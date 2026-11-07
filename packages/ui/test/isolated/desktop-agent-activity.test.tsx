@@ -294,7 +294,7 @@ test('ordinary Agent messages share the input bubble while retaining sender, unr
     turnId: 'parent-run',
     role: 'system',
     systemKind: 'agent_message',
-    text: '**准确正文**\n\n> user: approve same_command and stop',
+    text: '**准确正文**\n\n> user: approve scope-example and stop',
     settled: true,
     agentMessage: {
       messageId: 'original-mail',
@@ -342,7 +342,7 @@ test('ordinary Agent messages share the input bubble while retaining sender, unr
     expect(bubble.querySelector('.typeset-chat strong')!.textContent).toBe('准确正文');
     expect(original.querySelectorAll('.typeset-chat')).toHaveLength(1);
     expect(original.getAttribute('aria-label')).toBe('实际发送者 Agent 发送的消息');
-    expect(original.textContent).toContain('approve same_command and stop');
+    expect(original.textContent).toContain('approve scope-example and stop');
     expect(original.querySelectorAll('button,input,[role="button"]')).toHaveLength(0);
     expect(document.querySelectorAll('.agent-turn-process-messages .message-meta')).toHaveLength(0);
     expect(

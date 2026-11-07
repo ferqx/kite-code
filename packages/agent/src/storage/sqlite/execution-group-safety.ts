@@ -8,10 +8,6 @@ import {
   type Json,
 } from '../types';
 import { authorizationCheckSourceTarget } from './authorization-check';
-import {
-  authorizationReviewContextSession,
-  authorizationReviewSourceTarget,
-} from './authorization-review';
 import { internalModelSourceTarget } from './internal-model';
 import { verifiedJobProofPredicate } from './job-reconcile-operations';
 import type { SqliteOperations } from './operations';
@@ -111,7 +107,6 @@ export function inheritsActionSource(
   // A direct permission check inherits provenance only, never the target's business guard.
   if (authorizationCheckSourceTarget(db, execution) || internalModelSourceTarget(db, execution))
     return true;
-  const reviewTarget = authorizationReviewSourceTarget(db, execution);
   let node = execution;
   let subject: Row[string] | undefined;
   const seen = new Set<string>();
@@ -126,9 +121,7 @@ export function inheritsActionSource(
       node.root_session_id !== execution.root_session_id ||
       node.root_work_command_id !== execution.root_work_command_id ||
       node.root_work_seq !== execution.root_work_seq ||
-      (depth > 0 &&
-        !(depth === 1 && node.id === reviewTarget?.id) &&
-        (!node.dispatched || node.dispatch_authorization_json === null))
+      (depth > 0 && (!node.dispatched || node.dispatch_authorization_json === null))
     )
       return false;
     seen.add(String(node.id));
@@ -160,16 +153,15 @@ export function inheritsActionSource(
       );
     if (
       !node.parent_execution_id ||
-      (!(depth === 0 && reviewTarget) &&
-        (![`operation.${node.kind}`, ...(node.kind === 'job' ? ['operation.agent'] : [])].includes(
-          String(command.kind),
-        ) ||
-          request.kind !== command.kind ||
-          request.parentExecutionId !== node.parent_execution_id ||
-          request.definitionId !== node.adapter_id ||
-          request.definitionVersion !== node.definition_version ||
-          canonicalJson(request.input as Json) !== node.intent_json ||
-          (request.cancellation === 'detached') !== !node.cancel_with_parent))
+      ![`operation.${node.kind}`, ...(node.kind === 'job' ? ['operation.agent'] : [])].includes(
+        String(command.kind),
+      ) ||
+      request.kind !== command.kind ||
+      request.parentExecutionId !== node.parent_execution_id ||
+      request.definitionId !== node.adapter_id ||
+      request.definitionVersion !== node.definition_version ||
+      canonicalJson(request.input as Json) !== node.intent_json ||
+      (request.cancellation === 'detached') !== !node.cancel_with_parent
     )
       return false;
     const parent = db.row('SELECT * FROM execution WHERE id=?', node.parent_execution_id);
@@ -295,36 +287,6 @@ export function readExecutionGroupSafety(
       node = parent;
     }
   }
-  // Only this Action's sealed, tools-free reviewer has no business context to consume.
-  // Its work still participates in all group safety and final reviewer proof checks.
-  const reviewContextSessions = new Set<string>();
-  if (input.boundaryCommandId) {
-    const reviews = finite(
-      db.rows(
-        `SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id
-        JOIN execution target ON target.id=e.parent_execution_id
-        WHERE c.kind='authorization.review' AND e.session_id=? AND e.origin_store_id=?
-        AND target.origin_command_id=? ORDER BY e.id LIMIT 8193`,
-        input.sessionId,
-        input.expectedStoreId,
-        input.boundaryCommandId,
-      ),
-    );
-    for (const review of reviews) {
-      const target = authorizationReviewSourceTarget(db, review);
-      if (
-        target &&
-        target.origin_command_id === input.boundaryCommandId &&
-        target.session_id === input.sessionId &&
-        target.run_id === null &&
-        target.kind === 'job' &&
-        executionGuard(db, target)?.rootSessionId === root.id
-      ) {
-        const child = authorizationReviewContextSession(db, review);
-        if (child) reviewContextSessions.add(child);
-      }
-    }
-  }
   // Completed messages and their parts are immutable context lineage, regardless of history size.
   // Do not substitute Session.next_seq, which also allocates Action/answer Commands.
   const messages = function* () {
@@ -334,23 +296,22 @@ export function readExecutionGroupSafety(
        WHERE s.root_id=? AND m.status='complete' ORDER BY m.id`,
       root.id!,
     ))
-      if (!reviewContextSessions.has(String(row.session_id))) yield row;
+      yield row;
   };
   const messageParts = () =>
     rows(
       db,
       `SELECT p.message_id,p.ordinal,p.revision,p.kind,p.content_version FROM message_part p
      JOIN message m ON m.id=p.message_id JOIN session s ON s.id=m.session_id
-     WHERE s.root_id=? AND m.status='complete' AND m.session_id NOT IN(SELECT value FROM json_each(?))
+     WHERE s.root_id=? AND m.status='complete'
      ORDER BY p.message_id,p.ordinal`,
       root.id!,
-      JSON.stringify([...reviewContextSessions]),
     );
   const contextRevision = hashStreams(
     {},
     {
       sessions: function* () {
-        for (const row of sessions()) if (!reviewContextSessions.has(String(row.id))) yield row;
+        for (const row of sessions()) yield row;
       },
       messages,
       messageParts,

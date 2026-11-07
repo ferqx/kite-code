@@ -75,6 +75,28 @@ function invocation(node: Node, partial: boolean): readonly string[] | null {
   return words;
 }
 
+/** Preserve the only compound form that can be safely rewritten as an argv chain. */
+function readOnlyCommands(root: Node): readonly (readonly string[])[] | null {
+  if (root.hasError || root.children.length !== 1) return null;
+  const leaves: (readonly string[])[] = [];
+  const stack = [root.firstChild!];
+  while (stack.length) {
+    const node = stack.pop()!;
+    if (node.type === 'command') {
+      const words = invocation(node, false);
+      if (!words) return null;
+      leaves.push(words);
+    } else if (
+      node.type === 'list' &&
+      node.children.length === 3 &&
+      node.children[1]?.type === '&&'
+    ) {
+      stack.push(node.children[2]!, node.children[0]!);
+    } else return null;
+  }
+  return leaves.length ? leaves : null;
+}
+
 const executable = (value: string) =>
   value
     .replace(/\\/gu, '/')
@@ -286,7 +308,11 @@ export async function createShellCommandPolicy(input: {
   classify(
     command: string,
     signal?: AbortSignal,
-  ): Promise<{ plainCommands: readonly (readonly string[])[] | null; hardDenied: string | null }>;
+  ): Promise<{
+    plainCommands: readonly (readonly string[])[] | null;
+    readOnlyCommands: readonly (readonly string[])[] | null;
+    hardDenied: string | null;
+  }>;
 }> {
   let assets: readonly { path: string; digest: string }[];
   let language: Language;
@@ -349,7 +375,7 @@ export async function createShellCommandPolicy(input: {
         signal?.throwIfAborted();
         throw new AgentError('shell_parser_asset_changed');
       }
-      if (!supported) return { plainCommands: null, hardDenied: null };
+      if (!supported) return { plainCommands: null, readOnlyCommands: null, hardDenied: null };
       const parser = new Parser();
       try {
         parser.setLanguage(language);
@@ -380,6 +406,7 @@ export async function createShellCommandPolicy(input: {
               plain && exact.every((words) => words !== null)
                 ? (exact as readonly (readonly string[])[])
                 : null,
+            readOnlyCommands: plain ? readOnlyCommands(tree.rootNode) : null,
             hardDenied,
           };
         } finally {

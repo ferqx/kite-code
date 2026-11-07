@@ -336,7 +336,7 @@ test('catalogue changes while awaiting approval or a resource reject the origina
         presentationSessionId: 's',
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     try {
       await f.submit();

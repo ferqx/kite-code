@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { canonicalJson } from '../json';
 import { assertNoSymlinkPath } from '../platform/profile';
 import { createWorkspaceFiles } from '../tools/files';
+import { isManagedWorkingFilePath } from '../tools/session-output-path';
 import {
   checkpoint,
   closePrivate,
@@ -27,8 +28,6 @@ export interface WorkingFileInventory {
   fileCount: string;
 }
 type Entry = { path: string; proof: { sha256: string; byteLength: string } | null };
-const pathPattern =
-  /^files\/[a-f0-9]{64}\/[a-f0-9]{64}\/(?:plans\/[a-f0-9]{64}\/plan\.md|outputs\/[A-Za-z0-9][A-Za-z0-9._-]{0,119})$/;
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 function fail(): never {
   throw new MaintenanceError('backup_working_files_invalid');
@@ -45,7 +44,7 @@ function paths(db: Database) {
     const path = value.file?.path;
     if (
       typeof path !== 'string' ||
-      !pathPattern.test(path) ||
+      !isManagedWorkingFilePath(path) ||
       path.split('/')[2] !== hash(row.scope_id)
     )
       fail();
@@ -59,7 +58,7 @@ function paths(db: Database) {
     const value = JSON.parse(row.json);
     if (
       typeof value.path !== 'string' ||
-      !pathPattern.test(value.path) ||
+      !isManagedWorkingFilePath(value.path) ||
       value.path.split('/')[2] !== hash(row.scope_id)
     )
       fail();
@@ -92,7 +91,7 @@ function* entries(directory: string): Generator<Entry> {
           if (
             !value ||
             Object.keys(value).sort().join(',') !== 'path,proof' ||
-            !pathPattern.test(value.path)
+            !isManagedWorkingFilePath(value.path)
           )
             fail();
           if (
@@ -139,7 +138,13 @@ export async function captureWorkingFiles(
         await copyAssetFile(actual, join(target, ...path.split('/')), signal);
         proof = fingerprint(join(target, ...path.split('/')), signal);
       }
-      writeAll(fd, Buffer.from(`${JSON.stringify({ path, proof })}\n`));
+      // Preserve the bounded ASCII JSONL wire form; JSON.parse restores exact Unicode.
+      const line = JSON.stringify({ path, proof }).replace(
+        /[\u007f-\uffff]/g,
+        (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, '0')}`,
+      );
+      if (line.length > 1024) fail();
+      writeAll(fd, Buffer.from(`${line}\n`));
       await checkpoint(signal);
     }
     fsyncSync(fd);
@@ -253,7 +258,7 @@ export async function collectWorkingFiles(
         }
         const cache =
           /^cache\/documents\/[a-f0-9]{64}\/[a-f0-9]{64}\/[a-f0-9]{64}\/result\.json$/.test(path);
-        if (!item.isFile() || (!cache && !pathPattern.test(path)))
+        if (!item.isFile() || (!cache && !isManagedWorkingFilePath(path)))
           throw new MaintenanceError('gc_unexpected_asset');
         if (!cache && registered.has(path)) continue;
         const target = join(profile, ...path.split('/'));

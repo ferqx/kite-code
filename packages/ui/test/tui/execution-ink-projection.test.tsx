@@ -1200,7 +1200,7 @@ test('MCP resource references require the exact source receipt while resource co
     ).resourceReferences,
   ).toBeUndefined();
 });
-for (const field of ['check', 'review'] as const)
+for (const field of ['check'] as const)
   for (const status of ['planned', 'dispatching', 'running'] as const)
     test(`child projection reads ${field} ${status} as an automatic check without adding a child`, () => {
       const parent = execution('task', {
@@ -1637,4 +1637,18 @@ test('long child Markdown stays rendered through scrolling and width changes, in
   } finally {
     app.unmount();
   }
+});
+
+test('a cancelled Shell call keeps its exact command without claiming it ran', () => {
+  const original = execution('cancelled-before-dispatch', {
+    definitionId: 'builtin.shell/shell.execute',
+    status: 'cancelled',
+    toolInput: { command: 'printf never-started' },
+    result: { outcome: 'cancelled', content: 'cancel_requested' },
+  });
+  const card = projectInkTool(original, snapshot([original]));
+  expect(card.status).toBe('cancelled');
+  expect(card.detail).toBe('printf never-started');
+  expect(card.detail).not.toContain('Ran');
+  expect(card.summary).toBe('cancel_requested');
 });

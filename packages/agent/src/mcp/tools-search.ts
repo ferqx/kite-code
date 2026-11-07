@@ -20,9 +20,27 @@ export function createMcpToolsSearchTool(
   return {
     id: mcpToolsSearchId,
     version: '1',
-    model: { name: 'search_mcp_tools', snakeCase: true },
+    model: { name: 'search_mcp_tools', snakeCase: true, resultVersion: '1' },
+    formatModelResult({ result }) {
+      if (result.outcome !== 'succeeded') return;
+      const details = result.details as Record<string, Json>;
+      if (!Array.isArray(details.items)) return;
+      return JSON.stringify({
+        ...details,
+        items: details.items.map((raw) => {
+          const item = raw as Record<string, Json>;
+          return {
+            server_id: item.serverId,
+            server_name: item.serverName,
+            name: item.modelName,
+            description: item.description,
+            input_schema: item.inputSchema,
+          };
+        }),
+      });
+    },
     description:
-      'Search this step’s actual selected MCP tool catalogue. Returns callable model names, exact registered IDs, versions and schemas without connecting or invoking tools.',
+      'Search this step’s actual selected MCP tool catalogue. Returns selected server IDs, callable model names, descriptions and input schemas without connecting or invoking tools.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

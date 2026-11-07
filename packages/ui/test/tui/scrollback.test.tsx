@@ -73,7 +73,7 @@ test('finite Plan controls reserve Host rows and retain every choice, descriptio
           kind: 'plan_review',
           state: 'pending',
           revision: '1',
-          request: { allowedModes: ['auto', 'accept_edits'] },
+          request: { planId: 'p', version: '1', digest: 'd', content: 'Exact plan' },
         },
       ] as TuiSnapshot['interactions'],
     });
@@ -157,11 +157,11 @@ test('finite Plan controls reserve Host rows and retain every choice, descriptio
       await pause();
       const first = await viewport();
       for (const text of [
-        '1. Start execution in Auto mode',
-        'Automatically review non-destructive actions',
-        '2. Start execution in Accept edits mode',
-        'Edit workspace files without confirming each change',
-        '3. Continue planning with feedback',
+        '1. Approve this plan',
+        'Approve this exact plan; tool permissions stay unchanged',
+        '2. Continue planning with feedback',
+        '3. Deny this plan',
+        'Keep implementation blocked without cancelling this task',
         'Provide feedback to revise the plan',
         'none (Enter has no answer)',
       ])
@@ -170,7 +170,7 @@ test('finite Plan controls reserve Host rows and retain every choice, descriptio
       controller.setDraft('original unsent task');
       await pause();
       expect(bytes).not.toContain('\u001b[3J');
-      stdin.write('\u001b[B\u001b[B\u001b[B');
+      stdin.write('\u001b[B\u001b[B');
       await pause();
       stdin.write('\r');
       await pause();

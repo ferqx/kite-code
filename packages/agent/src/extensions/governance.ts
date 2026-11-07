@@ -9,6 +9,9 @@ export interface MutationGovernance {
 }
 export type CompletionDirective =
   | { kind: 'tool'; key: string; definitionId: string; definitionVersion: string; input: Json }
+  /** The owner's latest key is consumed after a complete business Model response.
+   * The same unchanged fact does not request another Model turn; a new fact uses a new key.
+   * This is Run-local and does not satisfy requirements or confer execution authority. */
   | { kind: 'continue'; key: string; content: string };
 export interface CompletionGovernance {
   prepare(input: {

@@ -76,7 +76,6 @@ test('current default Service resumes its original general child, approval and p
     expect(ready.effect.input).toEqual({
       path: join(directory, 'workspace', 'result.txt'),
       content: currentChildContent,
-      base: null,
     });
     expect(ready.card.executionId).toBe(ready.effect.id);
     expect(ready.child.session.parentSessionId).toBe('s');
@@ -117,15 +116,20 @@ test('current default Service resumes its original general child, approval and p
       expectedStoreId: ready.expectedStoreId,
       commandId: 'answer-current-original',
       expectedRevision: ready.card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
-    await until(
-      async () =>
-        (await runtime.getView('s')).runs.every((row) => row.status === 'completed') &&
-        (await runtime.getView(ready.child.session.id)).runs.every(
-          (row) => row.status === 'completed',
-        ),
-    );
+    await until(async () => {
+      const root = await runtime.getView('s'),
+        child = await runtime.getView(ready.child.session.id);
+      if ([...root.runs, ...child.runs].some((run) => run.status === 'failed'))
+        throw Error(
+          `current_child_recovery_failed:${JSON.stringify([...root.runs, ...child.runs].map(({ id, sessionId, status, reason }) => ({ id, sessionId, status, reason })))}`,
+        );
+      return (
+        root.runs.every((row) => row.status === 'completed') &&
+        child.runs.every((row) => row.status === 'completed')
+      );
+    });
     const child = await runtime.getView(ready.child.session.id);
     const written = child.executions.find((row) => row.id === ready.effect.id)!;
     expect(written.status, JSON.stringify(written.result)).toBe('succeeded');

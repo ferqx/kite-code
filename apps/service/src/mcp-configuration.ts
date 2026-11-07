@@ -9,6 +9,8 @@ import {
 import type { CapabilityDescription } from '@kite-ai/agent/permissions';
 
 const key = (kind: string, id: string, version: string) => JSON.stringify([kind, id, version]);
+const object = (value: Json): Record<string, Json> =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 /** Programmatic allowlist and lifecycle only; neither construction nor selection opens a transport. */
 export function createMcpConfiguration(options?: McpLifecycleOptions) {
   const lifecycle = options ? createMcpLifecycle(options) : undefined;
@@ -220,7 +222,7 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
           ...dynamic.values(),
         ]);
       },
-      admissionError(request: AuthorizationRequest) {
+      admissionError(request: AuthorizationRequest, resolvedInput: Json = request.input) {
         if (
           (request.kind === 'tool' && tools.has(request.definitionId)) ||
           (request.kind === 'job' &&
@@ -228,10 +230,7 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
               request.definitionId.startsWith('mcp.connection.') ||
               request.definitionId === mcpSourceConnectionJobId))
         ) {
-          const input =
-            request.input && typeof request.input === 'object' && !Array.isArray(request.input)
-              ? request.input
-              : {};
+          const input = object(resolvedInput);
           if (typeof input.serverId !== 'string' || !selected.has(input.serverId))
             return 'mcp_server_not_selected';
           const reconnect =
@@ -267,6 +266,7 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
             request.definitionId !== 'builtin.mcp/mcp.connect' &&
             request.definitionId !== mcpSourceConnectionJobId &&
             !request.definitionId.startsWith('mcp.connection.') &&
+            input.configDigest !== undefined &&
             input.configDigest !== selected.get(input.serverId)?.configDigest
           )
             return 'mcp_definition_version_unavailable';
@@ -285,10 +285,7 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
           request.kind === 'job' &&
           dynamic.has(key(request.kind, request.definitionId, request.definitionVersion))
         ) {
-          const input =
-            request.input && typeof request.input === 'object' && !Array.isArray(request.input)
-              ? request.input
-              : {};
+          const input = object(resolvedInput);
           const binding =
             input.binding && typeof input.binding === 'object' && !Array.isArray(input.binding)
               ? input.binding

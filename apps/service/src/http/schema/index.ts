@@ -122,19 +122,20 @@ const followUpInput = z.strictObject({
   selectedSkills: selectedSkills.optional(),
   extensionInputs: extensionInputs.optional(),
 });
+const approvalAnswer = z.discriminatedUnion('decision', [
+  z.strictObject({ kind: z.literal('approval'), decision: z.literal('approve'), optionId: id }),
+  z.strictObject({ kind: z.literal('approval'), decision: z.literal('deny') }),
+]);
+const questionAnswer = z.strictObject({ kind: z.literal('question'), answers: json });
+const planReviewAnswer = z.strictObject({
+  kind: z.literal('plan_review'),
+  decision: z.enum(['approve', 'deny', 'revise']),
+  feedback: z.string().max(8192).optional(),
+});
 const interactionAnswer = z.discriminatedUnion('kind', [
-  z.strictObject({
-    kind: z.literal('approval'),
-    decision: z.enum(['approve', 'deny']),
-    grant: z.enum(['approve_once', 'same_command']).optional(),
-  }),
-  z.strictObject({ kind: z.literal('question'), answers: json }),
-  z.strictObject({
-    kind: z.literal('plan_review'),
-    decision: z.enum(['approve', 'deny', 'revise']),
-    feedback: z.string().max(8192).optional(),
-    mode: z.string().max(128).optional(),
-  }),
+  approvalAnswer,
+  questionAnswer,
+  planReviewAnswer,
 ]);
 const interaction = z.object({
   id,
@@ -589,7 +590,21 @@ export const schemas = {
             definitionId: z.string().min(1).max(512),
             definitionVersion: z.string().min(1).max(128),
             inputDigest: etag,
-            commandDigest: etag.optional(),
+            ruleId: z.string().min(1).max(8192),
+            contractId: z.string().min(1).max(8192),
+            scope: json,
+            scopeDigest: etag,
+            bindings: z
+              .array(
+                z.object({
+                  kind: z.enum(['model', 'tool', 'job']),
+                  definitionId: z.string().min(1).max(512),
+                  definitionVersion: z.string().min(1).max(128),
+                }),
+              )
+              .min(1)
+              .max(32),
+            presentation: z.object({ label: z.string().min(1), details: z.array(z.string()) }),
             interactionId: id,
             decisionRevision: sequence,
             executionId: id,
@@ -1098,15 +1113,6 @@ export const schemas = {
             requireApproval: z.boolean(),
           })
           .optional(),
-        review: z
-          .object({
-            executionId: id,
-            status: executionStatus,
-            decision: z.enum(['approve_once', 'reject', 'ask_user', 'unavailable']),
-            reason: z.string().max(8192),
-            requireApproval: z.boolean(),
-          })
-          .optional(),
         human: z
           .object({
             interactionId: id,
@@ -1115,7 +1121,11 @@ export const schemas = {
             acceptedDecisionRevision: sequence.nullable(),
             accepted: z.boolean(),
             decision: z.enum(['approve', 'deny']).nullable(),
-            grant: z.enum(['approve_once', 'same_command']).optional(),
+            optionId: id.optional(),
+            optionKind: z.enum(['once', 'scope']).optional(),
+            presentation: z
+              .object({ label: z.string().min(1), details: z.array(z.string()) })
+              .optional(),
           })
           .optional(),
       })

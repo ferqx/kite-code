@@ -605,6 +605,74 @@ test('pure slow GET stays idle but final close waits for its original HTTP resou
   }
 });
 
+test('a completed admitted GET cannot pin listener close on its unread response', async () => {
+  const f = await fixture(),
+    storeClosed = gate(),
+    headersRead = gate();
+  const originalClose = f.store.close.bind(f.store),
+    originalList = f.runtime.listWorkspaces.bind(f.runtime);
+  let readCompleted = false;
+  f.store.close = async () => {
+    await originalClose();
+    storeClosed.enter();
+  };
+  f.runtime.listWorkspaces = async () => {
+    const value = await originalList();
+    readCompleted = value.length === 1 && value[0]?.id === 'unread-response';
+    return value;
+  };
+  let socket: ReturnType<typeof createConnection> | undefined,
+    closing: Promise<void> | undefined,
+    timer: ReturnType<typeof setTimeout> | undefined;
+  let response = '',
+    received = 0;
+  try {
+    await f.runtime.createWorkspace({
+      expectedStoreId: f.metadata.storeId,
+      id: 'unread-response',
+      name: 'x'.repeat(12 * 1024 * 1024),
+      rootUri: pathToFileURL(f.root).href,
+    });
+    const url = new URL(f.service.endpoint);
+    socket = createConnection({ host: url.hostname, port: Number(url.port) });
+    socket.on('data', (chunk) => {
+      received += chunk.length;
+      response += chunk.toString();
+      if (response.includes('\r\n\r\n')) {
+        socket!.pause();
+        headersRead.enter();
+      }
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket!.once('connect', resolve);
+      socket!.once('error', reject);
+    });
+    socket.write(
+      `GET /v1/workspaces HTTP/1.1\r\nHost: ${url.host}\r\nAuthorization: Bearer ${f.service.bootstrap.token}\r\nConnection: keep-alive\r\n\r\n`,
+    );
+    await headersRead.entered;
+    expect(readCompleted).toBe(true);
+    expect(response.startsWith('HTTP/1.1 200 OK\r\n')).toBe(true);
+    const contentLength = Number(/\r\nContent-Length: (\d+)\r\n/i.exec(response)?.[1]);
+    expect(contentLength).toBeGreaterThan(12 * 1024 * 1024);
+    expect(received).toBeLessThan(contentLength);
+    closing = f.service.close();
+    await storeClosed.entered;
+    // Bound a regression without releasing the socket that previously kept stop(false) alive.
+    await Promise.race([
+      closing,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(Error('listener_close_waited_for_unread_response')), 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+    socket?.destroy();
+    await closing;
+    await f.cleanup();
+  }
+});
+
 test('actual Store metadata failure is reported unavailable without creating replacement data', async () => {
   const f = await fixture(),
     original = f.store.getMetadata.bind(f.store);

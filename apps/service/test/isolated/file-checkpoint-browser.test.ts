@@ -588,7 +588,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       expectedStoreId: storeId,
       commandId: 'approve-restore',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const restored = await until(
       () => client.getExecution(card.executionId!),

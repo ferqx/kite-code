@@ -316,7 +316,7 @@ test('review timeout preserves the original independent human approval and execu
         interactionId: card!.id,
         expectedRevision: card!.revision,
         subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     }
     expect((await work).status).toBe('completed');

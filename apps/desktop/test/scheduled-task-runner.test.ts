@@ -916,7 +916,7 @@ test('actual scheduled Service Run waits for ordinary approval and completes onl
       expectedStoreId: storeId,
       commandId: 'approve-scheduled',
       expectedRevision: approval.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await runtime.waitForCommand(runner.list().runs[0]!.startCommandId, { timeoutMs: 5000 });
     await runner.tick();

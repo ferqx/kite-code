@@ -293,7 +293,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
       const approve = {
         kind: 'approval' as const,
         decision: 'approve' as const,
-        grant: 'approve_once' as const,
+        optionId: 'once' as const,
       };
       const deny = { kind: 'approval' as const, decision: 'deny' as const };
       async function answer(card: Card, commandId: string, value: typeof approve | typeof deny) {

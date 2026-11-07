@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { assertNoSymlinkPath, type ProfileAccess } from '../../platform/profile';
 import { defaultWindowsPathSecurity, privateDirectory } from '../../platform/windows-path-security';
 import { initializeDefaultSqliteEngine, type SqliteEngineSelection } from '../../sqlite-engine';
-import { matchingSchema, supportedSchemas } from './migrations';
+import { matchingSchema } from './migrations';
 export const FORMAT_MAJOR = 1;
 export class StoreOpenError extends Error {
   readonly code: string;
@@ -32,6 +32,36 @@ function validateFiles(access: ProfileAccess): void {
       throw new StoreOpenError('store_access_denied', 'Profile must be a private owned directory.');
   }
 }
+function baselineChecksum(
+  baseline = new URL('../migrations/0001-baseline.sql', import.meta.url),
+): string {
+  return createHash('sha256').update(readFileSync(baseline)).digest('hex');
+}
+/** Reject an unsupported profile before SQLite can create WAL sidecars.
+ * The schema fingerprint also distinguishes prior unpublished schemas with major 1.
+ * This is only an early refusal; the database's own major/schema are still checked. */
+function validateProfileFormat(access: ProfileAccess, baseline?: URL): void {
+  const path = join(access.profilePath, 'profile.json');
+  assertNoSymlinkPath(path);
+  if (!existsSync(path)) return;
+  privateRegular(path);
+  try {
+    if (lstatSync(path).size > 1024) throw new Error('profile_format_invalid');
+    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      !('formatMajor' in value) ||
+      value.formatMajor !== FORMAT_MAJOR ||
+      !('schemaChecksum' in value) ||
+      value.schemaChecksum !== baselineChecksum(baseline)
+    )
+      throw new Error('profile_format_unsupported');
+  } catch {
+    throw new StoreOpenError('store_incompatible', 'Unsupported profile format.');
+  }
+}
 export function openDatabase(
   access: ProfileAccess,
   readOnly: boolean,
@@ -39,6 +69,7 @@ export function openDatabase(
 ): Database {
   if (engine === undefined) initializeDefaultSqliteEngine();
   validateFiles(access);
+  validateProfileFormat(access);
   if (readOnly && !existsSync(access.databasePath))
     throw new StoreOpenError('store_not_found', 'Profile has no Store.');
   if (existsSync(access.databasePath)) preflight(access.databasePath);
@@ -74,10 +105,11 @@ export function openDatabase(
       const profileFile = join(access.profilePath, 'profile.json');
       if (!existsSync(profileFile)) {
         try {
-          writeFileSync(profileFile, JSON.stringify({ formatMajor: FORMAT_MAJOR }), {
-            flag: 'wx',
-            mode: 0o600,
-          });
+          writeFileSync(
+            profileFile,
+            JSON.stringify({ formatMajor: FORMAT_MAJOR, schemaChecksum: baselineChecksum() }),
+            { flag: 'wx', mode: 0o600 },
+          );
         } catch (error) {
           if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
         }
@@ -112,6 +144,7 @@ export type StorePreflight =
 export function preflightDatabase(access: ProfileAccess, baseline: URL): StorePreflight {
   initializeDefaultSqliteEngine();
   validateFiles(access);
+  validateProfileFormat(access, baseline);
   const journal = `${access.databasePath}-journal`;
   assertNoSymlinkPath(journal);
   if (existsSync(journal)) {
@@ -177,8 +210,6 @@ function closeReadonly(database: Database): void {
 }
 
 function initialize(database: Database): void {
-  // The reviewed 0005 table rebuild preserves all references, checked before commit.
-  database.run('PRAGMA foreign_keys=OFF');
   database.run('BEGIN IMMEDIATE');
   try {
     const exists = database
@@ -210,19 +241,8 @@ function initialize(database: Database): void {
     const current = matchingSchema(database);
     if (!current)
       throw new StoreOpenError('store_incompatible', 'Store migration identity is invalid.');
-    const target = supportedSchemas().at(-1)!;
-    let rebuiltExecution = false;
-    for (const migration of target.migrations.slice(current.migrations.length)) {
-      database.exec(migration.sql);
-      rebuiltExecution ||= migration.id === '0005-authorization-check';
-      database.run('INSERT INTO schema_migration VALUES(?,?,?)', [
-        migration.id,
-        migration.checksum,
-        new Date().toISOString(),
-      ]);
-    }
-    if (rebuiltExecution && database.query('PRAGMA foreign_key_check').get())
-      throw new StoreOpenError('store_incompatible', 'Store migration foreign keys are invalid.');
+    if (database.query('PRAGMA foreign_key_check').get())
+      throw new StoreOpenError('store_incompatible', 'Store foreign keys are invalid.');
     database.run('COMMIT');
   } catch (error) {
     try {
@@ -233,9 +253,6 @@ function initialize(database: Database): void {
       });
     }
     throw error;
-  } finally {
-    database.run('PRAGMA legacy_alter_table=OFF');
-    database.run('PRAGMA foreign_keys=ON');
   }
 }
 

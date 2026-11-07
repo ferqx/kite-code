@@ -227,6 +227,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
         expect(JSON.parse(owner!.answer_json)).toMatchObject({
           kind: 'approval',
           decision: 'approve',
+          optionId: 'once',
         });
         expect(owner!.accepted_decision_revision).toBeGreaterThan(0);
         expect(owner!.started).toBeGreaterThan(owner!.granted);

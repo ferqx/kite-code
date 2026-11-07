@@ -4,6 +4,7 @@ import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
 import { authorizationCheckInput, authorizationReadBodies } from './authorization-check-input';
 import {
   type AuthorizationCheckOutput,
+  authorizationCheckAnswer,
   authorizationCheckOutputMediaType,
   authorizationCheckOutputRefId,
 } from './authorization-check-output';
@@ -36,6 +37,7 @@ import {
 import { ChangeWaits } from './execution/change-waits';
 import { ChildSlots } from './execution/child-slots';
 import { ControlObservation } from './execution/control-observation';
+import { readExecutionToolOwner } from './execution/definition-owner';
 import {
   browserContinuationSource,
   inheritHostRevocation,
@@ -46,6 +48,12 @@ import type { WorkspaceSerialLocks } from './execution/resource-port';
 import { ExecutionResources } from './execution/resources';
 import { resolveExecutionRun } from './execution/task-origin';
 import { createToolDispatchBatch } from './execution/tool-dispatch-admission';
+import {
+  bindExecutionConfirmation,
+  consumesExecutionConfirmation,
+  executionConfirmationBinding,
+  sameExecutionConfirmation,
+} from './execution-confirmation';
 import type {
   AuthorizationRequest,
   Extension,
@@ -89,7 +97,9 @@ import {
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
 import { semanticDigestBytes } from './model-body/digest';
 import { assembleModelContext, modelHistory } from './model-context';
+import { modelExecutionId } from './model-identifier';
 import { modelOutputReference, readModelOutput } from './model-output';
+import { modelReference } from './model-reference';
 import { formatChildResult } from './model-result-presentation';
 import {
   captureModelRequestMetadata,
@@ -98,15 +108,11 @@ import {
   modelMetadataJson,
 } from './model-snapshot';
 import { createModelToolSurface, modelToolMessages } from './model-tools';
+import { approvalOptions, intersectGrantOffers, sameCapability } from './permission-grants';
 import { autoCheckOptions } from './permissions/auto-check';
 import { intersectPermissionPolicies } from './permissions/inheritance';
 import { sealWorktreeDecision } from './permissions/worktree-authorization';
 import { formatShellResult } from './shell-result-presentation';
-import {
-  isShellRiskRequest,
-  type ShellRiskPreparation,
-  shellRiskInstructions,
-} from './shell-risk-review';
 import { readSourceRequestJournal, sourceRequestJournalNode } from './source-request-journal';
 import type {
   AcceptCommandInput,
@@ -136,6 +142,13 @@ import {
   type SessionRecord,
   type WorkspaceRecord,
 } from './storage/types';
+import {
+  createToolBehaviorRegistry,
+  inheritToolBehaviorDefinition,
+  type ReviewPreparation,
+  type ToolBehaviorBinding,
+  type TrustedToolBehavior,
+} from './tool-behavior';
 import { failureOutcomeExplanation, toolFailurePresentation } from './tool-failure-presentation';
 import { toolImages } from './tool-images';
 import { childToolEvidence } from './tool-observations';
@@ -215,6 +228,10 @@ function sealExtension(extension: Extension): Extension {
           : {}),
       }) as T;
       inheritHostRevocation(definition, sealed);
+      inheritToolBehaviorDefinition(
+        definition as unknown as ToolDefinition,
+        sealed as unknown as ToolDefinition,
+      );
       return sealed;
     });
   return Object.freeze({
@@ -279,10 +296,6 @@ export type StepCapabilitiesReader = (input: {
 export interface AuthorizationCheckBinding extends AuthorizationCheckIdentity {
   readonly model: ModelAdapter;
   readonly timeoutMs?: number;
-  /** Trusted Run owner preparation, invoked only for its explicit Shell-risk contract. */
-  readonly prepareRiskReview?: (
-    request: AuthorizationRequest,
-  ) => Promise<import('./shell-risk-review').ShellRiskPreparation | null>;
 }
 function sealAuthorizationCheck(
   binding: AuthorizationCheckBinding | undefined,
@@ -309,8 +322,7 @@ function sealAuthorizationCheck(
     version: binding.version,
     modelId: binding.modelId,
     model: binding.model,
-    timeoutMs: binding.timeoutMs ?? 3000,
-    ...(binding.prepareRiskReview ? { prepareRiskReview: binding.prepareRiskReview } : {}),
+    timeoutMs: binding.timeoutMs ?? 8000,
   });
 }
 export interface AfterTurnPolicy {
@@ -332,6 +344,7 @@ export interface RunConfiguration {
   readonly compressor?: ContextCompressor;
   readonly afterTurn?: AfterTurnPolicy;
   readonly authorizationCheck?: AuthorizationCheckBinding;
+  readonly toolBehaviors?: readonly TrustedToolBehavior[];
   readonly model?: ModelAdapter;
   readonly modelId: string;
   readonly toolIds?: readonly string[];
@@ -358,40 +371,8 @@ export interface ChildAgentConfiguration extends RunConfiguration {
   readonly inputSchema?: JsonSchema;
 }
 
-/** Compare only the renamed host-owned checker field; retain the original persisted proof. */
 function matchesRecoveryConfiguration(current: Json, saved: Json): boolean {
-  const object = (value: Json): value is Record<string, Json> =>
-    value !== null && typeof value === 'object' && !Array.isArray(value);
-  if (!object(current) || !object(saved)) return canonicalJson(current) === canonicalJson(saved);
-  const actual = current.snapshot;
-  const original = saved.snapshot;
-  if (!actual || !original || !object(actual) || !object(original))
-    return canonicalJson(current) === canonicalJson(saved);
-  if (
-    (Object.hasOwn(actual, 'authorizationReview') && Object.hasOwn(actual, 'authorizationCheck')) ||
-    (Object.hasOwn(original, 'authorizationReview') &&
-      Object.hasOwn(original, 'authorizationCheck'))
-  )
-    return false;
-  if (!Object.hasOwn(original, 'authorizationReview'))
-    return canonicalJson(current) === canonicalJson(saved);
-  const legacy = original.authorizationReview;
-  if (
-    legacy !== null &&
-    (!legacy ||
-      !object(legacy) ||
-      Object.keys(legacy).sort().join(',') !== 'id,modelId,version' ||
-      !['id', 'modelId', 'version'].every((key) => typeof legacy[key] === 'string' && legacy[key]))
-  )
-    return false;
-  const { authorizationReview, ...rest } = original;
-  return (
-    canonicalJson(current) ===
-    canonicalJson({
-      ...saved,
-      snapshot: { ...rest, authorizationCheck: authorizationReview! },
-    })
-  );
+  return canonicalJson(current) === canonicalJson(saved);
 }
 
 function sealSources(sources: ContextSources | undefined): ContextSources | undefined {
@@ -407,6 +388,7 @@ type RunBinding = {
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
   authorizationCheck?: AuthorizationCheckBinding;
+  toolBehaviors?: readonly TrustedToolBehavior[];
   model: ModelAdapter;
   modelId: string;
   definitions: ReadonlyMap<string, ToolDefinition>;
@@ -430,6 +412,11 @@ type RunExecutionCheckpoint = {
   modelSource?: Record<string, Json>;
   sourceRequests: readonly SourceRequest[];
   sourceRequestJournal?: import('./model-body').ModelBodyReference | null;
+  completionGuidance?: {
+    delivered: { extensionId: string; key: string }[];
+    pending: { extensionId: string; key: string; sourceDigest: string } | null;
+  };
+  continuationSource?: ContextSource;
   initializationState: 'unstarted' | 'completed';
 };
 
@@ -442,6 +429,7 @@ export interface RuntimeOptions {
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
   authorizationCheck?: AuthorizationCheckBinding;
+  toolBehaviors?: readonly TrustedToolBehavior[];
   store: Store;
   model?: ModelAdapter;
   modelId?: string;
@@ -463,6 +451,8 @@ export interface RuntimeOptions {
     /** Original carrier, read and relationship-checked by Runtime for recovery or follow-up only. */
     readonly originalConfiguration?: Readonly<ChildConfiguration>;
     readonly originalConfigurationPurpose?: 'restore' | 'follow_up';
+    /** The already admitted child Run being restored, never a new follow-up. */
+    readonly originalRun?: Readonly<RunRecord>;
     readonly parentExecution: Readonly<ExecutionRecord>;
     readonly parentRun: Readonly<RunRecord> | null;
     readonly parentTools: readonly Readonly<{
@@ -647,7 +637,13 @@ export class AgentRuntime {
   private closeTask?: Promise<void>;
   private readonly options: RuntimeOptions;
   constructor(options: RuntimeOptions) {
-    this.options = { ...options };
+    this.options = {
+      ...options,
+      toolBehaviors: createToolBehaviorRegistry({
+        extensions: options.extensions ?? [],
+        behaviors: options.toolBehaviors,
+      }).behaviors,
+    };
     if (options.sessionInputMetadata)
       this.options.sessionInputMetadata = Object.freeze({
         preserve: options.sessionInputMetadata.preserve.bind(options.sessionInputMetadata),
@@ -688,6 +684,7 @@ export class AgentRuntime {
         configuration.extensions,
         configuration.toolIds,
         configuration.modelHiddenToolIds,
+        configuration.toolBehaviors,
       );
       const definitions = captured.definitions;
       let users = 1;
@@ -718,6 +715,7 @@ export class AgentRuntime {
             Object.freeze([...configuration.modelHiddenToolIds]),
           extensions: captured.extensions,
           jobs: captured.jobs,
+          toolBehaviors: captured.toolBehaviors,
           sources: sealSources(configuration.sources),
           compressor: sealCompressor(configuration.compressor ?? options.compressor),
           dispose: configuration.dispose,
@@ -741,6 +739,8 @@ export class AgentRuntime {
             captured.extensionIds,
             captured.extensions,
             configuration.permissions,
+            captured.toolBehaviors,
+            configuration.authorizationCheck ?? this.defaultChecker,
           ),
         },
         inputSchema: structuredClone(
@@ -769,6 +769,9 @@ export class AgentRuntime {
         this.sealApprovalRequest(scope, executionId, request),
       verifyApprovalRequest: (scope, executionId, saved, actual) =>
         this.verifyApprovalRequest(scope, executionId, saved, actual),
+      prepareExecutionConfirmation: (scope, request, execution) =>
+        this.prepareExecutionConfirmation(scope, request, execution),
+      authorizeParent: (scope, request, decision) => this.authorizeParent(scope, request, decision),
       checkAuthorization: (scope, request, source, decision) =>
         this.checkAuthorization(scope, request, source, decision),
       waitForChange: (cursor, signal, timeoutMs) => {
@@ -832,6 +835,7 @@ export class AgentRuntime {
     });
     const actionCatalogue = this.runDefinitions();
     const actionBindings: ScopedBindings = Object.freeze({
+      toolBehaviors: actionCatalogue.toolBehaviors,
       extensions: actionCatalogue.extensions,
       tools: actionCatalogue.definitions,
       jobs: actionCatalogue.jobs,
@@ -1134,6 +1138,7 @@ export class AgentRuntime {
     additional: readonly Extension[] = [],
     ids?: readonly string[],
     modelHiddenToolIds: readonly string[] = [],
+    toolBehaviors: readonly TrustedToolBehavior[] = this.options.toolBehaviors ?? [],
   ) {
     if (
       modelHiddenToolIds.length > 256 ||
@@ -1178,6 +1183,7 @@ export class AgentRuntime {
       definitions,
       jobs,
       extensionIds,
+      toolBehaviors: createToolBehaviorRegistry({ extensions, behaviors: toolBehaviors }).behaviors,
     };
   }
   private configurationSnapshot(
@@ -1188,9 +1194,24 @@ export class AgentRuntime {
     extensionIds = this.toolExtensions,
     registeredExtensions = this.extensions,
     permissions: Permissions | undefined = this.options.permissions,
+    toolBehaviors: readonly TrustedToolBehavior[] = this.options.toolBehaviors ?? [],
+    checker: AuthorizationCheckBinding | undefined = this.defaultChecker,
   ): Json {
     return {
       modelId,
+      authorizationCheck: checker
+        ? {
+            id: checker.id,
+            version: checker.version,
+            modelId: checker.modelId,
+            timeoutMs: checker.timeoutMs ?? 8000,
+          }
+        : null,
+      toolBehaviors: toolBehaviors.map(({ capability, contractRef, configurationDigest }) => ({
+        capability: { ...capability },
+        contractRef,
+        configurationDigest,
+      })) as unknown as Json,
       ...(permissions?.toolDispatchOrder
         ? { toolDispatchOrder: permissions.toolDispatchOrder }
         : {}),
@@ -1206,6 +1227,89 @@ export class AgentRuntime {
           ? { resultPresentationVersion: tool.model.resultVersion }
           : {}),
       })),
+    };
+  }
+  private async authorizeParent(
+    scope: ToolScope,
+    request: AuthorizationRequest,
+    decision: PermissionDecision,
+  ): Promise<AutoAuthorizationEvidence | null> {
+    if (request.kind !== 'job') return null;
+    const execution = await this.options.store.getExecution(request.executionId);
+    const parent = execution?.parentExecutionId
+      ? await this.options.store.getExecution(execution.parentExecutionId)
+      : null;
+    if (parent?.kind !== 'tool') return null;
+    const behavior = (scope.bindings?.toolBehaviors ?? this.options.toolBehaviors ?? []).find(
+      (value) =>
+        value.capability.kind === parent.kind &&
+        value.capability.definitionId === parent.definitionId &&
+        value.capability.definitionVersion === parent.definitionVersion,
+    );
+    if (!behavior?.authorizeChild) return null;
+    const work = 'run' in scope ? scope.run : scope.command;
+    const input = {
+      expectedStoreId: work.originStoreId,
+      owner: scope.owner,
+      targetExecutionId: request.executionId,
+      decision,
+    };
+    const context = {
+      parent: freeze({
+        executionId: parent.id,
+        kind: parent.kind,
+        definitionId: parent.definitionId,
+        definitionVersion: parent.definitionVersion,
+        input: structuredClone(parent.input),
+        inputDigest: await semanticDigest(parent.input),
+      }),
+    };
+    return behavior.authorizeChild(request, decision, context, {
+      worktree: () => this.options.store.resolveWorktreeAuthorization(input),
+    });
+  }
+  private reviewBinding(behavior: TrustedToolBehavior): ToolBehaviorBinding {
+    return {
+      capability: { ...behavior.capability },
+      contractRef: behavior.contractRef,
+      configurationDigest: behavior.configurationDigest,
+    };
+  }
+  private reviewBehavior(
+    scope: ToolScope,
+    request: AuthorizationRequest,
+    checker: AuthorizationCheckBinding,
+    decision: PermissionDecision,
+  ): TrustedToolBehavior {
+    const selected = (scope.bindings?.toolBehaviors ?? this.options.toolBehaviors ?? []).find(
+      (behavior) =>
+        behavior.capability.kind === request.kind &&
+        behavior.capability.definitionId === request.definitionId &&
+        behavior.capability.definitionVersion === request.definitionVersion,
+    );
+    if (decision.check?.behavior) {
+      if (
+        !selected?.prepareReview ||
+        canonicalJson(this.reviewBinding(selected) as unknown as Json) !==
+          canonicalJson(decision.check.behavior as unknown as Json)
+      )
+        throw new AgentError('authorization_check_binding_invalid');
+      return selected;
+    }
+    return {
+      capability: {
+        kind: request.kind,
+        definitionId: request.definitionId,
+        definitionVersion: request.definitionVersion,
+      },
+      contractRef: 'kite.authorization-check',
+      configurationDigest: createHash('sha256')
+        .update(
+          canonicalJson({ id: checker.id, version: checker.version, modelId: checker.modelId }),
+        )
+        .digest('hex'),
+      definition: {} as ToolDefinition,
+      ...(selected?.prepareParentProof ? { prepareParentProof: selected.prepareParentProof } : {}),
     };
   }
   private async checkAuthorization(
@@ -1267,23 +1371,28 @@ export class AgentRuntime {
   ): Promise<ReadAuthorizationCheckInput | AutoAuthorizationEvidence | null> {
     const checker = scope.bindings?.authorizationCheck ?? this.defaultChecker;
     if (!checker || !decision.check) return null;
-    const deadlineAt = startedAt + (checker.timeoutMs ?? 3000);
+    const deadlineAt = startedAt + (checker.timeoutMs ?? 8000);
     const timingState: AuthorizationTimingState = { startedAt, budgetMs: deadlineAt - startedAt };
     const identity = { id: checker.id, version: checker.version, modelId: checker.modelId };
-    const riskOnly = isShellRiskRequest(decision.check.request);
-    const preparedRisk = riskOnly
-      ? await this.prepareShellRisk(scope, request, checker, deadlineAt)
-      : undefined;
+    const behavior = this.reviewBehavior(scope, request, checker, decision);
+    const preparedReview =
+      behavior.prepareReview || behavior.prepareParentProof
+        ? await this.prepareToolReview(scope, request, behavior, deadlineAt)
+        : undefined;
+    const usesBehavior = !!behavior.prepareReview;
     scope.signal.throwIfAborted();
     const operationKey = await semanticDigest({
-      contract: riskOnly ? shellRiskInstructions : authorizationCheckInstructions,
+      behavior: {
+        contractRef: behavior.contractRef,
+        configurationDigest: behavior.configurationDigest,
+      },
       operation: decision.check.operationKey ?? {
         kind: request.kind,
         definitionId: request.definitionId,
         definitionVersion: request.definitionVersion,
         input: request.input,
       },
-      ...(riskOnly ? { riskReview: preparedRisk?.review?.fingerprint ?? null } : {}),
+      review: preparedReview?.review?.fingerprint ?? null,
     });
     const work = 'run' in scope ? scope.run : scope.command;
     const evidenceInput = {
@@ -1292,14 +1401,26 @@ export class AgentRuntime {
       targetExecutionId: request.executionId,
       decision: {
         ...decision,
-        check: { ...decision.check, request: riskOnly ? decision.check.request : null },
+        check: { ...decision.check, request: usesBehavior ? decision.check.request : null },
       },
       checker: identity,
       operationKey,
-      ...(riskOnly ? { riskReview: preparedRisk?.review ?? null } : {}),
+      behavior: this.reviewBinding(behavior),
+      ...(!usesBehavior &&
+      (scope.bindings?.toolBehaviors ?? this.options.toolBehaviors ?? []).some(
+        (value) =>
+          value.capability.kind === request.kind &&
+          value.capability.definitionId === request.definitionId &&
+          value.capability.definitionVersion === request.definitionVersion &&
+          value.prepareReview,
+      )
+        ? { reuseApproval: false as const }
+        : {}),
+      ...(usesBehavior ? { review: preparedReview?.review ?? null } : {}),
+      ...(preparedReview?.parentProof ? { parentProof: preparedReview.parentProof } : {}),
     };
     const reused =
-      !riskOnly || preparedRisk?.review
+      !usesBehavior || preparedReview?.review
         ? await this.options.store.resolveAutoAuthorization(evidenceInput)
         : null;
     if (reused) return reused;
@@ -1327,12 +1448,10 @@ export class AgentRuntime {
           operationKey,
           prepared,
           state: timingState,
-          ...(riskOnly
-            ? {
-                riskReview: preparedRisk?.review ?? null,
-                ...(preparedRisk?.failure ? { preparationFailure: preparedRisk.failure } : {}),
-              }
-            : {}),
+          behavior,
+          ...(usesBehavior ? { review: preparedReview?.review ?? null } : {}),
+          ...(preparedReview?.parentProof ? { parentProof: preparedReview.parentProof } : {}),
+          ...(preparedReview?.failure ? { preparationFailure: preparedReview.failure } : {}),
         },
       ),
       release,
@@ -1349,7 +1468,7 @@ export class AgentRuntime {
       scope.signal.throwIfAborted();
       // A preparation failure already observed before expiry is not a timeout,
       // even when persisting its original check is slow.
-      if (preparedRisk?.failure) {
+      if (preparedReview?.failure) {
         const failed = await task;
         if (!failed) throw new AgentError('authorization_check_unverifiable');
         return failed;
@@ -1420,16 +1539,14 @@ export class AgentRuntime {
     }
   }
   /** Fact preparation shares the review deadline; a slow read never holds timeout continuation. */
-  private async prepareShellRisk(
+  private async prepareToolReview(
     scope: ToolScope,
     request: AuthorizationRequest,
-    checker: AuthorizationCheckBinding,
+    behavior: TrustedToolBehavior,
     deadlineAt: number,
-  ): Promise<{ review: ShellRiskPreparation | null; failure?: string }> {
+  ): Promise<{ review: ReviewPreparation | null; parentProof?: Json; failure?: string }> {
     scope.signal.throwIfAborted();
     if (Date.now() >= deadlineAt) return { review: null };
-    if (!checker.prepareRiskReview)
-      return { review: null, failure: 'shell_risk_preparation_unavailable' };
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let cancel!: () => void;
@@ -1452,9 +1569,28 @@ export class AgentRuntime {
     });
     try {
       const preparing = this.trackInternalModelTask(
-        Promise.resolve().then(() =>
-          checker.prepareRiskReview!({ ...request, signal: controller.signal }),
-        ),
+        Promise.resolve().then(async () => {
+          const execution = await this.options.store.getExecution(request.executionId);
+          const parent = execution?.parentExecutionId
+            ? await this.options.store.getExecution(execution.parentExecutionId)
+            : null;
+          const context = parent
+            ? {
+                parent: freeze({
+                  executionId: parent.id,
+                  kind: parent.kind,
+                  definitionId: parent.definitionId,
+                  definitionVersion: parent.definitionVersion,
+                  input: structuredClone(parent.input),
+                  inputDigest: await semanticDigest(parent.input),
+                }),
+              }
+            : {};
+          const invocation = { ...request, signal: controller.signal };
+          const parentProof = await behavior.prepareParentProof?.(invocation, context);
+          const review = await behavior.prepareReview?.(invocation, context);
+          return { review: review ?? null, ...(parentProof ? { parentProof } : {}) };
+        }),
         scope.bindings?.retain(),
       );
       const result = await Promise.race([preparing, expired, cancelled]);
@@ -1462,17 +1598,19 @@ export class AgentRuntime {
       if (controller.signal.aborted && Date.now() >= deadlineAt) return { review: null };
       if (
         !result ||
-        !/^[a-f0-9]{64}$/.test(result.fingerprint) ||
-        typeof result.reusable !== 'boolean' ||
-        result.material === undefined
+        (behavior.prepareReview &&
+          (!result.review ||
+            !/^[a-f0-9]{64}$/.test(result.review.fingerprint) ||
+            typeof result.review.reusable !== 'boolean' ||
+            result.review.material === undefined))
       )
-        return { review: null, failure: 'shell_risk_preparation_unavailable' };
-      return { review: structuredClone(result) };
+        return { review: null, failure: 'authorization_check_preparation_unavailable' };
+      return structuredClone(result);
     } catch {
       scope.signal.throwIfAborted();
       return controller.signal.aborted && Date.now() >= deadlineAt
         ? { review: null }
-        : { review: null, failure: 'shell_risk_preparation_failed' };
+        : { review: null, failure: 'authorization_check_preparation_failed' };
     } finally {
       if (timer) clearTimeout(timer);
       scope.signal.removeEventListener('abort', cancel);
@@ -1489,7 +1627,9 @@ export class AgentRuntime {
       deadlineAt: number;
       operationKey: string;
       state: AuthorizationTimingState;
-      riskReview?: ShellRiskPreparation | null;
+      behavior: TrustedToolBehavior;
+      review?: ReviewPreparation | null;
+      parentProof?: Json;
       preparationFailure?: string;
       prepared(reference: ReadAuthorizationCheckInput): void;
     },
@@ -1501,9 +1641,9 @@ export class AgentRuntime {
     // Reserve the durable check before expensive context expansion. Its deadline
     // covers preparation and queueing as well as the Provider call.
     const checkRequest = decision.check.request;
-    const riskOnly = isShellRiskRequest(checkRequest);
+    const usesBehavior = !!timing.behavior.prepareReview;
     const requestBody =
-      !riskOnly && Buffer.byteLength(canonicalJson(checkRequest)) > 64 * 1024
+      !usesBehavior && Buffer.byteLength(canonicalJson(checkRequest)) > 64 * 1024
         ? await this.publishBody(scope, checkRequest, 'authorization-check-request')
         : undefined;
     const fact = await this.options.store.ensureAuthorizationCheck({
@@ -1516,7 +1656,9 @@ export class AgentRuntime {
       requireApproval: decision.check.requireApproval === true,
       checker: identity,
       operationKey: timing.operationKey,
-      ...(isShellRiskRequest(checkRequest) ? { riskReview: timing.riskReview ?? null } : {}),
+      behavior: this.reviewBinding(timing.behavior),
+      ...(usesBehavior ? { review: timing.review ?? null } : {}),
+      ...(timing.parentProof ? { parentProof: timing.parentProof } : {}),
       timeout: { startedAt: timing.startedAt, deadlineAt: timing.deadlineAt },
     });
     if (canonicalJson(fact.source) !== canonicalJson(source))
@@ -1532,7 +1674,11 @@ export class AgentRuntime {
       checker: identity,
     };
     timing.prepared(reference);
-    if (riskOnly && (!timing.riskReview || Date.now() >= timing.deadlineAt)) {
+    if (
+      (usesBehavior && !timing.review) ||
+      timing.preparationFailure ||
+      Date.now() >= timing.deadlineAt
+    ) {
       const timedOut = !timing.preparationFailure;
       if (fact.created)
         await this.options.store.finishAuthorizationCheck({
@@ -1575,7 +1721,7 @@ export class AgentRuntime {
               messages: [
                 {
                   role: 'system',
-                  content: riskOnly ? shellRiskInstructions : authorizationCheckInstructions,
+                  content: timing.review?.instructions ?? authorizationCheckInstructions,
                 },
                 {
                   role: 'user',
@@ -1639,7 +1785,26 @@ export class AgentRuntime {
             });
           };
           await this.execution.authorizationCheck(checkScope, {
-            ...(riskOnly ? { reviewPurpose: 'shell_risk' as const } : {}),
+            review: {
+              behavior: this.reviewBinding(timing.behavior),
+              target: {
+                executionId: request.executionId,
+                attempt: (await this.options.store.getExecution(request.executionId))!.attempt,
+                inputDigest: await semanticDigest(request.input),
+              },
+              checkInputDigest: await semanticDigest(fact.input),
+              ...(timing.review ? { materialFingerprint: timing.review.fingerprint } : {}),
+              interpret:
+                timing.behavior.interpretReview ??
+                ((content) => {
+                  try {
+                    const answer = authorizationCheckAnswer(JSON.parse(content));
+                    return answer ? { answer } : null;
+                  } catch {
+                    return null;
+                  }
+                }),
+            },
             execution: fact.execution,
             timing: timing.state,
             workspaceId: scope.workspaceId,
@@ -1703,24 +1868,135 @@ export class AgentRuntime {
     await scope.checkFreshness?.();
     return reference;
   }
+  private async prepareExecutionConfirmation(
+    scope: ToolScope,
+    request: AuthorizationRequest,
+    execution: ExecutionRecord,
+  ): Promise<import('./execution-confirmation').PreparedExecutionConfirmation | null> {
+    if (request.kind === 'model') return null;
+    const behaviors = scope.bindings?.toolBehaviors ?? this.options.toolBehaviors ?? [];
+    const behavior = behaviors.find(
+      (value) =>
+        value.capability.kind === request.kind &&
+        value.capability.definitionId === request.definitionId &&
+        value.capability.definitionVersion === request.definitionVersion,
+    );
+    if (request.kind !== 'job' && !behavior?.executionConfirmation) return null;
+    if (execution.parentExecutionId && request.kind === 'job') {
+      const parent = await this.options.store.getExecution(execution.parentExecutionId);
+      const interaction =
+        parent?.interactionBinding &&
+        (await this.options.store.getInteraction({
+          expectedStoreId: execution.originStoreId,
+          sessionId: execution.sessionId,
+          interactionId: parent.interactionBinding.interactionId,
+        }));
+      const raw =
+        interaction &&
+        (interaction.request as { executionConfirmation?: Json }).executionConfirmation;
+      if (raw) {
+        const binding = executionConfirmationBinding(raw);
+        const owner = behaviors.find(
+          (behavior) =>
+            behavior.capability.kind === parent!.kind &&
+            behavior.capability.definitionId === parent!.definitionId &&
+            behavior.capability.definitionVersion === parent!.definitionVersion,
+        );
+        const command = await this.options.store.getCommand(execution.originCommandId);
+        const operation = command?.request as { kind?: string; operationKey?: string } | undefined;
+        const step = binding.steps.find((step) => step.key === operation?.operationKey);
+        if (
+          !parent?.authorization?.dispatched ||
+          !execution.cancelWithParent ||
+          parent.sessionId !== execution.sessionId ||
+          parent.originStoreId !== execution.originStoreId ||
+          parent.rootWorkCommandId !== execution.rootWorkCommandId ||
+          parent.rootWorkSeq !== execution.rootWorkSeq ||
+          !owner?.executionConfirmation ||
+          !sameExecutionConfirmation(binding.owner, {
+            capability: owner.capability,
+            contractRef: owner.contractRef,
+            configurationDigest: owner.configurationDigest,
+          }) ||
+          interaction!.state !== 'answered' ||
+          !interaction!.acceptedDecisionRevision ||
+          interaction!.answer?.kind !== 'approval' ||
+          interaction!.answer.decision !== 'approve' ||
+          binding.executionId !== parent.id ||
+          binding.attempt !== parent.attempt ||
+          binding.inputDigest !== (await semanticDigest(parent.input)) ||
+          operation?.kind !== 'operation.job' ||
+          !step ||
+          step.capability.kind !== request.kind ||
+          step.capability.definitionId !== request.definitionId ||
+          step.capability.definitionVersion !== request.definitionVersion ||
+          step.inputDigest !== (await semanticDigest(request.input))
+        )
+          throw new AgentError('execution_confirmation_step_mismatch');
+        return {
+          proof: {
+            binding,
+            interactionId: interaction!.id,
+            decisionRevision: interaction!.acceptedDecisionRevision,
+            stepKey: step.key,
+          },
+        };
+      }
+    }
+    if (!behavior?.executionConfirmation) return null;
+    const declaration = await behavior.executionConfirmation({
+      ...request,
+      input: freeze(structuredClone(request.input)),
+    });
+    request.signal.throwIfAborted();
+    if (!declaration) return null;
+    const owner = {
+      capability: behavior.capability,
+      contractRef: behavior.contractRef,
+      configurationDigest: behavior.configurationDigest,
+    };
+    const binding = await bindExecutionConfirmation(owner, request, execution.attempt, declaration);
+    return { binding, declaration: freeze(structuredClone(declaration)) };
+  }
+
   private childPermissions(parent: Permissions, child: Permissions | undefined): Permissions {
     const policies = child && child !== parent ? [parent, child] : [parent];
+    const confirmationSources = new WeakMap<PermissionDecision, readonly PermissionDecision[]>();
     return {
+      async consumesExecutionConfirmation(request, decision, owner) {
+        const prior = confirmationSources.get(decision);
+        if (!prior) return false;
+        for (let i = 0; i < policies.length; i++)
+          if (!(await consumesExecutionConfirmation(policies[i]!, request, prior[i]!, owner)))
+            return false;
+        return true;
+      },
       toolDispatchOrder: parent.toolDispatchOrder ?? child?.toolDispatchOrder,
+      async reuseRevision(_request, capability, candidate, decision) {
+        const binding = decision.grantOffers
+          ?.find((offer) => offer.scopeDigest === candidate.scopeDigest)
+          ?.policyBindings.find((binding) => sameCapability(binding.capability, capability));
+        return binding
+          ? {
+              reuseRevision: binding.reuseRevision,
+              ...(binding.satisfiesCheck ? { satisfiesCheck: true as const } : {}),
+              ...(binding.requireApproval === undefined
+                ? {}
+                : { requireApproval: binding.requireApproval }),
+            }
+          : null;
+      },
       async authorize(request) {
         const decisions: PermissionDecision[] = [];
+        const originalDecisions: PermissionDecision[] = [];
         for (const policy of policies) {
           request.signal.throwIfAborted();
-          decisions.push(
-            freeze(
-              structuredClone(
-                await policy.authorize({
-                  ...request,
-                  input: freeze(structuredClone(request.input)),
-                }),
-              ),
-            ),
-          );
+          const decision = await policy.authorize({
+            ...request,
+            input: freeze(structuredClone(request.input)),
+          });
+          originalDecisions.push(decision);
+          decisions.push(freeze(structuredClone(decision)));
         }
         const controlReads: NonNullable<PermissionDecision['controlReads']>[number][] = [];
         let controlError: string | undefined;
@@ -1781,19 +2057,18 @@ export class AgentRuntime {
               }
             : {}),
         };
+        const finish = (decision: PermissionDecision): PermissionDecision => {
+          const sealed = sealWorktreeDecision(decision, decisions);
+          confirmationSources.set(sealed, originalDecisions);
+          return sealed;
+        };
         const challenges = decisions.filter((decision) => !decision.allowed);
         const approvals = challenges.filter((decision) => decision.approval);
         const checks = challenges.filter((decision) => decision.check);
-        const commandDigest = approvals[0]?.approval?.commandDigest;
-        // Every challenged scope must permit reuse; an independent check remains per-call.
-        const sameCommand =
-          approvals.length > 0 &&
-          challenges.every(
-            (decision) =>
-              decision.approval?.grants?.includes('same_command') &&
-              decision.approval.commandDigest === commandDigest &&
-              !decision.check?.requireApproval,
-          );
+        const grantOffers = await intersectGrantOffers(
+          request,
+          originalDecisions.map((decision, index) => ({ permissions: policies[index]!, decision })),
+        );
         const bindings: Json = decisions.map((decision) => ({
           controlReads:
             controlError || decision.controlReads === undefined
@@ -1804,15 +2079,14 @@ export class AgentRuntime {
           approval: decision.approval
             ? {
                 request: decision.approval.request,
-                grants: [...(decision.approval.grants ?? ['approve_once'])],
-                commandDigest: decision.approval.commandDigest ?? null,
+                options: (decision.approval.options ?? []) as unknown as Json,
               }
             : null,
           check: decision.check
             ? {
                 // Per-call check context does not revoke an explicitly reusable human grant.
                 // The InteractionGate still binds each actual check to its complete request.
-                request: sameCommand ? null : decision.check.request,
+                request: decision.check.request,
                 requireApproval: decision.check.requireApproval === true,
               }
             : null,
@@ -1829,16 +2103,10 @@ export class AgentRuntime {
             reason: denied.reason ?? 'parent_child_permission_denied',
             ...proof,
           };
-        if (!challenges.length)
-          return sealWorktreeDecision({ allowed: true, revision, ...proof }, decisions);
+        if (!challenges.length) return finish({ allowed: true, revision, grantOffers, ...proof });
         const approval = approvals.length
           ? {
-              ...(sameCommand
-                ? {
-                    grants: ['approve_once', 'same_command'] as const,
-                    ...(commandDigest === undefined ? {} : { commandDigest }),
-                  }
-                : {}),
+              options: approvalOptions(grantOffers),
               request: {
                 kind: 'parent_child_permission_intersection',
                 policies: decisions.map((decision, index) => ({
@@ -1865,16 +2133,14 @@ export class AgentRuntime {
                 checks.some((decision) => decision.check?.requireApproval),
             }
           : undefined;
-        return sealWorktreeDecision(
-          {
-            allowed: false,
-            revision,
-            ...proof,
-            ...(approval ? { approval } : {}),
-            ...(check ? { check } : {}),
-          },
-          decisions,
-        );
+        return finish({
+          allowed: false,
+          revision,
+          grantOffers,
+          ...proof,
+          ...(approval ? { approval } : {}),
+          ...(check ? { check } : {}),
+        });
       },
     };
   }
@@ -1891,6 +2157,7 @@ export class AgentRuntime {
     source: Json,
     continuation?: { executionId: string; afterRunId: string },
     originalExecutionId?: string,
+    originalRun?: RunRecord,
   ) {
     const declared = this.childConfigurations.get(configurationId);
     if (!declared) throw new AgentError('child_configuration_unavailable');
@@ -1926,8 +2193,7 @@ export class AgentRuntime {
         ? await this.options.store.getSession(carrier.childSessionId)
         : null;
       if (
-        !carrier ||
-        carrier.kind !== 'job' ||
+        carrier?.kind !== 'job' ||
         carrier.originStoreId !== execution.originStoreId ||
         carrier.sessionId !== session.id ||
         carrier.definitionId !== `agent/${configurationId}` ||
@@ -1940,6 +2206,16 @@ export class AgentRuntime {
       originalConfiguration = carrier.childConfiguration;
       originalConfigurationPurpose =
         carrier.parentExecutionId === execution.id ? 'restore' : 'follow_up';
+      if (
+        originalRun &&
+        (originalConfigurationPurpose !== 'restore' ||
+          originalRun.carrierExecutionId !== carrier.id ||
+          originalRun.sessionId !== child.id ||
+          originalRun.originStoreId !== carrier.originStoreId ||
+          originalRun.rootWorkCommandId !== carrier.rootWorkCommandId ||
+          originalRun.rootWorkSeq !== carrier.rootWorkSeq)
+      )
+        throw new AgentError('child_parent_binding_unavailable');
     }
     const parentBindings = parent.bindings;
     if (!parentBindings) throw new AgentError('child_parent_binding_unavailable');
@@ -1991,6 +2267,7 @@ export class AgentRuntime {
             ? {
                 originalConfiguration: freeze(structuredClone(originalConfiguration)),
                 originalConfigurationPurpose,
+                ...(originalRun ? { originalRun: freeze(structuredClone(originalRun)) } : {}),
               }
             : {}),
           parentExecution: freeze(structuredClone(execution)),
@@ -2034,6 +2311,7 @@ export class AgentRuntime {
         configuration.extensions,
         configuration.toolIds,
         configuration.modelHiddenToolIds,
+        configuration.toolBehaviors,
       );
       return this.childDefinition(
         configurationId,
@@ -2053,6 +2331,8 @@ export class AgentRuntime {
               captured.extensionIds,
               captured.extensions,
               configuration.permissions,
+              captured.toolBehaviors,
+              configuration.authorizationCheck ?? this.defaultChecker,
             ),
           },
           binding: {
@@ -2069,6 +2349,7 @@ export class AgentRuntime {
               configuration.afterTurn ?? declared.binding.afterTurn ?? this.options.afterTurn,
             definitions: captured.definitions,
             jobs: captured.jobs,
+            toolBehaviors: captured.toolBehaviors,
             extensions: captured.extensions,
             authorizationCheck: sealAuthorizationCheck(
               configuration.authorizationCheck ?? this.defaultChecker,
@@ -2857,12 +3138,7 @@ export class AgentRuntime {
   async readModelInput(
     input: Parameters<Store['getModelInputSnapshot']>[0] & { signal?: AbortSignal },
   ): Promise<ModelInputSnapshot> {
-    const {
-      authorizationCheck: check,
-      authorizationReview: legacyReview,
-      ...snapshot
-    } = await this.readOriginalModelInput(input);
-    const review = check ?? legacyReview;
+    const { authorizationCheck: check, ...snapshot } = await this.readOriginalModelInput(input);
     let changed = false;
     const request = {
       ...snapshot.request,
@@ -2871,12 +3147,11 @@ export class AgentRuntime {
         : {}),
       messages: modelToolMessages(snapshot.request.messages).map(({ continuation, ...message }) => {
         changed ||= continuation !== undefined;
-        // Older checker snapshots may contain private history serialized as user text.
-        // Only the exact persisted review child can identify this envelope, never its text alone.
+        // Only this saved internal check identifies its private input projection.
         if (
-          review &&
+          check &&
           message.role === 'user' &&
-          canonicalJson(message.sourceIds as unknown as Json) === canonicalJson(review.sourceIds)
+          canonicalJson(message.sourceIds as unknown as Json) === canonicalJson(check.sourceIds)
         ) {
           let content = semanticReviewContent(message.content);
           if (check) {
@@ -2916,7 +3191,6 @@ export class AgentRuntime {
   ): Promise<
     ModelInputSnapshot & {
       authorizationCheck: { sourceIds: [string, string] } | null;
-      authorizationReview: { sourceIds: [string, string] } | null;
     }
   > {
     const { signal, ...scope } = input;
@@ -2998,7 +3272,6 @@ export class AgentRuntime {
     return {
       ...identity,
       authorizationCheck: snapshot.authorizationCheck,
-      authorizationReview: snapshot.authorizationReview,
       storeId: snapshot.storeId,
       bodyHash: hash,
       bodyBytes: size,
@@ -3663,38 +3936,7 @@ export class AgentRuntime {
     return command && dispatchFailure ? { ...command, dispatchFailure } : command;
   }
   async getRun(id: string) {
-    const run = await this.options.store.getRun(id);
-    return run ? this.publicRun(run) : null;
-  }
-  private async publicRun(run: RunRecord): Promise<RunRecord> {
-    const configuration = run.configuration as Record<string, Json> | null;
-    const review = configuration?.authorizationReview as Record<string, Json> | null;
-    if (review?.purpose !== 'authorization_review') return run;
-    const command = await this.options.store.getCommand(run.originCommandId);
-    if (command?.kind !== 'child.start' || command.sessionId !== run.sessionId) return run;
-    const parentExecutionId = (command.request as Record<string, Json>).parentExecutionId;
-    if (typeof parentExecutionId !== 'string' || command.id !== `child-start-${parentExecutionId}`)
-      return run;
-    const carrier = await this.options.store.getExecution(parentExecutionId);
-    const origin = carrier ? await this.options.store.getCommand(carrier.originCommandId) : null;
-    if (
-      carrier?.childSessionId !== run.sessionId ||
-      carrier.originStoreId !== run.originStoreId ||
-      command.originStoreId !== run.originStoreId ||
-      origin?.kind !== 'authorization.review'
-    )
-      return run;
-    // Run configuration is public history; the Store retains the original binding proof.
-    return {
-      ...run,
-      configuration: {
-        ...configuration,
-        authorizationReview: {
-          ...review,
-          decisionContext: semanticReviewContext(review.decisionContext!),
-        },
-      },
-    };
+    return this.options.store.getRun(id);
   }
   /** Trusted host observation of one actual Run namespace; does not confer execution permission. */
   async readRunExtensionRecord(input: {
@@ -3947,7 +4189,6 @@ export class AgentRuntime {
     const executions = new Map(original.executions.map((execution) => [execution.id, execution]));
     const view = {
       ...original,
-      runs: await Promise.all(original.runs.map((run) => this.publicRun(run))),
       messages: await Promise.all(
         original.messages.map((message) => {
           const execution =
@@ -4188,6 +4429,89 @@ export class AgentRuntime {
       if (currentContinuation) {
         streak.count = Number(saved.count);
         streak.signature = saved.signature as string | null;
+      }
+      if (continuation.completionGuidance !== undefined) {
+        const guidance = continuation.completionGuidance as Record<string, Json>;
+        const validEntry = (
+          value: Json,
+        ): value is Record<string, Json> & { extensionId: string; key: string } =>
+          value !== null &&
+          typeof value === 'object' &&
+          !Array.isArray(value) &&
+          typeof value.extensionId === 'string' &&
+          value.extensionId.length > 0 &&
+          typeof value.key === 'string' &&
+          value.key.length > 0 &&
+          value.key.length <= 512;
+        if (
+          !guidance ||
+          typeof guidance !== 'object' ||
+          Array.isArray(guidance) ||
+          Object.keys(guidance).some((key) => !['delivered', 'pending'].includes(key)) ||
+          !Array.isArray(guidance.delivered) ||
+          !guidance.delivered.every(
+            (entry) => validEntry(entry) && Object.keys(entry).length === 2,
+          ) ||
+          new Set(guidance.delivered.map((entry) => (entry as { extensionId: string }).extensionId))
+            .size !== guidance.delivered.length ||
+          (guidance.pending !== null &&
+            (!validEntry(guidance.pending!) ||
+              Object.keys(guidance.pending!).length !== 3 ||
+              typeof guidance.pending.sourceDigest !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(guidance.pending.sourceDigest)))
+        )
+          throw new AgentError('run_continuation_invalid');
+        const delivered = guidance.delivered as { extensionId: string; key: string }[];
+        const pending = guidance.pending as {
+          extensionId: string;
+          key: string;
+          sourceDigest: string;
+        } | null;
+        if (pending) {
+          const sources = Array.isArray(source.sources) ? source.sources : [];
+          const matches = sources.filter(
+            (value) =>
+              value &&
+              typeof value === 'object' &&
+              !Array.isArray(value) &&
+              value.id === `${pending.extensionId}:completion:${state.run.id}`,
+          );
+          if (matches.length !== 1) throw new AgentError('run_continuation_invalid');
+          const original = matches[0] as unknown as ContextSource;
+          assertContextSource(original);
+          let diagnostic: Record<string, Json>;
+          try {
+            diagnostic = JSON.parse(original.content);
+          } catch {
+            throw new AgentError('run_continuation_invalid');
+          }
+          if (
+            original.kind !== 'completion' ||
+            original.role !== 'user' ||
+            original.scope !== state.run.sessionId ||
+            original.digest !== pending.sourceDigest ||
+            (await semanticDigest(original.content)) !== pending.sourceDigest ||
+            !diagnostic ||
+            typeof diagnostic !== 'object' ||
+            Array.isArray(diagnostic) ||
+            Object.keys(diagnostic).length !== 3 ||
+            diagnostic.kind !== 'completion_diagnostic' ||
+            diagnostic.key !== pending.key ||
+            typeof diagnostic.content !== 'string' ||
+            Buffer.byteLength(diagnostic.content) > 32 * 1024
+          )
+            throw new AgentError('run_continuation_invalid');
+          result.continuationSource = structuredClone(original);
+          // Preparation alone is not consumption. A succeeded business Model
+          // proves dispatch and complete output; the normal resume checks below
+          // still verify its original input/output before this checkpoint is used.
+          if (last.status === 'succeeded' && !source.compressionId) {
+            const prior = delivered.find((entry) => entry.extensionId === pending.extensionId);
+            if (prior) prior.key = pending.key;
+            else delivered.push({ extensionId: pending.extensionId, key: pending.key });
+          }
+        }
+        result.completionGuidance = { delivered, pending };
       }
       const savedRequests =
         continuation.version === 3
@@ -4545,6 +4869,7 @@ export class AgentRuntime {
           resolved?.extensions,
           resolved?.toolIds,
           resolved?.modelHiddenToolIds,
+          resolved?.toolBehaviors,
         );
         const checker = sealAuthorizationCheck(resolved?.authorizationCheck ?? this.defaultChecker);
         const snapshot = resolved?.snapshot ?? null;
@@ -4559,9 +4884,7 @@ export class AgentRuntime {
                   id: checker.id,
                   version: checker.version,
                   modelId: checker.modelId,
-                  ...(checker.timeoutMs !== undefined && checker.timeoutMs !== 3000
-                    ? { timeoutMs: checker.timeoutMs }
-                    : {}),
+                  timeoutMs: checker.timeoutMs ?? 8000,
                 }
               : null,
           },
@@ -4570,6 +4893,8 @@ export class AgentRuntime {
           catalogue.extensionIds,
           catalogue.extensions,
           resolved?.permissions,
+          catalogue.toolBehaviors,
+          checker,
         );
         if (!matchesRecoveryConfiguration(configuration, state.run.configuration))
           throw new AgentError('run_configuration_mismatch');
@@ -4580,6 +4905,7 @@ export class AgentRuntime {
           modelHiddenToolIds:
             resolved?.modelHiddenToolIds && Object.freeze([...resolved.modelHiddenToolIds]),
           jobs: catalogue.jobs,
+          toolBehaviors: catalogue.toolBehaviors,
           extensions: catalogue.extensions,
           sources: sealSources(resolved?.sources),
           permissions: resolved?.permissions,
@@ -4640,6 +4966,7 @@ export class AgentRuntime {
             child.carrier.decisionSource,
             continuation,
             child.carrier.id,
+            child.state?.run,
           );
           recoveredChildren.push({ child, agent, parent });
           if (
@@ -5195,6 +5522,7 @@ export class AgentRuntime {
             resolved.extensions,
             resolved.toolIds,
             resolved.modelHiddenToolIds,
+            resolved.toolBehaviors,
           );
           snapshot = structuredClone(resolved.snapshot);
           binding = {
@@ -5229,9 +5557,7 @@ export class AgentRuntime {
                   id: checker.id,
                   version: checker.version,
                   modelId: checker.modelId,
-                  ...(checker.timeoutMs !== undefined && checker.timeoutMs !== 3000
-                    ? { timeoutMs: checker.timeoutMs }
-                    : {}),
+                  timeoutMs: checker.timeoutMs ?? 8000,
                 }
               : null,
           },
@@ -5240,6 +5566,8 @@ export class AgentRuntime {
           catalogue.extensionIds,
           catalogue.extensions,
           binding.permissions,
+          catalogue.toolBehaviors,
+          checker,
         );
         if (canonicalJson(configuration) !== canonicalJson(parent.configuration))
           throw new AgentError('report_configuration_mismatch');
@@ -5301,6 +5629,7 @@ export class AgentRuntime {
               modelId,
               definitions: catalogue.definitions,
               jobs: catalogue.jobs,
+              toolBehaviors: catalogue.toolBehaviors,
               extensions: catalogue.extensions,
               dispose,
             },
@@ -5851,6 +6180,10 @@ export class AgentRuntime {
       release = this.trackLive(command, scope.owner, controller);
       await this.extensionHost.run(command, scope.owner, controller, {
         executionId: input.parentExecutionId,
+        resourcesHeld: !!(
+          bindings.tools.get(parent!.definitionId)?.resources?.slot ||
+          bindings.tools.get(parent!.definitionId)?.resources?.serial
+        ),
         bindings,
         assertFresh,
       });
@@ -6859,7 +7192,12 @@ export class AgentRuntime {
         snapshot = structuredClone(resolved.snapshot);
         modelHiddenToolIds =
           resolved.modelHiddenToolIds && Object.freeze([...resolved.modelHiddenToolIds]);
-        bindings = this.runDefinitions(resolved.extensions, resolved.toolIds, modelHiddenToolIds);
+        bindings = this.runDefinitions(
+          resolved.extensions,
+          resolved.toolIds,
+          modelHiddenToolIds,
+          resolved.toolBehaviors,
+        );
         definitions = bindings.definitions;
       }
       if (!model) throw new AgentError('model_unavailable');
@@ -6874,10 +7212,7 @@ export class AgentRuntime {
                 id: authorizationCheck.id,
                 version: authorizationCheck.version,
                 modelId: authorizationCheck.modelId,
-                ...(authorizationCheck.timeoutMs !== undefined &&
-                authorizationCheck.timeoutMs !== 3000
-                  ? { timeoutMs: authorizationCheck.timeoutMs }
-                  : {}),
+                timeoutMs: authorizationCheck.timeoutMs ?? 8000,
               }
             : null,
         },
@@ -6886,6 +7221,8 @@ export class AgentRuntime {
         bindings.extensionIds,
         bindings.extensions,
         permissions,
+        bindings.toolBehaviors,
+        authorizationCheck,
       );
       const write = {
         expectedStoreId: command.originStoreId,
@@ -6924,6 +7261,7 @@ export class AgentRuntime {
       definitions,
       modelHiddenToolIds,
       jobs: bindings.jobs,
+      toolBehaviors: bindings.toolBehaviors,
       extensions: bindings.extensions,
       sources,
       permissions,
@@ -6966,6 +7304,7 @@ export class AgentRuntime {
       value.extensions,
       value.toolIds,
       binding.modelHiddenToolIds,
+      binding.toolBehaviors,
     );
     const facts: Json = {
       snapshot,
@@ -7044,6 +7383,7 @@ export class AgentRuntime {
       jobs: binding.jobs ?? this.runDefinitions().jobs,
       permissions: binding.permissions,
       authorizationCheck: binding.authorizationCheck,
+      toolBehaviors: binding.toolBehaviors,
       conditions: binding.conditions,
       retain: this.retainRunBinding(runId, binding).retain,
     };
@@ -7329,6 +7669,7 @@ export class AgentRuntime {
           jobs: current.selected.jobs,
           permissions: binding.permissions,
           authorizationCheck: binding.authorizationCheck,
+          toolBehaviors: current.selected.toolBehaviors,
           conditions: binding.conditions,
           capabilitySnapshot: current.snapshot,
           retain: this.retainRunBinding(run.id, binding).retain,
@@ -7342,6 +7683,23 @@ export class AgentRuntime {
       const configuredSources = binding.sources ?? this.options.sources;
       const sourceRequests = new Map<string, SourceRequest>();
       const failureStreak = resumed?.toolFailureStreak ?? { signature: null, count: 0 };
+      const completionGuidance = new Map(
+        resumed?.completionGuidance?.delivered.map(({ extensionId, key }) => [extensionId, key]),
+      );
+      let continuationDirective = resumed?.completionGuidance?.pending ?? null;
+      let continuationSource: ContextSource | null = resumed?.continuationSource ?? null;
+      const guidanceOwners = new Set(
+        scope.bindings.extensions
+          .filter((extension) => extension.completionGovernance)
+          .map((extension) => extension.id),
+      );
+      if (
+        [
+          ...completionGuidance.keys(),
+          ...(continuationDirective ? [continuationDirective.extensionId] : []),
+        ].some((id) => !guidanceOwners.has(id))
+      )
+        throw new AgentError('run_continuation_invalid');
       let sourceRequestJournal = resumed?.sourceRequestJournal ?? null;
       const pendingSourceRequests: SourceRequest[] = [];
       for (const request of resumed?.sourceRequests ?? []) {
@@ -7360,6 +7718,10 @@ export class AgentRuntime {
         input: { kind: 'model_request' },
       });
       const continuationState = async (): Promise<Json> => {
+        const guidance = {
+          delivered: [...completionGuidance].map(([extensionId, key]) => ({ extensionId, key })),
+          pending: continuationDirective,
+        };
         if (this.options.artifacts) {
           if (pendingSourceRequests.length) {
             sourceRequestJournal = await this.publishBody(
@@ -7384,6 +7746,7 @@ export class AgentRuntime {
             contextSelectionId: run.contextSelectionId,
             sourceRequestJournal: sourceRequestJournal as unknown as Json,
             toolFailureStreak: { ...failureStreak },
+            completionGuidance: guidance,
           };
         }
         return {
@@ -7394,11 +7757,11 @@ export class AgentRuntime {
             .filter(([key]) => key !== 'model')
             .map(([, request]) => request as unknown as Json),
           toolFailureStreak: { ...failureStreak },
+          completionGuidance: guidance,
         };
       };
       let captured: ContextSource[] = [];
       let capturedRequests = new Map<string, SourceRequest>();
-      let continuationSource: ContextSource | null = null;
       const capture = async (
         requests: Iterable<SourceRequest> = sourceRequests.values(),
         bindings = scope.bindings,
@@ -7982,6 +8345,17 @@ export class AgentRuntime {
           let modelRetry = recoveredModelRetry;
           recoveredModelRetry = undefined;
           let providerAttempt = modelRetry?.attempt ?? 1;
+          const rememberGuidanceDelivery = () => {
+            if (
+              continuationDirective &&
+              captured.some(
+                (source) =>
+                  source.id === `${continuationDirective!.extensionId}:completion:${run.id}` &&
+                  source.digest === continuationDirective!.sourceDigest,
+              )
+            )
+              completionGuidance.set(continuationDirective.extensionId, continuationDirective.key);
+          };
           while (true) {
             try {
               const response = await this.execution.model(
@@ -7999,6 +8373,7 @@ export class AgentRuntime {
                   ? resumed.plannedModel
                   : undefined,
               );
+              rememberGuidanceDelivery();
               return response;
             } catch (error) {
               const retryReason = modelRetryReason(error);
@@ -8078,7 +8453,8 @@ export class AgentRuntime {
           const definition = decisionBindings.tools.get(call.name);
           const digestSources = (sources: ContextSource[]) =>
             semanticDigest(JSON.parse(JSON.stringify(sources)) as Json);
-          const decisionDigest = await digestSources(decisionSources);
+          let continuationSources = decisionSources;
+          let decisionDigest = await digestSources(continuationSources);
           const checkToolDecision = async () => {
             if (inputVersion !== decisionInputVersion)
               throw new AgentError('superseded_by_user_input');
@@ -8086,7 +8462,7 @@ export class AgentRuntime {
             const hostSources = new Map<string, ContextSource>();
             const current = await capture(decisionRequests.values(), decisionBindings, hostSources);
             if ((await digestSources(current)) === decisionDigest) return;
-            const known = new Set(decisionSources.map((source) => source.id));
+            const known = new Set(continuationSources.map((source) => source.id));
             const additions = current.filter((source) => !known.has(source.id));
             if (
               definition?.contextDiscovery === 'read_only' &&
@@ -8109,13 +8485,114 @@ export class AgentRuntime {
               return;
             throw new AgentError('context_refresh_required');
           };
-          return this.execution.toolExecution(
+          const onRequirementsRegistered = async (
+            transition: import('./execution').RequirementRegistrationTransition,
+          ) => {
+            if (
+              transition.runId !== scope.run.id ||
+              transition.before.some(
+                (ref) =>
+                  !transition.after.some(
+                    (next) =>
+                      canonicalJson(ref as unknown as Json) ===
+                      canonicalJson(next as unknown as Json),
+                  ),
+              )
+            )
+              throw new AgentError('requirement_scope_mismatch');
+            const additions = transition.after.filter(
+              (ref) =>
+                !transition.before.some(
+                  (previous) =>
+                    canonicalJson(previous as unknown as Json) ===
+                    canonicalJson(ref as unknown as Json),
+                ),
+            );
+            if (
+              additions.some(
+                (ref) =>
+                  ref.extensionId !== transition.extensionId ||
+                  ref.runId !== scope.run.id ||
+                  ref.sessionId !== scope.run.sessionId ||
+                  ref.originStoreId !== scope.run.originStoreId,
+              )
+            )
+              throw new AgentError('requirement_scope_mismatch');
+            const actual = await this.options.store.getExecution(transition.executionId);
+            const origin = actual ? await this.nearestParentRun(actual) : null;
+            const parent = origin?.ancestor;
+            if (
+              !actual ||
+              actual.kind !== 'tool' ||
+              actual.attempt !== transition.attempt ||
+              actual.cancelRequestedAt !== null ||
+              !['dispatching', 'running'].includes(actual.status) ||
+              actual.sessionId !== scope.run.sessionId ||
+              actual.originStoreId !== scope.run.originStoreId ||
+              origin?.run?.id !== scope.run.id ||
+              parent?.kind !== 'tool' ||
+              parent.cancelRequestedAt !== null ||
+              !['dispatching', 'running'].includes(parent.status) ||
+              parent.definitionId !== definition?.id ||
+              parent.definitionVersion !== definition?.version ||
+              parent.callId !== call.id ||
+              parent.stepId !== stepId ||
+              !decisionBindings.extensions.some(
+                (extension) =>
+                  extension.id === transition.extensionId &&
+                  extension.tools?.some(
+                    (tool) =>
+                      tool.id === actual.definitionId && tool.version === actual.definitionVersion,
+                  ),
+              )
+            )
+              throw new AgentError('requirement_scope_mismatch');
+            if (!additions.length) {
+              await checkToolDecision();
+              return;
+            }
+            if (inputVersion !== decisionInputVersion)
+              throw new AgentError('superseded_by_user_input');
+            await checkCapabilities(decisionCapabilities);
+            const current = await capture(decisionRequests.values(), decisionBindings);
+            if (current.length !== continuationSources.length)
+              throw new AgentError('context_refresh_required');
+            for (const previous of continuationSources) {
+              const next = current.find((source) => source.id === previous.id);
+              if (!next) throw new AgentError('context_refresh_required');
+              if (
+                canonicalJson(previous as unknown as Json) ===
+                canonicalJson(next as unknown as Json)
+              )
+                continue;
+              if (
+                !(
+                  previous.id.startsWith(`${transition.extensionId}:`) &&
+                  previous.kind === 'runtime_state' &&
+                  next.kind === previous.kind &&
+                  previous.role === 'user' &&
+                  next.role === previous.role &&
+                  previous.placement === 'runtime' &&
+                  next.placement === previous.placement &&
+                  previous.scope === scope.run.sessionId &&
+                  next.scope === previous.scope
+                )
+              )
+                throw new AgentError('context_refresh_required');
+            }
+            // Only this exact Tool continuation adopts the observation caused by its own
+            // monotonic registration. Original Model/source evidence and siblings stay unchanged.
+            continuationSources = structuredClone(current);
+            decisionDigest = await digestSources(continuationSources);
+          };
+          const outcome = await this.execution.toolExecution(
             {
               ...scope,
               signal,
               bindings: decisionBindings,
               decisionSources,
               checkFreshness: checkToolDecision,
+              onRequirementsRegistered,
               toolAdmission: toolAdmission?.forCall(call.id),
             },
             definition,
@@ -8131,6 +8608,12 @@ export class AgentRuntime {
                 : undefined;
             })(),
           );
+          if (
+            outcome.result.outcome === 'succeeded' &&
+            outcome.result.control?.kind === 'stop_work'
+          )
+            await this.observeOwnedCancellation();
+          return outcome;
         },
       };
       if (resumed?.modelRequest && resumed.modelSource) {
@@ -8348,6 +8831,9 @@ export class AgentRuntime {
                 Buffer.byteLength(directive.content) > 32 * 1024
               )
                 throw new AgentError('completion_directive_invalid');
+              // Each owner can revise its diagnostic when its facts change, but
+              // the same latest key must not repeatedly buy another Model turn.
+              if (completionGuidance.get(extension.id) === directive.key) continue;
               const content = canonicalJson({
                 kind: 'completion_diagnostic',
                 key: directive.key,
@@ -8360,6 +8846,11 @@ export class AgentRuntime {
                 scope: session.id,
                 digest: await semanticDigest(content),
                 content,
+              };
+              continuationDirective = {
+                extensionId: extension.id,
+                key: directive.key,
+                sourceDigest: continuationSource.digest,
               };
               continueModel = true;
               directiveApplied = true;
@@ -8438,6 +8929,10 @@ export class AgentRuntime {
                 sources: checkSources as unknown as Json,
               },
             );
+            if (result.outcome === 'succeeded' && result.control?.kind === 'stop_work') {
+              await this.observeOwnedCancellation();
+              controller.signal.throwIfAborted();
+            }
             if (result.outcome === 'outcome_unknown')
               throw new AgentError('operation_unverifiable');
             if (
@@ -9058,8 +9553,10 @@ export class AgentRuntime {
           },
         },
       },
-      grants: original.grants!,
-      ...(original.commandDigest === undefined ? {} : { commandDigest: original.commandDigest }),
+      options: original.options!,
+      ...(original.executionConfirmation
+        ? { executionConfirmation: original.executionConfirmation }
+        : {}),
       definitionId: original.definitionId!,
       definitionVersion: original.definitionVersion!,
       input: {
@@ -9139,6 +9636,19 @@ export class AgentRuntime {
     for (const [key, value] of Object.entries(actual as { [key: string]: Json }))
       if (canonicalJson(complete[key]!) !== canonicalJson(value))
         throw new AgentError('interaction_binding_changed');
+    const confirmation = (actual as { [key: string]: Json }).executionConfirmation;
+    if (confirmation !== undefined) {
+      const binding = executionConfirmationBinding(confirmation);
+      const policy = complete.policy;
+      if (
+        !policy ||
+        typeof policy !== 'object' ||
+        Array.isArray(policy) ||
+        !Object.hasOwn(policy, 'confirmation') ||
+        (await semanticDigest(policy.confirmation!)) !== binding.requestDigest
+      )
+        throw new AgentError('execution_confirmation_changed');
+    }
     scope.signal.throwIfAborted();
   }
   private async publishBody(
@@ -9313,18 +9823,7 @@ export class AgentRuntime {
         messages.push(message);
         continue;
       }
-      if (payload.reviewPurpose === 'shell_risk') {
-        const requestBody = bodyReference(payload.requestBody);
-        if (requestBody) {
-          payload.request = jsonBody(await this.readBody(requestBody.reference, scope.signal));
-          delete payload.requestBody;
-        }
-        if (!isShellRiskRequest(payload.request!))
-          throw new AgentError('authorization_check_binding_changed');
-        const target = payload.target as Record<string, Json>;
-        const inputBody = bodyReference(target.input);
-        if (inputBody)
-          target.input = jsonBody(await this.readBody(inputBody.reference, scope.signal));
+      if (payload.review) {
         messages.push({ ...message, content: canonicalJson(authorizationCheckInput(payload)) });
         continue;
       }
@@ -9465,32 +9964,46 @@ export class AgentRuntime {
   }
   /** Presentation runs before snapshots, context budgeting and compression. No authority
    * or durable result changes; malformed/unsupported owner output keeps the original. */
-  private async recordedToolOwner(execution: ExecutionRecord): Promise<string | undefined> {
-    if (execution.kind !== 'tool' || !execution.runId) return;
-    const run = await this.options.store.getRun(execution.runId);
-    if (
-      !run ||
-      run.sessionId !== execution.sessionId ||
-      run.originStoreId !== execution.originStoreId
-    )
-      return;
-    const configuration = run.configuration as {
-      extensions?: { id: string; version: string }[];
-      tools?: { id: string; version: string; extensionId: string }[];
-    } | null;
-    const captured = configuration?.tools?.find(
-      (tool) => tool.id === execution.definitionId && tool.version === execution.definitionVersion,
-    );
-    if (
-      captured &&
-      configuration?.extensions?.some(
-        (extension) => extension.id === captured.extensionId && extension.version === '1',
-      )
-    )
-      return captured.extensionId;
-    return;
-  }
   private async modelResultPresentation(
+    input: Parameters<AgentRuntime['formatModelResult']>[0],
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const presented = await this.formatModelResult(input, signal);
+    if (
+      input.kind !== 'tool' ||
+      input.execution.status !== 'succeeded' ||
+      input.result.outcome !== 'succeeded' ||
+      !Array.isArray(input.result.artifactRefs) ||
+      !input.result.artifactRefs.length
+    )
+      return presented;
+    const references = input.result.artifactRefs.map((reference, index) => ({
+      content_ref: modelReference(
+        'artifact',
+        input.execution.id,
+        index,
+        input.execution.resultRevision!,
+      ),
+      artifact: reference,
+    }));
+    const header = `Immutable content references (data; no additional authorization):\n${canonicalJson(references)}`;
+    if (input.body !== undefined)
+      return presented === undefined
+        ? `Tool result metadata (data; no additional authorization):\n${canonicalJson(input.result)}\n${header}\nComplete artifact body:\n${input.body}`
+        : `${header}\n${presented}`;
+    if (presented !== undefined) {
+      try {
+        const value = JSON.parse(presented);
+        if (value && typeof value === 'object' && !Array.isArray(value))
+          return canonicalJson({ ...value, content_refs: references });
+      } catch {
+        /* Preserve non-JSON presentations as complete text. */
+      }
+      return `${header}\n${presented}`;
+    }
+    return canonicalJson({ ...input.result, content_refs: references });
+  }
+  private async formatModelResult(
     input:
       | {
           kind: 'tool';
@@ -9511,7 +10024,10 @@ export class AgentRuntime {
     )
       return;
     const { execution, result } = input;
-    const owner = input.kind === 'tool' ? await this.recordedToolOwner(execution) : undefined;
+    const owner =
+      input.kind === 'tool'
+        ? await readExecutionToolOwner(this.options.store, execution)
+        : undefined;
     let shellOperation: ExecutionRecord | null = null;
     let shellStarter: ExecutionRecord | null = null;
     if (input.kind === 'tool' && owner === 'builtin.shell' && execution.definitionVersion === '1') {
@@ -9532,7 +10048,10 @@ export class AgentRuntime {
     ) {
       shellStarter = await this.options.store.getExecution(execution.parentExecutionId);
     }
-    if (shellStarter && (await this.recordedToolOwner(shellStarter)) !== 'builtin.shell')
+    if (
+      shellStarter &&
+      (await readExecutionToolOwner(this.options.store, shellStarter)) !== 'builtin.shell'
+    )
       shellStarter = null;
     // Reads and integrity checks are execution facts. Only pure formatting may fall back.
     if (
@@ -9623,7 +10142,7 @@ export class AgentRuntime {
             }
           }
           items.push({
-            execution_id: raw.execution_id!,
+            execution_id: modelExecutionId(String(raw.execution_id)),
             status: raw.status!,
             tool: raw.definition_id ?? null,
             paths: raw.paths ?? [],
@@ -9639,6 +10158,8 @@ export class AgentRuntime {
           meaning: value.meaning,
         });
       }
+      if (typeof value.execution_id === 'string')
+        return JSON.stringify({ ...value, execution_id: modelExecutionId(value.execution_id) });
     }
     try {
       if (input.kind === 'child') {

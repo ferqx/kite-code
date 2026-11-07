@@ -38,11 +38,24 @@ async function read(
   }
 }
 test('stdio default once and explicit offered same-command retain original prompt scope; deny never grants', async () => {
-  const request = { grants: ['approve_once', 'same_command'], input: { command: 'exact' } };
+  const request = {
+    options: [
+      { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+      {
+        optionId: 'scope-example',
+        kind: 'scope',
+        presentation: {
+          label: '本 Session 相同命令',
+          details: ['仅限此会话的完整相同命令、环境与执行范围'],
+        },
+      },
+    ],
+    input: { command: 'exact' },
+  };
   const once = await read(request, 'approve\n');
-  expect(once.answer).toEqual({ kind: 'approval', decision: 'approve', grant: 'approve_once' });
-  const same = await read(request, 'approve same_command\n');
-  expect(same.answer).toEqual({ kind: 'approval', decision: 'approve', grant: 'same_command' });
+  expect(once.answer).toEqual({ kind: 'approval', decision: 'approve', optionId: 'once' });
+  const same = await read(request, 'approve scope-example\n');
+  expect(same.answer).toEqual({ kind: 'approval', decision: 'approve', optionId: 'scope-example' });
   expect(same.lines.join('')).toContain('本 Session 相同命令');
   expect(JSON.parse(same.lines[0]!)).toMatchObject({
     interactionId: 'original',
@@ -57,20 +70,92 @@ test('stdio default once and explicit offered same-command retain original promp
 test('stdio cannot invent an unoffered grant or turn plan review, question, invalid input or EOF into same-command approval', async () => {
   const unoffered: Interaction['request'][] = [
     {},
-    { grants: ['approve_once'] },
-    { grants: 'same_command' },
+    {
+      options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
+    },
+    { options: 'scope-example' },
   ];
   for (const request of unoffered) {
-    const value = await read(request, 'approve same_command\n');
+    const value = await read(request, 'approve scope-example\n');
     expect(value.answer).toBeUndefined();
     expect(value.lines.join('')).not.toContain('本 Session 相同命令');
   }
-  expect((await read({ grants: ['same_command'] }, 'deny same_command\n')).answer).toBeUndefined();
   expect(
-    (await read({ grants: ['same_command'] }, 'approve same_command\n', 'plan_review')).answer,
+    (
+      await read(
+        {
+          options: [
+            {
+              optionId: 'scope-example',
+              kind: 'scope',
+              presentation: {
+                label: '本 Session 相同命令',
+                details: ['仅限此会话的完整相同命令、环境与执行范围'],
+              },
+            },
+          ],
+        },
+        'deny same_command\n',
+      )
+    ).answer,
   ).toBeUndefined();
   expect(
-    (await read({ grants: ['same_command'] }, 'approve same_command\n', 'question')).answer,
+    (
+      await read(
+        {
+          options: [
+            {
+              optionId: 'scope-example',
+              kind: 'scope',
+              presentation: {
+                label: '本 Session 相同命令',
+                details: ['仅限此会话的完整相同命令、环境与执行范围'],
+              },
+            },
+          ],
+        },
+        'approve scope-example\n',
+        'plan_review',
+      )
+    ).answer,
   ).toBeUndefined();
-  expect((await read({ grants: ['same_command'] }, '')).answer).toBeUndefined();
+  expect(
+    (
+      await read(
+        {
+          options: [
+            {
+              optionId: 'scope-example',
+              kind: 'scope',
+              presentation: {
+                label: '本 Session 相同命令',
+                details: ['仅限此会话的完整相同命令、环境与执行范围'],
+              },
+            },
+          ],
+        },
+        'approve scope-example\n',
+        'question',
+      )
+    ).answer,
+  ).toBeUndefined();
+  expect(
+    (
+      await read(
+        {
+          options: [
+            {
+              optionId: 'scope-example',
+              kind: 'scope',
+              presentation: {
+                label: '本 Session 相同命令',
+                details: ['仅限此会话的完整相同命令、环境与执行范围'],
+              },
+            },
+          ],
+        },
+        '',
+      )
+    ).answer,
+  ).toBeUndefined();
 });

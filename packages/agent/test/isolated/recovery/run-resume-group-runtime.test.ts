@@ -320,7 +320,7 @@ for (const mode of [
               presentationSessionId: 's',
               interactionId: card.id,
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
           }
         }

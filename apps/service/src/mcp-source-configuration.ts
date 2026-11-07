@@ -839,8 +839,8 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       servers,
       directoryToolId: mcpSourcesDirectoryToolId,
       sources,
-      admissionError(request: AuthorizationRequest) {
-        const raw = object(request.input),
+      admissionError(request: AuthorizationRequest, resolvedInput: Json = request.input) {
+        const raw = object(resolvedInput),
           binding = object(raw.binding);
         const id =
           typeof raw.serverId === 'string'
@@ -2048,7 +2048,40 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
         outcome: 'succeeded',
         content: JSON.stringify({
           source: 'local_mcp_metadata',
-          ...page(state.snapshot.servers, input),
+          ...(() => {
+            const request = object(input),
+              cursor = request.cursor;
+            let afterId: string | undefined;
+            if (cursor !== undefined) {
+              if (typeof cursor !== 'string' || cursor.length > 4096)
+                throw new McpAdapterError('mcp_source_cursor_invalid');
+              const bytes = Buffer.from(cursor, 'base64url'),
+                position = JSON.parse(bytes.toString('utf8'));
+              if (
+                bytes.toString('base64url') !== cursor ||
+                !Array.isArray(position) ||
+                position.length !== 3 ||
+                position[0] !== context.sessionId ||
+                position[1] !== state.snapshot.scopeDigest ||
+                typeof position[2] !== 'string'
+              )
+                throw new McpAdapterError('mcp_source_cursor_invalid');
+              afterId = position[2];
+            }
+            const { items, nextAfterId } = page(state.snapshot.servers, {
+              ...(afterId ? { afterId } : {}),
+              ...(request.limit === undefined ? {} : { limit: request.limit }),
+            });
+            return {
+              items,
+              next_cursor:
+                nextAfterId === null
+                  ? null
+                  : Buffer.from(
+                      JSON.stringify([context.sessionId, state.snapshot.scopeDigest, nextAfterId]),
+                    ).toString('base64url'),
+            };
+          })(),
           scopeDigest: state.snapshot.scopeDigest,
         }),
         details: { connectionAttempted: false, credentialLookupAttempted: false },
@@ -2446,10 +2479,35 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       {
         id: mcpSourcesDirectoryToolId,
         version: '1',
-        model: { name: 'list_mcp_sources', snakeCase: true },
+        model: { name: 'list_mcp_sources', snakeCase: true, resultVersion: '1' },
         description:
-          'List the selected MCP servers and their safe IDs before connecting; reading the directory does not connect or authorize tools',
-        inputSchema: pageSchema,
+          'List selected MCP servers before connecting. Copy the exact server_id into connect_mcp_server; name is only a display name. This read does not connect or authorize tools.',
+        formatModelResult({ result, body }) {
+          if (result.outcome !== 'succeeded' || body !== undefined) return;
+          const value = object(JSON.parse(result.content));
+          if (
+            value.source !== 'local_mcp_metadata' ||
+            !Array.isArray(value.items) ||
+            value.items.some((item) => typeof object(item).id !== 'string')
+          )
+            return;
+          const { items, ...metadata } = value;
+          return JSON.stringify({
+            ...metadata,
+            items: items.map((item) => {
+              const { id, ...server } = object(item);
+              return { ...server, server_id: id };
+            }),
+          });
+        },
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            cursor: { type: 'string', minLength: 1, maxLength: 4096 },
+            limit: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+        },
         execute: directory,
       },
     ],
@@ -2587,8 +2645,8 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
           return [];
         },
       } satisfies ContextSources,
-      admissionError(request: AuthorizationRequest) {
-        const value = object(request.input),
+      admissionError(request: AuthorizationRequest, resolvedInput: Json = request.input) {
+        const value = object(resolvedInput),
           binding = object(value.binding);
         const serverId = value.serverId ?? binding.serverId;
         return request.definitionId === mcpSourceConnectionJobId ||

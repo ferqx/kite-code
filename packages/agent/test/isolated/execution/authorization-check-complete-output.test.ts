@@ -381,7 +381,7 @@ for (const { shape, fault } of cases)
         interactionId: interaction.id,
         expectedRevision: interaction.revision,
         subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await runtime.waitForCommand('guarded');
       if (fault || invalid) {

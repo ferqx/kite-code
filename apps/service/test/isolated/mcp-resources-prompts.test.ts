@@ -231,11 +231,13 @@ async function fixture(
         });
   const scope = { expectedStoreId, sessionId: 'a', extensionId: 'builtin.mcp', subjectId: 'user' };
   async function binding() {
-    const record = (await store.getExtensionRecord({ ...scope, key: 'connection/local/first' }))!;
+    const record = (
+      await store.listExtensionRecords({ ...scope, contentType: 'builtin.mcp.catalogue' })
+    ).find((row) => object(row.value).serverId === 'local')!;
     const value = object(record.value);
     return {
       serverId: 'local',
-      connectionKey: 'first',
+      connectionKey: record.key.slice('connection/local/'.length),
       configDigest: value.configDigest,
       generation: value.generation,
     };
@@ -263,21 +265,21 @@ async function fixture(
     };
   }
   async function modelBinding() {
-    const value = await binding();
-    return {
-      server_id: value.serverId,
-      connection_key: value.connectionKey,
-      config_digest: value.configDigest,
-      generation: value.generation,
-    };
+    const connect = (await store.listExecutions('a')).find(
+      (row) => row.definitionId === 'mcp.connect' && row.status === 'succeeded',
+    )!;
+    return { connection_ref: object(object(connect.result).details!).connection_ref! };
   }
   async function modelTarget(family: 'resources' | 'prompts') {
-    const { catalogueExecutionId, descriptorDigest, ...payload } = await target(family);
-    return {
-      ...payload,
-      catalogue_execution_id: catalogueExecutionId,
-      descriptor_digest: descriptorDigest,
-    };
+    const catalogue = (await store.listExecutions('a'))
+      .filter((row) => row.definitionId === `mcp.${family}.list` && row.status === 'succeeded')
+      .at(-1)!;
+    const descriptor = object(
+      (object(object(catalogue.result).details!).descriptors as Json[])[0]!,
+    );
+    return family === 'resources'
+      ? { resource_ref: descriptor.resource_ref! }
+      : { prompt_ref: descriptor.prompt_ref!, arguments: { subject: 'exact subject' } };
   }
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -303,14 +305,9 @@ async function fixture(
           originalStoreId: expectedStoreId,
           sessionId: 'a',
           serverId: 'local',
-          connectionKey: 'first',
+          connectionKey: (await binding()).connectionKey,
         });
-        const selectedBinding = {
-          server_id: actual.serverId,
-          connection_key: actual.connectionKey,
-          config_digest: actual.configDigest,
-          generation: actual.generation,
-        };
+        const selectedBinding = await modelBinding();
         const selectedTools = body.tools as { function: { name: string } }[];
         expect(selectedTools.some((tool) => tool.function.name === 'list_mcp_resources')).toBe(
           true,
@@ -325,10 +322,7 @@ async function fixture(
           modelResourceCall = {
             name: 'read_mcp_resource',
             input: {
-              ...selectedBinding,
-              uri: catalogue.descriptors[0].descriptor.uri,
-              catalogue_execution_id: catalogue.binding.executionId,
-              descriptor_digest: catalogue.descriptors[0].descriptorDigest,
+              resource_ref: catalogue.descriptors[0].resource_ref,
             },
           };
         }
@@ -336,20 +330,20 @@ async function fixture(
       const call =
         modelResourceCall ??
         (step === 0
-          ? { name: 'connect_mcp_server', input: { server_id: 'local', key: 'first' } }
+          ? { name: 'connect_mcp_server', input: { server_id: 'local' } }
           : flow === 'all' && step === 1
             ? { name: 'list_mcp_resources', input: await modelBinding() }
             : flow === 'all' && step === 2
               ? {
                   name: 'read_mcp_resource',
-                  input: { ...(await modelBinding()), ...(await modelTarget('resources')) },
+                  input: await modelTarget('resources'),
                 }
               : flow === 'all' && step === 3
                 ? { name: 'list_mcp_prompts', input: await modelBinding() }
                 : flow === 'all' && step === 4
                   ? {
                       name: 'get_mcp_prompt',
-                      input: { ...(await modelBinding()), ...(await modelTarget('prompts')) },
+                      input: await modelTarget('prompts'),
                     }
                   : null);
       const chunk = {
@@ -713,7 +707,7 @@ test('default independent resource/prompt permissions, durable Ask and wrong sco
         presentationSessionId: card.presentationSessionId,
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       expect((await action).execution.status).toBe('succeeded');
       if (id === 'mcp.prompts.get')
@@ -747,7 +741,7 @@ test('default independent resource/prompt permissions, durable Ask and wrong sco
       expect((await f.invoke(id, input, session)).execution.status).toBe('failed');
       expect(f.wire).toHaveLength(count);
     }
-    await f.invoke('mcp.connect', { serverId: 'local', key: 'first' }, 'b');
+    await f.invoke('mcp.connect', { serverId: 'local', key: String(binding.connectionKey) }, 'b');
     const beforeCrossCatalogue = f.wire.length;
     expect(
       (await f.invoke('mcp.resources.read', { ...binding, ...resourceTarget } as Json, 'b'))
@@ -955,6 +949,9 @@ test('actual selected Model uses its captured connection facts and real list ide
     const view = await f.runtime.getView('a');
     expect(view.runs.find((run) => run.originCommandId === 'work')?.status).toBe('completed');
     expect(f.wire.filter((call) => call.method === 'resources/list')).toHaveLength(1);
+    expect(
+      view.executions.find((row) => row.definitionId === 'mcp.resources.read')?.result,
+    ).toMatchObject({ outcome: 'succeeded' });
     expect(f.wire.filter((call) => call.method === 'resources/read')).toHaveLength(1);
     expect(
       view.executions

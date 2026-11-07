@@ -3,8 +3,11 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { authorizationCheckInput } from '../../../src/authorization-check-input';
 import { canonicalJson } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
+import type { Json } from '../../../src/storage/types';
+import { ensureFixtureAuthorizationCheck } from '../../fixtures/review-behavior';
 
 test('an unsealed permission check stays in the Model directory and the same cursor window after prepare', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-check-directory-')));
@@ -30,6 +33,12 @@ test('an unsealed permission check stays in the Model directory and the same cur
       owner,
       commandId: 'work',
       configuration: {
+        authorizationCheck: {
+          id: 'checker',
+          version: '1',
+          modelId: 'check-model',
+          timeoutMs: 3000,
+        },
         modelId: 'ordinary',
         tools: [{ id: 'fixture.effect', version: '1', extensionId: 'fixture' }],
       },
@@ -56,7 +65,7 @@ test('an unsealed permission check stays in the Model directory and the same cur
       definitionId: 'fixture.effect',
       input: { value: 'exact' },
     });
-    const check = await store.ensureAuthorizationCheck({
+    const check = await ensureFixtureAuthorizationCheck(store, {
       expectedStoreId,
       owner,
       targetExecutionId: 'target',
@@ -101,7 +110,7 @@ test('an unsealed permission check stays in the Model directory and the same cur
         messages: [
           {
             role: 'user',
-            content: canonicalJson(check.input),
+            content: canonicalJson(authorizationCheckInput(check.input as Record<string, Json>)),
             sourceIds: [check.commandId, check.execution.id],
           },
         ],

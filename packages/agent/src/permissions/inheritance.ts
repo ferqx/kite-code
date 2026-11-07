@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
+import { consumesExecutionConfirmation } from '../execution-confirmation';
 import type { PermissionDecision, Permissions } from '../extensions';
+import { approvalOptions, intersectGrantOffers, sameCapability } from '../permission-grants';
 import { autoCheckOptions } from './auto-check';
 import { sealWorktreeDecision } from './worktree-authorization';
 
@@ -9,8 +11,34 @@ export function intersectPermissionPolicies(
   ceiling?: Permissions,
 ): Permissions {
   if (!ceiling) return current;
+  const sources = new WeakMap<PermissionDecision, readonly PermissionDecision[]>();
   return {
+    async consumesExecutionConfirmation(request, decision, owner) {
+      const prior = sources.get(decision);
+      if (!prior) return false;
+      return (
+        (await consumesExecutionConfirmation(current, request, prior[0]!, owner)) &&
+        (await consumesExecutionConfirmation(ceiling, request, prior[1]!, owner))
+      );
+    },
     toolDispatchOrder: current.toolDispatchOrder ?? ceiling.toolDispatchOrder,
+    async reuseRevision(_request, capability, candidate, decision) {
+      const offer = decision.grantOffers?.find(
+        (offer) => offer.scopeDigest === candidate.scopeDigest,
+      );
+      const binding = offer?.policyBindings.find((binding) =>
+        sameCapability(binding.capability, capability),
+      );
+      return binding
+        ? {
+            reuseRevision: binding.reuseRevision,
+            ...(binding.satisfiesCheck ? { satisfiesCheck: true as const } : {}),
+            ...(binding.requireApproval === undefined
+              ? {}
+              : { requireApproval: binding.requireApproval }),
+          }
+        : null;
+    },
     async authorize(request): Promise<PermissionDecision> {
       const base = await current.authorize(request);
       const injected = await ceiling.authorize(request);
@@ -28,6 +56,17 @@ export function intersectPermissionPolicies(
       }
       if (controlReads.length > 3)
         return { allowed: false, revision, reason: 'invalid_permission_control_reads' };
+      const grantOffers = await intersectGrantOffers(request, [
+        { permissions: current, decision: base },
+        { permissions: ceiling, decision: injected },
+      ]);
+      const apply = (decision: PermissionDecision): PermissionDecision => ({
+        ...decision,
+        grantOffers,
+        ...(decision.approval
+          ? { approval: { ...decision.approval, options: approvalOptions(grantOffers) } }
+          : {}),
+      });
       const proof = {
         revision,
         controlReads,
@@ -47,37 +86,39 @@ export function intersectPermissionPolicies(
                 },
               },
       };
+      const finish = (decision: PermissionDecision): PermissionDecision => {
+        const result = sealWorktreeDecision(apply(decision), [base, injected]);
+        sources.set(result, [base, injected]);
+        return result;
+      };
       if (!base.allowed && !base.approval && !base.check) return { ...base, ...proof };
       if (!injected.allowed && !injected.approval && !injected.check)
         return { ...injected, ...proof };
-      if (injected.allowed) return sealWorktreeDecision({ ...base, ...proof }, [base, injected]);
-      if (base.allowed) return sealWorktreeDecision({ ...injected, ...proof }, [base, injected]);
+      if (injected.allowed) return finish({ ...base, ...proof });
+      if (base.allowed) return finish({ ...injected, ...proof });
       const decisions = [base, injected];
       const checks = decisions.filter((decision) => decision.check);
-      return sealWorktreeDecision(
-        {
-          allowed: false,
-          ...proof,
-          approval: {
-            request: { policies: decisions.map((decision) => decision.approval?.request ?? null) },
-          },
-          ...(checks.length
-            ? {
-                check: {
-                  ...autoCheckOptions(checks.map((decision) => decision.check!)),
-                  request: {
-                    policies: decisions.map((decision) => decision.check?.request ?? null),
-                  },
-                  requireApproval: decisions.some(
-                    (decision) =>
-                      decision.check?.requireApproval || (!!decision.approval && !decision.check),
-                  ),
-                },
-              }
-            : {}),
+      return finish({
+        allowed: false,
+        ...proof,
+        approval: {
+          request: { policies: decisions.map((decision) => decision.approval?.request ?? null) },
         },
-        [base, injected],
-      );
+        ...(checks.length
+          ? {
+              check: {
+                ...autoCheckOptions(checks.map((decision) => decision.check!)),
+                request: {
+                  policies: decisions.map((decision) => decision.check?.request ?? null),
+                },
+                requireApproval: decisions.some(
+                  (decision) =>
+                    decision.check?.requireApproval || (!!decision.approval && !decision.check),
+                ),
+              },
+            }
+          : {}),
+      });
     },
   };
 }

@@ -8,9 +8,9 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 25));
 const card = {
   kind: 'plan_review',
   state: 'pending',
-  request: { allowedModes: ['accept_edits'] },
+  request: { planId: 'p', version: '1', digest: 'digest', content: 'Exact plan' },
 } as unknown as Interaction;
-test('plan review offers exact modes, requires selection and keeps literal multiline feedback across Esc', async () => {
+test('plan review offers business decisions, requires selection and keeps literal multiline feedback across Esc', async () => {
   const feedback = new ComposerBuffer(),
     answers: string[] = [];
   const ui = render(
@@ -25,7 +25,7 @@ test('plan review offers exact modes, requires selection and keeps literal multi
     await tick();
     ui.stdin.write('\r');
     await tick();
-    expect(answers).toEqual(['approve accept_edits']);
+    expect(answers).toEqual(['approve']);
     ui.stdin.write('\u001b[B');
     await tick();
     ui.stdin.write('\r');
@@ -74,26 +74,27 @@ test('actual input batch confirms the last explicit choice, never the listener i
   const answers: string[] = [];
   const ui = render(
     <TuiPlanReviewPanel
-      card={{ ...card, request: { allowedModes: ['auto', 'accept_edits'] } }}
+      card={card}
       feedback={new ComposerBuffer()}
       onAnswer={(answer) => answers.push(answer)}
     />,
   );
   try {
     await tick();
-    ui.stdin.write('\u001b[B\u001b[B\r');
+    ui.stdin.write('\u001b[B\u001b[B\u001b[A\r');
     await tick();
-    expect(answers).toEqual(['approve accept_edits']);
+    expect(answers).toEqual(['approve']);
   } finally {
     ui.unmount();
   }
 });
 
-test('an offered mode removed after selection cannot approve another row through its former index', async () => {
+test('a replacement card does not inherit the original explicit approval selection', async () => {
   const answers: string[] = [],
     feedback = new ComposerBuffer();
   const ui = render(
     <TuiPlanReviewPanel
+      key="original"
       card={card}
       feedback={feedback}
       onAnswer={(answer) => answers.push(answer)}
@@ -105,7 +106,8 @@ test('an offered mode removed after selection cannot approve another row through
     await tick();
     ui.rerender(
       <TuiPlanReviewPanel
-        card={{ ...card, request: { allowedModes: ['auto'] } }}
+        key="replacement"
+        card={{ ...card, revision: '2' }}
         feedback={feedback}
         onAnswer={(answer) => answers.push(answer)}
       />,

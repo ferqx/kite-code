@@ -150,7 +150,6 @@ export async function recoveryProfile(
                         arguments: JSON.stringify({
                           path: 'effect',
                           content: 'ORIGINAL_EFFECT_ONCE',
-                          base: null,
                         }),
                       },
                     },
@@ -369,7 +368,6 @@ function configure(startup, context) {
       !isDeepStrictEqual(target.input, {
         path: 'effect',
         content: 'ORIGINAL_EFFECT_ONCE',
-        base: null,
       }) ||
       JSON.stringify(reviewProof()) !==
         JSON.stringify([

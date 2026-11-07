@@ -173,20 +173,26 @@ test('actual DOM submits exact Source Review decisions through original card and
       const ordinary = {
         ...card(binding),
         kind: 'approval' as const,
-        request: { definitionId: card(binding).definitionId, input: {}, grants: [] },
+        request: {
+          definitionId: card(binding).definitionId,
+          input: {},
+          options: [
+            { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+          ],
+        },
       };
       await act(async () =>
         root.render(<InteractionCard interaction={ordinary} onAnswer={onAnswer} />),
       );
       expect(host.textContent).not.toContain('Source Review unavailable');
       const approve = [...host.querySelectorAll('button')].find(
-        (button) => button.textContent === 'Approve once',
+        (button) => button.textContent === '仅此次',
       );
       expect(approve).toBeDefined();
       await act(async () => approve!.click());
       expect(answers.at(-1)).toEqual({
         interaction: ordinary,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     }
   } finally {

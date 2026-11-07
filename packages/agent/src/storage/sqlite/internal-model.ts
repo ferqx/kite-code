@@ -228,8 +228,8 @@ export function dispatchInternalModel(
       !authorization.revision ||
       authorization.definitionVersion !== execution.definition_version ||
       authorization.inputDigest !== hash(JSON.parse(String(execution.intent_json))) ||
+      Object.hasOwn(authorization, 'reviewExecutionId') ||
       authorization.checkExecutionId !== undefined ||
-      authorization.reviewExecutionId !== undefined ||
       authorization.interactionId !== undefined ||
       authorization.decisionRevision !== undefined ||
       authorization.grant !== undefined

@@ -111,7 +111,10 @@ async function scenario(recoverSource: boolean, legacyParent = false) {
       },
       async resolveChildRunConfiguration(input) {
         const binding = await childHost.resolveChildRunConfiguration!(input);
-        if (legacyParent) expect(binding.authorizationCheck?.prepareRiskReview).toBeUndefined();
+        if (legacyParent)
+          expect(
+            (binding.toolBehaviors ?? []).some((behavior) => behavior.prepareReview !== undefined),
+          ).toBe(false);
         return {
           ...binding,
           model: children.get(input.configurationId as (typeof roles)[number])!,
@@ -182,7 +185,10 @@ async function scenario(recoverSource: boolean, legacyParent = false) {
           (e) => e.definitionId === `agent/${role}` && e.status === 'succeeded',
         );
         if (carrier?.childSessionId) break;
-        if (Date.now() > deadline) throw Error(`child_guidance_deadline:${role}`);
+        if (Date.now() > deadline)
+          throw Error(
+            `child_guidance_deadline:${role}:${JSON.stringify((await store.listExecutions(role)).map((row) => ({ definition: row.definitionId, status: row.status, result: row.result })))}`,
+          );
         await Bun.sleep(5);
       }
       const readonly = role === 'explore';
@@ -223,7 +229,7 @@ async function scenario(recoverSource: boolean, legacyParent = false) {
       const run = (await store.getRun(model.runId!))!;
       const manifest = object(run.configuration);
       const snapshot = object(object(manifest.snapshot).configuration);
-      expect(snapshot.defaultAutoReview).toBe(legacyParent ? undefined : 'shell_risk');
+      expect(snapshot.defaultAutoReview).toBe(legacyParent ? null : 'shell_risk');
       expect(Object.hasOwn(snapshot, 'readOnlyTaskSource')).toBe(readonly);
       if (role === 'explore') {
         originalSource = snapshot.readOnlyTaskSource as unknown as ContextSource;

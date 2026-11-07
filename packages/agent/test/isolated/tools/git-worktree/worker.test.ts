@@ -1159,7 +1159,9 @@ describe('trusted worktree worker: real Git', () => {
     success(await f.create({ baseRef: 'base-tag' }));
     expect(f.run(['rev-parse', 'HEAD'], f.target)).toBe(base);
     success(await f.remove());
-  });
+    // Six real create/remove phases and their native Git checks can exceed Bun's
+    // macOS 5s default under the repository's concurrent default runner.
+  }, 30000);
   test('native mount snapshot is available on this test platform', () => {
     if (process.platform !== 'win32') expect(mountTargets()).toContain('/');
   });

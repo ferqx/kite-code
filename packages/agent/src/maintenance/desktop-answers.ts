@@ -92,26 +92,21 @@ function validateAnswerRecord(raw: unknown): void {
   )
     throw Error();
   if (answer.kind === 'approval') {
-    closed(answer, ['kind', 'decision', ...('grant' in answer ? ['grant'] : [])]);
+    const decision = (answer as Record<string, unknown>).decision;
+    closed(answer, ['kind', 'decision', ...(decision === 'approve' ? ['optionId'] : [])]);
     if (
-      !['approve', 'deny'].includes(String((answer as Record<string, unknown>).decision)) ||
-      ('grant' in answer && !['approve_once', 'same_command'].includes(String(answer.grant)))
+      !['approve', 'deny'].includes(String(decision)) ||
+      (decision === 'approve' && !id((answer as Record<string, unknown>).optionId))
     )
       throw Error();
   } else if (answer.kind === 'question') closed(answer, ['kind', 'answers']);
   else {
-    closed(answer, [
-      'kind',
-      'decision',
-      ...('feedback' in answer ? ['feedback'] : []),
-      ...('mode' in answer ? ['mode'] : []),
-    ]);
+    closed(answer, ['kind', 'decision', ...('feedback' in answer ? ['feedback'] : [])]);
     if (
       !['approve', 'deny', 'revise'].includes(
         String((answer as Record<string, unknown>).decision),
       ) ||
-      ('feedback' in answer && typeof answer.feedback !== 'string') ||
-      ('mode' in answer && typeof answer.mode !== 'string')
+      ('feedback' in answer && typeof answer.feedback !== 'string')
     )
       throw Error();
   }

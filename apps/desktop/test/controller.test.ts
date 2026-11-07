@@ -536,7 +536,7 @@ test('lost answer response retains exact pending child source and reconciles ori
   const controller = createDesktopController({ admittedClient: client, onSnapshot() {} });
   await controller.selectSession('root');
   await expect(
-    controller.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+    controller.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' }),
   ).rejects.toThrow('lost');
   const frozen = controller.interactionSubmission(card)!;
   expect(frozen.phase).toBe('unknown');
@@ -552,7 +552,7 @@ test('lost answer response retains exact pending child source and reconciles ori
   expect(controller.interactionSubmission(card)?.phase).toBe('accepted');
 });
 
-test('plan answer requires actual request metadata and explicit offered mode before saving any intent', async () => {
+test('plan answer requires actual request metadata and rejects permission mode fields before saving any intent', async () => {
   const card: import('@kite-ai/client').Interaction = {
     id: 'plan',
     originStoreId: 'store',
@@ -573,7 +573,6 @@ test('plan answer requires actual request metadata and explicit offered mode bef
       version: 'v2',
       digest: 'actual-digest',
       content: 'Exact plan',
-      allowedModes: ['accept_edits'],
     },
     answer: null,
     revision: '1',
@@ -610,25 +609,28 @@ test('plan answer requires actual request metadata and explicit offered mode bef
   const desktop = createDesktopController({ admittedClient: client, onSnapshot() {} });
   await desktop.selectSession('s');
   await expect(
-    desktop.answerInteraction(card, { kind: 'plan_review', decision: 'approve' }),
+    desktop.answerInteraction(card, {
+      kind: 'plan_review',
+      decision: 'approve',
+      mode: 'auto',
+    } as unknown as NonNullable<typeof card.answer>),
   ).rejects.toThrow('interaction_answer_invalid');
   await expect(
-    desktop.answerInteraction(card, { kind: 'plan_review', decision: 'approve', mode: 'auto' }),
-  ).rejects.toThrow('interaction_answer_invalid');
-  await expect(
-    desktop.answerInteraction(card, { kind: 'plan_review', decision: 'approve', mode: 'full' }),
+    desktop.answerInteraction(card, {
+      kind: 'plan_review',
+      decision: 'approve',
+      mode: 'full',
+    } as unknown as NonNullable<typeof card.answer>),
   ).rejects.toThrow('interaction_answer_invalid');
   expect(mutations).toBe(0);
   expect(desktop.interactionSubmissions).toEqual([]);
   await desktop.answerInteraction(card, {
     kind: 'plan_review',
     decision: 'approve',
-    mode: 'accept_edits',
   });
   expect(mutations).toBe(1);
   expect(desktop.interactionSubmission(card)?.intent.answer).toEqual({
     kind: 'plan_review',
     decision: 'approve',
-    mode: 'accept_edits',
   });
 });

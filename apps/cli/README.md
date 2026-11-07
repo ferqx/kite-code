@@ -1,5 +1,7 @@
 # CLI 与 TUI
 
+2026-11-07，macOS arm64／Bun1.4.4，源码3402文件／`2273a30b…a9ed`：普通 CLI stdio 与 TUI80×24 分别以真实 `gpt-6-luna/medium` 完成三模式计划人答，六个 Run completed、六个 Shell Tool/自身 Job 成功且各精确效果一次，零 failed/unknown Execution。每端5个唯一原答案（3计划及Manual两张工具卡），无 mode／重复 POST；Auto 各一次 low/default5000 reviewer（CLI1721ms、TUI2156ms），Full零工具卡／reviewer。CLI Manual与TUI Auto实际丢202并离线，原未知状态保留，恢复后查原 Command、不重答；TUI待计划时权限面板可达，取消 Full 确认仍保 Auto 与同卡。正常退出及冷读核 CLI 3Run/41Exec/5Interaction/19Command、TUI3/45/5/19全行摘要与6效果相同，无进程残留。32个CLI阶段及61个TUI viewport/ANSI阶段、`final-audit.json`／`network-audit.json`／冷前后摘要在本机 `/private/tmp/kite-luna-plan-business-terminal-a7b9146b-79ff-44e5-848b-36dd9ccaf782/`。本轮未另起任务补做活动 Ctrl+C，活动取消复用已有固定PTY／Native资格；不外推其他平台或完整安装。
+
 当前测试夹具在隔离应用HOME前固定Rust工具链缓存，并按实际Windows ACL／junction／file URL建立测试前提；128条journal、四workspace构建与大正文等待按[测试体系](../../tests/README.md)提供硬件余量。恢复夹具持有同一只读WAL观察连接，逐原调用核SDK wire身份；[三类调用者强杀](test/isolated/caller-kind-crash.test.ts)整例预算现为120秒，仍核实际原生退出、原申请和零重发。下文既有30秒等记录对应原提交的实际资格，不代表本轮全部Windows或安装验收通过。
 
 新建普通会话由 [ensureSession](host/index.ts)保存空 title 的未命名标记，再按[共享自动命名](../../docs/handbook/features/sessions.md#自动命名)由默认 Service 装配的 Agent 扩展保存可读名称。命名使用同一 Session 下无 Run 的内部 Model 调用，CLI／TUI 的原正文读取和模型展示接口保持；[真实 argv 回归](test/isolated/host.test.ts)核17MiB完整原回复、命名一次及继续／只读零额外命名。
@@ -49,9 +51,9 @@ Context 公共薄接口（`rewindContext` 仅选择上下文，不提供 Files �
 [test/context.test.ts](test/context.test.ts) 的自有结束标记由 fixture 直接读取，原 4 秒完成观察与 15 秒整例预算保持；失败诊断保最后实际 Job 状态与标记存在性，不猜完成。[该场景](test/context.test.ts)通过公开 paired launcher 启动实际 Service 子进程与 SQLite Worker：Job 完成后 Rewind suppressed，Desktop 显式 include 与 CLI 重复 include 只保存同一 source，原外置 ledger 一次，固定模型保持两次请求；另行 startRun 才以准确 source ID/原 execution 在第三次请求读到结果。未调用收费模型，未建立完整 TUI/PTy 或 Context 压缩资格。
 
 
-plan_review 使用同一显式回答回调：收到原 Interaction 后，approve 仅允许请求中明确提供的 auto/accept_edits 模式，缺模式、Full、陌生 metadata/modes 或过长反馈明确保留等待状态，且不发起回答写入。deny/revise 是信息答复，不携带 mode。输出明确 `review information saved / tool permissions unchanged`；原审批、required evaluator 与实际派发资格不由计划答复替代。迟到答复可能按协议保存 answer_saved/cancelled:true 历史，Core 不接受该 decision，也不复活执行。
+plan_review 使用同一显式回答回调：收到原 Interaction 后，approve/deny/revise 都是纯业务决定，仅携带 kind/decision 与可选 feedback，不选择或修改权限模式。新请求不提供 allowedModes，带旧 mode 的答案、旧请求格式或过长反馈明确保留等待状态，且不发起回答写入。三种权限模式都必须由用户明确答复。输出明确 `review information saved / tool permissions unchanged`；原审批、required evaluator 与实际派发资格不由计划答复替代。迟到答复可能按协议保存 answer_saved/cancelled:true 历史，Core 不接受该 decision，也不复活执行。
 
-[test/plan-review.test.ts](test/plan-review.test.ts) 以实际 SQLite Worker/Core、loopback HTTP 与固定模型验证两模式/deny/revise 绑定同一原 Tool execution/attempt，原 Tool approval 保留，下一 Tool 仍需独立审批；duplicate Desktop 回答一次，取消后的迟到历史答复无新模型或额外 ledger 效果。此证据不建立正式 Electron/TUI/PTy 或全计划业务完成资格。
+[test/plan-review.test.ts](test/plan-review.test.ts) 以实际 SQLite Worker/Core、loopback HTTP 与固定模型验证 approve/deny/revise 绑定同一原 Tool execution/attempt，业务答案不修改当前权限，下一 Tool 仍受原独立权限检查；duplicate Desktop 回答一次，取消后的迟到历史答复无新模型或额外 ledger 效果。此证据不建立正式 Electron/TUI/PTy 或全计划业务完成资格。
 
 
 当原人工卡含公开完整附件时，`answerInteraction` handler 仅在 SDK 对原 scope 全量读取、完整 SHA-256 和严格 UTF-8 校验成功后调用，context 提供 `completeAttachment:{identity,text,reference}`。没有 handler 或读取失败时返回已知 waiting_interaction，零回答 mutation/工具效果；无强制 stdin、无正文永久缓存。附件读取/网络脱离不停止 Run，显式用户取消仍精确取消原 Command。普通无附件卡保留原 callback 行为。
@@ -60,13 +62,15 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 公开 `createStdioInteractionHandler({input?,write?})` 提供显式选择的前台 stdio 回答适配器，调用者将其 `answerInteraction` 传给 `run`/`invokeExtension`，结束后调用 `dispose()` 释放输入监听。导入 CLI 或未注入 handler 不读取 stdin。缺省输入是 stdin，提示写到 stderr，与 accepted/terminal 输出分开；调用者也可注入独立 Readable 和提示输出。提示展示原 Store、Session、presentation root、Run、Execution、attempt、Interaction/revision 和完整请求；完整附件仅在既有全量 scope/hash/UTF-8 验证成功后展示。JSON 转义保留正文并防止终端控制字符直接执行。
 
-每个答案必须是完成的一行：审批输入 `approve`（缺省仅一次，发送 `grant:approve_once`）或 `deny`（不携带 grant）；只有原请求 `grants` 数组实际提供 `same_command` 时，提示才列出 `approve same_command`（本 Session 相同命令），发送 `grant:same_command`，未提供该选项时此输入保留 waiting；问题输入符合原 `request.schema` 的 JSON，使用原内部 choice ID；计划审阅输入 `approve <明确提供的 auto|accept_edits>`、`deny` 或 `revise <反馈>`。计划信息不授予 Tool 权限。问题表单支持有限 object/array/string/number/integer/boolean/null、const/enum、oneOf/anyOf、required 和长度/数值边界；pattern 仅支持准确非空白扫描 `\S`。组合先核所有分支，再按原 JSON 值判断；未知或畸形分支整卡拒绝。未知 schema 关键字、陌生模式、无答案、未完成行或 EOF 均保留 `waiting_interaction`，不默认批准、不发起 answer mutation。输入每行最多 64 KiB、待消费行最多 16；超出时停止本地读取并保留等待，不截断成答案。此上限仅约束人工答案输入，不裁剪请求或附件正文。
+每个答案必须是完成的一行：审批输入 `approve` 时，选取原请求 `options` 中 `kind:once` 的原 `optionId`；输入 `approve <optionId>` 时，只能选择原卡已经提供的准确选项。提示展示每项原始 label 与完整 details，Shell、文件及 worktree 范围共用这套合同，不从命令名或输入重建范围。批准发送 `{kind:'approval',decision:'approve',optionId}`，拒绝输入 `deny` 且只发送 deny；旧 `grant` 答案与 `grants` 请求不再解析。缺少合法单次选项或未知 optionId 保持 waiting；问题输入符合原 `request.schema` 的 JSON，使用原内部 choice ID；计划审阅输入 `approve`、`deny` 或 `revise <反馈>`；`approve auto` 等旧模式语法不提交答案。计划信息不授予 Tool 权限。问题表单支持有限 object/array/string/number/integer/boolean/null、const/enum、oneOf/anyOf、required 和长度/数值边界；pattern 仅支持准确非空白扫描 `\S`。组合先核所有分支，再按原 JSON 值判断；未知或畸形分支整卡拒绝。未知 schema 关键字、陌生模式、无答案、未完成行或 EOF 均保留 `waiting_interaction`，不默认批准、不发起 answer mutation。输入每行最多 64 KiB、待消费行最多 16；超出时停止本地读取并保留等待，不截断成答案。此上限仅约束人工答案输入，不裁剪请求或附件正文。
 
 适配器只消费一个前台回答。回答仍由 CLI 封存原 Store/Interaction/revision 并通过根投影提交；原 child 身份不改写成当前 Session。Ctrl+C 中断本地输入后仍由 CLI 精确取消原 work command，迟到输入不复活任务；`dispose()`、EOF、网络脱离和明确等待 timeout 均不关闭 Service 或取消 Runtime。
 
-[test/stdio-interactions.test.ts](test/stdio-interactions.test.ts) 使用真实 paired Service、临时 SQLite 与固定模型验证 stdio 批准后 question 内部值、终态、EOF/空行/不支持输入、原 Command 精确取消、超过 17 MiB 全附件、附件读取被取消时零回答/零工具效果、显式 timeout 后工作继续，以及实际超过 30 秒仍能完成的缺省等待。真实同 Loop child 的原卡通过 presentation root 回答；CLI 按从 child 到 root 的实际 ancestry 和 carrier 的 parentExecutionId 找到原 work，不依赖 carrier 的空 runId 或当前活动 Run。[test/stdio-unit.test.ts](test/stdio-unit.test.ts) 独立核对 offered modes、问题 schema 子集、输入边界和同根旧 child 卡排除。此前 macOS 固定模型验证为 CLI 受影响测试 25 项／209 个断言通过（显式排除已执行的长等待项），另有真实约 30.3 秒长等待项／3 个断言通过。该可调用 stdio 闭环未建立正式 `kite run` 的原生 stdin、三平台终端或完整交互体验资格。
+[test/stdio-interactions.test.ts](test/stdio-interactions.test.ts) 使用真实 paired Service、临时 SQLite 与固定模型验证 stdio 批准后 question 内部值、终态、EOF/空行/不支持输入、原 Command 精确取消、超过 17 MiB 全附件、附件读取被取消时零回答/零工具效果、显式 timeout 后工作继续，以及实际超过 30 秒仍能完成的缺省等待。真实同 Loop child 的原卡通过 presentation root 回答；CLI 按从 child 到 root 的实际 ancestry 和 carrier 的 parentExecutionId 找到原 work，不依赖 carrier 的空 runId 或当前活动 Run。[test/stdio-unit.test.ts](test/stdio-unit.test.ts) 独立核对纯业务答案、旧模式语法拒绝、问题 schema 子集、输入边界和同根旧 child 卡排除。此前 macOS 固定模型验证为 CLI 受影响测试 25 项／209 个断言通过（显式排除已执行的长等待项），另有真实约 30.3 秒长等待项／3 个断言通过。该可调用 stdio 闭环未建立正式 `kite run` 的原生 stdin、三平台终端或完整交互体验资格。
 
-[test/stdio-grants.test.ts](test/stdio-grants.test.ts) 独立核对显式原卡选项、一次默认、准确原 child/展示根/决定版本提示、deny 无 grant，以及未提供选项、plan/question、非法输入和 EOF 不能制造会话授权。stdio 不保存权限缓存；真正的 grant 保存/clear 和执行资格仍由原 Store 的 Core/Service 决定，此适配器不代表正式 TUI/PTY 迁移。
+[test/stdio-grants.test.ts](test/stdio-grants.test.ts) 独立核对冻结的 options/optionId、仅此次默认、准确原 child/展示根/决定版本提示、deny 不带 optionId，以及未提供选项、plan/question、非法输入和 EOF 不能制造会话授权。stdio 不保存权限缓存；真正的 grant 保存/clear 和执行资格仍由原 Store 的 Core/Service 决定，此适配器不代表正式 TUI/PTY 迁移。
+
+2026-11-06 macOS／Bun1.4.4 的隔离真实 `runSelectedCLI` 前台进程与完整 paired Service 逐步观察了同一套合同：`approve` 连续两行只保存一次单次答案、不建 grant；准确范围 optionId 批准一次后，下一冷进程同命令不新增审核或人工卡；原 `runNonInteractive` 授权目录读取完整资源／工具／出处，按观察 revision 明确 clear 后，同命令重新出现新卡。答案提交后刻意丢失回执时保持原 command 的 `outcome_unknown`，恢复连接后沿原读取收敛，未重复 POST，实际效果仅一次。另一次新卡在真实 SIGINT 后取消、无额外效果。每次进程关闭与同 Store 冷读的原结果和清除事实保持。固定 high 审核器只控制人工路径，实际命令只写隔离目录；这证明当前可调用 stdio 与 Host 闭环，不扩大正式安装 argv、真实模型分类或其他平台资格。
 
 活动 include 的真实配对证据见 [test/context-active.test.ts](test/context-active.test.ts)：原 Run 等待时保存准确目标，checkpoint 前无来源，后续 Model 使用准确 source ID；历史 Job ledger 不重放。失效响应只查询原意图的有限测试见 [test/context-intent.test.ts](test/context-intent.test.ts)。
 

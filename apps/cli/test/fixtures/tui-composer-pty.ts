@@ -211,8 +211,8 @@ try {
   await key('\x1b[B');
   await wait('❯ Deny');
   await key('\x1b[B');
-  await wait('❯ Allow once');
-  await wait('Approve this execution only');
+  await wait('❯ 仅此次');
+  await wait('仅此次');
   await key('\r');
   await wait('RECOVERED_ORIGINAL_DONE');
   assert.equal(businessWrites().length, 2);

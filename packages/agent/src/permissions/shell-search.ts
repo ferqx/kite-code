@@ -58,14 +58,27 @@ function readOnlyRipgrepArguments(args: readonly string[]) {
   return true;
 }
 
-/** A single literal query only. No wrappers, redirects, expansion, hooks or ambient rg config. */
+/** Every leaf is a literal query; callers supply only a single command or a verified && chain. */
 export function readOnlySearchCommand(
-  commands: readonly (readonly string[])[] | null,
+  classification: { readonly readOnlyCommands: readonly (readonly string[])[] | null },
   shellExecutable: string,
   coreutilsPath?: string,
 ) {
-  if (commands?.length !== 1) return;
-  const [name, ...args] = commands[0]!;
+  const commands = classification.readOnlyCommands;
+  if (!commands?.length) return;
+  const rewritten = commands.map((command) =>
+    readOnlySearchLeaf(command, shellExecutable, coreutilsPath),
+  );
+  if (rewritten.some((command) => command === undefined)) return;
+  return rewritten.join(' && ');
+}
+
+function readOnlySearchLeaf(
+  command: readonly string[],
+  shellExecutable: string,
+  coreutilsPath?: string,
+) {
+  const [name, ...args] = command;
   const rg = ripgrepAsset();
   if (name === 'rg' || name === 'rg.exe' || name === rg) {
     if (!readOnlyRipgrepArguments(args)) return;

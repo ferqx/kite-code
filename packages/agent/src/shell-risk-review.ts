@@ -23,10 +23,7 @@ export function isShellRiskRequest(request: Json): boolean {
     if (Array.isArray(value.policies)) {
       if (
         !Object.keys(value).every((key) => ['kind', 'policies'].includes(key)) ||
-        (value.kind !== undefined &&
-          !['parent_child_permission_intersection', 'planning_mode_ceiling'].includes(
-            String(value.kind),
-          )) ||
+        (value.kind !== undefined && value.kind !== 'parent_child_permission_intersection') ||
         value.policies.length === 0
       )
         return [false];
@@ -77,8 +74,8 @@ Determine invocation independently of code risk. The same argv invokes the same 
 Trace data sources and destinations. Absolute paths outside the workspace remain local filesystem paths, not network recipients. Ordinary narrow local writes are not high risk merely because they persist, overwrite one ordinary file, or contain unknown ordinary data. A GET saved locally is incoming data; sending sensitive local data to a remote recipient is outgoing data. Chaining, computation, development tools, temporary scripts, public HTTP reads, full_access and internet are not by themselves high risk. Do not infer disposability, backups or recoverability from names. For cleanup, distinguish a target actually created by this command from an unresolved variable. Capability scope is a ceiling, not actual effects; classification cannot override tool hard denials or execution permissions.
 
 Apply these risk categories in priority order:
-1. critical: credential exfiltration, broad home/workspace destruction, or severe persistent system security weakening. Granting everyone unrestricted passwordless elevation or replacing shared authentication with unconditional success is critical, even when implemented by writing just one configuration file.
-2. high: other concrete consequential high-risk effects, such as destructive shared-remote changes, service disruption or private-data upload, or a materially unresolved target or payload of an identifiable destructive or outgoing-data operation. Uncertainty alone, without such an identifiable consequential effect, is not high risk.
+1. critical: credential exfiltration, broad home/workspace destruction, or severe persistent system security weakening. Sending an identified private SSH key, authentication token, password or session credential to a remote recipient is credential exfiltration. This first category takes precedence: an operation identified as uploading credentials must be critical, never high under the private-data-upload category. Public keys are not private credentials. Granting everyone unrestricted passwordless elevation or replacing shared authentication with unconditional success is critical, even when implemented by writing just one configuration file.
+2. high: other concrete consequential high-risk effects, such as destructive shared-remote changes, service disruption or non-credential private-data upload, or a materially unresolved target or payload of an identifiable destructive or outgoing-data operation. For an identifiable local-file upload, missing payload bytes remain materially unresolved unless supplied evidence establishes a non-sensitive payload; high does not require separate proof of private content. This differs from an unknown program body when no outgoing-data effect is identified. This category excludes identified credential exfiltration. Uncertainty alone, without such an identifiable consequential effect, is not high risk.
 3. ordinary: no concrete high-risk effect is established by the supplied evidence. This does not certify unknown code safe. If the only missing evidence is a program's body and no concrete destructive, outgoing-data or other high-risk effect is identified, classify ordinary and state that code was not supplied. Missing business context or an unknown program alone is not high risk. Judge effects on the resource actually changed; merely printing security-policy text or storing it as ordinary local data is not installing that policy.
 
 Return only one JSON object with exactly risk (ordinary, high, critical) and reason. Give one concise English sentence of at most 30 words naming the decisive actual effect. Do not return a permission decision, extra fields, Markdown, tools or further calls.`;

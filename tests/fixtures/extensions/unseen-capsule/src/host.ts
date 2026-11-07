@@ -135,7 +135,7 @@ async function answerPending(deny = false) {
       answer: {
         kind: 'approval',
         decision: deny ? 'deny' : 'approve',
-        ...(deny ? {} : { grant: 'approve_once' as const }),
+        ...(deny ? {} : { optionId: 'once' as const }),
       },
     });
   }

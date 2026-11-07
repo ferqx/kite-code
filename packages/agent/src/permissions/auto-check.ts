@@ -1,12 +1,24 @@
 import { createHash } from 'node:crypto';
 import type { PermissionDecision } from '../extensions';
+import { canonicalJson } from '../json';
+import type { Json } from '../storage/types';
 
 /** Intersections preserve only the Auto options supported by every challenged policy. */
 export function autoCheckOptions(checks: readonly NonNullable<PermissionDecision['check']>[]) {
   const keys = checks.map((check) => check.operationKey);
   const scopes = checks.map((check) => check.timeoutScope);
   const scope = scopes[0];
+  const behavior = checks[0]?.behavior;
   return {
+    ...(behavior &&
+    checks.every(
+      (check) =>
+        check.behavior &&
+        canonicalJson(check.behavior as unknown as Json) ===
+          canonicalJson(behavior as unknown as Json),
+    )
+      ? { behavior }
+      : {}),
     ...(keys.length && keys.every(Boolean)
       ? {
           operationKey:

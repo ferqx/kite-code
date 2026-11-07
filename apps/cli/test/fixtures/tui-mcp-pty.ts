@@ -10,12 +10,20 @@ const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'),
   workspace: string;
   dataRoot: string;
   mcpUrl: string;
+  reviewerBaseURL: string;
   artifact: CLIServiceArtifact;
 };
 if (!process.stdin.isTTY) {
   const { createDefaultProcessConfiguration } = await import('@kite-ai/service/configuration');
   const { runServiceProcess } = await import('@kite-ai/service/main');
   const { createMcpHttpTransportPort } = await import('@kite-ai/service/mcp-http-port');
+  const { createCompatibleModelBinding, createSdkModelAdapter } = await import('@kite-ai/ai/sdk');
+  const reviewer = createCompatibleModelBinding({
+    name: 'compatible',
+    protocol: 'chat-completions',
+    modelId: 'fixed',
+    baseURL: settings.reviewerBaseURL,
+  });
   appendFileSync(join(settings.root, 'startup-ledger'), 'service imports ready\n');
   await runServiceProcess({
     configure(startup) {
@@ -24,6 +32,17 @@ if (!process.stdin.isTTY) {
         userConfigurationPath: selectProfile(startup.profile).profilePath + '/config.jsonc',
         profile: selectProfile(startup.profile),
         hostConfiguration: startup.hostConfiguration,
+        // This isolated MCP keeper needs independent task approval. The ordinary
+        // default deliberately permits workspace Files writes without a card.
+        authorizationCheck: {
+          id: 'fixture.mcp.task-review',
+          version: '1',
+          modelId: 'fixed',
+          model: createSdkModelAdapter({
+            models: new Map([['fixed', reviewer]]),
+            presets: new Map([['fixed', { maxOutputTokens: 256 }]]),
+          }),
+        },
         credentialBackend: {
           kind: 'temporary',
           async put() {

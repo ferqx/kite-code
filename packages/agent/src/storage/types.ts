@@ -333,14 +333,6 @@ export interface ExecutionAuthorizationObservation {
     reason: string;
     requireApproval: boolean;
   };
-  /** Historical child-backed authorization review only. */
-  review?: {
-    executionId: string;
-    status: ExecutionStatus;
-    decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
-    reason: string;
-    requireApproval: boolean;
-  };
   human?: {
     interactionId: string;
     state: 'pending' | 'answered' | 'cancelled';
@@ -348,7 +340,9 @@ export interface ExecutionAuthorizationObservation {
     acceptedDecisionRevision: string | null;
     accepted: boolean;
     decision: 'approve' | 'deny' | null;
-    grant?: 'approve_once' | 'same_command';
+    optionId?: string;
+    optionKind?: 'once' | 'scope';
+    presentation?: { label: string; details: readonly string[] };
   };
 }
 export interface ExecutionRecord {
@@ -444,8 +438,6 @@ export interface StoredModelOutput {
 export interface StoredModelInput {
   /** Permission-owned model call, authenticated under the same read snapshot. */
   authorizationCheck: { sourceIds: [string, string] } | null;
-  /** Legacy purpose sealed from the exact child carrier in the same read transaction. */
-  authorizationReview: { sourceIds: [string, string] } | null;
   storeId: string;
   originStoreId: string;
   identity: ModelInputIdentity;
@@ -677,7 +669,12 @@ export interface HostMutationRecord {
   receipt: Json;
 }
 export interface PermissionGrant {
-  commandDigest?: string;
+  ruleId: string;
+  contractId: string;
+  scope: Json;
+  scopeDigest: string;
+  bindings: readonly import('../permission-grants').CapabilityBinding[];
+  presentation: import('../permission-grants').GrantCandidate['presentation'];
   id: string;
   originStoreId: string;
   sessionId: string;
@@ -703,13 +700,13 @@ export interface PermissionGrantPage {
 
 export type InteractionKind = 'approval' | 'question' | 'plan_review';
 export type InteractionAnswer =
-  | { kind: 'approval'; decision: 'approve' | 'deny'; grant?: 'approve_once' | 'same_command' }
+  | { kind: 'approval'; decision: 'approve'; optionId: string }
+  | { kind: 'approval'; decision: 'deny' }
   | { kind: 'question'; answers: Json }
   | {
       kind: 'plan_review';
       decision: 'approve' | 'deny' | 'revise';
       feedback?: string;
-      mode?: string;
     };
 export interface InteractionRecord {
   /** Private permission observation; never a Tool grant or public answer field. */

@@ -13,7 +13,7 @@ export function taskQualityPresentedRead(content: string) {
   const size = /^Content \((\d+) UTF-8 bytes; starts on next line\):$/.exec(
     lines[2 + referenceLine] ?? '',
   );
-  if (!match || !size || !lines[1 + referenceLine]?.startsWith('baseline=')) return;
+  if (!match || !size || !lines[1 + referenceLine]?.startsWith('base_ref=')) return;
   try {
     const text = lines.slice(3 + referenceLine).join('\n');
     if (Buffer.byteLength(text) !== Number(size[1])) return;
@@ -23,7 +23,7 @@ export function taskQualityPresentedRead(content: string) {
     return {
       evidenceRef: referenceLine ? JSON.parse(lines[1]!.slice('evidence_ref='.length)) : undefined,
       path: JSON.parse(match[1]!),
-      baseline: JSON.parse(lines[1 + referenceLine]!.slice('baseline='.length)),
+      baseRef: JSON.parse(lines[1 + referenceLine]!.slice('base_ref='.length)) as string,
       selection: {
         fromLine,
         toLine: window?.[1] ?? null,
@@ -53,7 +53,7 @@ export function taskQualityReadMessageMatches(presented: string, original: strin
       decoded.content === raw.content &&
       decoded.path === raw.path &&
       decoded.whole === whole &&
-      isDeepStrictEqual(decoded.baseline, raw.baseline) &&
+      decoded.baseRef === raw.base_ref &&
       isDeepStrictEqual(decoded.selection, raw.selection)
     );
   } catch {

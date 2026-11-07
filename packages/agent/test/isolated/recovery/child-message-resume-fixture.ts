@@ -59,7 +59,9 @@ export function childMessageResumeOptions(
           revision: 'original-policy',
           approval: {
             request: { title: 'Approve original child effect' },
-            grants: ['approve_once'],
+            options: [
+              { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+            ],
           },
         };
       return { allowed: true, revision: 'original-policy' };

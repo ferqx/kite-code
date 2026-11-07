@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
-  entrance: 'slash-task' | 'draft-mode' | 'active-queued' | 'scope-draft';
+  entrance: 'slash-task' | 'draft-mode' | 'active-queued' | 'scope-draft' | 'deny';
   root: string;
   workspace: string;
   databasePath: string;
@@ -160,7 +160,7 @@ try {
       join(input.root, 'original-model-release'),
       'explicit owned original Model release',
     );
-  } else if (input.entrance === 'slash-task') {
+  } else if (input.entrance === 'slash-task' || input.entrance === 'deny') {
     await key('\x1b[Z');
     await wait('Planning next Run >');
     await key('\x1b[Z');
@@ -196,17 +196,21 @@ try {
   await key('\x01');
   await waitOriginalAttachment();
   for (const choice of [
-    '1. Start execution in Auto mode',
-    '2. Start execution in Accept edits mode',
-    '3. Continue planning with feedback',
+    '1. Approve this plan',
+    '2. Continue planning with feedback',
+    '3. Deny this plan',
   ])
     assert.ok(
       pty.viewport().replace(/\s+/g, ' ').includes(choice),
       `original Plan choice is outside the current viewport: ${choice}\n${pty.viewport()}`,
     );
   await key('\x1b[B');
-  await key('\x1b[B');
-  await wait('❯ 2. Start execution in Accept edits mode');
+  await wait('❯ 1. Approve this plan');
+  if (input.entrance === 'deny') {
+    await key('\x1b[B');
+    await key('\x1b[B');
+    await waitViewport('❯ 3. Deny this plan');
+  }
   await key('\r');
   await wait('interaction.answer: unknown');
   const firstReadDeadline = Date.now() + 8000;
@@ -222,7 +226,7 @@ try {
   await waitViewport('interaction.answer: unknown');
   assert.equal(existsSync(input.firstLost), true);
   await wait('interaction.answer: applied');
-  await wait('ORIGINAL_PLAN_ACTUALLY_COMPLETED');
+  if (input.entrance !== 'deny') await wait('ORIGINAL_PLAN_ACTUALLY_COMPLETED');
   const end = Date.now() + 8000;
   for (;;) {
     abort.signal.throwIfAborted();
@@ -232,10 +236,37 @@ try {
           .query("SELECT status,reason FROM run WHERE session_id='s' ORDER BY rowid DESC LIMIT 1")
           .get() as { status: string; reason: string | null },
     );
-    if (run.status === 'completed') break;
+    if (run.status === (input.entrance === 'deny' ? 'cancelled' : 'completed')) break;
     if (Date.now() > end) throw Error(`actual original Run not completed ${JSON.stringify(run)}`);
     await pty.drain();
     await Bun.sleep(50);
+  }
+  if (input.entrance === 'deny') {
+    await waitViewport('New Run >');
+    await wait('用户拒绝了该计划，已停止本轮对话');
+    const idle = pty.viewport();
+    await key('AFTER_DENIAL_UNSENT_DRAFT🙂');
+    await waitViewport('AFTER_DENIAL_UNSENT_DRAFT');
+    const draft = pty.viewport();
+    readDatabase((database) => {
+      assert.deepEqual(database.query("SELECT COUNT(*) AS n FROM run WHERE session_id='s'").get(), {
+        n: 1,
+      });
+      assert.deepEqual(
+        database.query("SELECT COUNT(*) AS n FROM execution WHERE kind='model'").get(),
+        { n: 3 },
+      );
+    });
+    assert.equal(existsSync(join(input.workspace, 'after.txt')), false);
+    writeFileSync(
+      `${input.transcript}.deny-frames.json`,
+      JSON.stringify({
+        originalAttachmentRead: true,
+        idle,
+        draft,
+        finalText: (await current()).text,
+      }),
+    );
   }
   if (input.entrance === 'active-queued') {
     // Verify the removed key after the normal observer has reached Idle, so a

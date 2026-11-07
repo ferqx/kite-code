@@ -65,7 +65,7 @@ for (const drift of ['external_edit', 'later_run'] as const)
               expectedStoreId: storeId,
               commandId: 'actual-restore-approval',
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
           }
           return port.lookup(current);

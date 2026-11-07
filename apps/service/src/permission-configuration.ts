@@ -3,29 +3,31 @@ import {
   type AfterTurnPolicy,
   AgentError,
   type AgentRuntime,
+  createToolBehaviorRegistry,
   type RunConfiguration,
   type RuntimeOptions,
 } from '@kite-ai/agent';
 import type { ModelConfiguration } from '@kite-ai/agent/config';
 import type { AuthorizationRequest, Extension, Json, Permissions } from '@kite-ai/agent/extensions';
+import { mcpModelInputHint } from '@kite-ai/agent/mcp';
 import {
   builtinCapability,
   type CapabilityDescription,
   type CapabilityIdentity,
+  createBusinessPermissionPolicy,
   createDefaultAfterTurnPolicy,
   createPermissionCheckContextReader,
   createPermissionPolicy,
-  createPlanningPermissionPolicy,
   intersectPermissionPolicies,
   type PermissionPolicyOptions,
   type PermissionPolicySnapshot,
-  requireFileRestoreApproval,
   shellRiskReviewContractDigest,
 } from '@kite-ai/agent/permissions';
 import type { createShellConfiguration } from '@kite-ai/agent/permissions/shell';
 import type { createPlanningValidation } from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type { createSessionTitleExtension } from '@kite-ai/agent/session-title';
+import { createShellToolBehaviors } from '@kite-ai/agent/shell';
 import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
 import type { createBrowserConfiguration } from './browser-configuration';
 import type { ChildRole } from './child-configuration';
@@ -50,6 +52,7 @@ export function defaultAutoReviewContract(
   value: Json | undefined,
   digest: Json | undefined,
 ): 'shell_risk' | undefined {
+  if (value === null && digest === undefined) return undefined;
   if (value === undefined && digest === undefined) return undefined;
   if (value !== 'shell_risk' || typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest))
     throw new AgentError('recovery_configuration_unavailable');
@@ -353,7 +356,7 @@ export function createDefaultPermissionConfiguration(options: {
     trustedExtensions?: readonly Extension[];
     /** Narrow action guard for the mixed read/write Git Worktree tool. */
     readOnlyTask?: boolean;
-  }): Pick<RunConfiguration, 'permissions' | 'initializeRequirements'> {
+  }): Pick<RunConfiguration, 'permissions' | 'initializeRequirements' | 'toolBehaviors'> {
     const {
       command,
       modelId,
@@ -370,6 +373,21 @@ export function createDefaultPermissionConfiguration(options: {
       defaultAutoReview,
       trustedExtensions,
     } = input;
+    const toolBehaviorRegistry = createToolBehaviorRegistry({
+      extensions: runExtensions,
+      behaviors: [
+        ...createShellToolBehaviors({ ...shell, enableReview: defaultAutoReview !== undefined }),
+        ...files.toolBehaviors.filter(
+          (behavior) =>
+            behavior.capability.kind === 'tool' &&
+            toolIds.includes('files.write') &&
+            toolIds.includes('files.edit'),
+        ),
+      ].filter(
+        (behavior) =>
+          behavior.capability.kind !== 'tool' || toolIds.includes(behavior.capability.definitionId),
+      ),
+    });
     type DescriptionView = 'ordinary' | 'planning';
     type RefineCapability = (
       request: AuthorizationRequest,
@@ -408,8 +426,7 @@ export function createDefaultPermissionConfiguration(options: {
       if (request.kind === 'model') return entry?.description ?? null;
       if (!entry) return mcpSources.describe(request) ?? selectedMcp.describe(request);
       const refinement = await entry.refine?.(request, view, policy);
-      if (!refinement) return entry.description;
-      const { kind, definitionId, definitionVersion, ...facts } = refinement;
+      const { kind, definitionId, definitionVersion, ...facts } = refinement ?? {};
       if (
         (kind !== undefined && kind !== entry.description.kind) ||
         (definitionId !== undefined && definitionId !== entry.description.definitionId) ||
@@ -417,7 +434,42 @@ export function createDefaultPermissionConfiguration(options: {
           definitionVersion !== entry.description.definitionVersion)
       )
         throw new AgentError('capability_metadata_invalid');
-      return { ...entry.description, ...facts };
+      const description = { ...entry.description, ...facts };
+      const behavior = toolBehaviorRegistry.get(request);
+      // Planning's metadata-only read has no candidate consumer. Real policy reads
+      // retain candidates even when that policy already allows the operation.
+      const grantOffers =
+        policy !== undefined &&
+        behavior?.grantOffers &&
+        description.hardAllowed &&
+        !description.safeRead &&
+        !(behavior.autoReview === 'none' && policy?.mode === 'auto')
+          ? await behavior.grantOffers(request)
+          : undefined;
+      return {
+        ...description,
+        ...(behavior
+          ? {
+              grantBehavior: {
+                contractRef: behavior.contractRef,
+                configurationDigest: behavior.configurationDigest,
+              },
+            }
+          : {}),
+        ...(behavior?.prepareReview
+          ? {
+              reviewBehavior: {
+                capability: { ...behavior.capability },
+                contractRef: behavior.contractRef,
+                configurationDigest: behavior.configurationDigest,
+              },
+            }
+          : {}),
+        ...(behavior?.grantSatisfiesDefaultCheck
+          ? { grantSatisfiesDefaultCheck: true as const }
+          : {}),
+        ...(grantOffers?.length ? { grantOffers } : {}),
+      };
     };
     const modelDescription = modelCapability(modelId);
     register(modelDescription);
@@ -453,16 +505,9 @@ export function createDefaultPermissionConfiguration(options: {
         definitionVersion: string,
       ): Pick<CapabilityDescription, 'autoReview'> => {
         if (!defaultAutoReview || !trusted) return {};
-        if (!shellOwned) return { autoReview: 'none' };
-        if (definitionVersion !== '1') return {};
-        if (
-          (kind === 'tool' && ['shell.execute', 'shell.launch'].includes(definitionId)) ||
-          (kind === 'job' && definitionId === 'shell.command')
-        )
-          return { autoReview: 'shell_risk' };
-        return kind === 'tool' && ['shell.read', 'shell.wait', 'shell.stop'].includes(definitionId)
-          ? { autoReview: 'none' }
-          : {};
+        const behavior = toolBehaviorRegistry.get({ kind, definitionId, definitionVersion });
+        if (behavior?.autoReview) return { autoReview: behavior.autoReview };
+        return !shellOwned ? { autoReview: 'none' } : {};
       };
       const refine: RefineCapability | undefined = shellOwned
         ? refineShell
@@ -580,34 +625,42 @@ export function createDefaultPermissionConfiguration(options: {
       }),
     );
     let planningRun: { runId: string; sessionId: string } | undefined = recoveryRunIdentity;
-    const hasBusinessInitializer = Boolean(requirePlan);
     const initializeBusinessRequirements: NonNullable<
       RunConfiguration['initializeRequirements']
-    > = (input) =>
-      hasBusinessInitializer
-        ? planning.initializeRequirements(input, { requirePlan, readOnlyDefinitions })
-        : Promise.resolve([]);
+    > = (input) => planning.initializeRequirements(input, { requirePlan, readOnlyDefinitions });
     const planningOriginStoreId = command.originStoreId;
-    const planningPermissions = createPlanningPermissionPolicy({
-      isPlanFileEdit: files.isPlanFileEdit,
-      required: requirePlan,
-      run: () => planningRun,
+    const planningPermissions = createBusinessPermissionPolicy({
       current: classifiedPermissions,
-      async readState(request, identity) {
+      async gate(request) {
         const runtime = options.readRuntime();
+        const identity = planningRun;
         if (!runtime || !identity) throw new AgentError('planning_run_scope_unavailable');
-        return readPlanningPermissionState(
+        const state = await readPlanningPermissionState(
           runtime,
           planning,
           request,
           planningOriginStoreId,
           identity,
         );
+        if (requirePlan && state.status === 'disabled')
+          throw new AgentError('planning_run_obligation_unavailable');
+        const description = await describeRegistered(request, 'planning');
+        return planning.permissionGate({
+          request,
+          state,
+          identity,
+          planFileEdit: await files.isPlanFileEdit(request),
+          capability: description,
+        });
       },
-      describe: (request, policy) => describeRegistered(request, 'planning', policy),
     });
     const permissions: RuntimeOptions['permissions'] = {
       toolDispatchOrder: planningPermissions.toolDispatchOrder,
+      consumesExecutionConfirmation:
+        planningPermissions.consumesExecutionConfirmation?.bind(planningPermissions),
+      ...(planningPermissions.reuseRevision
+        ? { reuseRevision: planningPermissions.reuseRevision.bind(planningPermissions) }
+        : {}),
       async authorize(request) {
         if (input.readOnlyTask) {
           const worktree = shell.worktreeRequest(request);
@@ -632,45 +685,64 @@ export function createDefaultPermissionConfiguration(options: {
             };
           }
         }
+        let admissionInput = request.input;
+        try {
+          admissionInput = await mcpModelInputHint(request, {
+            readExecution: async (id) => {
+              const runtime = options.readRuntime();
+              if (!runtime) throw new AgentError('execution_scope_unavailable');
+              return runtime.getExecution(id);
+            },
+          });
+        } catch (error) {
+          request.signal.throwIfAborted();
+          return {
+            allowed: false,
+            revision: 'mcp-original-reference-1',
+            reason: error instanceof AgentError ? error.code : 'tool_reference_unavailable',
+          };
+        }
         const error =
-          selectedSources.admissionError(request) ?? selectedMcp.admissionError(request);
+          selectedSources.admissionError(request, admissionInput) ??
+          selectedMcp.admissionError(request, admissionInput);
         if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
         return await planningPermissions.authorize(request);
       },
     };
     return {
       permissions,
-      initializeRequirements: !hasBusinessInitializer
-        ? initializeBusinessRequirements
-        : async (input: Parameters<NonNullable<RunConfiguration['initializeRequirements']>>[0]) => {
-            const policyRuntime = options.readRuntime();
-            if (
-              ['job.report', 'job.report.continue'].includes(input.command.kind) ||
-              (planningRun &&
-                planningRun.runId !== input.run.id &&
-                typeof (input.command.receipt as { continuationRunId?: unknown })
-                  .continuationRunId === 'string')
-            ) {
-              if (!policyRuntime || !planningRun)
-                throw new AgentError('planning_run_scope_unavailable');
-              await readBoundPlanningSuccessor(
-                policyRuntime,
-                command.originStoreId,
-                planningRun,
-                input.run,
-                input.command,
-              );
-              // Store inherited the exact refs at report or same-work human activation.
-              return [];
-            }
-            if (
-              planningRun &&
-              (planningRun.runId !== input.run.id || planningRun.sessionId !== input.run.sessionId)
-            )
-              throw new AgentError('planning_run_scope_unavailable');
-            planningRun = { runId: input.run.id, sessionId: input.run.sessionId };
-            return initializeBusinessRequirements(input);
-          },
+      toolBehaviors: toolBehaviorRegistry.behaviors,
+      initializeRequirements: async (
+        input: Parameters<NonNullable<RunConfiguration['initializeRequirements']>>[0],
+      ) => {
+        const policyRuntime = options.readRuntime();
+        if (
+          ['job.report', 'job.report.continue'].includes(input.command.kind) ||
+          (planningRun &&
+            planningRun.runId !== input.run.id &&
+            typeof (input.command.receipt as { continuationRunId?: unknown }).continuationRunId ===
+              'string')
+        ) {
+          if (!policyRuntime || !planningRun)
+            throw new AgentError('planning_run_scope_unavailable');
+          await readBoundPlanningSuccessor(
+            policyRuntime,
+            command.originStoreId,
+            planningRun,
+            input.run,
+            input.command,
+          );
+          // Store inherited the exact refs at report or same-work human activation.
+          return [];
+        }
+        if (
+          planningRun &&
+          (planningRun.runId !== input.run.id || planningRun.sessionId !== input.run.sessionId)
+        )
+          throw new AgentError('planning_run_scope_unavailable');
+        planningRun = { runId: input.run.id, sessionId: input.run.sessionId };
+        return initializeBusinessRequirements(input);
+      },
     };
   }
 
@@ -704,6 +776,8 @@ export function createDefaultPermissionConfiguration(options: {
     },
     permissions: {
       toolDispatchOrder: globalPermissions.toolDispatchOrder,
+      consumesExecutionConfirmation:
+        globalPermissions.consumesExecutionConfirmation?.bind(globalPermissions),
       async authorize(request: AuthorizationRequest) {
         const titleDecision = await options.authorizeTitle(request);
         if (titleDecision) {
@@ -732,7 +806,7 @@ export function createDefaultPermissionConfiguration(options: {
           if (error) return { allowed: false, revision: 'mcp-selected-server-1', reason: error };
         }
         const decision = await globalPermissions.authorize(request);
-        return authority.permissions ? decision : requireFileRestoreApproval(request, decision);
+        return decision;
       },
     },
   };

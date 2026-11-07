@@ -167,7 +167,7 @@ for (const shape of ['inline', 'artifact-private', 'artifact-semantic'] as const
         expect(snapshot.bodyHash).toBe(await semanticDigest(actualCheck as unknown as Json));
         expect(JSON.stringify(snapshot)).not.toContain(marker);
         const stored = await store.getModelInputSnapshot(checkScope);
-        expect(stored.authorizationReview).toBeNull();
+        expect(stored).not.toHaveProperty('authorizationReview');
         const proof = {
           expectedStoreId,
           targetExecutionId: execution.parentExecutionId!,

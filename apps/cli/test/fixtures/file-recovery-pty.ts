@@ -139,11 +139,11 @@ async function drive(config: Configuration) {
     assert.equal(rows()[0]?.code?.phase, config.mode === 'lost' ? 'unknown' : 'pending');
     const beforeAnswer = postCount();
     await key('a');
-    await wait('❯ Allow once', { approval: true });
+    await wait('❯ 仅此次', { approval: true });
     await key('\x1b[B');
     await wait('❯ Deny', { approval: true });
     await key('\x1b[A');
-    await wait('❯ Allow once', { approval: true });
+    await wait('❯ 仅此次', { approval: true });
     assert.equal(postCount(), beforeAnswer, 'Viewing and selecting do not approve recovery');
     await key('\r');
     await wait('restored', { material: true });

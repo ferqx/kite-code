@@ -22,7 +22,16 @@ async function until<T>(read: () => Promise<T | null>) {
   }
   throw Error('nested_action_test_deadline');
 }
-async function fixture(mode: 'allow' | 'deny' | 'cancel' | 'orphan') {
+async function fixture(
+  mode:
+    | 'allow'
+    | 'deny'
+    | 'cancel'
+    | 'orphan'
+    | 'confirmation-held'
+    | 'information-held'
+    | 'information-held-via-tool',
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-nested-action-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   let runtime!: AgentRuntime;
@@ -61,6 +70,20 @@ async function fixture(mode: 'allow' | 'deny' | 'cancel' | 'orphan') {
         },
         async execute(_input, context) {
           entered++;
+          if (mode === 'information-held-via-tool') {
+            const child = await context.operations.ensure({
+              key: 'read-child',
+              request: {
+                kind: 'tool',
+                definitionId: 'fixture.info-child',
+                definitionVersion: '1',
+                input: {},
+              },
+            });
+            await context.operations.wait(child);
+          }
+          if (mode === 'information-held')
+            await context.requestInput!({ title: 'human', questions: [] });
           if (mode === 'cancel') {
             await new Promise<void>((resolve) => {
               if (context.signal.aborted) resolve();
@@ -75,6 +98,17 @@ async function fixture(mode: 'allow' | 'deny' | 'cancel' | 'orphan') {
     ],
     tools: [
       {
+        id: 'fixture.info-child',
+        version: '1',
+        description: 'Read-only nested information',
+        inputSchema: { type: 'object' },
+        async execute(_input, context) {
+          await context.requestInput!({ title: 'human', questions: [] });
+          return { outcome: 'succeeded', content: 'answered' };
+        },
+      },
+      {
+        ...(mode.includes('-held') ? { resources: { slot: 'process' as const } } : {}),
         id: 'fixture.parent',
         version: '1',
         description: 'Own the nested request',
@@ -136,6 +170,25 @@ async function fixture(mode: 'allow' | 'deny' | 'cancel' | 'orphan') {
   runtime = createRuntime({
     store,
     extensions: [extension],
+    ...(mode === 'confirmation-held'
+      ? {
+          toolBehaviors: [
+            {
+              definition: extension.actions![0]!,
+              capability: {
+                kind: 'job' as const,
+                definitionId: 'fixture/action',
+                definitionVersion: '1',
+              },
+              contractRef: 'fixture.owner-confirmation',
+              configurationDigest: 'a'.repeat(64),
+              async executionConfirmation() {
+                return { request: { reason: 'explicit human' } };
+              },
+            },
+          ],
+        }
+      : {}),
     permissions: {
       async authorize() {
         return { allowed: true, revision: 'global-allows' };
@@ -249,6 +302,49 @@ test('an accepted nested intent without the original hot permission binding neve
     });
     expect(command.receipt).toMatchObject({ reason: 'nested_action_recovery_required' });
     expect(f.entered()).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const mode of ['confirmation-held', 'information-held'] as const)
+  test(`nested Action cannot wait for a human while its actual parent holds a resource: ${mode}`, async () => {
+    const f = await fixture(mode);
+    try {
+      await f.done();
+      const action = (await f.store.listExecutions('s')).find(
+        (execution) => execution.definitionId === 'fixture/action',
+      )!;
+      expect(action.status).toBe(mode === 'confirmation-held' ? 'failed' : 'outcome_unknown');
+      expect(action.result).toMatchObject({
+        content:
+          mode === 'confirmation-held'
+            ? 'execution_confirmation_resources_held'
+            : 'interaction_execution_resource_held',
+      });
+      expect(action.authorization?.dispatched).toBe(mode === 'information-held');
+      expect(
+        (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+          .interactions,
+      ).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('a nested Tool keeps the original ancestor resource guard when an unresourced Action delegates it', async () => {
+  const f = await fixture('information-held-via-tool');
+  try {
+    await f.done();
+    const child = (await f.store.listExecutions('s')).find(
+      (execution) => execution.definitionId === 'fixture.info-child',
+    )!;
+    expect(child.status).toBe('outcome_unknown');
+    expect(child.result).toMatchObject({ content: 'interaction_execution_resource_held' });
+    expect(
+      (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+        .interactions,
+    ).toEqual([]);
   } finally {
     await f.close();
   }

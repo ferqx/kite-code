@@ -320,7 +320,7 @@ try {
         generation: 1,
         interactionId: id,
         revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     }, steerApproval);
   }

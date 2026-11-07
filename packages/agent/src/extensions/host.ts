@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import Ajv from 'ajv';
 
 import type { ArtifactContentStore } from '../artifact-port';
 import {
@@ -9,8 +8,10 @@ import {
   type SourceRequest,
 } from '../context';
 import type { StandaloneScope, ToolScope, UnifiedExecution } from '../execution';
+import { readExecutionToolOwner } from '../execution/definition-owner';
 import { browserContinuationSource } from '../execution/host-control';
 import { canonicalJson, semanticDigest } from '../json';
+import { InputSchemaCompiler } from '../schema-cache';
 import type { Store } from '../storage/port';
 import {
   AgentError,
@@ -55,6 +56,7 @@ function publicRun(run: Awaited<ReturnType<Store['getRun']>>): PublicRun | null 
   return {
     id: run.id,
     sessionId: run.sessionId,
+    requirements: structuredClone(run.requirements),
     originStoreId: run.originStoreId,
     status: run.status,
     isActive: run.isActive,
@@ -65,6 +67,7 @@ function publicRun(run: Awaited<ReturnType<Store['getRun']>>): PublicRun | null 
 }
 async function publicExecution(
   execution: Awaited<ReturnType<Store['getExecution']>>,
+  extensionId?: string,
 ): Promise<PublicExecution | null> {
   if (!execution) return null;
   const decision = execution.decisionSource;
@@ -73,6 +76,7 @@ async function publicExecution(
       ? decision.sources
       : undefined;
   return {
+    ...(extensionId ? { extensionId } : {}),
     ...(execution.authorization
       ? {
           authorization: {
@@ -175,7 +179,7 @@ export interface ExtensionHostOptions {
 }
 /** Trusted host facade: extension handlers receive only scoped data and finite operations. */
 export class ExtensionHost {
-  private readonly validator = new Ajv({ allErrors: true, strict: false });
+  private readonly validator = new InputSchemaCompiler();
   private readonly extensions = new Map<string, Extension>();
   private readonly operations = new Map<string, Promise<void>>();
   private readonly operationSessions = new Map<string, string>();
@@ -540,7 +544,39 @@ export class ExtensionHost {
           const execution = await this.options.store.getExecution(id);
           if (execution && execution.sessionId !== sessionId)
             throw new AgentError('permission_denied');
-          return publicExecution(execution);
+          const owner = execution
+            ? await readExecutionToolOwner(this.options.store, execution)
+            : undefined;
+          const view = await publicExecution(execution, owner);
+          if (!execution?.childSessionId || !view) return view;
+          const command = await this.options.store.getCommand(execution.originCommandId);
+          const request = command?.request;
+          if (
+            !command ||
+            !request ||
+            typeof request !== 'object' ||
+            Array.isArray(request) ||
+            request.kind !== 'operation.agent' ||
+            typeof request.extensionId !== 'string' ||
+            typeof request.operationKey !== 'string' ||
+            request.parentExecutionId !== execution.parentExecutionId ||
+            command.sessionId !== execution.sessionId ||
+            command.originStoreId !== execution.originStoreId ||
+            (subjectId !== undefined && command.subjectId !== subjectId)
+          )
+            return view;
+          const operationRef = await this.options.store.getOperation({
+            extensionId: request.extensionId,
+            sessionId,
+            key: request.operationKey,
+            subjectId: command.subjectId,
+            originStoreId: execution.originStoreId,
+          });
+          return operationRef?.executionId === execution.id &&
+            operationRef.commandId === command.id &&
+            operationRef.childSessionId === execution.childSessionId
+            ? { ...view, operationRef }
+            : view;
         }),
       getInteraction: (id) =>
         read(async () => {
@@ -899,6 +935,7 @@ export class ExtensionHost {
     controller: AbortController,
     parent?: {
       executionId: string;
+      resourcesHeld: boolean;
       bindings: NonNullable<StandaloneScope['bindings']>;
       assertFresh(): Promise<void>;
     },
@@ -991,7 +1028,27 @@ export class ExtensionHost {
         const forkBindings = structuredClone([...dispatch.forks.values()]);
         const guard = dispatch.guard === undefined ? undefined : structuredClone(dispatch.guard);
         const contextRevision = dispatch.contextRevision;
+        const confirmationOwner = (
+          parent?.bindings?.toolBehaviors ??
+          this.options.actionBindings?.toolBehaviors ??
+          []
+        ).find(
+          (behavior) =>
+            behavior.executionConfirmation &&
+            behavior.capability.kind === 'job' &&
+            behavior.capability.definitionId === `${extension.id}/${definition.id}` &&
+            behavior.capability.definitionVersion === definition.version,
+        );
         const source: Json = {
+          ...(confirmationOwner
+            ? {
+                executionConfirmationOwner: {
+                  capability: confirmationOwner.capability as unknown as Json,
+                  contractRef: confirmationOwner.contractRef,
+                  configurationDigest: confirmationOwner.configurationDigest,
+                },
+              }
+            : {}),
           kind: 'action_decision',
           commandId: command.id,
           extensionId: extension.id,
@@ -1011,6 +1068,7 @@ export class ExtensionHost {
           ...(contextRevision === undefined ? {} : { contextRevision }),
         };
         const scope: StandaloneScope = {
+          ...(parent?.resourcesHeld ? { resourcesHeldByAncestor: true } : {}),
           ...(definition.runControl === true ? { controlOnly: true as const } : {}),
           command,
           owner,
@@ -1184,11 +1242,15 @@ export class ExtensionHost {
         : scope.command;
     if (!command) throw new AgentError('command_not_found');
     const standalone: StandaloneScope = {
+      ...('resourcesHeldByAncestor' in scope && scope.resourcesHeldByAncestor
+        ? { resourcesHeldByAncestor: true }
+        : {}),
       command,
       owner: scope.owner,
       workspaceId: scope.workspaceId,
       signal: scope.signal,
       checkFreshness: scope.checkFreshness,
+      onRequirementsRegistered: scope.onRequirementsRegistered,
       checkpoint: scope.checkpoint,
       requirements: 'run' in scope ? scope.run.requirements : scope.requirements,
       bindings: scope.bindings,
@@ -1480,6 +1542,7 @@ export class ExtensionHost {
     const requestInteractionWithReceipt = this.options.execution.interactionRequesterWithReceipt(
       scope,
       executionId,
+      definition.resources,
     );
     const requestInteraction = async (input: {
       kind: 'question' | 'plan_review';
@@ -1503,6 +1566,9 @@ export class ExtensionHost {
             current?.runId ?? (current && (await this.options.requirementRun?.(current)))?.id;
           if (!actualRunId) throw new AgentError('requirement_run_required');
           if (!Array.isArray(references)) throw new AgentError('invalid_requirement');
+          await scope.checkFreshness?.();
+          const before = await this.options.store.getRun(actualRunId);
+          if (!before) throw new AgentError('run_not_found');
           const run = await this.options.store.registerRunRequirements({
             expectedStoreId: scope.command.originStoreId,
             owner: scope.owner,
@@ -1532,6 +1598,17 @@ export class ExtensionHost {
               };
             }),
           });
+          if (scope.onRequirementsRegistered) {
+            if (!current) throw new AgentError('execution_not_found');
+            await scope.onRequirementsRegistered({
+              extensionId: extension.id,
+              executionId,
+              attempt: current.attempt,
+              runId: actualRunId,
+              before: before.requirements,
+              after: run.requirements,
+            });
+          }
           return run.requirements.filter((reference) => reference.extensionId === extension.id);
         },
       },
@@ -2324,6 +2401,8 @@ export class ExtensionHost {
                 body.action !== input.kind ||
                 body.agentId !== input.agentId ||
                 body.content !== (input.content ?? null) ||
+                canonicalJson(body.expectedWork ?? null) !==
+                  canonicalJson((input.expectedWork ?? null) as unknown as Json) ||
                 body.sourceExecutionId !== executionId
               )
                 throw new AgentError('operation_conflict');
@@ -2417,6 +2496,7 @@ export class ExtensionHost {
                 operationKey: commandId,
                 agentId: input.agentId,
                 kind: input.kind,
+                ...(input.expectedWork ? { expectedWork: input.expectedWork } : {}),
                 newTurnPrepared: agent !== undefined,
                 ...(input.content === undefined ? {} : { content: input.content }),
                 request: {
@@ -2523,6 +2603,7 @@ export class ExtensionHost {
           const initialHuman = humanScope
             ? await this.options.store.readHumanWorkState(humanScope)
             : null;
+          let afterSeq = options.afterSeq ?? '0';
           for (;;) {
             scope.signal.throwIfAborted();
             const page = await this.options.store.listAgentEvents({
@@ -2530,10 +2611,39 @@ export class ExtensionHost {
               sessionId: scope.command.sessionId,
               extensionId: extension.id,
               subjectId: scope.command.subjectId,
-              afterSeq: options.afterSeq ?? '0',
+              afterSeq,
             });
-            if (page.events.length)
-              return { reason: 'events' as const, events: page.events, nextSeq: page.nextSeq };
+            afterSeq = page.nextSeq;
+            const events = options.workRefs
+              ? page.events.filter((event) =>
+                  options.workRefs!.some((ref) =>
+                    event.kind === 'completed'
+                      ? event.workRef?.executionId === ref.executionId
+                      : event.agentId === ref.childSessionId,
+                  ),
+                )
+              : page.events;
+            if (events.length) return { reason: 'events' as const, events, nextSeq: page.nextSeq };
+            if (options.workRefs) {
+              const targets = await Promise.all(options.workRefs.map((ref) => readAgent(ref)));
+              if (
+                targets.every((target) =>
+                  ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+                    target.execution.status,
+                  ),
+                )
+              )
+                return { reason: 'completed' as const, events: [], nextSeq: page.nextSeq };
+            } else if (duration !== 0) {
+              const directory = await this.options.store.listStableAgents({
+                expectedStoreId: scope.command.originStoreId,
+                sessionId: scope.command.sessionId,
+                extensionId: extension.id,
+                subjectId: scope.command.subjectId,
+              });
+              if (!directory.items.some((item) => item.state !== 'idle'))
+                return { reason: 'completed' as const, events: [], nextSeq: page.nextSeq };
+            }
             if (run) {
               const [inputs, human] = await Promise.all([
                 this.options.store.listPendingInputs({
@@ -2564,6 +2674,7 @@ export class ExtensionHost {
             }
             if (Date.now() >= deadline)
               return { reason: 'timeout' as const, events: [], nextSeq: page.nextSeq };
+            if (page.events.length) continue;
             const updates = await this.options.waitForChange(
               cursor,
               scope.signal,

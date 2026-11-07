@@ -636,7 +636,7 @@ test('information receipts expose exact accepted facts and same-Session proofs w
     const question = await f.pending();
     await f.answer(question, { kind: 'question', answers: { confirmed: true } });
     const plan = await f.pending('s', [question.id]);
-    await f.answer(plan, { kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer(plan, { kind: 'plan_review', decision: 'approve' });
     await f.done();
     expect(receipts).toHaveLength(2);
     expect(effects).toBe(0);

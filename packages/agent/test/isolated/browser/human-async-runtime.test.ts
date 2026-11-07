@@ -16,6 +16,7 @@ import {
 import { openSqliteStore } from '../../../src/sqlite';
 import { AgentError } from '../../../src/storage/types';
 import {
+  browserPageReference,
   createBrowserController,
   createBrowserExecution,
   createBrowserExtension,
@@ -326,7 +327,7 @@ async function fixture(
         args: Json = {};
       if (turn === 1) {
         name = 'browser_open';
-        args = { key: 'original', url: 'https://example.test/' };
+        args = { url: 'https://example.test/' };
         if (nested) {
           name = 'browser_execute';
           args = { code: 'open', description: '打开测试页面' };
@@ -340,9 +341,17 @@ async function fixture(
         const view = controller.view('s')!;
         name = 'browser_request_human';
         args = {
-          key: 'ask-human',
-          browser_id: view.browserId,
-          generation: auto?.invalidTarget ? 'foreign-generation' : view.generation,
+          page_ref: browserPageReference(
+            {
+              storeId,
+              sessionId: 's',
+              runId: (await store.getExecution(request.requestId))!.runId!,
+            },
+            {
+              browserId: view.browserId,
+              generation: auto?.invalidTarget ? 'foreign-generation' : view.generation,
+            },
+          ),
           reason: 'Review this controlled form, then explicitly continue and notify.',
         };
         if (nested) {
@@ -359,7 +368,16 @@ async function fixture(
       if ((turn === 4 && !ended && !proactive) || (turn === 3 && proactive)) {
         const view = controller.view('s')!;
         name = 'browser_snapshot';
-        args = { key: 'after-human', browser_id: view.browserId, generation: view.generation };
+        args = {
+          page_ref: browserPageReference(
+            {
+              storeId,
+              sessionId: 's',
+              runId: (await store.getExecution(request.requestId))!.runId!,
+            },
+            view,
+          ),
+        };
         if (nested) {
           name = 'browser_execute';
           args = { code: auto?.afterContinue ?? 'observe', description: '读取当前页面' };
@@ -757,7 +775,7 @@ for (const nested of [false, true])
       }
     }, 15000);
 
-test('legacy Auto Continue remains bound to the original Run during task.events without a reviewer', async () => {
+test('Auto Continue remains bound to the original Run after an immediate task.events snapshot without a reviewer', async () => {
   const f = await fixture(false, false, undefined, true, {
     runBoundChecker: true,
     waitForEvents: true,
@@ -766,7 +784,7 @@ test('legacy Auto Continue remains bound to the original Run during task.events 
   try {
     await until(async () =>
       (await f.store.listExecutions('s')).some(
-        (row) => row.definitionId === 'task.events' && row.status === 'dispatching',
+        (row) => row.definitionId === 'task.events' && row.status === 'succeeded',
       ),
     );
     expect(f.checker.requests).toHaveLength(0);
@@ -792,7 +810,7 @@ test('legacy Auto Continue remains bound to the original Run during task.events 
       'result.include',
     );
     expect(f.requests).toHaveLength(5);
-    expect(JSON.stringify(f.requests[3])).toContain('human-result-');
+    expect(JSON.stringify(f.requests.at(-1))).toContain('human-result-');
     expect(
       (await f.runtime.listInteractions({ expectedStoreId: f.storeId, sessionId: 's' }))
         .interactions,
@@ -942,7 +960,7 @@ for (const nested of [false, true])
     }
   }, 15000);
 
-test('a hard capability denial cannot resume or manufacture a legacy human result during task.events', async () => {
+test('a hard capability denial cannot resume or manufacture a human result after an immediate task.events snapshot', async () => {
   const f = await fixture(false, false, undefined, true, {
     runBoundChecker: true,
     waitForEvents: true,
@@ -951,7 +969,7 @@ test('a hard capability denial cannot resume or manufacture a legacy human resul
   try {
     await until(async () =>
       (await f.store.listExecutions('s')).some(
-        (row) => row.definitionId === 'task.events' && row.status === 'dispatching',
+        (row) => row.definitionId === 'task.events' && row.status === 'succeeded',
       ),
     );
     await f.respond('denied-run-review');
@@ -960,7 +978,7 @@ test('a hard capability denial cannot resume or manufacture a legacy human resul
     expect(f.resumes).toBe(0);
     const rows = await f.store.listExecutions('s');
     expect(rows.find((row) => row.originCommandId === 'denied-run-review')?.status).toBe('failed');
-    expect(rows.find((row) => row.definitionId === 'task.events')?.status).toBe('dispatching');
+    expect(rows.find((row) => row.definitionId === 'task.events')?.status).toBe('succeeded');
     expect(rows.find((row) => row.definitionId === 'browser.human_wait')?.status).toBe('running');
     const request = (await f.readRequest())!.value as Record<string, Json>;
     expect(await f.runtime.getCommand(`human-result-${request.requestId}`)).toBeNull();
@@ -1397,7 +1415,10 @@ test.each([
     await until(() => f.independent);
     const entries = await f.store.listExecutions('s');
     const asked = entries.find((row) => row.definitionId === 'browser.request_human')!;
-    expect(asked.status).toBe('succeeded');
+    expect({ status: asked.status, result: asked.result }).toMatchObject({
+      status: 'succeeded',
+      result: { outcome: 'succeeded' },
+    });
     const originRunId = nested
       ? entries.find((row) => row.id === asked.parentExecutionId)!.runId!
       : asked.runId!;

@@ -514,7 +514,7 @@ test('unconfigured process default uses the actual local observer and separate o
       commandId: 'ordinary-approval',
       expectedStoreId: storeId,
       expectedRevision: ask.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const question = await nextCard();
     expect(question.kind).toBe('question');

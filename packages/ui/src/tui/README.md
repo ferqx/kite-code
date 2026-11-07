@@ -20,7 +20,7 @@ Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认�
 
 [Ink 回归](../../test/tui/execution-ink-projection.test.tsx)实际验证新建／追问卡、同 Session 两轮步骤与审批隔离及等待文案；[80×24 PTY](../../test/isolated/tui/executions.test.ts)实际验证原准确 Job 停止、完整分页输出和父普通结束后的 child 日志。新增[六工具80×24 PTY](../../test/isolated/tui/collaboration.test.ts)在真实 Service/Runtime/SQLite 上通过正式按键核双 child 独立待批、父输入保持、准确批准 A、稳定 A Session 新 Run、旧卡停止不改投 A2、准确批准 A2 与停止 B。原8秒单等待预算保留；与原完整日志门禁组合2项通过。迟到旧答案的真实桥接与冷重开零重放归 Desktop 窗口门禁，不由投影单测替代。
 
-当前审批卡中的Esc沿原 `controller.answer(card,'deny')` 拒绝准确卡片，不取消根工作；Ctrl+B目标选择中的Esc仍只返回父输入，全局Ctrl+C仍是明确停止。[真实模型普通PTY](../../../../tests/e2e/live/model/collaboration-tui-window.live.ts)发现并复现过Esc错误调用根cancel，修复后在同一冻结版本三个独立样本核两真实child一批一拒、仅被拒child的原工作取消、兄弟与父正常完成、效果一次及冷客户端零重放。[按键回归](../../test/tui/controller.test.tsx)另核原卡revision、重复Esc去重、same_command初始无选择、Deny+Enter对照及全局停止；原17文件范围137项/1094断言通过。精确模型、代码、原红与未测范围归[69/80执行记录](../../../../tests/e2e/live/model/collaboration-v1.1-cases.md)，不升级为全部TUI、冷后端或其他平台资格。
+普通工具权限审批卡中的Esc沿原 `controller.answer(card,'deny')` 拒绝准确卡片，不取消根工作；默认 Planning 工具的计划拒绝由业务 owner 返回简要结果并停止当前轮次，客户端不把所有信息卡的 deny 一律解释为取消；Ctrl+B目标选择中的Esc仍只返回父输入，全局Ctrl+C仍是明确停止。[真实模型普通PTY](../../../../tests/e2e/live/model/collaboration-tui-window.live.ts)发现并复现过Esc错误调用根cancel，修复后在同一冻结版本三个独立样本核两真实child一批一拒、仅被拒child的原工作取消、兄弟与父正常完成、效果一次及冷客户端零重放。[按键回归](../../test/tui/controller.test.tsx)另核原卡revision、重复Esc去重、冻结选项、Deny+Enter对照及全局停止；原17文件范围137项/1094断言通过。精确模型、代码、原红与未测范围归[69/80执行记录](../../../../tests/e2e/live/model/collaboration-v1.1-cases.md)，不升级为全部TUI、冷后端或其他平台资格。
 
 模型重试提示只消费同 Store／Session／Run／root work 的实际失败前驱与 `modelRetry` 元数据；`maxAttempts=null` 表示无本地次数上限，只显示实际 attempt，历史有限上界仍显示分母。没有消息正文的真实模型失败仍显示。活动思考的尾段在完整回答之前收束一次，原 Static 历史不因进度、输入或菜单刷新重复输出。已批准计划进度保留实际标题及步骤，真实 Files 效果和 Core CAS 收据才能完成步骤。
 
@@ -30,7 +30,7 @@ Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认�
 
 无 Thinking 的单次只读调用保留原统计，阶段收束后补充普通工具卡结果；活动时保留原 StepRow，已有失败／取消卡不重复。卡片 node 与来源 version 使用同一个执行投影，不能只用 phase 摘要代替完整结果与引用版本。合法的 runless Shell carrier 只经唯一、准确的父 Tool 归到原 Run；同一调用来源用于消息顺序和结果去重，保留 Bash 后探索顺序，取消前驱的历史不会浮到后继输入之后。foreign 或多个 carrier 不推定归属，完整 Job 输出读取入口不变。MCP 原名称经同一 Scope／catalogue／definition／name hash 校验后同时提供运行预览和终态详情；已确认工具失败与传输后的未知效果分别保留，未知不自动续跑。
 
-已核实的完整附件与历史共用单一 Static 输出队列，关闭审批卡仍继续输出后续回复。 Static 宽度固定为当前终端列数，避免工具长单行把历史缓冲区撑宽，造成大正文输出延迟；正文仍完整换行，列数变化沿原 epoch 重排。Host 测量标题和提示的实际行高，为主对话及 Plan／Question 保留小于终端总高度的动态区域，避免 Windows Ink 在满屏时逐帧清屏并重放全部 Static。Plan 只压缩重复留白，选项及完整说明保持；独立长管理面板和首次配置继续使用原展开边界。真实 producer 完成后，有界预览可按来源顺序封存；显式全文读取继续独立核 EOF、字节和原引用，后来完整正文变化沿原版本重建。Ctrl+L 不触发任何刷新或查询；当前会话未知回执沿原自动退避只读核对；恢复目录中的每个原申请按准确 Session 分别查回，不查询其他会话或正在提交的申请，也不重发任何申请。显式 `/clear` 清理当前显示。提供 `same_command` 的审批要求先明确选择范围，初始空 Enter 不发送回答。
+已核实的完整附件与历史共用单一 Static 输出队列，关闭审批卡仍继续输出后续回复。 Static 宽度固定为当前终端列数，避免工具长单行把历史缓冲区撑宽，造成大正文输出延迟；正文仍完整换行，列数变化沿原 epoch 重排。Host 测量标题和提示的实际行高，为主对话及 Plan／Question 保留小于终端总高度的动态区域，避免 Windows Ink 在满屏时逐帧清屏并重放全部 Static。Plan 只压缩重复留白，选项及完整说明保持；独立长管理面板和首次配置继续使用原展开边界。真实 producer 完成后，有界预览可按来源顺序封存；显式全文读取继续独立核 EOF、字节和原引用，后来完整正文变化沿原版本重建。Ctrl+L 不触发任何刷新或查询；当前会话未知回执沿原自动退避只读核对；恢复目录中的每个原申请按准确 Session 分别查回，不查询其他会话或正在提交的申请，也不重发任何申请。显式 `/clear` 清理当前显示。普通审批从原冻结 `options` 中默认选中 `kind:once`；上下切换到后续范围后，完整原 label/details 在有界阅读窗口中显示，长内容用 PgUp／PgDn 读取，选择行和私人草稿输入保持可见；切换选项回到该原展示顶部，Enter 提交该原 optionId。审批期间已显示的历史材料封入既有 Static 输出，详情展开不挤压或重播原卡。未知/旧格式选项不补造为批准，deny 不携带 optionId。
 
 活动 Markdown 复用原增量解析缓存，由 [live-markdown](live-markdown.ts) 按原行偏移分出稳定段落和仍变化的尾段；稳定段落进入同一 Static 队列，完整来源变化才重建。增长中的长纯文本尾段先完整解析，再由 [plain-text-wrap](ink/plain-text-wrap.ts) 按真实列宽换行，最后仅向有限动态区域提供可见末行，避免 Ink 每帧遍历整段巨型文本后再裁剪。换行结果按原内容与列宽复用，计时、输入及仅行数变化不重算；原文、来源版本和完整读取缓存保持，稳定段及完成正文进入 Static 时不裁剪。小段、富样式、代码和表格保持原渲染，本项不宣称优化其所有大输入。已输出材料不因动态尾段暂时缩短而回放，reason-first 缓冲和真实工具归属仍决定正文顺序。Question 的完整材料保留原换行，输入窗口按实际内容列宽计算光标；只有 Question 明确使用完整宽度，其他 Overlay 的默认内边距保持。
 
@@ -55,6 +55,10 @@ Ctrl+A 只为当前原卡确实要求的附件发起重读；Controller 也在�
 模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。模型与 effort 使用原单 Enter 选择；权限、MCP 变更及恢复继续保留各自必要确认，CAS、来源绑定与原 ID 查询不变。Question Tab 在选项与自定义编辑间切换；可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。
 
 Ctrl+P 在运行、审批及 Question 草稿中直接打开权限面板，不解释或清空原答案的 slash 文本；Esc 返回原卡、步骤与缓冲。默认问卷的权限提示并入原 Alt+A 行，保留 80×24 的题号和选项高度。[权限回归](../../test/tui/permissions.test.tsx)核实际控制事件、主／子 scope、default／trust、选择中收到根变更、旧读晚回与原保存结果；[问卷回归](../../test/tui/questions.test.tsx)核实际按键切模式、原步骤／字面正文与准确答案身份。
+
+[权限目录](permission-panel.tsx)将信任说明与原 grant 的规则、完整资源、消费工具和批准出处放入同一有界阅读窗口；PgUp／PgDn 只翻页，模式选项、数量、清除确认与原结果固定可见，避免单条完整 grant 已超出 80×24 时把操作挤出屏幕。[实际 Ink 回归](../../test/tui/ink-panels.test.tsx)核首尾和固定行。2026-11-06 macOS／Bun1.4.4 的隔离真实 80×24 PTY 逐步观察已覆盖：Auto 单次批准只执行一次且不建 grant；选择同命令范围后丢失答案回执，原卡保持 unknown，联网恢复只查原命令后退卡；下一调用不新增 reviewer 或人工卡；冷重开保留范围，分页读取原出处后确认清除，准确相同命令重新审核并出现新卡，Ctrl+C 取消后效果不增加，正常退出再重开也不重放。审批与目录的旧溢出帧和修复后完整过程均保留在本机隔离夹具证据中。本证据使用当前源码 TUI 与完整配对 Service 制品、固定 high 审核器和真实隔离命令，不代替真实模型分类、正式安装制品或其他平台资格。
+
+Ctrl+B 的待批卡目录独占当前动态阅读高度：打开时暂收起活动历史、计划与压缩进度，关闭后恢复；原 Static 输出、已读正文、来源身份与后台执行保持。这样私有诊断制品显示完整 Interaction／Session／Store／revision 时也不会被活动工具历史挤出 80×24。[真实协作 PTY](../../test/isolated/tui/collaboration.test.ts)在当前 VT 完整屏幕上核连续的选中标记、全 Interaction／Session／Store／revision，再进入准确原卡；不从旧 ANSI diff 推断可见。2026-11-07 当前源码完整验证准确 A、同 child 新 Run 的 A2 批准及 B 取消，效果只有 A、A2；连同 interaction-overlays、scrollback、ink-panels 和 approval-presentation 五文件22项／341断言通过。普通构建仍关闭诊断字段；该范围没有修复或取得独立 Job 阅读面板全部 Static 输出的显示资格，原 `executions` 基线失败仍保留。
 
 Host 在 SSE ready、合法 `host_control.changed` 及首次／跨 Session 选择后重新读取准确权限，关闭面板时也更新状态显示。背景读取和面板保存使用独立读取身份及共同事实代次，不能让事件抢走在途原 POST／GET 的结果；晚回包不覆盖新 Session 或更新的事实。相同 controls 的刷新保留未提交确认，mode/default/trust 或 grants revision 真正变化才撤下原确认；读取失败移除不可核实的权限事实，后台成功或失败不覆盖其他操作的当前错误。事件只触发只读查询，不生成控制写入、Answer 或 Run。
 
@@ -164,3 +168,5 @@ controller 隔离原 scope/generation/Abort/selected Command。来源目录与 p
 原菜单命令保留忽略尾随文字的兼容行为；它们不从文字选择另一 Session、导出路径或扩大范围，显式管理命令仍校验参数。[命令测试](../../test/tui/management.test.tsx)与[导出测试](../../test/tui/export.test.ts)分别核这一解析边界和原完整正文／零额外读取。[真实 Thought 场景](../../../../tests/tui-system/scenarios/thought-lifecycle.test.ts)在下一次实际 Model 请求等待画面观察后才返回最终回答，核实活动搜索参数和结束后的复数摘要；同步点只属于本机 Provider 夹具，不增加生产展示延迟或放宽原观察预算。
 
 `environment.context` 只表示最近已核实的原请求输入及其独立本地估算，`nextContext` 表示当前已保存上下文的下一请求预测，`usage` 为实际消费与统计覆盖。底部优先显示明确标为估算的下一请求数量；`/context` 同时区分三者，实际输入缺失明确不可用。错误 scope、空闲换模型或推理档位改变不把旧预测归给新选择；没有新增客户端测试入口。口径归 [Core](../../../agent/src/context-estimate.README.md)。
+
+[80×24 审批回归](../../test/isolated/tui/approval-presentation.test.ts)在真实 Service／SQLite 与普通 TUI 上核默认仅此次、范围35行首尾分页、切回原选择及私人草稿保持，期间 Answer POST 与实际工具效果均为零。[执行投影](../../test/tui/execution-ink-projection.test.tsx)同时核取消 Shell 的中性原命令标题，不把未执行的取消记录显示成 Ran。

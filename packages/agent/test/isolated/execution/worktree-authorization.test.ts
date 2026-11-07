@@ -1,15 +1,29 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { fixtureGrant, fixtureScopeOption } from '../../../../../tests/fixtures/permission-grant';
+import { persistentWorktreeDirectory } from '../../../../../tests/fixtures/worktree-filesystem';
 import { createRuntime } from '../../../src';
 import type { JobDefinition, JobEvent, Json, Permissions } from '../../../src/extensions';
 import { createTaskExtension } from '../../../src/extensions/task';
 import { createPermissionPolicy } from '../../../src/permissions';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
+import { createWorktreeToolBehavior } from '../../../src/tools/git-worktree/approval';
+import { sha256 } from '../../../src/tools/git-worktree/paths';
 import {
   buildWorkerCommand,
   digest,
@@ -19,6 +33,7 @@ import {
   type WorktreePlan,
   type WorktreeRequest,
 } from '../../../src/tools/git-worktree/protocol';
+import { executeWorktreeRequest } from '../../../src/tools/git-worktree/worker';
 import { createShellExtension } from '../../../src/tools/shell';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
@@ -82,9 +97,10 @@ async function fixture(
   options: {
     mode?: 'auto' | 'accept_edits' | 'full';
     wrongOwner?: boolean;
+    noBehavior?: boolean;
     independentHuman?: boolean;
     race?: 'record' | 'clear-grant' | 'deadline' | 'mode';
-    grant?: 'approve_once' | 'same_command';
+    grant?: 'once' | 'scope';
     autoExempt?: boolean;
     action?: 'list' | 'create' | 'remove';
     child?: boolean;
@@ -269,6 +285,19 @@ async function fixture(
         hardAllowed: true,
         safeRead: list,
         ...(task ? { internalRecordOnly: true as const } : {}),
+        ...(options.grant === 'scope' &&
+        request.kind === 'tool' &&
+        request.definitionId === 'git.worktree'
+          ? {
+              grantOffers: [
+                fixtureGrant('git.worktree', {
+                  configurationIdentity: digest(config),
+                  action: 'create',
+                  targetPath,
+                }),
+              ],
+            }
+          : {}),
         ...(request.kind === 'tool' &&
         request.definitionId === 'git.worktree' &&
         current?.mode === 'auto' &&
@@ -410,9 +439,8 @@ async function fixture(
               ? { action: 'list' }
               : {
                   action: options.action ?? 'create',
-                  key: 'intent',
                   path: targetPath,
-                  permissions: { filesystem: 'full_access', network: 'none' },
+                  filesystem: 'full_access',
                 },
         ),
       },
@@ -424,6 +452,16 @@ async function fixture(
     store: proxy,
     modelId: 'fixed',
     permissions,
+    toolBehaviors:
+      options.wrongOwner || options.noBehavior
+        ? []
+        : [
+            createWorktreeToolBehavior({
+              definition: extension.tools!.find((tool) => tool.id === 'git.worktree')!,
+              configuration: config,
+              configurationDigest: digest(config),
+            }),
+          ],
     extensions: [
       extension,
       ...(options.child
@@ -551,7 +589,7 @@ async function fixture(
               answer: {
                 kind: 'approval',
                 decision: 'approve',
-                grant: options.grant ?? 'approve_once',
+                optionId: options.grant === 'scope' ? fixtureScopeOption(card.request) : 'once',
               },
             });
         }
@@ -600,6 +638,23 @@ test('one manual business approval derives only its two frozen inert Jobs', asyn
         sourceExecutionId: parent.id,
       });
     expect(f.counts().checks).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a Worktree without a registered owner behavior keeps each internal Job approval', async () => {
+  const f = await fixture({ noBehavior: true });
+  try {
+    const result = await f.run();
+    expect(result.cards.map((card) => card.definitionId)).toEqual([
+      'git.worktree',
+      'shell.command',
+      'shell.command',
+    ]);
+    expect(f.starts.map((request) => request.phase)).toEqual(['prepare_create', 'create']);
+    for (const job of result.executions.filter((row) => row.kind === 'job'))
+      expect(job.authorization?.policy).toBeUndefined();
   } finally {
     await f.close();
   }
@@ -773,8 +828,8 @@ test('changing the frozen mutation plan after reuse was accepted stops mutation 
   }
 });
 
-test('clearing the original same_command grant between reuse and dispatch stops the first Job', async () => {
-  const f = await fixture({ race: 'clear-grant', grant: 'same_command' });
+test('clearing the original structured scope grant between reuse and dispatch stops the first Job', async () => {
+  const f = await fixture({ race: 'clear-grant', grant: 'scope' });
   try {
     const result = await f.run();
     expect(f.counts().raced).toBe(true);
@@ -802,3 +857,239 @@ test('expiry between reuse and mutation dispatch does not inherit an expired bus
     await f.close();
   }
 });
+
+for (const drift of ['none', 'head', 'parent'] as const)
+  test(`real worktree scope grant reaches SQLite mutation gate with ${drift} drift`, async () => {
+    const persistent = realpathSync(persistentWorktreeDirectory('kite-worktree-scope-sql-'));
+    const source = join(persistent, 'source'),
+      parent = join(persistent, 'destinations'),
+      hooks = join(persistent, 'hooks'),
+      target = join(parent, 'target');
+    for (const path of [source, parent, hooks]) mkdirSync(path);
+    const gitPath = realpathSync(Bun.which('git')!);
+    const git = (args: string[]) =>
+      execFileSync(gitPath, args, {
+        cwd: source,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GIT_CONFIG_COUNT: '0',
+          GIT_CONFIG_PARAMETERS: undefined,
+          GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+        },
+      }).trim();
+    git(['init', '-q']);
+    git(['config', 'user.name', 'Scope SQL']);
+    git(['config', 'user.email', 'scope@example.test']);
+    writeFileSync(join(source, 'tracked.txt'), 'A\n');
+    git(['add', '.']);
+    git(['commit', '-qm', 'A']);
+    const baseOid = git(['rev-parse', 'HEAD']);
+    const configuration: GitWorktreeConfiguration = {
+      configurationId: 'real-scope-sql',
+      sourceCwd: source,
+      bunPath: process.execPath,
+      workerPath: join(persistent, 'unused-worker'),
+      configPath: join(persistent, 'unused-config'),
+      git: { path: gitPath, sha256: sha256(readFileSync(gitPath)) },
+      hooksPath: hooks,
+    };
+    const data = realpathSync(mkdtempSync(join(tmpdir(), 'kite-scope-sql-store-')));
+    const store = await openSqliteStore({ dataRoot: data, profile: 'test' });
+    const expectedStoreId = (await store.getMetadata()).storeId;
+    const starts: WorktreeRequest['phase'][] = [];
+    const job: JobDefinition = {
+      id: 'shell.command',
+      version: '1',
+      description: 'Isolated actual Git worker owned by the original Tool.',
+      inputSchema: { type: 'object' },
+      async start(input) {
+        const request = parseWorkerCommand(String(object(input).command), configuration)!;
+        starts.push(request.phase);
+        if (request.phase === 'prepare_create') {
+          if (drift === 'head') {
+            writeFileSync(join(source, 'tracked.txt'), 'B\n');
+            git(['add', '.']);
+            git(['commit', '-qm', 'B']);
+          }
+          if (drift === 'parent') {
+            renameSync(parent, join(persistent, 'old-destinations'));
+            mkdirSync(parent);
+          }
+        }
+        return { reference: { frame: (await executeWorktreeRequest(request)) as unknown as Json } };
+      },
+      async *observe(handle) {
+        yield {
+          type: 'output',
+          stream: 'stdout',
+          content: `${JSON.stringify(object(handle.reference).frame)}\n`,
+        };
+        yield {
+          type: 'terminal',
+          result: {
+            outcome: 'succeeded',
+            content: 'Actual isolated Git frame.',
+            details: { exitCode: 0 },
+          },
+          supervision: 'ended',
+        };
+      },
+      async cancel() {
+        return { status: 'already_finished' };
+      },
+      async dispose() {},
+    };
+    const extension = createShellExtension({
+      job,
+      gitWorktree: {
+        configuration,
+        worktreeHost: {
+          async readRegisteredWorkspaceRoots() {
+            return { originStoreId: expectedStoreId, complete: true, roots: [source] };
+          },
+        },
+      },
+    });
+    const definition = extension.tools!.find((tool) => tool.id === 'git.worktree')!;
+    const behavior = createWorktreeToolBehavior({
+      definition,
+      configuration,
+      configurationDigest: digest(configuration),
+    });
+    const permissions = createPermissionPolicy({
+      readPolicy: () => ({
+        mode: 'accept_edits',
+        workspaceTrust: true,
+        revision: 'scope-sql-policy',
+        allowed: [
+          { kind: 'model', definitionId: 'fixed', definitionVersion: '1' },
+          behavior.capability,
+          { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
+        ],
+      }),
+      async describeCapability(request) {
+        return {
+          kind: request.kind,
+          definitionId: request.definitionId,
+          definitionVersion: request.definitionVersion,
+          revision: 'trusted-real-worktree',
+          hardAllowed: true,
+          safeRead: false,
+          effects:
+            request.kind === 'model' ? ['network'] : ['process', 'workspace_write', 'record_write'],
+          ...(request.kind !== 'model'
+            ? {
+                executionScope: { filesystem: 'full_access' as const, network: 'none' as const },
+                worktreeAuthorization: { configurationIdentity: digest(configuration) },
+              }
+            : {}),
+          ...(request.kind === 'tool' ? { grantOffers: await behavior.grantOffers!(request) } : {}),
+        };
+      },
+    });
+    const model = createFixedModel([
+      [
+        {
+          type: 'tool_call',
+          id: 'create-call',
+          name: 'git_worktree',
+          arguments: JSON.stringify({
+            action: 'create',
+            path: target,
+            filesystem: 'full_access',
+          }),
+        },
+        { ...finish, reason: 'tool_calls' },
+      ],
+      [finish],
+    ]);
+    const runtime = createRuntime({
+      store,
+      model,
+      modelId: 'fixed',
+      extensions: [extension],
+      toolBehaviors: [behavior],
+      permissions,
+    });
+    try {
+      await runtime.createWorkspace({
+        expectedStoreId,
+        id: 'w',
+        name: 'real scope SQL',
+        rootUri: pathToFileURL(source).href,
+      });
+      await runtime.createSession({
+        expectedStoreId,
+        sessionId: 's',
+        workspaceId: 'w',
+        commandId: 'session',
+        subjectId: 'owner',
+        title: 'real scope SQL',
+      });
+      await runtime.submitCommand({
+        expectedStoreId,
+        sessionId: 's',
+        commandId: 'work',
+        subjectId: 'owner',
+        request: { kind: 'run.start', content: 'Create this exact isolated worktree.' },
+      });
+      const cards = [];
+      const until = Date.now() + 20000;
+      for (;;) {
+        const pending = (
+          await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
+        ).interactions;
+        for (const card of pending) {
+          cards.push(card);
+          expect(card.definitionId).toBe('git.worktree');
+          const optionId = fixtureScopeOption(card.request);
+          expect(JSON.stringify(card.request)).toContain(baseOid);
+          await runtime.answerInteraction({
+            expectedStoreId,
+            presentationSessionId: card.presentationSessionId,
+            interactionId: card.id,
+            expectedRevision: card.revision,
+            commandId: `answer-${card.id}`,
+            subjectId: 'owner',
+            answer: { kind: 'approval', decision: 'approve', optionId },
+          });
+        }
+        const command = await store.getCommand('work');
+        if (command?.status === 'rejected') throw Error(JSON.stringify(command.receipt));
+        const runId = object(command?.receipt).runId;
+        const run = typeof runId === 'string' ? await store.getRun(runId) : null;
+        if (run && !run.isActive) break;
+        if (Date.now() > until)
+          throw Error(`scope_sql_timeout:${JSON.stringify(await store.listExecutions('s'))}`);
+        await Bun.sleep(5);
+      }
+      expect(cards).toHaveLength(1);
+      const grants = await store.listPermissionGrants({
+        expectedStoreId,
+        sessionId: 's',
+        subjectId: 'owner',
+      });
+      expect(grants.items).toHaveLength(1);
+      expect(grants.items[0]!.grant.ruleId).toBe('builtin.worktree.action');
+      const executions = await store.listExecutions('s');
+      const owner = executions.find((row) => row.definitionId === 'git.worktree')!;
+      expect(owner.authorization?.human?.optionKind).toBe('scope');
+      if (drift === 'none') {
+        expect(starts).toEqual(['prepare_create', 'create']);
+        expect(existsSync(target)).toBe(true);
+        expect(git(['-C', target, 'rev-parse', 'HEAD'])).toBe(baseOid);
+      } else {
+        expect(starts).toEqual(['prepare_create']);
+        expect(existsSync(target)).toBe(false);
+        expect(owner.status).toBe('failed');
+        expect(
+          executions.filter((row) => row.kind === 'job').at(-1)?.authorization?.dispatched,
+        ).toBe(false);
+      }
+    } finally {
+      await runtime.close();
+      await store.close();
+      rmSync(data, { recursive: true, force: true });
+    }
+  }, 30000);

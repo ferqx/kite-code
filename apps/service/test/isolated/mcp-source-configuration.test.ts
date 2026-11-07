@@ -788,6 +788,16 @@ test('fixed SDK first Model sees only frozen selected safe metadata; actual dire
       (e) => e.definitionId === 'mcp.sources.list',
     )!;
     expect(tool.status).toBe('succeeded');
+    const raw = JSON.parse(object(tool.result).content as string);
+    const messages = object(f.modelBodies[1]).messages as Json[];
+    const presented = JSON.parse(
+      object(messages.find((message) => object(message).role === 'tool')).content as string,
+    );
+    expect(presented.items[0].server_id).toBe(raw.items[0].id);
+    expect(presented.items[0].name).toBe(raw.items[0].name);
+    expect(presented.items[0]).not.toHaveProperty('id');
+    expect(presented.next_after_id).toBe(raw.nextAfterId);
+    expect(JSON.parse(object(tool.result).content as string)).toEqual(raw);
     expect(f.wire).toEqual([]);
     expect(f.lookups).toBe(0);
     expect(
@@ -1005,7 +1015,7 @@ test('source connection Job has independent deny and Ask; approved grant cannot 
           presentationSessionId: card.presentationSessionId,
           interactionId: card.id,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       const failed = await pending;

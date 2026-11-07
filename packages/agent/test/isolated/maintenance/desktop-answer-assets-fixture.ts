@@ -35,7 +35,7 @@ const lease=await acquireDesktopProfileAccess(input.access);let data;
 try {data=openPrivateData(input.profilePath,lease);
 if(input.action==='seed')for(const kind of ['question','approval','plan_review']){
  const interaction={id:'original-'+kind,sessionId:'original-session',executionId:'original-execution',runId:'original-run',revision:'9007199254740993',kind,attempt:1,definitionId:'original-definition',definitionVersion:'1',inputDigest:'original-input-digest',policyRevision:'original-policy'};
- const answer=kind==='question'?{kind,answers:{exact:'é e\\u0301 🙂\\r\\n'.repeat(24000)+'ORIGINAL_ANSWER_TAIL\\r\\n'}}:kind==='approval'?{kind,decision:'approve',grant:'approve_once'}:{kind,decision:'revise',feedback:'Original 改訂\\r\\n',mode:'original-mode'};
+ const answer=kind==='question'?{kind,answers:{exact:'é e\\u0301 🙂\\r\\n'.repeat(24000)+'ORIGINAL_ANSWER_TAIL\\r\\n'}}:kind==='approval'?{kind,decision:'approve',optionId:'once'}:{kind,decision:'revise',feedback:'Original 改訂\\r\\n',mode:'original-mode'};
  const request={expectedStoreId:input.storeId,commandId:'answer-'+kind,expectedRevision:interaction.revision,answer};
  data.beginAnswer({intent:{scope:{storeId:input.storeId,sessionId:'original-session',workspaceId:'original-workspace',contextSelectionId:'original-selection'},subjectId:'original-subject',interaction,observationDigest:callerDigest({original:true,interaction}),request,bodyDigest:callerDigest(request),requestDigest:answerRequestDigest(interaction.id,request)},phase:'submitting'});
  data.finishAnswer(request.commandId,'unknown');

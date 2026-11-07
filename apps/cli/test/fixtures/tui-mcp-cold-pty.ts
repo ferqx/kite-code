@@ -69,7 +69,16 @@ if (!process.stdin.isTTY) {
               ? {
                   allowed: false,
                   revision: 'owned-cold-ask',
-                  approval: { request: { effects: ['workspace_write'] }, grants: ['approve_once'] },
+                  approval: {
+                    request: { effects: ['workspace_write'] },
+                    options: [
+                      {
+                        optionId: 'once',
+                        kind: 'once',
+                        presentation: { label: '仅此次', details: [] },
+                      },
+                    ],
+                  },
                 }
               : { allowed: true, revision: 'owned-cold-read' };
           },

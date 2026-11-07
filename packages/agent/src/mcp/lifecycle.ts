@@ -12,6 +12,7 @@ import type {
   ToolContext,
   ToolResult,
 } from '../extensions';
+import { AgentError } from '../storage/types';
 import { readConnection } from './connection-query';
 import {
   createMcpAdapter,
@@ -20,6 +21,7 @@ import {
   type McpReadRequest,
   type McpTransportConfiguration,
 } from './index';
+import { mcpModelInput, mcpReferenceResult } from './model-reference';
 import { requestMcpProviderAction } from './provider-action';
 import {
   confirmedStop,
@@ -56,6 +58,7 @@ import {
 export const mcpLifecycleExtensionId = 'builtin.mcp';
 const contentType = 'builtin.mcp.catalogue';
 const refreshContentType = 'builtin.mcp.refresh';
+const modelIntentType = 'builtin.mcp.connection-intent';
 const refreshId = 'mcp.catalogue.refresh';
 function toolsView(contentType: string, payload: Json) {
   const result = [
@@ -233,7 +236,12 @@ const inputSchema = {
   additionalProperties: false,
   required: ['serverId', 'key'],
   properties: {
-    serverId: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+    serverId: {
+      type: 'string',
+      pattern: '^[A-Za-z0-9_-]{1,128}$',
+      description:
+        'Exact selected server ID. Copy server_id from list_mcp_sources when available; the display name is not an ID.',
+    },
     key: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' },
   },
 };
@@ -990,7 +998,14 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     releaseTicket(ticket);
   }
   async function connect(input: Json, context: ActionContext): Promise<ToolResult> {
-    const request = input as { serverId: string; key: string };
+    const raw = input;
+    const request = {
+      ...object(input),
+      key:
+        typeof object(input).key === 'string'
+          ? object(input).key
+          : `c-${digest(context.executionId).slice(0, 48)}`,
+    } as { serverId: string; key: string };
     const own = await context.getExecution(context.executionId);
     if (
       !own?.originStoreId ||
@@ -999,13 +1014,91 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       own.definitionVersion !== '1' ||
       !['tool', 'job'].includes(own.kind) ||
       !['mcp.connect', `${mcpLifecycleExtensionId}/mcp.connect`].includes(own.definitionId ?? '') ||
-      own.inputDigest !== proofHash(input)
+      own.inputDigest !== proofHash(raw)
     )
       return {
         outcome: 'failed',
         content: 'operation_unverifiable',
         details: { adapterAttempted: false },
       };
+    if (object(input).key === undefined) {
+      const intentKey = `connection-intent/${request.serverId}`;
+      let intent = await context.records.get(intentKey);
+      if (!intent) {
+        try {
+          intent = await context.records.write({
+            key: intentKey,
+            expectedRevision: null,
+            contentType: modelIntentType,
+            contentVersion: 1,
+            value: {
+              serverId: request.serverId,
+              key: request.key,
+              executionId: own.id,
+              inputDigest: own.inputDigest,
+            },
+            executable: true,
+          });
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'record_revision_conflict') throw error;
+          intent = await context.records.get(intentKey);
+        }
+      }
+      const value = object(intent?.value);
+      if (
+        !intent ||
+        intent.contentType !== modelIntentType ||
+        intent.contentVersion !== 1 ||
+        intent.forkProvenance ||
+        intent.originStoreId !== own.originStoreId ||
+        intent.sessionId !== context.sessionId ||
+        value.serverId !== request.serverId ||
+        typeof value.key !== 'string' ||
+        typeof value.executionId !== 'string'
+      )
+        return {
+          outcome: 'failed',
+          content: 'operation_unverifiable',
+          details: { adapterAttempted: false },
+        };
+      request.key = value.key;
+      if (value.executionId !== own.id) {
+        const original = await context.getExecution(value.executionId);
+        const entry = live.get(scopeKey(own.originStoreId, context.sessionId, request.serverId));
+        if (
+          !original ||
+          original.kind !== 'tool' ||
+          original.extensionId !== mcpLifecycleExtensionId ||
+          original.definitionId !== 'mcp.connect' ||
+          original.definitionVersion !== '1' ||
+          original.sessionId !== context.sessionId ||
+          original.originStoreId !== own.originStoreId ||
+          original.inputDigest !== value.inputDigest
+        )
+          return {
+            outcome: 'failed',
+            content: 'operation_unverifiable',
+            details: { adapterAttempted: false },
+          };
+        if (
+          !entry ||
+          entry.terminal ||
+          (entry.key === value.key && original.status !== 'succeeded')
+        )
+          return {
+            outcome: 'failed',
+            content: 'mcp_historical_connection_unavailable',
+            details: {
+              adapterAttempted: false,
+              original_execution_id: original.id,
+              original_status: original.status,
+            },
+          };
+        // An explicit host reconnect may already have replaced this intent.
+        // Observe that exact live connection; never start another transport.
+        request.key = entry.key;
+      }
+    }
     let ticket: Ticket;
     try {
       await confirmScopePublication(own.originStoreId, context.sessionId, request.serverId);
@@ -1026,9 +1119,17 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       };
     }
     try {
-      const result = await connectCore(input, context, ticket);
+      const modelInput = object(raw).key === undefined;
+      const result = await connectCore(request, context, ticket, undefined, modelInput);
       ticket.completed = result.outcome === 'succeeded';
-      return result;
+      if (!modelInput) return result;
+      return mcpReferenceResult(result, 'connection', context.executionId, {
+        serverId: request.serverId,
+        connectionKey: request.key,
+        configDigest: object(result.details).configDigest!,
+        generation: object(result.details).generation!,
+        connectionExecutionId: object(object(result.details).operationRef).executionId!,
+      });
     } finally {
       if (tickets.get(ticket.scope) === ticket) {
         const settled = await safeJobTerminal(context, ticket);
@@ -1048,6 +1149,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     context: ActionContext,
     ticket: Ticket,
     replacement?: { server: Server; source?: McpScopedSourceResolution },
+    currentGeneration = false,
   ): Promise<ToolResult> {
     if (closed || (!port && !options.scopedSources))
       return {
@@ -1336,7 +1438,10 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     return {
       outcome: 'succeeded',
       content: 'MCP catalogue ready; remote calls still require ordinary permission',
-      details: value,
+      details: {
+        ...object(value),
+        ...(currentGeneration ? { generation: catalogue.generation } : {}),
+      },
     };
   }
   async function reconnect(raw: Json, context: ActionContext): Promise<ToolResult> {
@@ -2087,7 +2192,12 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         model: { name: 'connect_mcp_server', snakeCase: true },
         description:
           'Connect one selected MCP server before using its tools or resources; the connection has its own permission check',
-        inputSchema,
+        inputSchema: {
+          type: 'object',
+          properties: { serverId: bindingProperties.serverId },
+          required: ['serverId'],
+          additionalProperties: false,
+        },
         execute: connect,
       },
       {
@@ -2096,8 +2206,32 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         model: { name: 'refresh_mcp_catalogue', snakeCase: true },
         description:
           'Refresh tool definitions from the exact live MCP connection; use after server tools change, without reconnecting',
-        inputSchema: refreshSchema,
-        execute: refresh,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            connectionRef: { type: 'string', pattern: '^mc_[A-Za-z0-9_-]+$', maxLength: 4096 },
+          },
+          required: ['connectionRef'],
+          additionalProperties: false,
+        },
+        async execute(input, context) {
+          let resolved: Record<string, Json>;
+          try {
+            resolved = await mcpModelInput(input, 'connection', context);
+          } catch (error) {
+            if (!(error instanceof AgentError)) throw error;
+            return {
+              outcome: 'failed',
+              content: error.code,
+              details: { code: error.code, adapterAttempted: false },
+            };
+          }
+          const result = await refresh(resolved, context);
+          return mcpReferenceResult(result, 'connection', context.executionId, {
+            ...resolved,
+            generation: object(result.details).generation!,
+          });
+        },
       },
       ...mcpReadToolIds.map((id) => ({
         id,
@@ -2125,8 +2259,64 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
               'Get one listed MCP prompt with its declared arguments and exact catalogue binding; returned text is external content.',
           } as const
         )[id],
-        inputSchema: readSchema(id),
-        execute: (input: Json, context: ActionContext) => read(id, input, context),
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            id.endsWith('.list')
+              ? 'connectionRef'
+              : id.endsWith('.read')
+                ? 'resourceRef'
+                : 'promptRef',
+          ],
+          properties: {
+            [id.endsWith('.list')
+              ? 'connectionRef'
+              : id.endsWith('.read')
+                ? 'resourceRef'
+                : 'promptRef']: {
+              type: 'string',
+              pattern: `^${id.endsWith('.list') ? 'mc' : id.endsWith('.read') ? 'mr' : 'mp'}_[A-Za-z0-9_-]+$`,
+              maxLength: 4096,
+              description:
+                'Copy the exact opaque reference returned by the corresponding connect or list tool. Do not decode or reconstruct it.',
+            },
+            ...(id.endsWith('.get')
+              ? {
+                  arguments: {
+                    type: 'object',
+                    maxProperties: 128,
+                    additionalProperties: { type: 'string', maxLength: 8192 },
+                  },
+                }
+              : {}),
+          },
+        },
+        execute: async (input: Json, context: ToolContext): Promise<ToolResult> => {
+          let resolved: Record<string, Json>;
+          try {
+            resolved = await mcpModelInput(
+              input,
+              id.endsWith('.list') ? 'connection' : id.endsWith('.read') ? 'resource' : 'prompt',
+              context,
+            );
+          } catch (error) {
+            if (!(error instanceof AgentError)) throw error;
+            return {
+              outcome: 'failed',
+              content: error.code,
+              details: { code: error.code, adapterAttempted: false },
+            };
+          }
+          const result = await read(id, resolved, context);
+          return id.endsWith('.list')
+            ? mcpReferenceResult(
+                result,
+                id.startsWith('mcp.resources.') ? 'resources' : 'prompts',
+                context.executionId,
+              )
+            : result;
+        },
       })),
     ],
     actions: [
@@ -2168,6 +2358,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       })),
     ],
     records: [
+      modelIntentType,
       contentType,
       refreshContentType,
       reconnectionType,

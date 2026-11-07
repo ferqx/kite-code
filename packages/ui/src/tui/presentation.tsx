@@ -504,8 +504,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   '] original Session': '] 原会话',
   '· revision': '· 修订',
   'Up/Down explicit approval selection:': '上下键明确选择批准范围：',
-  'Ctrl+A: read required attachment. Approval: approve (once), approve same_command only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.':
-    'Ctrl+A：读取所需附件。批准：approve（仅一次）、仅提供时可用 approve same_command、deny。问题：原 schema JSON。计划：approve 已提供模式 / revise 反馈 / deny。',
+  'Ctrl+A: read required attachment. Approval: approve (once), approve <optionId> only if offered, deny. Question: original-schema JSON. Plan: approve / revise feedback / deny.':
+    'Ctrl+A：读取所需附件。批准：approve（仅一次）、仅提供时可用 approve <optionId>、deny。问题：原 schema JSON。计划：approve / revise 反馈 / deny。',
   Selection: '选择',
   '/ frozen upper': '/ 固定上界',
   Source: '来源',
@@ -558,7 +558,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   '· read scope': '· 读取范围',
   'T review trust / U review untrust · trust does not approve every Tool':
     'T 核对信任 / U 核对撤销信任 · 信任不代表批准所有 Tool',
-  'Saved same_command grants:': '已保存 same_command 授权：',
+  'Saved Session grants:': '已保存的会话授权：',
   '· frozen upper': '· 固定上界',
   'C review clear this exact Session only; earlier effects remain · R refresh · K original outcome lookup · Esc close':
     'C 核对清除此准确会话；已有影响保留 · R 刷新 · K 查询原结果 · Esc 关闭',

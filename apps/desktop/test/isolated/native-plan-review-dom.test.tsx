@@ -67,7 +67,6 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
           version: '1',
           digest: `plan-digest-${session.id}`,
           content: 'Full original plan\n1. first step\n2. second step',
-          allowedModes: ['auto', 'accept_edits'],
         },
       } satisfies Interaction,
     ]),
@@ -204,8 +203,6 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     });
   const text = () =>
     host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
-  const mode = () =>
-    host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Plan review mode"]')!;
   const mainInput = () =>
     host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
   const edit = async (value: string) =>
@@ -220,20 +217,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     await click('会话工具');
     expect(mainInput() === null).toBe(true);
     await edit('  original A\n雪🙂  ');
-    await act(async () => {
-      mode().dispatchEvent(
-        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
-      );
-    });
-    await act(async () => {
-      const choice = [...host.querySelectorAll<HTMLElement>('[role="option"]')].find(
-        (option) => option.textContent === 'accept_edits',
-      );
-      expect(choice).toBeDefined();
-      choice!.dispatchEvent(
-        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
-    });
+    expect(host.querySelector('[aria-label="Plan review mode"]')).toBeNull();
     // Plan denial and the explicit original-work cancellation are separate choices.
     expect(
       [...host.querySelectorAll('button')].some((button) =>
@@ -245,7 +229,6 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     await edit('other B');
     await click('Plan A');
     expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(mode().textContent).toBe('accept_edits');
     omitted = true;
     await refresh();
     expect(text()).toBeNull();
@@ -255,7 +238,6 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     omitted = unavailable = false;
     await refresh();
     expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(mode().textContent).toBe('accept_edits');
     await click('Request revision');
     expect(posts).toBe(1);
     expect(mainInput() === null).toBe(true);
@@ -268,7 +250,6 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     expect(text().value).toBe('other B');
     await click('Plan A');
     expect(text().value).toBe('  original A\n雪🙂  ');
-    expect(mode().textContent).toBe('accept_edits');
     expect(
       [...host.querySelectorAll('button')].find(
         (button) => button.textContent === 'Request revision',
@@ -302,7 +283,6 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     expect(text().value).toBe('other B');
     await click('Plan A');
     expect(text().value).toBe('');
-    expect(mode().textContent).toBe('Select a mode explicitly');
     await click('Plan B');
     expect(text().value).toBe('other B');
     cards.b = { ...cards.b!, revision: '2', inputDigest: 'replacement-input' };
@@ -347,7 +327,11 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       revision: '3',
       acceptedDecisionRevision: null,
       answer: null,
-      request: { grants: ['approve_once'] },
+      request: {
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
     };
     await refresh();
     expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');

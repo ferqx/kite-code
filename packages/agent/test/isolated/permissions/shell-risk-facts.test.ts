@@ -256,7 +256,7 @@ test.skipIf(process.platform !== 'darwin')(
             signal: signal(),
             dispatchAuthorization: {
               revision: 'r',
-              ...(approved ? { riskReviewApproved: true as const } : {}),
+              ...(approved ? { materialReviewed: true as const } : {}),
             },
           },
         );

@@ -463,7 +463,7 @@ for (const legacyCompact of [true, false])
         presentationSessionId: 's',
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await f.finish();
       expect(f.counts()).toEqual({ reviews: 1, effects: 1 });

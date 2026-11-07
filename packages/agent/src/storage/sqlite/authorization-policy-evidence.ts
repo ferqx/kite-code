@@ -3,10 +3,13 @@ import type { PermissionDecision } from '../../extensions';
 import { canonicalJson } from '../../json';
 import { dispatchScopeLeaves } from '../../permissions/dispatch-scope';
 import { isAutoWorktreeDecision } from '../../permissions/worktree-authorization';
-import { isShellRiskRequest } from '../../shell-risk-review';
 import type { AutoAuthorizationEvidence, DispatchInput, Store } from '../port';
 import { AgentError, type ExecutionAuthorizationObservation, type Json } from '../types';
-import { authorizationCheckFact, verifyAuthorizationCheckDispatch } from './authorization-check';
+import {
+  authorizationCheckFact,
+  verifyAuthorizationBehaviorBinding,
+  verifyAuthorizationCheckDispatch,
+} from './authorization-check';
 import { assertCurrentChildPurpose } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { verifyInteractionDispatch } from './interaction-operations';
@@ -22,32 +25,51 @@ const obj = (value: unknown): Record<string, Json> => {
   return value as Record<string, Json>;
 };
 const parsed = (value: unknown) => obj(JSON.parse(String(value)));
-const riskFingerprint = (payload: Record<string, Json>): Json =>
-  payload.reviewPurpose === 'shell_risk' && payload.riskReview
-    ? (obj(payload.riskReview).fingerprint ?? null)
-    : null;
-function trustedShellBridge(db: SqliteOperations, job: Row, tool: Row): boolean {
-  const run = tool.run_id && db.row('SELECT config_json FROM run WHERE id=?', tool.run_id);
-  const configuration = run ? parsed(run.config_json) : null;
+const reviewFingerprint = (payload: Record<string, Json>): Json =>
+  payload.review ? (obj(payload.review).fingerprint ?? null) : null;
+/** The selected owner computed this proof from both exact inputs; SQL checks identities only. */
+function trustedParentBridge(
+  db: SqliteOperations,
+  job: Row,
+  tool: Row,
+  preparation: Json | undefined,
+): boolean {
+  if (
+    !preparation ||
+    job.parent_execution_id !== tool.id ||
+    job.kind !== 'job' ||
+    tool.kind !== 'tool'
+  )
+    return false;
+  const proof = obj(preparation);
   const origin = db.row('SELECT * FROM command WHERE id=?', job.origin_command_id!);
   return (
-    job.definition_version === '1' &&
-    tool.definition_version === '1' &&
-    parsed(job.intent_json).command === parsed(tool.intent_json).command &&
-    origin?.extension_id === 'builtin.shell' &&
-    origin.kind === 'operation.job' &&
-    Array.isArray(configuration?.tools) &&
-    configuration.tools.some((value) => {
-      const entry = obj(value);
+    proof.parentExecutionId === tool.id &&
+    proof.parentInputDigest === hash(JSON.parse(String(tool.intent_json))) &&
+    typeof proof.operationDigest === 'string' &&
+    /^[a-f0-9]{64}$/.test(proof.operationDigest) &&
+    Array.isArray(proof.parentBindings) &&
+    proof.parentBindings.some((value) => {
+      const binding = obj(value);
       return (
-        entry.id === tool.adapter_id &&
-        entry.version === '1' &&
-        entry.extensionId === 'builtin.shell'
+        binding.kind === tool.kind &&
+        binding.definitionId === tool.adapter_id &&
+        binding.definitionVersion === tool.definition_version
       );
-    })
+    }) &&
+    origin?.kind === 'operation.job' &&
+    proof.cancelWithParent === Boolean(job.cancel_with_parent)
   );
 }
 
+function sameReviewFamily(a: Json | undefined, b: Json | undefined): boolean {
+  if (!a || !b) return false;
+  const left = obj(a),
+    right = obj(b);
+  return (
+    left.contractRef === right.contractRef && left.configurationDigest === right.configurationDigest
+  );
+}
 function autoScope(snapshot: Json): boolean {
   const leaves = [
     ...dispatchScopeLeaves(
@@ -63,16 +85,25 @@ function autoScope(snapshot: Json): boolean {
   );
 }
 
-/** A currently valid human command grant approves this Tool, not previously inspected code bytes. */
+/** A currently valid human scope grant approves this Tool, not previously inspected code bytes. */
 function parentGrant(db: SqliteOperations, parent: Row, accepted: Record<string, Json>) {
   const grant = obj(accepted.grant);
+  const offer = grant.offer ? obj(grant.offer) : null;
+  const binding = grant.binding ? obj(grant.binding) : null;
+  const permission =
+    offer && binding && Array.isArray(offer.policyBindings)
+      ? offer.policyBindings.find((value) => {
+          const candidate = obj(value);
+          return canonicalJson(candidate.capability!) === canonicalJson(binding);
+        })
+      : null;
   if (
     !parent.dispatched ||
     accepted.allowed !== true ||
-    typeof grant.commandDigest !== 'string' ||
-    !autoScope(accepted.snapshot!) ||
-    db.row('SELECT policy_revision FROM interaction WHERE id=?', String(grant.grantId))
-      ?.policy_revision !== accepted.revision
+    !permission ||
+    obj(permission).satisfiesCheck !== true ||
+    obj(permission).requireApproval === true ||
+    !autoScope(accepted.snapshot!)
   )
     throw new AgentError('authorization_policy_changed');
   verifyPermissionGrantDispatch(db, {
@@ -141,14 +172,14 @@ function scopeSnapshot(
   network: 'none' | 'internet',
 ): Json {
   const tree = obj(snapshot);
-  if (tree.namespace === 'builtin.planning.permissions') {
+  if (tree.namespace === 'builtin.business.permissions') {
     const data = obj(tree.data);
     return {
       ...tree,
       data: {
         ...data,
         current: scopeSnapshot(data.current!, filesystem, network),
-        ceiling: data.ceiling === null ? null : scopeSnapshot(data.ceiling!, filesystem, network),
+        gate: data.gate!,
       },
     };
   }
@@ -179,8 +210,6 @@ function scopeSnapshot(
     throw new AgentError('authorization_policy_scope_unavailable');
   // Timeout passes the semantic review gate; the original requested scope and
   // every independent tool/parent ceiling still determine execution authority.
-  if (!['shell.execute', 'shell.launch', 'shell.command'].includes(String(capability.definitionId)))
-    throw new AgentError('authorization_policy_scope_unavailable');
   const ceiling = capability.executionScope
     ? obj(capability.executionScope)
     : {
@@ -213,14 +242,14 @@ function scopeSnapshot(
 /** Tool/Job IDs differ, but this bridge may not change any policy or effect dimension. */
 function bridgePolicy(snapshot: Json): Json {
   const tree = obj(snapshot);
-  if (tree.namespace === 'builtin.planning.permissions') {
+  if (tree.namespace === 'builtin.business.permissions') {
     const data = obj(tree.data);
     return {
       ...tree,
       data: {
         ...data,
         current: bridgePolicy(data.current!),
-        ceiling: data.ceiling === null ? null : bridgePolicy(data.ceiling!),
+        gate: data.gate!,
       },
     };
   }
@@ -391,12 +420,8 @@ function sameApprovedEffect(db: SqliteOperations, row: Row, original: Row, check
     const source = obj(proof.payload.source);
     if (source.kind === 'check') {
       return (
-        row.adapter_id === 'shell.command' &&
-        row.definition_version === '1' &&
         row.parent_execution_id === original.id &&
         original.kind === 'tool' &&
-        ['shell.execute', 'shell.launch'].includes(String(original.adapter_id)) &&
-        original.definition_version === '1' &&
         proof.payload.reason === 'parent_review' &&
         source.id === check.id &&
         source.targetExecutionId === original.id &&
@@ -410,7 +435,6 @@ function sameApprovedEffect(db: SqliteOperations, row: Row, original: Row, check
       );
     }
     if (
-      row.adapter_id !== 'shell.command' ||
       row.definition_version !== '1' ||
       proof.payload.reason !== 'parent_review' ||
       source.kind !== 'policy' ||
@@ -423,7 +447,6 @@ function sameApprovedEffect(db: SqliteOperations, row: Row, original: Row, check
     if (
       row.parent_execution_id !== tool.id ||
       tool.kind !== 'tool' ||
-      !['shell.execute', 'shell.launch'].includes(String(tool.adapter_id)) ||
       tool.definition_version !== '1' ||
       tool.state !== 'succeeded' ||
       tool.cancel_requested ||
@@ -471,13 +494,13 @@ function evidence(
   db: SqliteOperations,
   id: string,
   depth = 0,
-): { payload: Record<string, Json>; target: Row; riskReviewApproved?: true } {
+): { payload: Record<string, Json>; target: Row; materialReviewed?: true } {
   if (depth > 4) throw new AgentError('authorization_policy_unverifiable');
   const { payload, target } = sealedPolicy(db, id);
   if (target.cancel_requested || payload.autoContext !== autoAuthorizationContext(db, target))
     throw new AgentError('authorization_policy_changed');
   const source = obj(payload.source);
-  let riskReviewApproved = false;
+  let materialReviewed = false;
   if (source.kind === 'worktree') {
     const decision = obj(payload.worktreeDecision) as unknown as PermissionDecision;
     const boundary = worktreeAuthorizationBoundary(db, target, decision);
@@ -506,8 +529,11 @@ function evidence(
       checked.payload.operationKey !== payload.operationKey ||
       checked.payload.autoContext !== payload.autoContext ||
       canonicalJson(checked.payload.checker!) !== canonicalJson(payload.checker!) ||
-      checked.payload.reviewPurpose !== payload.reviewPurpose ||
-      riskFingerprint(checked.payload) !== riskFingerprint(payload)
+      (payload.reason === 'parent_review'
+        ? !sameReviewFamily(checked.payload.behavior, payload.behavior)
+        : canonicalJson(checked.payload.behavior ?? null) !==
+          canonicalJson(payload.behavior ?? null)) ||
+      reviewFingerprint(checked.payload) !== reviewFingerprint(payload)
     )
       throw new AgentError('authorization_policy_changed');
     if (payload.reason === 'timeout_continue') {
@@ -527,15 +553,13 @@ function evidence(
       checked.payload.requireApproval === true
     )
       throw new AgentError('authorization_policy_changed');
-    else riskReviewApproved = checked.result.riskReviewApproved === true;
+    else materialReviewed = checked.result.materialReviewed === true;
     if (payload.reason === 'parent_review') {
       if (
         target.parent_execution_id !== sourceTarget.id ||
         target.kind !== 'job' ||
-        target.adapter_id !== 'shell.command' ||
         sourceTarget.kind !== 'tool' ||
-        !['shell.execute', 'shell.launch'].includes(String(sourceTarget.adapter_id)) ||
-        (payload.reviewPurpose === 'shell_risk' && !trustedShellBridge(db, target, sourceTarget)) ||
+        !trustedParentBridge(db, target, sourceTarget, payload.parentProof) ||
         !sourceTarget.dispatch_authorization_json
       )
         throw new AgentError('authorization_policy_changed');
@@ -565,19 +589,17 @@ function evidence(
       !sameScope(target, prior.target) ||
       prior.payload.operationKey !== payload.operationKey ||
       canonicalJson(prior.payload.checker!) !== canonicalJson(payload.checker!) ||
-      prior.payload.reviewPurpose !== payload.reviewPurpose ||
-      riskFingerprint(prior.payload) !== riskFingerprint(payload) ||
+      sameReviewFamily(prior.payload.behavior, payload.behavior) === false ||
+      reviewFingerprint(prior.payload) !== reviewFingerprint(payload) ||
       canonicalJson(prior.payload.controlReads ?? null) !==
         canonicalJson(payload.controlReads ?? null)
     )
       throw new AgentError('authorization_policy_changed');
-    riskReviewApproved = prior.riskReviewApproved === true;
+    materialReviewed = prior.materialReviewed === true;
     if (
       target.kind !== 'job' ||
-      target.adapter_id !== 'shell.command' ||
       prior.target.kind !== 'tool' ||
-      !['shell.execute', 'shell.launch'].includes(String(prior.target.adapter_id)) ||
-      (payload.reviewPurpose === 'shell_risk' && !trustedShellBridge(db, target, prior.target)) ||
+      !trustedParentBridge(db, target, prior.target, payload.parentProof) ||
       canonicalJson(bridgePolicy(prior.payload.snapshot!)) !==
         canonicalJson(bridgePolicy(payload.snapshot!))
     )
@@ -590,17 +612,14 @@ function evidence(
   } else if (source.kind === 'grant') {
     const parent = db.row('SELECT * FROM execution WHERE id=?', String(source.targetExecutionId));
     if (
-      payload.reviewPurpose !== 'shell_risk' ||
       payload.reason !== 'parent_review' ||
       !parent ||
       parent.cancel_requested ||
       !sameScope(target, parent) ||
       target.parent_execution_id !== parent.id ||
       target.kind !== 'job' ||
-      target.adapter_id !== 'shell.command' ||
       parent.kind !== 'tool' ||
-      !['shell.execute', 'shell.launch'].includes(String(parent.adapter_id)) ||
-      !trustedShellBridge(db, target, parent) ||
+      !trustedParentBridge(db, target, parent, payload.parentProof) ||
       !parent.dispatch_authorization_json ||
       !autoScope(payload.snapshot!)
     )
@@ -610,7 +629,7 @@ function evidence(
     if (
       grant.grantId !== source.id ||
       grant.revision !== source.revision ||
-      grant.commandDigest !== source.commandDigest ||
+      canonicalJson(grant.offer!) !== canonicalJson(source.offer!) ||
       canonicalJson(accepted.controlReads ?? null) !== canonicalJson(payload.controlReads!) ||
       canonicalJson(bridgePolicy(accepted.snapshot!)) !==
         canonicalJson(bridgePolicy(payload.snapshot!))
@@ -623,13 +642,9 @@ function evidence(
       !parent ||
       !sameScope(target, parent) ||
       target.parent_execution_id !== parent.id ||
-      !trustedShellBridge(db, target, parent) ||
+      !trustedParentBridge(db, target, parent, payload.parentProof) ||
       target.kind !== 'job' ||
-      target.adapter_id !== 'shell.command' ||
-      target.definition_version !== '1' ||
       parent.kind !== 'tool' ||
-      !['shell.execute', 'shell.launch'].includes(String(parent.adapter_id)) ||
-      parent.definition_version !== '1' ||
       !parent.dispatch_authorization_json ||
       payload.reason !== 'parent_review'
     )
@@ -641,21 +656,24 @@ function evidence(
       accepted.interactionId !== source.id ||
       accepted.decisionRevision !== source.decisionRevision ||
       checked.result.decision !== 'ask_user' ||
-      checked.result.riskReviewApproved !== true ||
+      checked.result.materialReviewed !== true ||
       checked.payload.requireApproval ||
       checked.payload.operationKey !== payload.operationKey ||
       checked.payload.autoContext !== payload.autoContext ||
-      checked.payload.reviewPurpose !== payload.reviewPurpose ||
-      riskFingerprint(checked.payload) !== riskFingerprint(payload) ||
+      (payload.reason === 'parent_review'
+        ? !sameReviewFamily(checked.payload.behavior, payload.behavior)
+        : canonicalJson(checked.payload.behavior ?? null) !==
+          canonicalJson(payload.behavior ?? null)) ||
+      reviewFingerprint(checked.payload) !== reviewFingerprint(payload) ||
       canonicalJson(checked.payload.checker!) !== canonicalJson(payload.checker!) ||
       canonicalJson(bridgePolicy(accepted.snapshot!)) !==
         canonicalJson(bridgePolicy(payload.snapshot!))
     )
       throw new AgentError('authorization_policy_changed');
     verifyInteractionDispatch(db, parent, { authorization: accepted } as unknown as DispatchInput);
-    riskReviewApproved = true;
+    materialReviewed = true;
   } else throw new AgentError('authorization_policy_unverifiable');
-  return { payload, target, ...(riskReviewApproved ? { riskReviewApproved: true as const } : {}) };
+  return { payload, target, ...(materialReviewed ? { materialReviewed: true as const } : {}) };
 }
 
 const sameWorktreeJson = (a: unknown, b: unknown) =>
@@ -677,8 +695,7 @@ function verifyWorktreeSource(
         ...original,
         worktreeDecisionSeal:
           accepted.worktreeDecisionSeal as unknown as PermissionDecision['worktreeDecisionSeal'],
-      })) ||
-    accepted.reviewExecutionId
+      }))
   )
     throw new AgentError('authorization_policy_changed');
   const input = {
@@ -702,7 +719,8 @@ export function resolveWorktreeAuthorization(
     try {
       boundary = worktreeAuthorizationBoundary(db, target, input.decision);
       verifyWorktreeSource(db, boundary.parent, boundary.accepted, boundary.original);
-    } catch {
+    } catch (error) {
+      if (error instanceof AgentError && error.code === 'worktree_scope_changed') throw error;
       return null;
     }
     const payload: Json = {
@@ -796,9 +814,15 @@ export function resolveAutoAuthorization(
     )
       return null;
     const autoContext = autoAuthorizationContext(db, target);
-    const riskCheck = isShellRiskRequest(decision.check.request);
-    const preparation = input.riskReview;
-    const fingerprint = riskCheck && preparation ? preparation.fingerprint : null;
+    verifyAuthorizationBehaviorBinding(
+      db,
+      target,
+      input.behavior,
+      input.checker as unknown as Json,
+    );
+    const usesBehavior = input.review !== undefined;
+    const preparation = input.review;
+    const fingerprint = preparation?.fingerprint ?? null;
     let source: Json | undefined, reason: AutoAuthorizationEvidence['reason'] | undefined;
     let inheritedTimeout: Record<string, Json> | undefined;
     let snapshot = decision.snapshot;
@@ -807,12 +831,10 @@ export function resolveAutoAuthorization(
       db.row('SELECT * FROM execution WHERE id=?', target.parent_execution_id);
     if (
       target.kind === 'job' &&
-      target.adapter_id === 'shell.command' &&
       parent &&
       parent.kind === 'tool' &&
-      ['shell.execute', 'shell.launch'].includes(String(parent.adapter_id)) &&
       sameScope(target, parent) &&
-      (!riskCheck || trustedShellBridge(db, target, parent)) &&
+      trustedParentBridge(db, target, parent, input.parentProof) &&
       !parent.cancel_requested &&
       parent.dispatch_authorization_json
     ) {
@@ -849,8 +871,8 @@ export function resolveAutoAuthorization(
               !checked.payload.requireApproval &&
               checked.payload.operationKey === input.operationKey &&
               checked.payload.autoContext === autoContext &&
-              checked.payload.reviewPurpose === (riskCheck ? 'shell_risk' : undefined) &&
-              riskFingerprint(checked.payload) === fingerprint &&
+              sameReviewFamily(checked.payload.behavior, input.behavior as unknown as Json) &&
+              reviewFingerprint(checked.payload) === fingerprint &&
               canonicalJson(checked.payload.checker!) ===
                 canonicalJson(input.checker as unknown as Json)
             )
@@ -862,22 +884,20 @@ export function resolveAutoAuthorization(
           } else if (typeof accepted.policyEvidenceId === 'string') {
             const prior = evidence(db, accepted.policyEvidenceId);
             const timeoutParent =
-              riskCheck &&
-              prior.payload.reviewPurpose === 'shell_risk' &&
               prior.payload.reason === 'timeout_continue' &&
-              trustedShellBridge(db, target, parent);
+              trustedParentBridge(db, target, parent, input.parentProof);
             if (
               (timeoutParent ||
                 (prior.payload.operationKey === input.operationKey &&
-                  riskFingerprint(prior.payload) === fingerprint)) &&
-              prior.payload.reviewPurpose === (riskCheck ? 'shell_risk' : undefined) &&
+                  reviewFingerprint(prior.payload) === fingerprint)) &&
+              sameReviewFamily(prior.payload.behavior, input.behavior as unknown as Json) &&
               canonicalJson(prior.payload.checker!) ===
                 canonicalJson(input.checker as unknown as Json)
             ) {
               source = { kind: 'policy', id: accepted.policyEvidenceId };
               if (timeoutParent) inheritedTimeout = prior.payload;
             }
-          } else if (riskCheck && typeof accepted.interactionId === 'string') {
+          } else if (usesBehavior && typeof accepted.interactionId === 'string') {
             const rows = db.rows(
               "SELECT id FROM execution WHERE parent_execution_id=? AND kind='model'",
               parent.id!,
@@ -886,11 +906,11 @@ export function resolveAutoAuthorization(
               const checked = checkSource(db, parent, String(row.id));
               if (
                 checked.result.decision !== 'ask_user' ||
-                checked.result.riskReviewApproved !== true ||
+                checked.result.materialReviewed !== true ||
                 checked.payload.requireApproval ||
                 checked.payload.operationKey !== input.operationKey ||
                 checked.payload.autoContext !== autoContext ||
-                riskFingerprint(checked.payload) !== fingerprint ||
+                reviewFingerprint(checked.payload) !== fingerprint ||
                 canonicalJson(checked.payload.checker!) !==
                   canonicalJson(input.checker as unknown as Json)
               )
@@ -910,7 +930,7 @@ export function resolveAutoAuthorization(
           }
           if (
             !source &&
-            riskCheck &&
+            usesBehavior &&
             accepted.grant &&
             autoScope(candidateSnapshot as unknown as Json)
           ) {
@@ -919,7 +939,7 @@ export function resolveAutoAuthorization(
               kind: 'grant',
               id: grant.grantId!,
               revision: grant.revision!,
-              commandDigest: grant.commandDigest!,
+              offer: grant.offer!,
               targetExecutionId: String(parent.id),
             };
           }
@@ -935,7 +955,12 @@ export function resolveAutoAuthorization(
         snapshot = decision.snapshot;
       }
     }
-    if (!source && !input.timedOutCheckId && (!riskCheck || preparation?.reusable === true)) {
+    if (
+      !source &&
+      !input.timedOutCheckId &&
+      input.reuseApproval !== false &&
+      (!usesBehavior || preparation?.reusable === true)
+    ) {
       const rows = db.rows(
         "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.check' AND e.session_id=? AND e.root_work_command_id=? AND e.state='succeeded' AND json_extract(c.request_json,'$.input.operationKey')=? ORDER BY c.seq DESC LIMIT 64",
         target.session_id!,
@@ -962,9 +987,9 @@ export function resolveAutoAuthorization(
             !checked.payload.requireApproval &&
             checked.payload.policyRevision === decision.revision &&
             checked.payload.autoContext === autoContext &&
-            checked.payload.reviewPurpose === (riskCheck ? 'shell_risk' : undefined) &&
-            riskFingerprint(checked.payload) === fingerprint &&
-            (!riskCheck || obj(checked.payload.riskReview).reusable === true) &&
+            sameReviewFamily(checked.payload.behavior, input.behavior as unknown as Json) &&
+            reviewFingerprint(checked.payload) === fingerprint &&
+            (!usesBehavior || obj(checked.payload.review).reusable === true) &&
             canonicalJson(checked.payload.checker!) ===
               canonicalJson(input.checker as unknown as Json) &&
             !interveningEffect(db, original, checked.check, target)
@@ -1022,12 +1047,13 @@ export function resolveAutoAuthorization(
       operationKey: inheritedTimeout?.operationKey ?? input.operationKey,
       autoContext,
       checker: input.checker as unknown as Json,
-      ...(riskCheck
+      behavior: input.behavior as unknown as Json,
+      ...(input.parentProof ? { parentProof: input.parentProof } : {}),
+      ...(usesBehavior
         ? {
-            reviewPurpose: 'shell_risk',
-            riskReview: inheritedTimeout
-              ? (inheritedTimeout.riskReview ?? null)
-              : ((preparation ?? null) as unknown as Json),
+            review: (inheritedTimeout
+              ? (inheritedTimeout.review ?? null)
+              : (preparation ?? null)) as unknown as Json,
           }
         : {}),
       controlReads: (decision.controlReads as unknown as Json) ?? null,
@@ -1085,7 +1111,7 @@ export function resolveAutoAuthorization(
       policyEvidenceId: String(command.id),
       reason,
       snapshot,
-      ...(verified.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+      ...(verified.materialReviewed ? { materialReviewed: true as const } : {}),
     };
   });
 }
@@ -1097,7 +1123,7 @@ export function verifyAutoAuthorizationDispatch(db: SqliteOperations, input: Dis
     value.target.origin_store_id !== input.expectedStoreId ||
     value.payload.policyRevision !== input.authorization.revision ||
     value.payload.inputDigest !== input.authorization.inputDigest ||
-    (value.riskReviewApproved === true) !== (input.authorization.riskReviewApproved === true) ||
+    (value.materialReviewed === true) !== (input.authorization.materialReviewed === true) ||
     canonicalJson(value.payload.snapshot!) !==
       canonicalJson((input.authorization.snapshot as unknown as Json) ?? null) ||
     canonicalJson(value.payload.controlReads!) !==

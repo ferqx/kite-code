@@ -259,7 +259,12 @@ test('ordinary Job approval and dispatch retain the exact planned Job and parent
       policyRevision: 'original-policy',
       requiredRefs: [read.requirement],
       source: f.source,
-      request: { title: 'Exact original ordinary Job' },
+      request: {
+        title: 'Exact original ordinary Job',
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
     });
     await f.store.answerInteraction({
       expectedStoreId: f.expectedStoreId,
@@ -268,7 +273,7 @@ test('ordinary Job approval and dispatch retain the exact planned Job and parent
       presentationSessionId: 's',
       interactionId: 'job-approval',
       expectedRevision: '1',
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const accepted = await f.store.acceptInteractionDecision({
       expectedStoreId: f.expectedStoreId,
@@ -636,11 +641,12 @@ test('information permission control reads are rechecked by the acceptance trans
     await rejected(
       f.store.acceptInteractionDecision({
         ...request,
+        currentInformationPermission: stamp,
         decisionRevision: '2',
         requirements: [],
         freshness: { checked: true, source: f.source },
       }),
-      'permission_control_changed',
+      'information_permission_control_changed',
     );
     expect(
       (

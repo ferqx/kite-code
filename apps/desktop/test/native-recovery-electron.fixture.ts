@@ -238,7 +238,7 @@ try {
           generation: state.generation,
           interactionId: cardId!,
           revision: revision!,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       },
       { cardId, revision },

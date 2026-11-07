@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { Session } from '@kite-ai/client';
+import type { Interaction, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { nativeDraftProof } from '../../electron/caller-journal';
@@ -205,6 +205,7 @@ function fixture(
     dom,
     calls,
     click,
+    snapshot,
     async chooseModel() {
       await click('选择模型');
       for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
@@ -1034,6 +1035,620 @@ test('cold unknown annotation keeps missing pixels and locks cards; accepted ori
     ).toBe('newer edit');
     expect(writes.at(-1)!.browserAnnotations).toEqual([]);
     expect(f.calls.filter((request) => request.method === 'submit')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a cached unavailable selection rereads the same activation and retires an accepted approval without replaying writes', async () => {
+  let unavailable = false,
+    recovered = false;
+  let originalState!: () => NativeState;
+  const card: Interaction = {
+    id: 'original-approval',
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: 'run',
+    executionId: 'tool',
+    presentationSessionId: 'a',
+    ancestry: ['a'],
+    attempt: 1,
+    kind: 'approval',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    inputDigest: 'input',
+    policyRevision: 'policy',
+    requiredRefs: [],
+    request: {
+      definitionId: 'shell.execute',
+      definitionVersion: '1',
+      input: { command: 'printf exact' },
+      options: [{ kind: 'once', optionId: 'once', presentation: { label: '仅此次', details: [] } }],
+    },
+    answer: null,
+    revision: '1',
+    acceptedDecisionRevision: null,
+    state: 'pending',
+  };
+  const stale = (): NativeState => {
+    const value = originalState();
+    return {
+      ...value,
+      selection: { ...value.selection!, permissionUnavailable: true, interactions: [card] },
+      interactionSubmissions: [
+        {
+          interaction: card,
+          intent: {
+            expectedStoreId: 'store',
+            commandId: 'original-answer',
+            expectedRevision: '1',
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+          },
+          phase: 'accepted',
+        },
+      ],
+    };
+  };
+  const f = fixture((request) => {
+    // Main state remains a cache. Only the exact original select retry can refresh its source.
+    if (request.method === 'state' && unavailable && !recovered) return stale();
+    if (request.method === 'select' && unavailable) {
+      recovered = true;
+      const value = originalState();
+      return { ...value, selection: { ...value.selection!, viewGeneration: 3 } };
+    }
+    return undefined;
+  });
+  originalState = f.snapshot;
+  try {
+    await f.render();
+    await f.click('Original A');
+    await act(async () => {
+      await setPromptText(
+        f.dom.window.document.querySelector('[role="textbox"][contenteditable]')!,
+        'newer private 🙂',
+      );
+    });
+    const activation = f.calls.find((request) => request.method === 'select')!;
+    unavailable = true;
+    await f.notify();
+    expect(f.dom.window.document.body.textContent).toContain('审批回答已保存，等待执行。');
+    await until(
+      () =>
+        recovered &&
+        !f.dom.window.document.querySelector('[aria-label="approval original-approval"]'),
+    );
+    const selects = f.calls.filter((request) => request.method === 'select');
+    expect(selects).toHaveLength(2);
+    expect(selects[1]).toEqual(activation);
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('newer private 🙂');
+    expect(
+      f.calls.filter((request) =>
+        [
+          'interaction.answer',
+          'conversation.send',
+          'input',
+          'caller.submit',
+          'cancelInput',
+          'permission.mode',
+          'permission.trust',
+        ].includes(request.method),
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('failed selection and unavailable observation share one read while the original unknown answer can recover', async () => {
+  const held = deferred<NativeResult>();
+  let failing = false,
+    unavailable = false,
+    selectionReads = 0,
+    lookups = 0;
+  let answerPhase: 'unknown' | 'accepted' = 'unknown';
+  let f!: ReturnType<typeof fixture>;
+  const card: Interaction = {
+    id: 'original-approval',
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: 'run',
+    executionId: 'tool',
+    presentationSessionId: 'a',
+    ancestry: ['a'],
+    attempt: 1,
+    kind: 'approval',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    inputDigest: 'input',
+    policyRevision: 'policy',
+    requiredRefs: [],
+    request: {
+      options: [{ kind: 'once', optionId: 'once', presentation: { label: '仅此次', details: [] } }],
+    },
+    answer: null,
+    revision: '1',
+    acceptedDecisionRevision: null,
+    state: 'pending',
+  };
+  const stale = (): NativeState => {
+    const value = f.snapshot();
+    return {
+      ...value,
+      selection: { ...value.selection!, permissionUnavailable: true },
+      interactionSubmissions: [
+        {
+          interaction: card,
+          intent: {
+            expectedStoreId: 'store',
+            commandId: 'original-answer',
+            expectedRevision: '1',
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+          },
+          phase: answerPhase,
+        },
+      ],
+    };
+  };
+  f = fixture((request) => {
+    if (request.method === 'select' && failing) {
+      failing = false;
+      unavailable = true;
+      throw Error('original_selection_read_failed');
+    }
+    if (request.method === 'select' && unavailable) {
+      selectionReads++;
+      return held.promise;
+    }
+    if (request.method === 'state' && unavailable) return stale();
+    if (request.method === 'lookupInteraction') {
+      expect(request.commandId).toBe('original-answer');
+      lookups++;
+      answerPhase = 'accepted';
+      return null;
+    }
+    return undefined;
+  });
+  try {
+    await f.render();
+    failing = true;
+    await f.click('Original A');
+    const activation = f.calls.filter((request) => request.method === 'select').at(-1)!;
+    await f.notify();
+    // Neither recovery reason may consume the second slot needed by the saved answer.
+    // The selected read remains held until after the original lookup has completed.
+    await until(() => lookups > 0 || selectionReads > 1);
+    expect({ selectionReads, lookups }).toEqual({ selectionReads: 1, lookups: 1 });
+    expect(stale().interactionSubmissions[0]?.phase).toBe('accepted');
+    const selects = f.calls.filter((request) => request.method === 'select');
+    expect(selects).toHaveLength(2); // failed activation, one held retry
+    expect(selects.at(-1)).toEqual(activation);
+    unavailable = false;
+    await act(async () => held.resolve(f.snapshot()));
+    await until(
+      () =>
+        f.dom.window.document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled ===
+        false,
+    );
+    expect(selectionReads).toBe(1);
+    expect(lookups).toBe(1);
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('original text');
+    const reads = new Set([
+      'attach',
+      'state',
+      'directory',
+      'select',
+      'draft.read',
+      'conversation.models.read',
+      'input.models.read',
+      'conversation.branch',
+      'messages',
+      'messages.close',
+      'background.open',
+      'background.close',
+      'lookupInteraction',
+    ]);
+    expect(f.calls.filter((request) => !reads.has(request.method))).toEqual([]);
+  } finally {
+    held.resolve(f.snapshot());
+    await f.close();
+  }
+});
+
+for (const recoveredDependency of ['directory', 'answer'] as const) {
+  test(`an unavailable directory published by state recovers after ${recoveredDependency} without replaying the original answer`, async () => {
+    const held = deferred<NativeResult>();
+    let outage = false,
+      directoryUnavailable = true,
+      directoryReads = 0,
+      selectionReads = 0,
+      lookups = 0;
+    let answerPhase: 'unknown' | 'accepted' = 'unknown';
+    let f!: ReturnType<typeof fixture>;
+    const card: Interaction = {
+      id: 'next-job-approval',
+      originStoreId: 'store',
+      sessionId: 'a',
+      runId: 'run',
+      executionId: 'job',
+      presentationSessionId: 'a',
+      ancestry: ['a'],
+      attempt: 1,
+      kind: 'approval',
+      definitionId: 'shell.command',
+      definitionVersion: '1',
+      inputDigest: 'input',
+      policyRevision: 'policy',
+      requiredRefs: [],
+      request: {
+        definitionId: 'shell.command',
+        definitionVersion: '1',
+        input: { command: 'printf exact' },
+        options: [
+          { kind: 'once', optionId: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
+      answer: null,
+      revision: '1',
+      acceptedDecisionRevision: null,
+      state: 'pending',
+    };
+    f = fixture((request) => {
+      if (outage && (request.method === 'state' || request.method === 'select')) {
+        if (request.method === 'select') selectionReads++;
+        const value = f.snapshot();
+        return {
+          ...value,
+          directory: { ...directory, unavailable: directoryUnavailable },
+          selection: {
+            ...value.selection!,
+            permissionUnavailable: directoryUnavailable,
+            interactions: [card],
+          },
+          interactionSubmissions: [
+            {
+              interaction: { ...card, id: 'original-tool-approval', executionId: 'tool' },
+              intent: {
+                expectedStoreId: 'store',
+                commandId: 'original-answer',
+                expectedRevision: '1',
+                answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+              },
+              phase: answerPhase,
+            },
+          ],
+        };
+      }
+      if (request.method === 'directory' && outage) {
+        directoryReads++;
+        if (recoveredDependency === 'answer') {
+          if (answerPhase === 'unknown') return { ...directory, unavailable: true };
+          directoryUnavailable = false;
+          return directory;
+        }
+        return held.promise.then((value) => {
+          directoryUnavailable = false;
+          return value;
+        });
+      }
+      if (request.method === 'lookupInteraction') {
+        expect(request.commandId).toBe('original-answer');
+        lookups++;
+        if (recoveredDependency === 'answer')
+          return held.promise.then(() => {
+            answerPhase = 'accepted';
+            return null;
+          });
+        answerPhase = 'accepted';
+        return null;
+      }
+      return undefined;
+    });
+    const approve = () =>
+      [...f.dom.window.document.querySelectorAll('button')].find(
+        (button) => button.textContent === '仅此次',
+      );
+    try {
+      await f.render();
+      await f.click('Original A');
+      outage = true;
+      await f.notify();
+      await until(() => !!approve());
+      expect(approve()!.disabled).toBe(true);
+      // The other dependency has already backed off before the held read succeeds.
+      await until(
+        () =>
+          directoryReads >= (recoveredDependency === 'answer' ? 2 : 1) &&
+          lookups > 0 &&
+          selectionReads >= 2,
+        4500,
+      );
+      if (recoveredDependency === 'directory') expect(directoryReads).toBe(1);
+      await act(async () => held.resolve(directory));
+      await until(() => approve()?.disabled === false, 1500);
+      expect(
+        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      ).toBe('original text');
+      expect(
+        f.calls.filter((request) =>
+          ['interaction.answer', 'conversation.send', 'caller.submit', 'permission.mode'].includes(
+            request.method,
+          ),
+        ),
+      ).toEqual([]);
+    } finally {
+      held.resolve(directory);
+      await f.close();
+    }
+  }, 10000);
+}
+
+test('same-scope observation recovery preserves an outstanding complete history scan across retries', async () => {
+  const messages = deferred<NativeResult>();
+  let unavailable = false,
+    recovered = false,
+    hold = true,
+    reads = 0;
+  let originalState!: () => NativeState;
+  const f = fixture((request) => {
+    if (request.method === 'messages') {
+      reads++;
+      if (hold) return messages.promise;
+    }
+    if (request.method === 'state' && unavailable) {
+      const value = originalState();
+      return { ...value, selection: { ...value.selection!, permissionUnavailable: !recovered } };
+    }
+    if (request.method === 'select' && unavailable) {
+      recovered = true;
+      return originalState();
+    }
+    return undefined;
+  });
+  originalState = f.snapshot;
+  try {
+    await f.render();
+    await f.click('Original A');
+    await until(() => reads === 1);
+    const activation = f.calls.find((request) => request.method === 'select')!;
+    unavailable = true;
+    await f.notify();
+    await until(() => recovered);
+    // A second scheduled observation must reuse the original scan while its read is slow.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1300));
+    });
+    expect(reads).toBe(1);
+    expect(f.calls.filter((request) => request.method === 'select').length).toBeGreaterThanOrEqual(
+      3,
+    );
+    expect(
+      f.calls
+        .filter((request) => request.method === 'select')
+        .every((request) => JSON.stringify(request) === JSON.stringify(activation)),
+    ).toBe(true);
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('original text');
+    hold = false;
+    await act(async () =>
+      messages.resolve({ messages: [], nextAfterSeq: null, highWaterSeq: '0' }),
+    );
+    expect(
+      f.calls.filter(
+        (request) =>
+          request.method === 'interaction.answer' || request.method === 'conversation.send',
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('ordinary Native permission menu owns the complete grant directory and original unknown clear without exposing diagnostics', async () => {
+  let target = 'a',
+    unknown = false;
+  let f!: ReturnType<typeof fixture>;
+  const held = deferred<NativeResult>();
+  let holdRead = false;
+  const facts = (sessionId: string) => ({
+    observationId: sessionId === 'a' ? 31 : 32,
+    page: {
+      storeId: 'store',
+      sessionId,
+      revision: '4',
+      snapshotCursor: '4',
+      highWaterSeq: '1',
+      upperSeq: '1',
+      nextAfterSeq: null,
+      items: [
+        {
+          seq: '1',
+          grant: {
+            id: 'grant-a',
+            originStoreId: 'store',
+            sessionId,
+            workspaceId: 'w',
+            kind: 'tool' as const,
+            definitionId: 'fixture.command',
+            definitionVersion: '1',
+            inputDigest: 'input-digest',
+            interactionId: 'original-approval',
+            decisionRevision: '2',
+            executionId: 'original-execution',
+            ruleId: 'fixture.rule',
+            contractId: 'fixture.scope',
+            scope: { resource: '/exact/resource', command: 'safe append' },
+            scopeDigest: 'scope-digest',
+            bindings: [
+              { kind: 'tool' as const, definitionId: 'fixture.command', definitionVersion: '1' },
+            ],
+            presentation: {
+              label: '当前会话准确资源',
+              details: ['完整资源范围说明', '最后一条完整出处'],
+            },
+          },
+        },
+      ],
+    },
+  });
+  const snapshot = (): NativeState => {
+    const value = f.snapshot();
+    return {
+      ...value,
+      grantSubmissions: unknown
+        ? [
+            {
+              sessionId: 'a',
+              workspaceId: 'w',
+              observationId: 31,
+              intent: { expectedStoreId: 'store', commandId: 'original-clear', ifRevision: '4' },
+              phase: 'unknown',
+            },
+          ]
+        : [],
+      selection: {
+        ...value.selection!,
+        session: sessions.find((s) => s.id === target)!,
+        viewSelection: target === 'a' ? 1 : 2,
+        viewGeneration: target === 'a' ? 1 : 2,
+        canReadPermissionGrants: true,
+        permissions: {
+          observationId: 1,
+          mode: {
+            storeId: 'store',
+            sessionId: target,
+            scopeSessionId: target,
+            mode: 'auto',
+            revision: '1',
+            defaultMode: 'auto',
+            defaultRevision: '1',
+          },
+          trust: {
+            storeId: 'store',
+            workspaceId: 'w',
+            status: 'trusted',
+            trusted: true,
+            revision: '1',
+            canonicalIdentity: 'a'.repeat(64),
+            externalReadScopeDigest: 'b'.repeat(64),
+            readScopes: [{ kind: 'workspace', description: 'Workspace' }],
+          },
+        },
+      },
+    };
+  };
+  f = fixture((request) => {
+    if (request.method === 'select') {
+      target = request.sessionId;
+      return snapshot();
+    }
+    if (request.method === 'state') return snapshot();
+    if (request.method === 'grants.read') return holdRead ? held.promise : facts(request.sessionId);
+    if (request.method === 'grants.clear') {
+      unknown = true;
+      return null;
+    }
+    if (request.method === 'lookupGrant') {
+      unknown = false;
+      return null;
+    }
+    return undefined;
+  });
+  async function open() {
+    await until(
+      () => !!f.dom.window.document.querySelector('[data-permission-trigger]:not([disabled])'),
+    );
+    await act(async () =>
+      f.dom.window.document.querySelector('[data-permission-trigger]')!.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    await until(() =>
+      [...f.dom.window.document.querySelectorAll('[role="menuitem"]')].some((e) =>
+        ['当前会话授权', 'Current session grants'].includes(e.textContent ?? ''),
+      ),
+    );
+    await act(async () =>
+      [...f.dom.window.document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+        .find((e) => ['当前会话授权', 'Current session grants'].includes(e.textContent ?? ''))!
+        .click(),
+    );
+    await until(() => !!f.dom.window.document.querySelector('[aria-label="当前会话授权目录"]'));
+  }
+  try {
+    await f.render(false);
+    await f.click('Original A');
+    await open();
+    expect(f.dom.window.document.body.textContent).not.toContain('会话工具');
+    expect(f.dom.window.document.body.textContent).not.toContain('公开扩展能力');
+    await f.click('读取当前会话授权');
+    const body = f.dom.window.document.body.textContent!;
+    for (const detail of [
+      '完整资源范围说明',
+      '最后一条完整出处',
+      '/exact/resource',
+      'fixture.rule',
+      'fixture.scope',
+      'original-approval',
+      'original-execution',
+      'scope-digest',
+      'fixture.command@1',
+    ])
+      expect(body).toContain(detail);
+    const clear = [...f.dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (e) => e.textContent === '清除当前会话授权',
+    )!;
+    expect(clear.disabled).toBe(true);
+    await act(async () =>
+      f.dom.window.document
+        .querySelector<HTMLInputElement>('[aria-label="当前会话授权目录"] input[type="checkbox"]')!
+        .click(),
+    );
+    await act(async () => {
+      clear.click();
+      clear.click();
+    });
+    expect(f.calls.filter((r) => r.method === 'grants.clear')).toEqual([
+      { method: 'grants.clear', generation: 1, observationId: 31 },
+    ]);
+    await until(() => f.dom.window.document.body.textContent!.includes('查询原授权清除选择'));
+    expect(f.dom.window.document.body.textContent).toContain(
+      '原会话 a · 工作区 w · 原存储 store · 授权版本 4',
+    );
+    await f.click('查询原授权清除选择');
+    expect(f.calls.filter((r) => r.method === 'lookupGrant')).toEqual([
+      { method: 'lookupGrant', generation: 1, commandId: 'original-clear' },
+    ]);
+    expect(f.calls.filter((r) => r.method === 'grants.clear')).toHaveLength(1);
+    holdRead = true;
+    await f.click('读取当前会话授权');
+    await act(async () =>
+      f.dom.window.document
+        .querySelector<HTMLElement>('[role="dialog"]')!
+        .dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+    );
+    await f.click('Other B');
+    await act(async () => held.resolve(facts('a')));
+    expect(f.dom.window.document.querySelector('[aria-label="当前会话授权目录"]')).toBeNull();
+    holdRead = false;
+    await open();
+    expect(f.dom.window.document.body.textContent).not.toContain('original-approval');
+    await f.click('读取当前会话授权');
+    expect(f.dom.window.document.body.textContent).toContain('实际会话：b');
+    expect(
+      f.calls.some((r) =>
+        ['submit', 'conversation.send', 'interaction.answer', 'caller.submit'].includes(r.method),
+      ),
+    ).toBe(false);
   } finally {
     await f.close();
   }

@@ -238,7 +238,6 @@ export {
 } from './permissions';
 export {
   describePlanReview,
-  type PlanMode,
   type PlanReviewDraft,
   PlanReviewPanel,
   serializePlanReviewAnswer,

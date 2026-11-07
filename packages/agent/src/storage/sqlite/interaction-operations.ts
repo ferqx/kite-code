@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto';
 import Ajv from 'ajv';
 import { and, eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
+import { executionConfirmationBinding } from '../../execution-confirmation';
 import { canonicalJson } from '../../json';
+import { selectedApprovalOption } from '../../permission-grants';
 import type { DispatchInput, Store } from '../port';
 import {
   AgentError,
@@ -130,8 +132,8 @@ function answer(kind: InteractionRecord['kind'], value: InteractionAnswer, reque
     kind === 'question'
       ? ['kind', 'answers']
       : kind === 'approval'
-        ? ['kind', 'decision', 'grant']
-        : ['kind', 'decision', 'feedback', 'mode'];
+        ? ['kind', 'decision', 'optionId']
+        : ['kind', 'decision', 'feedback'];
   if (Object.keys(value).some((key) => !allowed.includes(key)))
     throw new AgentError('interaction_answer_invalid');
   if (kind === 'question') {
@@ -140,23 +142,16 @@ function answer(kind: InteractionRecord['kind'], value: InteractionAnswer, reque
     if (body?.schema !== undefined && !schema(body.schema)(value.answers))
       throw new AgentError('interaction_answer_invalid');
   } else {
-    if (
-      value.kind === 'approval' &&
-      value.grant !== undefined &&
-      (value.decision !== 'approve' ||
-        !['approve_once', 'same_command'].includes(value.grant) ||
-        (value.grant === 'same_command' &&
-          !(request as { grants?: string[] })?.grants?.includes('same_command')))
-    )
-      throw new AgentError('interaction_answer_invalid');
+    if (value.kind === 'approval') {
+      if (value.decision === 'approve') selectedApprovalOption(request, value.optionId);
+      else if (Object.hasOwn(value, 'optionId')) throw new AgentError('interaction_answer_invalid');
+    }
     if (
       !('decision' in value) ||
       !['approve', 'deny', ...(kind === 'plan_review' ? ['revise'] : [])].includes(value.decision)
     )
       throw new AgentError('interaction_answer_invalid');
     if ('feedback' in value && (typeof value.feedback !== 'string' || value.feedback.length > 8192))
-      throw new AgentError('interaction_answer_invalid');
-    if ('mode' in value && (typeof value.mode !== 'string' || value.mode.length > 128))
       throw new AgentError('interaction_answer_invalid');
   }
 }
@@ -231,11 +226,206 @@ function stopped(db: SqliteOperations, execution: Row): boolean {
   }
   return false;
 }
+/** Check the saved original human answer and closed parent step, never a Tool result. */
+function verifyExecutionConfirmation(
+  db: SqliteOperations,
+  execution: Row,
+  input: DispatchInput,
+): void {
+  const proof = input.authorization.executionConfirmation!;
+  if (
+    Object.keys(proof).some(
+      (key) => !['binding', 'interactionId', 'decisionRevision', 'stepKey'].includes(key),
+    ) ||
+    typeof proof.interactionId !== 'string' ||
+    !/^[1-9][0-9]{0,18}$/.test(proof.decisionRevision) ||
+    (proof.stepKey !== undefined &&
+      (typeof proof.stepKey !== 'string' || !proof.stepKey || proof.stepKey.length > 256))
+  )
+    throw new AgentError('execution_confirmation_invalid');
+  const binding = executionConfirmationBinding(proof.binding);
+  const root = db.row('SELECT * FROM execution WHERE id=?', binding.executionId);
+  const row = db.row('SELECT * FROM interaction WHERE id=?', proof.interactionId);
+  const request = row && decode<Record<string, Json>>(row.request_json);
+  if (
+    !root ||
+    !row ||
+    row.kind !== 'approval' ||
+    row.state !== 'answered' ||
+    row.accepted_decision_revision === null ||
+    String(row.accepted_decision_revision) !== proof.decisionRevision ||
+    String(row.revision) !== proof.decisionRevision ||
+    row.execution_id !== root.id ||
+    Number(row.attempt) !== binding.attempt ||
+    Number(root.attempt) !== binding.attempt ||
+    digest(decode(root.intent_json)) !== binding.inputDigest ||
+    row.input_digest !== binding.inputDigest ||
+    !request ||
+    canonicalJson(request.executionConfirmation!) !== canonicalJson(binding as unknown as Json) ||
+    row.policy_revision !== `execution-confirmation/${digest(binding as unknown as Json)}` ||
+    root.kind !== binding.owner.capability.kind ||
+    root.adapter_id !== binding.owner.capability.definitionId ||
+    root.definition_version !== binding.owner.capability.definitionVersion ||
+    row.definition_id !== root.adapter_id ||
+    row.definition_version !== root.definition_version ||
+    root.origin_store_id !== execution.origin_store_id ||
+    root.session_id !== execution.session_id ||
+    root.root_work_command_id !== execution.root_work_command_id ||
+    root.root_work_seq !== execution.root_work_seq ||
+    root.owner_generation !== execution.owner_generation ||
+    row.origin_store_id !== root.origin_store_id ||
+    row.session_id !== root.session_id ||
+    row.source_json !== root.decision_source_json ||
+    canonicalJson(required(db, root) as unknown as Json) !== row.required_refs_json
+  )
+    throw new AgentError('execution_confirmation_changed');
+  const policy = request.policy;
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy))
+    throw new AgentError('execution_confirmation_changed');
+  if (!Object.hasOwn(request, 'approvalRequestDigest')) {
+    if (
+      !Object.hasOwn(policy, 'confirmation') ||
+      digest(policy.confirmation!) !== binding.requestDigest
+    )
+      throw new AgentError('execution_confirmation_changed');
+  } else {
+    // Bytes are verified by the existing host body reader. SQL independently
+    // binds that original envelope to its immutable execution-scoped registration.
+    const attachment = policy.check ?? policy.review;
+    const reference =
+      attachment && typeof attachment === 'object' && !Array.isArray(attachment)
+        ? attachment.reference
+        : undefined;
+    if (
+      typeof request.approvalRequestDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(request.approvalRequestDigest) ||
+      !reference ||
+      typeof reference !== 'object' ||
+      Array.isArray(reference) ||
+      typeof reference.id !== 'string' ||
+      !reference.scope ||
+      typeof reference.scope !== 'object' ||
+      Array.isArray(reference.scope) ||
+      reference.scope.kind !== 'execution' ||
+      reference.scope.id !== root.id
+    )
+      throw new AgentError('execution_confirmation_changed');
+    const artifact = db.row(
+      'SELECT r.*, b.size FROM blob_ref r JOIN blob b ON b.hash=r.blob_hash WHERE r.id=?',
+      reference.id,
+    );
+    if (
+      !artifact ||
+      artifact.blob_hash !== request.approvalRequestDigest ||
+      artifact.origin_store_id !== root.origin_store_id ||
+      artifact.session_id !== root.session_id ||
+      artifact.subject_id !== row.subject_id ||
+      artifact.owner_kind !== 'execution' ||
+      artifact.owner_id !== root.id ||
+      artifact.media_type !== reference.mediaType ||
+      artifact.media_type !== 'application/json' ||
+      String(artifact.size) !== reference.size
+    )
+      throw new AgentError('execution_confirmation_changed');
+  }
+  const answer = decode<InteractionAnswer>(row.answer_json);
+  if (
+    answer.kind !== 'approval' ||
+    answer.decision !== 'approve' ||
+    answer.optionId !== 'once' ||
+    selectedApprovalOption(request, 'once').kind !== 'once'
+  )
+    throw new AgentError('execution_confirmation_changed');
+  const rootOrigin = db.row('SELECT subject_id FROM command WHERE id=?', root.origin_command_id!);
+  if (row.subject_id !== rootOrigin?.subject_id)
+    throw new AgentError('execution_confirmation_changed');
+  const rootBinding =
+    root.interaction_binding_json &&
+    decode<{ interactionId: string; decisionRevision: string }>(root.interaction_binding_json);
+  if (
+    !rootBinding ||
+    rootBinding.interactionId !== row.id ||
+    rootBinding.decisionRevision !== proof.decisionRevision
+  )
+    throw new AgentError('execution_confirmation_changed');
+  // Tool callbacks are frozen in the actual Run. Runless Actions carry the exact
+  // registered owner binding in their Core-built preparation source instead.
+  const source = decode<Record<string, Json>>(root.decision_source_json);
+  if (root.run_id !== null) {
+    const run = db.row('SELECT config_json FROM run WHERE id=?', root.run_id!);
+    const config = run && decode<{ toolBehaviors?: Json[] }>(run.config_json);
+    if (
+      !config?.toolBehaviors?.some(
+        (candidate) => canonicalJson(candidate) === canonicalJson(binding.owner as unknown as Json),
+      )
+    )
+      throw new AgentError('execution_confirmation_changed');
+  } else if (
+    source.kind !== 'action_decision' ||
+    `${source.extensionId}/${source.actionId}` !== root.adapter_id ||
+    source.definitionVersion !== root.definition_version ||
+    canonicalJson(source.executionConfirmationOwner!) !==
+      canonicalJson(binding.owner as unknown as Json)
+  )
+    throw new AgentError('execution_confirmation_changed');
+  if (proof.stepKey === undefined) {
+    if (
+      root.id !== execution.id ||
+      input.authorization.interactionId !== row.id ||
+      input.authorization.decisionRevision !== proof.decisionRevision
+    )
+      throw new AgentError('execution_confirmation_changed');
+    return;
+  }
+  const step = binding.steps.find((step) => step.key === proof.stepKey);
+  const command = db.row('SELECT * FROM command WHERE id=?', execution.origin_command_id!);
+  const original = command && decode<Record<string, Json>>(command.request_json);
+  if (
+    !step ||
+    !root.dispatched ||
+    !['dispatching', 'running', 'succeeded'].includes(String(root.state)) ||
+    execution.parent_execution_id !== root.id ||
+    !execution.cancel_with_parent ||
+    execution.kind !== 'job' ||
+    step.capability.kind !== execution.kind ||
+    step.capability.definitionId !== execution.adapter_id ||
+    step.capability.definitionVersion !== execution.definition_version ||
+    step.inputDigest !== digest(decode(execution.intent_json)) ||
+    !original ||
+    command?.kind !== 'operation.job' ||
+    command.operation_key !== step.key ||
+    original?.parentExecutionId !== root.id ||
+    original.operationKey !== step.key ||
+    original.cancellation !== 'attached' ||
+    original.definitionId !== execution.adapter_id ||
+    original.definitionVersion !== execution.definition_version ||
+    canonicalJson(original.input!) !== execution.intent_json ||
+    input.authorization.interactionId !== undefined ||
+    input.authorization.decisionRevision !== undefined
+  )
+    throw new AgentError('execution_confirmation_step_mismatch');
+  const origin = db.row('SELECT subject_id FROM command WHERE id=?', root.origin_command_id!);
+  if (
+    command.subject_id !== origin?.subject_id ||
+    db.row(
+      'SELECT e.id FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE e.parent_execution_id=? AND e.id<>? AND e.dispatched=1 AND c.operation_key=? LIMIT 1',
+      root.id!,
+      execution.id!,
+      step.key,
+    )
+  )
+    throw new AgentError('execution_confirmation_step_mismatch');
+}
+
 export function verifyInteractionDispatch(
   db: SqliteOperations,
   execution: Row,
   input: DispatchInput,
 ): void {
+  if (input.authorization.executionConfirmation) {
+    verifyExecutionConfirmation(db, execution, input);
+    return;
+  }
   if (execution.interaction_binding_json === null) {
     if (
       input.authorization.interactionId !== undefined ||
@@ -261,6 +451,8 @@ export function verifyInteractionDispatch(
   )
     throw new AgentError('interaction_decision_required');
   binding(execution, record(row));
+  if (decode<Record<string, Json>>(row.request_json).executionConfirmation)
+    throw new AgentError('execution_confirmation_changed');
   const decision = decode<InteractionAnswer>(row.answer_json);
   if (!('decision' in decision) || decision.decision !== 'approve')
     throw new AgentError('permission_denied');
@@ -271,80 +463,6 @@ export function verifyInteractionDispatch(
     throw new AgentError('interaction_binding_changed');
 }
 export function callInteraction(db: SqliteOperations, method: string, args: unknown[]): unknown {
-  if (method === 'invalidateAuthorizationReview')
-    return db.tx(() => {
-      const input = args[0] as Parameters<Store['invalidateAuthorizationReview']>[0];
-      db.identity(input.expectedStoreId);
-      const target = db.row('SELECT * FROM execution WHERE id=?', input.executionId);
-      if (!target) throw new AgentError('execution_not_found');
-      live(db, target, input.owner);
-      if (target.state !== 'planned' || target.dispatched)
-        throw new AgentError('interaction_not_active');
-      verifyHostControlReads(db, target, input.expectedStoreId, input.controlReads);
-      if (input.previousPolicyRevision === input.policyRevision)
-        throw new AgentError('authorization_review_binding_changed');
-      const reviews = db.rows(
-        "SELECT e.id,c.request_json FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND e.session_id=? AND e.origin_store_id=?",
-        target.id!,
-        target.session_id!,
-        input.expectedStoreId,
-      );
-      for (const review of reviews) {
-        const request = decode<{ request: { input: { policyRevision: string } } }>(
-          review.request_json,
-        );
-        // ensureAgent envelopes preserve the original review payload under request.input.
-        const policy =
-          request.request?.input?.policyRevision ??
-          (request as unknown as { input?: { policyRevision?: string } }).input?.policyRevision;
-        if (
-          policy !== input.previousPolicyRevision ||
-          (input.reviewExecutionId !== undefined && review.id !== input.reviewExecutionId)
-        )
-          continue;
-        const requestFact: Json = {
-          kind: 'authorization.invalidate',
-          targetExecutionId: input.executionId,
-          reviewExecutionId: String(review.id),
-          previousPolicyRevision: input.previousPolicyRevision,
-          policyRevision: input.policyRevision,
-          controlReads: (input.controlReads ?? []) as unknown as Json,
-        };
-        const id = `review-refresh-${digest(requestFact)}`;
-        if (db.row('SELECT id FROM command WHERE id=?', id)) continue;
-        const origin = db.row(
-          'SELECT subject_id FROM command WHERE id=?',
-          target.origin_command_id!,
-        )!;
-        db.allocateSessionSequence(String(target.session_id));
-        const seq = db.row('SELECT next_seq FROM session WHERE id=?', target.session_id!)!
-          .next_seq!;
-        db.run(
-          "INSERT INTO command(id,session_id,seq,kind,subject_id,request_digest,request_json,status,receipt_json,origin_store_id,root_work_command_id,root_work_seq) VALUES(?,?,?,'authorization.invalidate',?,?,?,'applied',?,?,?,?)",
-          id,
-          target.session_id!,
-          seq,
-          origin.subject_id!,
-          digest(requestFact),
-          canonicalJson(requestFact),
-          canonicalJson({
-            reason: 'permission_policy_changed',
-            targetExecutionId: input.executionId,
-            reviewExecutionId: String(review.id),
-            policyRevision: input.policyRevision,
-          }),
-          input.expectedStoreId,
-          target.root_work_command_id!,
-          target.root_work_seq!,
-        );
-        db.event(String(target.session_id), String(review.id), 'authorization.invalidated', {
-          commandId: id,
-          reason: 'permission_policy_changed',
-          targetExecutionId: input.executionId,
-          policyRevision: input.policyRevision,
-        });
-      }
-    });
   if (method === 'refreshApproval')
     return db.tx(() => {
       const input = args[0] as import('../../execution/authorization-refresh').RefreshApprovalInput;
@@ -740,18 +858,29 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
     if (row.information_permission_json !== null && row.information_permission_json !== undefined) {
       if (
         !input.informationPermission ||
+        !input.currentInformationPermission ||
         canonicalJson(input.informationPermission as unknown as Json) !==
           row.information_permission_json
       )
         throw new AgentError('information_permission_changed');
       validateInformationPermission(input.informationPermission);
-      verifyHostControlReads(
-        db,
-        execution,
-        input.expectedStoreId,
-        input.informationPermission.controlReads,
-      );
-    } else if (input.informationPermission) throw new AgentError('information_permission_changed');
+      validateInformationPermission(input.currentInformationPermission);
+      try {
+        verifyHostControlReads(
+          db,
+          execution,
+          input.expectedStoreId,
+          input.currentInformationPermission.controlReads,
+        );
+      } catch (error) {
+        // Only this fresh observation may be retried. Historical identity,
+        // source, requirements and cancellation failures remain terminal.
+        if (error instanceof AgentError && error.code === 'permission_control_changed')
+          throw new AgentError('information_permission_control_changed');
+        throw error;
+      }
+    } else if (input.informationPermission || input.currentInformationPermission)
+      throw new AgentError('information_permission_changed');
     if (
       row.execution_id !== input.executionId ||
       Number(row.attempt) !== input.attempt ||

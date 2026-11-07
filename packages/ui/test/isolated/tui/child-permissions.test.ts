@@ -58,7 +58,7 @@ def wait(text,ready=False):
    except OSError: raise RuntimeError('PTY ended '+tail)
 try:
  wait('New Run');matching='';os.write(master,b'work');wait('New Run > work');matching='';os.write(master,b'\\r');wait('Original child approval pending');os.write(master,b'\\x02');wait('Pending cards ·');os.write(master,b'\\r');wait('approval [')
- ${mode === 'complete' ? `wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\x1b[B');wait('❯ Deny',ready=True);matching='';os.write(master,b'\\x1b[A');wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\r');wait('Original child choice pending');os.write(master,b'\\x02');wait('Pending cards ·');os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('❯ 1. internal-choice',ready=True);matching='';os.write(master,b'\\r');wait('Original completed Run / complete output preview ready');matching='';os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
+ ${mode === 'complete' ? `wait('❯ 仅此次',ready=True);matching='';os.write(master,b'\\x1b[B');wait('❯ Deny',ready=True);matching='';os.write(master,b'\\x1b[A');wait('❯ 仅此次',ready=True);matching='';os.write(master,b'\\r');wait('Original child choice pending');os.write(master,b'\\x02');wait('Pending cards ·');os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('❯ 1. internal-choice',ready=True);matching='';os.write(master,b'\\r');wait('Original completed Run / complete output preview ready');matching='';os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
  os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5
  while not eof_mode and p.poll() is None and time.monotonic()<deadline:
@@ -97,7 +97,11 @@ finally:
         expect(card.sessionId).not.toBe('a');
         expect(card.presentationSessionId).toBe('a');
       }
-      expect(facts.interactions[0].answer.grant).toBe('approve_once');
+      expect(facts.interactions[0].answer).toEqual({
+        kind: 'approval',
+        decision: 'approve',
+        optionId: 'once',
+      });
       expect(
         facts.interactions.find((card: { kind: string }) => card.kind === 'question').answer,
       ).toEqual({ kind: 'question', answers: { choiceId: 'internal-choice' } });

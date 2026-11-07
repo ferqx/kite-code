@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
-import { createFileTools, createWorkspaceFiles, type FileBaseline } from '../../../../src/files';
+import { createFileTools, createWorkspaceFiles } from '../../../../src/files';
 import { createWorkspaceSerialLocks } from '../../../../src/resources';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
@@ -58,7 +58,7 @@ for (const scenario of ['unselected-content', 'same-content-new-inode'] as const
       aWrote = gate();
     let readCount = 0;
     const stages = new Map<string, number>();
-    const baselines = new Map<string, FileBaseline>();
+    const baselines = new Map<string, string>();
     let parentCalls = 0;
     const child: ModelAdapter = {
       async *stream(request) {
@@ -80,14 +80,14 @@ for (const scenario of ['unselected-content', 'same-content-new-inode'] as const
         if (stage === 0)
           events = call('read_file', { path: 'shared', start_line: 1, max_lines: 1 });
         else if (stage === 1) {
-          baselines.set(actor, body.baseline);
+          baselines.set(actor, body.baseRef ?? body.base_ref);
           expect(body.content).toBe('A=0\n');
           if (++readCount === 2) bothRead.release();
           await bothRead.promise;
           if (actor === 'B') await aWrote.promise;
           events = call('write_file', {
             path: 'shared',
-            base: body.baseline,
+            base_ref: body.baseRef ?? body.base_ref,
             content:
               actor === 'A'
                 ? scenario === 'unselected-content'
@@ -96,7 +96,7 @@ for (const scenario of ['unselected-content', 'same-content-new-inode'] as const
                 : 'MUST_NOT_OVERWRITE',
           });
         } else if (actor === 'A') {
-          expect(body.baseline).toBeDefined();
+          expect(body.baseRef ?? body.base_ref).toBeDefined();
           utimesSync(join(directory, 'shared'), initialStat.atime, initialStat.mtime);
           expect(statSync(join(directory, 'shared')).mtime.getTime()).toBe(
             initialStat.mtime.getTime(),
@@ -107,15 +107,15 @@ for (const scenario of ['unselected-content', 'same-content-new-inode'] as const
           expect(last!.content).toContain('baseline');
           events = call('read_file', { path: 'shared' });
         } else if (stage === 3) {
-          expect(body.baseline.inode).not.toBe(baselines.get('B')!.inode);
+          expect(String(statSync(join(directory, 'shared')).ino)).not.toBe(String(initialStat.ino));
           if (scenario === 'unselected-content') expect(body.content).toContain('B=1');
           events = call('write_file', {
             path: 'shared',
-            base: body.baseline,
+            base_ref: body.baseRef ?? body.base_ref,
             content: scenario === 'unselected-content' ? 'A=1\nB=1\n' : 'A=1\nB=0\n',
           });
         } else {
-          expect(body.baseline).toBeDefined();
+          expect(body.baseRef ?? body.base_ref).toBeDefined();
           events = [
             {
               type: 'text_delta',
@@ -131,7 +131,7 @@ for (const scenario of ['unselected-content', 'same-content-new-inode'] as const
       roles: [{ id: 'worker', configurationId: 'worker', description: 'workspace editor' }],
     });
     const fileExtension = {
-      id: 'fixture.files',
+      id: 'builtin.files',
       version: '1',
       apiMajor: 1 as const,
       tools: createFileTools(files),
@@ -260,7 +260,7 @@ for (const unknown of [false, true])
     let afterPublications = 0,
       childCalls = 0,
       parentCalls = 0;
-    const bases = new Map<string, FileBaseline>();
+    const bases = new Map<string, string>();
     const tools = createFileTools(files, {
       capture: {
         async before(input) {
@@ -310,14 +310,22 @@ for (const unknown of [false, true])
           for (const message of messages) {
             const read = presentedFileRead(message.content);
             expect(read).toBeDefined();
-            if (read!.path === 'X' || read!.path === 'Y') bases.set(read!.path, read!.baseline);
+            if (read!.path === 'X' || read!.path === 'Y') bases.set(read!.path, read!.baseRef);
           }
-          events = call('write_file', { path: 'X', base: bases.get('X'), content: 'X=committed' });
+          events = call('write_file', {
+            path: 'X',
+            base_ref: bases.get('X'),
+            content: 'X=committed',
+          });
         } else if (stage === 2) {
-          expect(body.baseline).toBeDefined();
+          expect(body.baseRef ?? body.base_ref).toBeDefined();
           expect(readFileSync(join(directory, 'X'), 'utf8')).toBe('X=committed');
           if (!unknown) writeFileSync(join(directory, 'Y'), 'Y=external-direct-write');
-          events = call('write_file', { path: 'Y', base: bases.get('Y'), content: 'Y=published' });
+          events = call('write_file', {
+            path: 'Y',
+            base_ref: bases.get('Y'),
+            content: 'Y=published',
+          });
         } else {
           expect(unknown).toBe(false);
           events = [
@@ -355,7 +363,7 @@ for (const unknown of [false, true])
       model: parent,
       modelId: 'parent',
       modelConcurrency: 2,
-      extensions: [task, { id: 'fixture.files', version: '1', apiMajor: 1 as const, tools }],
+      extensions: [task, { id: 'builtin.files', version: '1', apiMajor: 1 as const, tools }],
       permissions: {
         async authorize() {
           return { allowed: true, revision: 'current' };

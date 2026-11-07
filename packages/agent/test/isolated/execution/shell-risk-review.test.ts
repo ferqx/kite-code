@@ -7,8 +7,10 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
+import type { Extension } from '../../../src/extensions';
 import { createPermissionPolicy } from '../../../src/permissions';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureReviewBinding, fixtureRiskBehavior } from '../../fixtures/review-behavior';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -80,7 +82,9 @@ async function fixture(
       hardAllowed: true,
       safeRead: false,
       effects: ['unknown'],
-      ...(request.kind === 'tool' ? { autoReview: 'shell_risk' as const } : {}),
+      ...(request.kind === 'tool'
+        ? { autoReview: 'check' as const, reviewBehavior: fixtureReviewBinding(behaviors, request) }
+        : {}),
     }),
     readCheckContext: () => {
       contexts++;
@@ -92,6 +96,38 @@ async function fixture(
       };
     },
   });
+  const prepareRiskReview = async () => {
+    preparations++;
+    if (options.hangPreparation) await preparationGate;
+    if (options.preparationFails) throw new Error('private preparation body');
+    return {
+      material: { command: 'bounded fixture', cwd: root, revision },
+      fingerprint: createHash('sha256').update(String(revision)).digest('hex'),
+      reusable: options.reusable ?? true,
+    };
+  };
+  const extensions: Extension[] = [
+    {
+      id: 'fixture',
+      version: '1',
+      apiMajor: 1,
+      tools: [
+        {
+          id: 'fixture.effect',
+          version: '1',
+          description: 'Governed fixture',
+          inputSchema: { type: 'object' },
+          async execute(_input, context) {
+            effects++;
+            reviewedExecutions.push(context.dispatchAuthorization?.materialReviewed === true);
+            if (options.changed) revision++;
+            return { outcome: 'succeeded', content: 'Effect confirmed.' };
+          },
+        },
+      ],
+    },
+  ];
+  const behaviors = [fixtureRiskBehavior(extensions[0]!.tools![0]!, 'tool', prepareRiskReview)];
   const runtime = createRuntime({
     store,
     artifacts: createArtifactStore({ profile, store }),
@@ -104,16 +140,6 @@ async function fixture(
       modelId: 'reviewer',
       timeoutMs:
         options.reviewBudgetMs ?? (options.hangPreparation || options.delayedEnsure ? 30 : 5000),
-      async prepareRiskReview() {
-        preparations++;
-        if (options.hangPreparation) await preparationGate;
-        if (options.preparationFails) throw new Error('private preparation body');
-        return {
-          material: { command: 'bounded fixture', cwd: root, revision },
-          fingerprint: createHash('sha256').update(String(revision)).digest('hex'),
-          reusable: options.reusable ?? true,
-        };
-      },
       model: {
         async *stream(input) {
           requests.push(structuredClone(input));
@@ -139,27 +165,8 @@ async function fixture(
         },
       },
     },
-    extensions: [
-      {
-        id: 'fixture',
-        version: '1',
-        apiMajor: 1,
-        tools: [
-          {
-            id: 'fixture.effect',
-            version: '1',
-            description: 'Governed fixture',
-            inputSchema: { type: 'object' },
-            async execute(_input, context) {
-              effects++;
-              reviewedExecutions.push(context.dispatchAuthorization?.riskReviewApproved === true);
-              if (options.changed) revision++;
-              return { outcome: 'succeeded', content: 'Effect confirmed.' };
-            },
-          },
-        ],
-      },
-    ],
+    extensions,
+    toolBehaviors: behaviors,
   });
   await runtime.createWorkspace({
     expectedStoreId,
@@ -212,9 +219,11 @@ test('risk-only Loop seals original risk, derives approval, and omits business m
     const check = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'reviewer')!;
     expect(check.result).toMatchObject({
       content: '{"risk":"ordinary","reason":"Exact bounded fixture effect."}',
-      risk: 'ordinary',
-      decision: 'approve_once',
-      reviewPurpose: 'shell_risk',
+      authorizationCheckOutput: {
+        version: 1,
+        answer: { decision: 'approve_once' },
+        evidence: { risk: 'ordinary' },
+      },
     });
     expect(f.model.requests.at(-1)!.messages.filter((m) => m.role === 'tool')).toHaveLength(2);
   } finally {
@@ -310,7 +319,7 @@ for (const mode of ['auto', 'accept_edits'] as const)
         interactionId: card!.id,
         expectedRevision: card!.revision,
         subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       expect((await work).status).toBe('completed');
       expect(f.counts()).toMatchObject({ effects: 1, reviews: mode === 'auto' ? 1 : 0 });
@@ -326,7 +335,7 @@ test('preparation failures remain readable technical failures rather than approv
     expect((await f.run()).status).toBe('completed');
     expect(f.counts()).toMatchObject({ effects: 0, reviews: 0 });
     const text = f.model.requests.at(-1)!.messages.find((m) => m.role === 'tool')!.content;
-    expect(text).toContain('preparing the trusted Shell review facts failed');
+    expect(text).toContain('preparing the trusted review materials failed');
     expect(text).not.toContain('private preparation body');
   } finally {
     await f.close();
@@ -339,9 +348,9 @@ test('a preparation failure does not become timeout approval while its check is 
     expect((await f.run()).status).toBe('completed');
     expect(f.counts()).toMatchObject({ effects: 0, reviews: 0 });
     const check = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'reviewer')!;
-    expect(check.result).toMatchObject({ code: 'shell_risk_preparation_failed' });
+    expect(check.result).toMatchObject({ code: 'authorization_check_preparation_failed' });
     expect(f.model.requests.at(-1)!.messages.find((m) => m.role === 'tool')!.content).toContain(
-      'preparing the trusted Shell review facts failed',
+      'preparing the trusted review materials failed',
     );
   } finally {
     await f.close();

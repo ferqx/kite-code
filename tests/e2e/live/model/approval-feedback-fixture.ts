@@ -1,6 +1,10 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { basename, resolve } from 'node:path';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
+import type { ModelAdapter, ModelRequest, ModelToolCall, ModelUsage } from '@kite-ai/ai';
+import { describeLiveModelAttemptFailure } from './live-model-fixture';
+import { createPhysicalObserver } from './live-physical-stream-observer';
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -25,16 +29,226 @@ type Feedback = {
   content: string;
 };
 
-export function liveReasoningEffort(value: string | undefined): 'low' | 'high' {
+export function liveReasoningEffort(value: string | undefined): 'low' | 'medium' | 'high' {
   if (value === undefined) return 'low';
-  if (value === 'low' || value === 'high') return value;
+  if (value === 'low' || value === 'medium' || value === 'high') return value;
   throw Error('live_approval_execution_reasoning_effort_invalid');
 }
 
-export function liveModelSelection(value: string | undefined): 'gpt-6-luna' | 'gpt-6.1-terra' {
+export function liveModelSelection(
+  value: string | undefined,
+): 'default' | 'gpt-6-luna' | 'gpt-6.1-terra' {
   if (value === undefined) return 'gpt-6-luna';
-  if (value === 'gpt-6-luna' || value === 'gpt-6.1-terra') return value;
+  if (value === 'default' || value === 'gpt-6-luna' || value === 'gpt-6.1-terra') return value;
   throw Error('live_approval_execution_model_invalid');
+}
+
+/** Shell review receives owner material only; generic policy/authorization fields stay sealed. */
+export function hasMinimalShellRiskInput(value: unknown): boolean {
+  const input = object(value);
+  return (
+    input.purpose === 'shell_risk' &&
+    Object.keys(input).sort().join(',') === 'material,operation,purpose'
+  );
+}
+
+/** Observe original bindings and transport without replacing presets, signals or retry policy. */
+export function createDefaultApprovalObservation(options: {
+  modelId: string;
+  signal: AbortSignal;
+  metadata: Record<string, unknown>;
+  wireRequest?(entry: { physicalIndex: number; requestId: string | null; body: string }): void;
+  rawResponse?(index: number, bytes: Uint8Array): void;
+}) {
+  const context = new AsyncLocalStorage<string>();
+  const requests: ModelRequest[] = [];
+  const calls: ModelToolCall[] = [];
+  const usage: ModelUsage[] = [];
+  const wire: { status: number; tools: string[] }[] = [];
+  const wireRequests: {
+    physicalIndex: number;
+    requestId: string | null;
+    body: string;
+    bytes: number;
+  }[] = [];
+  const attemptFailures: ReturnType<typeof describeLiveModelAttemptFailure>[] = [];
+  const physical = createPhysicalObserver();
+  const logical: {
+    requestId: string;
+    role: 'business' | 'reviewer';
+    binding: ReturnType<NonNullable<ModelAdapter['describeRequest']>> | null;
+    startedAt: number;
+    firstEventAt: number | null;
+    endedAt: number | null;
+    completed: boolean;
+  }[] = [];
+  function wrap(model: ModelAdapter, role: 'business' | 'reviewer'): ModelAdapter {
+    return {
+      describeRequest: model.describeRequest?.bind(model),
+      async *stream(request, input) {
+        requests.push(structuredClone(request));
+        const entry = {
+          requestId: request.requestId,
+          role,
+          binding: model.describeRequest?.(request) ?? null,
+          startedAt: performance.now(),
+          firstEventAt: null as number | null,
+          endedAt: null as number | null,
+          completed: false,
+        };
+        logical.push(entry);
+        let count = 0,
+          failed = false;
+        const iterator = model.stream(request, input)[Symbol.asyncIterator]();
+        const close = async () => {
+          try {
+            await context.run(request.requestId, () => iterator.return?.());
+          } catch (error) {
+            if (!failed) throw error;
+          }
+        };
+        try {
+          for (;;) {
+            const step = await context.run(request.requestId, () => iterator.next());
+            if (step.done) {
+              entry.completed = true;
+              break;
+            }
+            count++;
+            entry.firstEventAt ??= performance.now();
+            if (step.value.type === 'tool_call') calls.push(structuredClone(step.value));
+            if (step.value.type === 'finish') usage.push(structuredClone(step.value.usage));
+            yield step.value;
+          }
+        } catch (error) {
+          failed = true;
+          attemptFailures.push(describeLiveModelAttemptFailure(request.requestId, count, error));
+          throw error;
+        } finally {
+          entry.endedAt = performance.now();
+          if (!entry.completed) await close();
+        }
+      },
+    };
+  }
+  function observeFetch(original: typeof fetch): typeof fetch {
+    return Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        const requestId = context.getStore();
+        if (!requestId) return original(input, init);
+        const attempt = physical.begin(requestId);
+        const body = typeof init?.body === 'string' ? init.body : '';
+        let parsed: Record<string, unknown> = {};
+        try {
+          parsed = object(JSON.parse(body));
+        } catch {
+          /* Preserve opaque requests unchanged. */
+        }
+        const tools = Array.isArray(parsed.tools)
+          ? parsed.tools.map((tool) =>
+              String(object(object(tool).function).name ?? object(tool).name ?? ''),
+            )
+          : [];
+        const entry = {
+          physicalIndex: attempt.index,
+          requestId,
+          body,
+          bytes: Buffer.byteLength(body),
+        };
+        options.wireRequest?.(entry);
+        wireRequests.push(entry);
+        const observation = { status: 0, tools };
+        wire.push(observation);
+        try {
+          const response = await original(input, init);
+          observation.status = response.status;
+          if (!response.body) return physical.response(attempt, response);
+          const reader = response.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let saved = false;
+          const save = () => {
+            if (saved) return;
+            saved = true;
+            options.rawResponse?.(attempt.index, Buffer.concat(chunks));
+          };
+          const captured = new ReadableStream<Uint8Array>(
+            {
+              async pull(controller) {
+                try {
+                  const item = await reader.read();
+                  if (item.done) {
+                    save();
+                    controller.close();
+                  } else {
+                    chunks.push(item.value.slice());
+                    controller.enqueue(item.value);
+                  }
+                } catch (error) {
+                  save();
+                  controller.error(error);
+                }
+              },
+              async cancel(reason) {
+                save();
+                await reader.cancel(reason);
+              },
+            },
+            { highWaterMark: 0 },
+          );
+          return physical.response(
+            attempt,
+            new Response(captured, {
+              status: response.status,
+              statusText: response.statusText,
+              headers: response.headers,
+            }),
+          );
+        } catch (error) {
+          physical.transportFailed(attempt);
+          throw error;
+        }
+      },
+      { preconnect: original.preconnect },
+    );
+  }
+  function install() {
+    const originalFetch = globalThis.fetch;
+    const originalSession = Bun.FetchSession;
+    const observedFetch = observeFetch(originalFetch);
+    const observedSession = new Proxy(originalSession, {
+      construct(target, args, newTarget) {
+        const session = Reflect.construct(target, args, newTarget) as Bun.FetchSession;
+        Object.defineProperty(session, 'fetch', {
+          value: observeFetch(
+            Object.assign(session.fetch.bind(session), { preconnect: originalFetch.preconnect }),
+          ),
+        });
+        return session;
+      },
+    });
+    globalThis.fetch = observedFetch;
+    Bun.FetchSession = observedSession;
+    return () => {
+      if (globalThis.fetch === observedFetch) globalThis.fetch = originalFetch;
+      if (Bun.FetchSession === observedSession) Bun.FetchSession = originalSession;
+    };
+  }
+  return {
+    modelId: options.modelId,
+    signal: options.signal,
+    metadata: options.metadata,
+    requests,
+    calls,
+    usage,
+    wire,
+    wireRequests,
+    attemptFailures,
+    physical,
+    logical,
+    wrap,
+    observeFetch,
+    install,
+  };
 }
 
 /** Decode the public Source header; business excerpts are never receipt metadata. */
@@ -162,7 +376,7 @@ export function partialChildFailurePrerequisites(input: {
     carrier.childSessionId !== model.sessionId ||
     carrier.originStoreId !== model.originStoreId ||
     reference.runId !== model.runId ||
-    !['worker', 'code'].includes(String(role)) ||
+    role !== 'general' ||
     input.witnessContent !== input.expectedContent ||
     !input.validatorUnchanged
   )

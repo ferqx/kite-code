@@ -166,6 +166,7 @@ export function formatFileReadResult({
       'path',
       'content',
       'baseline',
+      'base_ref',
       'selection',
       'executionId',
       'runId',
@@ -175,6 +176,7 @@ export function formatFileReadResult({
     ]) ||
     typeof value.path !== 'string' ||
     (!baseline(value.baseline) && !(externalRead && value.baseline === undefined)) ||
+    (value.baseline !== undefined && typeof value.base_ref !== 'string') ||
     !knownObservation(value.observation, 'inspection')
   )
     return;
@@ -223,7 +225,7 @@ export function formatFileReadResult({
     `Read ${quote(value.path)}; from_line=${selected.fromLine}; lines=${selected.toLine === null ? 'none' : `${selected.fromLine}-${selected.toLine}`}/${selected.totalLines}; next_line=${selected.nextOffset}; ${whole ? 'complete file' : 'selected window only'}.\n` +
     (externalRead && value.baseline === undefined
       ? 'External read-only file; no edit baseline.\n'
-      : `${externalRead ? 'External file; outside workspace checkpoints. Baseline does not grant write permission.\n' : ''}baseline=${quote(value.baseline)}\n`) +
+      : `${externalRead ? 'External file; outside workspace checkpoints. The reference does not grant write permission.\n' : ''}base_ref=${quote(value.base_ref)}\n`) +
     `Content (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`
   );
 }

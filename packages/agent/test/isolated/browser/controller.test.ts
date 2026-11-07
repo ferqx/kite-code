@@ -1238,7 +1238,7 @@ test('snapshot discovers current generation after asynchronous open, while a sec
   const extension = createBrowserExtension({ controller: fixture.controller }),
     { context } = toolContext();
   const snapshotTool = extension.tools!.find((tool) => tool.id === 'browser.snapshot')!;
-  expect(snapshotTool.inputSchema.required as string[]).not.toContain('generation');
+  expect(snapshotTool.model!.inputSchema!.required).toEqual(['pageRef']);
   const result = await snapshotTool.execute(
     { key: 'observe-current', browserId: 'browser-one' },
     context,

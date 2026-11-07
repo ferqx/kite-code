@@ -197,7 +197,11 @@ test('actual 40 sibling Job approvals: CLI exhausts original pending pages and D
     const last = next!.interactions[0]!;
     const cliTarget = next!.interactions[19]!;
     expect(cliTarget.id).toBe(waiting.interactions!.at(-1)!.id);
-    const answer = await desktop.answerInteraction(last, { kind: 'approval', decision: 'approve' });
+    const answer = await desktop.answerInteraction(last, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    });
     expect(answer.sessionId).toBe('s');
     expect(answer.originStoreId).toBe(storeId);
     await desktop.selectSession('other');
@@ -210,7 +214,7 @@ test('actual 40 sibling Job approvals: CLI exhausts original pending pages and D
             expectedStoreId: storeId,
             commandId: crypto.randomUUID(),
             expectedRevision: card.revision,
-            answer: { kind: 'approval', decision: 'approve' },
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
           }),
         ),
     );
@@ -224,7 +228,7 @@ test('actual 40 sibling Job approvals: CLI exhausts original pending pages and D
         expect(card.presentationSessionId).toBe('s');
         expect(card.originStoreId).toBe(storeId);
         seen.add(card.id);
-        return { kind: 'approval', decision: 'approve' };
+        return { kind: 'approval', decision: 'approve', optionId: 'once' };
       },
     });
     if (outcome.status !== 'succeeded')

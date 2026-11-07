@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import type { Extension, JobDefinition, JobEvent, Json } from '../../../src/extensions';
+import { modelExecutionId } from '../../../src/model-identifier';
 import { openSqliteStore } from '../../../src/sqlite';
 import { createShellExtension } from '../../../src/tools/shell';
 
@@ -200,9 +201,16 @@ test('actual foreground model feedback is public text while the original command
     expect(feedback.content).toContain(stdout);
     expect(feedback.content).toContain(stderr);
     expect(feedback.content).toContain('Exit code: 0');
+    expect(feedback.content).toContain(
+      `execution_id: ${JSON.stringify(modelExecutionId(tool.id))}`,
+    );
+    expect(feedback.content).not.toContain(
+      `execution_id: ${JSON.stringify(modelExecutionId(command.id))}`,
+    );
     const saved = tool.result as { content: string; details: Json };
     expect(JSON.parse(saved.content)).toEqual(saved.details);
     expect(JSON.parse(saved.content).execution.id).toBe(command.id);
+    expect(JSON.parse(saved.content).execution_id).toBe(tool.id);
     expect(command.parentExecutionId).toBe(tool.id);
     expect(saved.content).not.toBe(feedback.content);
     expect(f.counts().starts).toBe(1);
@@ -292,6 +300,12 @@ test('background admission, later original completion and shell_read retain one 
     const original = before.find((row) => row.kind === 'job')!;
     const originalStarterResult = structuredClone(starter.result);
     expect(accepted.sourceIds).toEqual([starter.id]);
+    expect(accepted.content).toContain(
+      `execution_id: ${JSON.stringify(modelExecutionId(starter.id))}`,
+    );
+    expect((starter.result as { details: Record<string, Json> }).details.execution_id).toBe(
+      starter.id,
+    );
     f.release();
     const deadline = Date.now() + 5000;
     while ((await f.store.getExecution(original.id))?.status !== 'succeeded') {
@@ -331,6 +345,12 @@ test('background admission, later original completion and shell_read retain one 
       (message) => message.role === 'tool' && message.toolCallId === 'original-read',
     )!;
     expect(readFeedback.sourceIds).toEqual([reader.id]);
+    expect(readFeedback.content).toContain(
+      `execution_id: ${JSON.stringify(modelExecutionId(starter.id))}`,
+    );
+    expect(readFeedback.content).not.toContain(
+      `execution_id: ${JSON.stringify(modelExecutionId(reader.id))}`,
+    );
     publicFeedback(readFeedback.content);
     expect(readFeedback.content).toContain(stdout);
     expect(readFeedback.content).toContain(stderr);

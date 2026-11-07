@@ -1222,7 +1222,7 @@ test('tool receipts outside the bounded View retain exact outcomes and only uniq
     f.add('unknown', 'outcome_unknown');
     f.executions.get('execution-m240')!.authorization = {
       dispatched: true,
-      review: {
+      check: {
         executionId: 'original-review',
         status: 'succeeded',
         decision: 'approve_once',
@@ -1352,7 +1352,7 @@ test('sealed Fork provenance is read-only, mismatched original Stores are reject
     execution.runId = 'source-run';
     execution.authorization = {
       dispatched: false,
-      review: {
+      check: {
         executionId: 'later-review',
         status: 'succeeded',
         decision: 'reject',
@@ -1963,41 +1963,40 @@ test('context forecasts reject changed selections, departed reads, foreign recei
   expect(signal?.aborted).toBe(true);
 });
 
-for (const field of ['check', 'review'] as const)
-  test(`Native ${field} authorization produces checking state and preserves human precedence`, () => {
-    for (const status of ['planned', 'dispatching', 'running'] as const) {
-      const authorization = {
-        dispatched: false,
-        [field]: {
-          executionId: 'check',
-          status,
-          decision: 'unavailable' as const,
-          reason: 'exact check reason',
-          requireApproval: false,
-        },
-      };
-      expect(authorizationApproval(authorization)).toMatchObject({
-        source: 'auto',
-        state: 'checking',
+test('Native check authorization produces checking state and preserves human precedence', () => {
+  for (const status of ['planned', 'dispatching', 'running'] as const) {
+    const authorization = {
+      dispatched: false,
+      check: {
+        executionId: 'check',
+        status,
+        decision: 'unavailable' as const,
         reason: 'exact check reason',
-      });
-      expect(
-        authorizationApproval({
-          ...authorization,
-          human: {
-            interactionId: 'human',
-            state: 'pending',
-            revision: '1',
-            acceptedDecisionRevision: null,
-            accepted: false,
-            decision: null,
-          },
-        }),
-      ).toMatchObject({ source: 'user', state: 'awaiting_user', reason: 'exact check reason' });
-    }
-  });
+        requireApproval: false,
+      },
+    };
+    expect(authorizationApproval(authorization)).toMatchObject({
+      source: 'auto',
+      state: 'checking',
+      reason: 'exact check reason',
+    });
+    expect(
+      authorizationApproval({
+        ...authorization,
+        human: {
+          interactionId: 'human',
+          state: 'pending',
+          revision: '1',
+          acceptedDecisionRevision: null,
+          accepted: false,
+          decision: null,
+        },
+      }),
+    ).toMatchObject({ source: 'user', state: 'awaiting_user', reason: 'exact check reason' });
+  }
+});
 
-test('new check fact takes precedence over a conflicting legacy review observation', () => {
+test('only the current check observation supplies an automatic approval state', () => {
   expect(
     authorizationApproval({
       dispatched: false,
@@ -2006,13 +2005,6 @@ test('new check fact takes precedence over a conflicting legacy review observati
         status: 'running',
         decision: 'unavailable',
         reason: 'current checker',
-        requireApproval: false,
-      },
-      review: {
-        executionId: 'old',
-        status: 'succeeded',
-        decision: 'approve_once',
-        reason: 'historical review',
         requireApproval: false,
       },
     }),

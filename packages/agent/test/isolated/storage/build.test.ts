@@ -72,6 +72,9 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
     const store = await runner.openSqliteStore({ dataRoot, profile: 'built' });
     try {
       expect((await store.getMetadata()).formatMajor).toBe(1);
+      expect(
+        runner.sqliteStorageAssets().migrations.map((url) => url.pathname.split('/').at(-1)),
+      ).toEqual(['0001-baseline.sql']);
       // A loaded Windows DLL remains mapped until process exit. Run the built file
       // capability in its own process so cleanup does not pretend it was unloaded.
       const child = Bun.spawn(

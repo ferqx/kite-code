@@ -911,7 +911,12 @@ test('new grants reject legacy IDs and future timestamps before allocating or re
   const now = Date.now();
   setSystemTime(new Date(now));
   try {
-    const legacy = createBrowserGrantRequestId().replace(/-7/, '-4');
+    const current = createBrowserGrantRequestId();
+    // Change the UUID version nibble, preserving all 48 timestamp bits even
+    // when a timestamp group itself begins with 7.
+    const legacy = `${current.slice(0, 14)}4${current.slice(15)}`;
+    expect(current[14]).toBe('7');
+    expect(legacy.slice(0, 14)).toBe(current.slice(0, 14));
     await expect(f.prepare(legacy)).rejects.toThrow('page_request_invalid');
     setSystemTime(new Date(now + 1));
     const future = createBrowserGrantRequestId();

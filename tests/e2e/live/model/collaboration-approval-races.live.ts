@@ -321,7 +321,7 @@ export async function runLiveApprovalRaces(options: Options): Promise<{ cases: R
               expectedStoreId,
               commandId: 'approve',
               expectedRevision: card!.revision,
-              answer: { kind: 'approval', decision: 'approve' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             },
             { signal: options.signal },
           );

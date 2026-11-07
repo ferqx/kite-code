@@ -2,6 +2,7 @@ import {
   type Interaction,
   type Message,
   type ModelOutputSnapshot,
+  readApprovalOptions,
   requiresInteractionAttachment,
   type SessionView,
 } from '@kite-ai/client';
@@ -333,12 +334,14 @@ function TuiHistory({
   form,
   step,
   collapsed,
+  hideLive = false,
 }: {
   controller: TuiController;
   card?: Interaction;
   form?: ReturnType<typeof questionForm>;
   step?: number;
   collapsed: ReadonlySet<string>;
+  hideLive?: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const { stdout, write } = useStdout();
@@ -1013,7 +1016,10 @@ function TuiHistory({
   // scrollback once; the first mutable item and following rows remain live.
   const mutableIndex = items.findIndex((item) => item.mutable);
   const materialStatic =
-    !!card && (testDiagnostics || longQuestionMaterial(form, step, columns, rows));
+    !!card &&
+    (card.kind === 'approval' ||
+      testDiagnostics ||
+      longQuestionMaterial(form, step, columns, rows));
   const sealed = materialStatic || mutableIndex < 0 ? items : items.slice(0, mutableIndex);
   const live = materialStatic || mutableIndex < 0 ? [] : items.slice(mutableIndex);
   const attachment = card && state.attachments.get(interactionKey(card));
@@ -1030,7 +1036,7 @@ function TuiHistory({
           ),
         }
       : undefined;
-  const [committed, setCommitted] = useState({ scope, items: sealed, epoch: 0 });
+  const [committed, setCommitted] = useState({ scope, items: sealed, epoch: 0, materialStatic });
   const replace = committed.scope !== scope;
   let history = committed;
   const changedPrefix = committed.items
@@ -1044,13 +1050,14 @@ function TuiHistory({
           previous.version !== next.version)
       );
     });
-  if (replace || changedPrefix) {
+  if (replace || changedPrefix || (committed.materialStatic && !materialStatic)) {
     // Verified late bodies and source-order changes cannot keep an old Static
     // node. Ordinary mutable status updates stay live and never replay history.
     history = {
       scope,
       items: [...sealed, ...(attachmentItem ? [attachmentItem] : [])],
       epoch: committed.epoch + 1,
+      materialStatic,
     };
     setCommitted(history);
   } else {
@@ -1060,8 +1067,8 @@ function TuiHistory({
     const additions = [...sealed, ...(attachmentItem ? [attachmentItem] : [])].filter(
       (item) => !committedKeys.has(item.key),
     );
-    if (additions.length) {
-      history = { ...committed, items: [...committed.items, ...additions] };
+    if (additions.length || committed.materialStatic !== materialStatic) {
+      history = { ...committed, materialStatic, items: [...committed.items, ...additions] };
       setCommitted(history);
     }
   }
@@ -1091,7 +1098,7 @@ function TuiHistory({
           )}
         </Static>
       </Box>
-      {liveItems.length > 0 && (
+      {!hideLive && liveItems.length > 0 && (
         <Box
           flexDirection="column"
           flexShrink={1}
@@ -1109,8 +1116,10 @@ function TuiHistory({
           ))}
         </Box>
       )}
-      {snapshot?.planProgress && <InkTaskProgress plan={snapshot.planProgress} />}
-      {snapshot?.compactionPhase && <CompactionProgress phase={snapshot.compactionPhase} />}
+      {!hideLive && snapshot?.planProgress && <InkTaskProgress plan={snapshot.planProgress} />}
+      {!hideLive && snapshot?.compactionPhase && (
+        <CompactionProgress phase={snapshot.compactionPhase} />
+      )}
     </Box>
   );
 }
@@ -1763,19 +1772,21 @@ function TuiSessionView({
     !chooser &&
     !cardChooser;
   const selectedSource = sourceChoices.get(approvalKey);
-  const offersSameCommand =
-    card?.kind === 'approval' &&
-    card.request !== null &&
-    typeof card.request === 'object' &&
-    !Array.isArray(card.request) &&
-    Array.isArray(card.request.grants) &&
-    card.request.grants.includes('same_command');
-  const approvalAnswers = offersSameCommand
-    ? ['approve', 'approve same_command', 'deny']
-    : ['approve', 'deny'];
+  const offeredApprovalOptions = card?.kind === 'approval' ? readApprovalOptions(card.request) : [];
+  const approvalAnswers = [
+    ...offeredApprovalOptions.map((option) =>
+      option.kind === 'once' ? 'approve' : `approve ${option.optionId}`,
+    ),
+    'deny',
+  ];
   const selectedApproval =
     approvalChoices.get(approvalKey) ??
-    (card?.kind === 'approval' && !offersSameCommand ? 0 : undefined);
+    (card?.kind === 'approval'
+      ? Math.max(
+          0,
+          offeredApprovalOptions.findIndex((option) => option.kind === 'once'),
+        )
+      : undefined);
   const setAnswer = (value: string | ((previous: string) => string)) => {
     answerBuffer.sync(typeof value === 'function' ? value(answerBuffer.text) : value);
     renderQuestion((n) => n + 1);
@@ -2065,7 +2076,7 @@ function TuiSessionView({
         if (card.kind === 'approval' && (key.upArrow || key.downArrow)) {
           setApprovalChoices((previous) => {
             const next = new Map(previous),
-              index = previous.get(approvalKey) ?? (offersSameCommand ? undefined : 0);
+              index = previous.get(approvalKey) ?? 0;
             next.set(
               approvalKey,
               index === undefined
@@ -2089,7 +2100,12 @@ function TuiSessionView({
           const source = sourceChoiceRef.current.get(approvalKey);
           const approval =
             approvalChoiceRef.current.get(approvalKey) ??
-            (card.kind === 'approval' && !offersSameCommand ? 0 : undefined);
+            (card.kind === 'approval'
+              ? Math.max(
+                  0,
+                  offeredApprovalOptions.findIndex((option) => option.kind === 'once'),
+                )
+              : undefined);
           if (card.kind === 'approval' && !currentAnswer.trim() && approval === undefined) return;
           if (currentAnswer.trim().startsWith('/')) {
             void controller.routeCommand(currentAnswer);
@@ -2144,6 +2160,7 @@ function TuiSessionView({
       form={form}
       step={question?.step}
       collapsed={resultDisplay.collapsed}
+      hideLive={cardChooser}
     />
   );
   const withHistory = (panel: ReactNode) => (
@@ -2326,6 +2343,10 @@ function TuiSessionView({
             <TuiApprovalPanel
               card={card}
               choices={approvalAnswers}
+              rows={Math.max(
+                8,
+                Math.min(rows - 1, availableRows ?? rows - 1) - (testDiagnostics ? 4 : 2),
+              )}
               selected={selectedApproval}
               busy={
                 state.loading ||

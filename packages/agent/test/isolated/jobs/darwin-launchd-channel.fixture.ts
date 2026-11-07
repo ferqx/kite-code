@@ -10,13 +10,23 @@ import { fileURLToPath } from 'node:url';
 // only these two OS imports in a private copy of the production broker source.
 const kind = process.argv[2] as 'browser' | 'mcp' | 'shell';
 const mode = process.argv[3]!;
+const heldAuthentication = mode === 'auth-held-timeout';
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-channel-mock-')));
 const cwd = process.cwd();
 const calls: string[][] = [];
 const frames: Record<string, unknown>[] = [];
+const writes: string[] = [];
+const unhandled: unknown[] = [];
+const onUnhandled = (error: unknown) => unhandled.push(error);
+process.on('unhandledRejection', onUnhandled);
 let callback: (socket: unknown) => void;
 let registration: { secret: string; label: string; domain: string };
 let removed = false;
+const began = performance.now();
+let authenticationPending = false;
+let closeAttemptedAt: number | undefined;
+let closeCompleted = false;
+let closeCallback: (() => void) | undefined;
 let deadline: ReturnType<typeof setTimeout> | undefined;
 let settleOnFrame!: () => void;
 const onFrameGate = new Promise<void>((resolve) => {
@@ -50,6 +60,7 @@ class Channel extends EventEmitter {
   }
   write(content: string, done?: (error?: Error) => void) {
     const value = JSON.parse(content);
+    writes.push(value.type);
     queueMicrotask(() => done?.());
     if (value.type === 'start') {
       setImmediate(() => {
@@ -82,6 +93,22 @@ class Channel extends EventEmitter {
   }
 }
 const socket = new Channel();
+const unauthenticatedSocket = new Channel();
+const lateSocket = new Channel();
+const accepted = heldAuthentication ? [socket, unauthenticatedSocket, lateSocket] : [socket];
+const openSockets = new Set(accepted);
+function settleServerClose() {
+  if (openSockets.size === 0) {
+    const done = closeCallback;
+    closeCallback = undefined;
+    done?.();
+  }
+}
+for (const channel of accepted)
+  channel.on('close', () => {
+    openSockets.delete(channel);
+    settleServerClose();
+  });
 const server = Object.assign(new EventEmitter(), {
   listen(path: string, ready: () => void) {
     assert.equal(path, 'control.sock');
@@ -89,7 +116,16 @@ const server = Object.assign(new EventEmitter(), {
     return server;
   },
   close(done?: (error?: Error) => void) {
-    queueMicrotask(() => done?.());
+    if (heldAuthentication) {
+      closeAttemptedAt = performance.now() - began;
+      closeCallback = () => {
+        closeCompleted = true;
+        queueMicrotask(() => done?.());
+      };
+      // Already queued connections can reach the callback while closing.
+      callback(lateSocket);
+      settleServerClose();
+    } else queueMicrotask(() => done?.());
     return server;
   },
 });
@@ -106,6 +142,9 @@ fixtureGlobal.fixtureNet = {
 fixtureGlobal.fixtureSpawn = (executable: string, args: string[]) => {
   assert.equal(executable, '/bin/launchctl');
   calls.push([...args]);
+  // A delayed identity reply remains the exact successful observation captured
+  // before bootout, so rejection cannot rely on that late reply becoming absent.
+  const wasRemoved = removed;
   const child = Object.assign(new EventEmitter(), {
     stdout: new PassThrough(),
     stderr: new PassThrough(),
@@ -113,10 +152,11 @@ fixtureGlobal.fixtureSpawn = (executable: string, args: string[]) => {
       throw Error('unexpected fake launchctl timeout');
     },
   });
-  queueMicrotask(() => {
+  const complete = () => {
     if (args[0] === 'bootstrap') {
       registration = JSON.parse(readFileSync(join(dirname(args[2]!), 'owner.json'), 'utf8'));
       callback(socket);
+      if (heldAuthentication) callback(unauthenticatedSocket);
       socket.emit(
         'data',
         Buffer.from(
@@ -128,12 +168,23 @@ fixtureGlobal.fixtureSpawn = (executable: string, args: string[]) => {
       if (args[0] === 'bootout') removed = true;
       else assert.equal(args[0], 'print');
     }
-    const code = args[0] === 'print' && removed ? 113 : 0;
-    child.stdout.end(args[0] === 'print' && !removed ? '\tpid = 777\n' : '');
+    const code = args[0] === 'print' && wasRemoved ? 113 : 0;
+    child.stdout.end(args[0] === 'print' && !wasRemoved ? '\tpid = 777\n' : '');
     child.stderr.end();
     child.emit('exit', code, null);
     child.emit('close', code, null);
-  });
+  };
+  if (heldAuthentication && args[0] === 'bootstrap') setTimeout(complete, 1500);
+  else if (heldAuthentication && args[0] === 'print' && !removed) {
+    // Bootstrap has already consumed 1.5s of the real 4s ready budget. Keep
+    // identity verification pending across that deadline, within launchctl's
+    // separate 3s budget. No production timer or option is replaced.
+    authenticationPending = true;
+    setTimeout(() => {
+      authenticationPending = false;
+      complete();
+    }, 2700);
+  } else queueMicrotask(complete);
   return child;
 };
 Object.defineProperty(process, 'platform', { value: 'darwin' });
@@ -158,7 +209,7 @@ assert.notEqual(instrumented, original);
 writeFileSync(join(root, 'supervisor.ts'), instrumented);
 try {
   const { startLaunchdSupervisor } = await import(join(root, 'supervisor.ts'));
-  const bridge = await startLaunchdSupervisor({
+  const starting = startLaunchdSupervisor({
     kind,
     controlBase: root,
     frame: { type: 'start', nonce: 'nonce' },
@@ -167,30 +218,84 @@ try {
       frames.push(frame);
     },
   });
-  let error: unknown;
-  try {
-    await Promise.race([
-      bridge.finished,
-      new Promise((_, reject) => {
-        deadline = setTimeout(() => reject(Error('fixture_test_deadlock')), 2500);
+  if (heldAuthentication) {
+    let caught: unknown;
+    try {
+      await Promise.race([
+        starting,
+        new Promise((_, reject) => {
+          deadline = setTimeout(() => reject(Error('fixture_startup_cleanup_deadlock')), 5000);
+        }),
+      ]);
+    } catch (error) {
+      caught = error;
+    }
+    clearTimeout(deadline);
+    console.log(
+      JSON.stringify({
+        mode,
+        closeAttemptedAt,
+        closeCompleted,
+        authenticationPending,
+        destroyed: accepted.map((value) => value.destroyed),
+        calls: calls.map((args) => args[0]),
+        error: caught instanceof Error ? caught.message : null,
+        noNativeSpawn: true,
       }),
-    ]);
-  } catch (cause) {
-    error = cause;
+    );
+    assert.equal(caught instanceof Error ? caught.message : null, 'launchd_guardian_start_timeout');
+    assert.ok(closeAttemptedAt! >= 3800);
+    assert.equal(authenticationPending, true);
+    assert.equal(closeCompleted, true);
+    assert.deepEqual(
+      accepted.map((value) => value.destroyed),
+      [true, true, true],
+    );
+    assert.deepEqual(
+      calls.map((args) => args[0]),
+      ['bootstrap', 'print', 'bootout', 'print'],
+    );
+    assert.equal(frames.length, 0);
+    // Let the successful original PID response arrive after startup cleanup.
+    // It must not send any business frame or escape as an unhandled rejection.
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.equal(authenticationPending, false);
+    assert.deepEqual(writes, []);
+    assert.deepEqual(unhandled, []);
+    assert.equal(frames.length, 0);
+    console.log(
+      JSON.stringify({ lateAuthenticationCompleted: true, businessWrites: 0, unhandled: 0 }),
+    );
+  } else {
+    const bridge = await starting;
+    let error: unknown;
+    try {
+      await Promise.race([
+        bridge.finished,
+        new Promise((_, reject) => {
+          deadline = setTimeout(() => reject(Error('fixture_test_deadlock')), 2500);
+        }),
+      ]);
+    } catch (cause) {
+      error = cause;
+    }
+    clearTimeout(deadline);
+    const valid = ['valid', 'delayed-handler', 'split-utf8', 'eof-half-close'].includes(mode);
+    assert.equal(
+      !error,
+      valid,
+      `${kind}/${mode}: ${error instanceof Error ? error.message : 'resolved'}`,
+    );
+    assert.notEqual(error instanceof Error ? error.message : '', 'fixture_test_deadlock');
+    assert.equal(frames.filter((frame) => frame.type === 'terminal').length, valid ? 1 : 0);
+    if (valid) assert.equal(frames[0]?.content, '慢');
+    assert.equal(calls.filter((args) => args[0] === 'bootout').length, valid ? 1 : 0);
+    console.log(
+      JSON.stringify({ kind, mode, valid, terminalDelivered: valid, noNativeSpawn: true }),
+    );
   }
-  clearTimeout(deadline);
-  const valid = ['valid', 'delayed-handler', 'split-utf8', 'eof-half-close'].includes(mode);
-  assert.equal(
-    !error,
-    valid,
-    `${kind}/${mode}: ${error instanceof Error ? error.message : 'resolved'}`,
-  );
-  assert.notEqual(error instanceof Error ? error.message : '', 'fixture_test_deadlock');
-  assert.equal(frames.filter((frame) => frame.type === 'terminal').length, valid ? 1 : 0);
-  if (valid) assert.equal(frames[0]?.content, '慢');
-  assert.equal(calls.filter((args) => args[0] === 'bootout').length, valid ? 1 : 0);
-  console.log(JSON.stringify({ kind, mode, valid, terminalDelivered: valid, noNativeSpawn: true }));
 } finally {
+  process.off('unhandledRejection', onUnhandled);
   clearTimeout(deadline);
   process.chdir(cwd);
   rmSync(root, { recursive: true });

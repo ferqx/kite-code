@@ -270,6 +270,7 @@ function NativeDesktopContent({
   const [settingsToastHost, setSettingsToastHost] = useState<HTMLDivElement | null>(null);
   const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [grantDirectoryOpen, setGrantDirectoryOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
   const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
   const [browserLeaseRestore, setBrowserLeaseRestore] = useState(0);
@@ -286,6 +287,14 @@ function NativeDesktopContent({
     preparation: boolean;
   }>({ draft: '', preparation: false });
   const { state, draft, models: preparedModels } = frame;
+  const grantDirectoryScope = useRef<string | undefined>(undefined);
+  const currentGrantScope = state?.selection
+    ? `${state.selection.storeId}/${state.selection.session.id}`
+    : undefined;
+  useEffect(() => {
+    if (grantDirectoryScope.current !== currentGrantScope) setGrantDirectoryOpen(false);
+    grantDirectoryScope.current = currentGrantScope;
+  }, [currentGrantScope]);
   function setPreparing(value: boolean) {
     setPreparingIntent(value);
     if (value) setFrame((previous) => ({ ...previous, preparation: true }));
@@ -444,7 +453,7 @@ function NativeDesktopContent({
   const [failedReads, setFailedReads] = useState<{
     state?: string;
     directory?: string;
-    selection?: { key: string; sessionId: string };
+    selection?: { key: string; sessionId: string; preserveHistory?: boolean };
   }>({});
   const sessionRecovery = useRef(new NativeSessionRecovery());
   const [, recoveryVisibilityChanged] = useState(0);
@@ -821,6 +830,7 @@ function NativeDesktopContent({
   }
   async function select(sessionId: string, keepCurrentDraft = true, keepTaskPage = false) {
     if (!bridge || readLifecycle.current.quitting) return;
+    setGrantDirectoryOpen(false);
     setAgentBrowserOpen(false);
     if (keepCurrentDraft) rememberDraft();
     const firstHandoff =
@@ -890,7 +900,13 @@ function NativeDesktopContent({
       }
     }
   }
-  async function readSelection(sessionId: string, current: number, nonce: number, epoch: number) {
+  async function readSelection(
+    sessionId: string,
+    current: number,
+    nonce: number,
+    epoch: number,
+    preserveHistory = false,
+  ) {
     if (!isCurrentRead(current, epoch, nonce)) return;
     const original: NonNullable<typeof selectionRead.current> = {
       sessionId,
@@ -978,7 +994,7 @@ function NativeDesktopContent({
               };
         }
         original.holdPresentation = false;
-        history.current?.preview(sessionId);
+        if (!preserveHistory) history.current?.preview(sessionId);
         draftOwner.current = imageScope(targetSelection.storeId, sessionId);
         const saved = preparedDraft && 'value' in preparedDraft ? preparedDraft.value : undefined;
         preparedView = {
@@ -1073,7 +1089,7 @@ function NativeDesktopContent({
       if (!isCurrentRead(current, epoch, nonce)) return;
       setFailedReads((previous) => ({
         ...previous,
-        selection: { key: JSON.stringify([current, epoch, nonce]), sessionId },
+        selection: { key: JSON.stringify([current, epoch, nonce]), sessionId, preserveHistory },
       }));
       throw cause;
     } finally {
@@ -1616,11 +1632,20 @@ function NativeDesktopContent({
     if (!readLifecycle.current.quitting && current > 0 && document.visibilityState !== 'hidden') {
       const readKey = JSON.stringify([current, epoch, nonce]);
       if (failedReads.state === readKey) add('state-read', refresh);
-      if (failedReads.directory === JSON.stringify([current, epoch]))
-        add('directory-read', readDirectory);
-      if (failedReads.selection?.key === readKey) {
-        const target = failedReads.selection.sessionId;
-        add(`selection-read:${target}`, () => readSelection(target, current, nonce, epoch));
+      if (directory?.unavailable || failedReads.directory === JSON.stringify([current, epoch]))
+        add('directory-read', async () => {
+          const value = await readDirectory();
+          if (active() && value && !value.unavailable && value.storeId === selection?.storeId)
+            for (const key of work.keys())
+              if (key !== `${scope}:directory-read`) sessionRecovery.current.wake(key);
+        });
+      const failedSelection =
+        failedReads.selection?.key === readKey ? failedReads.selection : undefined;
+      if (failedSelection) {
+        const target = failedSelection.sessionId;
+        add(`selection-read:${target}`, () =>
+          readSelection(target, current, nonce, epoch, failedSelection.preserveHistory),
+        );
       }
       if (readingParent && selection && selection.session.id === sessionId) {
         if (
@@ -1629,9 +1654,21 @@ function NativeDesktopContent({
           state?.callerUnavailable ||
           state?.backgroundUnavailable ||
           executionUnconfirmed ||
-          (retrying('observation') && (historyState.phase === 'loading' || selection.viewLoading))
+          (retrying(`selection-read:${sessionId}`) &&
+            (historyState.phase === 'loading' || selection.viewLoading))
         )
-          add('observation', refresh);
+          // Both reasons own the same original selection read and recovery slot.
+          add(`selection-read:${selection.session.id}`, () =>
+            readSelection(
+              selection.session.id,
+              current,
+              nonce,
+              epoch,
+              failedSelection?.sessionId === selection.session.id
+                ? failedSelection.preserveHistory
+                : true,
+            ),
+          );
         if (fileTargets.error || (retrying('files') && fileTargets.loading))
           add('files', () => {
             if (!fileTargets.loading) fileTargets.retry();
@@ -1657,7 +1694,12 @@ function NativeDesktopContent({
       ) =>
         add(`${method}:${commandId}`, async () => {
           await bridge.request({ method, generation: current, commandId });
-          if (active()) await refresh();
+          if (active()) {
+            // This lookup resolves only after verifying the original answer receipt.
+            if (method === 'lookupInteraction')
+              sessionRecovery.current.wake(`${scope}:directory-read`);
+            await refresh();
+          }
         });
       for (const [id, input] of inputDeliveries)
         if (
@@ -2633,8 +2675,20 @@ function NativeDesktopContent({
       ['approval', 'question', 'plan_review'].includes(card.kind) && card.state === 'pending',
   );
   const hasPendingRootInteraction = nativeRootInteractionBlocksComposer(selection);
+  const hasPendingRootBusinessInteraction = nativeRootInteractionBlocksComposer(
+    selection
+      ? {
+          ...selection,
+          interactions: selection.interactions.filter(
+            (card) => card.kind === 'question' || card.kind === 'plan_review',
+          ),
+        }
+      : selection,
+  );
   const canCompose =
-    !!selection && !selection.session.parentSessionId && !hasPendingRootInteraction;
+    !!selection &&
+    !selection.session.parentSessionId &&
+    (!hasPendingRootInteraction || hasPendingRootBusinessInteraction);
   const localWorktreeExit =
     !!selection &&
     isNativeWorktreeExitCommand(draft) &&
@@ -3186,6 +3240,82 @@ function NativeDesktopContent({
         }}
       />
     ) : undefined;
+  const renderPermissionGrants = () => (
+    <>
+      {selection && (
+        <PermissionGrantsPanel
+          facts={
+            grantFacts?.page.sessionId === selection.session.id &&
+            grantFacts.page.storeId === selection.storeId
+              ? grantFacts
+              : undefined
+          }
+          busy={(state?.grantSubmissions ?? []).some((value) =>
+            ['saved', 'submitting', 'unknown'].includes(value.phase),
+          )}
+          onRead={selection.canReadPermissionGrants ? () => readGrants() : undefined}
+          onNext={
+            grantFacts?.page.nextAfterSeq !== null && grantFacts
+              ? () => readGrants(true)
+              : undefined
+          }
+          onClear={
+            selection.canReadPermissionGrants && grantFacts
+              ? async (observationId) => {
+                  const current = generation.current,
+                    nonce = viewIntent.current;
+                  try {
+                    await bridge.request({
+                      method: 'grants.clear',
+                      generation: current,
+                      observationId,
+                    });
+                  } finally {
+                    if (current === generation.current && nonce === viewIntent.current)
+                      setGrantFacts(undefined);
+                  }
+                  await refresh();
+                }
+              : undefined
+          }
+        />
+      )}
+      {(state?.grantSubmissions ?? []).map((submission) => (
+        <section key={submission.intent.commandId} aria-label="原授权清除选择">
+          <div>
+            <p>
+              原会话 {submission.sessionId} · 工作区 {submission.workspaceId} · 原存储{' '}
+              {submission.intent.expectedStoreId} · 授权版本 {submission.intent.ifRevision}
+            </p>
+          </div>
+          <PermissionSubmissionStatus
+            submission={{
+              commandId: diagnostics ? submission.intent.commandId : '当前操作',
+              phase: submission.phase,
+              error: submission.error,
+            }}
+          />
+          {submission.phase === 'unknown' && (
+            <button
+              type="button"
+              onClick={() =>
+                void report(async () => {
+                  await bridge.request({
+                    method: 'lookupGrant',
+                    generation: generation.current,
+                    commandId: submission.intent.commandId,
+                  });
+                  await refresh();
+                })
+              }
+            >
+              查询原授权清除选择
+            </button>
+          )}
+        </section>
+      ))}
+    </>
+  );
   const renderSessionTools = () => (
     <section id="native-session-tools" aria-label="会话与任务">
       <header>
@@ -3580,42 +3710,7 @@ function NativeDesktopContent({
             }
             onRefresh={refresh}
           />
-          <PermissionGrantsPanel
-            facts={
-              grantFacts?.page.sessionId === selection.session.id &&
-              grantFacts.page.storeId === selection.storeId
-                ? grantFacts
-                : undefined
-            }
-            busy={(state.grantSubmissions ?? []).some((value) =>
-              ['saved', 'submitting', 'unknown'].includes(value.phase),
-            )}
-            onRead={selection.canReadPermissionGrants ? () => readGrants() : undefined}
-            onNext={
-              grantFacts?.page.nextAfterSeq !== null && grantFacts
-                ? () => readGrants(true)
-                : undefined
-            }
-            onClear={
-              selection.canReadPermissionGrants && grantFacts
-                ? async (observationId) => {
-                    const current = generation.current,
-                      nonce = viewIntent.current;
-                    try {
-                      await bridge.request({
-                        method: 'grants.clear',
-                        generation: current,
-                        observationId,
-                      });
-                    } finally {
-                      if (current === generation.current && nonce === viewIntent.current)
-                        setGrantFacts(undefined);
-                    }
-                    await refresh();
-                  }
-                : undefined
-            }
-          />
+          {renderPermissionGrants()}
         </section>
       )}
       {bridge && state && <NativeCallerView bridge={bridge} state={state} onRefresh={refresh} />}
@@ -3788,40 +3883,7 @@ function NativeDesktopContent({
           )}
         </div>
       ))}
-      {(state?.grantSubmissions ?? []).map((submission) => (
-        <section key={submission.intent.commandId} aria-label="原授权清除选择">
-          <NativeDiagnostic>
-            <p>
-              原会话 {submission.sessionId} · 工作区 {submission.workspaceId} · 原存储{' '}
-              {submission.intent.expectedStoreId} · 授权版本 {submission.intent.ifRevision}
-            </p>
-          </NativeDiagnostic>
-          <PermissionSubmissionStatus
-            submission={{
-              commandId: diagnostics ? submission.intent.commandId : '当前操作',
-              phase: submission.phase,
-              error: submission.error,
-            }}
-          />
-          {submission.phase === 'unknown' && (
-            <button
-              type="button"
-              onClick={() =>
-                void report(async () => {
-                  await bridge.request({
-                    method: 'lookupGrant',
-                    generation: generation.current,
-                    commandId: submission.intent.commandId,
-                  });
-                  await refresh();
-                })
-              }
-            >
-              查询原授权清除选择
-            </button>
-          )}
-        </section>
-      ))}
+
       <NativeFileRecoveryPanel
         bridge={bridge}
         generation={state?.generation ?? generation.current}
@@ -5058,6 +5120,7 @@ function NativeDesktopContent({
                 sessionLoading,
                 sending,
                 // A routine history scan gates actions without removing the observed label.
+                permissionWhenPromptHidden: hasPendingRootBusinessInteraction,
                 permission: composerPermission,
                 fullPermissionScope: JSON.stringify([
                   state.generation,
@@ -5080,6 +5143,13 @@ function NativeDesktopContent({
                     ['saved', 'submitting', 'unknown'].includes(value.phase),
                 ),
                 onPermissionChange: changeCurrentPermission,
+                onPermissionGrants: selection.canReadPermissionGrants
+                  ? () => {
+                      setToolsOpen(false);
+                      setGrantDirectoryOpen(true);
+                      setGrantFacts(undefined);
+                    }
+                  : undefined,
                 sendDisabled:
                   sendContentBlocked ||
                   (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
@@ -5302,147 +5372,164 @@ function NativeDesktopContent({
           : undefined
       }
       overlays={
-        <Dialog
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
-        >
-          <DialogContent
-            ref={setSettingsToastHost}
-            portalled={false}
-            className="desktop-settings-dialog translate-x-0 translate-y-0"
-            style={
-              {
-                '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
-                '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
-              } as CSSProperties
-            }
-            showCloseButton={false}
-            showOverlay={false}
-            onEscapeKeyDown={(event) => {
-              if (settingsEditorControl.current) {
-                event.preventDefault();
-                settingsEditorControl.current.close();
-              }
-            }}
-            onInteractOutside={(event) => {
-              // Full-page settings closes through navigation or Escape. A nested
-              // Select can temporarily retarget a double-click or focus to the document.
-              event.preventDefault();
-              if (event.detail.originalEvent.type === 'pointerdown')
-                event.detail.originalEvent.preventDefault();
-            }}
+        <>
+          <Dialog open={grantDirectoryOpen} onOpenChange={setGrantDirectoryOpen}>
+            <DialogContent className="max-h-[80dvh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>当前会话授权</DialogTitle>
+                <DialogDescription>
+                  读取当前会话的授权范围，核对来源与版本后清除。
+                </DialogDescription>
+              </DialogHeader>
+              <div className="min-w-0 [overflow-wrap:anywhere] [&_pre]:whitespace-pre-wrap">
+                {renderPermissionGrants()}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
           >
-            <DialogHeader className="desktop-settings-header">
-              <DialogTitle>设置</DialogTitle>
-              <DialogDescription className="sr-only">配置模型、提供商与扩展能力</DialogDescription>
-            </DialogHeader>
-            <div className="settings settings-layout desktop-settings">
-              <aside className="settings-sidebar">
-                <nav aria-label="设置分类">
-                  <DesktopButton
-                    type="button"
-                    variant="ghost"
-                    className="settings-back"
-                    onClick={() => setSettingsOpen(false)}
-                  >
-                    <SettingsNavigationIcon name="back" />
-                    <span>返回应用</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'general'}
-                    onClick={() => setSettingsPage('general')}
-                  >
-                    <SettingsNavigationIcon name="general" />
-                    <span>常规</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'providers'}
-                    onClick={() => setSettingsPage('providers')}
-                  >
-                    <SettingsNavigationIcon name="providers" />
-                    <span>提供商与模型</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'mcp'}
-                    onClick={() => setSettingsPage('mcp')}
-                  >
-                    <SettingsNavigationIcon name="mcp" />
-                    <span>MCP</span>
-                  </DesktopButton>
-                  <DesktopButton
-                    variant="ghost"
-                    type="button"
-                    aria-pressed={settingsPage === 'skills'}
-                    onClick={() => setSettingsPage('skills')}
-                  >
-                    <SettingsNavigationIcon name="skills" />
-                    <span>Skills</span>
-                  </DesktopButton>
-                </nav>{' '}
-              </aside>
-              <div className="client-content-frame settings-content-frame">
-                <div className="settings-content-panels">
-                  <div className="settings-content">
-                    {settingsPage === 'general' ? (
-                      <NativeGeneralSettings
-                        bridge={bridge}
-                        generation={generation.current}
-                        storeId={directory?.storeId}
-                        selection={!preparing ? selection : undefined}
-                        revision={settingsRevision}
-                        editor={editor}
-                        onEditorChange={setEditor}
-                      />
-                    ) : settingsPage === 'skills' ? (
-                      <NativeSkillsSettings
-                        panelHost={settingsEditorHost}
-                        editorControl={settingsEditorControl}
-                        bridge={bridge}
-                        generation={generation.current}
-                        storeId={directory?.storeId}
-                      />
-                    ) : settingsPage === 'mcp' ? (
-                      <NativeMcpSettings
-                        panelHost={settingsEditorHost}
-                        editorControl={settingsEditorControl}
-                        bridge={bridge}
-                        generation={generation.current}
-                        storeId={directory?.storeId}
-                        submissions={state?.userMcpSubmissions ?? []}
-                      />
-                    ) : (
-                      <NativeProviderModelSettings
-                        key={JSON.stringify([
-                          generation.current,
-                          directory?.storeId,
-                          selection?.session.id,
-                          selection?.viewSelection,
-                        ])}
-                        panelHost={settingsEditorHost}
-                        editorControl={settingsEditorControl}
-                        bridge={bridge}
-                        generation={generation.current}
-                        selection={selection}
-                        storeId={directory?.storeId}
-                        providerSubmissions={state?.providerSettingsSubmissions ?? []}
-                        modelSubmissions={state?.modelSettingsSubmissions ?? []}
-                        onSaved={() => setSettingsRevision((value) => value + 1)}
-                      />
-                    )}
+            <DialogContent
+              ref={setSettingsToastHost}
+              portalled={false}
+              className="desktop-settings-dialog translate-x-0 translate-y-0"
+              style={
+                {
+                  '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
+                  '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
+                } as CSSProperties
+              }
+              showCloseButton={false}
+              showOverlay={false}
+              onEscapeKeyDown={(event) => {
+                if (settingsEditorControl.current) {
+                  event.preventDefault();
+                  settingsEditorControl.current.close();
+                }
+              }}
+              onInteractOutside={(event) => {
+                // Full-page settings closes through navigation or Escape. A nested
+                // Select can temporarily retarget a double-click or focus to the document.
+                event.preventDefault();
+                if (event.detail.originalEvent.type === 'pointerdown')
+                  event.detail.originalEvent.preventDefault();
+              }}
+            >
+              <DialogHeader className="desktop-settings-header">
+                <DialogTitle>设置</DialogTitle>
+                <DialogDescription className="sr-only">
+                  配置模型、提供商与扩展能力
+                </DialogDescription>
+              </DialogHeader>
+              <div className="settings settings-layout desktop-settings">
+                <aside className="settings-sidebar">
+                  <nav aria-label="设置分类">
+                    <DesktopButton
+                      type="button"
+                      variant="ghost"
+                      className="settings-back"
+                      onClick={() => setSettingsOpen(false)}
+                    >
+                      <SettingsNavigationIcon name="back" />
+                      <span>返回应用</span>
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
+                      type="button"
+                      aria-pressed={settingsPage === 'general'}
+                      onClick={() => setSettingsPage('general')}
+                    >
+                      <SettingsNavigationIcon name="general" />
+                      <span>常规</span>
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
+                      type="button"
+                      aria-pressed={settingsPage === 'providers'}
+                      onClick={() => setSettingsPage('providers')}
+                    >
+                      <SettingsNavigationIcon name="providers" />
+                      <span>提供商与模型</span>
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
+                      type="button"
+                      aria-pressed={settingsPage === 'mcp'}
+                      onClick={() => setSettingsPage('mcp')}
+                    >
+                      <SettingsNavigationIcon name="mcp" />
+                      <span>MCP</span>
+                    </DesktopButton>
+                    <DesktopButton
+                      variant="ghost"
+                      type="button"
+                      aria-pressed={settingsPage === 'skills'}
+                      onClick={() => setSettingsPage('skills')}
+                    >
+                      <SettingsNavigationIcon name="skills" />
+                      <span>Skills</span>
+                    </DesktopButton>
+                  </nav>{' '}
+                </aside>
+                <div className="client-content-frame settings-content-frame">
+                  <div className="settings-content-panels">
+                    <div className="settings-content">
+                      {settingsPage === 'general' ? (
+                        <NativeGeneralSettings
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory?.storeId}
+                          selection={!preparing ? selection : undefined}
+                          revision={settingsRevision}
+                          editor={editor}
+                          onEditorChange={setEditor}
+                        />
+                      ) : settingsPage === 'skills' ? (
+                        <NativeSkillsSettings
+                          panelHost={settingsEditorHost}
+                          editorControl={settingsEditorControl}
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory?.storeId}
+                        />
+                      ) : settingsPage === 'mcp' ? (
+                        <NativeMcpSettings
+                          panelHost={settingsEditorHost}
+                          editorControl={settingsEditorControl}
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory?.storeId}
+                          submissions={state?.userMcpSubmissions ?? []}
+                        />
+                      ) : (
+                        <NativeProviderModelSettings
+                          key={JSON.stringify([
+                            generation.current,
+                            directory?.storeId,
+                            selection?.session.id,
+                            selection?.viewSelection,
+                          ])}
+                          panelHost={settingsEditorHost}
+                          editorControl={settingsEditorControl}
+                          bridge={bridge}
+                          generation={generation.current}
+                          selection={selection}
+                          storeId={directory?.storeId}
+                          providerSubmissions={state?.providerSettingsSubmissions ?? []}
+                          modelSubmissions={state?.modelSettingsSubmissions ?? []}
+                          onSaved={() => setSettingsRevision((value) => value + 1)}
+                        />
+                      )}
+                    </div>
+                    <div className="settings-editor-panel" ref={setSettingsEditorHost} />
                   </div>
-                  <div className="settings-editor-panel" ref={setSettingsEditorHost} />
                 </div>
               </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </>
       }
     />,
   );

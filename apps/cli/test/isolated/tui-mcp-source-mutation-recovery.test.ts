@@ -237,7 +237,7 @@ async function fixture(many: boolean) {
       commandId: `answer-${interaction.id}`,
       expectedStoreId: storeId,
       expectedRevision: interaction.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
   }
   async function succeeded(commandId: string) {

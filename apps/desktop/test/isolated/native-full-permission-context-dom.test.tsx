@@ -5,7 +5,7 @@ import type { ComposerProps } from '../../../../packages/ui/src/desktop/Composer
 import { useNativePermissionChange } from '../../src/use-native-permission-change';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-async function fixture() {
+async function fixture(permissionWhenPromptHidden = false) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -65,6 +65,8 @@ async function fixture() {
         <span data-committed-scope={scope}>{scope}</span>
         <Composer
           scopeKey={scope}
+          promptHidden={permissionWhenPromptHidden}
+          permissionWhenPromptHidden={permissionWhenPromptHidden}
           fullPermissionScope={`permission-${scope}`}
           permission="auto"
           onPermissionChange={onPermissionChange}
@@ -223,6 +225,26 @@ test('unmount retires the native permission action as well as its pending Compos
     callback('full');
     await act(async () => f.requests[0]!.resolve(true));
     expect(f.changes).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a business-card permission toolbar keeps full confirmation scoped across a committed session replacement', async () => {
+  const f = await fixture(true);
+  try {
+    await f.mount();
+    expect(document.querySelector('form.composer')).toBeNull();
+    await f.chooseFull();
+    await f.transitionB();
+    await f.commitB();
+    expect(f.requests[0]!.signal.aborted).toBe(true);
+    await act(async () => f.requests[0]!.resolve(true));
+    expect(f.changes).toEqual([]);
+    await f.chooseFull();
+    await act(async () => f.requests[1]!.resolve(true));
+    expect(f.changes).toEqual([{ scope: 'B', mode: 'full' }]);
+    expect(document.querySelector('form.composer')).toBeNull();
   } finally {
     await f.close();
   }

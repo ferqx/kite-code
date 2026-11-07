@@ -250,7 +250,7 @@ export function createBrowserExecution(options: {
   const tool: ToolDefinition = {
     id: 'browser.execute',
     version: '1',
-    model: { name: 'browser_execute', requiredParameters: ['description'] },
+    model: { name: 'browser_execute' },
     description:
       'Execute bounded JavaScript in an isolated persistent browser environment for this Run. Load the built-in computer-use skill first for the exact API. Top-level await and variables persist. Browser operations need no approval or reviewer; the host still enforces exact task/page ownership, current control and cancellation. A failed, cancelled or unknown call stops this batch, including calls attempted after catch. Observe before acting and verify the actual result; never replay unknown effects. No filesystem, direct network, process, shell, CDP or credentials. Screenshots return formal model images at the end of this call. For a later user message continuing a released Native page, list browser.pages(), choose the unique candidate whose canonical URL matches the intended task page, use browser.page(candidate.id), then await page.snapshot(). Never select the first or most recent candidate by position. pages() offers all known released candidates with fresh task-scoped ids and bindingRequired:true, not existing control. Listing and browser.page(id) perform no I/O. The first snapshot binds only the retained existing page through Main and obtains new refs; a missing or changed target fails without creating, refreshing or navigating a page. After a confirmed browser_page_existing_missing result, the old candidate is invalid; when the current task clearly requests a known URL without depending on old page state, make a separate browser.open(theActualUrl) call and take a new snapshot. Do not replay completed or unknown actions. Mismatch, connection loss and unconfirmed cleanup do not permit this recovery. Multiple candidates for the same canonical URL are ambiguous and refuse binding before dispatch. Before a successful snapshot no input is allowed. Ordinary browser.open for a unique released URL also uses existing-only binding. An empty pages list means no known control or retained-page metadata, not proof that a browser tab is absent. Stop/handoff invalidates this code environment without destroying the retained page.',
     inputSchema: {
@@ -259,11 +259,8 @@ export function createBrowserExecution(options: {
         code: { type: 'string', minLength: 1, maxLength: 16384 },
         description: {
           type: 'string',
-          minLength: 1,
-          maxLength: 10,
-          pattern: '\\S',
           description:
-            'A short action phrase in the user’s language describing this call, at most 10 characters. Describe the intended action, not a success claim; omit code and sensitive values.',
+            'Optional action purpose for display in the user’s language. Omit to use the host summary. Describe the intended action without sensitive values; display length never changes execution.',
         },
       },
       required: ['code'],

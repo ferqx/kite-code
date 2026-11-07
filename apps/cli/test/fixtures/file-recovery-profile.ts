@@ -22,7 +22,7 @@ import { buildOwnedDaemon } from './daemon-host-build';
 function readToolBaseline(content: string) {
   const actual = taskQualityPresentedRead(content);
   if (actual?.path !== 'original.txt') throw Error('actual_file_read_result_invalid');
-  return actual.baseline;
+  return actual.baseRef;
 }
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
@@ -66,7 +66,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
                 input: {
                   path: 'original.txt',
                   content: n === 1 ? 'actual changed bytes\r\n' : 'later actual Run bytes\r\n',
-                  base: readToolBaseline(read!.content),
+                  base_ref: readToolBaseline(read!.content),
                 },
               }
             : null;

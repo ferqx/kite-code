@@ -178,14 +178,7 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
     let originalAudits: unknown[];
     try {
       const schema = matchingSchema(sourceCore)!;
-      expect(schema.migrations.map((migration) => migration.id)).toEqual([
-        '0001-baseline',
-        '0002-recovery-audit',
-        '0003-session-reconciliation',
-        '0004-pending-input-order',
-        '0005-authorization-check',
-        '0006-input-file-imports',
-      ]);
+      expect(schema.migrations.map((migration) => migration.id)).toEqual(['0001-baseline']);
       coreChecksum = schema.checksum;
       originalAudits = sourceCore.query('SELECT * FROM recovery_audit ORDER BY run_id').all();
       expect(originalAudits).toHaveLength(1);

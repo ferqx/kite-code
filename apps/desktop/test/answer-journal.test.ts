@@ -7,6 +7,8 @@ import type {
   SessionView,
 } from '@kite-ai/client';
 import { answerRequestDigest, NativeAnswerJournal } from '../electron/answer-journal';
+import { callerDigest } from '../electron/caller-journal';
+import { decodeNativeRequest } from '../electron/native-ipc';
 import { createDesktopController } from '../src/controller';
 import { memoryPrivateData } from './private-data.fixture';
 
@@ -31,6 +33,26 @@ const card: Interaction = {
   acceptedDecisionRevision: null,
   state: 'pending',
 };
+test('Native answer IPC accepts only an explicit frozen option ID or a plain deny', () => {
+  const request = {
+    method: 'interaction.answer' as const,
+    generation: 1,
+    interactionId: card.id,
+    revision: card.revision,
+  } as const;
+  for (const answer of [
+    { kind: 'approval', decision: 'approve', optionId: 'original-opaque-option' },
+    { kind: 'approval', decision: 'deny' },
+  ] as const)
+    expect(decodeNativeRequest({ ...request, answer })).toEqual({ ...request, answer });
+  for (const answer of [
+    { kind: 'approval', decision: 'approve' },
+    { kind: 'approval', decision: 'approve', grant: 'same_command' },
+    { kind: 'approval', decision: 'approve', optionId: 'once', scope: {} },
+    { kind: 'approval', decision: 'deny', optionId: 'once' },
+  ])
+    expect(() => decodeNativeRequest({ ...request, answer })).toThrow('invalid_native_request');
+});
 const view = {
   storeId: 'store',
   snapshotCursor: '10',
@@ -45,6 +67,109 @@ const view = {
   runs: [],
   executions: [],
 } as unknown as SessionView;
+
+test('Native plan answer IPC accepts explicit business decisions and rejects permission modes', () => {
+  const request = {
+    method: 'interaction.answer' as const,
+    generation: 1,
+    interactionId: card.id,
+    revision: card.revision,
+  };
+  for (const decision of ['approve', 'deny', 'revise'] as const) {
+    const answer = { kind: 'plan_review' as const, decision, feedback: 'original feedback' };
+    expect(decodeNativeRequest({ ...request, answer })).toEqual({ ...request, answer });
+    for (const mode of ['auto', 'accept_edits', 'full'])
+      expect(() => decodeNativeRequest({ ...request, answer: { ...answer, mode } })).toThrow(
+        'invalid_native_request',
+      );
+  }
+});
+
+test('a saved current plan answer remains byte-exact and can only query its original Command', async () => {
+  const f = fixture();
+  const interaction = { ...card, kind: 'plan_review' as const };
+  const request = {
+    expectedStoreId: 'store',
+    commandId: 'old-plan-answer',
+    expectedRevision: card.revision,
+    answer: {
+      kind: 'plan_review' as const,
+      decision: 'approve' as const,
+      feedback: 'original',
+    },
+  };
+  const {
+    id,
+    sessionId,
+    executionId,
+    runId,
+    revision,
+    kind,
+    attempt,
+    definitionId,
+    definitionVersion,
+    inputDigest,
+    policyRevision,
+  } = interaction;
+  f.data.beginAnswer({
+    intent: {
+      scope: {
+        storeId: 'store',
+        sessionId: 's',
+        workspaceId: 'w',
+        contextSelectionId: 'selection',
+      },
+      subjectId: 'owner',
+      interaction: {
+        id,
+        sessionId,
+        executionId,
+        runId,
+        revision,
+        kind,
+        attempt,
+        definitionId,
+        definitionVersion,
+        inputDigest,
+        policyRevision,
+      },
+      observationDigest: callerDigest(interaction),
+      request,
+      bodyDigest: callerDigest(request),
+      requestDigest: answerRequestDigest(card.id, request),
+    },
+    phase: 'submitting',
+  });
+  f.data.finishAnswer(request.commandId, 'unknown');
+  const original = JSON.stringify(f.data.answers()[0]!.intent);
+  f.respond(f.correct());
+  await f.journal.lookup(request.commandId);
+  expect(f.gets()).toBe(1);
+  expect(f.posts()).toBe(0);
+  expect(f.data.answers()[0]!.phase).toBe('accepted');
+  expect(JSON.stringify(f.data.answers()[0]!.intent)).toBe(original);
+});
+
+test('a new journal submission cannot save or strip an old plan permission mode', async () => {
+  const f = fixture();
+  await expect(
+    f.journal.prepare(
+      {
+        interaction: { ...card, kind: 'plan_review' },
+        phase: 'saved',
+        intent: {
+          expectedStoreId: 'store',
+          commandId: 'new-plan-answer',
+          expectedRevision: card.revision,
+          answer: { kind: 'plan_review', decision: 'approve', mode: 'auto' },
+        },
+      } as unknown as import('../src/controller').InteractionAnswerSubmission,
+      view,
+    ),
+  ).rejects.toThrow('interaction_answer_invalid');
+  expect(f.data.answers()).toEqual([]);
+  expect(f.posts()).toBe(0);
+});
 function fixture() {
   const data = memoryPrivateData();
   let posts = 0,
@@ -126,7 +251,7 @@ test('save failure issues zero POST; successful prepare persists exact original 
     throw Error('owned_disk_full');
   };
   await expect(
-    c.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+    c.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' }),
   ).rejects.toThrow('owned_disk_full');
   expect(f.posts()).toBe(0);
   expect(f.data.answers()).toEqual([]);
@@ -134,7 +259,7 @@ test('save failure issues zero POST; successful prepare persists exact original 
   const hot = f.controller();
   await hot.selectSession('s');
   await expect(
-    hot.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+    hot.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' }),
   ).rejects.toThrow('lost');
   expect(f.posts()).toBe(1);
   const row = f.data.answers()[0]!;
@@ -144,7 +269,7 @@ test('save failure issues zero POST; successful prepare persists exact original 
   const cold = f.controller();
   await cold.selectSession('s');
   await expect(
-    cold.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+    cold.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' }),
   ).rejects.toThrow('interaction_answer_already_saved');
   expect(f.posts()).toBe(1);
   expect(f.data.answers()).toEqual([row]);
@@ -187,7 +312,7 @@ test('another Store or subject cannot query or rebind the saved command; cold ro
     c = f.controller();
   await c.selectSession('s');
   await expect(
-    c.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+    c.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' }),
   ).rejects.toThrow('lost');
   const row = f.data.answers()[0]!;
   f.client.serverInfo!.storeId = 'different';
@@ -228,7 +353,7 @@ test('another Store or subject cannot query or rebind the saved command; cold ro
   const cold = f.controller();
   await cold.selectSession('s');
   await expect(
-    cold.answerInteraction(attached, { kind: 'approval', decision: 'approve' }),
+    cold.answerInteraction(attached, { kind: 'approval', decision: 'approve', optionId: 'once' }),
   ).rejects.toThrow('attachment_not_loaded');
   expect(f.posts()).toBe(1);
 });
@@ -262,10 +387,10 @@ test('submit accepts only the exact applied saved decision; imprecise replies re
     };
     await c.selectSession('s');
     if (field === 'correct')
-      await c.answerInteraction(card, { kind: 'approval', decision: 'approve' });
+      await c.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' });
     else
       await expect(
-        c.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+        c.answerInteraction(card, { kind: 'approval', decision: 'approve', optionId: 'once' }),
       ).rejects.toThrow();
     expect(calls).toBe(1);
     expect(f.data.answers()[0]!.phase).toBe(field === 'correct' ? 'accepted' : 'unknown');
@@ -273,6 +398,7 @@ test('submit accepts only the exact applied saved decision; imprecise replies re
     expect(f.data.answers()[0]!.intent.request.answer).toEqual({
       kind: 'approval',
       decision: 'approve',
+      optionId: 'once',
     });
   }
 });

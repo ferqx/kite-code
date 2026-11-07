@@ -18,6 +18,7 @@ export interface StableAgentSummary {
   state: AgentState;
   lastOutcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown' | null;
   lastResultSource: CollaborationSource | null;
+  lastResultRef: OperationRef | null;
   /** Trusted host metadata; never copied into the Model directory. */
   ref: OperationRef;
   runId: string | null;
@@ -44,6 +45,7 @@ export interface ApplyAgentCommandInput extends EnsureOperationInput {
   agentId: string;
   kind: 'follow_up' | 'interrupt';
   content?: string;
+  expectedWork?: OperationRef;
   /** Host preparation only: false forbids admitting a turn without its executable binding. */
   newTurnPrepared?: boolean;
 }
@@ -61,6 +63,7 @@ export interface AgentMailboxEvent {
   kind: 'message' | 'completed';
   outcome?: string;
   summary: string;
+  workRef?: OperationRef;
 }
 export type ListAgentEventsInput = WriteContext &
   RecordScope & {

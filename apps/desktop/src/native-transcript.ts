@@ -578,6 +578,26 @@ export function desktopTranscript({
             : (run.status as 'completed' | 'failed' | 'cancelled'),
       });
     if (!run.isActive && (run.status === 'failed' || run.status === 'interrupted')) {
+      const failure =
+        run.reason === 'context_source_unavailable'
+          ? {
+              summary: '工作区上下文读取失败',
+              text: '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。',
+            }
+          : run.reason === 'necessary_condition_unsatisfied'
+            ? {
+                summary: '本轮完成条件未满足',
+                text: '本轮尚未满足必要完成条件，无法确认为完成。已保存的回复和工具执行结果保留；请先核对尚未完成的要求与实际结果，再决定如何继续。',
+              }
+            : run.status === 'interrupted'
+              ? {
+                  summary: '本轮执行已中断',
+                  text: '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。',
+                }
+              : {
+                  summary: '本轮异常结束',
+                  text: '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
+                };
       let last = -1;
       for (let index = 0; index < modeled.length; index++) {
         const message = modeled[index]!;
@@ -593,21 +613,11 @@ export function desktopTranscript({
         turnId,
         role: 'system',
         systemKind: 'turn_failure',
-        text:
-          run.reason === 'context_source_unavailable'
-            ? '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。'
-            : run.status === 'interrupted'
-              ? '本轮执行已中断，未生成最终回复。请先核对本轮工具执行结果，再决定是否重新发送。'
-              : '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
+        text: failure.text,
         settled: true,
         status: 'failed',
         failure: {
-          summary:
-            run.reason === 'context_source_unavailable'
-              ? '工作区上下文读取失败'
-              : run.status === 'interrupted'
-                ? '本轮执行已中断'
-                : '本轮异常结束',
+          summary: failure.summary,
           ...(run.reason ? { reasonCode: run.reason } : {}),
         },
       });

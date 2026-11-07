@@ -777,7 +777,7 @@ for (const drift of [false, true])
         presentationSessionId: 'f2',
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await f.runtime.waitForCommand('human-action', { timeoutMs: 5000 });
       expect(f.counts().effects).toBe(drift ? 0 : 1);

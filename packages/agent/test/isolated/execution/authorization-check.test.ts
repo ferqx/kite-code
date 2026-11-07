@@ -11,6 +11,7 @@ import {
 } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createRuntime, type RuntimeOptions } from '../../../src';
+import { authorizationCheckInstructions } from '../../../src/execution/authorization-check-feedback';
 import type { Permissions } from '../../../src/extensions';
 import { semanticDigest } from '../../../src/json';
 import { createPermissionPolicy } from '../../../src/permissions';
@@ -18,6 +19,7 @@ import { builtinCapability } from '../../../src/permissions/capabilities';
 import { createPermissionCheckContextReader } from '../../../src/permissions/check-context';
 import { createShellCommandPolicy, readOnlySearchCommand } from '../../../src/permissions/shell';
 import { openSqliteStore } from '../../../src/sqlite';
+import { ensureFixtureAuthorizationCheck } from '../../fixtures/review-behavior';
 
 const permissionSnapshot = {
   namespace: 'fixture.permissions',
@@ -223,7 +225,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
         interactionId: interaction.id,
         expectedRevision: interaction.revision,
         subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await runtime.waitForCommand('reviewed-work');
       const completed = (await store.getExecution(target.id))!;
@@ -493,7 +495,7 @@ test('Shell review retains distinct task authorization and execution scope throu
   for (const candidate of cases) {
     const parsed = await parser.classify(candidate.command);
     expect(parsed.hardDenied).toBeNull();
-    expect(readOnlySearchCommand(parsed.plainCommands, '/bin/bash')).toBeUndefined();
+    expect(readOnlySearchCommand(parsed, '/bin/bash')).toBeUndefined();
   }
   const ordinary = createFixedModel(
     cases.flatMap((candidate): ModelEvent[][] => [
@@ -572,45 +574,7 @@ test('Shell review retains distinct task authorization and execution scope throu
           const { task } = candidate;
           expect(input.tools).toEqual([]);
           const instructions = input.messages.find((message) => message.role === 'system')!.content;
-          expect(instructions).toContain("not evidence of the command's actual effects");
-          expect(instructions).toContain('default and narrowest Shell scope');
-          expect(instructions).toContain('There is no read_only Shell scope');
-          expect(instructions).toContain('conservative capability metadata');
-          expect(instructions).toContain(
-            'including chained commands, pipelines, redirections, substitutions',
-          );
-          expect(instructions).toContain(
-            'Actual unauthorized writes, destructive operations or disclosures',
-          );
-          expect(instructions).toContain(
-            'a read-only command does not automatically authorize expanded execution scope',
-          );
-          expect(instructions).toContain(
-            'Return only one JSON object with exactly decision (approve_once, reject, or ask_user) and a nonempty reason',
-          );
-          expect(instructions).toContain('Separate intrinsic risk from user authorization');
-          expect(instructions).toContain(
-            'These are assessment categories, not automatic allow/deny thresholds',
-          );
-          expect(instructions).toContain(
-            'Explicit user authorization does not lower intrinsic risk',
-          );
-          expect(instructions).toContain(
-            'Low or medium risk never substitutes for user authorization',
-          );
-          expect(instructions).toContain('High authorization never overrides a hard denial');
-          expect(instructions).toContain(
-            'A low-risk file creation, edit or deletion is still outside a read-only task; reject it',
-          );
-          expect(instructions).toContain(
-            'Current explicit restrictions take precedence over a broad task or earlier permission',
-          );
-          expect(instructions).toContain(
-            'A planning-draft exception applies only when the supplied current policy establishes that exact exception',
-          );
-          expect(instructions).toContain(
-            'do not add risk_level, user_authorization or any other output fields',
-          );
+          expect(instructions).toBe(authorizationCheckInstructions);
           expect(payload.target).toMatchObject({
             definitionId: 'shell.execute',
             input: {
@@ -619,18 +583,36 @@ test('Shell review retains distinct task authorization and execution scope throu
               permissions: candidate.permissions,
             },
           });
-          expect(payload.request).toMatchObject({
-            mode: 'auto',
-            effects: ['process', 'unknown', 'record_write'],
-            executionScope: candidate.permissions,
+          expect(payload.policy).toMatchObject({
+            appliesToExecutionId: payload.target.executionId,
+            constraints: {
+              mode: 'auto',
+              effects: ['process', 'unknown', 'record_write'],
+              executionScope: candidate.permissions,
+            },
           });
           expect(payload.authorizationContext).toMatchObject({
             availability: 'available',
             workspaceRoot: root,
             executionBase: { cwd: root },
           });
+          const actualTarget = (await store.getExecution(payload.target.executionId))!;
+          const actualSession = (await store.getSession(actualTarget.sessionId))!;
+          expect(payload.authorizationContext.actor).toEqual({
+            participant: actualTarget.sessionId === actualSession.rootSessionId ? 'root' : 'child',
+            sessionId: actualTarget.sessionId,
+            runId: actualTarget.runId,
+            rootSessionId: actualSession.rootSessionId,
+            parentSessionId: actualSession.parentSessionId,
+          });
           expect(payload.authorizationContext.taskInputs).toContainEqual(
-            expect.objectContaining({ source: 'user', kind: 'run.start', content: task }),
+            expect.objectContaining({
+              source: 'user',
+              kind: 'run.start',
+              content: task,
+              sessionId: actualTarget.sessionId,
+              recipientRelation: 'current',
+            }),
           );
           expect(payload.decisionContext).toBeUndefined();
           const checkExecution = (await store.getExecution(input.requestId))!;
@@ -641,12 +623,14 @@ test('Shell review retains distinct task authorization and execution scope throu
                 originCommandRequest: unknown;
                 rootWorkRequest: unknown;
                 request: { invocation: { input: unknown } };
+                authorizationContext: { actor: unknown };
               };
             }
           ).input;
           expect(sealed.originCommandRequest).toMatchObject({ kind: 'run.start', content: task });
           expect(sealed.rootWorkRequest).toMatchObject({ kind: 'run.start', content: task });
           expect(sealed.request.invocation.input).toEqual(payload.target.input);
+          expect(sealed.authorizationContext.actor).toEqual(payload.authorizationContext.actor);
           expect(effects).toEqual(
             cases
               .slice(0, cases.indexOf(candidate))
@@ -1222,7 +1206,7 @@ test('a valid ask_user checker decision still requires actual human approval', a
       interactionId: interaction.id,
       expectedRevision: interaction.revision,
       subjectId: 'owner',
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.runtime.waitForCommand('work');
     expect(f.effects()).toBe(1);
@@ -1773,101 +1757,155 @@ test('changed check request at the same policy revision cannot borrow an earlier
   }
 });
 
-test('authorization check inside a delegated child does not consume its already-held single user child slot', async () => {
-  let effects = 0;
-  let reviews = 0;
-  const toolCall = (name: string): ModelEvent[] => [
-    { type: 'tool_call', id: crypto.randomUUID(), name, arguments: '{}' },
-    { ...finish, type: 'finish', reason: 'tool_calls' } as ModelEvent,
-  ];
-  const rootModel = createFixedModel([toolCall('fixture.delegate'), [finish]]);
-  const childModel = createFixedModel([toolCall('fixture.effect'), [finish]]);
-  const f = await fixture(
-    {
-      async *stream(input) {
-        reviews++;
-        expect(input.tools).toEqual([]);
-        yield {
-          type: 'text_delta',
-          text: '{"decision":"approve_once","reason":"child exact call"}',
-        };
-        yield finish;
-      },
-    },
-    {
-      async authorize(request) {
-        return request.definitionId === 'fixture.effect'
-          ? { allowed: false, revision: 'p1', check: { request: { task: 'child effect' } } }
-          : { allowed: true, revision: 'p1' };
-      },
-    },
-    {
-      model: rootModel,
-      maxConcurrentSubagents: 1,
-      childConfigurations: [
-        {
-          id: 'child',
-          version: '1',
-          model: childModel,
-          modelId: 'child-model',
-          toolIds: ['fixture.effect'],
-          snapshot: {},
-          maxConcurrentSubagents: 1,
+for (const compact of [false, true])
+  test(`authorization check inside a delegated child does not consume its already-held single user child slot (${compact ? 'trusted actor material' : 'legacy window'})`, async () => {
+    let effects = 0;
+    let reviews = 0;
+    let observedActor: unknown;
+    const toolCall = (name: string): ModelEvent[] => [
+      { type: 'tool_call', id: crypto.randomUUID(), name, arguments: '{}' },
+      { ...finish, type: 'finish', reason: 'tool_calls' } as ModelEvent,
+    ];
+    const rootModel = createFixedModel([toolCall('fixture.delegate'), [finish]]);
+    const childModel = createFixedModel([toolCall('fixture.effect'), [finish]]);
+    const f = await fixture(
+      {
+        async *stream(input) {
+          reviews++;
+          expect(input.tools).toEqual([]);
+          if (compact) {
+            const payload = JSON.parse(
+              input.messages.find((message) => message.role === 'user')!.content!,
+            );
+            expect(payload.authorizationContext.availability).toBe('available');
+            observedActor = payload.authorizationContext.actor;
+            expect(observedActor).toMatchObject({ parentSessionId: 's', rootSessionId: 's' });
+            expect(payload.authorizationContext.taskInputs).toContainEqual(
+              expect.objectContaining({
+                sessionId: 's',
+                source: 'user',
+                recipientRelation: 'parent',
+              }),
+            );
+            expect(payload.authorizationContext.taskInputs).toContainEqual(
+              expect.objectContaining({
+                source: 'delegation',
+                recipientRelation: 'current',
+                content: 'perform child effect',
+              }),
+            );
+          }
+          yield {
+            type: 'text_delta',
+            text: '{"decision":"approve_once","reason":"child exact call"}',
+          };
+          yield finish;
         },
-      ],
-      extensions: [
-        {
-          id: 'fixture',
-          version: '1',
-          apiMajor: 1,
-          tools: [
-            {
-              id: 'fixture.effect',
-              version: '1',
-              description: 'effect',
-              inputSchema: { type: 'object' },
-              async execute() {
-                effects++;
-                return { outcome: 'succeeded', content: 'child effect' };
-              },
-            },
-            {
-              id: 'fixture.delegate',
-              version: '1',
-              description: 'delegate',
-              inputSchema: { type: 'object' },
-              async execute(_input, context) {
-                const operation = await context.operations.ensure({
-                  key: 'child',
+      },
+      {
+        async authorize(request) {
+          return request.definitionId === 'fixture.effect'
+            ? {
+                allowed: false,
+                revision: 'p1',
+                check: {
                   request: {
-                    kind: 'agent',
-                    configurationId: 'child',
-                    input: { content: 'perform child effect' },
+                    task: 'child effect',
+                    ...(compact
+                      ? {
+                          context: {
+                            reviewInput: 'task_authorization',
+                            task: { availability: 'available' },
+                          },
+                        }
+                      : {}),
                   },
-                  cancellation: 'attached',
-                });
-                const result = await context.operations.wait(operation);
-                return {
-                  outcome: result?.status === 'succeeded' ? 'succeeded' : 'failed',
-                  content: 'child done',
-                };
-              },
-            },
-          ],
+                },
+              }
+            : { allowed: true, revision: 'p1' };
         },
-      ],
-    },
-  );
-  try {
-    await f.runtime.waitForCommand('work');
-    expect(effects).toBe(1);
-    expect(reviews).toBe(1);
-    expect(childModel.requests).toHaveLength(2);
-    expect(rootModel.requests).toHaveLength(2);
-  } finally {
-    await f.close();
-  }
-});
+      },
+      {
+        model: rootModel,
+        maxConcurrentSubagents: 1,
+        childConfigurations: [
+          {
+            id: 'child',
+            version: '1',
+            model: childModel,
+            modelId: 'child-model',
+            toolIds: ['fixture.effect'],
+            snapshot: {},
+            maxConcurrentSubagents: 1,
+          },
+        ],
+        extensions: [
+          {
+            id: 'fixture',
+            version: '1',
+            apiMajor: 1,
+            tools: [
+              {
+                id: 'fixture.effect',
+                version: '1',
+                description: 'effect',
+                inputSchema: { type: 'object' },
+                async execute() {
+                  effects++;
+                  return { outcome: 'succeeded', content: 'child effect' };
+                },
+              },
+              {
+                id: 'fixture.delegate',
+                version: '1',
+                description: 'delegate',
+                inputSchema: { type: 'object' },
+                async execute(_input, context) {
+                  const operation = await context.operations.ensure({
+                    key: 'child',
+                    request: {
+                      kind: 'agent',
+                      configurationId: 'child',
+                      input: { content: 'perform child effect' },
+                    },
+                    cancellation: 'attached',
+                  });
+                  const result = await context.operations.wait(operation);
+                  return {
+                    outcome: result?.status === 'succeeded' ? 'succeeded' : 'failed',
+                    content: 'child done',
+                  };
+                },
+              },
+            ],
+          },
+        ],
+      },
+    );
+    try {
+      await f.runtime.waitForCommand('work');
+      expect(effects).toBe(1);
+      expect(reviews).toBe(1);
+      expect(childModel.requests).toHaveLength(2);
+      expect(rootModel.requests).toHaveLength(2);
+      if (compact) {
+        const carrier = (await f.store.listExecutions('s')).find((row) => row.childSessionId)!;
+        const child = (await f.store.getSession(carrier.childSessionId!))!;
+        const target = (await f.store.listExecutions(child.id)).find(
+          (row) => row.definitionId === 'fixture.effect',
+        )!;
+        expect(observedActor).toEqual({
+          participant: 'child',
+          sessionId: child.id,
+          runId: target.runId,
+          rootSessionId: child.rootSessionId,
+          parentSessionId: child.parentSessionId,
+        });
+      }
+    } finally {
+      await f.close();
+    }
+  });
 
 test('cold planned authorization check is observation only and ordinary children cannot borrow its target exception', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cold-review-')));
@@ -1903,6 +1941,12 @@ test('cold planned authorization check is observation only and ordinary children
       commandId: 'work',
       configuration: {
         modelId: 'fixed',
+        authorizationCheck: {
+          id: 'checker',
+          version: '1',
+          modelId: 'check-model',
+          timeoutMs: 3000,
+        },
         tools: [{ id: 'fixture.effect', version: '1', extensionId: 'fixture' }],
       },
     });
@@ -1933,8 +1977,8 @@ test('cold planned authorization check is observation only and ordinary children
       request: { task: 'actual task' },
       checker: { id: 'checker', version: '1', modelId: 'check-model' },
     };
-    const first = await store.ensureAuthorizationCheck(input);
-    const repeated = await store.ensureAuthorizationCheck(input);
+    const first = await ensureFixtureAuthorizationCheck(store, input);
+    const repeated = await ensureFixtureAuthorizationCheck(store, input);
     expect(first.created).toBe(true);
     expect(repeated.created).toBe(false);
     expect(repeated.execution.id).toEqual(first.execution.id);

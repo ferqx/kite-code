@@ -693,11 +693,14 @@ export function projectInkTool(
         }
       : {}),
     preview: proxy ? discoveredName : getToolPreview(name, args),
-    detail: fileMissing
-      ? terminalText(String(args.path ?? ''))
-      : proxy
-        ? discoveredName
-        : getToolDetail(name, args),
+    detail:
+      name === 'shell_execute' && execution.status === 'cancelled'
+        ? getToolPreview(name, args)
+        : fileMissing
+          ? terminalText(String(args.path ?? ''))
+          : proxy
+            ? discoveredName
+            : getToolDetail(name, args),
     expanded,
     ...(confirmed
       ? {
@@ -829,12 +832,12 @@ export function projectInkChild(
             item.cancelRequestedAt === null &&
             ['planned', 'dispatching', 'running'].includes(item.status) &&
             (item.authorization?.human?.state === 'pending' ||
-              (item.authorization?.check ?? item.authorization?.review)?.status === 'planned' ||
-              (item.authorization?.check ?? item.authorization?.review)?.status === 'dispatching' ||
-              (item.authorization?.check ?? item.authorization?.review)?.status === 'running'),
+              item.authorization?.check?.status === 'planned' ||
+              item.authorization?.check?.status === 'dispatching' ||
+              item.authorization?.check?.status === 'running'),
         )
       : undefined;
-  const pendingCheck = pendingChild?.authorization?.check ?? pendingChild?.authorization?.review;
+  const pendingCheck = pendingChild?.authorization?.check;
   const approvalState =
     pendingChild?.authorization?.human?.state === 'pending'
       ? ('awaiting_user' as const)

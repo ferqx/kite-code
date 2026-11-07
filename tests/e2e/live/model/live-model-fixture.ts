@@ -13,6 +13,7 @@ import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
   type ReasoningEffort,
+  type SdkModelPreset,
 } from '@kite-ai/ai/sdk';
 import { createUserConfiguration, parseModelPreset } from '@kite-ai/service/configuration';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
@@ -83,6 +84,8 @@ export async function createLiveModelFixture(options: {
   /** Explicit existing local ChatGPT model; absent retains the configured default provider. */
   model?: string;
   reasoningEffort?: ReasoningEffort;
+  /** Isolated same-connection preset comparison; never writes user configuration. */
+  presetOverride?: SdkModelPreset;
   signal?: AbortSignal;
   /** Explicit independent finite-output experiment; ordinary suites retain their 4096 cap. */
   outputTokenLimit?: 8192;
@@ -182,7 +185,9 @@ export async function createLiveModelFixture(options: {
   );
   const protocol = selected.protocol ?? 'chat-completions';
   check(protocol === 'chat-completions' || protocol === 'responses', 'protocol_invalid');
-  const configuredPreset = parseModelPreset(selected.options);
+  const configuredPreset = options.presetOverride
+    ? parseModelPreset(options.presetOverride as Json)
+    : parseModelPreset(selected.options);
   check(!localSource || options.outputTokenLimit === undefined, 'local_output_limit_unsupported');
   const preset = localSource
     ? configuredPreset

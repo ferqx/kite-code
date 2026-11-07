@@ -273,6 +273,22 @@ function GrantDirectory({
           <ul>
             {facts.page.items.map(({ seq, grant }) => (
               <li key={grant.id}>
+                <p>{grant.presentation.label}</p>
+                {grant.presentation.details.map((detail, index) => (
+                  <p key={index}>{detail}</p>
+                ))}
+                <p>
+                  规则 {grant.ruleId} · 合同 {grant.contractId}
+                </p>
+                <pre>{JSON.stringify(grant.scope, null, 2)}</pre>
+                <p>
+                  {grant.bindings
+                    .map(
+                      (binding) =>
+                        `${binding.kind} ${binding.definitionId}@${binding.definitionVersion}`,
+                    )
+                    .join(' · ')}
+                </p>
                 <p>
                   {grant.kind} · {grant.definitionId}@{grant.definitionVersion}
                 </p>
@@ -286,7 +302,7 @@ function GrantDirectory({
                 </p>
                 <p>
                   输入摘要 {grant.inputDigest}
-                  {grant.commandDigest ? ` · 命令摘要 ${grant.commandDigest}` : ''}
+                  {` · 范围摘要 ${grant.scopeDigest}`}
                 </p>
               </li>
             ))}

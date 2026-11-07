@@ -2,6 +2,11 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  fixtureGrant,
+  fixtureOptions,
+  fixtureScopeOption,
+} from '../../../../../tests/fixtures/permission-grant';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -323,7 +328,10 @@ test('guidance waits for planned tools and approvals, preserves dispatched reque
       policyRevision: '1',
       requiredRefs: [],
       source: f.source,
-      request: { title: 'original params' },
+      request: {
+        title: 'original params',
+        options: [{ optionId: 'once', kind: 'once', presentation: { label: 'Once', details: [] } }],
+      },
     });
     for (let n = 0; n < 12; n++) await f.steer('steer-' + n);
     const page = await f.store.listPendingInputs({
@@ -361,7 +369,7 @@ test('guidance waits for planned tools and approvals, preserves dispatched reque
       interactionId: 'approval',
       expectedRevision: '1',
       subjectId: 'user',
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.store.acceptInteractionDecision({
       ...f.write,
@@ -512,8 +520,10 @@ for (const semanticCommand of [false, true])
           requiredRefs: [],
           source: decisionSource,
           request: {
-            grants: ['approve_once', 'same_command'],
-            ...(semantic && commandDigest ? { commandDigest } : {}),
+            options: fixtureOptions(
+              execution.definitionId!,
+              semantic && commandDigest ? commandDigest : execution.input,
+            ),
           },
         });
         await f.store.answerInteraction({
@@ -522,7 +532,11 @@ for (const semanticCommand of [false, true])
           presentationSessionId: 's',
           interactionId: card.id,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+          answer: {
+            kind: 'approval',
+            decision: 'approve',
+            optionId: fixtureScopeOption(card.request),
+          },
         });
         const answered = (await f.store.getInteraction({
           ...f.base,
@@ -568,7 +582,7 @@ for (const semanticCommand of [false, true])
       const approval = await approve('old-completion', source, semanticCommand);
       const grantInput = {
         expectedStoreId: f.expectedStoreId,
-        ...(commandDigest ? { commandDigest } : {}),
+        offers: [fixtureGrant('fixed', commandDigest ?? input)],
       };
       expect(
         await f.store.getPermissionGrant({ ...grantInput, executionId: 'old-completion' }),
@@ -610,8 +624,9 @@ for (const semanticCommand of [false, true])
         await f.store.getPermissionGrant({
           expectedStoreId: f.expectedStoreId,
           executionId: 'unrelated',
+          offers: [fixtureGrant('unrelated', (await f.store.getExecution('unrelated'))!.input)],
         }),
-      ).toEqual({ grantId: unrelated.id, revision: after.revision });
+      ).toMatchObject({ grantId: unrelated.id, revision: after.revision });
       expect(
         f.db.query('SELECT revoked_seq FROM permission_grant WHERE id=?').get(approval.id),
       ).toEqual({ revoked_seq: Number(after.revision) });
@@ -1010,7 +1025,10 @@ test('real message transaction fault and INT64 exhaustion roll back input/Run/su
       policyRevision: '1',
       requiredRefs: [],
       source,
-      request: { title: 'original completion params' },
+      request: {
+        title: 'original completion params',
+        options: [{ optionId: 'once', kind: 'once', presentation: { label: 'Once', details: [] } }],
+      },
     });
     const original = await f.store.getExecution('old-tool');
     await f.steer('atomic');

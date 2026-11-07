@@ -371,7 +371,19 @@ const card: Interaction = {
   inputDigest: 'hash',
   policyRevision: 'p',
   requiredRefs: [],
-  request: { grants: ['approve_once', 'same_command'] },
+  request: {
+    options: [
+      { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+      {
+        optionId: 'scope-example',
+        kind: 'scope',
+        presentation: {
+          label: '本 Session 相同命令',
+          details: ['仅限此会话的完整相同命令、环境与执行范围'],
+        },
+      },
+    ],
+  },
   answer: null,
   revision: '7',
   acceptedDecisionRevision: null,
@@ -581,12 +593,10 @@ test('rapid native approval selection and Enter deny the offered execution rathe
     await Bun.sleep(20);
     app.stdin.write('\r');
     await Bun.sleep(20);
-    expect(app.lastFrame()).toContain('same command in original Session');
+    expect(app.lastFrame()).toContain('本 Session 相同命令');
     expect(f.writes).toHaveLength(0);
-    // This offered three-option menu begins unselected: first Down selects
-    // once, second selects same_command, third selects deny. Keep the native
-    // keys back-to-back so Enter still detects a stale selection closure.
-    app.stdin.write('\u001b[B');
+    // The frozen once option is selected by default. Two Down keys select deny;
+    // consecutive input must not submit the stale once selection.
     app.stdin.write('\u001b[B');
     app.stdin.write('\u001b[B');
     app.stdin.write('\r');
@@ -610,7 +620,17 @@ test('ordinary selected child approval Escape denies only the exact card, preser
       ...card,
       id: 'first',
       request: {
-        grants: ['approve_once', 'same_command'],
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+          {
+            optionId: 'scope-example',
+            kind: 'scope',
+            presentation: {
+              label: '本 Session 相同命令',
+              details: ['仅限此会话的完整相同命令、环境与执行范围'],
+            },
+          },
+        ],
         input: { path: '/synthetic/first.txt' },
       },
     },
@@ -621,7 +641,12 @@ test('ordinary selected child approval Escape denies only the exact card, preser
       ancestry: ['a', 'sibling'],
       runId: 'siblingrun',
       executionId: 'sibling-effect',
-      request: { grants: ['approve_once'], input: { path: '/synthetic/second.txt' } },
+      request: {
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+        input: { path: '/synthetic/second.txt' },
+      },
     },
   ];
   f.port.readSession = async () => ({ ...snapshot(), interactions: cards });
@@ -660,7 +685,7 @@ test('ordinary selected child approval Escape denies only the exact card, preser
     expect(app.lastFrame()).toContain('Pending cards · 2');
     await key('\r');
     expect(app.lastFrame()).toContain('/synthetic/first.txt');
-    expect(app.lastFrame()).toContain('same command in original Session');
+    expect(app.lastFrame()).toContain('本 Session 相同命令');
     await key('\x1b');
     await key('\x1b');
     expect(f.writes).toEqual([
@@ -755,10 +780,12 @@ test('only original offered approval grants, EOF/blank and question never defaul
   expect(interactionAnswer(card, 'approve')).toEqual({
     kind: 'approval',
     decision: 'approve',
-    grant: 'approve_once',
+    optionId: 'once',
   });
-  expect(interactionAnswer(card, 'approve same_command')).toMatchObject({ grant: 'same_command' });
-  expect(interactionAnswer({ ...card, request: {} }, 'approve same_command')).toBeUndefined();
+  expect(interactionAnswer(card, 'approve scope-example')).toMatchObject({
+    optionId: 'scope-example',
+  });
+  expect(interactionAnswer({ ...card, request: {} }, 'approve scope-example')).toBeUndefined();
   expect(
     interactionAnswer(
       { ...card, kind: 'question', request: { schema: { type: 'object' } } },
@@ -769,11 +796,15 @@ test('only original offered approval grants, EOF/blank and question never defaul
   f.port.readSession = async () => ({ ...snapshot(), interactions: [card] });
   const c = new TuiController(f.port);
   await c.select('a');
-  await c.answer(card, 'approve same_command');
+  await c.answer(card, 'approve scope-example');
   expect(f.writes[0]).toMatchObject({
     id: 'a',
     card: 'card',
-    intent: { expectedStoreId: 'store', expectedRevision: '7', answer: { grant: 'same_command' } },
+    intent: {
+      expectedStoreId: 'store',
+      expectedRevision: '7',
+      answer: { optionId: 'scope-example' },
+    },
   });
   expect(c.state.intent?.phase).toBe('applied');
   expect(activity(c.state.snapshot)).toBe('Waiting for required result');
@@ -899,7 +930,17 @@ test('late output and disposed observer cannot publish or reopen reads, failed a
   const reviewedCard = {
     ...card,
     request: {
-      grants: ['approve_once', 'same_command'],
+      options: [
+        { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        {
+          optionId: 'scope-example',
+          kind: 'scope',
+          presentation: {
+            label: '本 Session 相同命令',
+            details: ['仅限此会话的完整相同命令、环境与执行范围'],
+          },
+        },
+      ],
       policy: {
         review: {
           kind: 'artifact',
@@ -1314,7 +1355,7 @@ test('independent complete attachments retain original scopes across selection; 
     id,
     sessionId: source,
     request: {
-      grants: ['approve_once'],
+      options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
       policy: {
         review: {
           kind: 'artifact',

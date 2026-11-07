@@ -12,6 +12,7 @@ import { createDefaultProcessConfiguration } from '@kite-ai/service/configuratio
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
 import type { CaseEvidence } from '../../../../scripts/runtime/unified-soak-cases';
 import { verifyMcpStdioJobHandoff } from '../../../../scripts/runtime/unified-soak-mcp-handoff';
+import { loopbackModelEnvironment } from '../../loopback-model-environment';
 import { privateDirectory } from '../../test-filesystem';
 import { check, until } from './common';
 
@@ -134,6 +135,12 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       );
     },
   });
+  // This owned Provider is local; do not discover the developer's OS proxy in a fixture.
+  const environment = loopbackModelEnvironment(provider.url);
+  const originalEnvironment = new Map(
+    Object.keys(environment).map((key) => [key, process.env[key]]),
+  );
+  Object.assign(process.env, environment);
   const cleanup: (() => Promise<unknown>)[] = [];
   const closeOwned = async (items: (() => Promise<unknown>)[], message: string) => {
     const errors: unknown[] = [];
@@ -253,7 +260,13 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       });
       const command = await until(
         () => client.getCommand(commandId),
-        (value) => value.status === 'applied',
+        (value) => {
+          if (value.status === 'rejected')
+            throw Error(
+              `mcp_stdio_run_rejected:${String(object(value.receipt).reason ?? 'unknown')}`,
+            );
+          return value.status === 'applied';
+        },
       );
       const runId = String(object(command.receipt).runId);
       const view = await until(
@@ -485,7 +498,14 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
     try {
       await closeHot();
     } finally {
-      provider.stop(true);
+      try {
+        provider.stop(true);
+      } finally {
+        for (const [key, value] of originalEnvironment) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
     }
   }
 }

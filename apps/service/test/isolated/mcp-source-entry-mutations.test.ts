@@ -269,7 +269,7 @@ async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: st
       answer:
         decision === 'deny'
           ? { kind: 'approval', decision: 'deny' }
-          : { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          : { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     return interaction;
   }

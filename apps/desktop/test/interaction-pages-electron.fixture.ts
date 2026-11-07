@@ -259,7 +259,7 @@ try {
       generation: 1,
       interactionId: original.id,
       revision: original.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     }),
     (error) => {
       return error instanceof Error && error.message.includes('network_outcome_unknown');
@@ -406,7 +406,7 @@ try {
       generation: 1,
       interactionId: card.id,
       revision: card.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
   }
   await page.waitForFunction(async (id) => {

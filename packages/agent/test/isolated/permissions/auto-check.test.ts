@@ -5,7 +5,7 @@ import type {
   Permissions,
 } from '../../../src/extensions';
 import {
-  createPlanningPermissionPolicy,
+  createBusinessPermissionPolicy,
   intersectPermissionPolicies,
 } from '../../../src/permissions';
 import { autoCheckOptions } from '../../../src/permissions/auto-check';
@@ -66,54 +66,57 @@ test('missing or different AND scopes cannot inherit another policy timeout capa
   expect(autoCheckOptions([])).toEqual({});
 });
 
-test('nested parent-child AND and approved Planning preserve equal scopes without dropping either approval requirement', async () => {
+test('a domain interpreter is preserved only when every actual checker selects the same complete binding', async () => {
+  const behavior = {
+    capability: { kind: 'tool' as const, definitionId: 'fixture.tool', definitionVersion: '1' },
+    contractRef: 'fixture.review',
+    configurationDigest: 'a'.repeat(64),
+  };
+  const checked = (binding: typeof behavior | undefined): Permissions => ({
+    authorize: async () => ({
+      allowed: false,
+      revision: 'checker',
+      check: { request: { kind: 'fixture' }, ...(binding ? { behavior: binding } : {}) },
+    }),
+  });
+  const agreed = await intersectPermissionPolicies(
+    checked(behavior),
+    checked(structuredClone(behavior)),
+  ).authorize(request);
+  expect(agreed.check!.behavior).toEqual(behavior);
+  for (const other of [
+    undefined,
+    { ...behavior, contractRef: 'independent.review' },
+    { ...behavior, configurationDigest: 'b'.repeat(64) },
+  ]) {
+    const combined = await intersectPermissionPolicies(checked(behavior), checked(other)).authorize(
+      request,
+    );
+    expect(combined.check!.behavior).toBeUndefined();
+    expect(combined.check!.request).toEqual({
+      policies: [{ kind: 'fixture' }, { kind: 'fixture' }],
+    });
+  }
+  const independent = await intersectPermissionPolicies(checked(behavior), {
+    authorize: async () => ({
+      allowed: false,
+      revision: 'independent-human',
+      check: { request: null, requireApproval: true },
+    }),
+  }).authorize(request);
+  expect(independent.check!.behavior).toBeUndefined();
+  expect(independent.check!.requireApproval).toBe(true);
+});
+
+test('a business gate preserves parent-child timeout scopes and their original approval requirement', async () => {
   const parentChild = intersectPermissionPolicies(policy(scope), policy(reordered));
-  let planScope: Scope = reordered;
-  const permission = createPlanningPermissionPolicy({
-    required: true,
-    run: () => ({ runId: 'r', sessionId: 's' }),
+  const permission = createBusinessPermissionPolicy({
     current: parentChild,
-    readState: async () => ({
-      status: 'approved',
-      mode: 'auto',
-      planId: 'plan',
-      version: 1,
-      digest: 'digest',
-    }),
-    describe: (actual) => ({
-      kind: actual.kind,
-      definitionId: actual.definitionId,
-      definitionVersion: actual.definitionVersion,
-      revision: 'shell',
-      effects: ['process'],
-      hardAllowed: true,
-      safeRead: false,
-      autoReview: 'shell_risk',
-      autoTimeoutScope: planScope,
-    }),
+    gate: async () => ({ allowed: true, revision: 'approved-business' }),
   });
   const result = await permission.authorize(request);
   expect(result.allowed).toBe(false);
+  expect(result.check).toEqual((await parentChild.authorize(request)).check);
   expect(result.check?.timeoutScope).toEqual(scope);
-  expect(result.snapshot?.namespace).toBe('builtin.planning.permissions');
-  for (const narrowed of [
-    undefined,
-    { filesystem: 'workspace_write', network: 'internet' },
-  ] as const) {
-    planScope = narrowed;
-    expect((await permission.authorize(request)).check?.timeoutScope).toBeUndefined();
-  }
-  const human = intersectPermissionPolicies(parentChild, {
-    async authorize() {
-      return {
-        allowed: false,
-        revision: 'human',
-        approval: { request: 'Independent human approval' },
-      };
-    },
-  });
-  expect((await human.authorize(request)).check).toMatchObject({
-    timeoutScope: scope,
-    requireApproval: true,
-  });
+  expect(result.snapshot?.namespace).toBe('builtin.business.permissions');
 });

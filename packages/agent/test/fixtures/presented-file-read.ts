@@ -9,13 +9,13 @@ export function presentedFileRead(content: string) {
   const size = /^Content \((\d+) UTF-8 bytes; starts on next line\):$/.exec(
     lines[2 + reference] ?? '',
   );
-  if (!header || !size || !lines[1 + reference]?.startsWith('baseline=')) return;
+  if (!header || !size || !lines[1 + reference]?.startsWith('base_ref=')) return;
   try {
     const text = lines.slice(3 + reference).join('\n');
     if (Buffer.byteLength(text) !== Number(size[1])) return;
     return {
       path: JSON.parse(header[1]!) as string,
-      baseline: JSON.parse(lines[1 + reference]!.slice('baseline='.length)),
+      baseRef: JSON.parse(lines[1 + reference]!.slice('base_ref='.length)) as string,
       content: text,
     };
   } catch {

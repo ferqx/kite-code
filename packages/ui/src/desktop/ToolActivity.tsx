@@ -289,9 +289,12 @@ function toolTarget(message: Message): string | undefined {
       return [argument('skill_id'), argument('path')].filter(Boolean).join(' · ') || undefined;
     case 'browser_execute': {
       const description = argument('description');
-      return description && [...description].length <= 10
-        ? description.replace(/\s+/gu, ' ').trim() || undefined
-        : undefined;
+      const purpose = description?.replace(/\s+/gu, ' ').trim();
+      return purpose
+        ? [...purpose].length > 40
+          ? `${[...purpose].slice(0, 40).join('')}…`
+          : purpose
+        : '操作浏览器';
     }
     case 'read_file':
     case 'view_images':
@@ -543,8 +546,8 @@ function approvalLabel(message: Message): string | undefined {
     case 'approved':
       return approval.source === 'auto'
         ? '已自动批准'
-        : approval.grant === 'same_command'
-          ? '已人工批准 · 本会话相同命令'
+        : approval.optionKind === 'scope' && approval.presentation
+          ? `已人工批准 · ${approval.presentation.label}`
           : '已人工批准';
   }
 }

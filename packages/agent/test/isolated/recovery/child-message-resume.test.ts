@@ -128,7 +128,7 @@ for (const drift of ['none', 'description', 'schema', 'snapshot'] as const)
         presentationSessionId: 's',
         interactionId: ready.card.id,
         expectedRevision: ready.card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await until(async () =>
         (await store!.getView(ready.child.session.id)).runs.every(

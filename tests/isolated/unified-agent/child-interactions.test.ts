@@ -266,7 +266,10 @@ async function fixture(count = 2) {
           expectedStoreId,
           commandId,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision },
+          answer:
+            decision === 'approve'
+              ? { kind: 'approval', decision: 'approve', optionId: 'once' }
+              : { kind: 'approval', decision: 'deny' },
         });
       },
       settled(label: string) {
@@ -311,7 +314,7 @@ test('two actual detached child approvals share root presentation; observer Serv
           expectedStoreId: f.expectedStoreId,
           commandId: `child-direct-${card.id}`,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         }),
         'interaction_scope_denied',
       );
@@ -322,7 +325,7 @@ test('two actual detached child approvals share root presentation; observer Serv
         expectedStoreId: 'wrong-store',
         commandId: 'wrong-store',
         expectedRevision: a.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       }),
       'store_identity_mismatch',
     );
@@ -331,7 +334,7 @@ test('two actual detached child approvals share root presentation; observer Serv
         expectedStoreId: f.expectedStoreId,
         commandId: 'stale-revision',
         expectedRevision: '0',
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       }),
       'interaction_revision_conflict',
     );
@@ -410,7 +413,7 @@ for (const domain of ['child', 'root'] as const)
     }
   }, 15000);
 
-test('denying one actual child ends its original round without cancelling a queued new parent Run or detached sibling', async () => {
+test('denying one actual child returns its original refusal without cancelling a queued new parent Run or detached sibling', async () => {
   const f = await fixture();
   try {
     const a = f.card('a');
@@ -423,8 +426,23 @@ test('denying one actual child ends its original round without cancelling a queu
     });
     await f.answer(a, 'deny');
     await f.settled('a');
-    expect((await f.client.getExecution(a.executionId)).status).toBe('failed');
-    expect((await f.client.getView(a.sessionId)).runs[0]?.status).toBe('cancelled');
+    const denied = await f.client.getExecution(a.executionId);
+    expect(denied.status).toBe('failed');
+    expect(denied.authorization?.dispatched).toBe(false);
+    expect(denied.result).toMatchObject({
+      content: 'approval_denied',
+      details: { adapterAttempted: false },
+    });
+    // Current product semantics preserve a refusal for the next Model; only
+    // explicit task cancellation cancels the Run (execution handbook).
+    expect((await f.client.getRun(a.runId!)).status).toBe('completed');
+    expect(
+      f.requests.filter((request) =>
+        request.messages.some(
+          (message) => message.role === 'tool' && message.sourceIds?.includes(a.executionId),
+        ),
+      ),
+    ).toHaveLength(1);
     expect((await f.client.getCommand('new-explicit')).cancelRequestedAt).toBeNull();
     expect((await f.client.getCommand('original')).cancelRequestedAt).toBeNull();
     expect(f.effects).toHaveLength(0);

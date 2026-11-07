@@ -18,6 +18,8 @@ Status: implemented
 
 PDF 解析和缓存留在宿主文件读取内部；UTF-8 正文复用既有完整交接，页图必须补真实视觉结果到模型输入的协议，不能以 PNG 路径代替图像。缓存不承担历史权威，已交给模型的结果持久保存。
 
+2026-11-07 真实普通会话在自己的输出目录写入“优化方案.md”被首版ASCII文件名限制拒绝。保留该限制不能满足自然中文文档交付；只改Files又会使维护和Native识别同一文件时失败。因此三方共用纯名称／路径校验，继续保留准确登记与物理对象核实。备份用标准JSON Unicode转义维持原有有界ASCII清单，不引入格式升级、迁移或额外兼容读取；完整名称约束归Files owner。普通输出文档保存不自动建立Planning批准。
+
 当前行为和数据交接归 [Files](../../../../packages/agent/src/tools/files/README.md)、[Planning](../../../../packages/agent/src/business/planning/README.md)、[维护](../../../../packages/agent/src/maintenance/README.md#会话工作文件与-manifest-v20)和[桌面手册](../../../../docs/handbook/clients/desktop/README.md#提示词与附件)。本决定已完成 Windows 开发交付范围；[Desktop](../../../../apps/desktop/README.md)与[Terminal](../../../../apps/cli/docs/terminal-release.md)分别保存客户端过程、正式候选证据和未取得的安装／平台资格。
 
 ## Alternatives considered

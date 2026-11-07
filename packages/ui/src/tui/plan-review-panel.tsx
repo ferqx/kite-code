@@ -1,6 +1,7 @@
 import type { Interaction } from '@kite-ai/client';
 import { Box, useInput, usePaste, useStdout } from 'ink';
 import { useRef, useState } from 'react';
+import { describePlanReview } from '../plan-review';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch } from './composer-input';
 import { terminalText } from './controller';
@@ -31,33 +32,25 @@ export function TuiPlanReviewPanel({
   const [showEmptyHint, setShowEmptyHint] = useState(false);
   const [selected, setSelected] = useState<number>();
   const [, render] = useState(0);
-  const request = card.request;
-  const offered =
-    request !== null &&
-    typeof request === 'object' &&
-    !Array.isArray(request) &&
-    Array.isArray(request.allowedModes)
-      ? request.allowedModes
-      : [];
-  const modes = ['auto', 'accept_edits'].filter((mode) => offered.includes(mode));
+  const supported = describePlanReview(card.request).kind === 'supported';
   const choices = [
-    ...modes.map((mode) => ({
-      answer: `approve ${mode}`,
-      label:
-        mode === 'auto'
-          ? `${translate('planReview.auto')}${translate('common.recommended')}`
-          : translate('planReview.acceptEdits'),
-      description: translate(
-        mode === 'auto' ? 'planReview.autoDescription' : 'planReview.acceptEditsDescription',
-      ),
-    })),
+    {
+      answer: 'approve',
+      label: translate('planReview.approve'),
+      description: translate('planReview.approveDescription'),
+    },
     {
       answer: 'revise',
       label: translate('planReview.feedback'),
       description: translate('planReview.feedbackDescription'),
     },
+    {
+      answer: 'deny',
+      label: translate('planReview.deny'),
+      description: translate('planReview.denyDescription'),
+    },
   ];
-  const mutable = !busy && card.state === 'pending';
+  const mutable = supported && !busy && card.state === 'pending';
   // Ink's actual terminal listener may outlive the render that selected a row.
   // Keep the explicit user choice, rather than reading an old callback index.
   const explicitChoice = useRef<string | undefined>(undefined);
@@ -162,6 +155,7 @@ export function TuiPlanReviewPanel({
       ) : (
         <>
           <Text>{translate('planReview.choose')}</Text>
+          {!supported && <Text>{t('Plan request unavailable for new decisions')}</Text>}
           <Box marginTop={compact ? 0 : 1}>
             <OverlayChoiceList
               options={choices.map((choice) => ({

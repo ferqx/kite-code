@@ -16,6 +16,7 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json, ToolResult } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { Git } from '../../../../packages/agent/src/tools/git-worktree/git';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
@@ -169,19 +170,18 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
   const steps = new Map<string, number>();
   const seen: string[] = [];
   const calls = (scenario: string): Call[] => {
-    const writeScope = { filesystem: 'full_access', network: 'none' };
+    const writeScope = { filesystem: 'full_access' };
     if (scenario.startsWith('default-create'))
       return [
         {
           name: 'git_worktree',
           arguments: {
             action: 'create',
-            key: scenario,
-            newBranch: scenario,
-            permissions:
-              scenario === 'default-create-workspace'
-                ? { filesystem: 'workspace_write', network: 'none' }
-                : writeScope,
+
+            new_branch: scenario,
+            ...(scenario === 'default-create-workspace'
+              ? { filesystem: 'workspace_write' }
+              : writeScope),
           },
         },
       ];
@@ -192,9 +192,9 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           name: 'git_worktree',
           arguments: {
             action: 'remove',
-            key: scenario,
+
             path: defaultTarget,
-            permissions: writeScope,
+            ...writeScope,
           },
         },
       ];
@@ -210,9 +210,9 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           name: 'git_worktree',
           arguments: {
             action: 'create',
-            key: 'auto-create',
+
             path: target,
-            permissions: writeScope,
+            ...writeScope,
           },
         },
       ];
@@ -222,9 +222,9 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           name: 'git_worktree',
           arguments: {
             action: 'remove',
-            key: 'auto-remove',
+
             path: target,
-            permissions: writeScope,
+            ...writeScope,
           },
         },
       ];
@@ -232,7 +232,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
       return [
         {
           name: 'git_worktree',
-          arguments: { action: 'remove', key: scenario, path: target, permissions: writeScope },
+          arguments: { action: 'remove', path: target, ...writeScope },
         },
       ];
     if (scenario === 'overlap-create' || scenario === 'workspace-create')
@@ -241,15 +241,12 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           name: 'git_worktree',
           arguments: {
             action: 'create',
-            key: scenario,
+
             path:
               scenario === 'overlap-create'
                 ? join(source, 'nested-worktree')
                 : join(root, 'outside-write-scope'),
-            permissions:
-              scenario === 'workspace-create'
-                ? { filesystem: 'workspace_write', network: 'none' }
-                : writeScope,
+            ...(scenario === 'workspace-create' ? { filesystem: 'workspace_write' } : writeScope),
           },
         },
       ];
@@ -267,18 +264,18 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           name: 'git_worktree',
           arguments: {
             action: 'create',
-            key: 'forbidden-create',
+
             path: join(root, `${scenario}-target`),
-            permissions: writeScope,
+            ...writeScope,
           },
         },
         {
           name: 'git_worktree',
           arguments: {
             action: 'remove',
-            key: 'forbidden-remove',
+
             path: target,
-            permissions: writeScope,
+            ...writeScope,
           },
         },
       ];
@@ -289,9 +286,9 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
           name: 'git_worktree',
           arguments: {
             action: 'create',
-            key: 'plan-create',
+
             path: target,
-            permissions: writeScope,
+            ...writeScope,
           },
         },
       ];
@@ -360,14 +357,13 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
               name: 'git_worktree',
               arguments: {
                 action: step === 0 ? 'create' : 'remove',
-                key: `${scenario}-${step === 0 ? 'create' : 'remove'}`,
                 ...(defaultRootCase
                   ? step === 1
                     ? { path: defaultTarget }
                     : {}
                   : { path: target }),
-                permissions: { filesystem: 'full_access', network: 'none' },
-                ...(step === 0 ? { newBranch: `${scenario}-branch` } : {}),
+                filesystem: 'full_access',
+                ...(step === 0 ? { new_branch: `${scenario}-branch` } : {}),
               },
             },
           ];
@@ -524,6 +520,12 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
             expect(
               (await store.listExecutions(scenario)).filter((row) => row.kind === 'job'),
             ).toHaveLength(0);
+            if (!defaultRootCase && scenario === 'auto-create')
+              expect(card.request).toMatchObject({
+                options: expect.arrayContaining([
+                  expect.objectContaining({ kind: 'scope', ruleId: 'builtin.worktree.action' }),
+                ]),
+              });
             if (defaultRootCase) {
               expect(existsSync(defaultRoot)).toBe(scenario === 'default-remove');
               if (scenario === 'default-remove') expect(existsSync(defaultTarget!)).toBe(true);
@@ -535,7 +537,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
               interactionId: card.id,
               expectedRevision: card.revision,
               subjectId: 'owner',
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             approvals.push(card.id);
           }
@@ -620,6 +622,12 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
               authorization: { dispatched: false },
             });
             const removing = (execution.input as { action: string }).action === 'remove';
+            if (!defaultRootCase && scenario === 'auto-create')
+              expect(card.request).toMatchObject({
+                options: expect.arrayContaining([
+                  expect.objectContaining({ kind: 'scope', ruleId: 'builtin.worktree.action' }),
+                ]),
+              });
             if (defaultRootCase) {
               expect(existsSync(defaultRoot)).toBe(removing);
               if (removing) expect(existsSync(defaultTarget!)).toBe(true);
@@ -631,7 +639,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
               interactionId: card.id,
               expectedRevision: card.revision,
               subjectId: 'owner',
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             approvals.push(card.id);
           }
@@ -857,7 +865,7 @@ native(
       const tools = result.executions.filter((row) => row.definitionId === 'git.worktree');
       const jobs = result.executions.filter((row) => row.definitionId === 'shell.command');
       expect(tools).toHaveLength(2);
-      expect(jobs).toHaveLength(4);
+      expect(jobs, JSON.stringify(tools.map((row) => row.result))).toHaveLength(4);
       for (const tool of tools) {
         expect(tool.result).toMatchObject({
           outcome: 'succeeded',
@@ -1155,7 +1163,7 @@ for (const mode of ['accept_edits', 'auto'] as const)
         expect(dirname(createdPath)).toBe(f.defaultRoot);
         expect(tools[1]!.input).toMatchObject({ path: createdPath });
         expect(existsSync(createdPath)).toBe(false);
-        expect(jobs).toHaveLength(4);
+        expect(jobs, JSON.stringify(tools.map((row) => row.result))).toHaveLength(4);
         expect(result.approvals).toHaveLength(mode === 'auto' ? 0 : 2);
         expect(f.checks).toHaveLength(0);
         for (const tool of tools) {
@@ -1169,7 +1177,7 @@ for (const mode of ['accept_edits', 'auto'] as const)
             expect(tool.authorization?.human).toMatchObject({
               accepted: true,
               decision: 'approve',
-              grant: 'approve_once',
+              optionId: 'once',
             });
           const internal = jobs.filter((job) => job.parentExecutionId === tool.id);
           expect(internal).toHaveLength(2);
@@ -1305,6 +1313,35 @@ native(
     } catch (error) {
       bodyError = error;
     } finally {
+      await f.close(bodyError);
+    }
+  },
+  60000,
+);
+
+native(
+  'required Planning metadata does not collect Worktree scope facts for an Auto mutation',
+  async () => {
+    const f = await fixture(true);
+    const repository = spyOn(Git.prototype, 'repository');
+    let bodyError: unknown;
+    try {
+      const result = await f.run('planning', 'auto');
+      const mutation = result.executions.find(
+        (row) =>
+          row.definitionId === 'git.worktree' &&
+          (row.input as { action?: string }).action === 'create',
+      )!;
+      expect(mutation.result).toMatchObject({ outcome: 'failed' });
+      expect(JSON.stringify(mutation.result)).toContain('plan_approval_required');
+      expect(repository).toHaveBeenCalledTimes(0);
+      expect(result.approvals).toHaveLength(0);
+      expect(f.checks).toHaveLength(0);
+      expect(existsSync(f.target)).toBe(false);
+    } catch (error) {
+      bodyError = error;
+    } finally {
+      repository.mockRestore();
       await f.close(bodyError);
     }
   },

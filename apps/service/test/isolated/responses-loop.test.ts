@@ -1071,7 +1071,7 @@ test('Responses manual approval waits with zero effects then continues the origi
       expectedStoreId: f.storeId,
       commandId: 'approve',
       expectedRevision: interaction.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const view = await finished(f.client);
     expect(provider.errors).toEqual([]);

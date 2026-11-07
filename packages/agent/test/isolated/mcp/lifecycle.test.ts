@@ -16,6 +16,20 @@ import { selectProfile } from '../../../src/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
+async function connectionRecordKey(
+  store: Awaited<ReturnType<typeof openSqliteStore>>,
+  sessionId: string,
+) {
+  const intent = await store.getExtensionRecord({
+    sessionId,
+    extensionId: mcpLifecycleExtensionId,
+    key: 'connection-intent/local',
+  });
+  if (!intent || typeof (intent.value as { key?: string }).key !== 'string')
+    throw Error('fixture_connection_intent_missing');
+  return `connection/local/${(intent.value as { key: string }).key}`;
+}
+
 async function fixture(
   withPort = true,
   beforeOpen?: () => Promise<void>,
@@ -146,7 +160,7 @@ async function fixture(
         .name;
       const tool =
         step === 0 && route !== 'use-b'
-          ? { name: 'connect_mcp_server', input: { server_id: 'local', key: 'first' } }
+          ? { name: 'connect_mcp_server', input: { server_id: 'local' } }
           : (step === 1 && route !== 'use-b') || (step === 0 && route === 'use-b')
             ? remote
               ? { name: remote, input: {} }
@@ -362,7 +376,7 @@ test('durable connection Job precedes network; next actual compatible Model sees
           await readonly.getExtensionRecord({
             sessionId: 'a',
             extensionId: mcpLifecycleExtensionId,
-            key: 'connection/local/first',
+            key: await connectionRecordKey(f.store, 'a'),
           })
         )?.originStoreId,
       ).toBe(f.expectedStoreId);
@@ -395,7 +409,7 @@ test('connection Job cancellation is exact per Session and leaves another Sessio
     const record = (await f.store.getExtensionRecord({
       sessionId: 'a',
       extensionId: mcpLifecycleExtensionId,
-      key: 'connection/local/first',
+      key: await connectionRecordKey(f.store, 'a'),
     }))!;
     const ref = (record.value as { operationRef: { executionId: string } }).operationRef;
     await f.runtime.cancelExecution({
@@ -502,7 +516,7 @@ test('readonly Runtime reopen exposes saved catalogue without live restoration; 
             type: 'tool_call',
             id: 'retry',
             name: 'connect_mcp_server',
-            arguments: '{"server_id":"local","key":"first"}',
+            arguments: '{"server_id":"local"}',
           },
           { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } },
         ],
@@ -556,7 +570,7 @@ test('unconfirmed owned transport stop invalidates future tools without inventin
     const record = (await f.store.getExtensionRecord({
       sessionId: 'a',
       extensionId: mcpLifecycleExtensionId,
-      key: 'connection/local/first',
+      key: await connectionRecordKey(f.store, 'a'),
     }))!;
     const ref = (record.value as { operationRef: { executionId: string } }).operationRef;
     f.confirmStop = false;
@@ -777,7 +791,7 @@ test('close during actual dispatched Job open collects the late owned handle wit
         await f.store.getExtensionRecord({
           sessionId: 'a',
           extensionId: mcpLifecycleExtensionId,
-          key: 'connection/local/first',
+          key: await connectionRecordKey(f.store, 'a'),
         }),
       ).toBeNull();
     } finally {

@@ -61,14 +61,11 @@ async function fixture(
   const calls: ({ name: string; input: unknown } | undefined)[] = scenario
     ? [
         { name: 'read_file', input: { path: projectFile } },
-        { name: 'write_file', input: { path: projectFile, base: null, content: 'placeholder' } },
+        { name: 'write_file', input: { path: projectFile, content: 'placeholder' } },
         { name: 'read_file', input: { path: projectFile } },
         undefined,
       ]
-    : [
-        { name: 'write_file', input: { path: 'output.txt', content: 'exact first', base: null } },
-        undefined,
-      ];
+    : [{ name: 'write_file', input: { path: 'output.txt', content: 'exact first' } }, undefined];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -337,7 +334,7 @@ async function fixture(
         expectedStoreId,
         commandId: `answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     },
     async close() {

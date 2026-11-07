@@ -31,7 +31,7 @@ test('literal search uses bundled rg through Bash with quoted arguments and no a
     writeFileSync(configuration, '--glob=*.unmatchable\n');
     const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: shell });
     const classified = await policy.classify(`rg -n -F "${needle}" "目录 space/条目.txt"`);
-    const command = readOnlySearchCommand(classified.plainCommands, shell);
+    const command = readOnlySearchCommand(classified, shell);
     expect(classified.hardDenied).toBeNull();
     expect(command).toBeDefined();
     const { env } = withBundledRipgrep({
@@ -64,7 +64,7 @@ test('literal search uses bundled rg through Bash with quoted arguments and no a
       'rg "$(printf pattern)" .',
     ]) {
       const parsed = await policy.classify(candidate);
-      expect(readOnlySearchCommand(parsed.plainCommands, shell), candidate).toBeUndefined();
+      expect(readOnlySearchCommand(parsed, shell), candidate).toBeUndefined();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -102,7 +102,7 @@ test('rg consumes option values before recognizing an option terminator', async 
       'rg -nF --no-heading --color never -e -- input.txt',
     ]) {
       const parsed = await policy.classify(candidate);
-      const command = readOnlySearchCommand(parsed.plainCommands, shell);
+      const command = readOnlySearchCommand(parsed, shell);
       expect(parsed.hardDenied, candidate).toBeNull();
       expect(command, candidate).toBeDefined();
       const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
@@ -147,7 +147,71 @@ test('rg consumes option values before recognizing an option terminator', async 
       const parsed = await policy.classify(candidate);
       expect(parsed.plainCommands, candidate).not.toBeNull();
       expect(parsed.hardDenied, candidate).toBeNull();
-      expect(readOnlySearchCommand(parsed.plainCommands, shell), candidate).toBeUndefined();
+      expect(readOnlySearchCommand(parsed, shell), candidate).toBeUndefined();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('literal read-only && chains rewrite every leaf and preserve failure short-circuiting', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-search-chain-')));
+  const shell =
+    process.platform === 'win32'
+      ? realpathSync.native(join(dirname(dirname(Bun.which('git')!)), 'usr/bin/bash.exe'))
+      : '/bin/bash';
+  try {
+    const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: shell });
+    writeFileSync(join(root, 'input.txt'), 'needle\n');
+    const configuration = join(root, 'rg-config');
+    writeFileSync(configuration, '--glob=*.unmatchable\n');
+    const run = async (source: string) => {
+      const classification = await policy.classify(source);
+      const command = readOnlySearchCommand(classification, shell);
+      expect(command, source).toBeDefined();
+      const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
+        cwd: root,
+        env: {
+          SystemRoot: process.env.SystemRoot ?? '',
+          PATH: '',
+          RIPGREP_CONFIG_PATH: configuration,
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exit, output, error] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      return { command: command!, exit, output, error };
+    };
+    const success = await run('pwd && ls input.txt && rg -n needle input.txt');
+    expect(success.exit, success.error).toBe(0);
+    expect(success.output).toBe(`${root.replaceAll('\\', '/')}\ninput.txt\n1:needle\n`);
+    expect(success.command).toContain('--no-config');
+    const failure = await run('rg absent input.txt && pwd && rg needle input.txt');
+    expect(failure.exit).toBe(1);
+    expect(failure.output).toBe('');
+    expect(failure.command.match(/--no-config/g)).toHaveLength(2);
+    for (const source of [
+      'pwd || ls',
+      'pwd; ls',
+      'pwd\nls',
+      'pwd | ls',
+      'pwd && ls;',
+      'pwd && (ls)',
+      'pwd && VAR=x ls',
+      'pwd && ls > output',
+      'pwd && ls "$DIRECTORY"',
+      'pwd && rg "$(pwd)" .',
+      'pwd && rg --pre=helper needle .',
+      'pwd && rg --search-zip needle .',
+      'pwd && printf tail',
+      'pwd && sh script.sh',
+      'pwd && ls && unknown',
+    ]) {
+      expect(readOnlySearchCommand(await policy.classify(source), shell), source).toBeUndefined();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -188,7 +252,7 @@ test.skipIf(process.platform === 'win32')(
         const parsed = await policy.classify(command);
         expect(parsed.plainCommands, command).toEqual([['rg', ...args]]);
         expect(parsed.hardDenied, command).toBeNull();
-        expect(readOnlySearchCommand(parsed.plainCommands, '/bin/bash'), command).toBeUndefined();
+        expect(readOnlySearchCommand(parsed, '/bin/bash'), command).toBeUndefined();
         // Execute only our own temporary fixture to verify the hidden option really can spawn.
         const child = Bun.spawn([executable, '--no-config', ...args], {
           cwd: root,
@@ -228,6 +292,7 @@ test('loads the real packaged Bash WASM and accepts only literal argv sequences'
       ['head', '-1'],
       ['git', 'status'],
     ],
+    readOnlyCommands: null,
     hardDenied: null,
   });
   expect((await policy.classify('printf "a b" x\'y\'')).plainCommands).toEqual([
@@ -320,6 +385,7 @@ test('retains fixed critical-system denial through literal wrappers and complex 
   expect((await policy.classify('rm -rf /\n(')).plainCommands).toBeNull();
   expect(await policy.classify('printf harmless\n(')).toEqual({
     plainCommands: null,
+    readOnlyCommands: null,
     hardDenied: null,
   });
 });
@@ -331,6 +397,7 @@ test('does not reinterpret a non-POSIX shell with Bash grammar', async () => {
   });
   expect(await policy.classify('Get-Content file')).toEqual({
     plainCommands: null,
+    readOnlyCommands: null,
     hardDenied: null,
   });
 });

@@ -46,6 +46,10 @@ export interface ToolResult {
   outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
   content: string;
   details?: Json;
+  /** Only a succeeded Tool's top-level result can stop its original work and
+   * attached descendants. Job/standalone Action results and nested data do not
+   * control another Run. Existing effects are retained; new user work is independent. */
+  control?: { kind: 'stop_work' };
   artifactRefs?: ArtifactRef[];
   /** Complete UTF-8 Model body; Core must verify original scope and read to successful EOF. */
   modelContent?: { kind: 'artifact'; reference: ArtifactRef; encoding: 'utf-8' };
@@ -87,6 +91,8 @@ export interface ToolDefinition {
     /** Restrict a public entry without removing the original internal control contract. */
     readonly omitParameters?: readonly string[];
     readonly requiredParameters?: readonly string[];
+    /** Explicit public input surface in internal field names. Core still validates inputSchema. */
+    readonly inputSchema?: JsonSchema;
     /** Version of the owner's pure result presentation; original results remain durable. */
     readonly resultVersion?: string;
   };
@@ -128,7 +134,7 @@ export interface JobContext {
   readonly dispatchAuthorization?: {
     readonly revision: string;
     /** Accepted evidence reviewed the prepared risk material; never set for timeout continuation. */
-    readonly riskReviewApproved?: true;
+    readonly materialReviewed?: true;
     readonly snapshot?: { namespace: string; version: string; data: Json };
   };
 }
@@ -214,6 +220,8 @@ export interface Extension {
   };
 }
 export interface PublicRun {
+  /** Actual immutable requirement identities registered on this Run; records alone confer no obligation. */
+  readonly requirements: readonly RequirementRef[];
   /** Read-only persisted provenance. Older external readers may omit it. */
   readonly originStoreId?: string;
 
@@ -225,6 +233,10 @@ export interface PublicRun {
   finishedAt: number | null;
 }
 export interface PublicExecution {
+  /** Actual Tool owner from the original Run's captured registration, never result data. */
+  extensionId?: string;
+  /** Exact existing controlled child operation, resolved from its original Command/Store record. */
+  operationRef?: OperationRef;
   /** Core projects saved dispatch and human-decision facts; adapter results cannot supply them. */
   authorization?: {
     dispatched: boolean;
@@ -344,6 +356,7 @@ export interface Operations {
     agentId: string;
     kind: 'follow_up' | 'interrupt';
     content?: string;
+    expectedWork?: OperationRef;
   }): Promise<import('../storage/agent-collaboration').AgentCommandReceipt>;
   listStableAgents?(options?: {
     agentIds?: string[];
@@ -351,8 +364,12 @@ export interface Operations {
     upperSeq?: string;
     limit?: number;
   }): Promise<import('../storage/agent-collaboration').StableAgentPage>;
-  waitAgentEvents?(options?: { afterSeq?: string; waitMs?: number | null }): Promise<{
-    reason: 'events' | 'input' | 'timeout';
+  waitAgentEvents?(options?: {
+    afterSeq?: string;
+    waitMs?: number | null;
+    workRefs?: OperationRef[];
+  }): Promise<{
+    reason: 'events' | 'input' | 'timeout' | 'completed';
     events: import('../storage/agent-collaboration').AgentMailboxEvent[];
     nextSeq: string;
   }>;
@@ -532,13 +549,15 @@ export interface PermissionDecision {
   revision: string;
   reason?: string;
   /** The current host policy allows a human to decide this exact otherwise-unapproved call. */
+  grantOffers?: readonly import('../permission-grants').GrantOffer[];
   approval?: {
     request: Json;
-    grants?: readonly ('approve_once' | 'same_command')[];
-    commandDigest?: string;
+    options?: readonly import('../permission-grants').ApprovalOption[];
   };
   /** Trusted host classification asks the finite durable authorization check; never itself grants execution. */
   check?: {
+    /** Exact trusted interpreter selected by this policy, preserved only by unanimous composition. */
+    behavior?: import('../tool-behavior').ToolBehaviorBinding;
     request: Json;
     requireApproval?: boolean;
     /** Host-derived equivalent operation, independent of logical call IDs. */
@@ -553,6 +572,18 @@ export interface Permissions {
   /** Trusted owner policy; model/configuration data cannot select this scheduling contract. */
   readonly toolDispatchOrder?: 'model';
   authorize(request: AuthorizationRequest): Promise<PermissionDecision>;
+  /** Explicit trusted policy support for replacing only its own ordinary challenge. */
+  consumesExecutionConfirmation?(
+    request: AuthorizationRequest,
+    decision: PermissionDecision,
+    owner: import('../tool-behavior').ToolBehaviorBinding,
+  ): Promise<boolean>;
+  reuseRevision?(
+    request: AuthorizationRequest,
+    capability: import('../permission-grants').CapabilityBinding,
+    candidate: import('../permission-grants').GrantCandidate,
+    decision: PermissionDecision,
+  ): Promise<{ reuseRevision: string; satisfiesCheck?: true; requireApproval?: boolean } | null>;
 }
 export interface NecessaryConditions {
   evaluate(

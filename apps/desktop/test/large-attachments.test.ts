@@ -20,7 +20,11 @@ test('actual Desktop exact attachment proof cannot cross a view switch or late r
     await controller.selectSession('s');
     expect(
       await failure(() =>
-        controller.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+        controller.answerInteraction(card, {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: 'once',
+        }),
       ),
     ).toMatchObject({ code: 'attachment_not_loaded' });
     const attachment = interactionAttachment(card)!;
@@ -46,7 +50,11 @@ test('actual Desktop exact attachment proof cannot cross a view switch or late r
     expect(await rejected).toBeDefined();
     expect(
       await failure(() =>
-        controller.answerInteraction(card, { kind: 'approval', decision: 'approve' }),
+        controller.answerInteraction(card, {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: 'once',
+        }),
       ),
     ).toMatchObject({ code: 'attachment_not_loaded' });
     expect(f.effects()).toBe(0);
@@ -55,10 +63,18 @@ test('actual Desktop exact attachment proof cannot cross a view switch or late r
       signal: new AbortController().signal,
     });
     expect(body.content.byteLength).toBe(Number(attachment.reference.size));
-    const first = controller.answerInteraction(card, { kind: 'approval', decision: 'approve' });
-    expect(controller.answerInteraction(card, { kind: 'approval', decision: 'approve' })).toBe(
-      first,
-    );
+    const first = controller.answerInteraction(card, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    });
+    expect(
+      controller.answerInteraction(card, {
+        kind: 'approval',
+        decision: 'approve',
+        optionId: 'once',
+      }),
+    ).toBe(first);
     await first;
     await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
     expect(f.effects()).toBe(1);

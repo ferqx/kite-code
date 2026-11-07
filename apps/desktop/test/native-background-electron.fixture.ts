@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { loopbackModelEnvironment } from '../../../tests/fixtures/loopback-model-environment';
 import type { NativeState } from '../src/native-bridge';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -50,10 +52,16 @@ async function launch(removalPending = false) {
     executablePath: join(candidate!, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate!, 'app'), `--user-data-dir=${join(home!, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home!,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...loopbackModelEnvironment(new URL(control!)),
+    },
     timeout: 15000,
   });
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 15000);
+  stage('root_renderer', { url: page.url(), windows: app.windows().map((window) => window.url()) });
   page.setDefaultTimeout(15000);
   if (removalPending) await page.getByRole('button', { name: '查看结果', exact: true }).waitFor();
   else {
@@ -128,8 +136,10 @@ async function close() {
   await owned.evaluate(({ app }) => app.quit());
   await exit;
   app = undefined;
-  assert.throws(() => process.kill(childPid!, 0));
-  stage('ordinary_exit_service_absent', { childPid });
+  if (childPid) {
+    assert.throws(() => process.kill(childPid!, 0));
+    stage('ordinary_exit_service_absent', { childPid });
+  } else stage('ordinary_exit_service_unobserved');
   childPid = undefined;
 }
 try {
@@ -779,23 +789,58 @@ try {
     pids,
   });
 } catch (error) {
-  if (app)
+  if (app) {
+    const windows = app.windows();
+    writeFileSync(
+      join(home!, 'window-failure-urls.json'),
+      JSON.stringify({
+        error: String(error),
+        windows: windows.map((page) => page.url()),
+      }),
+    );
+    // Startup may fail before network instrumentation or tracing exists. Capture
+    // each available renderer independently so a missing diagnostic cannot hide it.
+    for (const [index, page] of windows.entries()) {
+      try {
+        writeFileSync(
+          join(home!, `window-failure-${index}.txt`),
+          await page.locator('body').innerText(),
+        );
+      } catch {}
+      try {
+        await page.screenshot({
+          path: join(home!, `window-failure-${index}.png`),
+          fullPage: true,
+          timeout: 5000,
+        });
+      } catch {}
+      try {
+        writeFileSync(
+          join(home!, `window-failure-${index}-state.json`),
+          JSON.stringify(
+            await page.evaluate(async () =>
+              window.kiteNative
+                ? window.kiteNative.request({ method: 'state', generation: 1 })
+                : null,
+            ),
+          ),
+        );
+      } catch {}
+    }
     try {
-      const page = app.windows()[0]!;
-      writeFileSync(join(home!, 'window-failure.txt'), await page.locator('body').innerText());
       writeFileSync(
         join(home!, 'background-failure-physical.json'),
-        JSON.stringify(await app.evaluate(() => (globalThis as Globals).backgroundPhysical)),
+        JSON.stringify(await app.evaluate(() => (globalThis as Globals).backgroundPhysical ?? [])),
       );
-      await page.screenshot({ path: join(home!, 'window-failure.png'), fullPage: true });
-      await page.context().tracing.stop({ path: join(home!, 'window-failure-trace.zip') });
-      stage('failure', {
-        error: String(error),
-        state: await page.evaluate(
-          async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
-        ),
-      });
     } catch {}
+    for (const page of windows) {
+      try {
+        await page.context().tracing.stop({ path: join(home!, 'window-failure-trace.zip') });
+        break;
+      } catch {}
+    }
+    stage('failure', { error: String(error) });
+  }
   await fetch(`${control}/release/all`).catch(() => {});
   try {
     await close();

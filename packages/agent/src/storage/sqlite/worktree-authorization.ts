@@ -5,11 +5,12 @@ import {
   validWorktreeDecision,
   worktreeConfigurationIdentity,
 } from '../../permissions/worktree-authorization';
+import { matchesWorktreeApprovalScope } from '../../tools/git-worktree/approval-scope';
 import {
   decodeWorkerRequest,
   digest,
   limits,
-  parseGitWorktreeInput,
+  parseGitWorktreeRequest,
   resolveDefaultWorktreeTarget,
   validateFrame,
   validatePlan,
@@ -62,7 +63,7 @@ function preparationFrame(
 }
 
 /** Compare every policy dimension while mapping only this registered Tool to its own Job. */
-function policy(snapshot: Json, planCeiling = false): Json {
+function policy(snapshot: Json): Json {
   const tree = obj(snapshot),
     data = obj(tree.data);
   if (tree.version !== '1') throw new AgentError('worktree_authorization_changed');
@@ -72,18 +73,15 @@ function policy(snapshot: Json, planCeiling = false): Json {
       namespace: tree.namespace,
       policies: data.policies.map((p) => {
         const leaf = obj(p);
-        return { scope: leaf.scope!, snapshot: policy(leaf.snapshot!, planCeiling) };
+        return { scope: leaf.scope!, snapshot: policy(leaf.snapshot!) };
       }),
     };
   }
-  if (tree.namespace === 'builtin.planning.permissions')
-    return {
-      namespace: tree.namespace,
-      planning: data.planning!,
-      originalRun: data.originalRun!,
-      current: policy(data.current!, planCeiling),
-      ceiling: data.ceiling === null ? null : policy(data.ceiling!, true),
-    };
+  if (tree.namespace === 'builtin.business.permissions') {
+    if (Object.keys(data).sort().join(',') !== 'current,gate')
+      throw new AgentError('worktree_authorization_changed');
+    return { namespace: tree.namespace, gate: data.gate!, current: policy(data.current!) };
+  }
   const capability = obj(data.capability);
   if (
     tree.namespace !== 'builtin.permissions' ||
@@ -106,7 +104,7 @@ function policy(snapshot: Json, planCeiling = false): Json {
     mode: data.mode!,
     workspaceTrust: data.workspaceTrust,
     policyRevision: data.policyRevision!,
-    allowed: planCeiling ? null : data.worktreeAllowedDigest!,
+    allowed: data.worktreeAllowedDigest!,
     effects: [...(capability.effects as Json[])].sort(),
     executionScope: capability.executionScope ?? null,
     worktreeAuthorization: capability.worktreeAuthorization!,
@@ -193,7 +191,7 @@ export function worktreeAuthorizationBoundary(
     !same(policy(accepted.snapshot!), policy(decision.snapshot as unknown as Json))
   )
     throw new AgentError('worktree_authorization_changed');
-  const input = parseGitWorktreeInput(JSON.parse(String(parent.intent_json)));
+  const input = parseGitWorktreeRequest(JSON.parse(String(parent.intent_json)), String(parent.id));
   if (!input || input.action === 'list') throw new AgentError('worktree_authorization_changed');
   const key = `git-worktree/${input.key}`;
   const record = db.row(
@@ -355,6 +353,16 @@ export function worktreeAuthorizationBoundary(
     );
     if (!same(frame.plan, value.plan) || frame.planDigest !== value.planDigest)
       throw new AgentError('worktree_authorization_changed');
+    if (accepted.grant) {
+      const grant = obj(accepted.grant),
+        offer = obj(grant.offer);
+      if (
+        offer.ruleId !== 'builtin.worktree.action' ||
+        offer.contractId !== 'builtin.worktree.action-scope' ||
+        !matchesWorktreeApprovalScope(offer.scope!, value.plan)
+      )
+        throw new AgentError('worktree_scope_changed');
+    }
   }
   const { ref: _ref, ...frozen } = step;
   return {

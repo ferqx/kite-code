@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
+import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import {
+  createDefaultApprovalObservation,
+  hasMinimalShellRiskInput,
   liveModelSelection,
   liveReasoningEffort,
   originalToolFeedbackReceived,
@@ -48,16 +51,18 @@ const feedback = {
   content: `The command failed.\nExit code: 17.\nshell_id: "original-handle"\nstdout:\n${details.stdout}\nstderr:\n${details.stderr}`,
 };
 
-test('live reasoning effort preserves low by default and accepts only low or high', () => {
+test('live reasoning effort preserves low by default and accepts explicit medium', () => {
   expect(liveReasoningEffort(undefined)).toBe('low');
   expect(liveReasoningEffort('low')).toBe('low');
   expect(liveReasoningEffort('high')).toBe('high');
-  for (const input of ['', 'medium', 'LOW', 'high,low'])
+  expect(liveReasoningEffort('medium')).toBe('medium');
+  for (const input of ['', 'MEDIUM', 'LOW', 'high,low'])
     expect(() => liveReasoningEffort(input)).toThrow('reasoning_effort_invalid');
 });
 
 test('live model selection preserves luna by default and independently supports the terra low comparison', () => {
   expect(liveModelSelection(undefined)).toBe('gpt-6-luna');
+  expect(liveModelSelection('default')).toBe('default');
   expect(liveModelSelection('gpt-6-luna')).toBe('gpt-6-luna');
   expect(liveModelSelection('gpt-6.1-terra')).toBe('gpt-6.1-terra');
   expect({ model: liveModelSelection('gpt-6-luna'), effort: liveReasoningEffort('high') }).toEqual({
@@ -70,6 +75,346 @@ test('live model selection preserves luna by default and independently supports 
   }).toEqual({ model: 'gpt-6.1-terra', effort: 'low' });
   for (const input of ['', 'terra', 'gpt-6.1-terra, gpt-6-luna', 'GPT-6-LUNA', 'gpt-6-astra'])
     expect(() => liveModelSelection(input)).toThrow('model_invalid');
+});
+
+test('Shell risk input requires the exact current owner projection and rejects generic policy fields', () => {
+  const input = {
+    purpose: 'shell_risk',
+    operation: { kind: 'tool', definitionId: 'shell.execute' },
+    material: { command: 'pwd', cwd: '/owned' },
+  };
+  expect(hasMinimalShellRiskInput(input)).toBe(true);
+  for (const [field, value] of Object.entries({
+    policyRevision: 'revision',
+    request: {},
+    requireApproval: false,
+    authorizationContext: {},
+    decisionContext: {},
+  }))
+    expect(hasMinimalShellRiskInput({ ...input, [field]: value })).toBe(false);
+  expect(hasMinimalShellRiskInput({ ...input, purpose: 'authorization_check' })).toBe(false);
+  expect(hasMinimalShellRiskInput({ purpose: 'shell_risk', operation: input.operation })).toBe(
+    false,
+  );
+  expect(hasMinimalShellRiskInput(null)).toBe(false);
+});
+
+const observationRequest = (requestId: string): ModelRequest => ({
+  requestId,
+  modelId: 'original-model',
+  messages: [],
+  tools: [],
+});
+const adapterSnapshot = (effort: 'medium' | 'low', cap?: number) => ({
+  adapterId: 'original-sdk',
+  adapterVersion: '1',
+  provider: {
+    availability: 'available' as const,
+    family: 'compatible',
+    modelId: 'original-wire-model',
+  },
+  settings: {
+    reasoningEffort: effort,
+    ...(cap ? { maxOutputTokens: cap } : {}),
+    maxRetries: 0,
+    maxSteps: 1,
+    allowSystemInMessages: true,
+  },
+  transformation: { id: 'original-transform', version: '1' },
+});
+const observation = (extra: Partial<Parameters<typeof createDefaultApprovalObservation>[0]> = {}) =>
+  createDefaultApprovalObservation({
+    modelId: 'original-model',
+    signal: new AbortController().signal,
+    metadata: {},
+    ...extra,
+  });
+
+test('transparent model tap preserves distinct business and reviewer bindings, original request, signal and events', async () => {
+  const tap = observation();
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const seen: { request: ModelRequest; signal: AbortSignal }[] = [];
+  const event: ModelEvent = { type: 'text_delta', text: 'original 雪🙂' };
+  const make = (effort: 'medium' | 'low', cap?: number): ModelAdapter => ({
+    describeRequest: () => adapterSnapshot(effort, cap),
+    async *stream(request, input) {
+      seen.push({ request, signal: input.signal });
+      yield event;
+    },
+  });
+  const business = make('medium'),
+    reviewer = make('low', 256);
+  const businessTap = tap.wrap(business, 'business'),
+    reviewerTap = tap.wrap(reviewer, 'reviewer');
+  const first = observationRequest('business-original'),
+    second = observationRequest('check-original');
+  expect(businessTap.describeRequest?.(first)).toEqual(business.describeRequest?.(first));
+  expect(reviewerTap.describeRequest?.(second)).toEqual(reviewer.describeRequest?.(second));
+  for (const [model, request] of [
+    [businessTap, first],
+    [reviewerTap, second],
+  ] as const)
+    for await (const actual of model.stream(request, { signal })) expect(actual).toBe(event);
+  expect(seen[0]?.request).toBe(first);
+  expect(seen[1]?.request).toBe(second);
+  expect(seen.every((entry) => entry.signal === signal)).toBe(true);
+  expect(
+    tap.logical.map((entry) => [
+      entry.requestId,
+      entry.role,
+      entry.binding?.settings.reasoningEffort,
+      entry.binding?.settings.maxOutputTokens,
+      entry.completed,
+    ]),
+  ).toEqual([
+    ['business-original', 'business', 'medium', undefined, true],
+    ['check-original', 'reviewer', 'low', 256, true],
+  ]);
+  expect(tap.requests).toEqual([first, second]);
+});
+
+test('transparent wire tap forwards exact init and complete bytes with original request identity and no retries', async () => {
+  const captured: Uint8Array[] = [];
+  const tap = observation({ rawResponse: (_, bytes) => captured.push(bytes) });
+  const signal = new AbortController().signal;
+  const init = {
+    method: 'POST',
+    signal,
+    body: JSON.stringify({
+      model: 'original-wire-model',
+      messages: [],
+      reasoning_effort: 'low',
+      max_tokens: 256,
+    }),
+  };
+  const bytes = new TextEncoder().encode(
+    'data: {"choices":[{"delta":{"content":"雪🙂"}}]}\n\ndata: [DONE]\n\n',
+  );
+  let calls = 0;
+  const original = Object.assign(
+    async (input: Parameters<typeof fetch>[0], actual?: Parameters<typeof fetch>[1]) => {
+      calls++;
+      expect(input).toBe('https://owned.invalid/model');
+      expect(actual).toBe(init);
+      let part = 0;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              if (part === 0) controller.enqueue(bytes.slice(0, 41));
+              else if (part === 1) controller.enqueue(bytes.slice(41));
+              else controller.close();
+              part++;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        { headers: { 'content-type': 'text/event-stream', 'x-owned': 'preserved' } },
+      );
+    },
+    { preconnect: fetch.preconnect },
+  );
+  const observed = tap.observeFetch(original);
+  const model: ModelAdapter = {
+    async *stream() {
+      const response = await observed('https://owned.invalid/model', init);
+      expect(response.headers.get('x-owned')).toBe('preserved');
+      yield { type: 'text_delta', text: await response.text() };
+    },
+  };
+  for await (const event of tap
+    .wrap(model, 'reviewer')
+    .stream(observationRequest('original-check'), { signal }))
+    expect(event).toEqual({ type: 'text_delta', text: new TextDecoder().decode(bytes) });
+  expect(calls).toBe(1);
+  expect(captured).toEqual([bytes]);
+  expect(tap.wireRequests).toEqual([
+    {
+      physicalIndex: 0,
+      requestId: 'original-check',
+      body: init.body,
+      bytes: Buffer.byteLength(init.body),
+    },
+  ]);
+  expect(tap.physical.attempts[0]).toMatchObject({
+    requestId: 'original-check',
+    eof: true,
+    cancelled: false,
+    failed: false,
+    terminal: 'sse_done',
+    bytes: bytes.length,
+  });
+  expect(JSON.stringify(tap.metadata)).not.toContain('owned.invalid');
+});
+
+test('transparent wire tap preserves reader cancellation and does not drain unread output', async () => {
+  const tap = observation();
+  const reason = new Error('original-reader-cancel');
+  let reads = 0,
+    cancelled: unknown;
+  const original = Object.assign(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              reads++;
+              controller.enqueue(new TextEncoder().encode('original chunk'));
+            },
+            cancel(input) {
+              cancelled = input;
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      ),
+    { preconnect: fetch.preconnect },
+  );
+  const observed = tap.observeFetch(original);
+  const model: ModelAdapter = {
+    async *stream() {
+      const response = await observed('https://owned.invalid/model', {
+        method: 'POST',
+        body: '{}',
+      });
+      const reader = response.body!.getReader();
+      try {
+        const item = await reader.read();
+        yield { type: 'text_delta', text: new TextDecoder().decode(item.value) };
+      } finally {
+        await reader.cancel(reason);
+      }
+    },
+  };
+  const iterator = tap
+    .wrap(model, 'business')
+    .stream(observationRequest('cancel-original'), { signal: new AbortController().signal })
+    [Symbol.asyncIterator]();
+  expect((await iterator.next()).done).toBe(false);
+  await iterator.return?.();
+  expect(reads).toBe(1);
+  expect(cancelled).toBe(reason);
+  expect(tap.logical[0]?.completed).toBe(false);
+  expect(tap.physical.attempts[0]).toMatchObject({ cancelled: true, eof: false });
+});
+
+test('transparent observation propagates original abort and transport errors without retry or replacement', async () => {
+  const tap = observation();
+  const controller = new AbortController();
+  const error = new TypeError('original-private-error');
+  let calls = 0;
+  const original = Object.assign(
+    async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      calls++;
+      expect(init?.signal).toBe(controller.signal);
+      controller.abort(error);
+      throw error;
+    },
+    { preconnect: fetch.preconnect },
+  );
+  const observed = tap.observeFetch(original);
+  const model: ModelAdapter = {
+    async *stream(_request, input) {
+      await observed('https://owned.invalid/model', {
+        method: 'POST',
+        body: '{}',
+        signal: input.signal,
+      });
+      yield { type: 'text_delta', text: 'unreachable' };
+    },
+  };
+  const iterator = tap
+    .wrap(model, 'reviewer')
+    .stream(observationRequest('failed-original'), { signal: controller.signal })
+    [Symbol.asyncIterator]();
+  await expect(iterator.next()).rejects.toBe(error);
+  expect(controller.signal.reason).toBe(error);
+  expect(calls).toBe(1);
+  expect(tap.attemptFailures).toEqual([
+    { requestId: 'failed-original', eventCount: 0, reason: 'model_failed' },
+  ]);
+  expect(tap.physical.attempts[0]).toMatchObject({ failed: true, status: 0 });
+});
+
+test('logical observation leaves EOF alone and preserves the original failure if cleanup also fails', async () => {
+  const tap = observation();
+  let returns = 0;
+  const failure = new TypeError('original-model-failure');
+  const adapter = (fail: boolean): ModelAdapter => ({
+    stream() {
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              if (fail) throw failure;
+              return { done: true as const, value: undefined };
+            },
+            async return() {
+              returns++;
+              throw Error('secondary-cleanup-failure');
+            },
+          };
+        },
+      };
+    },
+  });
+  const signal = new AbortController().signal;
+  const eof = tap
+    .wrap(adapter(false), 'business')
+    .stream(observationRequest('eof-original'), { signal })
+    [Symbol.asyncIterator]();
+  expect((await eof.next()).done).toBe(true);
+  expect(returns).toBe(0);
+  const failed = tap
+    .wrap(adapter(true), 'reviewer')
+    .stream(observationRequest('failure-original'), { signal })
+    [Symbol.asyncIterator]();
+  await expect(failed.next()).rejects.toBe(failure);
+  expect(returns).toBe(1);
+});
+
+test('installed observer covers real Bun FetchSession transport and restores the original surfaces', async () => {
+  const tap = observation();
+  const originalFetch = globalThis.fetch,
+    originalSession = Bun.FetchSession;
+  let received = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch() {
+      received++;
+      return new Response('data: [DONE]\n\n');
+    },
+  });
+  const restore = tap.install();
+  const session = new Bun.FetchSession();
+  try {
+    const model: ModelAdapter = {
+      async *stream(_request, input) {
+        const response = await session.fetch(`http://127.0.0.1:${server.port}/`, {
+          method: 'POST',
+          body: '{}',
+          signal: input.signal,
+          proxy: false,
+        });
+        yield { type: 'text_delta', text: await response.text() };
+      },
+    };
+    for await (const event of tap
+      .wrap(model, 'business')
+      .stream(observationRequest('session-original'), { signal: new AbortController().signal }))
+      expect(event).toEqual({ type: 'text_delta', text: 'data: [DONE]\n\n' });
+    expect(received).toBe(1);
+    expect(tap.wireRequests.map((entry) => entry.requestId)).toEqual(['session-original']);
+    expect(tap.physical.attempts[0]).toMatchObject({ requestId: 'session-original', eof: true });
+  } finally {
+    restore();
+    session.close();
+    await server.stop(true);
+  }
+  expect(globalThis.fetch).toBe(originalFetch);
+  expect(Bun.FetchSession).toBe(originalSession);
 });
 
 function partialFixture() {
@@ -128,12 +473,12 @@ function partialFixture() {
   const carrier = row({
     id: 'carrier',
     kind: 'job',
-    definitionId: 'child.worker',
+    definitionId: 'agent/general',
     sessionId: 's',
     childSessionId: 'child',
     reference: { runId: 'child-run' },
     childConfiguration: {
-      snapshot: { snapshot: { roleId: 'worker' } },
+      snapshot: { snapshot: { roleId: 'general' } },
     } as unknown as ExecutionRecord['childConfiguration'],
     status: 'running',
   });
@@ -231,6 +576,29 @@ test('partial failure guard arms only after original native mutation and termina
   ])
     expect(partialChildFailurePrerequisites({ ...f, ...changed })).toBeNull();
   expect(f).toEqual(before);
+});
+
+test('partial failure control accepts only the current writable general role, without retired aliases', () => {
+  const fixture = partialFixture();
+  expect(partialChildFailurePrerequisites(fixture)).not.toBeNull();
+  for (const roleId of [
+    'worker',
+    'code',
+    'plan',
+    'review',
+    'explore',
+    'GENERAL',
+    null,
+    undefined,
+  ]) {
+    const carrier = {
+      ...fixture.carrier,
+      childConfiguration: {
+        snapshot: { snapshot: { roleId } },
+      } as unknown as ExecutionRecord['childConfiguration'],
+    };
+    expect(partialChildFailurePrerequisites({ ...fixture, carrier })).toBeNull();
+  }
 });
 
 test('literal validator detection excludes path mentions and counts repeated original invocations', () => {

@@ -8,6 +8,7 @@ import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
+import { modelReference } from '../../../src/model-reference';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('full read/write/edit and complete search retain content and hash beyond former file, match and line limits', async () => {
@@ -110,14 +111,7 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
       return files.write(input);
     },
   };
-  const responses = [
-    call('write_file', { path: 'large', base: null, content_artifact: publicSource }),
-    [finish],
-    call('read_file', { path: 'large' }),
-    [finish],
-    call('write_file', { path: 'denied', base: null, content_artifact: publicSource }),
-    [finish],
-  ];
+  const responses = [call('fixture_publish', {}), [finish]];
   const model = createFixedModel(responses);
   let deny = false;
   const runtime = createRuntime({
@@ -130,7 +124,26 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
         return { allowed: request.kind === 'model' || !deny, revision: 'p1' };
       },
     },
-    extensions: [{ id: 'files', version: '2', apiMajor: 1, tools: createFileTools(wrapped) }],
+    extensions: [
+      { id: 'builtin.files', version: '2', apiMajor: 1, tools: createFileTools(wrapped) },
+      {
+        id: 'fixture',
+        version: '1',
+        apiMajor: 1,
+        tools: [
+          {
+            id: 'fixture.publish',
+            version: '1',
+            model: { name: 'fixture_publish' },
+            description: 'Publish the original large text Artifact.',
+            inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+            async execute() {
+              return { outcome: 'succeeded', content: 'Original body', artifactRefs: [source] };
+            },
+          },
+        ],
+      },
+    ],
   });
   const run = async (commandId: string) => {
     await runtime.submitCommand({
@@ -178,6 +191,20 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
       expect(tool).toMatchObject({ originCommandId: businessId, rootWorkCommandId: commandId });
   };
   try {
+    await run('publish');
+    const producer = (await store.listExecutions('s')).find(
+      (row) => row.definitionId === 'fixture.publish',
+    )!;
+    expect(producer.status).toBe('succeeded');
+    const contentRef = modelReference('artifact', producer.id, 0);
+    responses.push(
+      call('write_file', { path: 'large', content_ref: contentRef }),
+      [finish],
+      call('read_file', { path: 'large' }),
+      [finish],
+      call('write_file', { path: 'denied', content_ref: contentRef }),
+      [finish],
+    );
     await run('write');
     expect(writes).toBe(1);
     expect(readFileSync(join(workspace, 'large'), 'utf8')).toBe(content);
@@ -205,25 +232,25 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
       ).toString('utf8'),
     ).toBe(content);
     expect(
-      model.requests[3]?.messages.some(
-        (message) =>
-          message.role === 'tool' &&
-          message.content.endsWith(content) &&
-          message.content.includes(JSON.stringify(summary.baseline)),
-      ),
+      model.requests
+        .at(-1)
+        ?.messages.some(
+          (message) =>
+            message.role === 'tool' &&
+            message.content.endsWith(content) &&
+            message.content.includes(summary.base_ref),
+        ),
     ).toBe(true);
     responses.splice(
-      4,
+      6,
       0,
       call('edit_file', {
         path: 'large',
-        base: summary.baseline,
+        base_ref: summary.base_ref,
         old_text: 'end\n',
         new_text: 'REPAIRED\n',
         expected_matches: 1,
       }),
-      [finish],
-      call('search_content', { text: 'x', mode: 'content' }),
       [finish],
     );
     await run('edit');
@@ -235,18 +262,6 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
     expect(readFileSync(join(workspace, 'large'), 'utf8')).toBe(
       content.replace('end\n', 'REPAIRED\n'),
     );
-    await run('search');
-    const searched = (await store.listExecutions('s')).find(
-      (value) => value.definitionId === 'files.search',
-    )!;
-    expect(searched.status).toBe('succeeded');
-    const searchResult = searched.result as { content: string };
-    const searchBody = JSON.parse(searchResult.content);
-    expect(searchBody.matches).toHaveLength(1);
-    expect(searchBody.matches[0].content).toHaveLength(2000);
-    expect(searchBody.matches[0].truncated).toBe(true);
-    expect(searchBody.matches[0].originalLength).toBe(9 * 1024 * 1024);
-    expect(searchBody.next).toBeNull();
     const completeSearch = await files.search({ text: 'x' });
     expect(completeSearch.matches[0]!.content).toHaveLength(9 * 1024 * 1024);
     deny = true;

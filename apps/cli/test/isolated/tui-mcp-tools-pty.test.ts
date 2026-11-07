@@ -320,7 +320,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
         expectedStoreId: storeId,
         commandId: `approve-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       facts.push({ card });
     }

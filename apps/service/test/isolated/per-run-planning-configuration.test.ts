@@ -309,13 +309,13 @@ async function fixture(
           ).interactions.find((card) => card.kind === kind) ?? null,
       );
     },
-    async approvePlan(executionMode: 'auto' | 'accept_edits') {
+    async approvePlan() {
       const card = await f.card('plan_review');
       await client.answerInteraction('s', card.id, {
         expectedStoreId,
         commandId: `plan-answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'plan_review', decision: 'approve', mode: executionMode },
+        answer: { kind: 'plan_review', decision: 'approve' },
       });
       return card;
     },
@@ -356,29 +356,35 @@ async function planScript(step: number, f: Fixture): Promise<Call> {
   if (step === 1)
     return {
       name: 'write_file',
-      input: { path: 'before.txt', content: 'must be refused', base: null },
+      input: { path: 'before.txt', content: 'must be refused' },
     };
   if (step === 2)
     return {
       name: 'write_plan',
       input: {
         plan_id: 'plan',
-        expected_version: null,
+
         title: 'Owned plan',
         body: 'One precise write 中文',
         steps: [{ id: 'a', title: 'Write once' }],
       },
     };
-  const current = (await f.record('plan.current'))?.value as Record<string, Json>;
+
+  const planWrite = (await f.store.listExecutions('s'))
+    .filter((row) => row.definitionId === 'planning.write' && row.status === 'succeeded')
+    .at(-1);
+  const planRef = (planWrite?.result as { details?: Record<string, Json> } | undefined)?.details
+    ?.plan_ref;
+
   if (step === 3)
     return {
       name: 'request_plan_review',
-      input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+      input: { plan_ref: planRef! },
     };
   if (step === 4)
     return {
       name: 'write_file',
-      input: { path: 'after.txt', content: 'approved actual effect', base: null },
+      input: { path: 'after.txt', content: 'approved actual effect' },
     };
   if (step === 5) {
     const run = await f.run();
@@ -392,11 +398,8 @@ async function planScript(step: number, f: Fixture): Promise<Call> {
     return {
       name: 'update_plan_progress',
       input: {
-        run_id: run.id,
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
-        expected_progress_revision: null,
+        plan_ref: planRef!,
+        progress_ref: null,
         step_id: 'a',
         status: 'completed',
         execution_id: write.id,
@@ -412,7 +415,7 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
     f.workId === 'work'
       ? planScript(step, f)
       : step === 0
-        ? { name: 'write_file', input: { path: `${f.workId}.txt`, content: f.workId, base: null } }
+        ? { name: 'write_file', input: { path: `${f.workId}.txt`, content: f.workId } }
         : null,
   );
   try {
@@ -433,7 +436,7 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
       'failed',
     );
     expect((await f.runtime.getExecution(card.executionId))?.runId).toBe(run.id);
-    await f.approvePlan('accept_edits');
+    await f.approvePlan();
     const done = await f.done();
     const file = (await f.store.listExecutions('s')).find(
       (row) =>
@@ -524,21 +527,13 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
   }
 }, 25000);
 
-test('chosen Auto remains a ceiling over Full with a custom task-review contract for the post-plan write', async () => {
+test('business plan approval leaves current Full unchanged without invoking the independent checker', async () => {
   const f = await fixture(planScript, true);
   try {
     await f.submit();
-    await f.approvePlan('auto');
+    await f.approvePlan();
     expect((await f.done()).status).toBe('completed');
-    expect(f.reviews).toHaveLength(1);
-    const reviewMessage = (f.reviews[0]!.messages as { role: string; content: string }[]).find(
-      (message) => message.role === 'user',
-    );
-    expect(reviewMessage).toBeDefined();
-    const payload = JSON.parse(reviewMessage!.content);
-    expect(payload.purpose).toBe('authorization_check');
-    expect(JSON.stringify(payload)).toContain('"mode":"auto"');
-    expect(payload.target.definitionId).toBe('files.write');
+    expect(f.reviews).toHaveLength(0);
     expect(readFileSync(join(f.workspace, 'after.txt'), 'utf8')).toBe('approved actual effect');
   } finally {
     await f.close();
@@ -560,7 +555,7 @@ test('plan approval never overrides newly current Auto human decision or trust d
   }, true);
   try {
     await f.submit();
-    await f.approvePlan('accept_edits');
+    await f.approvePlan();
     await until(async () => (entered ? true : null));
     f.reviewDecision('ask_user');
     await f.policy('auto');
@@ -573,7 +568,7 @@ test('plan approval never overrides newly current Auto human decision or trust d
       expectedStoreId: f.expectedStoreId,
       commandId: 'write-answer',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     expect((await f.done()).status).toBe('failed');
     expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
@@ -636,7 +631,7 @@ test('closed business envelopes reject retired Workflow input; malformed intents
       expect(f.normal).toHaveLength(0);
     }
     await f.submit();
-    await f.approvePlan('accept_edits');
+    await f.approvePlan();
     const run = await f.done();
     const original = (await f.store.getCommand(run.originCommandId))!;
     const before = f.credentialReads;
@@ -646,7 +641,7 @@ test('closed business envelopes reject retired Workflow input; malformed intents
       userConfigurationPath: f.profile.profilePath + '/config.jsonc',
       profile: f.profile,
       credentialBackend: f.credentialBackend,
-      planning: { allowedExecutionModes: ['accept_edits'] },
+      planning: { completionGuidance: false },
     });
     changed.permissionManagement?.(f.runtime);
     let rejected: unknown;
@@ -680,3 +675,159 @@ test('closed business envelopes reject retired Workflow input; malformed intents
     await f.close();
   }
 }, 25000);
+
+test('Manual Auto and Full all wait for the original business plan decision and retain current Tool permissions', async () => {
+  for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+    const f = await fixture(planScript);
+    try {
+      await f.policy(mode);
+      await f.submit();
+      const card = await f.card('plan_review');
+      expect(card.request).not.toHaveProperty('allowedModes');
+      expect(existsSync(join(f.workspace, 'before.txt'))).toBe(false);
+      expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
+      expect(f.reviews).toHaveLength(0);
+      await f.approvePlan();
+      expect((await f.done()).status).toBe('completed');
+      expect(readFileSync(join(f.workspace, 'after.txt'), 'utf8')).toBe('approved actual effect');
+      const run = await f.run();
+      const write = (await f.store.listExecutions('s')).find(
+        (e) => e.runId === run.id && e.definitionId === 'files.write' && e.status === 'succeeded',
+      );
+      expect(write).toBeDefined();
+      expect(
+        await f.host.permissionManagement!(f.runtime).readMode({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'user',
+          sessionId: 's',
+        }),
+      ).toMatchObject({ mode });
+      expect(
+        (
+          await f.store.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' })
+        ).interactions.filter((i) => i.kind === 'plan_review'),
+      ).toHaveLength(1);
+      expect(
+        (
+          await f.store.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' })
+        ).interactions.filter((i) => i.kind === 'approval'),
+      ).toHaveLength(0);
+      expect(f.reviews).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  }
+}, 20000);
+
+for (const mode of ['accept_edits', 'auto', 'full'] as const)
+  test(`${mode} plan denial preserves the accepted original Tool receipt and stops the round before another Model or effect`, async () => {
+    const f = await fixture(async (step, f) =>
+      f.workId === 'work'
+        ? planScript(step, f)
+        : step === 0
+          ? { name: 'read_file', input: { path: 'original.txt' } }
+          : null,
+    );
+    try {
+      await f.policy(mode);
+      await f.submit();
+      const card = await f.card('plan_review');
+      const originalRun = await f.run();
+      const modelsAtAnswer = f.normal.length;
+      expect(modelsAtAnswer).toBe(4);
+      expect(f.reviews).toHaveLength(0);
+      expect(card).toMatchObject({
+        sessionId: 's',
+        runId: originalRun.id,
+        state: 'pending',
+        acceptedDecisionRevision: null,
+      });
+      const answerCommandId = `deny-plan-${card.id}`;
+      await f.client.answerInteraction('s', card.id, {
+        expectedStoreId: f.expectedStoreId,
+        commandId: answerCommandId,
+        expectedRevision: card.revision,
+        answer: { kind: 'plan_review', decision: 'deny', feedback: '不要执行此计划。' },
+      });
+      await f.done();
+      const stopped = await until(async () => {
+        const run = await f.store.getRun(originalRun.id);
+        return run && !run.isActive ? run : null;
+      });
+      expect(stopped).toMatchObject({ id: originalRun.id, status: 'cancelled', isActive: false });
+      expect(stopped.requirements).toEqual(originalRun.requirements);
+      expect(f.normal).toHaveLength(modelsAtAnswer);
+      expect(f.reviews).toHaveLength(0);
+      expect(await f.store.getCommand(answerCommandId)).toMatchObject({
+        id: answerCommandId,
+        status: 'applied',
+      });
+      const answered = await f.client.getInteraction('s', card.id, {
+        storeId: f.expectedStoreId,
+      });
+      expect(answered).toMatchObject({
+        id: card.id,
+        executionId: card.executionId,
+        state: 'answered',
+        answer: { kind: 'plan_review', decision: 'deny', feedback: '不要执行此计划。' },
+        acceptedDecisionRevision: expect.any(String),
+      });
+      const review = await f.store.getExecution(card.executionId);
+      expect(review).toMatchObject({
+        id: card.executionId,
+        runId: originalRun.id,
+        definitionId: 'planning.review',
+        status: 'succeeded',
+        result: {
+          outcome: 'succeeded',
+          content: '用户拒绝了该计划，已停止本轮对话',
+          details: { status: 'not_approved', decision: 'deny', feedback: '不要执行此计划。' },
+          control: { kind: 'stop_work' },
+        },
+      });
+      expect(await f.record(`run/${originalRun.id}/approval/plan/1`)).toBeNull();
+      const originalExecutions = (await f.store.listExecutions('s')).filter(
+        (execution) => execution.runId === originalRun.id,
+      );
+      expect(
+        originalExecutions.filter((execution) => execution.definitionId === 'planning.review'),
+      ).toHaveLength(1);
+      expect(
+        originalExecutions.filter(
+          (execution) =>
+            execution.definitionId === 'files.write' && execution.status === 'succeeded',
+        ),
+      ).toHaveLength(0);
+      expect(
+        originalExecutions.filter((execution) =>
+          ['planned', 'dispatching', 'running', 'outcome_unknown'].includes(execution.status),
+        ),
+      ).toHaveLength(0);
+      expect(existsSync(join(f.workspace, 'before.txt'))).toBe(false);
+      expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
+
+      await f.submit('after-plan-denial', false);
+      const next = await f.done();
+      expect(next).toMatchObject({ status: 'completed', requirements: [] });
+      expect(next.id).not.toBe(originalRun.id);
+      expect(f.normal).toHaveLength(modelsAtAnswer + 2);
+      expect(f.reviews).toHaveLength(0);
+      expect(
+        (await f.store.listExecutions('s')).find(
+          (execution) => execution.runId === next.id && execution.definitionId === 'files.read',
+        ),
+      ).toMatchObject({ status: 'succeeded' });
+      expect(readFileSync(join(f.workspace, 'original.txt'), 'utf8')).toBe('original Chinese 中文');
+      expect((await f.store.getRun(originalRun.id))?.status).toBe('cancelled');
+      expect((await f.store.getExecution(card.executionId))?.result).toEqual(review!.result);
+      expect(
+        await f.host.permissionManagement!(f.runtime).readMode({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'user',
+          sessionId: 's',
+        }),
+      ).toMatchObject({ mode });
+    } finally {
+      await f.close();
+    }
+  }, 15000);

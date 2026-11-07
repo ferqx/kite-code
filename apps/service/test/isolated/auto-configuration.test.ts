@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import {
@@ -25,9 +26,38 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
+import { createRunModelAdapters } from '../../src/authorization-check-model';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { parseModelPreset } from '../../src/model-options';
 import { createPermissionManagement } from '../../src/permission-management';
+
+test('an opaque SDK binding without reasoning support omits the checker effort and output limit', () => {
+  const opaque = createOpenAICompatible({ name: 'fixture', baseURL: 'http://127.0.0.1:9/v1' })(
+    'opaque',
+  );
+  const preset = { temperature: 0.25 };
+  const adapters = createRunModelAdapters({
+    modelId: 'opaque',
+    models: new Map([['opaque', opaque]]),
+    preset,
+    supportsCheckOutputLimit: false,
+    supportsCheckReasoning: false,
+  });
+  const request = { modelId: 'opaque', requestId: 'fixture', messages: [], tools: [] };
+  expect(adapters.checkModel.describeRequest?.(request).settings).toMatchObject({
+    temperature: 0.25,
+  });
+  expect(adapters.checkModel.describeRequest?.(request).settings).not.toHaveProperty(
+    'reasoningEffort',
+  );
+  expect(adapters.checkModel.describeRequest?.(request).settings).not.toHaveProperty(
+    'maxOutputTokens',
+  );
+  expect(adapters.model.describeRequest?.(request)).toEqual(
+    adapters.checkModel.describeRequest?.(request),
+  );
+  expect(preset).toEqual({ temperature: 0.25 });
+});
 
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 8000;
@@ -43,10 +73,12 @@ async function fixture(
   decision: CheckResponse = 'approve_once',
   options: {
     maxOutputTokens?: number;
-    reasoningEffort?: 'low';
+    reasoningEffort?: 'low' | 'high';
+    autoApprovalTimeoutMs?: number;
     authorizationCheck?: RuntimeOptions['authorizationCheck'];
     /** Legacy task authorization is an explicit custom policy, not the new builtin default. */
     defaultBuiltinPolicy?: true;
+    rejectReasoningParameter?: true;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-auto-')));
@@ -70,6 +102,8 @@ async function fixture(
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as Record<string, unknown>;
+        if (options.rejectReasoningParameter && Object.hasOwn(body, 'reasoning_effort'))
+          return new Response('unsupported reasoning parameter', { status: 400 });
         const messages = body.messages as { role: string; content: string }[];
         let payload: Record<string, unknown> | undefined;
         try {
@@ -99,7 +133,6 @@ async function fixture(
               arguments: JSON.stringify({
                 path: `${workId}.txt`,
                 content: `actual ${workId}`,
-                base: null,
               }),
             };
         }
@@ -148,6 +181,9 @@ async function fixture(
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
     modelId: 'a',
+    ...(options.autoApprovalTimeoutMs === undefined
+      ? {}
+      : { autoApproval: { timeoutMs: options.autoApprovalTimeoutMs } }),
     models: providers.map((provider, index) => ({
       id: ['a', 'b'][index],
       provider: 'compatible',
@@ -376,7 +412,7 @@ async function fixture(
         expectedStoreId,
         commandId: `answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     },
     async close() {
@@ -408,12 +444,32 @@ test('default Auto delegates builtin file effects to their tool policy without a
       (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
     ).toHaveLength(0);
     const run = (await f.store.getView('s')).runs[0]!;
+    expect(run.configuration).toMatchObject({ authorizationCheck: { timeoutMs: 8000 } });
     expect(
       ((run.configuration as Record<string, unknown>).snapshot as Record<string, unknown>)
         .defaultAutoReview,
     ).toBe('shell_risk');
   } finally {
     await f.close();
+  }
+});
+
+test('an explicit Auto timeout remains frozen instead of inheriting the eight-second default', async () => {
+  for (const timeoutMs of [3000, 5000, 8000]) {
+    const f = await fixture('approve_once', {
+      defaultBuiltinPolicy: true,
+      autoApprovalTimeoutMs: timeoutMs,
+    });
+    try {
+      await f.run();
+      await f.done();
+      const run = (await f.store.getView('s')).runs[0]!;
+      expect(run.configuration).toMatchObject({ authorizationCheck: { timeoutMs } });
+      expect(f.checks).toHaveLength(0);
+      expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
+    } finally {
+      await f.close();
+    }
   }
 });
 
@@ -443,7 +499,7 @@ test('a custom task policy retains the selected SDK reviewer, durable check and 
     expect(f.checks[0]!.payload.target).toMatchObject({
       definitionId: 'files.write',
       definitionVersion: '3',
-      input: { path: 'work.txt', base: null },
+      input: { path: 'work.txt' },
     });
     const executions = await f.store.listExecutions('s');
     expect(executions.every((execution) => execution.childSessionId === null)).toBe(true);
@@ -515,7 +571,9 @@ test('a custom task policy retains the selected SDK reviewer, durable check and 
     expect(firstChecker).toMatchObject({ id: 'builtin.auto', modelId: 'a' });
     expect(nextChecker).toMatchObject({ id: 'builtin.auto', modelId: 'b' });
     expect(firstChecker.version).not.toBe(nextChecker.version);
-    expect(f.checks.every(({ payload }) => payload.checker === undefined)).toBe(true);
+    // The first unavailable task-context uses the complete sealed request; the
+    // later available compact projection omits transport identity from model material.
+    expect(f.checks.map(({ payload }) => payload.checker)).toEqual([firstChecker, undefined]);
     expect(readFileSync(join(f.workspace, 'work-two.txt'), 'utf8')).toBe('actual work-two');
   } finally {
     await f.close();
@@ -530,7 +588,7 @@ test('custom task-policy ask_user requires the original human card without rerun
     expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
     expect(card.request).toMatchObject({
       definitionId: 'files.write',
-      input: { path: 'work.txt', base: null },
+      input: { path: 'work.txt' },
     });
     expect(f.checks).toHaveLength(1);
     const executions = await f.store.listExecutions('s');
@@ -554,9 +612,24 @@ test('custom task-policy ask_user requires the original human card without rerun
   }
 }, 30000);
 
+test('an unconfigured reasoning parameter is not injected into a compatible provider check', async () => {
+  const f = await fixture('approve_once', { rejectReasoningParameter: true });
+  try {
+    await f.run();
+    await f.done();
+    expect(f.checks).toHaveLength(1);
+    expect(f.normalRequests).toHaveLength(2);
+    for (const { body } of [...f.checks, ...f.normalRequests])
+      expect(body).not.toHaveProperty('reasoning_effort');
+    expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
+  } finally {
+    await f.close();
+  }
+});
+
 for (const maxOutputTokens of [32, 4096])
-  test(`the selected checker caps only its output without expanding the original ${maxOutputTokens} token preset`, async () => {
-    const f = await fixture('approve_once', { maxOutputTokens, reasoningEffort: 'low' });
+  test(`the selected checker uses low reasoning and caps its output independently of the original ${maxOutputTokens} token preset`, async () => {
+    const f = await fixture('approve_once', { maxOutputTokens, reasoningEffort: 'high' });
     try {
       await f.run();
       await f.done();
@@ -571,7 +644,7 @@ for (const maxOutputTokens of [32, 4096])
         expect(body).toMatchObject({
           max_tokens: maxOutputTokens,
           temperature: 0.25,
-          reasoning_effort: 'low',
+          reasoning_effort: 'high',
         });
       expect(f.configuration.models[0]!.options.maxOutputTokens).toBe(maxOutputTokens);
       const check = (await f.store.listExecutions('s')).find(
@@ -594,7 +667,7 @@ for (const maxOutputTokens of [32, 4096])
       const { version } = (command.request as { input: { checker: { version: string } } }).input
         .checker;
       // Changed actual reviewer settings must not retain an old cold-Run identity.
-      expect(version === uncappedVersion).toBe(maxOutputTokens <= 256);
+      expect(version).not.toBe(uncappedVersion);
       const snapshot = await f.runtime.readModelInput({
         expectedStoreId: f.expectedStoreId,
         subjectId: 'owner',

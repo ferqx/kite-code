@@ -87,7 +87,9 @@ export interface Message {
       | 'cancelled';
     readonly source: 'auto' | 'user';
     readonly interactionId?: string;
-    readonly grant?: 'approve_once' | 'same_command';
+    readonly optionId?: string;
+    readonly optionKind?: 'once' | 'scope';
+    readonly presentation?: { readonly label: string; readonly details: readonly string[] };
     readonly reason?: string;
   };
   /** Host-confirmed dispatch fact; approval alone does not prove execution. */

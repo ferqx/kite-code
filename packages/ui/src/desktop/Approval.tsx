@@ -1,5 +1,6 @@
 import { ArrowDown01Icon, TerminalIcon, Wrench01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import type { ApprovalOptionView } from '@kite-ai/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +19,7 @@ export function Approval({
   fullText,
   attachment,
   status,
-  grants,
+  options,
   disabled,
   onDecide,
   embedded = false,
@@ -30,11 +31,12 @@ export function Approval({
   fullText?: string;
   attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
   status?: string;
-  grants: readonly ('approve_once' | 'same_command')[];
+  options: readonly ApprovalOptionView[];
   disabled: boolean;
-  onDecide: (decision: 'approve_once' | 'same_command' | 'reject') => void;
+  onDecide: (optionId: string | null) => void;
 }) {
-  const subsequent = grants.includes('same_command');
+  const once = options.find((option) => option.kind === 'once');
+  const subsequent = options.filter((option) => option.kind === 'scope');
   return (
     <section
       className={embedded ? 'tool-approval-form' : 'notice tool-approval-form'}
@@ -76,19 +78,19 @@ export function Approval({
             {status}
           </span>
         ) : (
-          <Button variant="ghost" disabled={disabled} onClick={() => onDecide('reject')}>
+          <Button variant="ghost" disabled={disabled} onClick={() => onDecide(null)}>
             拒绝
           </Button>
         )}
-        <div className={subsequent ? 'approval-split' : undefined}>
+        <div className={subsequent.length ? 'approval-split' : undefined}>
           <Button
             className="primary"
-            disabled={disabled || !grants.includes('approve_once')}
-            onClick={() => onDecide('approve_once')}
+            disabled={disabled || !once}
+            onClick={() => once && onDecide(once.optionId)}
           >
-            批准一次
+            {once?.presentation.label ?? '仅此次'}
           </Button>
-          {subsequent && (
+          {subsequent.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button className="primary" disabled={disabled} aria-label="更多批准方式">
@@ -102,12 +104,20 @@ export function Approval({
                 sideOffset={8}
               >
                 <DropdownMenuGroup>
-                  <DropdownMenuItem disabled={disabled} onSelect={() => onDecide('same_command')}>
-                    <span className="approval-session-option">
-                      <span>本次会话批准</span>
-                      <small>本次及本会话内的相同命令</small>
-                    </span>
-                  </DropdownMenuItem>
+                  {subsequent.map((option) => (
+                    <DropdownMenuItem
+                      key={option.optionId}
+                      disabled={disabled}
+                      onSelect={() => onDecide(option.optionId)}
+                    >
+                      <span className="approval-session-option">
+                        <span>{option.presentation.label}</span>
+                        {option.presentation.details.map((detail, index) => (
+                          <small key={index}>{detail}</small>
+                        ))}
+                      </span>
+                    </DropdownMenuItem>
+                  ))}
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>

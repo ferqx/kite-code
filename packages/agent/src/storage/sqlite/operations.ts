@@ -2,7 +2,6 @@ import type { Database, Statement } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
-import { semanticReviewContent } from '../../authorization-review-context';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
 import { recordedTokenUsage } from '../../token-usage';
@@ -54,14 +53,9 @@ import {
   resolveAutoAuthorization,
   resolveWorktreeAuthorization,
 } from './authorization-policy-evidence';
-import {
-  ensureAuthorizationReview,
-  executionAuthorizationObservation,
-  getAuthorizationReview,
-  verifyAuthorizationReviewDispatch,
-} from './authorization-review';
+import { executionAuthorizationObservation } from './authorization-review';
 import { readBackgroundExecutions } from './background-directory';
-import { cancel } from './cancel-operations';
+import { cancel, cancelWorkBody } from './cancel-operations';
 import { verifyFirstActivation } from './child-first-activation';
 import {
   activateChildRun,
@@ -907,25 +901,8 @@ export class SqliteOperations {
     const source = parse(row.source_json) as Record<string, Json>;
     const compression = compressionDisplay(this, row, source);
     const humanInput = humanInputDisplay(this, row, source);
-    let content = String(source.content ?? '');
-    if (row.role === 'user' && row.run_id !== null && content.includes('"decisionContext"')) {
-      const run = this.row(
-        'SELECT * FROM run WHERE id=? AND session_id=?',
-        row.run_id!,
-        row.session_id!,
-      );
-      const command = run && this.row('SELECT * FROM command WHERE id=?', run.origin_command_id!);
-      const carrier = command && this.childCarrier(command, String(run!.id));
-      if (
-        carrier &&
-        command!.kind === 'child.start' &&
-        canonicalJson(source.sourceIds!) ===
-          canonicalJson([String(command!.id), String(carrier.id)]) &&
-        this.row('SELECT kind FROM command WHERE id=?', carrier.origin_command_id!)?.kind ===
-          'authorization.review'
-      )
-        content = semanticReviewContent(content);
-    }
+    const content = String(source.content ?? '');
+
     return {
       id: String(row.id),
       sessionId: String(row.session_id),
@@ -1167,16 +1144,6 @@ export class SqliteOperations {
         return invalidateAuthorizationCheck(
           this,
           args[0] as Parameters<Store['invalidateAuthorizationCheck']>[0],
-        );
-      case 'ensureAuthorizationReview':
-        return ensureAuthorizationReview(
-          this,
-          args[0] as Parameters<Store['ensureAuthorizationReview']>[0],
-        );
-      case 'getAuthorizationReview':
-        return getAuthorizationReview(
-          this,
-          args[0] as Parameters<Store['getAuthorizationReview']>[0],
         );
       case 'inspectChildSettlement':
         return inspectChildSettlement(
@@ -1806,7 +1773,6 @@ export class SqliteOperations {
         return listPendingInputs(this, args[0] as Parameters<Store['listPendingInputs']>[0]);
       case 'requestInteraction':
       case 'refreshApproval':
-      case 'invalidateAuthorizationReview':
       case 'answerInteraction':
       case 'acceptInteractionDecision':
       case 'getInteraction':
@@ -1886,7 +1852,6 @@ export class SqliteOperations {
           verifyInteractionDispatch(this, execution, input);
           verifyHostControlDispatch(this, execution, input);
           verifyAuthorizationCheckDispatch(this, input);
-          verifyAuthorizationReviewDispatch(this, input);
           assertDispatchReadSet(this, execution, input);
           this.run(
             "UPDATE execution SET state='dispatching',dispatched=1,dispatch_authorization_json=? WHERE id=?",
@@ -2154,6 +2119,57 @@ export class SqliteOperations {
             input.executionId,
           );
           registerJobReport(this, input.executionId);
+          const control =
+            result &&
+            typeof result === 'object' &&
+            !Array.isArray(result) &&
+            result.outcome === 'succeeded'
+              ? result.control
+              : undefined;
+          if (
+            execution.kind === 'tool' &&
+            execution.run_id !== null &&
+            status === 'succeeded' &&
+            control &&
+            typeof control === 'object' &&
+            !Array.isArray(control) &&
+            Object.keys(control).length === 1 &&
+            control.kind === 'stop_work'
+          ) {
+            const origin = this.row(
+              'SELECT * FROM command WHERE id=?',
+              execution.origin_command_id!,
+            );
+            const root = this.row(
+              'SELECT c.*,s.root_id,s.workspace_id FROM command c JOIN session s ON s.id=c.session_id WHERE c.id=?',
+              execution.root_work_command_id!,
+            );
+            const current = this.row('SELECT * FROM session WHERE id=?', execution.session_id!);
+            if (
+              !origin ||
+              !root ||
+              !current ||
+              origin.origin_store_id !== execution.origin_store_id ||
+              root.origin_store_id !== execution.origin_store_id ||
+              origin.subject_id !== root.subject_id ||
+              root.root_id !== execution.root_session_id ||
+              current.root_id !== root.root_id ||
+              current.workspace_id !== root.workspace_id ||
+              root.root_work_command_id !== execution.root_work_command_id ||
+              String(root.root_work_seq) !== String(execution.root_work_seq)
+            )
+              throw new AgentError('operation_unverifiable');
+            // Commit the original succeeded Tool/message and the exact work's
+            // ordinary cancellation together: recovery cannot observe a stop
+            // result without its durable cancellation or replay it into new work.
+            cancelWorkBody(this, {
+              expectedStoreId: input.expectedStoreId,
+              sessionId: String(root.session_id),
+              subjectId: String(root.subject_id),
+              commandId: `tool-stop-${execution.id}`,
+              targetCommandId: String(root.id),
+            });
+          }
           return this.execution(this.row('SELECT * FROM execution WHERE id=?', input.executionId)!);
         });
       case 'getExecution': {

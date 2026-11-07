@@ -1,3 +1,4 @@
+import './terminal-viewport.fixture';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -135,7 +136,18 @@ const runtime = createRuntime({
         ? {
             allowed: false,
             revision: 'exact',
-            approval: { request: { input: invocation.input, grants: ['approve_once'] } },
+            approval: {
+              request: {
+                input: invocation.input,
+                options: [
+                  {
+                    optionId: 'once',
+                    kind: 'once',
+                    presentation: { label: '仅此次', details: [] },
+                  },
+                ],
+              },
+            },
           }
         : { allowed: true, revision: 'exact' };
     },

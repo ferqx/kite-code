@@ -4,6 +4,8 @@ Native 用户设置通过 [management-transport](management-transport.ts)使用�
 
 模型入口使用 `search_mcp_tools`、`connect_mcp_server`、`refresh_mcp_catalogue`、`list_mcp_resources`、`read_mcp_resource`、`list_mcp_prompts` 与 `get_mcp_prompt`；Service 的只读来源目录使用 `list_mcp_sources`。内置声明字段投影为 snake_case，远端 prompt arguments 等开放参数保持原 key。动态远端工具的模型名称为 `mcp_<server>_<remote>_<hash8>`，server／remote 片段清理并限制长度、hash 绑定原 server ID 与远端工具名，完整公开名不超过 64 字符；内部 ID/version、原远端 schema 和 RPC arguments 不改写。搜索结果的 `modelName` 与该可调用模型名一致，原 definition 和 descriptor 事实仍保留；发现名称不授予执行权限。
 
+connect 只接受 `server_id`，宿主稳定意图绑定原连接。后续模型调用只复制 `connection_ref/resource_ref/prompt_ref`；引用为单个不透明短字符串，只定位原执行与原 descriptor 序号，不重复编码 server、连接 key、配置摘要和代次。当前 UUID 执行的连接引用26字符、资源／prompt引用31字符。Service 准入用原成功回执读取 server，再核当前选择；真正派发前仍由 leaf 核原 Store／Session／Run、实际 owner、结果修订、完整 binding 和准确 descriptor。其他 Tool 的同名业务字段不进入这条引用读取路径。动态 Tool 的 owner 以原已完成 Model 的冻结 `toolBindings` 为准，不因初始 Run 目录尚无该动态定义而误拒绝，也不借今日目录证明历史归属。原回执的派生 `modelBinding` 不授予权限；可信 Actions 继续使用其显式领域合同。
+
 [tools-search](tools-search.ts)只搜索本 Run 实际选入的冻结目录，供 Model 取得准确远端定义；不连接或重新发现，也不把 annotations 当权限。实际选中连接的[资源来源](resource-model-source.ts)只投影有限原身份及 generation，标明不是 authority；Model 动态选入原 resources.list/read，实际读取仍核完整目录 Execution、descriptor digest 和目标 URI。TUI 依据同 Scope 的不可变资源收据展示 URI，资源正文留在正式 Model 结果，不进入普通目录卡片。
 
 [provider-action](provider-action.ts)给真实父 Tool 提供普通 nested Action 的有限端口。Store 原子核父执行、Actor、root work、所属 Run 与取消关系，热装配保相同权限；冷记录仅观察、不得重建默认执行。OAuth 执行仍在正式 Action／HTTP port，连接、来源批准和认证各自独立核实。
@@ -39,6 +41,10 @@ Worker 是纯 schema 缓存，不持有 Model/process 资源许可。一秒空�
 [完整包制品回归](../../../../tests/isolated/unified-agent/built-package.test.ts)按 Agent manifest 全部入口在同一次 build 构建，生成 Worker/guardian 资产后，从源码树外逐一导入并实际执行 SQLite、Shell、Skills 与 MCP。AI 也独立构建，不链接 workspace source alias；外部 npm 依赖复用已安装模块。该证据验证当前制品布局与执行定位，不代替独立安装、签名或跨平台发行资格。
 
 
+模型连接只填 `server_id`，返回 `connection_ref`；refresh、资源／提示词 list 复制该引用，read/get 分别复制 `resource_ref/prompt_ref`，get 的 arguments 默认空对象。来源目录用 cursor，搜索呈现唯一 callable 名与原输入 Schema；远端 Tool 的业务参数不改。引用核原成功回执、实际 owner、Store/Session、修订、原连接和准确 descriptor；动态加入的工具从其原 Model 持久 toolBindings 核归属，不要求它出现在 Run 最初目录，也不借当前目录恢复旧身份。
+
+宿主把模型连接意图保存到原 namespace；新的模型调用只观察仍存活的准确原连接，冷启动或未确认原结果不生成新 key 重连。用户明确重连产生的实际替代连接可被后续 connect 观察，不能将旧引用改绑到它。内部管理 Action 保当前显式 key 合同。来源准入从不透明引用提取的 hint 只用于收窄选择；原引用仍封存在输入，派发前核原回执与完整配置／代次，hint 不授予权限。
+
 ## 当前 HTTP OAuth 与原申请
 
 [OAuth provider](oauth-provider.ts) 复用 host 的一个 CredentialVault owned scope，持久 tokens/client information/discovery state 及新 tokenRevision；PKCE/state 仅在当前 flow。保存与冷读取沿 SDK schema 验证，并限定可消费的 Bearer ASCII grammar/8000字符；原生保存开始后的取消/失败保 publication unknown。现有 [Broker](credentials.ts) 的 `issueOwned` 仅接可信 private resolver，实际 header 前复核原连接全部 identity 与 tokenRevision；旧 handle 不因新登录而取得新材料。
@@ -59,7 +65,7 @@ Worker 是纯 schema 缓存，不持有 Model/process 资源许可。一秒空�
 
 `mcp.tools.snapshots@1` 和 `mcp.tools@1` 都是同 builtin.mcp namespace 的只读 Query，完整 display envelope≤32 KiB、每页≤32项。明确选择原 record/generation，续页固定原 indexDigest；不连接、不查凭据、不调用远端、不授 Tool grant。只实读原 index，缺失/损坏/scope/hash/size不等则 unavailable 或有限失败。当前 live/generation 单独投影，旧 snapshot 不改标。
 
-`sourceRecordKey` 不单独证明 writer。读取核实际 publisher 已保存 result（去 metadata pointer 后与完整 source value 全等）、原输入 digest/版本/Session/Store，以及真实 connection command/parent/root-work；原 operation key A 与合法复用时的新 source key B 分别绑定，不依赖可变 A head。Artifact 再核实际 publisher scope。私有 bootstrap 的 Job 全文不由公共 Execution 投影重建。直接 Query 使用已有只读 `readExecutionGroupSafety` 核当前 Store/Session/subject，完整流式检查累计已完成Session/Message/Part；实际活跃和未确认安全域仍有明确边界，历史不被截断成安全证明。当前实现与回归归[Store owner](../storage/README.md#累计执行组观察)，原metadata封存、私有正文和引用资格理由继续见[原决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-tool-metadata-artifacts.md)。
+`sourceRecordKey` 不单独证明 writer。读取核实际 publisher 已保存 result（去 metadata pointer 及派生 connection_ref/modelBinding 后与完整 source value 全等）、原输入 digest/版本/Session/Store，以及真实 connection command/parent/root-work；原 operation key A 与合法复用时的新 source key B 分别绑定，不依赖可变 A head。Artifact 再核实际 publisher scope。私有 bootstrap 的 Job 全文不由公共 Execution 投影重建。直接 Query 使用已有只读 `readExecutionGroupSafety` 核当前 Store/Session/subject，完整流式检查累计已完成Session/Message/Part；实际活跃和未确认安全域仍有明确边界，历史不被截断成安全证明。当前实现与回归归[Store owner](../storage/README.md#累计执行组观察)，原metadata封存、私有正文和引用资格理由继续见[原决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-tool-metadata-artifacts.md)。
 
 [实际 metadata 测试](../../test/isolated/mcp/tools-metadata.test.ts) 当前13/952/0：真实 SQLite/Artifact/local SDK peer，65工具、3,660,270 bytes/56chunks全文等价、两代刷新与冷 removed-server，普通 Model Tool connect/refresh、自身 publisher scope、fork/foreign、物理缺失/损坏/256KiB node、缺 Artifact host、发布失败、SQL commit 后丢回执、非法预览及 warm B复用A。公共 maintenance 实际 create/inspect/restore 生成新 Store B，当前 B 准入仍核原 A snapshot/index/descriptor，旧 expected A 与 foreign subject 拒绝；冷读取零新增 RPC/Model/publish/cursor，历史不产生 Tool grant。当前原六邻接28/301/0；完整 Client与真实80×24消费者分别归对应 owner，不由本片推导三平台/全部累计阈值资格。
 
@@ -106,7 +112,7 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 
 ## 持久连接 Job 与下一 Step 目录
 
-`createMcpLifecycle({servers, transportPort?, readyTimeoutMs?})` 返回 `extension`、`readStepCapabilities(input)` 和 `close()`。bootstrap Extension ID 为 `builtin.mcp`，提供普通 Tool/Action `mcp.connect`（输入 `{serverId,key}`）、只读 Query `mcp.catalogue` 和每个 server 的连接 Job。factory、Query 与 Step 缓存读取均不连接；只有已持久派发的 Job `start` 能调用显式注入的 `transportPort.open` 并发现目录。缺少可信 port 时连接请求局部返回 `mcp_transport_unavailable`，不启动 Job，也不降级到直接 stdio/fetch。
+`createMcpLifecycle({servers, transportPort?, readyTimeoutMs?})` 返回 `extension`、`readStepCapabilities(input)` 和 `close()`。bootstrap Extension ID 为 `builtin.mcp`，提供模型 Tool `mcp.connect`（公开输入 `{server_id}`）及内部管理 Action（输入 `{serverId,key}`）、只读 Query `mcp.catalogue` 和每个 server 的连接 Job。factory、Query 与 Step 缓存读取均不连接；只有已持久派发的 Job `start` 能调用显式注入的 `transportPort.open` 并发现目录。缺少可信 port 时连接请求局部返回 `mcp_transport_unavailable`，不启动 Job，也不降级到直接 stdio/fetch。
 
 连接按原 Store、Session、server 隔离，Job version 绑定固定配置摘要。Job.start 还复核 factory 私有 bootstrap staging，不能从任意 Job input 自报 Store scope 获得连接；这个保护不替代 Core 权限。`mcp.connect` 使用普通 `operations.ensure` 创建 detached Job，并等待真实 ready 通知；ready 后由普通 execution 的 `records.write` 保存有限非秘密目录、原 Store 与实际 operation ref。相同原 key/当前 live ref 重试返回原事实，不重新连接；冷启动或只读历史没有 live handle，同 key 明确不可恢复，不依据 record 自动重连。不同 parent 的 warm reuse也保留原 operation ref，不制造新的 ensure 关系。Query 返回 `{items,nextAfterKey}`，按 record key 分页（每页最多 100）；历史目录与当前 `live` 状态分别呈现。
 

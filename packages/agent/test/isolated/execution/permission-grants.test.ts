@@ -6,19 +6,50 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
+import {
+  approvalOptions,
+  type GrantOffer,
+  grantDigest,
+  grantScopeDigest,
+} from '../../../src/permission-grants';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
 
+const offerFor = (scope: unknown, definitions = ['fixture.command']): GrantOffer => {
+  const candidate = {
+    ruleId: 'fixture.command',
+    contractId: 'fixture.command-scope',
+    scope: scope as import('../../../src/storage/types').Json,
+    bindings: definitions.map((definitionId) => ({
+      kind: 'tool' as const,
+      definitionId,
+      definitionVersion: '1',
+    })),
+    presentation: { label: '本会话相同命令', details: ['仅准确命令'] },
+  };
+  return {
+    ...candidate,
+    scopeDigest: grantScopeDigest(candidate),
+    policyBindings: candidate.bindings.map((capability) => ({
+      capability,
+      reuseRevision: grantDigest({ policy: 'fixture.policy', scope: candidate.scope }),
+    })),
+  };
+};
+const scopeOption = (request: unknown): string =>
+  (request as { options: { optionId: string; kind: string }[] }).options.find(
+    (option) => option.kind === 'scope',
+  )!.optionId;
 const finish: ModelEvent = {
   type: 'finish',
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
-const call = (text: string, key?: string): ModelEvent[] => [
+const call = (text: string, key?: string, name = 'fixture.command'): ModelEvent[] => [
   {
     type: 'tool_call',
     id: crypto.randomUUID(),
-    name: 'fixture.command',
+    name,
     arguments: JSON.stringify({ command: text, cwd: 'original', ...(key ? { key } : {}) }),
   },
   { ...finish, reason: 'tool_calls' },
@@ -88,7 +119,12 @@ async function exactBusinessTool(
   });
   return tool!;
 }
-async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknown) => string) {
+async function fixture(
+  responses: ModelEvent[][],
+  trustedDigest?: (input: unknown) => string,
+  definitions = ['fixture.command'],
+  changingRevision = false,
+) {
   const root = realpathSync(temporaryDirectory('kite-grant-core-'));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   let held = false,
@@ -117,25 +153,55 @@ async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknow
     },
   });
   const model = createFixedModel(responses);
+  let independent = false;
+  let independentHuman = false;
+  const reviewer = createFixedModel(
+    ['approve_once', 'reject'].map((decision) => [
+      {
+        type: 'text_delta' as const,
+        text: JSON.stringify({ decision, reason: 'independent trusted checker' }),
+      },
+      finish,
+    ]),
+  );
   const runtime = createRuntime({
     store: proxy,
     model,
     modelId: 'fixed',
+    authorizationCheck: {
+      id: 'independent.checker',
+      version: '1',
+      modelId: 'review',
+      model: reviewer,
+    },
     permissions: {
       async authorize(request) {
         if (request.kind !== 'model' && hardDenied)
           return { allowed: false, revision: 'revoked-policy', reason: 'hard_capability_denied' };
-        return request.kind === 'model'
-          ? { allowed: true, revision: 'policy' }
-          : {
-              allowed: false,
-              revision: 'policy',
-              approval: {
-                ...(trustedDigest ? { commandDigest: trustedDigest(request.input) } : {}),
-                request: { title: 'Exact command' },
-                grants: ['approve_once', 'same_command'],
-              },
-            };
+        if (request.kind === 'model') return { allowed: true, revision: 'policy' };
+        const offer = offerFor(
+          trustedDigest ? trustedDigest(request.input) : request.input,
+          definitions,
+        );
+        return {
+          allowed: false,
+          revision: changingRevision
+            ? grantDigest({ input: request.input, independent })
+            : 'policy',
+          grantOffers: definitions.includes(request.definitionId) ? [offer] : [],
+          ...(independent
+            ? {
+                check: {
+                  request: { kind: 'independent', invocation: request.input },
+                  ...(independentHuman ? { requireApproval: true } : {}),
+                },
+              }
+            : {}),
+          approval: {
+            request: { title: 'Exact command' },
+            options: approvalOptions(definitions.includes(request.definitionId) ? [offer] : []),
+          },
+        };
       },
     },
     extensions: [
@@ -143,18 +209,16 @@ async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknow
         id: 'fixture',
         version: '1',
         apiMajor: 1,
-        tools: [
-          {
-            id: 'fixture.command',
-            version: '1',
-            description: 'Harmless explicit command',
-            inputSchema: { type: 'object' },
-            async execute(input) {
-              effects.push(input);
-              return { outcome: 'succeeded', content: 'done' };
-            },
+        tools: ['fixture.command', 'fixture.write', 'fixture.third'].map((id) => ({
+          id,
+          version: '1',
+          description: 'Harmless explicit command',
+          inputSchema: { type: 'object' },
+          async execute(input) {
+            effects.push(input);
+            return { outcome: 'succeeded', content: 'done' };
           },
-        ],
+        })),
       },
     ],
   });
@@ -196,6 +260,11 @@ async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknow
           .interactions[0] ?? null,
     );
   return {
+    reviewer,
+    enableIndependentChecker(human = false) {
+      independent = true;
+      independentHuman = human;
+    },
     denyCapability() {
       hardDenied = true;
     },
@@ -234,7 +303,11 @@ test('actual accepted same_command applies only to exact original Session and fu
   try {
     await f.submit('first');
     const card = await f.pending();
-    expect((card.request as { grants: string[] }).grants).toContain('same_command');
+    expect(
+      (card.request as { options: { kind: string }[] }).options.some(
+        (option) => option.kind === 'scope',
+      ),
+    ).toBe(true);
     await f.runtime.answerInteraction({
       expectedStoreId: f.expectedStoreId,
       subjectId: 'owner',
@@ -242,7 +315,7 @@ test('actual accepted same_command applies only to exact original Session and fu
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(card.request) },
     });
     expect((await f.terminal('first')).status).toBe('completed');
     const page = await f.store.listPermissionGrants({
@@ -316,7 +389,7 @@ test('clear is durable CAS and final dispatch transaction rejects a proof captur
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(card.request) },
     });
     await f.terminal('first');
     const page = await f.store.listPermissionGrants({
@@ -389,9 +462,11 @@ test('trusted command semantics permits a new logical operation key but another 
   try {
     await f.submit('first');
     const card = await f.pending();
-    expect((card.request as { commandDigest: string }).commandDigest).toBe(
-      digest({ command: 'original', cwd: 'original' }),
-    );
+    expect(
+      (card.request as unknown as { options: GrantOffer[] }).options.find(
+        (option) => option.scopeDigest,
+      )!.scope,
+    ).toBe(digest({ command: 'original', cwd: 'original' }));
     await f.runtime.answerInteraction({
       expectedStoreId: f.expectedStoreId,
       subjectId: 'owner',
@@ -399,7 +474,7 @@ test('trusted command semantics permits a new logical operation key but another 
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(card.request) },
     });
     await f.terminal('first');
     await f.submit('second', 's', 'New task: second');
@@ -414,9 +489,7 @@ test('trusted command semantics permits a new logical operation key but another 
       subjectId: 'owner',
       sessionId: 's',
     });
-    expect(page.items[0]!.grant.commandDigest).toBe(
-      digest({ command: 'original', cwd: 'original' }),
-    );
+    expect(page.items[0]!.grant.scope).toBe(digest({ command: 'original', cwd: 'original' }));
     await f.runtime.createSession({
       expectedStoreId: f.expectedStoreId,
       subjectId: 'owner',
@@ -465,7 +538,7 @@ test('approve_once creates no session grant, and an existing same-command grant 
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await once.terminal('once');
     expect(once.effects).toHaveLength(1);
@@ -492,7 +565,7 @@ test('approve_once creates no session grant, and an existing same-command grant 
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(card.request) },
     });
     await granted.terminal('first');
     granted.denyCapability();
@@ -507,5 +580,169 @@ test('approve_once creates no session grant, and an existing same-command grant 
     });
   } finally {
     await granted.close();
+  }
+});
+
+test('one frozen range authorizes another bound definition with a new input and complete policy revision, never a third definition', async () => {
+  const f = await fixture(
+    [
+      call('first'),
+      [finish],
+      call('new-body', undefined, 'fixture.write'),
+      [finish],
+      call('third-body', undefined, 'fixture.third'),
+      [finish],
+    ],
+    () => 'precise-position',
+    ['fixture.command', 'fixture.write'],
+    true,
+  );
+  try {
+    await f.submit('edit');
+    const card = await f.pending();
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'approve-range',
+      presentationSessionId: 's',
+      interactionId: card.id,
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(card.request) },
+    });
+    await f.terminal('edit');
+    await f.submit('write');
+    await f.terminal('write');
+    expect(f.effects).toEqual([
+      { command: 'first', cwd: 'original' },
+      { command: 'new-body', cwd: 'original' },
+    ]);
+    const write = (await f.store.listExecutions('s')).find(
+      (execution) => execution.kind === 'tool' && execution.definitionId === 'fixture.write',
+    )!;
+    expect(write.status).toBe('succeeded');
+    await f.submit('third');
+    const third = await f.pending();
+    expect(
+      (third.request as { options: { kind: string }[] }).options.map((option) => option.kind),
+    ).toEqual(['once']);
+    expect(f.effects).toHaveLength(2);
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'deny-third',
+      presentationSessionId: 's',
+      interactionId: third.id,
+      expectedRevision: third.revision,
+      answer: { kind: 'approval', decision: 'deny' },
+    });
+    await f.terminal('third');
+    const grants = await f.store.listPermissionGrants({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      sessionId: 's',
+    });
+    expect(grants.items).toHaveLength(1);
+    expect(grants.items[0]!.grant.definitionId).toBe('fixture.command');
+    expect(grants.items[0]!.grant.bindings.map((binding) => binding.definitionId)).toEqual([
+      'fixture.command',
+      'fixture.write',
+    ]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a reused range still executes its independent checker, carries the result through final dispatch, and its rejection has zero effects', async () => {
+  const f = await fixture(
+    [
+      call('original', 'one'),
+      [finish],
+      call('original', 'two'),
+      [finish],
+      call('original', 'three'),
+      [finish],
+    ],
+    () => 'one-exact-command',
+    ['fixture.command'],
+    true,
+  );
+  try {
+    await f.submit('first');
+    const card = await f.pending();
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'approve-range',
+      presentationSessionId: 's',
+      interactionId: card.id,
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(card.request) },
+    });
+    await f.terminal('first');
+    f.enableIndependentChecker();
+    await f.submit('second');
+    await f.terminal('second');
+    expect(f.effects).toHaveLength(2);
+    expect(f.reviewer.requests).toHaveLength(1);
+    expect(
+      (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+        .interactions,
+    ).toHaveLength(1);
+    await f.submit('third');
+    await f.terminal('third');
+    expect(f.reviewer.requests).toHaveLength(2);
+    expect(f.effects).toHaveLength(2);
+    const third = (await f.store.listExecutions('s')).find(
+      (execution) => execution.kind === 'tool' && execution.originCommandId === 'third',
+    )!;
+    expect(third.status).toBe('failed');
+    expect(third.result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'permission_denied', adapterAttempted: false, dispatchCommitted: false },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test('a range never removes a custom checker independently required human approval when no coverage was declared', async () => {
+  const f = await fixture(
+    [call('original', 'one'), [finish], call('original', 'two'), [finish]],
+    () => 'one-exact-command',
+    ['fixture.command'],
+    true,
+  );
+  try {
+    await f.submit('first');
+    const first = await f.pending();
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'approve-range',
+      presentationSessionId: 's',
+      interactionId: first.id,
+      expectedRevision: first.revision,
+      answer: { kind: 'approval', decision: 'approve', optionId: scopeOption(first.request) },
+    });
+    await f.terminal('first');
+    f.enableIndependentChecker(true);
+    await f.submit('second');
+    const required = await f.pending();
+    expect(required.id).not.toBe(first.id);
+    expect(f.reviewer.requests).toHaveLength(1);
+    expect(f.effects).toHaveLength(1);
+    await f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'deny-independent',
+      presentationSessionId: 's',
+      interactionId: required.id,
+      expectedRevision: required.revision,
+      answer: { kind: 'approval', decision: 'deny' },
+    });
+    await f.terminal('second');
+    expect(f.effects).toHaveLength(1);
+  } finally {
+    await f.close();
   }
 });

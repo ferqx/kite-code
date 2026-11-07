@@ -174,7 +174,7 @@ if (mode === 'cold') {
         expectedStoreId: storeId,
         commandId: `approve-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     }
     const snap = await snapshot();

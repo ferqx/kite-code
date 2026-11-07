@@ -253,7 +253,6 @@ export function modelDispatchMetadata(value: Json | null): ModelInputMetadata['a
       'snapshot',
       'controlReads',
       'checkExecutionId',
-      'reviewExecutionId',
       'interactionId',
       'decisionRevision',
     ]) ||

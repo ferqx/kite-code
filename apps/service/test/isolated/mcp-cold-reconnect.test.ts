@@ -418,7 +418,7 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
         expectedStoreId: storeId,
         commandId: `approve-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       record({ card, executionId });
       return card;

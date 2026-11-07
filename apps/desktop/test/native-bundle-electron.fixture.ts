@@ -33,18 +33,18 @@ async function openSessionTools(page: import('playwright').Page) {
 async function readOriginalCacheMetrics(page: import('playwright').Page) {
   await page
     .locator('.composer-cache-rate')
-    .filter({ hasText: /^缓存 50%$/ })
+    .filter({ hasText: /^缓存 40%$/ })
     .waitFor();
   assert.equal(
     await page.locator('.composer-cache-rate').getAttribute('title'),
-    '缓存命中 200 / 400 tokens',
+    '缓存命中 200 / 500 tokens',
   );
   const state = await page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
   );
   assert.equal(state.selection?.session.id, conversationId);
-  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '4');
 }
 
 async function readOriginalFileChanges(page: import('playwright').Page) {
@@ -58,7 +58,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
   assert.equal(await process.getAttribute('aria-expanded'), 'true');
   assert.equal(await final.count(), 1);
-  await page.locator('.tool-edit-heading [role="img"][aria-label^="已人工批准"]').waitFor();
+  await page.locator('.tool-activity-summary [role="img"][aria-label^="已人工批准"]').waitFor();
   await openSessionTools(page);
   const history = page.locator('[data-interaction-history]');
   await history.locator(':scope > summary').click();
@@ -73,7 +73,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     .getByText('本次执行已接收该回答；这不表示执行成功。', { exact: true })
     .waitFor();
   assert.equal(
-    await originalApproval.getByRole('button', { name: 'Approve once', exact: true }).isDisabled(),
+    await originalApproval.getByRole('button', { name: '仅此次', exact: true }).isDisabled(),
     true,
   );
   await history.locator(':scope > summary').click();
@@ -146,7 +146,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   assert.equal(await failed.locator('.tool-step-preview').count(), 0);
   if ((await failedHeading.getAttribute('aria-expanded')) !== 'true') await failedHeading.click();
   await failed.getByRole('region', { name: '工具异常详情', exact: true }).waitFor();
-  assert.ok((await failed.locator('.tool-detail').textContent())!.includes('ENOENT'));
+  assert.ok((await failed.locator('.tool-detail').textContent())!.includes('file_not_regular'));
   console.log(
     'native_driver_stage: original tool rows, accurate Files read failure and no file action',
   );
@@ -161,7 +161,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   );
   await failure.getByRole('button', { name: '确定', exact: true }).click();
   assert.equal(await failure.count(), 0);
-  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '4');
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('combobox', { name: '默认编辑器', exact: true }).waitFor();
   await page.getByText('compatible · fixed', { exact: true }).waitFor();
@@ -249,7 +249,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     'TextEdit',
   );
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
-  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '4');
   console.log(
     'native_driver_stage: original file changes, exact saved body, current file action, retained editor choice and GET-only reading',
   );
@@ -728,7 +728,7 @@ try {
     deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (await page.getByText('轮次：completed', { exact: true }).isVisible()) break;
-    const approve = page.getByRole('button', { name: '批准一次', exact: true });
+    const approve = page.getByRole('button', { name: '仅此次', exact: true });
     if (await approve.isVisible()) {
       const state = await page.evaluate(
           async () =>
@@ -756,7 +756,7 @@ try {
         if (await process.count()) await process.click();
         const write = page
           .locator('.tool-activity-summary')
-          .filter({ hasText: 'bundled.txt' })
+          .filter({ hasText: 'bundle approval probe' })
           .filter({ hasText: '等待人工审批' });
         while (!(await write.isVisible())) {
           // The interaction card can precede the saved process metadata. Expand
@@ -786,7 +786,7 @@ try {
           }
           assert.ok(
             Date.now() < deadline,
-            'original pending write metadata and group became visible',
+            'original pending Shell metadata and group became visible',
           );
           await page.waitForTimeout(20);
         }
@@ -856,6 +856,13 @@ try {
           generation: 1,
         })) as NativeState;
         return {
+          executions: state.selection?.executions.map((value) => ({
+            id: value.id,
+            definitionId: value.definitionId,
+            status: value.status,
+            result: value.result,
+            authorization: value.authorization,
+          })),
           interactions: state.selection?.interactions.map((value) => ({
             id: value.id,
             state: value.state,
@@ -880,7 +887,7 @@ try {
     readFileSync(join(home, 'workspace/bundled.txt'), 'utf8'),
     'actual bundled bytes\r\n',
   );
-  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '4');
   const afterFirst = await page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
@@ -908,6 +915,7 @@ try {
   assert.equal(afterFirst.inputSubmissions.length, 1);
   assert.equal(afterFirst.callerSubmissions?.length, 1);
   assert.equal(await page.getByText('write one real bundled file', { exact: true }).count(), 1);
+  await page.getByText('正在发送', { exact: true }).waitFor({ state: 'hidden' });
   assert.equal(await page.getByText('正在发送', { exact: true }).count(), 0);
   console.log('native_driver_stage: deferred original preparation and one exact first send');
   await readOriginalCacheMetrics(page);
@@ -919,6 +927,7 @@ try {
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();
+  await page.locator('.composer-cache-rate').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('.composer-cache-rate').count(), 0);
   const empty = await page.evaluate(
     async () =>
@@ -953,7 +962,7 @@ try {
   childPid = undefined;
   assert.deepEqual(await lockState(), { outer: false, inner: false });
   page = await launch();
-  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '4');
   await readOriginalCacheMetrics(page);
   console.log(
     'native_driver_stage: original persisted cache usage after cold launch and zero replay',
@@ -969,7 +978,7 @@ try {
       }),
     conversationId,
   );
-  assert.equal(await (await fetch(`${control}/count`)).text(), '3');
+  assert.equal(await (await fetch(`${control}/count`)).text(), '4');
   process.kill(childPid!, 'SIGSTOP');
   app!.process().kill('SIGKILL');
   await new Promise<void>((resolve) => app!.process().once('exit', () => resolve()));

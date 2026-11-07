@@ -1054,18 +1054,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       answer.kind === 'question'
         ? ['answers']
         : answer.kind === 'approval'
-          ? ['decision', 'grant']
+          ? ['decision', ...(answer.decision === 'approve' ? ['optionId'] : [])]
           : answer.kind === 'plan_review'
-            ? ['decision', 'mode', 'feedback']
+            ? ['decision', 'feedback']
             : undefined;
     if (!extras) throw Error('invalid_native_request');
     exact(answer, ['kind', ...extras]);
     if (
       answer.kind === 'approval' &&
       (!['approve', 'deny'].includes(String(answer.decision)) ||
-        (answer.grant !== undefined &&
-          (answer.decision !== 'approve' ||
-            !['approve_once', 'same_command'].includes(String(answer.grant)))))
+        (answer.decision === 'approve' &&
+          (typeof answer.optionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(answer.optionId))))
     )
       throw Error('invalid_native_request');
   }

@@ -1,8 +1,12 @@
 # 显式离线备份
 
+当前 Core Store 只接纳 `formatMajor=1` 与 reviewed `0001-baseline.sql` 的准确闭合 schema/checksum，审核回执与范围授权均使用新版合同。backup／inspect／restore 不转换或重标历史旧结构；遇到旧库或旧 Core 备份明确拒绝，原数据保持。下文 Desktop 私有 DB、manifest 和配置资产各自的格式语法不因此升级，也不提供旧 Run 的执行兼容。
+
 ## 会话工作文件与 manifest v20
 
 [工作文件 owner](working-files.ts)仅从 `builtin.planning.record` 的 plan 文档／发布意图与 `builtin.files.output` 登记提取准确路径，不扫描任意 JSON 猜来源。Profile 中有登记工作文件时，备份使用 closed manifest v20：`assetFormatVersion` 保留原 v2–v19 资产语法，`workingFiles` 绑定 `working-files.jsonl` 的完整 SHA、字节数和文件数。无工作文件的旧格式继续沿原验证合同。
+
+会话输出路径与Files／Native共用[名称校验](../tools/session-output-path.ts)，允许当前合同下的中文与空格，不放宽Store／Session哈希、准确登记集合或物理路径检查。JSONL写入使用标准`\uXXXX`转义保存非ASCII字符，读取仍保持原ASCII字节检查、1024字节单行预算与准确JSON字段；解析后还原原文件名，不归一化、不加旧格式分支。合法名称最长240个UTF-8字节的实际备份仍在原行预算内。manifest、Store及回执版本不因名称扩展而改变。
 
 备份在原 Profile EX 下复制实际当前字节，并在全部复制后复核源文件，包含尚未再次交付的修改。缺失文件保存为明确 null proof；inspect 核准确登记集合、无额外文件、无链接、全字节 hash／size，restore 不以旧 Plan 或 Artifact 快照补造缺失当前文件。新 Store 保留来源相对定位与历史事实，外部漂移继续阻断 Plan 批准。解析 cache 不属于备份必需资产。
 
@@ -11,6 +15,8 @@
 原 GC 完成准确历史收集后才处理工作文件：仍有 typed 登记的文件全部保留，只有失去登记且过宽限的合法管理路径可沿原生 Files 完整基线删除。派生 `cache/documents` 独立按相同宽限淘汰，不能删除 blobs 或当前文件；无链接、关闭未知与原维护 EX 保有规则继续生效。已释放上传登记保留墓碑和原 Artifact 引用，直到原历史 GC 证明依赖可收集；当前没有按 TTL 强删未发送引用。客户端与发布验收范围见 [Desktop](../../../../apps/desktop/README.md)和 [Terminal](../../../../apps/cli/docs/terminal-release.md)，不把本维护入口的恢复证据外推为完整生命周期资格。
 
 Desktop DB10 使用独立 closed manifest v19；定时任务快照与旧格式隔离见[DB10合同](#desktop-db10-与-manifest-v19)。
+
+2026-11-07 授权方案联验发现当前 Native 的既有范围差异：[私有数据 owner](../../../../apps/desktop/electron/private-data.ts)已经写入 DB11／DB12，而本维护入口的 [Desktop 资产验证](assets.ts)仍只接纳 DB1–10。真实普通 Native 的后台任务、准确停止及正常退出完成后，`native-background-bundle` 的公开备份恢复因此返回 `backup_ui_incompatible`，没有完成该例的备份冷开。两处行为在基线 `fb4bebd0dcea5b59a3fa717b7e19321d7dc7229e` 已同时存在，本次 Core 格式2与审批字段替换没有扩大 Desktop 维护格式。当前授权的同 Store 正常冷开验证不代替这项备份恢复资格，历史 DB8／DB9／DB10 的有限证据也不证明 DB11／DB12 已可维护。
 
 MCP 五类申请与文件恢复申请的 document reader 共用内部 [intent-document](intent-document.ts)：沿原 `openPrivate/closePrivate` 保有同一 FD／Windows pin，执行 16MiB 完整读取、实体前后复核、fatal UTF-8 和闭合 version/records envelope；各资产继续独立核原 records grammar、摘要、数量及错误码。普通 caller reader 保留自己的 `backup_content_changed`、实体字段、平台前置检查及布尔返回合同，不以共享 reader 改写其兼容语义。
 
@@ -40,7 +46,7 @@ backup、inspect、restore／reconcile 和 GC 在各自调用的资源 owner 内
 
 [backup.ts](backup.ts) 在原 profile-use 排他锁内，先由 [files.ts](files.ts) 将完整 Core DB 与实际存在的 WAL 配对复制到本次私有 scratch，只打开该副本，核原 schema/capture 后执行 `VACUUM INTO` 生成一致候选。原 DB/WAL 的完整字节、存在状态及 dev/ino/ctime/size/mode/uid/nlink 在配对采集、每次复制之后和 SQL 回调前后重新核对；缺失 WAL 不创建替代，原 SHM 不复制，任何变化均拒绝发布。SQL 不打开原库，因此关闭后没有副文件的原 Profile 不会因只读 SQLite 连接而新建 WAL/SHM。scratch 在后续候选验证和发布前删除，不进入备份树。
 
-候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配原 0001、增加 0002-recovery-audit 或再增加 0003-session-reconciliation 的准确闭合 schema/checksum，通过 integrity/FK 检查；baseline 原 checksum 保持，新增迁移的 capture checksum 绑定完整已应用链，未知项拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
+候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配当前 baseline 的准确闭合 schema/checksum，通过 integrity/FK 检查；capture checksum 绑定这套 reviewed 结构，未知或历史迁移链拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
 
 仅本次创建的私有 staging 会在失败时删除。数据库、媒体、清单完成验证和 fsync 后才发布 `ready.json`，最后将 staging 改名到独立备份目录并同步父目录。检查备份重新核对数据库、媒体清单、每个媒体完整 hash 和目录内容，不能仅凭 ready 标记认定有效。文件要求私有、当前主体持有、非软链接、单一硬链接；媒体不可写。检查失败不会修改原 profile。
 
@@ -149,6 +155,8 @@ Desktop DB3 的 [desktop-callers.ts](desktop-callers.ts) 另核真实只读 SQLi
 Desktop DB5 的 [desktop-answers.ts](desktop-answers.ts) 独立核准确 `answer_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)`，必须与原 DB4 五表共同存在；manifest v7 接纳 DB5，旧 v2–v6 的准确字段、格式和物理白名单不扩大。没有新增独立 UI 文件，也不创建缺失 journal。Agent 维护代码只依赖自身与 Node/Bun SQLite，不引用 Desktop/Client/CLI workspace。
 
 每行核完整 closed scope/subject/interaction/request/phase，原 SQL PK 等于 request.commandId，原 Store 与 expectedStoreId、revision 一致，三个答案种类的准确请求字段、全记录 commandId 与 Store/Interaction/revision 唯一。实际 BLOB hex 对照 UTF8 原字节，单记录 JSON 4MiB、整个表最多128行/16MiB；unknown 不静默删除。完整请求 bodyDigest 与准确 interaction.answer Core requestDigest 重新计算，observationDigest/subject 仅保存既有身份元数据，不能推导 Service receipt、查询许可或首次 POST 权。
+
+当前审批答复与 Desktop journal 使用同一闭合形状：approve 必须保存原 `optionId`，deny 不携带选项；旧 `grant`、缺选项及额外字段即使重算摘要也拒绝。真实 Node 三种答复的备份／恢复整文件4项79断言通过，保原 Unicode／CRLF、原申请身份、冷读零 HTTP；不为旧 Core 格式增加读取兼容。
 
 原 answer 表随同一私有 SQLite 的 VACUUM INTO 一致副本保存；source DB/WAL、snapshot proof、inspect 和 restore 独立核验。恢复生成新 Core Store，但 UI 的旧 Store、Session、Workspace、Interaction、Execution、Run、Command、subject、两种请求摘要、完整答案 Unicode/CRLF 与 phase 均保持。维护不执行答案、不重标身份、不恢复热 authority，不接触 Provider/vault。
 
@@ -293,4 +301,4 @@ Provider原配置意图新增有限可选kind（upsert/remove）与name；省略
 
 ## 会话核实 checkpoint 的维护
 
-0003 的 `session_reconciliation` 是同 Store 原执行组接续的私有边界，备份按实际链保留；恢复为新 Store 时若表存在便清除全部行，原 Session／Command／结果出处保留，旧 checkpoint 不成为新授权。旧 0001／0002 只读维护不强制升级。GC 随实际回收 root 删除其 checkpoint，不扩大其他组范围；原 secure_delete／VACUUM／WAL 清理继续覆盖私有内容。安全导出固定白名单不含该表。[恢复](../../test/isolated/maintenance/restore.test.ts)、[GC](../../test/isolated/maintenance/gc.test.ts)、[备份](../../test/isolated/maintenance/backup.test.ts)与[迁移链](../../test/isolated/recovery/run-resume-audit-migration.test.ts)核各自边界，完整语义归[状态 owner](../storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。
+当前 baseline 的 `session_reconciliation` 是同 Store 原执行组接续的私有边界，备份保留；恢复为新 Store 时清除全部行，原 Session／Command／结果出处保留，旧 checkpoint 不成为新授权。历史 major 1 旧结构的 0001／0002／0003 迁移链不再接纳或升级。GC 随实际回收 root 删除其 checkpoint，不扩大其他组范围；原 secure_delete／VACUUM／WAL 清理继续覆盖私有内容。安全导出固定白名单不含该表。[恢复](../../test/isolated/maintenance/restore.test.ts)、[GC](../../test/isolated/maintenance/gc.test.ts)、[备份](../../test/isolated/maintenance/backup.test.ts)与[格式核验](../../test/isolated/recovery/run-resume-audit-migration.test.ts)核各自边界，完整语义归[状态 owner](../storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。

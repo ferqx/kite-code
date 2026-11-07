@@ -183,7 +183,12 @@ test('certified cold resume keeps complete original history, pages exact identit
       policyRevision: 'fixed',
       requiredRefs: [],
       source: { kind: 'fixed' },
-      request: { description: 'original pending authority' },
+      request: {
+        description: 'original pending authority',
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
     });
     const planned = (await store.getExecution('planned-next'))!;
     await store.close();

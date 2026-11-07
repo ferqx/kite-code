@@ -188,7 +188,7 @@ async function fixture(scenario: Scenario) {
           input: { agent_id: followupTarget, content: 'CHILD_FOLLOW_UP_REQUEST' },
         };
       } else if (!child && scenario !== 'cold' && scenario !== 'unconnected' && index === 0)
-        call = { name: 'connect_mcp_server', input: { server_id: safeId, key: 'parent' } };
+        call = { name: 'connect_mcp_server', input: { server_id: safeId } };
       else if (!child && index === (scenario === 'cold' || scenario === 'unconnected' ? 0 : 1))
         call = {
           name: 'spawn_agent',
@@ -201,7 +201,6 @@ async function fixture(scenario: Scenario) {
           name: 'connect_mcp_server',
           input: {
             server_id: safeId,
-            key: index === 3 ? 'child-followup' : 'child',
           },
         };
       else if (
@@ -480,7 +479,7 @@ async function fixture(scenario: Scenario) {
             expectedRevision: card.revision,
             answer: denied
               ? { kind: 'approval', decision: 'deny' }
-              : { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              : { kind: 'approval', decision: 'approve', optionId: 'once' },
           });
         }
         if (Date.now() > deadline) {
@@ -581,7 +580,16 @@ async function fixture(scenario: Scenario) {
                 expect(policies.every((policy) => policy.allowed === true)).toBe(true);
                 return policies.map((policy) => policy.snapshot);
               })();
-        for (const snapshot of snapshots)
+        for (const item of snapshots) {
+          const saved = item as { namespace: string; data: { gate: unknown; current: unknown } };
+          if (saved.namespace === 'builtin.business.permissions') {
+            expect(saved.data.gate).toMatchObject({
+              namespace: 'builtin.planning',
+              data: { planning: { status: 'disabled' } },
+            });
+          }
+          const snapshot =
+            saved.namespace === 'builtin.business.permissions' ? saved.data.current : saved;
           expect(snapshot).toMatchObject({
             namespace: 'builtin.permissions',
             version: '1',
@@ -597,6 +605,7 @@ async function fixture(scenario: Scenario) {
               },
             },
           });
+        }
         expect(authorization.revision.length).toBeGreaterThan(0);
         expect(execution.authorization?.human).toBeUndefined();
       }

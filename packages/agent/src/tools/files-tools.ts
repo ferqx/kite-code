@@ -1,5 +1,6 @@
 import type { ArtifactRef, ToolContext, ToolDefinition, ToolResult } from '../extensions';
-import type { Json, JsonSchema } from '../storage/types';
+import { modelReference, readModelReference } from '../model-reference';
+import type { Json } from '../storage/types';
 import { AgentError } from '../storage/types';
 import type { FileBaseline, FileSnapshot, WorkspaceFiles } from './files';
 import { formatFileReadResult } from './files/model-result';
@@ -14,42 +15,75 @@ export interface FileMutationCapture {
   failed(token: unknown, error: unknown, context: ToolContext): Promise<void>;
 }
 
-const base: JsonSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['hash', 'size', 'device', 'inode'],
-  properties: {
-    hash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-    size: { type: 'integer', minimum: 0 },
-    device: { type: 'string' },
-    inode: { type: 'string' },
-  },
-};
 const path = {
   type: 'string',
   maxLength: 4096,
   description:
     'Path relative to the fixed workspace root, or an absolute path inside that workspace. No .. segments; paths outside the workspace are rejected.',
 };
-const artifactSchema: JsonSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['id', 'mediaType', 'size', 'scope'],
-  properties: {
-    id: { type: 'string', minLength: 1 },
-    mediaType: { type: 'string', minLength: 1 },
-    size: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
-    scope: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['kind', 'id'],
-      properties: {
-        kind: { enum: ['session', 'message', 'execution'] },
-        id: { type: 'string', minLength: 1 },
-      },
-    },
-  },
-};
+const referenceSchema = { type: 'string', minLength: 1, maxLength: 4096 };
+const fileDefinitions = { 'files.read': ['4', '5'], 'files.write': ['3'], 'files.edit': ['2'] };
+
+export async function fileBaselineReference(
+  reference: Json,
+  context: ToolContext,
+  expectedPath: string,
+  normalize: (path: string) => string = (path) => path,
+): Promise<Json> {
+  const { result } = await readModelReference(
+    reference,
+    'file',
+    context,
+    'builtin.files',
+    fileDefinitions,
+  );
+  let original: Record<string, Json>;
+  try {
+    original = object(JSON.parse(String(result.content)));
+  } catch {
+    throw new AgentError('tool_reference_unavailable');
+  }
+  if (
+    original.base_ref !== reference ||
+    typeof original.path !== 'string' ||
+    normalize(original.path) !== normalize(expectedPath)
+  )
+    throw new AgentError('tool_reference_target_mismatch');
+  if (!baseline(original.baseline)) throw new AgentError('tool_reference_unavailable');
+  return original.baseline!;
+}
+
+async function fileParameters(
+  input: Record<string, Json>,
+  context: ToolContext,
+  files: WorkspaceFiles,
+): Promise<Record<string, Json>> {
+  const value = { ...input };
+  if (value.baseRef !== undefined) {
+    if (value.base !== undefined) throw new AgentError('file_input_invalid');
+    value.base = await fileBaselineReference(value.baseRef, context, string(value.path), (path) =>
+      files.relativePath(path),
+    );
+    delete value.baseRef;
+  }
+  for (const field of ['content', 'find', 'replace']) {
+    const reference = value[`${field}Ref`];
+    if (reference === undefined) continue;
+    if (value[field] !== undefined || value[`${field}Artifact`] !== undefined)
+      throw new AgentError('file_input_invalid');
+    const { result, reference: selected } = await readModelReference(
+      reference,
+      'artifact',
+      context,
+    );
+    const refs = result.artifactRefs;
+    if (!Array.isArray(refs) || selected.index === undefined || !refs[selected.index])
+      throw new AgentError('tool_reference_unavailable');
+    value[`${field}Artifact`] = refs[selected.index]!;
+    delete value[`${field}Ref`];
+  }
+  return value;
+}
 async function textInput(
   input: Record<string, Json>,
   name: string,
@@ -112,13 +146,13 @@ export function fileFailureAdvice(code: string): string | undefined {
     file_read_range_invalid:
       'The requested line range is invalid. start_line and max_lines must be positive safe integers; omit them to use their declared defaults. Correct the range without changing the intended file.',
     file_edit_invalid:
-      'The edit arguments are invalid. Supply a nonempty old_text, a string new_text, a positive integer expected_matches and the exact complete-file baseline, using the declared text or Artifact fields.',
+      'Supply a nonempty old_text, a string new_text and the exact base_ref from a successful read or mutation. expected_matches defaults to 1; explicitly set the exact positive count for multiple matches. Use declared text or content references, never reconstruct baseline objects.',
     file_edit_match_conflict:
       'The exact old_text occurrence count does not equal expected_matches. This edit did not publish a change. Check the exact text and intended match count against an authorized current read and its complete-file baseline before a separately authorized corrected edit; do not broaden the requested replacement.',
     file_baseline_invalid:
-      'The supplied baseline is invalid. Use the complete baseline from the exact original file read; do not invent or partially reconstruct it.',
+      'The file version reference could not be resolved. Copy base_ref from a successful authorized read of this exact path; do not construct a baseline object.',
     ENOENT:
-      "The target file or a required parent directory does not exist. A new file with base=null can create missing parents within this tool's accepted scope; replacement and edit require an existing file. An empty directory listing does not mean the file scope is unavailable. Verify the exact target and baseline before another authorized attempt.",
+      'The target file or a required parent directory does not exist. Omit base_ref to create a new file and missing accepted parents; never pass null. Replacement and edit require an existing file and its exact base_ref. Verify the exact target before another authorized attempt.',
     ENOTDIR:
       'A parent path component is a file or a link instead of a usable directory. Inspect the exact parent chain; do not repeat the same target unchanged or select a different target without task authorization.',
     EACCES:
@@ -229,22 +263,26 @@ export function createFileTools(
     },
     {
       name: 'write',
-      required: ['path', 'base'],
+      required: ['path'],
       properties: {
         path,
         content: { type: 'string' },
-        contentArtifact: artifactSchema,
-        base: { anyOf: [base, { type: 'null' }] },
+        contentRef: referenceSchema,
+        baseRef: {
+          ...referenceSchema,
+          description:
+            'Exact reference from a successful read or mutation of this path. Omit this field entirely to create a new file; never pass null or a baseline object.',
+        },
       },
       oneOf: [
-        { required: ['content'], not: { required: ['contentArtifact'] } },
-        { required: ['contentArtifact'], not: { required: ['content'] } },
+        { required: ['content'], not: { required: ['contentRef'] } },
+        { required: ['contentRef'], not: { required: ['content'] } },
       ],
       call: async (i, context) => {
         const content = await textInput(i, 'content', context);
         context.signal.throwIfAborted();
         const path = string(i.path),
-          base = baseline(i.base);
+          base = i.base === undefined ? null : baseline(i.base);
         return mutation({ operation: 'write', path, base }, context, () =>
           files.write({ path, content, base }),
         );
@@ -252,28 +290,29 @@ export function createFileTools(
     },
     {
       name: 'edit',
-      required: ['path', 'occurrences', 'base'],
+      required: ['path', 'baseRef'],
       oneOf: [
-        { required: ['find'], not: { required: ['findArtifact'] } },
-        { required: ['findArtifact'], not: { required: ['find'] } },
+        { required: ['find'], not: { required: ['findRef'] } },
+        { required: ['findRef'], not: { required: ['find'] } },
       ],
       properties: {
         path,
         find: { type: 'string', minLength: 1 },
         replace: { type: 'string' },
-        findArtifact: artifactSchema,
-        replaceArtifact: artifactSchema,
-        occurrences: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
-        base,
+        findRef: referenceSchema,
+        replaceRef: referenceSchema,
+        occurrences: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER, default: 1 },
+        baseRef: referenceSchema,
       },
       call: async (i, context) => {
         const b = baseline(i.base);
-        if (!b || typeof i.occurrences !== 'number') throw new AgentError('file_input_invalid');
+        if (!b || (i.occurrences !== undefined && typeof i.occurrences !== 'number'))
+          throw new AgentError('file_input_invalid');
         const find = await textInput(i, 'find', context),
           replace = await textInput(i, 'replace', context);
         context.signal.throwIfAborted();
         const path = string(i.path),
-          occurrences = i.occurrences;
+          occurrences = i.occurrences === undefined ? 1 : (i.occurrences as number);
         return mutation({ operation: 'edit', path, base: b }, context, () =>
           files.edit({ path, base: b, find, replace, occurrences }),
         );
@@ -291,25 +330,34 @@ export function createFileTools(
       find: 'old_text',
       replace: 'new_text',
       occurrences: 'expected_matches',
-      findArtifact: 'old_text_artifact',
-      replaceArtifact: 'new_text_artifact',
+      findRef: 'old_text_ref',
+      replaceRef: 'new_text_ref',
     },
   };
   const descriptions: Record<string, string> = {
-    read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset). The returned baseline describes the complete file and is required for later modifications.',
+    read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset). The returned base_ref binds the complete file identity and version and is required for later modifications.',
     write:
-      'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; missing parent directories within the accepted file scope are created through the same protected no-follow boundary. Replacing a file requires its exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. If a call fails, correct the reported cause before another authorized attempt; repeating the same path and input does not fix it. Only a call that attempts parent-directory creation may leave new empty directories. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
-    edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
+      'Create or replace a complete UTF-8 file. Omit base_ref only to create a new file; missing parent directories within the accepted file scope are created through the same protected no-follow boundary. Replacing a file requires the exact base_ref returned by its successful read or previous mutation and existing parents. Supply exactly one of content or content_ref. If a call fails, correct the reported cause before another authorized attempt; repeating the same path and input does not fix it. Only a call that attempts parent-directory creation may leave new empty directories. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
+    edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its exact base_ref. expected_matches defaults to 1 and must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable old_text_ref and new_text_ref returned for Artifact bodies. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
   };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
     model: {
       name: modelNames[d.name]!,
       snakeCase: true,
-      ...(d.name === 'read' ? { resultVersion: '1' } : {}),
+      resultVersion: '1',
       ...(modelParameters[d.name] ? { parameterNames: modelParameters[d.name] } : {}),
     },
-    ...(d.name === 'read' ? { formatModelResult: formatFileReadResult } : {}),
+    formatModelResult:
+      d.name === 'read'
+        ? formatFileReadResult
+        : ({ result }) => {
+            if (result.outcome !== 'succeeded') return;
+            const value = object(JSON.parse(result.content));
+            if (typeof value.base_ref !== 'string') return;
+            const { baseline: _baseline, ...metadata } = value;
+            return JSON.stringify(metadata);
+          },
     ...(capture && (d.name === 'write' || d.name === 'edit')
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
@@ -328,8 +376,8 @@ export function createFileTools(
                 ? [
                     {
                       oneOf: [
-                        { required: ['replace'], not: { required: ['replaceArtifact'] } },
-                        { required: ['replaceArtifact'], not: { required: ['replace'] } },
+                        { required: ['replace'], not: { required: ['replaceRef'] } },
+                        { required: ['replaceRef'], not: { required: ['replace'] } },
                       ],
                     },
                   ]
@@ -343,7 +391,7 @@ export function createFileTools(
       if (context.signal.aborted)
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };
       try {
-        const parameters = object(input);
+        const parameters = await fileParameters(object(input), context, files);
         const selected =
           parameters.path === undefined
             ? parameters
@@ -389,6 +437,7 @@ export function createFileTools(
             ? {
                 path: (value as { path: string }).path,
                 baseline: (value as { baseline: unknown }).baseline,
+                base_ref: modelReference('file', context.executionId),
                 ...(change
                   ? {
                       fileChange: change,
@@ -553,7 +602,9 @@ export async function createFileReadResult(
   })();
   const metadata = {
     path: snapshot.path,
-    ...(snapshot.baseline ? { baseline: snapshot.baseline } : {}),
+    ...(snapshot.baseline
+      ? { baseline: snapshot.baseline, base_ref: modelReference('file', context.executionId) }
+      : {}),
     selection: snapshot.selection,
     ...(observation ? { observation } : {}),
   };

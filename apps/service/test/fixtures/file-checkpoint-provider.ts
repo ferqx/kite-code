@@ -50,7 +50,7 @@ export function createFileCheckpointProvider(
           name: 'write_file',
           input: {
             path: 'original.txt',
-            base: actual.baseline,
+            base_ref: actual.baseRef,
             content: `${key} actual modified UTF8\r\n`,
           },
         };
@@ -59,7 +59,6 @@ export function createFileCheckpointProvider(
           name: 'write_file',
           input: {
             path: `${key}-created.txt`,
-            base: null,
             content: `${key} actual created bytes\r\n`,
           },
         };

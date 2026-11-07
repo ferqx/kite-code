@@ -843,7 +843,7 @@ export async function runLiveUntrustedResults(options: Options): Promise<{ cases
           expectedStoreId,
           commandId: 'approve-original-W-once',
           expectedRevision: afterCard.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         },
         { signal: options.signal },
       );

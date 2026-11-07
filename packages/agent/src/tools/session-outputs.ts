@@ -15,10 +15,10 @@ import { dispatchScopeLeaves } from '../permissions/dispatch-scope';
 import { AgentError } from '../storage/types';
 import { createWorkspaceFiles, type FileSnapshot, type WorkspaceFiles } from './files';
 import { createFileTools } from './files-tools';
+import { isSessionOutputName, isSessionOutputPath } from './session-output-path';
 
 const contentType = 'builtin.files.output';
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
-const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 export interface SessionOutput {
   path: string;
   name: string;
@@ -34,11 +34,9 @@ function decode(value: Json): SessionOutput {
   const output = value as unknown as SessionOutput;
   if (
     !output ||
-    typeof output.path !== 'string' ||
-    !/^files\/[a-f0-9]{64}\/[a-f0-9]{64}\/outputs\/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(
-      output.path,
-    ) ||
-    !namePattern.test(output.name) ||
+    !isSessionOutputPath(output.path) ||
+    !isSessionOutputName(output.name) ||
+    output.path.split('/').at(-1) !== output.name ||
     !['pending', 'saved', 'inherited'].includes(output.state)
   )
     throw new AgentError('output_file_invalid');
@@ -115,7 +113,7 @@ export function withSessionOutputs(options: {
     const prior = scope.files.find((file) => join(profile, ...file.value.path.split('/')) === path);
     if (
       resolve(path) !== path ||
-      !namePattern.test(basename(path)) ||
+      !isSessionOutputName(basename(path)) ||
       (!prior && (!write || dirname(path) !== ownRoot))
     )
       throw new AgentError('output_file_scope_denied');
@@ -140,7 +138,7 @@ export function withSessionOutputs(options: {
         ? tool
         : {
             ...tool,
-            description: `${tool.description} Session output paths provided by the host are persistent editable deliverables; use a new filename with base=null to create one.`,
+            description: `${tool.description} Session output paths provided by the host are persistent editable deliverables; omit base_ref to create a new filename. outputDirectory is only the parent directory of a requested deliverable, not a file to read or a source of child-Agent results. Use an exact file path for reading; Agent tools provide child results. Filenames may contain Unicode letters/numbers and spaces; use one component starting with a letter/number, at most 120 characters and 240 UTF-8 bytes. No path separators, control characters, Windows reserved names/characters, or trailing dot/space.`,
             async execute(input, context) {
               let files: WorkspaceFiles | undefined;
               try {

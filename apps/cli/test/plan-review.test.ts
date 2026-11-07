@@ -16,7 +16,6 @@ const plan = {
   version: 'v2',
   digest: 'original-plan-digest',
   content: 'Exact plan body\n1. inspect\n2. proposed edit',
-  allowedModes: ['auto', 'accept_edits'],
 };
 async function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-plan-review-')));
@@ -152,7 +151,7 @@ async function fixture() {
   };
 }
 
-test('real Core plan reviews return two explicit modes/deny/revise information without reauthorizing another Tool', async () => {
+test('real Core plan reviews return approve/deny/revise business information without reauthorizing another Tool', async () => {
   const f = await fixture();
   try {
     const cards: Interaction[] = [];
@@ -176,18 +175,17 @@ test('real Core plan reviews return two explicit modes/deny/revise information w
           if (card.kind === 'approval') {
             approvals++;
             if (approvals === 2) expect(readFileSync(f.ledger, 'utf8')).toBe('plan-tool\n');
-            return { kind: 'approval', decision: 'approve' };
+            return { kind: 'approval', decision: 'approve', optionId: 'once' };
           }
           expect(card.kind).toBe('plan_review');
           expect(card.definitionId).toBe('fixture.plan');
           expect(card.attempt).toBe(1);
           expect(card.request).toMatchObject(plan);
           const answers = [
-            { kind: 'plan_review', decision: 'approve', mode: 'auto', feedback: 'reviewed auto' },
+            { kind: 'plan_review', decision: 'approve', feedback: 'reviewed first' },
             {
               kind: 'plan_review',
               decision: 'approve',
-              mode: 'accept_edits',
               feedback: 'reviewed edits',
             },
             { kind: 'plan_review', decision: 'deny', feedback: 'do not use plan' },
@@ -202,11 +200,10 @@ test('real Core plan reviews return two explicit modes/deny/revise information w
     expect(approvals).toBe(2);
     expect(f.responses).toHaveLength(4);
     expect(f.responses).toEqual([
-      { kind: 'plan_review', decision: 'approve', mode: 'auto', feedback: 'reviewed auto' },
+      { kind: 'plan_review', decision: 'approve', feedback: 'reviewed first' },
       {
         kind: 'plan_review',
         decision: 'approve',
-        mode: 'accept_edits',
         feedback: 'reviewed edits',
       },
       { kind: 'plan_review', decision: 'deny', feedback: 'do not use plan' },
@@ -253,7 +250,7 @@ test('Desktop plan answer duplicate binds original executed Tool; late answer af
       expectedStoreId: f.storeId,
       commandId: 'approve-tool',
       expectedRevision: approval.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const card = await f.pending('plan_review');
     const desktop = createDesktopController({ admittedClient: f.client, onSnapshot() {} });
@@ -261,7 +258,6 @@ test('Desktop plan answer duplicate binds original executed Tool; late answer af
     const answer = {
       kind: 'plan_review',
       decision: 'approve',
-      mode: 'auto',
       feedback: 'exact original',
     } as const;
     const first = desktop.answerInteraction(card, answer);
@@ -282,7 +278,7 @@ test('Desktop plan answer duplicate binds original executed Tool; late answer af
       expectedStoreId: f.storeId,
       commandId: 'late-plan',
       expectedRevision: next.revision,
-      answer: { kind: 'plan_review', decision: 'approve', mode: 'accept_edits' },
+      answer: { kind: 'plan_review', decision: 'approve' },
     });
     expect(late.receipt).toMatchObject({ outcome: 'answer_saved', cancelled: true });
     const history = await f.client.getInteraction('s', next.id, { storeId: f.storeId });

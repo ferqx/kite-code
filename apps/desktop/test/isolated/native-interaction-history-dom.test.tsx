@@ -67,20 +67,23 @@ test('original readonly cards keep saved generic answers, cancellation and exact
       id: 'c',
       kind: 'plan_review',
       acceptedDecisionRevision: '2',
-      answer: { kind: 'plan_review', decision: 'revise', feedback: '  原反馈\r\n雪🙂  ' },
+      answer: {
+        kind: 'plan_review',
+        decision: 'approve',
+        feedback: '  原反馈\r\n雪🙂  ',
+      },
       request: {
         planId: 'plan',
         version: '1',
         digest: 'digest',
         content: '原计划',
-        allowedModes: ['auto'],
       },
     },
     {
       ...base,
       id: 'd',
       kind: 'approval',
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'scope-example' },
     },
     {
       ...base,
@@ -180,7 +183,9 @@ test('original readonly cards keep saved generic answers, cancellation and exact
     expect(container.textContent).toContain('问题 · 已取消');
     expect(container.textContent).toContain('本次执行已接收该回答');
     expect(
-      container.querySelector('[data-interaction-id="c"] pre[data-saved-answer]')?.textContent,
+      JSON.parse(
+        container.querySelector('[data-interaction-id="c"] pre[data-saved-answer]')!.textContent!,
+      ).feedback,
     ).toBe('  原反馈\r\n雪🙂  ');
     const answerButtons = [
       ...container.querySelectorAll<HTMLButtonElement>('[data-interaction-id] button'),

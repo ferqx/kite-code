@@ -165,6 +165,7 @@ test('close during controller refresh reaches the synchronously registered lease
   const caller = Object.assign(Object.create(NativeCaller.prototype), {
     generation: 1,
     closed: false,
+    controller: { snapshot: null },
     refreshing: refresh.promise,
     jobOutput: reads,
   }) as NativeCaller;

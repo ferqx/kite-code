@@ -21,7 +21,7 @@ test('actual CLI handler receives complete verified attachment before an exact a
       timeoutMs: 15000,
       async answerInteraction() {
         handlers++;
-        return { kind: 'approval', decision: 'approve' };
+        return { kind: 'approval', decision: 'approve', optionId: 'once' };
       },
     });
     expect(waiting.status).toBe('waiting_interaction');
@@ -48,7 +48,7 @@ test('actual CLI handler receives complete verified attachment before an exact a
             }
           ).policy.check.reference.scope,
         );
-        return { kind: 'approval', decision: 'approve' };
+        return { kind: 'approval', decision: 'approve', optionId: 'once' };
       },
     });
     expect(result.status).toBe('succeeded');

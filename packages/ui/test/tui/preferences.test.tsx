@@ -320,7 +320,7 @@ test('all existing panel-owned headings use Chinese while public machine values 
     'Idle Rewind: choose original boundary with arrows/Enter; 0 empty; Esc close',
     'Current selected Context projection, not actual Model input Inspector; Esc close',
     'Up/Down explicit approval selection:',
-    'Ctrl+A: read required attachment. Approval: approve (once), approve same_command only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.',
+    'Ctrl+A: read required attachment. Approval: approve (once), approve <optionId> only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.',
   ];
   for (const label of labels) expect(tuiChinese[label]).toBeTruthy();
   expect(f.counts().effects).toBe(0);
@@ -399,7 +399,30 @@ test('populated model, permission and Skill panels translate owned instructions 
         readScopes: [{ kind: 'workspace', description: '/Original/English/path' }],
       },
       grants: {
-        items: [{ grant: { id: 'grant', kind: 'tool', definitionId: 'Models' } }],
+        items: [
+          {
+            seq: '1',
+            grant: {
+              id: 'grant',
+              originStoreId: 'store',
+              sessionId: 'a',
+              workspaceId: 'w',
+              kind: 'tool',
+              definitionId: 'Models',
+              definitionVersion: '1',
+              inputDigest: 'a'.repeat(64),
+              ruleId: 'original-rule',
+              contractId: 'original-contract',
+              scope: { path: '/Original/English/path' },
+              scopeDigest: 'b'.repeat(64),
+              bindings: [{ kind: 'tool', definitionId: 'Models', definitionVersion: '1' }],
+              presentation: { label: 'Original grant', details: ['Original grant detail'] },
+              interactionId: 'source-approval',
+              decisionRevision: '1',
+              executionId: 'source-execution',
+            },
+          },
+        ],
         revision: '4',
         upperSeq: '5',
       },
@@ -435,7 +458,7 @@ test('populated model, permission and Skill panels translate owned instructions 
     ],
     [
       TuiPermissionPanel,
-      ['以后会话默认值：', '已保存 same_command 授权：', '信任不代表批准所有 Tool'],
+      ['以后会话默认值：', '已保存的会话授权：', '信任不代表批准所有 Tool'],
       ['accept_edits', 'auto', 'untrusted', '/Original/English/path', '"definitionId":"Models"'],
     ],
     [

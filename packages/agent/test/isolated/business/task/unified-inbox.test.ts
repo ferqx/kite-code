@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,6 +12,8 @@ import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
 import type { Store } from '../../../../src/storage/port';
+import { listAgentMessages } from '../../../../src/storage/sqlite/agent-mail-operations';
+import { SqliteOperations } from '../../../../src/storage/sqlite/operations';
 
 const finish = {
   type: 'finish',
@@ -19,6 +22,34 @@ const finish = {
 } satisfies ModelEvent;
 const resultBody = 'Canonical child terminal result 雪🙂';
 const ordinaryBody = 'Ordinary agent note: untrusted data';
+function indexedInbox(db: Database, input: Parameters<Store['listAgentMessages']>[0]) {
+  const operations = new SqliteOperations(db, true);
+  const reads: Parameters<SqliteOperations['row']>[] = [];
+  const row = operations.row.bind(operations);
+  operations.row = (sql, ...args) => {
+    reads.push([sql, ...args]);
+    return row(sql, ...args);
+  };
+  try {
+    const page = listAgentMessages(operations, input);
+    const water = reads.find(([sql]) => sql.includes('AS water FROM command c'))!;
+    expect(water).toBeDefined();
+    const [sql, ...args] = water;
+    const plan = db
+      .query<{ detail: string }, (string | number | bigint | null)[]>(`EXPLAIN QUERY PLAN ${sql}`)
+      .all(...args);
+    expect(
+      plan.some(({ detail }) =>
+        detail.includes(
+          'SEARCH c USING INDEX command_mail_recipient (mail_target_session_id=? AND subject_id=?)',
+        ),
+      ),
+    ).toBe(true);
+    return page;
+  } finally {
+    operations.releaseStatements();
+  }
+}
 function gate() {
   let release!: () => void;
   return {
@@ -468,6 +499,51 @@ test('an ordinary idle Agent note stays queued and is distinct from the later te
     expect(physical.inputKind).toBeUndefined();
     expect(physical.originCommandId).toBeUndefined();
     expect(f.authorizations()).toBe(1);
+
+    // Both actual ordinary mail and the child's sealed result retain the same public inbox.
+    expect(page.items.map((item) => item.kind)).toEqual(['message', 'result']);
+    const query = { ...f.base, sessionId: 'root', limit: 1 };
+    const first = await f.store.listAgentMessages(query);
+    expect(first.items.map((item) => item.id)).toEqual([note.id]);
+    expect(first.nextAfterSeq).toBe(first.items[0]!.seq);
+    const second = await f.store.listAgentMessages({
+      ...query,
+      afterSeq: first.nextAfterSeq!,
+      upperSeq: first.upperSeq,
+    });
+    expect(second.items).toEqual([page.items[1]!]);
+    expect(second.nextAfterSeq).toBeNull();
+    expect(second.highWaterSeq).toBe(first.highWaterSeq);
+    expect(second.receivedSeq).toBe(first.receivedSeq);
+    const indexed = indexedInbox(f.db, { ...f.base, sessionId: 'root' });
+    expect(indexed.items).toEqual(page.items);
+    expect(indexed.highWaterSeq).toBe(page.highWaterSeq);
+    expect(indexed.receivedSeq).toBe(page.receivedSeq);
+    expect(
+      indexedInbox(f.db, {
+        ...f.base,
+        sessionId: 'root',
+        runId: page.items[1]!.receivedRunId!,
+        confirmedOnly: true,
+      }).items,
+    ).toEqual(page.items);
+    const resultCarrier = (await f.store.getExecution(page.items[1]!.sourceExecutionId))!;
+    expect(
+      indexedInbox(f.db, { ...f.base, sessionId: resultCarrier.childSessionId! }).items,
+    ).toEqual([]);
+    await assert.rejects(f.store.listAgentMessages({ ...query, subjectId: 'intruder' }), {
+      code: 'permission_denied',
+    });
+    await assert.rejects(f.store.listAgentMessages({ ...query, expectedStoreId: 'foreign' }), {
+      code: 'store_identity_mismatch',
+    });
+    await assert.rejects(
+      f.store.listAgentMessages({
+        ...query,
+        afterSeq: (BigInt(page.highWaterSeq) + 1n).toString(),
+      }),
+      { code: 'cursor_ahead' },
+    );
   } finally {
     await f.close();
   }

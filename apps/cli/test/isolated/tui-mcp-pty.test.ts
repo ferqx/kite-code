@@ -38,6 +38,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
   privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let reviewCalls = 0;
+  const reviewTargets: string[] = [];
   let calls = 0,
     rpc = 0;
   const provider = Bun.serve({
@@ -50,7 +51,10 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
       const review = body.messages.some((message) => {
         if (message.role !== 'user' || !message.content) return false;
         try {
-          return JSON.parse(message.content).purpose === 'authorization_check';
+          const payload = JSON.parse(message.content);
+          if (payload.purpose !== 'authorization_check') return false;
+          reviewTargets.push(payload.target?.definitionId);
+          return true;
         } catch {
           return false;
         }
@@ -82,7 +86,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
                     name: 'write_file',
                     arguments: JSON.stringify({
                       path: calls === 2 ? 'effect.txt' : 'effect-next.txt',
-                      base: null,
+
                       content: 'owned authorized file effect',
                     }),
                   },
@@ -156,6 +160,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
         workspace,
         dataRoot: profile.dataRoot,
         mcpUrl: remote.url.href,
+        reviewerBaseURL: `${provider.url.href}v1`,
         artifact,
       }),
       { mode: 0o600 },
@@ -377,7 +382,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
               expectedStoreId: storeId,
               commandId: 'approve-owned-original-file',
               expectedRevision: original.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             await until(async () => {
               const run = await client.getRun(originalRun);
@@ -405,7 +410,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
               expectedStoreId: storeId,
               commandId: 'approve-original-mcp-job',
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             const execution = await until(async () => {
               const row = await client.getExecution(executionId);
@@ -522,7 +527,14 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
     expect(receipts.some((row) => row.stage === '/clear')).toBe(true);
     expect(receipts.some((row) => row.stage === '/draft-clear')).toBe(true);
     expect(calls).toBe(4);
-    expect(reviewCalls).toBe(2);
+    // The explicit generic checker covers the two Files calls and the one
+    // user-confirmed selection Action. Reading and closing MCP panels add none.
+    expect(reviewCalls).toBe(3);
+    expect(reviewTargets).toEqual([
+      'files.write',
+      'builtin.mcp.management/mcp.server.select',
+      'files.write',
+    ]);
     expect(rpc).toBe(0);
     expect(readFileSync(join(workspace, 'effect.txt'), 'utf8')).toBe(
       'owned authorized file effect',
@@ -566,7 +578,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
         expect.arrayContaining(historyIds),
       );
       expect(calls).toBe(4);
-      expect(reviewCalls).toBe(2);
+      expect(reviewCalls).toBe(3);
     } finally {
       await reopened.close();
     }

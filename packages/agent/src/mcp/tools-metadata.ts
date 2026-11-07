@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ActionContext, ArtifactRef, Json, ReadContext } from '../extensions';
 import { canonicalJson } from '../json';
-import { proveConnectionParent, savedReconnection } from './reconnection-proof';
+import {
+  connectionPublisherInput,
+  proveConnectionParent,
+  savedReconnection,
+} from './reconnection-proof';
 
 export const toolsSnapshotType = 'builtin.mcp.tools.snapshot';
 export interface ToolsOrigin {
@@ -339,6 +343,8 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
   const catalogueDetails = reconnectProof ? obj(details.catalogue) : details;
   const sourceProof = { ...catalogueDetails };
   delete sourceProof.toolsMetadata;
+  delete sourceProof.connection_ref;
+  delete sourceProof.modelBinding;
   const prefix = `connection/${o.serverId}/`;
   if (
     typeof operation.key !== 'string' ||
@@ -410,14 +416,11 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
           ? reconnectProof.stage.input.serverId !== o.serverId ||
             reconnectProof.stage.input.key !== s.sourceRecordKey.slice(prefix.length) ||
             !same(reconnectProof.stage.newOperationRef, operation)
-          : !['mcp.connect', 'builtin.mcp/mcp.connect'].includes(publisher.definitionId ?? '') ||
-            publisher.inputDigest !==
-              hash(
-                encoded({
-                  serverId: o.serverId,
-                  key: s.sourceRecordKey.slice(`connection/${o.serverId}/`.length),
-                }),
-              )))
+          : !connectionPublisherInput(
+              publisher,
+              o.serverId,
+              s.sourceRecordKey.slice(prefix.length),
+            )))
   )
     throw new Error('mcp_tools_scope_unavailable');
   return s as unknown as ToolsSnapshot;

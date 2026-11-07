@@ -48,7 +48,7 @@ test('actual default file recovery engine seals both legs before POST and cold l
                 input: {
                   path: 'original.txt',
                   content: 'actual changed bytes\r\n',
-                  base: read!.baseline,
+                  base_ref: read!.baseRef,
                 },
               }
             : null;
@@ -189,7 +189,7 @@ test('actual default file recovery engine seals both legs before POST and cold l
               expectedStoreId: card.originStoreId,
               commandId: 'restore-answer',
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
           return port.lookup(current);
         },

@@ -15,8 +15,11 @@ import type {
   Permissions,
 } from '../../../src/extensions';
 import { createPermissionPolicy } from '../../../src/permissions';
+import { intersectPermissionPolicies } from '../../../src/permissions/inheritance';
 import { openSqliteStore } from '../../../src/sqlite';
 import { createShellExtension } from '../../../src/tools/shell';
+import { createShellToolBehaviors } from '../../../src/tools/shell-approval';
+import { fixtureReviewBinding } from '../../fixtures/review-behavior';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -27,7 +30,11 @@ const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(valu
 const command = (input: Json) => (input as { command: string }).command;
 
 async function fixture(
-  options: { changedCommand?: boolean; independentJobApproval?: boolean } = {},
+  options: {
+    changedCommand?: boolean;
+    independentJobApproval?: boolean;
+    genericCheck?: boolean;
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-risk-grant-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
@@ -44,7 +51,7 @@ async function fixture(
     async start(input, context) {
       starts.push({
         command: command(input),
-        reviewed: context.dispatchAuthorization?.riskReviewApproved === true,
+        reviewed: context.dispatchAuthorization?.materialReviewed === true,
       });
       appendFileSync(join(root, 'effects'), `${command(input)}\n`);
       return { reference: { command: command(input) } };
@@ -74,6 +81,24 @@ async function fixture(
     ]),
     [{ type: 'text_delta', text: 'Both controlled effects completed.' }, finish],
   ]);
+  const prepareRiskReview = async (request: AuthorizationRequest) => {
+    return {
+      material: { command: command(request.input), cwd: root },
+      fingerprint: hash({ command: command(request.input), cwd: root }),
+      reusable: false,
+    };
+  };
+  const behaviors = createShellToolBehaviors({
+    extensions: [extension],
+    snapshot: { configuration: 'fixture' },
+    commandDigest: (request) =>
+      hash({
+        kind: request.kind,
+        definitionId: request.definitionId,
+        command: command(request.input),
+      }),
+    prepareRiskReview,
+  });
   const policy = createPermissionPolicy({
     readPolicy: () => ({
       mode: 'auto',
@@ -89,7 +114,7 @@ async function fixture(
         { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
       ],
     }),
-    describeCapability: (request: AuthorizationRequest) => ({
+    describeCapability: async (request: AuthorizationRequest) => ({
       kind: request.kind,
       definitionId: request.definitionId,
       definitionVersion: request.definitionVersion,
@@ -99,7 +124,17 @@ async function fixture(
       effects: request.kind === 'model' ? ['network'] : ['process', 'unknown'],
       ...(request.kind !== 'model'
         ? {
-            autoReview: 'shell_risk' as const,
+            autoReview: 'check' as const,
+            reviewBehavior: fixtureReviewBinding(behaviors, request),
+            grantSatisfiesDefaultCheck: true as const,
+            grantOffers:
+              (await behaviors
+                .find(
+                  (behavior) =>
+                    behavior.capability.kind === request.kind &&
+                    behavior.capability.definitionId === request.definitionId,
+                )
+                ?.grantOffers?.(request)) ?? [],
             executionScope: { filesystem: 'workspace_write' as const, network: 'none' as const },
             autoReviewKey: hash({ command: command(request.input) }),
             commandDigest: hash({
@@ -111,10 +146,27 @@ async function fixture(
         : {}),
     }),
   });
+  const effectivePolicy = options.genericCheck
+    ? intersectPermissionPolicies(policy, {
+        async authorize(request) {
+          return request.kind === 'model'
+            ? { allowed: true, revision: 'independent-generic' }
+            : {
+                allowed: false,
+                revision: 'independent-generic',
+                check: {
+                  request: { purpose: 'independent-policy' },
+                  operationKey: hash({ command: command(request.input) }),
+                },
+              };
+        },
+      })
+    : policy;
   const permissions: Permissions = {
-    toolDispatchOrder: policy.toolDispatchOrder,
+    toolDispatchOrder: effectivePolicy.toolDispatchOrder,
+    reuseRevision: effectivePolicy.reuseRevision,
     async authorize(request) {
-      const decision = await policy.authorize(request);
+      const decision = await effectivePolicy.authorize(request);
       return options.independentJobApproval && request.kind === 'job' && decision.check
         ? { ...decision, check: { ...decision.check, requireApproval: true } }
         : decision;
@@ -127,27 +179,28 @@ async function fixture(
     modelId: 'fixed',
     permissions,
     extensions: [extension],
+    toolBehaviors: behaviors,
     authorizationCheck: {
       id: 'risk',
       version: 'same-command-fixture',
       modelId: 'reviewer',
       timeoutMs: 5000,
-      async prepareRiskReview(request) {
-        return {
-          material: { command: command(request.input), cwd: root },
-          fingerprint: hash({ command: command(request.input), cwd: root }),
-          reusable: false,
-        };
-      },
       model: {
         async *stream() {
           reviews++;
           yield {
             type: 'text_delta',
-            text: JSON.stringify({
-              risk: 'high',
-              reason: 'Controlled high-risk finding for this exact operation.',
-            }),
+            text: JSON.stringify(
+              options.genericCheck
+                ? {
+                    decision: 'approve_once',
+                    reason: 'Independent generic checker accepts only this invocation.',
+                  }
+                : {
+                    risk: 'high',
+                    reason: 'Controlled high-risk finding for this exact operation.',
+                  },
+            ),
           };
           yield finish;
         },
@@ -208,7 +261,14 @@ async function fixture(
         interactionId: card.id,
         expectedRevision: card.revision,
         subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve', grant },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: (
+            card.request as { options: { kind: string; optionId: string }[] }
+          ).options.find((option) => option.kind === (grant === 'same_command' ? 'scope' : 'once'))!
+            .optionId,
+        },
       });
     },
     async close() {
@@ -301,6 +361,20 @@ test('Auto same_command parent grant never removes an independent Job approval',
     expect((await work).status).toBe('completed');
     expect(f.counts()).toEqual({ effects: 2, reviews: 3 });
     expect(readFileSync(join(f.root, 'effects'), 'utf8')).toBe('printf same\nprintf same\n');
+  } finally {
+    await f.close();
+  }
+});
+
+test('generic checker fallback cannot turn domain nonreusable Shell material into cross-call reuse', async () => {
+  const f = await fixture({ genericCheck: true });
+  try {
+    expect((await f.run()).status).toBe('completed');
+    expect(f.counts()).toEqual({ effects: 2, reviews: 2 });
+    const checks = (await f.store.listExecutions('s')).filter(
+      (row) => row.kind === 'model' && row.definitionId === 'reviewer',
+    );
+    expect(checks).toHaveLength(2);
   } finally {
     await f.close();
   }

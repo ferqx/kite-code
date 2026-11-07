@@ -472,11 +472,10 @@ export async function runChildSpawnCase(root: string, role: Role, mode: Mode, si
             expectedStoreId: f.expectedStoreId,
             commandId: `answer-${card.id}`,
             expectedRevision: card.revision,
-            answer: {
-              kind: 'approval',
-              decision: answer.decision as 'approve' | 'deny',
-              ...(answer.decision === 'approve' ? { grant: 'approve_once' as const } : {}),
-            },
+            answer:
+              answer.decision === 'approve'
+                ? { kind: 'approval', decision: 'approve', optionId: 'once' }
+                : { kind: 'approval', decision: 'deny' },
           });
           answered.add(card.id);
           approvals.push({ card, answer });

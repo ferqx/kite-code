@@ -110,7 +110,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
       const remote = tools.find((x) => x.function.name.startsWith('mcp_local_effect_'));
       const call =
         step === 0 && route !== 'remote-b'
-          ? { name: 'connect_mcp_server', input: { server_id: connectServer, key: 'first' } }
+          ? { name: 'connect_mcp_server', input: { server_id: connectServer } }
           : (step === 1 && route !== 'remote-b') || (step === 0 && route === 'remote-b')
             ? remote
               ? { name: remote.function.name, input: { value: 'exact' } }
@@ -257,7 +257,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
         presentationSessionId: card.presentationSessionId,
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     },
     async close() {
@@ -461,7 +461,14 @@ test('Run selected MCP scope refuses another registered host server without tran
       (x) => x.definitionId === 'mcp.connect',
     )!;
     expect(connect.status).toBe('failed');
-    expect(connect.result).toMatchObject({ content: 'permission_denied' });
+    expect(connect.result).toMatchObject({
+      details: {
+        code: 'permission_denied',
+        reason: 'mcp_server_not_selected',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    });
     expect(f.requests).toHaveLength(2);
     expect(f.opens).toBe(0);
     expect(f.connections).toBe(0);

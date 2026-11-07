@@ -89,18 +89,11 @@ export function nativeChildActivity(facts: NativeBackgroundChild): string | unde
     return '等待你的批准';
   if (
     executions.some((execution) =>
-      ['dispatching', 'running'].includes(
-        (execution.authorization?.check ?? execution.authorization?.review)?.status ?? '',
-      ),
+      ['dispatching', 'running'].includes(execution.authorization?.check?.status ?? ''),
     )
   )
     return '正在自动审核';
-  if (
-    executions.some(
-      (execution) =>
-        (execution.authorization?.check ?? execution.authorization?.review)?.status === 'planned',
-    )
-  )
+  if (executions.some((execution) => execution.authorization?.check?.status === 'planned'))
     return '等待自动审核';
   return undefined;
 }

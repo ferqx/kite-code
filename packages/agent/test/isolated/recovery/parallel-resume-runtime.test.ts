@@ -149,7 +149,7 @@ test('SIGKILL with original A planned and B succeeded resumes only A, preserves 
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await until(
       async () =>

@@ -292,6 +292,59 @@ test('model reconnection stays in its original Turn process across retries, reco
   }
 });
 
+test('unmet completion conditions preserve saved output and show the known failure across cold reads', async () => {
+  const f = fixture();
+  const saved = [
+    message('input', 'user', '1', '按批准计划写入并读回文件'),
+    message('saved-result', 'tool', '2', '已写入并读回确认 approved-full'),
+    message('reply', 'assistant', '3', '文件已经写入并读回确认。'),
+  ];
+  const project = () =>
+    desktopTranscript({
+      messages: saved,
+      runs: [{ ...run(), status: 'failed', reason: 'necessary_condition_unsatisfied' }],
+      executions: [],
+      tools: [tool('saved-result')],
+      storeId: 'store',
+      sessionId: 's',
+    });
+  try {
+    for (const cold of [false, true]) {
+      if (cold) await act(async () => f.root.render(null));
+      const transcript = project();
+      expect(transcript.messages.filter((entry) => entry.id === 'saved-result')).toHaveLength(1);
+      expect(transcript.messages.filter((entry) => entry.id === 'reply')).toHaveLength(1);
+      expect(transcript.messages.find((entry) => entry.id === 'reply')?.text).toBe(
+        '文件已经写入并读回确认。',
+      );
+      const failure = transcript.messages.filter((entry) => entry.systemKind === 'turn_failure');
+      expect(failure).toHaveLength(1);
+      expect(failure[0]?.failure?.reasonCode).toBe('necessary_condition_unsatisfied');
+      await act(async () =>
+        f.root.render(
+          <Conversation
+            {...transcript}
+            loading={false}
+            selected
+            connected
+            saveReading={() => {}}
+          />,
+        ),
+      );
+      const notice = f.host.querySelector('.turn-failure')!;
+      expect(notice.getAttribute('role')).toBe('alert');
+      expect(notice.getAttribute('aria-label')).toBe('本轮完成条件未满足');
+      expect(notice.textContent).toContain('尚未满足必要完成条件');
+      expect(notice.textContent).toContain('已保存的回复和工具执行结果保留');
+      expect(notice.textContent).not.toContain('模型连接');
+      expect(notice.textContent).not.toContain('未能生成最终回复');
+      expect(f.host.querySelector('[data-status="running"]')).toBeNull();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('five failed reconnections expose one expandable human-readable error in the original Turn and survive cold reads', async () => {
   const f = fixture();
   const attempts: NativeToolExecution[] = Array.from({ length: 6 }, (_, index) => ({

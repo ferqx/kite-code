@@ -453,7 +453,7 @@ async function fixture(
         expectedStoreId,
         commandId: `approve-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       return card;
     },
@@ -465,13 +465,13 @@ async function fixture(
           ).interactions.find((card) => card.kind === kind) ?? null,
       );
     },
-    async approvePlan(executionMode: 'auto' | 'accept_edits') {
+    async approvePlan() {
       const card = await f.card('plan_review');
       await client.answerInteraction('s', card.id, {
         expectedStoreId,
         commandId: `plan-answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'plan_review', decision: 'approve', mode: executionMode },
+        answer: { kind: 'plan_review', decision: 'approve' },
       });
       return card;
     },
@@ -567,7 +567,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
       if (f.scenario === 'untrusted') await f.policy('full', false);
       return {
         name: 'write_file',
-        input: { path: 'child.txt', content: 'original child effect', base: null },
+        input: { path: 'child.txt', content: 'original child effect' },
       };
     }
     return null;
@@ -586,7 +586,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
       name: 'write_plan',
       input: {
         plan_id: 'parent-plan',
-        expected_version: null,
+
         title: 'Delegate once',
         body: 'Actual child reads and writes once',
         steps: [{ id: 'delegate', title: 'Delegate and wait' }],
@@ -597,7 +597,13 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
     throw new Error(
       `plan_missing:${JSON.stringify((await f.store.listExecutions('s')).map((e) => ({ definitionId: e.definitionId, status: e.status, result: e.result })))}`,
     );
-  const current = planRecord.value as Record<string, Json>;
+
+  const planWrite = (await f.store.listExecutions('s'))
+    .filter((row) => row.definitionId === 'planning.write' && row.status === 'succeeded')
+    .at(-1);
+  const planRef = (planWrite?.result as { details?: Record<string, Json> } | undefined)?.details
+    ?.plan_ref;
+
   if (f.scenario === 'pending_job') {
     if (step === 1)
       return {
@@ -609,7 +615,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   if (step === 1)
     return {
       name: 'request_plan_review',
-      input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+      input: { plan_ref: planRef! },
     };
   if (step === 2)
     return {
@@ -626,11 +632,8 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
     return {
       name: 'update_plan_progress',
       input: {
-        run_id: (await f.run()).id,
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
-        expected_progress_revision: null,
+        plan_ref: planRef!,
+        progress_ref: null,
         step_id: 'delegate',
         status: 'completed',
         execution_id: target.id,
@@ -641,12 +644,8 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   return null;
 }
 async function delegateApprovals(f: Fixture) {
-  await f.approvePlan('accept_edits');
-  const task = await f.approve('task.spawn');
   expect(f.normal.filter((row) => row.model === 'child')).toHaveLength(0);
-  const carrier = await f.approve('agent/worker');
-  expect(carrier.executionId).not.toBe(task.executionId);
-  return { task, carrier };
+  await f.approvePlan();
 }
 test('pending single-Run planning defeats current Full Task and ordinary Job with zero child or physical start', async () => {
   for (const scenario of ['pending_task', 'pending_job'] as const) {
@@ -693,7 +692,7 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
     }
   }
 }, 15000);
-test('approved accept_edits under current Full independently challenges Task/carrier then permits ordinary child read/write with only its own base sources', async () => {
+test('business plan approval under current Full permits ordinary child read/write without adding a Task/carrier permission ceiling', async () => {
   const f = await fixture('approved');
   try {
     await f.submit();
@@ -744,7 +743,7 @@ test('approved accept_edits under current Full independently challenges Task/car
     const cards = (await f.client.listInteractions('s', { storeId: f.expectedStoreId }))
       .interactions;
     expect(cards.filter((card) => card.kind === 'plan_review')).toHaveLength(1);
-    expect(cards.filter((card) => card.kind === 'approval')).toHaveLength(2);
+    expect(cards.filter((card) => card.kind === 'approval')).toHaveLength(0);
   } finally {
     await f.close();
   }

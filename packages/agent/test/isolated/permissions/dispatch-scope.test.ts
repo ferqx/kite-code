@@ -39,33 +39,39 @@ function context(snapshot: Snapshot): JobContext & ToolContext {
 }
 const verifyShell = (snapshot: Snapshot) => hostExecutionScope(context(snapshot));
 
-test('Planning wrappers preserve the current target and every nonempty approval ceiling', () => {
-  const planning = (current: Snapshot, ceiling: Snapshot | null): Snapshot => ({
-    namespace: 'builtin.planning.permissions',
+test('business wrappers retain the exact permission scope and never interpret business evidence as a ceiling', () => {
+  const business = (current: Snapshot, gate: Snapshot | null = null): Snapshot => ({
+    namespace: 'builtin.business.permissions',
     version: '1',
-    data: {
-      planning: { status: ceiling ? 'approved' : 'pending' },
-      originalRun: { sessionId: 's', runId: 'r' },
-      current: current as never,
-      ceiling: ceiling as never,
-    },
+    data: { current: current as never, gate: gate as never },
   });
-  expect(() => verifyShell(planning(leaf('job'), null))).not.toThrow();
-  expect(() => verifyShell(planning(leaf('job'), leaf('job')))).not.toThrow();
+  expect(() => verifyShell(business(leaf('job')))).not.toThrow();
+  expect(verifyShell(business(leaf('job', 'auto'), leaf('job', 'full')))).toEqual({
+    filesystem: 'workspace_write',
+    network: 'none',
+  });
   const changed = leaf('job');
   (changed.data as { capability: { definitionId: string } }).capability.definitionId = 'foreign';
-  expect(() => verifyShell(planning(changed, leaf('job')))).toThrow(
-    'shell_dispatch_scope_unavailable',
-  );
-  expect(() => verifyShell(planning(leaf('job'), changed))).toThrow(
-    'shell_dispatch_scope_unavailable',
-  );
-  const malformed = planning(leaf('job'), null);
+  expect(() => verifyShell(business(changed))).toThrow('shell_dispatch_scope_unavailable');
+  expect(() => verifyShell(business(leaf('tool')))).toThrow('shell_dispatch_scope_unavailable');
+  const malformed = business(leaf('job'));
   (malformed.data as Record<string, unknown>).current = null;
   expect(() => verifyShell(malformed)).toThrow('shell_dispatch_scope_unavailable');
-  expect(() => verifyShell(planning(leaf('tool'), null))).toThrow(
-    'shell_dispatch_scope_unavailable',
-  );
+  const malformedGate = business(leaf('job'));
+  (malformedGate.data as Record<string, unknown>).gate = {};
+  expect(() => verifyShell(malformedGate)).toThrow('shell_dispatch_scope_unavailable');
+  expect(() =>
+    verifyShell({
+      namespace: 'builtin.planning.permissions',
+      version: '1',
+      data: {
+        current: leaf('job') as never,
+        ceiling: null,
+        planning: { status: 'approved' },
+        originalRun: { sessionId: 's', runId: 'r' },
+      },
+    }),
+  ).toThrow('shell_dispatch_scope_unavailable');
 });
 
 test('accepted parent and child challenges retain the restrictive Shell ceiling', () => {

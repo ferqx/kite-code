@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { access, lstat, open, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   createLinuxHostShellJob,
   createMacosHostShellJob,
@@ -12,7 +12,13 @@ import {
   type TrustedWorkerLaunch,
 } from '@kite-ai/agent/jobs/shell';
 import { createShellExtension, gitWorktreeAssetDirectory } from '@kite-ai/agent/shell';
-import type { AuthorizationRequest, Extension, JobContext } from '../extensions';
+import type {
+  AuthorizationRequest,
+  Extension,
+  JobContext,
+  JobDefinition,
+  JobHandle,
+} from '../extensions';
 import { JobStartError } from '../extensions';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
 import { parseShellCommandInput } from '../shell-input';
@@ -21,7 +27,7 @@ import type { GitWorktreeHost } from '../tools/git-worktree';
 import {
   digest,
   type GitWorktreeConfiguration,
-  parseGitWorktreeInput,
+  parseGitWorktreeRequest,
   parseWorkerCommand,
 } from '../tools/git-worktree/protocol';
 import { shellToolCapability as describe } from './capabilities';
@@ -520,7 +526,7 @@ export async function createShellConfiguration(input: {
     const worktreeRequest = (request: AuthorizationRequest) => {
       if (request.definitionVersion !== '1') return undefined;
       if (request.kind === 'tool' && request.definitionId === 'git.worktree') {
-        const value = parseGitWorktreeInput(request.input);
+        const value = parseGitWorktreeRequest(request.input, request.executionId);
         return value ? { action: value.action } : undefined;
       }
       if (request.kind !== 'job' || request.definitionId !== 'shell.command' || !worktree?.profile)
@@ -540,7 +546,7 @@ export async function createShellConfiguration(input: {
         : undefined;
     };
     const host = options.host;
-    const riskPreparer = createShellRiskPreparer({
+    const riskOptions = {
       cwd,
       env: options.env,
       rgPath: searchAsset.path,
@@ -554,14 +560,21 @@ export async function createShellConfiguration(input: {
         configurationId: options.configurationId,
       },
       sanitizedEnvironment: !!host && !/zsh/i.test(shell.path),
-      classify: (command) => commandPolicy.classify(command),
-      rewritten: async (command) =>
+      classify: (command: string) => commandPolicy.classify(command),
+      rewritten: async (command: string) =>
         readOnlySearchCommand(
-          (await commandPolicy.classify(command)).plainCommands,
+          await commandPolicy.classify(command),
           shell.path,
           coreutils?.path,
         ) !== undefined,
-    });
+    };
+    const riskPreparer = createShellRiskPreparer(riskOptions);
+    const executionDirectory = async (workdir?: string) => {
+      const path = workdir === undefined ? cwd : await realpath(resolve(cwd, workdir));
+      const stat = await lstat(path);
+      if (!stat.isDirectory()) throw new AgentError('shell_workdir_unavailable');
+      return { path, dev: String(stat.dev), ino: String(stat.ino) };
+    };
     const riskSnapshots = new Map<string, readonly ShellRiskSnapshot[]>();
     const workerScopes = new Map<
       string,
@@ -597,11 +610,12 @@ export async function createShellConfiguration(input: {
         ? { linux: { bubblewrapPath: bubblewrap.path, initExecutable: supervisor.path } }
         : {}),
     };
-    const job =
+    const makeJob = async (directory = cwd) =>
       options.platform === 'win32' && coreutils && host
         ? await createWindowsShellJob(
             {
               ...jobOptions,
+              cwd: directory,
               controlBase: host.controlBase,
               coreutilsPath: coreutils.path,
               fullShellExecutable: options.windows!.fullShellExecutable,
@@ -613,6 +627,7 @@ export async function createShellConfiguration(input: {
         : options.platform === 'linux' && bubblewrap && host
           ? createLinuxHostShellJob({
               ...jobOptions,
+              cwd: directory,
               ...host,
               bubblewrapPath: bubblewrap.path,
               filesystemScope: hostFilesystemScope,
@@ -621,11 +636,14 @@ export async function createShellConfiguration(input: {
           : host
             ? createMacosHostShellJob({
                 ...jobOptions,
+                cwd: directory,
                 ...host,
                 filesystemScope: hostFilesystemScope,
                 executionScope,
               })
-            : createShellJob(jobOptions);
+            : createShellJob({ ...jobOptions, cwd: directory });
+    const job = await makeJob();
+    const handleOwners = new WeakMap<JobHandle, JobDefinition>();
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
       ...(worktree
@@ -650,6 +668,7 @@ export async function createShellConfiguration(input: {
                 type: 'object',
                 properties: {
                   command: { type: 'string', minLength: 1, maxLength: 262144 },
+                  workdir: { type: 'string', minLength: 1, maxLength: 4096 },
                   permissions: permissionsSchema,
                 },
                 required: ['command'],
@@ -663,7 +682,7 @@ export async function createShellConfiguration(input: {
           riskSnapshots.delete(context.executionId);
           try {
             context.signal.throwIfAborted();
-            if (context.dispatchAuthorization?.riskReviewApproved && reviewedScripts)
+            if (context.dispatchAuthorization?.materialReviewed && reviewedScripts)
               await riskPreparer.verify(reviewedScripts, context.signal);
             const actual = await mapAssetVerification(
               assets,
@@ -723,13 +742,22 @@ export async function createShellConfiguration(input: {
               throw new AgentError('invalid_shell_arguments');
             const classified = await commandPolicy.classify(command, context.signal);
             context.signal.throwIfAborted();
-            const search = readOnlySearchCommand(
-              classified.plainCommands,
-              shell.path,
-              coreutils?.path,
-            );
+            const search = readOnlySearchCommand(classified, shell.path, coreutils?.path);
+            const parsed = parseShellCommandInput(value, 'job', !!host);
+            if (!parsed) throw new AgentError('invalid_shell_arguments');
+            const directory = await executionDirectory(parsed.workdir);
+            const selectedJob = parsed.workdir === undefined ? job : await makeJob(directory.path);
+            context.signal.throwIfAborted();
             dispatched = true;
-            return await job.start({ command: search ?? command }, context);
+            try {
+              const handle = await selectedJob.start({ command: search ?? command }, context);
+              handleOwners.set(handle, selectedJob);
+              return handle;
+            } catch (error) {
+              if (error instanceof JobStartError && error.handle)
+                handleOwners.set(error.handle, selectedJob);
+              throw error;
+            }
           } catch (error) {
             if (!dispatched)
               throw new JobStartError(
@@ -745,6 +773,12 @@ export async function createShellConfiguration(input: {
               /^[a-z][a-z0-9_]{1,80}$/.test(message) ? message : 'shell_start_failed',
             );
           }
+        },
+        observe: (handle) => (handleOwners.get(handle) ?? job).observe(handle),
+        cancel: (handle) => (handleOwners.get(handle) ?? job).cancel(handle),
+        async dispose(handle) {
+          await (handleOwners.get(handle) ?? job).dispose(handle);
+          handleOwners.delete(handle);
         },
       },
     });
@@ -807,7 +841,16 @@ export async function createShellConfiguration(input: {
         if (worktree?.profile && parseWorkerCommand(value.command, worktree.configuration))
           return null;
         if (kind === 'job') riskSnapshots.delete(request.executionId);
-        const prepared = await riskPreparer.prepare(
+        const directory = await executionDirectory(value.workdir);
+        const preparer =
+          value.workdir === undefined
+            ? riskPreparer
+            : createShellRiskPreparer({
+                ...riskOptions,
+                cwd: directory.path,
+                binding: { ...riskOptions.binding, cwd: directory },
+              });
+        const prepared = await preparer.prepare(
           value.command,
           value.executionScope,
           request.signal,
@@ -824,6 +867,16 @@ export async function createShellConfiguration(input: {
         request: AuthorizationRequest,
         policy?: Readonly<PermissionPolicySnapshot>,
       ): Promise<Partial<CapabilityDescription> | undefined> {
+        if (
+          request.kind === 'tool' &&
+          request.definitionId === 'git.worktree' &&
+          request.definitionVersion === '1' &&
+          request.input &&
+          typeof request.input === 'object' &&
+          !Array.isArray(request.input) &&
+          request.input.action === 'observe'
+        )
+          return { hardAllowed: true, safeRead: true, effects: ['read'], autoReview: 'none' };
         const worktreeCall = worktreeRequest(request);
         if (
           request.kind === 'tool' &&
@@ -846,7 +899,10 @@ export async function createShellConfiguration(input: {
             request.signal.throwIfAborted();
             return { hardAllowed: false, denialReason: 'worktree_asset_changed' };
           }
-          const parsed = request.kind === 'tool' ? parseGitWorktreeInput(request.input) : null;
+          const parsed =
+            request.kind === 'tool'
+              ? parseGitWorktreeRequest(request.input, request.executionId)
+              : null;
           const scope =
             parsed && parsed.action !== 'list'
               ? parsed.permissions
@@ -890,9 +946,16 @@ export async function createShellConfiguration(input: {
         if (!shellCommandKind(request)) return undefined;
         const value = commandRequest(request, !!host);
         if (!value) return { hardAllowed: false, denialReason: 'invalid_shell_arguments' };
+        let directory: Awaited<ReturnType<typeof executionDirectory>>;
+        try {
+          directory = await executionDirectory(value.workdir);
+        } catch {
+          request.signal.throwIfAborted();
+          return { hardAllowed: false, denialReason: 'shell_workdir_unavailable' };
+        }
         const classified = await commandPolicy.classify(value.command);
         return {
-          ...(readOnlySearchCommand(classified.plainCommands, shell.path, coreutils?.path) &&
+          ...(readOnlySearchCommand(classified, shell.path, coreutils?.path) &&
           value.executionScope.filesystem === 'workspace_write' &&
           value.executionScope.network === 'none'
             ? { safeRead: true, effects: ['read'] as const }
@@ -907,7 +970,7 @@ export async function createShellConfiguration(input: {
             .update(
               JSON.stringify({
                 command: value.command,
-                cwd,
+                cwd: directory,
                 env: Object.entries(options.env).sort(([a], [b]) => a.localeCompare(b)),
                 assets,
                 parserAssets: commandPolicy.assets,
@@ -953,6 +1016,7 @@ export async function createShellConfiguration(input: {
               definitionVersion: request.definitionVersion,
               configurationId: options.configurationId,
               command: value.command,
+              workdir: value.workdir ?? null,
               cancellation: value.cancellation,
               timeoutMs: value.timeoutMs,
               ...(request.definitionId === 'shell.execute' && value.background

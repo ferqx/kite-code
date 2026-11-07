@@ -6,9 +6,9 @@
 
 公开 `@kite-ai/agent/ask-user` 的 `createAskUserExtension()` 纯工厂登记 `builtin.ask-user@1` 与 `ask_user@1`，import 和工厂不打开资源。执行只调用当前普通 `ToolContext.requestInput`，没有旧 Runtime 依赖、专用 Loop、数据库迁移或回答端口。
 
-模型输入是闭合 `{questions}`：1–3 题，每题闭合 `{question,options}`，2–3 个闭合 `{label,description,recommended?}` 选项。题文和文案 trim 后须非空，每题至多一项 `recommended:true`；模型不能指定内部 ID、自由输入开关或旧单题顶层字段。自有解析失败在发出信息请求前返回已知失败，不把未发生的效果记为未知。
+模型输入是闭合 `{questions}`：1–3 题，每题闭合 `{question,options}`，2–3 个闭合 `{label,description}` 选项。题文和文案 trim 后须非空，首项作为推荐展示；不接收选项级 `recommended`；模型不能指定内部 ID、自由输入开关或旧单题顶层字段。自有解析失败在发出信息请求前返回已知失败，不把未发生的效果记为未知。
 
-每题生成原 `q1…q3`、`qN-oM` ID，并通过有限原 JSON Schema 的平坦 `anyOf` 请求答案：选项是带原文案的 const ID，自由回答是闭合 `{text:string}`。`text` 的 `minLength:1` 和准确 `pattern:'\\S'` 在 Core 保存前拒绝空白；不 trim 或截短合格答案。该对象分支使自由输入 `q3-o1` 与同文选项 ID 保持区别。显式推荐项或缺省首项显示推荐标记，客户端仍须明确作答。
+每题生成原 `q1…q3`、`qN-oM` ID，并通过有限原 JSON Schema 的平坦 `anyOf` 请求答案：选项是带原文案的 const ID，自由回答是闭合 `{text:string}`。`text` 的 `minLength:1` 和准确 `pattern:'\\S'` 在 Core 保存前拒绝空白；不 trim 或截短合格答案。该对象分支使自由输入 `q3-o1` 与同文选项 ID 保持区别。仅首项显示推荐标记，客户端仍须明确作答。
 
 原问题答案仅提供信息。选项 ID 映射为原 label，自由回答保留原空格、Unicode 和多行；结果 `{answer,answers}` 同时用于 Tool content 与 details。单题 `answer` 是文案或自由原文，多题逐行保存 `问题: 答案`；持久 Interaction 仍保存原 ID／自由对象，不以语义摘要替换恢复身份。
 

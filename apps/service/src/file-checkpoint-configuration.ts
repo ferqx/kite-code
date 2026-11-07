@@ -2,11 +2,17 @@ import { createHash } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AgentError, type AgentRuntime, type ModelInputSnapshot } from '@kite-ai/agent';
+import {
+  AgentError,
+  type AgentRuntime,
+  type ModelInputSnapshot,
+  type TrustedToolBehavior,
+} from '@kite-ai/agent';
 import type { PublicExecution, ReadContext, ToolContext } from '@kite-ai/agent/extensions';
 import {
   type CheckpointSource,
   createFileCheckpointing,
+  createFileToolBehaviors,
   createImageFileReads,
   createScopedFileCheckpointing,
   createWorkspaceFiles,
@@ -767,11 +773,11 @@ export function createDefaultFileCheckpointConfiguration(options: {
     'Paths are relative to the fixed workspace root or absolute, never relative to Shell cwd. In Request Approval and Auto, ordinary external files are read-only through Files: external write_file/edit_file requests are unsupported and do not open an approval card. Only effective Full access supports direct ordinary external writes and edits. Files has no filesystem or network request parameter. A separate permitted tool still requires its own existing authorization; never bypass a real refusal, protected resource or unknown outcome. Parent/child permissions, selected tools, Planning and OS/native restrictions still apply. Exact saved attachments are immutable; current Plan files and host-provided session output paths follow their separate declared scope. External files are outside workspace checkpoints.';
   const descriptions: Readonly<Record<string, string>> = {
     'files.read':
-      'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with the returned next_line. Workspace reads return a complete-file baseline. Ordinary external reads in Request Approval and Auto have no edit baseline; effective Full returns a complete baseline only for targets supported by safe native editing, with other readable targets remaining read-only. A baseline never grants write permission. A known missing ordinary file returns File does not exist with exists:false, not empty contents or a baseline. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
+      'Read UTF-8 file lines, at most 200 by default. start_line begins at 1; continue with next_line. Editable workspace reads return base_ref bound to the complete file even for a partial read. Ordinary external reads in Request Approval and Auto have no edit reference; effective Full returns base_ref only for targets supported by safe native editing. A reference never grants write permission. A known missing file returns exists:false, not empty contents or an edit reference. For workspace and non-PDF files, omit pages/mode and use start_line/max_lines. Saved PDF attachments use pages and mode=text|image, omit line parameters; default is page 1 text, at most 20 text pages or 4 images. Empty extracted text does not prove a blank page.',
     'files.write':
-      'Create or replace a complete UTF-8 file. Use base:null only for a new file; missing accepted parent directories can be created through the original native boundary. Replacement requires the exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. Preserve the requested target and complete contents. Correct a reported cause before a separately authorized new attempt; never repeat a write with an unknown outcome.',
+      'Create or replace a complete UTF-8 file. Omit base_ref entirely only to create a new file; never pass null or a baseline object. Existing targets reject create-only requests. Missing accepted parents can be created through the original native boundary. Replacement requires the exact base_ref returned by read_file or a successful mutation of this path. Supply exactly one of content or content_ref. Preserve the exact target and complete contents. Correct a reported cause before another separately authorized attempt; never repeat an unknown write.',
     'files.edit':
-      'Replace exact non-overlapping literal text using the complete-file baseline. expected_matches must equal the actual count. Supply old_text/new_text or their corresponding immutable Artifact references. Preserve the requested target and intended replacement. A conflict does not reveal current contents or roll back other successful operations; use original receipts and authorized current reads before a separately authorized corrected edit.',
+      'Replace exact non-overlapping literal text using the exact base_ref returned by read_file or a successful mutation of this path. expected_matches defaults to 1; multiple matches require the explicit exact positive count. Supply each of old_text/new_text or its corresponding immutable old_text_ref/new_text_ref, never both text and reference for the same field. Preserve the exact target and intended change. A conflict does not reveal current contents or roll back other operations; read the authorized current file and use its fresh base_ref before a separately authorized corrected edit.',
   };
   const tools = [...outputs.extension.tools!, images.tool].map((tool) => {
     const description = descriptions[tool.id];
@@ -792,9 +798,59 @@ export function createDefaultFileCheckpointConfiguration(options: {
       },
     };
   });
+  const restore = outputs.extension.actions?.find(
+    (action) => action.id === 'files.checkpoint.restore',
+  );
+  if (restore?.version !== '1') fail('file_restore_definition_unavailable');
+  const restoreConfirmation: TrustedToolBehavior = {
+    definition: restore,
+    capability: {
+      kind: 'job',
+      definitionId: `${outputs.extension.id}/${restore.id}`,
+      definitionVersion: restore.version,
+    },
+    contractRef: 'builtin.files.explicit-restore',
+    configurationDigest: createHash('sha256')
+      .update('exact-human-file-restore-closed-call')
+      .digest('hex'),
+    async executionConfirmation(request) {
+      return {
+        request: {
+          reason: 'explicit_file_restore',
+          effects: ['workspace_write'],
+          operation: request.input,
+        },
+      };
+    },
+  };
   return {
     extension: { ...outputs.extension, tools },
     tools,
+    toolBehaviors: [
+      restoreConfirmation,
+      ...createFileToolBehaviors({
+        tools,
+        async readFiles(request) {
+          const runtime = options.runtime();
+          const session = await runtime.getSession(request.sessionId);
+          const workspace = session && (await runtime.getWorkspace(session.workspaceId));
+          if (!session || session.deletedAt !== null || !workspace) fail('file_scope_unavailable');
+          const path = fileURLToPath(workspace.rootUri);
+          const root = await realpath(path);
+          const stat = await lstat(path);
+          if (!stat.isDirectory() || stat.isSymbolicLink()) fail('file_scope_unavailable');
+          return {
+            workspaceId: workspace.id,
+            root,
+            files: createWorkspaceFiles({
+              root,
+              protectReads: true,
+              protectedPaths: await protectedPaths(root, options.profile, options.runtimeAssets()),
+            }),
+          };
+        },
+      }),
+    ],
     isPlanFileEdit: planFiles.isPlanFileEdit,
     async describeRequest(
       request: import('@kite-ai/agent/extensions').AuthorizationRequest,

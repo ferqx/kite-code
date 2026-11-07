@@ -83,7 +83,13 @@ async function replayPolicy(root: string, e: CaseEvidence) {
               revision: 'owned',
               approval: {
                 request: { title: 'Read original owned file' },
-                grants: ['approve_once'],
+                options: [
+                  {
+                    optionId: 'once',
+                    kind: 'once',
+                    presentation: { label: '仅此次', details: [] },
+                  },
+                ],
               },
             }
           : { allowed: true, revision: 'owned' };
@@ -267,7 +273,7 @@ async function replayPolicy(root: string, e: CaseEvidence) {
       expectedStoreId: f.storeId,
       commandId: 'approve-original',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     check(
       e.assertions,
@@ -544,7 +550,7 @@ async function modelFault(root: string, e: CaseEvidence) {
           ? retry === undefined
           : retry?.previousExecutionId === observed[index - 1]!.id &&
             retry.attempt === index + 1 &&
-            retry.maxAttempts === null &&
+            retry.maxAttempts === 6 &&
             retry.reason === reason);
       if (index < failedCount) {
         proved &&=

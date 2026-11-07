@@ -221,7 +221,7 @@ const leave = async (parent = 'MCP · w', pending = false) => {
   await key('\x03');
   await wait(parent);
   await key('\x03');
-  await wait(pending ? 'Ctrl+B pending cards' : 'New Run >');
+  await wait(pending ? 'General tool · Tool approval' : 'New Run >');
 };
 const close = async (phase: string) => {
   await key('\x11');

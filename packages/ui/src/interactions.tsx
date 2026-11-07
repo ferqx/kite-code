@@ -1,4 +1,4 @@
-import type { Interaction, Json } from '@kite-ai/client';
+import { type Interaction, type Json, readApprovalOptions } from '@kite-ai/client';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   type AttachmentReader,
@@ -69,12 +69,7 @@ function PlainInteractionCard({
   const request = interaction.request;
   const structuredQuestion =
     interaction.kind === 'question' && !!onAnswer && !!questionForm(request);
-  const sameCommand =
-    request !== null &&
-    typeof request === 'object' &&
-    !Array.isArray(request) &&
-    Array.isArray(request.grants) &&
-    request.grants.includes('same_command');
+  const approvalOptions = readApprovalOptions(request);
   const materials = (
     <>
       <p>
@@ -142,54 +137,26 @@ function PlainInteractionCard({
       )}
       {interaction.kind === 'approval' && !isMcpSourceReview(interaction) && (
         <div className="actions">
-          <Button
-            type="button"
-            disabled={disabled}
-            onClick={() =>
-              onAnswer?.(interaction, {
-                kind: 'approval',
-                decision: 'approve',
-                grant: 'approve_once',
-              })
-            }
-            onKeyDown={(event) => {
-              if (!disabled && (event.key === 'Enter' || event.key === ' ')) {
-                event.preventDefault();
-                void onAnswer?.(interaction, {
-                  kind: 'approval',
-                  decision: 'approve',
-                  grant: 'approve_once',
-                });
-              }
-            }}
-          >
-            Approve once
-          </Button>
-          {sameCommand && (
-            <Button
-              type="button"
-              disabled={disabled}
-              onClick={() =>
-                onAnswer?.(interaction, {
-                  kind: 'approval',
-                  decision: 'approve',
-                  grant: 'same_command',
-                })
-              }
-              onKeyDown={(event) => {
-                if (!disabled && (event.key === 'Enter' || event.key === ' ')) {
-                  event.preventDefault();
-                  void onAnswer?.(interaction, {
+          {approvalOptions.map((option) => (
+            <div key={option.optionId}>
+              <Button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  onAnswer?.(interaction, {
                     kind: 'approval',
                     decision: 'approve',
-                    grant: 'same_command',
-                  });
+                    optionId: option.optionId,
+                  })
                 }
-              }}
-            >
-              本 Session 相同命令
-            </Button>
-          )}
+              >
+                {option.presentation.label}
+              </Button>
+              {option.presentation.details.map((detail, index) => (
+                <p key={index}>{detail}</p>
+              ))}
+            </div>
+          ))}
           <Button
             type="button"
             disabled={disabled}

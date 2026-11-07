@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
@@ -16,14 +17,19 @@ import { createClient } from '@kite-ai/client';
 import { startService } from '../../../../apps/service/src';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
-import { resolveWebTransport } from '../../../../apps/service/src/web-fetch-proxy';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
+import { readModelExecutionId } from '../../../../packages/agent/src/model-identifier';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
 import { privateDirectory } from '../../../fixtures/test-filesystem';
+import { liveModelSelection, liveReasoningEffort } from './approval-feedback-fixture';
 import { liveCodeEvidence } from './live-code-evidence';
+import { createLiveModelFixture } from './live-model-fixture';
 import {
   extendedToolGroups,
+  parseAllToolMode,
+  recoveredContextRefresh,
   runExtendedToolCases,
+  stoppedOriginalBackgroundShell,
   type ToolScenarioOptions,
 } from './model-tools-extended-cases';
 
@@ -31,7 +37,26 @@ import {
 const args = process.argv.slice(2);
 const output = args.find((arg) => arg.startsWith('--output='))?.slice(9);
 const selectedScenario = args.find((arg) => arg.startsWith('--scenario='))?.slice(11);
-const baselineScenarios = ['files-shell', 'question', 'planning', 'skills', 'mcp', 'web', 'agents'];
+const mode = parseAllToolMode(args);
+const modelArgument = args.find((arg) => arg.startsWith('--model='))?.slice(8);
+const reasoningArgument = args.find((arg) => arg.startsWith('--reasoning-effort='))?.slice(19);
+const selectedModel = modelArgument === undefined ? 'default' : liveModelSelection(modelArgument);
+const reasoningEffort =
+  reasoningArgument === undefined ? undefined : liveReasoningEffort(reasoningArgument);
+if (selectedModel === 'default' && reasoningEffort !== undefined)
+  throw Error('all_tools_reasoning_requires_explicit_model');
+const baselineScenarios = [
+  'files-shell',
+  'question',
+  'planning',
+  'skills',
+  'mcp',
+  'web',
+  'agents',
+  'images',
+  'execution-evidence',
+  'worktree-list',
+];
 const scenarioNames = [...baselineScenarios, ...Object.keys(extendedToolGroups)];
 const extended =
   args.includes('--extended') || !!(selectedScenario && selectedScenario in extendedToolGroups);
@@ -47,8 +72,16 @@ if (
   args.filter((arg) => arg.startsWith('--output=')).length !== 1 ||
   args.filter((arg) => arg.startsWith('--scenario=')).length > 1 ||
   args.filter((arg) => arg === '--extended').length > 1 ||
+  args.filter((arg) => arg.startsWith('--mode=')).length > 1 ||
+  args.filter((arg) => arg.startsWith('--model=')).length > 1 ||
+  args.filter((arg) => arg.startsWith('--reasoning-effort=')).length > 1 ||
   args.length !==
-    1 + Number(selectedScenario !== undefined) + Number(args.includes('--extended')) ||
+    1 +
+      Number(selectedScenario !== undefined) +
+      Number(args.includes('--extended')) +
+      args.filter((arg) => arg.startsWith('--mode=')).length +
+      Number(modelArgument !== undefined) +
+      Number(reasoningArgument !== undefined) ||
   (selectedScenario !== undefined && !scenarioNames.includes(selectedScenario)) ||
   !output ||
   !isAbsolute(output) ||
@@ -56,15 +89,19 @@ if (
   existsSync(`${output}.workspace`)
 )
   throw Error('all_tools_requires_opt_in_and_new_absolute_output');
-if (process.platform !== 'win32') throw Error('all_tools_windows_host_fixture_required');
+if (!['win32', 'darwin'].includes(process.platform))
+  throw Error('all_tools_native_host_fixture_required');
 
-const modelName = 'gpt-6-luna';
-const reasoningEffort = 'low';
-const requestLimit = extended ? 160 : 100;
-const timeoutMs = 1_200_000;
-const deadline = AbortSignal.timeout(timeoutMs);
+const cancellation = new AbortController();
+const signal = cancellation.signal;
+const interrupt = () => cancellation.abort(new Error('operator_interrupted'));
+process.on('SIGINT', interrupt);
+process.on('SIGTERM', interrupt);
 const expected = [
   'read_file',
+  'view_images',
+  'read_execution_evidence',
+  'git_worktree',
   'write_file',
   'edit_file',
   'shell_execute',
@@ -102,28 +139,26 @@ function check(value: unknown, point: string): asserts value {
   if (!value) throw Error(`all_tools_${point}`);
 }
 const started = Date.now();
-const wire: {
-  status: number;
-  model: string;
-  reasoningEffort: string;
-  errorCode?: string;
-  errorType?: string;
-}[] = [];
+const wire: { status: number; tools: string[]; phase: 'business' | 'review' }[] = [];
+let physicalRequests = 0;
 const scenarios: Record<string, unknown>[] = [];
 const interactions: { sessionId: string; definitionId: string; kind: string; decision: string }[] =
   [];
 const failures: { scenario: string; point: string }[] = [];
 const report: Record<string, unknown> = {
-  model: modelName,
-  reasoningEffort,
-  provider: 'codex-local-session',
-  protocol: 'responses',
+  mode,
+  selectedModel,
+  ...(reasoningEffort ? { reasoningEffort } : {}),
+  provider: 'configured-default',
+  transportQualification:
+    'test-injected configured-model SDK adapters; not default SDK latency qualification',
   platform: process.platform,
   bun: Bun.version,
   startedAt: new Date().toISOString(),
   selectedScenario: selectedScenario ?? (extended ? 'extended' : 'all'),
-  requestLimit,
-  timeoutMs,
+  requestLimit: null,
+  timeoutMs: null,
+  requestTimeoutMs: null,
   code: liveCodeEvidence(),
   scenarios,
   wire,
@@ -252,6 +287,37 @@ try {
     },
   });
   cleanup.push({ name: 'mcp_server', close: () => remote.stop(true) });
+  let webRequests = 0;
+  const web = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path === '/robots.txt') return new Response('User-agent: *\nAllow: /\n');
+      check(path === '/', 'web_unexpected_path');
+      webRequests++;
+      return new Response(`<html><title>Owned live test</title><body>web-${marker}</body></html>`, {
+        headers: { 'content-type': 'text/html' },
+      });
+    },
+  });
+  cleanup.push({ name: 'web_server', close: () => web.stop(true) });
+  const imageCode = randomUUID().replaceAll('-', '').slice(0, 6).toUpperCase();
+  if (selected.has('images')) {
+    const require = createRequire(
+      new URL('../../../../packages/agent/package.json', import.meta.url),
+    );
+    const { createCanvas } = require('@napi-rs/canvas');
+    const canvas = createCanvas(480, 160);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, 480, 160);
+    ctx.fillStyle = '#000';
+    ctx.font = '64px sans-serif';
+    ctx.fillText(imageCode, 48, 102);
+    writeFileSync(join(workspace, 'image.png'), canvas.toBuffer('image/png'));
+  }
+
   writeFileSync(
     join(profile.profilePath, 'mcp.json'),
     JSON.stringify({
@@ -262,7 +328,7 @@ try {
   const wrap = (adapter: ModelAdapter): ModelAdapter => ({
     describeRequest: adapter.describeRequest?.bind(adapter),
     async *stream(request, options) {
-      deadline.throwIfAborted();
+      signal.throwIfAborted();
       const trace = { request: structuredClone(request), events: [] as ModelEvent[] };
       requests.push(trace);
       for (const tool of request.tools) names.add(tool.id);
@@ -273,7 +339,7 @@ try {
       );
       try {
         for await (const event of adapter.stream(request, {
-          signal: AbortSignal.any([deadline, options.signal]),
+          signal: AbortSignal.any([signal, options.signal]),
         })) {
           trace.events.push(structuredClone(event));
           if (event.type === 'tool_call') {
@@ -290,76 +356,88 @@ try {
       }
     },
   });
+  async function liveAdapter(
+    phase: 'business' | 'review',
+    presetOverride?: Parameters<typeof createLiveModelFixture>[0]['presetOverride'],
+  ) {
+    return createLiveModelFixture({
+      requestTimeoutMs: null,
+      signal,
+      preserveSdkAttemptErrors: true,
+      ...(selectedModel !== 'default'
+        ? {
+            model: selectedModel,
+            reasoningEffort: phase === 'review' ? 'low' : (reasoningEffort ?? 'low'),
+          }
+        : {}),
+      ...(presetOverride ? { presetOverride } : {}),
+      beforeWireRequest() {
+        physicalRequests++;
+      },
+      observe(state) {
+        for (const event of state.wire)
+          if (!wire.includes(event as (typeof wire)[number]))
+            wire.push(Object.assign(event, { phase }));
+      },
+    });
+  }
+  const business = await liveAdapter('business');
+  report.model = business.metadata;
+  const businessSettings = object(business.metadata.settings);
+  const reviewer = await liveAdapter('review', {
+    ...businessSettings,
+    reasoningEffort: 'low',
+    ...(selectedModel === 'default'
+      ? {
+          maxOutputTokens: Math.min(
+            typeof businessSettings.maxOutputTokens === 'number'
+              ? businessSettings.maxOutputTokens
+              : 256,
+            256,
+          ),
+        }
+      : {}),
+  });
+  report.reviewOutputLimitQualification =
+    selectedModel === 'default'
+      ? '256 tokens when supported by the configured adapter'
+      : 'Codex transport does not support an output-token ceiling';
+  const localSource = selectedModel === 'default' ? false : createCodexLocalSource();
+  const discovery = localSource ? localSource.discover() : null;
+  check(!localSource || discovery, 'local_session_unavailable');
+  report.reviewer = reviewer.metadata;
   function instrument(binding: RunConfiguration): RunConfiguration {
     return {
       ...binding,
-      ...(binding.model ? { model: wrap(binding.model) } : {}),
+      ...(binding.model ? { model: wrap(business.model) } : {}),
+      ...(binding.authorizationCheck
+        ? { authorizationCheck: { ...binding.authorizationCheck, model: wrap(reviewer.model) } }
+        : {}),
     };
   }
-  const transport = await resolveWebTransport(undefined);
-  check(!transport.unavailableReason, 'registered_proxy_unavailable');
-  report.modelTransport = transport.proxy?.https ? 'registered-user-https-proxy' : 'direct';
-  const source = createCodexLocalSource({
-    fetch: Object.assign(
-      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-        check(wire.length < requestLimit, 'request_budget');
-        const body = object(JSON.parse(String(init?.body)));
-        check(
-          body.model === modelName && object(body.reasoning).effort === reasoningEffort,
-          'wire_model_settings',
-        );
-        const observed: (typeof wire)[number] = { status: 0, model: modelName, reasoningEffort };
-        wire.push(observed);
-        const response = await fetch(input, {
-          ...init,
-          proxy: transport.proxy?.https,
-          signal: AbortSignal.any([
-            deadline,
-            AbortSignal.timeout(120_000),
-            ...(init?.signal ? [init.signal] : []),
-          ]),
-        });
-        observed.status = response.status;
-        if (!response.ok) {
-          const error = object(
-            object(
-              await response
-                .clone()
-                .json()
-                .catch(() => ({})),
-            ).error,
-          );
-          if (typeof error.code === 'string' && /^[a-z0-9_-]+$/i.test(error.code))
-            observed.errorCode = error.code;
-          if (typeof error.type === 'string' && /^[a-z0-9_-]+$/i.test(error.type))
-            observed.errorType = error.type;
-        }
-        return response;
-      },
-      { preconnect: fetch.preconnect },
-    ),
-  });
-  const discovery = source.discover();
-  check(discovery, 'local_session_unavailable');
-  check(
-    discovery.models.some((model) => model.name === modelName),
-    'model_not_available',
-  );
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   writeFileSync(
     configurationPath,
     JSON.stringify({
       modelId: 'live',
       models: [
-        {
-          id: 'live',
-          provider: 'codex',
-          providerName: discovery.alias,
-          model: modelName,
-          baseURL: CODEX_BASE_URL,
-          protocol: 'responses',
-          options: { reasoningEffort },
-        },
+        selectedModel === 'default'
+          ? {
+              id: 'live',
+              provider: 'compatible',
+              model: 'injected-live',
+              baseURL: 'http://model.fixture.invalid/v1',
+              options: businessSettings,
+            }
+          : {
+              id: 'live',
+              provider: 'codex',
+              providerName: discovery!.alias,
+              model: selectedModel,
+              baseURL: CODEX_BASE_URL,
+              protocol: 'responses',
+              options: businessSettings,
+            },
       ],
       skills: [{ id: 'synthetic-knowledge', path: 'skill' }],
       tools: [
@@ -373,15 +451,40 @@ try {
       ].map((id) => ({ id })),
     }),
   );
-  const assets = await windowsShellFixture();
+  const assets = process.platform === 'win32' ? await windowsShellFixture() : undefined;
+  let supervisorPath = assets?.runner;
+  if (!supervisorPath) {
+    const built = await Bun.build({
+      entrypoints: [
+        join(
+          import.meta.dir,
+          '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
+        ),
+      ],
+      outdir: join(root, 'assets'),
+      target: 'bun',
+      naming: 'shell-supervisor.js',
+    });
+    check(built.success && built.outputs[0], 'native_supervisor_build_failed');
+    supervisorPath = built.outputs[0]!.path;
+  }
+
   const host = createDefaultProcessConfiguration({
     profile,
     userConfigurationPath: configurationPath,
-    localCodex: source,
+    localCodex: localSource,
+    browser: false,
     ordinaryHostTools: true,
     observerSubjectId: 'owner',
     credentialBackend: createTemporaryCredentialBackend(),
     mcpSources: { http: { allowLoopbackForTests: true } },
+    webFetch: {
+      network: {
+        policy: { mode: 'allowlist', hosts: ['127.0.0.1'] },
+        allowLoopbackForTests: true,
+        admitHop: async () => ({ allowed: true, revision: 'owned-loopback-only' }),
+      },
+    },
     afterTurn: {
       async authorize() {
         return {
@@ -392,8 +495,8 @@ try {
       },
     },
     shell: {
-      platform: 'win32',
-      configurationId: 'owned-live-windows-shell',
+      platform: process.platform === 'win32' ? 'win32' : 'darwin',
+      configurationId: 'owned-live-native-shell',
       env: withBundledRipgrep(
         Object.fromEntries(
           Object.entries(process.env).filter(
@@ -402,14 +505,18 @@ try {
           ),
         ),
       ).env,
-      supervisorPath: assets.runner,
+      supervisorPath,
       bunExecutable: process.execPath,
-      shellExecutable: assets.shell,
-      windows: {
-        coreutilsPath: assets.coreutils,
-        fullShellExecutable: assets.fullShell,
-        stateRoot: assets.stateRoot,
-      },
+      shellExecutable: assets?.shell ?? '/bin/sh',
+      ...(assets
+        ? {
+            windows: {
+              coreutilsPath: assets.coreutils,
+              fullShellExecutable: assets.fullShell,
+              stateRoot: assets.stateRoot,
+            },
+          }
+        : {}),
       host: {
         controlBase: control,
         protectedRoots: [profile.dataRoot, control],
@@ -477,7 +584,7 @@ try {
             'content-type': 'application/json',
           },
           ...(body ? { body } : {}),
-          signal: deadline,
+          signal,
         });
         const bytes = await response.arrayBuffer();
         if (
@@ -548,10 +655,10 @@ try {
         answer =
           options.approval === 'deny'
             ? { kind: 'approval', decision: 'deny' }
-            : { kind: 'approval', decision: 'approve', grant: 'approve_once' };
-      } else if (card.kind === 'plan_review')
-        answer = { kind: 'plan_review', decision: 'approve', mode: 'accept_edits' };
-      else if (card.kind === 'question') answer = { kind: 'question', answers: { q1: 'q1-o1' } };
+            : { kind: 'approval', decision: 'approve', optionId: 'once' };
+      } else if (card.kind === 'plan_review') {
+        answer = { kind: 'plan_review', decision: 'approve' };
+      } else if (card.kind === 'question') answer = { kind: 'question', answers: { q1: 'q1-o1' } };
       else throw Error('all_tools_unexpected_interaction');
       await client.answerInteraction(sessionId, card.id, {
         expectedStoreId,
@@ -568,10 +675,8 @@ try {
     }
   }
   async function waitForRun(id: string, commandId: string, options: ToolScenarioOptions = {}) {
-    const until = Date.now() + 180_000;
     for (;;) {
-      deadline.throwIfAborted();
-      check(Date.now() < until, `${id}_scenario_deadline`);
+      signal.throwIfAborted();
       await answerPending(id, options);
       const command = await client.getCommand(commandId);
       const runId = object(command.receipt).runId;
@@ -586,7 +691,7 @@ try {
           !['failed', 'rejected', 'outcome_unknown'].includes(command.status),
           'command_failed',
         );
-      await delay(80, undefined, { signal: deadline });
+      await delay(80, undefined, { signal });
     }
   }
   async function scenario(
@@ -611,8 +716,9 @@ try {
       subjectId: 'owner',
       sessionId: id,
       workspaceId: 'workspace',
-      mode: options.mode ?? 'full',
+      mode: options.mode ?? mode,
       trusted: true,
+      nativeShellRead: process.platform === 'darwin',
     });
     const commandId = `run-${id}`;
     if (id === 'client-reconnect') cutStart = true;
@@ -640,10 +746,17 @@ try {
     for (const tool of tools) if (tool.status === 'succeeded') succeededCalls.add(tool.callId);
     const summary = {
       name: id,
+      mode: options.mode ?? mode,
+      requestedMode: mode,
+      ...(options.mode && options.mode !== mode
+        ? { modeQualification: 'explicit case-specific permission mode' }
+        : {}),
       status: run.status,
       verified: false,
       requests: requests.length - firstRequest,
       durationMs: Date.now() - begin,
+      recoveredContextRefreshes: tools.filter((tool) => recoveredContextRefresh(tool, executions))
+        .length,
       tools: tools.map((tool) => ({
         id: tool.definitionId,
         status: tool.status,
@@ -654,7 +767,12 @@ try {
     scenarios.push(summary);
     check(run.status === (options.expectedStatus ?? 'completed'), `${id}_run_${run.status}`);
     check(
-      tools.every((tool) => tool.status === 'succeeded' || options.expectedFailure?.(tool)),
+      tools.every(
+        (tool) =>
+          tool.status === 'succeeded' ||
+          recoveredContextRefresh(tool, executions) ||
+          options.expectedFailure?.(tool),
+      ),
       `${id}_tool_failed`,
     );
     return { executions, run };
@@ -674,14 +792,80 @@ try {
           'edit_effect',
         );
         check(readFileSync(join(workspace, 'result.txt'), 'utf8') === 'verified\n', 'write_effect');
-        const launch = executions.find((execution) => execution.definitionId === 'shell.launch');
-        const backgroundId = object(object(object(launch?.result).details).ref).executionId;
-        const background = executions.find((execution) => execution.id === backgroundId);
+        check(stoppedOriginalBackgroundShell(executions), 'shell_stop_not_confirmed');
+      }
+      if (id === 'web') {
+        check(webRequests > 0, 'real_owned_web_request_missing');
         check(
-          background?.status === 'cancelled' &&
-            object(object(background.result).details).cleanupConfirmed === true &&
-            object(object(background.result).details).processTreeStopped === true,
-          'shell_stop_not_confirmed',
+          (await store.listMessages(id, { limit: 1000 })).some(
+            (message) => message.role === 'assistant' && message.content.includes(`web-${marker}`),
+          ),
+          'web_actual_token_missing',
+        );
+      }
+      if (id === 'execution-evidence') {
+        const source = executions.find(
+          (row) =>
+            row.kind === 'tool' &&
+            row.definitionId === 'files.read' &&
+            object(row.input).path === 'source.txt',
+        );
+        const reads = executions.filter((row) => row.definitionId === 'execution_evidence.read');
+        check(
+          source?.status === 'succeeded' &&
+            reads.some((row) => object(row.input).executionId === undefined) &&
+            reads.some(
+              (row) =>
+                typeof object(row.input).executionId === 'string' &&
+                readModelExecutionId(String(object(row.input).executionId)) === source.id,
+            ),
+          'original_execution_evidence_not_read',
+        );
+      }
+      if (id === 'images') {
+        const image = executions.filter(
+          (execution) => execution.definitionId === 'files.view_images',
+        );
+        check(
+          executions
+            .filter((row) => row.kind === 'tool')
+            .every((row) => row.definitionId === 'files.view_images'),
+          'image_substitute_tool_used',
+        );
+        check(
+          image.length === 1 && image[0]!.status === 'succeeded',
+          'original_image_read_missing',
+        );
+        check(
+          (await store.listMessages(id, { limit: 1000 })).some(
+            (message) =>
+              message.role === 'assistant' &&
+              new RegExp(`\\b${imageCode}\\b`).test(message.content),
+          ),
+          'image_visual_token_missing',
+        );
+      }
+      if (id === 'worktree-list') {
+        const operation = executions.find((execution) => execution.definitionId === 'git.worktree');
+        check(
+          executions
+            .filter((row) => row.kind === 'tool')
+            .every(
+              (row) =>
+                (row.definitionId === 'git.worktree' && object(row.input).action === 'list') ||
+                [
+                  'skills.load',
+                  'skills.resource',
+                  'files.read',
+                  'files.view_images',
+                  'execution_evidence.read',
+                ].includes(row.definitionId),
+            ),
+          'worktree_substitute_or_mutation_used',
+        );
+        check(
+          operation?.status === 'succeeded' && object(operation.input).action === 'list',
+          'worktree_actual_list_missing',
         );
       }
       if (id === 'question') {
@@ -765,7 +949,7 @@ try {
           targetCommandId: `run-${id}`,
         })
         .catch(() => {});
-      if (deadline.aborted || wire.some((entry) => entry.status !== 200)) throw error;
+      if (signal.aborted || wire.some((entry) => entry.status !== 200)) throw error;
     }
   }
   await client.connect();
@@ -777,7 +961,7 @@ try {
   });
   await runCase(
     'files-shell',
-    `Use the actual tools for this synthetic test. With shell_execute run ls, rg --files docs, and rg -n -F -- '[a-z]+' docs; use filesystem:"workspace_write",network:"none". Read source.txt via read_file, edit message=before to message=after using its exact complete-file baseline, and create result.txt containing exactly verified followed by a newline using write_file. Also use read_file to read the absolute external file ${JSON.stringify(join(root, 'external.txt'))}. Then shell_execute with background:true one command: echo BACKGROUND_STARTED; sleep 120 with the same workspace/no-network permissions. Using its returned shell_id, call shell_read, shell_wait with wait_timeout_ms:0, shell_stop with command_id:"stop-background-once" (a new cancellation intent ID, not ref.commandId), then shell_wait until its actual cancellation is terminal. Use all four Shell tools and all three file tools. Only shell_id and existing resource IDs must come from prior results; the cancellation command_id is the new literal specified above. Do not relaunch an existing command. Finally report observed search and file results, the external token, and confirmed background stop. Be concise.`,
+    `Use the actual tools for this synthetic test. With shell_execute run ls, rg --files docs, and rg -n -F -- '[a-z]+' docs; use filesystem:"workspace_write",network:"none". Read source.txt via read_file, edit message=before to message=after using its exact base_ref returned by read_file, and create result.txt containing exactly verified followed by a newline using write_file. Also use read_file to read the absolute external file ${JSON.stringify(join(root, 'external.txt'))}. Then shell_execute with background:true one command: echo BACKGROUND_STARTED; sleep 120 with the same workspace/no-network permissions. Using its returned shell_id, call shell_read, shell_wait with wait_ms:0, shell_stop with only that shell_id, then shell_wait until its actual cancellation is terminal. Use all four Shell tools and all three file tools. Copy exact returned references; the host owns cancellation intent identity. Do not relaunch an existing command. Finally report observed search and file results, the external token, and confirmed background stop. Be concise.`,
   );
   await runCase(
     'question',
@@ -785,7 +969,7 @@ try {
   );
   await runCase(
     'planning',
-    'Use all four planning tools. First read_plan. Then write_plan with plan_id coverage, expected_version:null, title Coverage plan, body One bounded verification step, steps:[{id:"verify",title:"Run the synthetic check"}]. Read the saved plan and run_id with read_plan, then request_plan_review for its exact version/digest. Wait for approval. After approval use shell_execute to run printf "PLAN_VERIFIED\\n" with workspace_write/no-network permissions. Mark verify completed with update_plan_progress using the actual successful shell_execute execution_id as evidence, the exact run_id and plan identity, expected_progress_revision:null and complete_plan:true. Read the final plan and report actual completion. Never invent an execution identity.',
+    'Use all four planning tools. First read_plan. Then write_plan with plan_id coverage (omit expected_plan_ref for this first creation), title Coverage plan, body One bounded verification step, steps:[{id:"verify",title:"Run the synthetic check"}]. Read the saved plan and progress with read_plan, then request_plan_review with the exact returned plan_ref. Wait for approval. After approval use shell_execute to run printf "PLAN_VERIFIED\\n" with workspace_write/no-network permissions. Mark verify completed with update_plan_progress using the actual successful shell_execute execution_id as evidence, the exact returned plan_ref; the host binds the current Run, so omit run_id, progress_ref:null and complete_plan:true. Read the final plan and report actual completion. Never invent an execution identity.',
     true,
   );
   await runCase(
@@ -794,15 +978,67 @@ try {
   );
   await runCase(
     'mcp',
-    'Use all MCP capabilities in this bounded test. First list_mcp_sources and connect_mcp_server to the synthetic server with its actual returned server_id and a fresh key. Use refresh_mcp_catalogue with its exact connection binding, then search_mcp_tools for "Echo" and call the discovered dynamic echo_probe tool with value:"verified". Use list_mcp_resources followed by read_mcp_resource for synthetic://coverage/note, supplying exact connection and catalogue descriptor bindings from actual results. Use list_mcp_prompts followed by get_mcp_prompt for coverage_prompt with arguments:{subject:"verified"} and the exact prompt descriptor binding. Both list_mcp_resources and list_mcp_prompts require ALL FOUR connection fields: server_id, connection_key, config_digest, generation. Read/get additionally require the catalogue_execution_id and descriptor_digest from the corresponding list response. Report the three actual tokens returned by the dynamic tool, resource and prompt. Do not guess binding IDs or skip any of these eight named MCP tools.',
+    'Use all MCP capabilities in this bounded test. First list_mcp_sources and connect_mcp_server to the synthetic server with only its actual returned server_id. Use refresh_mcp_catalogue with its exact connection_ref, then search_mcp_tools for "Echo" and call the discovered dynamic echo_probe tool with value:"verified". Use list_mcp_resources followed by read_mcp_resource for synthetic://coverage/note, using the exact resource_ref returned by the list. Use list_mcp_prompts followed by get_mcp_prompt for coverage_prompt with arguments:{subject:"verified"} and the exact prompt_ref returned by the list. Both lists use the latest successful connection_ref from refresh; read/get use resource_ref/prompt_ref from their corresponding lists. Do not reconstruct connection fields or hashes. Report the three actual tokens returned by the dynamic tool, resource and prompt. Do not guess binding IDs or skip any of these eight named MCP tools.',
   );
   await runCase(
     'web',
-    'Use web_fetch to fetch https://example.com/ and report the actual page title and one sentence explaining its stated purpose. Do not use Shell or memory to replace the fetch.',
+    `Use web_fetch to fetch ${web.url.href}, then read_execution_evidence to read that exact Web Tool's original result using its actual execution_id. Report the exact token in the actual page body. Do not use Shell or memory to replace the fetch, and do not use page tokens as execution IDs.`,
   );
   await runCase(
     'agents',
-    'Use all six collaborator tools. Spawn exactly one collaborator with prompt:"Calculate 17 * 19; reply with exactly 323." Wait for completion with wait_agent_events and list_agents for the returned agent_id, reading its complete result. Once idle, send_agent_message to that same agent_id with "For your next turn, preserve the first answer in history"; this alone must not start a turn. Call interrupt_agent on the idle collaborator and inspect the idle result. Then follow_up_agent on the SAME agent_id with "Calculate 23 * 29; reply with exactly 667." Wait for its second completion with wait_agent_events using the prior next_seq and list_agents for the same ID. Read the complete second result. Do not create a second agent, use a preset, invent IDs or use old tool names. If a child fails, immediately report that failure without retries, more messages or more waits. Finally report both actual answers only if both child turns succeeded.',
+    'Use all six collaborator tools. Spawn exactly one collaborator with prompt:"Calculate 17 * 19; reply with exactly 323." Wait for completion with wait_agent_events using the returned work_ref in work_refs, and list_agents for the returned agent_id, reading its complete result. Once idle, send_agent_message to that same agent_id with "For your next turn, preserve the first answer in history"; this alone must not start a turn. Call interrupt_agent on the idle collaborator and inspect the idle result. Then follow_up_agent on the SAME agent_id with "Calculate 23 * 29; reply with exactly 667." Wait for its second completion with wait_agent_events using the prior next_cursor and the new work_ref and list_agents for the same ID. Read the complete second result. Do not create a second agent, use a preset, invent IDs or use old tool names. If a child fails, immediately report that failure without retries, more messages or more waits. Finally report both actual answers only if both child turns succeeded.',
+  );
+  await runCase(
+    'images',
+    'Read image.png with exactly one view_images call and inspect the actual image. Reply only IMAGE: followed by the six characters printed in it. Do not use file reading, Shell or OCR as a substitute.',
+  );
+  await runCase(
+    'execution-evidence',
+    'First read source.txt with read_file to create one real read receipt. Then use read_execution_evidence to list the actual current task records, and use read_execution_evidence with the exact execution_id of that successful source.txt read from the real list to read its original result. Do not invent identifiers or execute a mutating tool. Report the observed record identity and state.',
+  );
+  if (selected.has('worktree-list') || selected.has('worktree-mutation-observe')) {
+    const git = assets
+      ? join(dirname(assets.fullShell), '../../mingw64/bin/git.exe')
+      : '/usr/bin/git';
+    const gitEnvironment = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([name]) =>
+          ['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT'].includes(name.toUpperCase()),
+        ),
+      ),
+      HOME: workspace,
+      USERPROFILE: workspace,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+      GIT_TERMINAL_PROMPT: '0',
+    };
+    const initialized = Bun.spawnSync([git, 'init', '-q', workspace], {
+      env: gitEnvironment,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    check(initialized.exitCode === 0, 'owned_git_init_failed');
+    const committed = Bun.spawnSync(
+      [
+        git,
+        '-C',
+        workspace,
+        '-c',
+        'user.name=Owned Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '--allow-empty',
+        '-qm',
+        'Owned worktree listing fixture',
+      ],
+      { env: gitEnvironment, stdout: 'pipe', stderr: 'pipe' },
+    );
+    check(committed.exitCode === 0, 'owned_git_commit_failed');
+  }
+  await runCase(
+    'worktree-list',
+    'Use git_worktree with action:list to inspect this owned repository. Do not create, remove, or switch worktrees, and do not use Shell as a replacement. Report the actual source worktree from the tool result.',
   );
   if (extended)
     await runExtendedToolCases({
@@ -838,7 +1074,10 @@ try {
     planning: ['read_plan', 'write_plan', 'request_plan_review', 'update_plan_progress'],
     skills: ['load_skill', 'read_skill_resource'],
     mcp: expected.filter((name) => name.includes('mcp')),
-    web: ['web_fetch'],
+    web: ['web_fetch', 'read_execution_evidence'],
+    images: ['view_images'],
+    'execution-evidence': ['read_execution_evidence'],
+    'worktree-list': ['git_worktree'],
     agents: expected.filter(
       (name) =>
         name.endsWith('_agent') ||
@@ -873,6 +1112,7 @@ try {
       ['tools/call', 'resources/read', 'prompts/get'].every((method) => rpc.includes(method)),
       'mcp_effect_missing',
     );
+  check(physicalRequests === wire.length, 'physical_wire_count_mismatch');
   check(
     wire.every((entry) => entry.status === 200),
     'provider_http_failed',
@@ -885,6 +1125,8 @@ try {
       : 'all_tools_attempt_failed';
   process.exitCode = 1;
 } finally {
+  process.off('SIGINT', interrupt);
+  process.off('SIGTERM', interrupt);
   for (const resource of cleanup.reverse()) {
     try {
       await resource.close();
@@ -914,6 +1156,9 @@ try {
   report.rpc = rpc;
   report.durationMs = Date.now() - started;
   report.requestCount = requests.length;
+  report.physicalRequests = physicalRequests;
+  report.businessPhysicalRequests = wire.filter((item) => item.phase === 'business').length;
+  report.reviewPhysicalRequests = wire.filter((item) => item.phase === 'review').length;
   report.codeUnchanged = JSON.stringify(report.code) === JSON.stringify(liveCodeEvidence());
   if (!report.codeUnchanged) {
     report.status = 'failed';

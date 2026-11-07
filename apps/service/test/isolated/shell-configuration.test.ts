@@ -20,6 +20,7 @@ import { createShellConfiguration } from '@kite-ai/agent/permissions/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { fixtureScopeOption } from '../../../../tests/fixtures/permission-grant';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { parseShellModelFeedback } from '../../../../tests/fixtures/unified-agent/shell-model-feedback';
 import { startService } from '../../src';
@@ -37,6 +38,27 @@ async function until<T>(read: () => Promise<T | undefined>) {
     await Bun.sleep(5);
   }
 }
+function permissionSnapshot(raw: unknown): unknown {
+  const value = raw as { namespace: string; data: Record<string, unknown> };
+  if (value.namespace === 'builtin.business.permissions') {
+    expect(Object.keys(value.data).sort()).toEqual(['current', 'gate']);
+    expect(value.data.gate === null || typeof value.data.gate === 'object').toBe(true);
+    return permissionSnapshot(value.data.current);
+  }
+  if (value.namespace === 'agent.permission-intersection')
+    return {
+      ...value,
+      data: {
+        ...value.data,
+        policies: (value.data.policies as { snapshot: unknown }[]).map((policy) => ({
+          ...policy,
+          snapshot: permissionSnapshot(policy.snapshot),
+        })),
+      },
+    };
+  return value;
+}
+
 type RequestedScope = {
   filesystem: 'workspace_write' | 'full_access';
   network: 'none' | 'internet';
@@ -56,6 +78,7 @@ function endpoint(
     : 'child-shell-task';
   let permissions: RequestedScope | undefined;
   let description: string | undefined;
+  let workdir: string | undefined;
   const reviews: Record<string, unknown>[] = [];
   let beforeStop: ((shellId: string) => Promise<void>) | undefined;
   const requests: Record<string, unknown>[] = [];
@@ -90,9 +113,6 @@ function endpoint(
       );
       const results = messages.slice(last + 1).filter((row) => row.role === 'tool');
       const isChild = child && messages[last]?.content === childTask;
-      const key = isChild
-        ? 'child-shell'
-        : (messages[last]?.content.replace(/^新任务：/, '') ?? 'work');
       let shellId: string | undefined;
       try {
         shellId = parseShellModelFeedback(results[0]?.content ?? '').shellId;
@@ -113,6 +133,7 @@ function endpoint(
                 name: 'shell_execute',
                 input: {
                   command: actualCommand,
+                  ...(workdir === undefined ? {} : { workdir }),
                   background: true,
                   ...(description === undefined ? {} : { description }),
                   ...(permissions ?? {}),
@@ -120,12 +141,10 @@ function endpoint(
               },
               {
                 name: stop ? 'shell_stop' : 'shell_wait',
-                input: stop
-                  ? { shell_id: shellId, command_id: `stop-${key}` }
-                  : { shell_id: shellId, wait_timeout_ms: 4000 },
+                input: stop ? { shell_id: shellId } : { shell_id: shellId, wait_ms: 4000 },
               },
-              { name: 'shell_wait', input: { shell_id: shellId, wait_timeout_ms: 4000 } },
-              { name: 'shell_read', input: { shell_id: shellId, after_seq: '0', limit: 200 } },
+              { name: 'shell_wait', input: { shell_id: shellId, wait_ms: 4000 } },
+              { name: 'shell_read', input: { shell_id: shellId, limit: 200 } },
             ];
       const call =
         reviewPayload ||
@@ -179,6 +198,9 @@ function endpoint(
     reviews,
     permissions(value?: RequestedScope) {
       permissions = value;
+    },
+    workdir(value?: string) {
+      workdir = value;
     },
     description(value?: string) {
       description = value;
@@ -429,7 +451,11 @@ async function fixture(
         commandId,
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', ...(grant ? { grant } : {}) },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: grant === 'same_command' ? fixtureScopeOption(card.request) : 'once',
+        },
       });
       return card;
     },
@@ -441,6 +467,79 @@ async function fixture(
     },
   };
 }
+for (const mode of ['full', 'accept_edits', 'auto'] as const)
+  nativeTest(
+    `explicit workdir selects the actual supervised process directory and leaves Session cwd fixed: ${mode}`,
+    async () => {
+      const f = await fixture({ mode, hostBoundary: true, review: 'approve_once' });
+      const nested = join(f.workspace, 'nested'),
+        outside = join(f.root, 'outside');
+      mkdirSync(nested);
+      mkdirSync(outside);
+      const observations: { executionId: string; definitionId: string; policy: unknown }[] = [];
+      async function perform(id: string) {
+        await f.submit(id);
+        let done = false;
+        const terminal = f.done(id).finally(() => {
+          done = true;
+        });
+        while (!done) {
+          const cards = (await f.store.listInteractions({ ...f.base, state: 'pending' }))
+            .interactions;
+          for (const card of cards) {
+            expect(observations.some((previous) => previous.executionId === card.executionId)).toBe(
+              false,
+            );
+            observations.push({
+              executionId: card.executionId,
+              definitionId: card.definitionId,
+              policy: card.request,
+            });
+            await f.runtime.answerInteraction({
+              ...f.base,
+              presentationSessionId: 's',
+              commandId: `answer-${card.id}`,
+              interactionId: card.id,
+              expectedRevision: card.revision,
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+            });
+          }
+          if (!done) await Bun.sleep(5);
+        }
+        await terminal;
+        const rows = await f.store.listExecutions('s');
+        const job = rows.filter((row) => row.definitionId === 'shell.command').at(-1)!;
+        expect(job.status).toBe('succeeded');
+        return job;
+      }
+      try {
+        f.a.workdir('nested');
+        f.a.command('printf once >> marker; pwd');
+        const first = await perform('work');
+        expect(readFileSync(join(nested, 'marker'), 'utf8')).toBe('once');
+        expect(existsSync(join(f.workspace, 'marker'))).toBe(false);
+        expect(first.input).toMatchObject({ workdir: 'nested' });
+        f.a.workdir(outside);
+        f.a.permissions({ filesystem: 'full_access', network: 'none' });
+        await perform('grant-outside');
+        expect(readFileSync(join(outside, 'marker'), 'utf8')).toBe('once');
+        f.a.workdir(undefined);
+        f.a.permissions(undefined);
+        f.a.command('pwd');
+        const last = await perform('next');
+        const output = await f.store.listExecutionOutput({ ...f.base, executionId: last.id });
+        expect(output.items.map((item) => item.content).join('')).toContain(f.workspace);
+        expect(last.input).not.toHaveProperty('workdir');
+        expect((await f.runtime.getWorkspace('w'))?.rootUri).toBe(pathToFileURL(f.workspace).href);
+        expect(
+          (await f.store.listInteractions({ ...f.base, state: 'pending' })).interactions,
+        ).toHaveLength(0);
+      } finally {
+        await f.close();
+      }
+    },
+    30000,
+  );
 nativeTest(
   'an invalid optional Codex path does not block an ordinary manual Provider Run or its actual Host Shell',
   async () => {
@@ -614,7 +713,7 @@ nativeTest(
       expect(f.a.reviews).toHaveLength(1);
       expect(readFileSync(outside, 'utf8')).toBe('full');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('fullask');
-      expect(snapshots).toEqual(
+      expect(snapshots.map(permissionSnapshot)).toEqual(
         ['full', 'auto'].map((mode) =>
           expect.objectContaining({
             namespace: 'agent.permission-intersection',
@@ -837,7 +936,7 @@ nativeTest(
       expect(f.a.reviews).toHaveLength(1);
       expect(readFileSync(outside, 'utf8')).toBe('full');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('workspace');
-      expect(snapshots).toEqual([
+      expect(snapshots.map(permissionSnapshot)).toEqual([
         expect.objectContaining({
           namespace: 'builtin.permissions',
           version: '1',
@@ -1292,19 +1391,27 @@ nativeTest(
       f.a.description('Inspect initial workspace state');
       await f.submit('grant-first');
       const tool = await f.card('shell.execute');
-      expect(tool.request).toMatchObject({ grants: ['approve_once', 'same_command'] });
+      expect(tool.request).toMatchObject({ options: [{ kind: 'once' }, { kind: 'scope' }] });
       await client.answerInteraction('s', tool.id, {
         expectedStoreId: f.base.expectedStoreId,
         commandId: 'grant-tool',
         expectedRevision: tool.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: fixtureScopeOption(tool.request),
+        },
       });
       const job = await f.card('shell.command');
       await client.answerInteraction('s', job.id, {
         expectedStoreId: f.base.expectedStoreId,
         commandId: 'grant-job',
         expectedRevision: job.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: fixtureScopeOption(job.request),
+        },
       });
       expect((await f.done('grant-first')).status).toBe('applied');
       expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('once');
@@ -1326,7 +1433,11 @@ nativeTest(
       const grants = [...first.items, ...second.items].map((row) => row.grant);
       expect(grants.map((row) => row.kind).sort()).toEqual(['job', 'tool']);
       expect(new Set(grants.map((row) => row.interactionId))).toEqual(new Set([tool.id, job.id]));
-      expect(grants.every((row) => /^[a-f0-9]{64}$/.test(row.commandDigest!))).toBe(true);
+      expect(
+        grants.every((row) =>
+          /^[a-f0-9]{64}$/.test((row.scope as { commandDigest: string }).commandDigest),
+        ),
+      ).toBe(true);
       expect((await f.store.getMetadata()).lastChangeCursor).toBe(beforeRead);
       expect(f.a.requests).toHaveLength(beforeProvider);
       f.a.description('Inspect workspace state again');

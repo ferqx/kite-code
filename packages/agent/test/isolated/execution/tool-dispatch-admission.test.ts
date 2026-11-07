@@ -338,7 +338,7 @@ test('guidance preserves an approved-waiting ordered Tool and its queued sibling
       presentationSessionId: 's',
       interactionId: interaction.id,
       expectedRevision: interaction.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
     const steer = (await f.store.getCommand('steer'))!;

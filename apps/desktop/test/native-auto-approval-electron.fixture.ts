@@ -249,7 +249,7 @@ try {
         await request.waitFor();
         assert.deepEqual(JSON.parse((await request.textContent())!), card.request);
         await page.keyboard.press('Escape');
-        await page.getByRole('button', { name: '批准一次', exact: true }).click();
+        await page.getByRole('button', { name: '仅此次', exact: true }).click();
       }
       await until(
         state,

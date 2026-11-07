@@ -475,11 +475,10 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
         expectedStoreId: storeId,
         commandId: `answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: {
-          kind: 'approval',
-          decision,
-          ...(decision === 'approve' ? { grant: 'approve_once' as const } : {}),
-        },
+        answer:
+          decision === 'approve'
+            ? { kind: 'approval', decision: 'approve', optionId: 'once' }
+            : { kind: 'approval', decision: 'deny' },
       });
       facts.push({
         stage: 'explicit-control-approval',

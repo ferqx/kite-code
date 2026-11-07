@@ -18,6 +18,8 @@ Status: implemented
 
 [Service](../../../../apps/service/README.md)提供 Native 专用 `/v1/lifecycle` 和 `/v1/lifecycle/shutdown`。独立 lifecycleVersion 和原 profile/instance 身份不依赖业务 API 兼容性或可用 Store；Native bearer、Host 和无 Origin 约束保持，Browser gateway 无此路由。202 只证明受理。成功关闭会结束 runner 自己的父管道读取，父管道仍打开时所属进程也能退出；父 EOF 与普通网络断开仍是不同事件。
 
+2026-11-07 的实际 Native 冷开退出又证明：Core、HTTP 资源、正文流及 Store 均已结算后，`server.stop(false)` 仍可能等待已完成但客户端未消费的传输响应，耗尽 Main 原4秒截止。最终 listener 因此只在上述全部原清理成功之后结束剩余连接；该晚期传输收尾不提前取消业务、不替代停止证明，也不改变失败保留。真实 Service/Store 背压回归核完整读取后暂停响应、Store 已关闭时仍能结束 listener，并保慢 GET、上传、配置发布与 shutdown 202 原断言。普通完整响应的 Node/Electron 管道与 HTTP 对照本来正常，不能将本修复泛化为所有 EOF 或 listener 都有缺陷。
+
 未确认 Job 停止、dispose 或宿主排空失败保持 `drain_failed` 和原资源，不关闭诊断 HTTP、不释放 profile 锁、不宣称完成。当前不提供失败关闭的原地重试或恢复接纳。[独立 Client](../../../../packages/client/README.md)只查询固定原目标；关闭前核身份并只 POST 一次，丢回复或不可信回执为 unknown，只能查询原实例，不能自动改绑或重发。
 
 ## Alternatives considered

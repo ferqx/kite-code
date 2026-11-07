@@ -389,7 +389,7 @@ ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Coll
 
 长普通文本在 Markdown 转换后的树中拆成相邻 Text 节点，不增加包装元素、换行或省略内容，继续沿原消息列和 GFM 展示完整正文；code／pre 保原结构。超过4096个字符串单位的文本按约2048单位组织，非ASCII沿 grapheme 边界，单一更长 grapheme 仍完整保留。原文字、标题、链接、表格、图片替代文字及 HTML 处理保持；全文仍先经宿主完整 EOF／SHA／UTF-8／scope 核验，复制使用原正文，不增加读取或文件权限。[原 Markdown 文件](test/markdown.test.tsx)保全部原断言并核实际 DOM 的完整长文本与 Unicode 边界；实际 Electron 可见性与全文资格归 Desktop owner 和[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)，不据此承诺固定内存或所有设备的延迟。
 
-浏览器执行沿工具行显示已核调用中的 `description`，使用可读动作名和最多10个Unicode字符的短说明；加载技能只显示真实 Skill ID，不附调用目的；读取资料只显示 Skill ID／资源路径，不附执行描述。未知定义／版本不读取该字段，旧记录不补造。Native 通过原 `Message.target` 投影，通用组件也识别这三个公开名称的简短参数，保持单行省略与完整 title；描述不参与执行状态、审批或文件打开资格。已识别的浏览器操作在无真实异常时只绘制静态摘要，即使恢复了旧展开状态也不挂载原始正文或调用宿主 reader；失败、拒绝、结果未知及未核实记录继续沿原异常／原始 reader。
+浏览器执行沿工具行显示已核调用中的可选 `description`，使用可读动作名和最多40个Unicode字符的短说明；省略描述仍可正常执行，完整原描述保存在原调用中；加载技能只显示真实 Skill ID，不附调用目的；读取资料只显示 Skill ID／资源路径，不附执行描述。未知定义／版本不读取该字段，旧记录不补造。Native 通过原 `Message.target` 投影，通用组件也识别这三个公开名称的简短参数，保持单行省略与完整 title；描述不参与执行状态、审批或文件打开资格。已识别的浏览器操作在无真实异常时只绘制静态摘要，即使恢复了旧展开状态也不挂载原始正文或调用宿主 reader；失败、拒绝、结果未知及未核实记录继续沿原异常／原始 reader。
 
 原工具组件允许宿主给 `Message.target` 传展示文本，不从文本取得文件或执行权限。Native 的已知工具行沿准确执行结果与当前视图适配；未来定义／版本不借旧同名分类解释，原文仍可展开。Shell 操作继续复用原工具图标，实际身份、目标、状态与限定证据归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
@@ -468,9 +468,9 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 `ContextSubmissionNotice` 显示原 command 与 saved/submitting/queued/applied/unknown/failed 事实；保存来源不等于模型已读取或执行成功。queued 明确等待原 checkpoint，尚未纳入；applied 仍不证明模型正确使用。Context UI 同时包含纯投影与 [test/context-active-dom.test.tsx](test/context-active-dom.test.tsx) 的实际 JSdom 点击、目标准确性和缺目标禁用验证；不声称原生浏览器或正式客户端迁移完成。
 
 
-有限 `plan_review` 答复只在请求提供 planId/version/digest/content 与非空、无陌生值的 allowedModes 时开启。支持模式仅 `auto`、`accept_edits`（严格取请求提供的子集），批准要求用户显式选择；Full 不在选项中。缺失/陌生 metadata 或 modes 保只读说明，并仍显示完整原 request；未知身份字段明确 unknown。反馈最多 8192 个 JavaScript 字符串单位，原空格、Unicode 与换行保留，deny/revise 不携带 mode。信息回答不改变默认权限，不证明计划已满足业务 required evaluator，也不证明执行或完成。
+有限 `plan_review` 答复只在请求提供 planId/version/digest/content 时开启，提供批准此计划、补充修改和拒绝三个显式决定；答案仅含 kind/decision 与可选 feedback，不接受 allowedModes 或 answer.mode。手动、Auto、Full 都等待用户明确答复，计划批准不切换权限模式、不授予后续工具执行权，也不证明执行或完成。旧格式请求只读显示完整原文，不转换为新批准。反馈最多 8192 个 JavaScript 字符串单位，原空格、Unicode 与换行保留；空 Enter 和未明确选择不会默认批准。 默认 Planning 工具在用户拒绝后保存简短拒绝结果并停止当前轮次；该行为来自工具的业务控制，不由面板把通用信息卡的 deny 解释为取消。
 
-`PlanReviewDraft` 与 `initialPlanDraft/onPlanDraftChange` 让宿主以原 Interaction 身份保存显式模式与原反馈。表单事件同步通知宿主，同一 render 重复提交受原锁约束；失败不清理，Promise resolve 也不冒充准确 accepted 回执。完整 canonical `plan_document` 的 ID/version/digest 与原 request 相符时，以安全 Markdown 展示完整正文和步骤；陌生格式保留完整原文。大附件仍先沿原 reader 完整验证，未完成读取时不提供答复，原完整附件另可展开核对。[实际 DOM 测试](test/isolated/plan-review-dom.test.tsx)核原草稿恢复、显式模式、一次提交与失败保留；宿主的页面生命周期、Main 读取证明和真实窗口资格归 [Desktop owner](../../apps/desktop/README.md#native-计划入口与完整审核)，组件不取得 I/O 或批准权。
+`PlanReviewDraft` 与 `initialPlanDraft/onPlanDraftChange` 让宿主以原 Interaction 身份保存原反馈。表单事件同步通知宿主，同一 render 重复提交受原锁约束；失败不清理，Promise resolve 也不冒充准确 accepted 回执。完整 canonical `plan_document` 的 ID/version/digest 与原 request 相符时，以安全 Markdown 展示完整正文和步骤；陌生格式保留完整原文。大附件仍先沿原 reader 完整验证，未完成读取时不提供答复，原完整附件另可展开核对。[实际 DOM 测试](test/isolated/plan-review-dom.test.tsx)核原草稿恢复、纯业务决定、空 Enter 不批准、一次提交与失败保留；宿主的页面生命周期、Main 读取证明和真实窗口资格归 [Desktop owner](../../apps/desktop/README.md#native-计划入口与完整审核)，组件不取得 I/O 或批准权。
 
 
 `InteractionCard` 的 `onReadAttachment` 是可选宿主回调，只接受原公开 reference 的准确 Store、Session、scope 和元数据。大审批附件在完整读取、SHA-256 与严格 UTF-8 校验成功后展示全文；缺 reader、加载中或失败时保留原卡并禁用回答。取消读取、替换卡片、切换身份或卸载只释放视图等待，迟到正文不能成为另一卡的已读证明。组件仅在当前视图保存正文，重复键盘/点击同步抑制，不把正文存入控制器验证集合。无附件的原审批行为保持不变。
@@ -574,3 +574,5 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 保留的[SessionPage](src/desktop/SessionPage.tsx)切换tabs scope时，在layout阶段取消旧右栏RAF／timer，按目标已确认的右栏意图直接布局；loading／browserPending／restore未决时不把空tabs当作用户关闭。导航与右栏分别持有动画状态和timer，右栏动画只属于原scope，普通手动开合保持动画。自动reveal与已有页请求在layout阶段采用；reveal去重只限当前scope的一次激活，返回原scope可重新接纳，而用户显式收起的记忆仍保留。任务编辑器退休不再另排一次无目标的collapse，由当前右栏意图统一决定。上述[回归](test/isolated/desktop-session-page-render.test.tsx)通过受控RAF和真实Group／Panel核提交前收栏、旧动作取消、未决原页恢复、目标详情、显式关闭和独立导航动画；原生连续画面与灰带限制仍归Desktop owner。
 
 标题栏重开保留的浏览器标签、请求已有网页，与首次空白标签、子会话及普通详情统一使用180ms缓出动画。同scope从真实折叠状态打开时，首个render即带上过渡标记，避免启用的分隔线重新注册、Group先于RAF重建布局而跳过动画；layout阶段提交打开意图，并沿现有240ms计时保留标记。实际折叠状态读取Panel handle，不能使用可能迟于布局的React通知状态。scope切换、恢复与明确直接布局继续沿原逻辑；尚未开始的收起被取消时保持原宽度，不另播动画。[回归](test/isolated/desktop-session-page-render.test.tsx)覆盖收起未执行、进行中及动画结束后的重开，已有页请求和普通详情的首个提交、旧回调取消、原页节点与输入保持。实际Page／文档是否可暖恢复仍由Desktop Main核实，UI标签存在不授显示或Agent能力；真实Electron连续画面及限制归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
+
+统一审批展示由冻结 `options/optionId` 驱动；`Approval` 保留仅此次主按钮与范围菜单，菜单原文换行显示完整资源和限制。共享普通卡和 TUI 复用 Client 只读选项投影，不按工具名产生后续范围。TUI 默认选择原 once，选中的长说明完整换行；授权目录普通界面可查看原范围、真实 bindings 与审批出处。历史工具状态使用后端保存的 `optionKind/presentation` 显示批准范围，不从 opaque optionId 推断。

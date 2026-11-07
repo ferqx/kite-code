@@ -1,10 +1,16 @@
 # Ordinary Shell Tools
 
-模型侧提供 `shell_execute/shell_read/shell_wait/shell_stop`。启动统一为 `shell_execute({command, description?, background?, execution_timeout_ms?, filesystem?, network?})`：默认前台等待原 Job 终态，`background:true` 返回同一 Job 的真实 `shell_id`、引用与受理状态，受理不证明启动成功或完成。描述仅供展示，省略沿用命令预览；真实命令、审批、权限与完整原调用继续保留。
+模型侧提供 `shell_execute/shell_read/shell_wait/shell_stop`。启动统一为 `shell_execute({command, description?, background?, execution_timeout_ms?, workdir?, filesystem?, network?})`：默认前台等待原 Job 终态，`background:true` 返回同一 Job 的真实 `shell_id`、引用与受理状态，受理不证明启动成功或完成。描述仅供展示，省略沿用命令预览；真实命令、审批、权限与完整原调用继续保留。
 
-新模型不填写 `key` 或 `cancellation`。内部 key 从已持久化的 Tool execution ID 稳定派生；同一逻辑 Tool 重入仍走原 `operations.ensure`，新 Tool 即使命令相同也有独立 Job。返回的 `shell_id` 用于原操作的读取、等待和停止；结果未知时先核原执行，不能通过新调用找回结果。普通模型前后台均使用 attached 取消关系，原父 Command 取消传播保持。旧 `shell.launch` 内部注册、显式 key、nested permissions、timeoutMs 和 detached 契约保留，新模型目录隐藏这些旧参数；历史模型参数的投影使用原封存 descriptor，不按今日目录重写。恢复仍核原配置与执行来源，不为兼容重新派发未知效果。
+新模型不填写 `key` 或 `cancellation`。内部 key 从已持久化的 Tool execution ID 无损派生为 `sh_` 短句柄，当前 UUID 对应26字符，不建别名表或旧摘要读取分支；同一逻辑 Tool 重入仍走原 `operations.ensure`，新 Tool 即使命令相同也有独立 Job。返回的 `shell_id` 用于原操作的读取、等待和停止；`execution_id` 是原启动 Tool 的执行记录 ID，用于查询执行证据或引用计划进度，后台受理不因此证明执行成功。模型要等待已受理的后台命令时沿原 `shell_id` 调用 `shell_wait/read`；即使首次选择后台不符合任务要求，也不能为了改成前台再执行原命令。前台、后台和内部 `shell.launch` 一致提供两种身份；后续 read/wait/stop 的可信模型反馈仍显示原启动 Tool 的 `execution_id`，不把查询 Tool 或内部 Job 身份冒充原调用。模型呈现先核原 owner、引用和身份，不改写 stdout／stderr。结果未知时先核原执行，不能通过新调用找回结果。普通模型前后台均使用 attached 取消关系，原父 Command 取消传播保持。旧 `shell.launch` 内部注册、显式 key、nested permissions、timeoutMs 和 detached 契约保留，新模型目录隐藏这些旧参数；历史模型参数的投影使用原封存 descriptor，不按今日目录重写。恢复仍核原配置与执行来源，不为兼容重新派发未知效果。
 
-前台期限 `execution_timeout_ms` 单位毫秒、范围1～3600000；省略不设期限。`background:true` 与期限同时填写在模型 Schema 和执行前参数校验中都失败，不创建 Job。`shell_wait` 的 `wait_timeout_ms` 保持0～30000、默认30000，超时不停止 Job。
+`workdir` 只改变本次命令的真实工作目录，省略使用固定 Session cwd。相对值以该 cwd 解析；目录必须真实存在。风险材料、目录身份、命令语义指纹、父 Tool→Job 证明及最终原生执行均绑定该目录；后续调用和 Files 路径不会因此改变。每个动态目录 Job 的 handle 仍交回创建它的原执行器观察、停止和释放。
+
+模型结果中的 `execution_id/cancellation_execution_id` 使用原 ID 的无损短表示，计划进度与执行证据入口准确解码。原 Store 回执仍保存原 ID；不做前缀搜索、近似纠错或选择最近调用，也不改变 Shell 身份与派发次数。
+
+`shell_read({shell_id,cursor?,limit?})` 的 cursor 绑定原 Job 和流位置；`caught_up` 只表示读到当前水位，`terminal` 才表示原执行终态，暂时无输出不表示完成。`shell_stop({shell_id})` 由宿主按原取消 Tool 稳定派生 command 身份，结果同时保原启动 `execution_id` 和独立 `cancellation_execution_id`；请求取消不冒充进程已停止，也不重放命令。`shell_wait({shell_id,wait_ms?})` 仅观察，期限到达不取消业务。
+
+前台期限 `execution_timeout_ms` 单位毫秒、范围1～3600000；省略不设期限。`background:true` 与期限同时填写在模型 Schema 和执行前参数校验中都失败，不创建 Job。`shell_wait` 的 `wait_ms` 保持0～30000、默认30000，超时不停止 Job。
 
 `filesystem` 和 `network` 是独立的顶层申请，省略分别为 `workspace_write`、`none`；只填一个不会开放另一个。`network:internet` 包括 localhost、127.0.0.1、::1、局域网和互联网；风险通过不为 `network:none` 申请增加联网能力。`filesystem:full_access` 申请外部写入，不切换 Full 审批模式，也不自动扩大实际执行范围。默认普通宿主不再额外遮挡 Profile、配置、认证、controlBase 或整目录运行资产；自定义显式保护及 confined 宿主仍沿其原约束。原权限模块统一解析新申请与旧 Job 输入，执行器仍只使用最终接纳的授权证明。description 不进入风险模型输入、命令语义指纹或 Job input；原调用参数和完整性绑定仍保真。
 
@@ -12,7 +18,9 @@
 
 支持范围请求的宿主为前台／后台入口提供相同指引：默认请求工作区写入／无网络，外部写入或联网须显式申请；审批不扩张申请范围，失败不自动扩权重跑。普通 Full 的有效范围仍由现行模式及硬上限决定。
 
-新默认 Auto 的调用事实、直接脚本读取、风险分类、批准复用和启动前材料复核归[权限 owner](../permissions/README.md)。Shell Tool 本身不解析风险或扩大授权；模型风险通过、人工批准、timeout 继续与实际执行成功分别保存。默认范围、手动／Full 和未知效果沿原合同。
+新默认 Auto 的调用事实和直接脚本读取复用[权限 owner](../permissions/README.md)的 Shell 领域实现；[Shell 行为工厂](shell-approval.ts)随准确执行定义提供审核材料、指引、风险输出解释和同命令候选，再由可信宿主登记。材料保完整命令与执行事实，模型 description 不成为风险依据。ordinary/high/critical 由 Shell owner 映射为统一 approve_once/ask_user/reject；核心和 SQLite 不重新解析领域风险文本。显式自定义 checker 不被替换为该风险解释器。
+
+同命令 scope 原样包装现有完整可信 commandDigest，不引入 trim、前缀、别名或脚本等价。默认行为明确允许有效同命令授权满足默认审核；独立 checker、固定危险拒绝和当前权限继续核验。准确自身 Job 的 parentProof 由 Shell owner 的独立准备钩子比对真实父定义、命令与规范化范围后产生，绑定原父 Execution/inputDigest；一次审核准备中由 Runtime 调用该钩子一次，并以顶层证明交给原父桥，Shell 风险材料不再重复构造和嵌套保存同一证明。Tool 的执行期限与 cancellation 保留原完整调用和 ensure 来源。模型风险通过、人工批准、timeout 继续与实际执行成功分别保存；grant 和超时不伪装为脚本材料已审核，启动前材料重核只消费通用 materialReviewed 事实。
 
 `createShellExtension({job})` is a pure factory containing five ordinary Tools and one trusted `shell.command` Job. `shell.execute` 的前后台及内部旧 `shell.launch` 共用普通 `operations.ensure` 和不可变 own-record OperationRef，不嵌套调用另一个 Tool。 Only the registered Job's `start` may start a process. Import/factory/read/wait never create another manager or restart a cold reference. JSON input contains no cwd, environment, executable or guardian authority.
 

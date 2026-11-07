@@ -446,7 +446,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           expectedStoreId: storeId,
           commandId: `approve-${restoreSequence}`,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
         const execution = await until(
           () => child!.client.getExecution(card.executionId!),

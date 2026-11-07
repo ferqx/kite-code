@@ -11,6 +11,7 @@ import type { Json } from '../../../src/storage';
 import type { DispatchInput } from '../../../src/storage/port';
 import { executionGuard } from '../../../src/storage/sqlite/execution-group-safety';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
+import { ensureFixtureAuthorizationCheck } from '../../fixtures/review-behavior';
 
 async function code(work: Promise<unknown>) {
   try {
@@ -432,7 +433,7 @@ async function reviewFixture(target: 'Action' | 'Tool', guarded = false) {
         targetExecutionId,
       ]);
     }
-    const review = await f.store.ensureAuthorizationCheck({
+    const review = await ensureFixtureAuthorizationCheck(f.store, {
       expectedStoreId: f.base.expectedStoreId,
       owner: f.owner,
       targetExecutionId,

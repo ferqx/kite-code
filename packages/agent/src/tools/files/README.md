@@ -1,5 +1,17 @@
 # Workspace 文件 leaf
 
+模型 read 的 `base_ref` 定位原成功派发回执中的完整文件基线，即使只读一段也绑定整个文件。write 接受 `path,base_ref?,content` 或互斥的 `content_ref`；省略 base_ref 仅表示创建，不接受 null 或隐式覆盖。edit 必填准确 base_ref，正文与 `old_text_ref/new_text_ref` 分别互斥；`expected_matches` 默认1，多处替换必须显式填写准确正数。成功修改返回新 base_ref。模型不能重建 hash/device/inode 或借另一路径、会话、失效修订的引用；CAS、no-follow、当前权限和特殊 Plan／Output owner 继续核原状态。
+
+正文引用只定位原 Tool 的真实不可变 Artifact，核原 Store/Session/Run、结果修订与 Artifact scope；读取中取消仍在文件发布前生效。原始回执保完整基线，模型呈现使用 base_ref；Service 覆盖描述与同一公开 Schema 一致，不保旧模型字段降级。
+
+宿主提供的 `outputDirectory` 是所需交付文件的父目录；读取仍使用准确文件路径，目录本身不是可读文件或子 Agent 结果来源。子工作结果沿协作工具的原结果引用读取。此说明不增加路径范围或批准任何写入。
+
+## 精确位置授权范围
+
+[Files 行为工厂](../files-approval.ts)随实际 `files.edit@2`、`files.write@3` 两个定义登记到可信宿主；两者共享同一 Workspace／真实根对象、已验证父目录与精确文件槽位范围，只包含 edit/write，不递归，也不包含其他定义。范围取证复用 [WorkspaceFiles](../files.ts) 的原 native 根／父对象与普通文件核验，不新增原生文件引擎。缺失文件可以绑定已存在父目录下的准确槽位；父目录缺失、受保护路径、链接或无法描述的对象不提供后续范围，原单次安全检查保持。
+
+位置范围不保存当前文件 inode、正文或 baseline，因此正常原子替换和正文变化不会自动撤销位置授权。实际每次写入仍核当前完整 baseline、内容冲突、no-follow、保护路径与当前权限。默认产品工作区写入沿原模式直接允许，不为展示该范围制造人工卡；非 Full 的外部 Files 修改仍硬拒绝。领域回归见[授权行为](../../../test/isolated/tools/approval-behavior.test.ts)，统一接纳／撤销和最终派发归[grant owner](../../storage/sqlite/permission-grants.README.md)。
+
 ## 图片读取
 
 持久理由见[严格本地图片读取决定](../../../../../.agents/notes/implemented/architecture/2026-11-04-strict-local-image-reading.md)。
@@ -114,7 +126,7 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 该固定 parser 会把部分字体错误降为警告；Worker 只识别已核对的字体诊断前缀并返回 `pdf_font_invalid`，其他格式错误警告返回 `pdf_processing_failed`，不发布降级的文本或页图，也不传播命中的原始诊断。记录只存在于单次解析 Worker，结束恢复原警告处理；版本变化必须重新核对。未嵌入字体的 `missingFile` 也可能合法，不能据此拒绝无故障的 CMap 文本读取。此处理拒绝已识别的解析失败，不修复字体，也不承诺任意字体或排版都可读取。
 
-[输出文件](../session-outputs.ts)复用 `builtin.files` typed records、原生 Files CAS 和 Artifact。当前文件存于 `<profile>/files/<SHA256 Store>/<SHA256 Session>/outputs/`，首版文件名为 1–120 位 ASCII 字母数字、点、下划线或连字符并以字母数字开头；原生层继续拒绝设备名、别名与链接。`base=null` 只创建，不因同名覆盖。发布前写 pending 意图；字节、不可变交付快照及登记均完成才成功，后半段失败保持 unknown。工作区源码与检查点沿原链路，会话文件不进入工作区恢复点。
+[输出文件](../session-outputs.ts)复用 `builtin.files` typed records、原生 Files CAS 和 Artifact。当前文件存于 `<profile>/files/<SHA256 Store>/<SHA256 Session>/outputs/`。[共享名称／路径合同](../session-output-path.ts)允许中文、Unicode 字母／数字、标点／符号及内部空格，首字符须为字母或数字，最多120个Unicode字符及240个UTF-8字节；拒绝分隔符、控制字符、Windows保留字符／设备名和尾部点／空格，不归一化或静默改名。Files登记、维护与Native准确文件入口共用该合同，原生层继续核别名与链接。`base=null` 只创建，不因同名覆盖。发布前写 pending 意图；字节、不可变交付快照及登记均完成才成功，后半段失败保持 unknown。工作区源码与检查点沿原链路，会话文件不进入工作区恢复点。普通输出文档的保存不自动建立Planning批准，显式计划实施审核仍由Planning独立发起。
 
 Fork 从所选执行的不可变交付建立只读来源锚点，首次读取生成独立真实副本；分支编辑另建当前记录，保留继承锚点供再次 Fork。来源文件的后续外部修改不进入旧交付。文件清单上下文至多展示 200 项且标明是否完整，准确路径查找没有累计文件数量上限。`files.outputs`／`files.output-source` 是宿主登记查询，不新增模型缓存工具。
 

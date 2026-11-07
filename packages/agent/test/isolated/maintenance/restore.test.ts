@@ -6,6 +6,7 @@ import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   createProfileBackup,
+  inspectProfileBackup,
   inspectProfileRestore,
   reconcileProfileRestore,
   restoreProfileBackup,
@@ -14,7 +15,6 @@ import { runProfileRestore } from '../../../src/maintenance/restore';
 import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
-import { restoreLegacyExecutionSchema } from '../storage/legacy-execution-schema-fixture';
 import {
   configBytes,
   nodeAssets,
@@ -40,7 +40,7 @@ async function fails(work: Promise<unknown>, code: string) {
   }
   expect((error as { code?: string })?.code ?? (error as Error)?.message).toBe(code);
 }
-async function fixture(seed = false, legacy = false) {
+async function fixture(seed = false) {
   const directory = temporaryDirectory('kite-restore-'),
     profile = { dataRoot: join(directory, 'data'), profile: 'test' },
     store = await openSqliteStore(profile),
@@ -113,14 +113,6 @@ async function fixture(seed = false, legacy = false) {
     ]);
     checkpoint.close(true);
   }
-  if (legacy) {
-    const previousSchema = new Database(selected.databasePath);
-    restoreLegacyExecutionSchema(previousSchema, 1);
-    previousSchema.exec(
-      "DROP TRIGGER pending_input_queue_insert; DROP TRIGGER pending_input_queue_update; DROP TRIGGER pending_input_queue_delete; DROP TABLE pending_input_queue_revision; DROP INDEX command_pending_order; ALTER TABLE command DROP COLUMN pending_order; DROP TABLE session_reconciliation; DELETE FROM schema_migration WHERE id IN('0003-session-reconciliation','0004-pending-input-order')",
-    );
-    previousSchema.close(true);
-  }
   await seedAssets(directory, profile, storeId);
   const backup = await createProfileBackup({
     profile,
@@ -158,23 +150,27 @@ async function fixture(seed = false, legacy = false) {
     },
   };
 }
-test('an original 0002 backup restores without adding or requiring a reconciliation checkpoint table', async () => {
-  const f = await fixture(false, true);
+test('a backup declaring unsupported Store format 2 is rejected without replacing or rewriting original data', async () => {
+  const f = await fixture();
   try {
-    const restored = await restoreProfileBackup(f.input);
-    expect(restored.storeId).not.toBe(f.storeId);
-    const database = new Database(f.selected.databasePath, { readonly: true });
-    try {
-      expect(
-        database.query("SELECT 1 FROM sqlite_schema WHERE name='session_reconciliation'").get(),
-      ).toBeNull();
-      expect(database.query('SELECT id FROM schema_migration ORDER BY id').all()).toEqual([
-        { id: '0001-baseline' },
-        { id: '0002-recovery-audit' },
-      ]);
-    } finally {
-      database.close(true);
-    }
+    const manifestPath = join(f.backup.directory, 'ready.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.source.formatMajor = 2;
+    writeFileSync(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
+    const originals = new Map(
+      [
+        f.selected.databasePath,
+        join(f.selected.profilePath, 'profile.json'),
+        join(f.selected.profilePath, 'config.jsonc'),
+        join(f.selected.profilePath, 'ui/preferences.jsonc'),
+        join(f.backup.directory, 'core.db'),
+        manifestPath,
+      ].map((path) => [path, readFileSync(path)]),
+    );
+    await fails(inspectProfileBackup(f.backup), 'backup_invalid_manifest');
+    await fails(restoreProfileBackup(f.input), 'backup_invalid_manifest');
+    expect(inspectProfileRestore({ profile: f.profile })).toBeNull();
+    for (const [path, bytes] of originals) expect(readFileSync(path)).toEqual(bytes);
   } finally {
     f.close();
   }

@@ -68,13 +68,23 @@ test('question wizard last step shows exact prompt and submit shortcut without e
 test('approval overlay displays exact request and only caller offered grants with unknown status', () => {
   const card = {
     kind: 'approval',
-    request: { command: 'echo exact original' },
+    sessionId: 'source-session',
+    request: {
+      command: 'echo exact original',
+      options: [
+        {
+          optionId: 'once',
+          kind: 'once',
+          presentation: { label: '仅此次', details: ['Approve this execution only'] },
+        },
+      ],
+    },
   } as unknown as Interaction;
   const ui = render(
     <TuiApprovalPanel
       card={card}
       choices={['approve', 'deny']}
-      selected={1}
+      selected={0}
       busy
       error="original error"
     />,
@@ -82,11 +92,22 @@ test('approval overlay displays exact request and only caller offered grants wit
   try {
     const frame = ui.lastFrame()!;
     expect(frame).toContain('echo exact original');
+    expect(frame).toContain('仅此次');
     expect(frame).toContain('Approve this execution only');
-    expect(frame).toContain('Do not call the tool and end this turn');
     expect(frame).not.toContain('same command');
     expect(frame).toContain('Original outcome pending or unknown');
     expect(frame).toContain('original error');
+    ui.rerender(
+      <TuiApprovalPanel
+        card={card}
+        choices={['approve', 'deny']}
+        selected={1}
+        busy
+        error="original error"
+      />,
+    );
+    expect(ui.lastFrame()).toContain('仅此次');
+    expect(ui.lastFrame()).toContain('Do not call the tool and end this turn');
   } finally {
     ui.unmount();
   }
@@ -114,12 +135,13 @@ test('wizard review shows semantic option labels and full original feedback with
 test('actual approval card displays exact canonical tool and target without leaking file body', () => {
   const card = {
     kind: 'approval',
+    sessionId: 'source-session',
     definitionId: 'files.write_path',
     request: {
       definitionId: 'files.write_path',
       definitionVersion: '1',
       input: { path: '/owned/home/external.txt', content: 'private draft contents', base: null },
-      grants: ['approve_once'],
+      options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
       policy: { effects: ['external'] },
     },
   } as unknown as Interaction;

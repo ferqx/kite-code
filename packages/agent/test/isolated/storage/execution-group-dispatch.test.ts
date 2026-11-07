@@ -474,7 +474,7 @@ test('trusted Host prepare seals guard; real Ask self qualifies and physical run
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await Promise.race([
       running,

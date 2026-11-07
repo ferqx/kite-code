@@ -8,6 +8,11 @@ import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import {
+  approvalOptions,
+  grantDigest,
+  grantScopeDigest,
+} from '../../../../packages/agent/src/permission-grants';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -54,6 +59,23 @@ test.skipIf(process.platform !== 'darwin')(
         [finish],
       );
     }
+    const candidate = {
+      ruleId: 'fixture.command',
+      contractId: 'fixture.command-scope',
+      scope: { command: 'harmless' },
+      bindings: [
+        { kind: 'tool' as const, definitionId: 'fixture.command', definitionVersion: '1' },
+      ],
+      presentation: { label: '本 Session 相同命令', details: ['harmless', '仅来源会话的准确命令'] },
+    };
+    const offer = {
+      ...candidate,
+      scopeDigest: grantScopeDigest(candidate),
+      policyBindings: candidate.bindings.map((capability) => ({
+        capability,
+        reuseRevision: grantDigest({ policy: 'fixture', scope: candidate.scope }),
+      })),
+    };
     let effects = 0;
     const runtime = createRuntime({
       store,
@@ -66,9 +88,10 @@ test.skipIf(process.platform !== 'darwin')(
             : {
                 allowed: false,
                 revision: 'policy',
+                grantOffers: [offer],
                 approval: {
                   request: { title: 'Exact harmless command' },
-                  grants: ['approve_once', 'same_command'],
+                  options: approvalOptions([offer]),
                 },
               };
         },
@@ -148,7 +171,11 @@ test.skipIf(process.platform !== 'darwin')(
         presentationSessionId: id,
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: approvalOptions([offer]).find((option) => option.kind === 'scope')!.optionId,
+        },
       });
       await runtime.waitForCommand(`seed-${id}`);
       expect(
@@ -214,13 +241,15 @@ test.skipIf(process.platform !== 'darwin')(
     const fixture = join(root, 'driver.ts');
     writeFileSync(
       fixture,
-      readFileSync(
-        resolve(import.meta.dir, '../native-grants-electron.fixture.ts'),
-        'utf8',
-      ).replace(
-        "import { _electron } from 'playwright';",
-        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-      ),
+      readFileSync(resolve(import.meta.dir, '../native-grants-electron.fixture.ts'), 'utf8')
+        .replace(
+          "'./native-root-page.fixture'",
+          JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+        )
+        .replace(
+          "import { _electron } from 'playwright';",
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+        ),
     );
     const build = await Bun.build({
       entrypoints: [fixture],

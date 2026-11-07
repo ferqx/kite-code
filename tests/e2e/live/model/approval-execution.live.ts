@@ -15,7 +15,11 @@ import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
-import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
+import {
+  createCredentialVault,
+  createOsCredentialBackend,
+  createTemporaryCredentialBackend,
+} from '@kite-ai/agent/config';
 import { ripgrepAsset } from '@kite-ai/agent/jobs/shell';
 import { createShellCommandPolicy, readOnlySearchCommand } from '@kite-ai/agent/permissions/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -24,7 +28,12 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../../../apps/service/src';
-import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
+import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
+import {
+  createDefaultProcessConfiguration,
+  createUserConfiguration,
+  parseModelPreset,
+} from '../../../../apps/service/src/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
 import { canonicalJson } from '../../../../packages/agent/src/json';
 import { privateDirectory } from '../../../fixtures/test-filesystem';
@@ -41,6 +50,8 @@ import {
   verifyUnifiedShellModelCatalogue,
 } from './approval-execution-fixture';
 import {
+  createDefaultApprovalObservation,
+  hasMinimalShellRiskInput,
   liveModelSelection,
   liveReasoningEffort,
   originalToolFeedbackReceived,
@@ -132,6 +143,7 @@ if (process.platform !== 'darwin')
   throw Error('live_approval_execution_requires_macos_native_host');
 const args = new Map(
   process.argv.slice(2).map((arg) => {
+    if (arg === '--production-bindings') return ['production-bindings', 'true'] as const;
     const match = /^--(output|case|review|review-timeout-ms|reasoning-effort|model)=(.+)$/.exec(
       arg,
     );
@@ -144,11 +156,25 @@ if (args.has('review') && args.get('review') !== 'default-risk')
 const defaultRisk = args.get('review') === 'default-risk';
 const reasoningEffort = liveReasoningEffort(args.get('reasoning-effort'));
 const selectedModel = liveModelSelection(args.get('model'));
+const configuredDefault = selectedModel === 'default';
+const productionBindings = configuredDefault || args.has('production-bindings');
+if (productionBindings && (!defaultRisk || args.has('review-timeout-ms')))
+  throw Error('live_approval_execution_production_bindings_require_unmodified_default_risk');
+if (
+  configuredDefault &&
+  (!defaultRisk || args.has('reasoning-effort') || args.has('review-timeout-ms'))
+)
+  throw Error('live_approval_execution_default_requires_unmodified_default_risk');
+const transportQualification = productionBindings
+  ? 'original-service-business-and-reviewer-adapters; transparent-request-and-transport-observation'
+  : 'test-injected-live-adapter; default SDK transport is not under acceptance';
 if (args.has('review-timeout-ms') && !defaultRisk)
   throw Error('live_approval_execution_review_timeout_requires_default_risk');
-const reviewerTimeoutMs = defaultRisk
-  ? approvalReviewerTimeoutMs(args.get('review-timeout-ms'))
-  : 3000;
+const reviewerTimeoutMs = productionBindings
+  ? null
+  : defaultRisk
+    ? approvalReviewerTimeoutMs(args.get('review-timeout-ms'))
+    : 3000;
 const output = args.get('output');
 if (!output || !isAbsolute(output) || existsSync(output) || existsSync(`${output}.workspace`))
   throw Error('live_approval_execution_new_output_required');
@@ -168,12 +194,11 @@ const codeBefore = liveCodeEvidence();
 const results: Record<string, unknown>[] = [];
 const report = {
   model: selectedModel,
-  reasoningEffort,
+  reasoningEffort: configuredDefault ? 'original-independent-binding-settings' : reasoningEffort,
   platform: process.platform,
   source: 'formal-service-default-permissions',
   review: defaultRisk ? 'default-risk' : 'legacy-custom-checker',
-  transportQualification:
-    'test-injected-live-adapter; default SDK transport is not under acceptance',
+  transportQualification,
   reviewerTimeoutMs,
   productionTimeoutChanged: false,
   startedAt: new Date().toISOString(),
@@ -355,7 +380,26 @@ async function run(entry: Case) {
   let failure: string | undefined;
   const evidenceErrors: string[] = [];
   const cleanupErrors: string[] = [];
-  let live: Awaited<ReturnType<typeof createLiveModelFixture>> | undefined;
+  let live: Omit<Awaited<ReturnType<typeof createLiveModelFixture>>, 'model'> | undefined;
+  let defaultObservation: ReturnType<typeof createDefaultApprovalObservation> | undefined;
+  let restoreObservation: (() => void) | undefined;
+  const selectedWire = (wire: { requestId: string | null; body: string }) => {
+    const body = object(JSON.parse(wire.body));
+    if (!productionBindings)
+      return body.model === selectedModel && object(body.reasoning).effort === reasoningEffort;
+    const binding = defaultObservation?.logical.find(
+      (entry) => entry.requestId === wire.requestId,
+    )?.binding;
+    if (binding?.provider.availability !== 'available') return false;
+    return (
+      body.model === binding.provider.modelId &&
+      (object(body.reasoning).effort ?? body.reasoning_effort) ===
+        binding.settings.reasoningEffort &&
+      (binding.settings.maxOutputTokens === undefined ||
+        (body.max_output_tokens ?? body.max_tokens ?? body.max_completion_tokens) ===
+          binding.settings.maxOutputTokens)
+    );
+  };
   let runtime: ReturnType<typeof createRuntime> | undefined;
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let service: Awaited<ReturnType<typeof startService>> | undefined;
@@ -458,24 +502,119 @@ async function run(entry: Case) {
     return [...found.values()];
   };
   try {
-    live = await createLiveModelFixture({
-      model: selectedModel,
-      reasoningEffort,
-      requestTimeoutMs: null,
-      signal: cancellation.signal,
-      captureWireRequests: true,
-      beforeWireRequest(entry) {
-        appendFileSync(join(evidence, 'wire-requests.ndjson'), `${JSON.stringify(entry)}\n`, {
-          mode: 0o600,
+    const credentialBackend = createTemporaryCredentialBackend();
+    let configuredModel: Record<string, unknown> | undefined;
+    let configuredAutoApproval: unknown;
+    let localCodex: ReturnType<typeof createCodexLocalSource> | false = false;
+    let injectedModel: ModelAdapter | undefined;
+    const saveWireRequest = (entry: {
+      physicalIndex: number;
+      requestId: string | null;
+      body: string;
+    }) => {
+      appendFileSync(join(evidence, 'wire-requests.ndjson'), `${JSON.stringify(entry)}\n`, {
+        mode: 0o600,
+      });
+    };
+    if (productionBindings) {
+      localCodex = configuredDefault ? false : createCodexLocalSource();
+      const source = createUserConfiguration();
+      const configuration = source.read().value;
+      const discovery = localCodex ? localCodex.discover() : undefined;
+      if (!configuredDefault)
+        assert(
+          discovery?.models.some((model) => model.name === selectedModel),
+          'explicit-local-model-available',
+        );
+      const selected = configuredDefault
+        ? (Array.isArray(configuration.models) ? configuration.models : []).find(
+            (candidate) => object(candidate).id === configuration.modelId,
+          )
+        : {
+            id: 'live',
+            provider: 'codex',
+            providerName: discovery!.alias,
+            model: selectedModel,
+            baseURL: CODEX_BASE_URL,
+            protocol: 'responses',
+            enabled: true,
+            options: { reasoningEffort },
+          };
+      const selectedValue = object(selected);
+      assert(
+        typeof selectedValue.id === 'string' && selectedValue.enabled !== false,
+        'configured-default-model-available',
+      );
+      assert(
+        [
+          'openai',
+          'deepseek',
+          'compatible',
+          'ollama',
+          ...(!configuredDefault ? ['codex'] : []),
+        ].includes(String(selectedValue.provider)),
+        'configured-default-provider-supported',
+      );
+      assert(
+        typeof selectedValue.model === 'string' && typeof selectedValue.baseURL === 'string',
+        'configured-default-model-binding',
+      );
+      configuredModel = selectedValue;
+      configuredAutoApproval = configuration.autoApproval;
+      if (selectedValue.credentialRef !== undefined) {
+        assert(
+          typeof selectedValue.credentialRef === 'string',
+          'configured-default-credential-reference',
+        );
+        const reference = selectedValue.credentialRef as string;
+        const vault = createCredentialVault({
+          backend: createOsCredentialBackend({
+            service: 'kite-agent',
+            accountNamespace: 'user-models',
+          }),
         });
-      },
-      // Match the production adapter's sanitized failures; preserve every failed attempt in evidence.
-      preserveSdkAttemptErrors: true,
-    });
-    const model: ModelAdapter = {
-      describeRequest: live.model.describeRequest?.bind(live.model),
+        const secret = source.resolveCredential(reference) ?? (await vault.resolve(reference));
+        await credentialBackend.put(reference, secret);
+      }
+      defaultObservation = createDefaultApprovalObservation({
+        modelId: String(selectedValue.id),
+        signal: cancellation.signal,
+        metadata: {
+          model: selectedValue.model,
+          provider: selectedValue.provider,
+          protocol: selectedValue.protocol ?? 'chat-completions',
+          settings: parseModelPreset(
+            selectedValue.options as Parameters<typeof parseModelPreset>[0],
+          ),
+          bindingFingerprint: digest(JSON.stringify(selectedValue)),
+          transportQualification,
+        },
+        wireRequest: saveWireRequest,
+        rawResponse(index, bytes) {
+          const directory = join(evidence, 'wire-responses');
+          mkdirSync(directory, { recursive: true, mode: 0o700 });
+          writeFileSync(join(directory, `${index}.bin`), bytes, { mode: 0o600 });
+        },
+      });
+      live = defaultObservation;
+      restoreObservation = defaultObservation.install();
+    } else {
+      const injected = await createLiveModelFixture({
+        model: selectedModel,
+        reasoningEffort,
+        requestTimeoutMs: null,
+        signal: cancellation.signal,
+        captureWireRequests: true,
+        beforeWireRequest: saveWireRequest,
+        preserveSdkAttemptErrors: true,
+      });
+      live = injected;
+      injectedModel = injected.model;
+    }
+    const observeModel = (delegate: ModelAdapter, reviewer = false): ModelAdapter => ({
+      describeRequest: delegate.describeRequest?.bind(delegate),
       async *stream(request, context) {
-        const originalModel = await store!.getExecution(request.requestId);
+        const originalModel = reviewer ? null : await store!.getExecution(request.requestId);
         if (verifyUnifiedShellModelCatalogue(request.tools, originalModel?.sessionId === 's'))
           assert(true, `actual-unified-model-catalogue-${request.requestId}`);
         timeline.push({
@@ -633,7 +772,7 @@ async function run(entry: Case) {
             }
           }
         }
-        for await (const event of live!.model.stream(request, context)) {
+        for await (const event of delegate.stream(request, context)) {
           modelEvents.push({ requestId: request.requestId, event: structuredClone(event) });
           appendFileSync(
             join(evidence, 'model-events.ndjson'),
@@ -643,20 +782,24 @@ async function run(entry: Case) {
           yield event;
         }
       },
-    };
+    });
+    const model = injectedModel ? observeModel(injectedModel) : undefined;
     const configurationPath = join(profile.profilePath, 'config.jsonc');
     writeFileSync(
       configurationPath,
       JSON.stringify({
         modelId: live.modelId,
-        models: [
-          {
-            id: live.modelId,
-            provider: 'compatible',
-            model: 'injected-live',
-            baseURL: 'http://127.0.0.1:1/v1',
-          },
-        ],
+        models: configuredModel
+          ? [configuredModel]
+          : [
+              {
+                id: live.modelId,
+                provider: 'compatible',
+                model: 'injected-live',
+                baseURL: 'http://127.0.0.1:1/v1',
+              },
+            ],
+        ...(configuredAutoApproval === undefined ? {} : { autoApproval: configuredAutoApproval }),
         tools: [
           'execution_evidence.read',
           'files.read',
@@ -692,15 +835,15 @@ async function run(entry: Case) {
     const host = createDefaultProcessConfiguration({
       profile,
       userConfigurationPath: configurationPath,
-      localCodex: false,
-      credentialBackend: createTemporaryCredentialBackend(),
+      localCodex,
+      credentialBackend,
       ...(!defaultRisk
         ? {
             authorizationCheck: {
               id: 'live-approval-review',
               version: '1',
               modelId: live.modelId,
-              model,
+              model: model!,
             },
           }
         : {}),
@@ -723,12 +866,16 @@ async function run(entry: Case) {
     locks = createWorkspaceSerialLocks(profile);
     host.bindWorkspaceSerialLocks?.(locks);
     const instrument = (binding: RunConfiguration, actor: 'root' | 'child'): RunConfiguration => {
-      if (!defaultRisk) return { ...binding, model };
+      if (!defaultRisk) return { ...binding, model: model! };
       const outer = object(binding.snapshot);
       const snapshot = typeof outer.roleId === 'string' ? object(outer.configuration) : outer;
       assert(snapshot.defaultAutoReview === 'shell_risk', `default-risk-${actor}-frozen-contract`);
       assert(
-        typeof binding.authorizationCheck?.prepareRiskReview === 'function',
+        binding.toolBehaviors?.some(
+          (behavior) =>
+            behavior.capability.definitionId === 'shell.execute' &&
+            typeof behavior.prepareReview === 'function',
+        ) === true,
         `default-risk-${actor}-host-preparer`,
       );
       reviewBindings.push({
@@ -738,17 +885,36 @@ async function run(entry: Case) {
         checkerVersion: binding.authorizationCheck!.version,
         hasHostPreparer: true,
         originalTimeoutMs: binding.authorizationCheck!.timeoutMs,
-        injectedTimeoutMs: reviewerTimeoutMs,
-        injectedModel: 'live observation wrapper',
+        ...(productionBindings
+          ? { preservedOriginalBinding: true }
+          : { injectedTimeoutMs: reviewerTimeoutMs, injectedModel: 'live observation wrapper' }),
         model: selectedModel,
-        reasoningEffort,
+        reasoningEffort: configuredDefault
+          ? 'original-independent-binding-settings'
+          : reasoningEffort,
         policy: 'default-service-host',
-        transport: 'test-injected-live-adapter',
+        transport: productionBindings ? transportQualification : 'test-injected-live-adapter',
       });
+      if (productionBindings)
+        return {
+          ...binding,
+          model: observeModel(defaultObservation!.wrap(binding.model!, 'business')),
+          authorizationCheck: {
+            ...binding.authorizationCheck!,
+            model: observeModel(
+              defaultObservation!.wrap(binding.authorizationCheck!.model, 'reviewer'),
+              true,
+            ),
+          },
+        };
       return {
         ...binding,
-        model,
-        authorizationCheck: { ...binding.authorizationCheck!, model, timeoutMs: reviewerTimeoutMs },
+        model: model!,
+        authorizationCheck: {
+          ...binding.authorizationCheck!,
+          model: model!,
+          timeoutMs: reviewerTimeoutMs!,
+        },
       };
     };
     runtime = createRuntime({
@@ -908,7 +1074,7 @@ async function run(entry: Case) {
               expectedRevision: card.revision,
               answer: deny
                 ? { kind: 'approval', decision: 'deny' }
-                : { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+                : { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             approvals.push({
               at: Date.now(),
@@ -944,7 +1110,7 @@ async function run(entry: Case) {
               expectedStoreId,
               commandId: `answer-${card.id}`,
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             approvals.push({
               at: Date.now(),
@@ -1033,7 +1199,7 @@ async function run(entry: Case) {
             expectedRevision: card.revision,
             answer: deny
               ? { kind: 'approval', decision: 'deny' }
-              : { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              : { kind: 'approval', decision: 'approve', optionId: 'once' },
           });
           approvals.push({
             at: Date.now(),
@@ -1383,12 +1549,8 @@ async function run(entry: Case) {
           ),
           `default-risk-only-builtin-shell-${record.requestId}`,
         );
-        const keys = Object.keys(record.input).sort();
         assert(
-          keys.join(',') ===
-            ['material', 'operation', 'policyRevision', 'purpose', 'request', 'requireApproval']
-              .sort()
-              .join(','),
+          hasMinimalShellRiskInput(record.input),
           `default-risk-minimal-input-${record.requestId}`,
         );
         const hasBusinessContext = (value: unknown): boolean =>
@@ -1441,16 +1603,13 @@ async function run(entry: Case) {
         'default-risk-every-successful-shell-review-has-original-risk-input',
       );
       assert(
-        live.wireRequests.every((wire) => {
-          const body = object(JSON.parse(wire.body));
-          return body.model === selectedModel && object(body.reasoning).effort === reasoningEffort;
-        }),
+        live.wireRequests.every(selectedWire),
         `default-risk-actual-wire-selected-model-${reasoningEffort}`,
       );
       observations.defaultRisk = {
         policy: 'default-service-host',
-        transport: 'test-injected-live-adapter',
-        defaultSdkTransportQualified: false,
+        transport: productionBindings ? transportQualification : 'test-injected-live-adapter',
+        defaultSdkTransportQualified: productionBindings,
         bindings: reviewBindings,
         riskRequests: records.length,
         rawAndMappedEvidence: join(evidence, 'risk-review.json'),
@@ -1514,7 +1673,7 @@ async function run(entry: Case) {
       assert(
         carriers.length === 1 &&
           carrier?.status === 'failed' &&
-          ['worker', 'code'].includes(String(role(carrier))) &&
+          role(carrier) === 'general' &&
           carrier.childSessionId === fault.childSessionId &&
           injectedModel?.kind === 'model' &&
           injectedModel.status === 'failed' &&
@@ -1742,13 +1901,7 @@ async function run(entry: Case) {
     } else if (entry.kind === 'natural') {
       assert(actualAttemptFailures.length === 0, 'natural-no-provider-technical-failure');
       assert(
-        live.wireRequests.length === requests.length &&
-          live.wireRequests.every((entry) => {
-            const body = object(JSON.parse(entry.body));
-            return (
-              body.model === selectedModel && object(body.reasoning).effort === reasoningEffort
-            );
-          }),
+        live.wireRequests.length === requests.length && live.wireRequests.every(selectedWire),
         'natural-every-business-child-and-review-request-uses-selected-model',
       );
       const originalCarrier = carriers.find(
@@ -1766,9 +1919,7 @@ async function run(entry: Case) {
                   carrier.childSessionId === observedChildIdentity!.childSessionId &&
                   carrier.status === 'succeeded',
               ) &&
-              (entry.actor === 'explore'
-                ? ['explore', 'plan', 'review'].includes(String(role(originalCarrier)))
-                : ['worker', 'code'].includes(String(role(originalCarrier)))),
+              role(originalCarrier) === (entry.actor === 'explore' ? 'explore' : 'general'),
         'natural-exact-actor-and-role',
       );
       const actorId = entry.actor === 'main' ? 's' : observedChildIdentity!.childSessionId;
@@ -1935,7 +2086,7 @@ async function run(entry: Case) {
         });
         for (const tool of shellTools) {
           const classified = await readonlyPolicy.classify(String(object(tool.input).command));
-          if (readOnlySearchCommand(classified.plainCommands, '/bin/sh')) continue;
+          if (readOnlySearchCommand(classified, '/bin/sh')) continue;
           const reviewPath = join(evidence, `readonly-observation-${tool.id}.json`);
           writeFileSync(
             reviewPath,
@@ -2082,7 +2233,7 @@ async function run(entry: Case) {
           const safeRead =
             (scope.filesystem ?? 'workspace_write') === 'workspace_write' &&
             (scope.network ?? 'none') === 'none' &&
-            readOnlySearchCommand(classified.plainCommands, '/bin/sh');
+            readOnlySearchCommand(classified, '/bin/sh');
           if (!safeRead) requireReview(execution, ['approve_once', 'ask_user']);
         }
         for (const execution of executions.filter(
@@ -2185,11 +2336,11 @@ async function run(entry: Case) {
             (e) =>
               e.status === 'succeeded' && object(object(e.result).details).status === 'completed',
           ) &&
-          carriers.filter((e) => role(e) === 'code').length === 1 &&
+          carriers.filter((e) => role(e) === 'general').length === 1 &&
           carriers.filter((e) => role(e) === 'explore').length === 1,
         'two-real-child-sessions',
       );
-      const writerId = carriers.find((e) => role(e) === 'code')!.childSessionId!;
+      const writerId = carriers.find((e) => role(e) === 'general')!.childSessionId!;
       const explorerId = carriers.find((e) => role(e) === 'explore')!.childSessionId!;
       assert(
         executions.some(
@@ -2278,7 +2429,7 @@ async function run(entry: Case) {
           const safeRead =
             (scope.filesystem ?? 'workspace_write') === 'workspace_write' &&
             (scope.network ?? 'none') === 'none' &&
-            readOnlySearchCommand(classified.plainCommands, '/bin/sh');
+            readOnlySearchCommand(classified, '/bin/sh');
           if (!safeRead) requireReview(e);
         }
       }
@@ -2618,6 +2769,12 @@ async function run(entry: Case) {
           wire: live.wire,
           wireRequests: live.wireRequests,
           attemptFailures: live.attemptFailures,
+          ...(defaultObservation
+            ? {
+                logical: defaultObservation.logical,
+                physical: defaultObservation.physical.attempts,
+              }
+            : {}),
         },
         null,
         2,
@@ -2728,8 +2885,8 @@ async function run(entry: Case) {
             {
               review: 'default-risk',
               policy: 'default-service-host',
-              transport: 'test-injected-live-adapter',
-              defaultSdkTransportQualified: false,
+              transport: productionBindings ? transportQualification : 'test-injected-live-adapter',
+              defaultSdkTransportQualified: productionBindings,
               timeoutMs: reviewerTimeoutMs,
               productionTimeoutChanged: false,
               bindings: reviewBindings,
@@ -2750,6 +2907,12 @@ async function run(entry: Case) {
               wire: live.wire,
               wireRequests: live.wireRequests,
               attemptFailures: live.attemptFailures,
+              ...(defaultObservation
+                ? {
+                    logical: defaultObservation.logical,
+                    physical: defaultObservation.physical.attempts,
+                  }
+                : {}),
             },
             null,
             2,
@@ -2773,6 +2936,7 @@ async function run(entry: Case) {
         cleanupErrors.push(`${name}:${String(error)}`);
       }
     }
+    restoreObservation?.();
     if (cleanupErrors.length || evidenceErrors.length) {
       status = 'failed';
       failure ??= cleanupErrors.length ? 'cleanup-failed' : 'evidence-failed';
@@ -2783,7 +2947,9 @@ async function run(entry: Case) {
       kind: entry.kind,
       actor: entry.actor,
       model: selectedModel,
-      reasoningEffort,
+      reasoningEffort: configuredDefault
+        ? 'original-independent-binding-settings'
+        : reasoningEffort,
       naturalToolSelection: ['natural', 'partial-child-failure'].includes(entry.kind),
       ...(entry.kind === 'partial-child-failure'
         ? {

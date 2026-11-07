@@ -125,7 +125,7 @@ test('range and edit-argument errors explain the model parameter contract withou
     });
     expect(emptyText.details).toMatchObject({ code: 'file_edit_invalid' });
     expect(emptyText.content).toContain('nonempty old_text');
-    expect(emptyText.content).toContain('positive integer expected_matches');
+    expect(emptyText.content).toContain('expected_matches defaults to 1');
     expect(readFileSync(join(f.workspace, 'source.txt'), 'utf8')).toBe('original\n');
   } finally {
     await f.close();
@@ -222,7 +222,7 @@ test('supported Full external operations explain OS/path failure without imposin
     });
     expect(missing.outcome).toBe('failed');
     expect(missing.details).toMatchObject({ code: 'ENOENT', fileScope: 'external_path' });
-    expect(missing.content).toContain('replacement and edit require an existing file');
+    expect(missing.content).toContain('Replacement and edit require an existing file');
     noParentNotice(missing);
     const invalid = await execute('files.read', { path: `${f.external}/./source.txt` });
     expect(invalid.details).toMatchObject({ code: 'file_path_invalid' });

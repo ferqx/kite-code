@@ -1,24 +1,30 @@
 # Git Worktree 工具
 
-`builtin.shell` 注册 `git.worktree@1`，模型名为 `git_worktree`，只提供 `list/create/remove`。外层工具不持有进程槽或串行资源；全部 Git 调用由现有 `shell.command@1` 的受管 Bun worker 使用 argv 执行。创建返回路径，保留来源 checkout 和 Session cwd，不维护工作树数据库。
+`builtin.shell` 注册 `git.worktree@1`，模型名为 `git_worktree`，提供 `list/create/remove/observe`。外层工具不持有进程槽或串行资源；全部 Git 调用由现有 `shell.command@1` 的受管 Bun worker 使用 argv 执行。创建返回路径，保留来源 checkout 和 Session cwd，不维护工作树数据库。
 
 ## 输入与产品边界
 
-[输入及编排](../git-worktree.ts)使用封闭对象和 action 校验。`list` 只接收 action；变更要求 ASCII `key`；remove 的原生绝对 `path` 必填，create 可省略 path，可信默认根为 `~/.kite-code/worktrees/`，最终目标按来源 cwd／Session／key 稳定派生。显式 path 优先。创建默认 detached、`baseRef:HEAD`，`newBranch` 只允许尚不存在的字面本地短名；不展开 Shell、环境变量或 checkout 简写。期限首次接纳后固定，list 为15秒，创建默认120秒，删除默认60秒。变更权限默认 `workspace_write/none`；`full_access` 仍经过原权限链，网络不能申请 internet。固定 worker 的实际范围取接纳证明与原申请的交集，Full 也不扩大本工具的申请。
+[输入及编排](../git-worktree.ts)使用封闭对象和 action 校验。模型 list 只接收 action，create 使用 `path?、base_ref?、new_branch?、execution_timeout_ms?、filesystem?`，remove 使用原生绝对 path 及可选期限／filesystem；不接收 key、嵌套 permissions 或 network。宿主从已持久 Tool execution 稳定派生意图，返回准确 `operation_ref`。observe 只接收原 operation_ref，读取原扩展记录和原 Job 状态，不调用 ensure、prepare、mutation，也不重放 unknown。
 
-公开 schema 同时表达 action 间的字段限制，避免非法 list 附带 key/path、变更缺少 key、remove 缺少 path 或 remove 携带创建字段落入权限拒绝。Runtime 在权限与派发前按原 `invalid_tool_arguments` 路径返回可修正的参数反馈，零 Git Job、零意图记录；参数错误不要求扩大权限。工具及 worker 的严格解析继续兜底，已经接纳的变更仍只能观察原 key／原 Job，不能借修参重发。新分支名的存在性包含悬空符号引用条目；prepare 和 mutation 均拒绝已有名称，避免 Git 解引用后创建未请求的分支。
+operation_ref 只无损编码原 Tool ID，当前 UUID 为26字符。观察从该原 ID 派生同一个宿主意图键，核原 Store／Session、准确 builtin.shell／git.worktree 定义、真实派发和记录 owner；不重复编码或信任模型填写的内部 key。原结果正文缺失或 outcome_unknown 仍可只读观察原记录和 Job。返回引用不再额外读取、重验记录，避免已知损坏记录失败被第二次异常覆盖；实际受理与失败分类由原执行路径决定。
+
+create 可省略 path，可信默认根为 `~/.kite-code/worktrees/`，最终目标按来源 cwd／Session／宿主意图稳定派生。显式 path 优先。创建默认 detached、`base_ref:HEAD`，`new_branch` 只允许尚不存在的字面本地短名；不展开 Shell、环境变量或 checkout 简写。公开 Schema 提前表达原生绝对路径、分支前缀和 action 字段限制；worker 继续严格验证。期限首次接纳后固定，list 为15秒，创建默认120秒，删除默认60秒。filesystem 默认 workspace_write，full_access 仍经过原权限链；网络固定 none。固定 worker 的实际范围取接纳证明与原申请的交集，Full 也不扩大申请。参数错误为 invalid_tool_arguments，零 Git Job、零意图记录；不要求扩权或换意图重投。
 
 [临时路径策略](../../permissions/worktree-path-policy.ts)从可信平台临时根、环境和最近真实祖先识别临时目录及别名。Tool 首次接纳前、worker prepare 和 mutation 均拒绝新的临时创建目标，原历史回执优先读取，remove 不因目标曾在临时目录而拒绝原安全检查。模型指导要求创建只走本工具，不以 Shell／脚本兜底；没有新增普通 Shell AST 拦截。
 
-省略 path 的原记录保留原输入，并在首次 executable CAS 冻结 resolvedTarget；prepare 请求使用同一值，不能回填改写原授权意图。Store 从原封存 Run 的可信 Shell 配置（含 child configuration 包装）验证根和稳定派生路径。旧显式路径记录继续可读，同 key 先查旧记录／ref，默认设置变化不能重选路径或重发。
+省略 path 的原记录保留原输入，并在首次 executable CAS 冻结 resolvedTarget；prepare 请求使用同一值，不能回填改写原授权意图。Store 从原封存 Run 的可信 Shell 配置（含 child configuration 包装）验证根和稳定派生路径。同一内部意图先查原记录／ref，默认设置变化不能重选路径或重发；公开 observe 只定位该原意图。
 
 默认父目录缺失时，prepare 只读保存最近存在祖先、代际和缺失链；原获批 mutation Job 在公共锁内逐级非递归 mkdir，首个 mkdir 后即为 partial。失败保留已有目录，原 owner／ref 恢复边界不变。显式路径仍要求直接父目录已存在；未放宽原仓库 overlap 或删除保护。
 
 ## 业务授权与创建通知
 
-Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或人工审批，封闭内部 Job 只继承经 Store 完整核实的原 Auto 免审来源；普通 Shell 即使命令相同也不取得该例外。手动模式的一次创建／删除批准仍覆盖原 Tool 的两个封闭步骤，正常外部范围各一张业务卡。prepare 仍按所属变更分类，不改 safeRead，也不免除 Job 派发检查。[准确资产描述](../../permissions/shell.ts)在核验实际 worker 后封存配置身份；[授权边界](../../storage/sqlite/worktree-authorization.ts)核实际 builtin.shell 注册、同 Store／Session／root work／owner、原记录和步骤、权限、期限及原 prepare 的完整输出。mutation 必须使用其实际成功 prepared frame 的原 plan/digest。原来源、当前父子／Planning 策略、控制读集与撤销在最终派发事务再验；自定义独立人工上限不被吸收。原 same_command 和普通 Shell 手动分层合同保持。
+[工作树行为工厂](approval.ts)提供有限的 create/remove 会话范围，随真实 Tool 定义登记；不将内部 Shell Job 加入消费 bindings。create 在卡片前通过原可信 Git／路径读取能力取得真实仓库、已存在的批准父目录和 base commit OID，范围只覆盖该父目录的直接子项、固定 commit 及 detached/newBranch 模式。它不运行 prepare Job、不创建 executable 记录；父目录无法核实或尚不存在时保留原单次路径。remove 只覆盖准确现有目标，不包含 create、force 或递归清理。
 
-退出工作树不属于本工具三个 action：它只返回客户端来源项目／会话，不删除目录、登记或分支。模型须按[默认合同](../../model-context.ts)区分导航与明确目标的删除意图；创建未改变原 Session cwd，不能以 remove 模拟退出。
+后续正常 prepare 继续生成实际计划；[范围比较](approval-scope.ts)在[原 SQL 证明桥](../../storage/sqlite/worktree-authorization.ts)核对 prepared frame 与已接纳范围的仓库／父锚点、baseOid、分支模式和直接子项或准确删除目标。选择范围批准后，若卡片所绑定的 HEAD/ref 或父目录身份与 prepared 计划失配，不能启动 mutation，也不自动降级单次继续。范围使用稳定目录身份；ctime 等本次代际仍独立用于 prepare/mutation 安全核验。原单次及 Auto 免审路径保持各自语义，不为它们增加范围批准的固定 commit 义务。相邻[范围回归](../../../test/isolated/tools/git-worktree/approval-scope.test.ts)覆盖真实 Git 的批准前取证、同父目录兄弟候选及 HEAD／父目录漂移零工作树创建。
+
+Auto 下准确 `builtin.shell/git.worktree@1` Tool 不调用 generic check 或人工审批，封闭内部 Job 只继承经 Store 完整核实的原 Auto 免审来源；普通 Shell 即使命令相同也不取得该例外。手动模式的一次创建／删除批准仍覆盖原 Tool 的两个封闭步骤，正常外部范围各一张业务卡。prepare 仍按所属变更分类，不改 safeRead，也不免除 Job 派发检查。[准确资产描述](../../permissions/shell.ts)在核验实际 worker 后封存配置身份；[授权边界](../../storage/sqlite/worktree-authorization.ts)核实际 builtin.shell 注册、同 Store／Session／root work／owner、原记录和步骤、权限、期限及原 prepare 的完整输出。mutation 必须使用其实际成功 prepared frame 的原 plan/digest。原来源、当前父子／Planning 策略、控制读集与撤销在最终派发事务再验；自定义独立人工上限不被吸收。普通 Shell 同命令统一范围与准确父链沿各自行为核验，不借用 Worktree 特例。
+
+退出工作树不属于本工具的 Git action：它只返回客户端来源项目／会话，不删除目录、登记或分支。模型须按[默认合同](../../model-context.ts)区分导航与明确目标的删除意图；创建未改变原 Session cwd，不能以 remove 模拟退出。
 
 [通知 helper](notification.ts)只在原创建 owner 已保存稳定成功后，沿现有 sendStableAgentMessage 向 parent 排队确定正文；用实际执行组根关系区分根与子会话，不以 quiescent 作为通知门槛。原 owner 合法恢复可续接同一正文和持久消息身份，新 Execution 历史回执不另发。单次 Tool 回执的 parentNotification 区分 queued/accepted:true、预检或稳定记录保存失败的 failed/accepted:false，以及入队受理不可核实的 outcome_unknown/accepted:null；只表示消息情况，Git outcome 保持。稳定操作记录保存原 Git 回执，消息受理继续由原邮箱 command 持久化；没有队列确认不能宣称父已收到。
 

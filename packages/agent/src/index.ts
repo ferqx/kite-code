@@ -58,3 +58,10 @@ export type {
   SessionExportTextPage,
 } from './storage/types';
 export { AgentError, type HostControlState } from './storage/types';
+
+export {
+  createToolBehaviorRegistry,
+  type ReviewPreparation,
+  type ToolBehaviorBinding,
+  type TrustedToolBehavior,
+} from './tool-behavior';

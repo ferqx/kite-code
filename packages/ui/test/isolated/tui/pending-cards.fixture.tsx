@@ -89,7 +89,21 @@ const runtime = createRuntime({
             approval: {
               request: {
                 input: invocation.input,
-                grants: ['approve_once', 'same_command'],
+                options: [
+                  {
+                    optionId: 'once',
+                    kind: 'once',
+                    presentation: { label: '仅此次', details: [] },
+                  },
+                  {
+                    optionId: 'scope-example',
+                    kind: 'scope',
+                    presentation: {
+                      label: '本 Session 相同命令',
+                      details: ['仅限此会话的完整相同命令、环境与执行范围'],
+                    },
+                  },
+                ],
                 policyBody: 'P'.repeat(70000) + ' END_FULL_' + invocation.definitionId,
               },
             },

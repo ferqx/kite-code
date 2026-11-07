@@ -82,7 +82,16 @@ if (!process.stdin.isTTY) {
               ? {
                   allowed: false,
                   revision: 'owned-auth-ordinary-ask',
-                  approval: { request: { effects: ['configuration'] }, grants: ['approve_once'] },
+                  approval: {
+                    request: { effects: ['configuration'] },
+                    options: [
+                      {
+                        optionId: 'once',
+                        kind: 'once',
+                        presentation: { label: '仅此次', details: [] },
+                      },
+                    ],
+                  },
                 }
               : { allowed: true, revision: 'owned-auth-read' };
           },

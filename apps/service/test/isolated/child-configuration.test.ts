@@ -66,13 +66,13 @@ function provider() {
             ? null
             : {
                 name: 'write_file',
-                input: { path: 'forbidden.txt', base: null, content: 'must not write' },
+                input: { path: 'forbidden.txt', content: 'must not write' },
               }
           : body.model === 'background'
             ? toolResults.length
               ? null
               : { name: 'fixture.launch', input: {} }
-            : toolResults.some((message) => message.content.includes('baseline'))
+            : toolResults.some((message) => message.content.includes('base_ref='))
               ? null
               : { name: 'read_file', input: { path: 'input.txt' } };
       const chunk = (delta: unknown, reason: string | null) =>
@@ -668,7 +668,7 @@ test('trusted role carrier is an independent exact unknown-effect Job: Ask appro
           commandId: 'approve-carrier',
           interactionId: card.id,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       await f.runtime.waitForCommand('work', { timeoutMs: 7000 });

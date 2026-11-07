@@ -43,7 +43,7 @@ const approval = (id: string, sessionId: string): Interaction => ({
   request: {
     definitionId: 'files.write',
     definitionVersion: '2',
-    grants: ['approve_once'],
+    options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
     input: { path: `${id}.txt` },
   },
   answer: null,
@@ -75,7 +75,17 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
     child = approval('child-approval', 'child');
   const fullRequest = {
     ...(child.request as object),
-    grants: ['approve_once', 'same_command'],
+    options: [
+      { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+      {
+        optionId: 'scope-example',
+        kind: 'scope',
+        presentation: {
+          label: '本 Session 相同命令',
+          details: ['仅限此会话的完整相同命令、环境与执行范围'],
+        },
+      },
+    ],
     input: { path: 'child-full.txt', content: '准确完整内容 雪🙂' },
   };
   const content = new TextEncoder().encode(JSON.stringify(fullRequest));
@@ -156,7 +166,7 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
     unknown = true;
     await act(async () => render());
     expect(article(parent.id).textContent).toContain('审批提交结果未知');
-    expect(button(parent.id, '批准一次').disabled).toBe(true);
+    expect(button(parent.id, '仅此次').disabled).toBe(true);
     await act(async () =>
       host.querySelector<HTMLButtonElement>('[aria-label="下一项审批"]')!.click(),
     );
@@ -169,7 +179,7 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
       if (Date.now() >= deadline) throw Error('group_attachment_not_verified');
       await act(async () => await Bun.sleep(5));
     }
-    expect(button(child.id, '批准一次').disabled).toBe(false);
+    expect(button(child.id, '仅此次').disabled).toBe(false);
     expect(article(child.id).textContent).toContain('child-full.txt');
     expect(host.querySelector('pre')).toBeNull();
     expect(article(child.id).querySelector('[aria-label="更多批准方式"]')).not.toBeNull();
@@ -186,16 +196,16 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
       if (Date.now() >= deadline) throw Error('group_attachment_not_verified_again');
       await act(async () => await Bun.sleep(5));
     }
-    await act(async () => button(child.id, '批准一次').click());
+    await act(async () => button(child.id, '仅此次').click());
     expect(answers[1]).toEqual({
       id: child.id,
       runId: child.runId,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await act(async () => render([parent]));
     expect(host.querySelector('[aria-label="切换审批"]')).toBeNull();
     expect(host.querySelector(`article[aria-label="approval ${child.id}"]`)).toBeNull();
-    expect(button(parent.id, '批准一次').disabled).toBe(true);
+    expect(button(parent.id, '仅此次').disabled).toBe(true);
     // A new earlier approval must not replace the currently visible child.
     await act(async () => render([child]));
     await act(async () => render([parent, child]));
@@ -257,7 +267,17 @@ test('session approval submits only the selected original child while sibling an
     request: {
       definitionId: 'shell.execute',
       definitionVersion: '1',
-      grants: ['approve_once', 'same_command'],
+      options: [
+        { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        {
+          optionId: 'scope-example',
+          kind: 'scope',
+          presentation: {
+            label: '本 Session 相同命令',
+            details: ['仅限此会话的完整相同命令、环境与执行范围'],
+          },
+        },
+      ],
       input: { command: 'printf "same command"' },
     },
   }));
@@ -300,8 +320,8 @@ test('session approval submits only the selected original child while sibling an
       ),
     );
     const same = dom.window.document.querySelector<HTMLElement>('[role="menuitem"]')!;
-    expect(same.textContent).toContain('本次会话批准');
-    expect(same.textContent).toContain('本次及本会话内的相同命令');
+    expect(same.textContent).toContain('本 Session 相同命令');
+    expect(same.textContent).toContain('仅限此会话的完整相同命令、环境与执行范围');
     await act(async () => same.click());
     expect(answers).toHaveLength(1);
     expect(answers[0]!.original).toBe(interactions[1]!);
@@ -316,7 +336,7 @@ test('session approval submits only the selected original child while sibling an
     expect(answers[0]!.answer).toEqual({
       kind: 'approval',
       decision: 'approve',
-      grant: 'same_command',
+      optionId: 'scope-example',
     });
     await page('下一项审批');
     expect(article().getAttribute('aria-label')).toBe('approval child-b-shell');

@@ -219,7 +219,6 @@ const provider = Bun.serve({
           call = {
             name: 'update_plan_progress',
             input: {
-              run_id: previous.runId,
               plan_id: 'fixture',
               version: 2,
               digest: current.digest,

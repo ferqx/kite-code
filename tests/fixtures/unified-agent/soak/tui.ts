@@ -10,6 +10,7 @@ import type {
   CaseEvidence,
   ResourceObservation,
 } from '../../../../scripts/runtime/unified-soak-cases';
+import { loopbackModelEnvironment } from '../../loopback-model-environment';
 import { privateDirectory } from '../../test-filesystem';
 import { check } from './common';
 export async function runTuiCase(
@@ -60,6 +61,7 @@ export async function runTuiCase(
       });
     },
   });
+  Object.assign(userConfiguration.homeEnvironment, loopbackModelEnvironment(server.url));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'soak-tui' });
   privateDirectory(profile.profilePath);
   privateDirectory(join(profile.profilePath, 'ui'));

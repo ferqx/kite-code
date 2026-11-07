@@ -132,7 +132,7 @@ function fixture(child = false, legacy = false) {
 }
 
 for (const legacy of [false, true])
-  test(`check material reads exact task, workspace, plan and scoped ${legacy ? 'legacy' : 'current'} refusal without granting authority`, async () => {
+  test(`check material reads exact task, workspace, plan and ${legacy ? 'ignores an unsupported legacy refusal' : 'retains the scoped current refusal'} without granting authority`, async () => {
     const f = fixture(false, legacy);
     const result = await f.read(f.request);
     expect(result.task).toMatchObject({
@@ -144,7 +144,7 @@ for (const legacy of [false, true])
       trustedAsAuthority: false,
     });
     expect(result.plan).toEqual({ body: 'Real saved plan\nwith details' });
-    expect(result.rejectionReasons).toEqual(['Saved refusal']);
+    expect(result.rejectionReasons).toEqual(legacy ? [] : ['Saved refusal']);
   });
 
 test('actual child role is sealed Run snapshot; input role cannot choose checker identity', async () => {

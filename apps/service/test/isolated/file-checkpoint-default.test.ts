@@ -54,7 +54,11 @@ function stamp(path: string) {
     hash: hash(readFileSync(path)),
   };
 }
-test('default paired Files captures actual two-Run Model boundaries and complete byte preimages; explicit restore asks independently, removes creates, and cold reads replay nothing', async () => {
+test.each([
+  'accept_edits',
+  'auto',
+  'full',
+] as const)('default paired Files captures actual two-Run Model boundaries and complete byte preimages; explicit restore asks independently in %s, removes creates, and cold reads replay nothing', async (restoreMode) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-file-checkpoint-default-'))),
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -236,9 +240,11 @@ test('default paired Files captures actual two-Run Model boundaries and complete
         'follow_up_agent',
         'interrupt_agent',
         'list_agents',
+        'read_execution_evidence',
         'read_file',
         'send_agent_message',
         'spawn_agent',
+        'view_images',
         'wait_agent_events',
         'web_fetch',
         'write_file',
@@ -370,6 +376,25 @@ test('default paired Files captures actual two-Run Model boundaries and complete
       definitionVersion: '1',
       input: { checkpointId: point.id, restoreId: 'explicit-first' },
     };
+    const restoreControl = await client.getPermissionMode('s', { storeId });
+    expect(
+      (
+        await client.setPermissionMode('s', {
+          expectedStoreId: storeId,
+          commandId: 'restore-mode',
+          mode: restoreMode,
+          ifRevision: restoreControl.revision,
+          makeDefault: false,
+          ifDefaultRevision: restoreControl.defaultRevision,
+        })
+      ).state,
+    ).toBe('applied');
+    const restorePermission = await client.getPermissionMode('s', { storeId });
+    expect(restorePermission.mode).toBe(restoreMode);
+    const executionsBeforeRestore = await reader.listExecutions('s');
+    expect(
+      (await reader.listInteractions({ expectedStoreId: storeId, sessionId: 's' })).interactions,
+    ).toEqual([]);
     const beforeRestore = stamp(originalPath);
     await client.invokeExtension('s', input);
     const cards = await until(
@@ -385,6 +410,29 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     expect(card.definitionVersion).toBe('1');
     expect(card.kind).toBe('approval');
     expect(card.runId).toBeNull();
+    expect(cards.interactions).toHaveLength(1);
+    const savedCard = await reader.getInteraction({
+      expectedStoreId: storeId,
+      sessionId: 's',
+      interactionId: card.id,
+    });
+    const confirmation = (savedCard!.request as Record<string, Json>).executionConfirmation;
+    expect(confirmation).toMatchObject({
+      owner: {
+        capability: {
+          kind: 'job',
+          definitionId: 'builtin.files/files.checkpoint.restore',
+          definitionVersion: '1',
+        },
+        contractRef: 'builtin.files.explicit-restore',
+      },
+      executionId: card.executionId,
+      inputDigest: savedCard!.inputDigest,
+      steps: [],
+    });
+    expect((savedCard!.request as Record<string, Json>).options).toMatchObject([
+      { optionId: 'once', kind: 'once' },
+    ]);
     expect(stamp(originalPath)).toEqual(beforeRestore);
     expect(existsSync(join(workspace, 'first-created.txt'))).toBe(true);
     const carrier = await reader.getExecution(card.executionId!);
@@ -398,7 +446,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
       expectedStoreId: storeId,
       commandId: 'approve-restore',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const restored = await until(
       () => client.getExecution(card.executionId!),
@@ -407,6 +455,35 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     if (restored.status !== 'succeeded')
       console.error('actual_default_restore_failure', JSON.stringify(restored));
     expect(restored.status).toBe('succeeded');
+    const acceptedCard = await reader.getInteraction({
+      expectedStoreId: storeId,
+      sessionId: 's',
+      interactionId: card.id,
+    });
+    expect(acceptedCard).toMatchObject({
+      state: 'answered',
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+      acceptedDecisionRevision: acceptedCard!.revision,
+      request: savedCard!.request,
+    });
+    const restoredCarrier = await reader.getExecution(card.executionId!);
+    expect(restoredCarrier!.interactionBinding).toEqual({
+      interactionId: card.id,
+      decisionRevision: acceptedCard!.revision,
+    });
+    expect(restoredCarrier!.authorization).toMatchObject({
+      dispatched: true,
+      human: { interactionId: card.id, accepted: true, optionId: 'once', optionKind: 'once' },
+    });
+    const newExecutions = (await reader.listExecutions('s')).filter(
+      (execution) => !executionsBeforeRestore.some((before) => before.id === execution.id),
+    );
+    // This code-only Action is itself the Job carrier; it declares no additional closed steps.
+    expect(newExecutions.map((execution) => execution.id)).toEqual([card.executionId!]);
+    expect(
+      (await reader.listInteractions({ expectedStoreId: storeId, sessionId: 's' })).interactions,
+    ).toEqual([acceptedCard!]);
+    expect(await client.getPermissionMode('s', { storeId })).toEqual(restorePermission);
     expect(readFileSync(originalPath)).toEqual(original);
     expect(existsSync(join(workspace, 'first-created.txt'))).toBe(false);
     expect(existsSync(join(workspace, 'second-created.txt'))).toBe(false);
@@ -430,6 +507,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
       (await client.listInteractions('s', { storeId, state: 'pending', limit: 100 })).interactions,
     ).toEqual([]);
     const metadata = await reader.getMetadata();
+    expect(metadata.formatMajor).toBe(1);
     const allBefore = await reader.getView('s');
     await reader.close();
     reader = undefined;
@@ -465,6 +543,13 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     expect(stamp(originalPath)).toEqual(afterRestore);
     expect((await reader.getMetadata()).lastChangeCursor).toBe(metadata.lastChangeCursor);
     expect(await reader.getView('s')).toEqual(allBefore);
+    expect(
+      await reader.getInteraction({
+        expectedStoreId: storeId,
+        sessionId: 's',
+        interactionId: card.id,
+      }),
+    ).toEqual(acceptedCard);
     expect(requests).toHaveLength(8);
   } finally {
     await reader?.close();

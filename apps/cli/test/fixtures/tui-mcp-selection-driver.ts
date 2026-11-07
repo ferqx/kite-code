@@ -199,7 +199,7 @@ try {
   await wait('MCP Tools · saved metadata');
   await wait('Reading does not connect or authorize tools.');
   await key('\x03');
-  await wait('Approve this execution only');
+  await wait('仅此次');
   // The subsequent control read proves the exact original pending ID and revision.
   await wait('approval [');
   await check('ctrl-c');
@@ -207,7 +207,7 @@ try {
   await key('/clear');
   await wait('/clear');
   await key('\r');
-  await wait('Approve this execution only');
+  await wait('仅此次');
   // The subsequent control read proves the exact original pending ID and revision.
   await wait('approval [');
   await check('clear');
@@ -216,7 +216,7 @@ try {
     false,
   );
   await key('PRIVATE_CARD_DRAFT');
-  await wait('Approve this execution only');
+  await wait('仅此次');
   // The subsequent control read proves the exact original pending ID and revision.
   await wait('approval [');
   await wait('PRIVATE_CARD_DRAFT');

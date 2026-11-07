@@ -40,7 +40,9 @@ async function fixture() {
   const owner = (await store.acquireSessionOwner('root', 'original'))!;
   const configuration = {
     modelId: 'fixed',
-    snapshot: { value: null, authorizationReview: null },
+    snapshot: { value: null, authorizationCheck: null },
+    authorizationCheck: null,
+    toolBehaviors: [],
     maxConcurrentSubagents: 3,
     extensions: [{ id: 'fixture', version: '1' }],
     tools: [{ id: 'fixture/parent', version: '1', extensionId: 'fixture' }],

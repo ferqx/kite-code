@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
@@ -89,6 +90,67 @@ test('current Store identity and exact database/profile bytes survive readonly p
   access.lock.release();
 });
 
+test('a forged current profile fingerprint cannot admit a same-major legacy database schema', async () => {
+  const value = await current();
+  const header = bytes(join(value.profilePath, 'profile.json'));
+  const db = new Database(value.databasePath);
+  db.exec(
+    "DROP TABLE schema_migration; CREATE TABLE legacy_marker(value TEXT NOT NULL); INSERT INTO legacy_marker VALUES('untouched')",
+  );
+  db.close(true);
+  const database = bytes(value.databasePath);
+  await rejected(value.options, 'store_incompatible');
+  for (const mode of ['readonly', 'readwrite'] as const)
+    await expect(openSqliteStore({ ...value.options, mode })).rejects.toMatchObject({
+      code: 'store_incompatible',
+    });
+  expect(bytes(value.databasePath)).toBe(database);
+  expect(bytes(join(value.profilePath, 'profile.json'))).toBe(header);
+});
+
+for (const missing of ['all', 'work', 'mail'] as const)
+  test(`unfinished current-format Store without ${missing === 'work' ? 'the work authority index' : missing === 'mail' ? 'the mail recipient index' : 'the reviewed access indexes'} is rejected without rewriting its schema or bytes`, async () => {
+    const value = await current();
+    const indexes =
+      missing === 'work'
+        ? ['command_work_authority']
+        : missing === 'mail'
+          ? ['command_mail_recipient']
+          : [
+              'authorization_invalidation_check',
+              'context_result_execution',
+              'execution_origin_command',
+              'execution_work_effect',
+              'command_work_authority',
+              'command_mail_recipient',
+            ];
+    const baseline = readFileSync(
+      new URL('../../../src/storage/migrations/0001-baseline.sql', import.meta.url),
+      'utf8',
+    );
+    const priorBaseline = baseline
+      .split('\n')
+      .filter((line) => !indexes.some((name) => line.startsWith(`CREATE INDEX ${name} `)))
+      .join('\n');
+    const db = new Database(value.databasePath);
+    for (const index of indexes) db.exec(`DROP INDEX ${index}`);
+    db.query('UPDATE schema_migration SET checksum=? WHERE id=?').run(
+      createHash('sha256').update(priorBaseline).digest('hex'),
+      '0001-baseline',
+    );
+    expect(db.query('SELECT format_major FROM storage_meta').get()).toEqual({ format_major: 1 });
+    db.close(true);
+    const database = bytes(value.databasePath);
+    const profile = bytes(join(value.profilePath, 'profile.json'));
+    await rejected(value.options, 'store_incompatible');
+    for (const mode of ['readonly', 'readwrite'] as const)
+      await expect(openSqliteStore({ ...value.options, mode })).rejects.toMatchObject({
+        code: 'store_incompatible',
+      });
+    expect(bytes(value.databasePath)).toBe(database);
+    expect(bytes(join(value.profilePath, 'profile.json'))).toBe(profile);
+  });
+
 test('live WAL Store remains usable and Core/WAL bytes are unchanged', async () => {
   const value = fixture();
   const store = await openSqliteStore(value.options);
@@ -118,6 +180,7 @@ test('live WAL Store remains usable and Core/WAL bytes are unchanged', async () 
 test('future, unknown, broken schema and migration checksum reject without writes or retained resources', async () => {
   for (const mutation of [
     'UPDATE storage_meta SET format_major=99',
+    'UPDATE storage_meta SET format_major=2',
     'DROP TABLE storage_meta',
     'CREATE TABLE unknown_extension(id TEXT)',
     "UPDATE schema_migration SET checksum='wrong'",
@@ -228,36 +291,6 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
     fileURLToPath(new URL('../../../src/storage/migrations/0001-baseline.sql', import.meta.url)),
     migration,
   );
-  copyFileSync(
-    fileURLToPath(
-      new URL('../../../src/storage/migrations/0002-recovery-audit.sql', import.meta.url),
-    ),
-    join(dirname(migration), '0002-recovery-audit.sql'),
-  );
-  copyFileSync(
-    fileURLToPath(
-      new URL('../../../src/storage/migrations/0003-session-reconciliation.sql', import.meta.url),
-    ),
-    join(dirname(migration), '0003-session-reconciliation.sql'),
-  );
-  copyFileSync(
-    fileURLToPath(
-      new URL('../../../src/storage/migrations/0004-pending-input-order.sql', import.meta.url),
-    ),
-    join(dirname(migration), '0004-pending-input-order.sql'),
-  );
-  copyFileSync(
-    fileURLToPath(
-      new URL('../../../src/storage/migrations/0005-authorization-check.sql', import.meta.url),
-    ),
-    join(dirname(migration), '0005-authorization-check.sql'),
-  );
-  copyFileSync(
-    fileURLToPath(
-      new URL('../../../src/storage/migrations/0006-input-file-imports.sql', import.meta.url),
-    ),
-    join(dirname(migration), '0006-input-file-imports.sql'),
-  );
   writeFileSync(
     join(packageRoot, 'package.json'),
     JSON.stringify({
@@ -284,4 +317,24 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
   const missing = run();
   expect(await missing.exited).not.toBe(0);
   expect(await new Response(missing.stderr).text()).toContain('store_incompatible');
+});
+
+test('unsupported format 2 rejection preserves original database and profile before writer admission; readonly WAL discovery adds no frames', async () => {
+  const value = await current();
+  const db = new Database(value.databasePath);
+  db.exec('UPDATE storage_meta SET format_major=2');
+  db.close(true);
+  const before = bytes(value.databasePath);
+  const profile = bytes(join(value.profilePath, 'profile.json'));
+  await expect(openSqliteStore(value.options)).rejects.toMatchObject({
+    code: 'store_incompatible',
+  });
+  expect(bytes(value.databasePath)).toBe(before);
+  expect(bytes(join(value.profilePath, 'profile.json'))).toBe(profile);
+  // SQLite may create its empty WAL/shared-memory discovery sidecars even for a
+  // readonly connection to an existing WAL-mode database. No writer was admitted.
+  if (existsSync(`${value.databasePath}-wal`))
+    expect(readFileSync(`${value.databasePath}-wal`)).toHaveLength(0);
+  const access = acquireProfileAccess(value.options, 'exclusive');
+  access.lock.release();
 });

@@ -1,6 +1,4 @@
 import { semanticReviewContext } from './authorization-review-context';
-import { parseShellCommandInput } from './shell-input';
-import { isShellRiskRequest } from './shell-risk-review';
 import type { Json } from './storage/types';
 
 const object = (value: Json | undefined): Record<string, Json> | undefined =>
@@ -58,55 +56,24 @@ function operationPolicy(value: Json): Json {
     ...(request.executionScope === undefined ? {} : { executionScope: request.executionScope }),
     ...(Array.isArray(request.policies)
       ? {
-          policies: request.policies.map((entry) => {
+          contributions: request.policies.map((entry) => {
             const policy = object(entry);
             return policy?.request === undefined
               ? operationPolicy(entry)
-              : { scope: policy.scope ?? null, request: operationPolicy(policy.request) };
+              : {
+                  contributor: policy.scope ?? null,
+                  constraints: operationPolicy(policy.request),
+                };
           }),
         }
       : {}),
   };
 }
 
-/** Display-only Shell purpose stays in the sealed target, outside the risk model's evidence. */
-function shellRiskOperationInput(target: Record<string, Json>): Json {
-  const input = object(target.input);
-  if (
-    target.kind !== 'tool' ||
-    target.definitionVersion !== '1' ||
-    !['shell.execute', 'shell.launch'].includes(String(target.definitionId)) ||
-    !input ||
-    !parseShellCommandInput(
-      input,
-      target.definitionId === 'shell.execute' ? 'execute' : 'launch',
-      true,
-    )
-  )
-    return target.input!;
-  const { description: _description, ...operation } = input;
-  return operation;
-}
-
 /** Only a new Core-sealed task projection changes model material; original bindings stay stored. */
 export function authorizationCheckInput(payload: Record<string, Json>): Record<string, Json> {
-  if (payload.reviewPurpose === 'shell_risk' && isShellRiskRequest(payload.request!)) {
-    const target = object(payload.target)!;
-    const preparation = object(payload.riskReview);
-    return {
-      purpose: 'shell_risk',
-      policyRevision: payload.policyRevision!,
-      requireApproval: payload.requireApproval!,
-      request: operationPolicy(payload.request!),
-      operation: {
-        kind: target.kind!,
-        definitionId: target.definitionId!,
-        definitionVersion: target.definitionVersion!,
-        input: shellRiskOperationInput(target),
-      },
-      material: preparation?.material ?? null,
-    };
-  }
+  const review = object(payload.review);
+  if (review) return review.material as Record<string, Json>;
   const context = object(payload.authorizationContext);
   if (context?.availability !== 'available')
     return { ...payload, decisionContext: semanticReviewContext(payload.decisionContext!) };
@@ -115,7 +82,10 @@ export function authorizationCheckInput(payload: Record<string, Json>): Record<s
     purpose: payload.purpose!,
     requireApproval: payload.requireApproval!,
     policyRevision: payload.policyRevision!,
-    request: operationPolicy(payload.request!),
+    policy: {
+      appliesToExecutionId: target.executionId!,
+      constraints: operationPolicy(payload.request!),
+    },
     target: {
       executionId: target.executionId!,
       sessionId: target.sessionId!,

@@ -60,28 +60,24 @@ native(
       list: { action: 'list' },
       scopeDenied: {
         action: 'create',
-        key: 'scope-denied',
         path: target,
-        newBranch: 'must-not-exist',
+        new_branch: 'must-not-exist',
       },
       create: {
         action: 'create',
-        key: 'create-branch',
         path: target,
-        newBranch: 'fixture-branch',
-        permissions: { filesystem: 'full_access', network: 'none' },
+        new_branch: 'fixture-branch',
+        filesystem: 'full_access',
       },
       remove: {
         action: 'remove',
-        key: 'remove-branch',
         path: target,
-        permissions: { filesystem: 'full_access', network: 'none' },
+        filesystem: 'full_access',
       },
       replay: {
         action: 'remove',
-        key: 'remove-branch',
         path: target,
-        permissions: { filesystem: 'full_access', network: 'none' },
+        filesystem: 'full_access',
       },
     };
     const server = Bun.serve({
@@ -369,7 +365,13 @@ native(
       expect(results).toHaveLength(4);
       expect(existsSync(target)).toBe(false);
       expect(git(source, 'rev-parse', 'fixture-branch')).toBe(head);
-      // Same-path replacement is a new entity. Historical remove must only replay its receipt.
+      // Same-path replacement is a new entity. Observation must never dispatch another removal.
+      requests.replay = {
+        action: 'observe',
+        operation_ref: (results.at(-1) as { details: { operation_ref: string } }).details
+          .operation_ref,
+      };
+      expect((requests.replay as { operation_ref: string }).operation_ref.length).toBe(26);
       git(source, 'worktree', 'add', '--detach', target, head);
       await runtime.submitCommand({
         ...base,
@@ -380,7 +382,7 @@ native(
       const executions = await store.listExecutions('s');
       expect(
         executions.filter((row) => row.definitionId === 'git.worktree').at(-1)?.result,
-      ).toMatchObject({ outcome: 'succeeded', details: { replayed: true } });
+      ).toMatchObject({ outcome: 'succeeded', details: { action: 'observe', phase: 'completed' } });
       expect(git(target, 'rev-parse', 'HEAD')).toBe(head);
       await verifyWorktreeExecutionEvidence(store, 's', consumedToolContents);
       expect(executions.filter((row) => row.definitionId === 'shell.command')).toHaveLength(7);

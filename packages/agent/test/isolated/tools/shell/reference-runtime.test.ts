@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
 import type { JobDefinition, JobEvent } from '../../../../src/extensions';
+import { modelIdentifier } from '../../../../src/model-identifier';
 import { openSqliteStore } from '../../../../src/sqlite';
 import { createShellExtension } from '../../../../src/tools/shell';
 
@@ -158,7 +159,6 @@ for (const tool of ['shell_read', 'shell_wait', 'shell_stop'])
   test(`${tool} missing reference remains a correctable failure in the actual Loop`, async () => {
     const input = {
       shell_id: 'noop-probe',
-      ...(tool === 'shell_stop' ? { command_id: 'exact-stop' } : {}),
     };
     const f = await fixture([
       calls([tool, input], ['fixture.read', {}]),
@@ -196,10 +196,7 @@ for (const tool of ['shell_read', 'shell_wait', 'shell_stop'])
 test('wrong reference does not alter or restart an existing original Job', async () => {
   const f = await fixture([
     calls(['shell_execute', { command: 'controlled command' }]),
-    calls(
-      ['shell_read', { shell_id: 'wrong-shell' }],
-      ['shell_stop', { shell_id: 'wrong-shell', command_id: 'wrong-stop' }],
-    ),
+    calls(['shell_read', { shell_id: 'wrong-shell' }], ['shell_stop', { shell_id: 'wrong-shell' }]),
     calls(['shell_read', { shell_id: 'original-shell' }]),
     [finish],
   ]);
@@ -261,7 +258,10 @@ for (const background of [false, true])
             )
               throw Error('original_shell_result_unavailable');
             const content = JSON.parse(result.content);
-            return content.shell_id ?? content.shellId;
+            const handle = content.shell_id ?? content.shellId;
+            expect(handle).toBe(`sh_${modelIdentifier(execution.id)}`);
+            expect(handle).toHaveLength(26);
+            return handle;
           }),
         ).size,
       ).toBe(2);

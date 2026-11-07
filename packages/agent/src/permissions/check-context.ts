@@ -190,7 +190,7 @@ export function createPermissionCheckContextReader(options: {
           saved.rootWorkSeq !== run.rootWorkSeq
         )
           continue;
-        const check = saved.authorization?.check ?? saved.authorization?.review;
+        const check = saved.authorization?.check;
         if (check?.decision === 'reject' && check.reason) rejectionReasons.push(check.reason);
       }
     }

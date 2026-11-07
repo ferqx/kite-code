@@ -98,7 +98,6 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
                   ? {
                       path: 'result.txt',
                       content: 'Original child work still completes.\n',
-                      base: null,
                     }
                   : { path: 'source.txt' },
             ),
@@ -179,7 +178,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
               presentationSessionId: 's',
               interactionId: card.id,
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             answered.add(card.id);
           }

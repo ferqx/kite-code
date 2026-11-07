@@ -23,14 +23,13 @@ async function fixture() {
   const digest = createHash('sha256').update(canonicalJson(plan)).digest('hex');
   const document = { ...plan, kind: 'plan_document', digest };
   const current = { kind: 'plan_current', key: 'plan/p/1', planId: 'p', version: 1, digest };
-  const answer = { kind: 'plan_review', decision: 'approve', mode: 'auto' };
+  const answer = { kind: 'plan_review', decision: 'approve' };
   const request = {
     kind: 'plan_review',
     planId: 'p',
     version: '1',
     digest,
     content: canonicalJson(document),
-    allowedModes: ['auto', 'accept_edits'],
   };
   const proof = {
     interactionId: 'interaction',
@@ -69,8 +68,25 @@ async function fixture() {
     records: { get: async (key: string) => rows.get(key) ?? null },
     getRun: async (id: string) =>
       id === 'run'
-        ? { id, sessionId: 'session', originStoreId: 'store' }
-        : { id, sessionId: 'other', originStoreId: 'store' },
+        ? {
+            id,
+            sessionId: 'session',
+            originStoreId: 'store',
+            requirements: [
+              {
+                extensionId: 'builtin.planning',
+                definitionVersion: '1',
+                requirementId: 'plan.required',
+                recordKey: 'run/run/plan.required',
+                revision: rows.get('run/run/plan.required')?.revision ?? '1',
+                sessionId: 'session',
+                runId: 'run',
+                originStoreId: 'store',
+                phase: 'both',
+              },
+            ],
+          }
+        : { id, sessionId: 'other', originStoreId: 'store', requirements: [] },
     getInteraction: async () => ({
       kind: 'plan_review',
       state: 'answered',
@@ -116,6 +132,8 @@ test('plan approval observations preserve exact Run requirements without Agent p
   expect(actual.content).toContain('plan_requirement:');
   expect(actual.content).toContain('"status":"approved"');
   expect(actual.content).toContain('"planId":"p"');
+  expect(actual.content).toContain('Do not ask again');
+  expect(actual.content).toContain('current tool permissions');
   expect(actual.content).not.toContain('phase:');
   expect(actual.content).not.toContain('building');
   f.put('progress/p/1', {
@@ -126,11 +144,77 @@ test('plan approval observations preserve exact Run requirements without Agent p
   f.rejectProof();
   const pending = (await capture()).find((source) => source.placement === 'runtime')!;
   expect(pending.content).toContain('"status":"pending"');
+  expect(pending.content).not.toContain('Do not ask again');
   expect(pending.content).not.toContain('phase:');
   f.rows.delete('run/run/plan.required');
+  await expect(capture()).rejects.toThrow('planning_run_mismatch');
+  f.context.getRun = async (id: string) => ({
+    id,
+    sessionId: 'session',
+    originStoreId: 'store',
+    requirements: [],
+    status: 'running',
+    isActive: true,
+    createdAt: 0,
+    finishedAt: null,
+  });
   const disabled = (await capture()).find((source) => source.placement === 'runtime')!;
   expect(disabled.content).toContain('"status":"disabled"');
+  expect(disabled.content).not.toContain('Do not ask again');
   expect(disabled.content).not.toContain('phase:');
+});
+test('approved continuation guidance does not survive a changed plan digest or a successor Run', async () => {
+  for (const change of ['digest', 'run'] as const) {
+    const f = await fixture();
+    const request = {
+      sessionId: 'session',
+      runId: 'run',
+      workspaceId: 'workspace',
+      definitionId: 'fixed',
+      input: { kind: 'model_request' },
+    };
+    const capture = () => f.business.extension.context!.capture(request, f.context);
+    expect((await capture()).find((source) => source.placement === 'runtime')!.content).toContain(
+      'Do not ask again',
+    );
+    if (change === 'digest') {
+      f.put('plan.current', {
+        ...(f.rows.get('plan.current')!.value as Record<string, Json>),
+        digest: 'changed-digest',
+      });
+    } else {
+      const getRun = f.context.getRun;
+      f.put('run/next/plan.required', {
+        kind: 'plan',
+        runId: 'next',
+        requirementId: 'plan.required',
+      });
+      f.context.getRun = async (id) => {
+        const original = await getRun('run');
+        return id === 'next'
+          ? {
+              ...original!,
+              id,
+              requirements: original!.requirements.map((ref) => ({
+                ...ref,
+                runId: id,
+                recordKey: 'run/next/plan.required',
+              })),
+            }
+          : getRun(id);
+      };
+      request.runId = 'next';
+    }
+    const runtime = (await capture()).find((source) => source.placement === 'runtime')!;
+    expect(runtime.content).toContain('"status":"pending"');
+    expect(runtime.content).not.toContain('Do not ask again');
+    expect(
+      await f.business.readPlanningState(f.context, {
+        runId: request.runId,
+        originStoreId: 'store',
+      }),
+    ).toEqual({ status: 'pending' });
+  }
 });
 test('planning progress query verifies accepted original proof and exposes exact failed progress without changing status query', async () => {
   const f = await fixture(),
@@ -172,6 +256,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
     expectedStoreId = (await store.getMetadata()).storeId;
   const business = createPlanningValidation({ requirePlan: true });
   let step = 0;
+  let postApprovalInput: string | undefined;
   const runtime = createRuntime({
     store,
     artifacts: createArtifactStore({ profile, store }),
@@ -185,7 +270,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
       },
     },
     model: {
-      async *stream(_request, { signal }) {
+      async *stream(request, { signal }) {
         if (step === 0) {
           step++;
           yield {
@@ -193,7 +278,6 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
             id: 'write',
             name: 'write_plan',
             arguments: JSON.stringify({
-              expected_version: null,
               plan_id: 'actual',
               title: 'Approved actual plan',
               body: 'Actual original content',
@@ -207,19 +291,16 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
           };
         } else if (step === 1) {
           step++;
-          const current = (await store.getExtensionRecord({
-            sessionId: 's',
-            extensionId: 'builtin.planning',
-            key: 'plan.current',
-          }))!.value as Record<string, Json>;
+          const write = (await store.listExecutions('s')).find(
+            (row) => row.definitionId === 'planning.write' && row.status === 'succeeded',
+          )!;
+          const planRef = (write.result as { details: Record<string, Json> }).details.plan_ref!;
           yield {
             type: 'tool_call',
             id: 'review',
             name: 'request_plan_review',
             arguments: JSON.stringify({
-              plan_id: current.planId,
-              version: current.version,
-              digest: current.digest,
+              plan_ref: planRef,
             }),
           };
           yield {
@@ -228,6 +309,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
             usage: { inputTokens: 1, outputTokens: 1 },
           };
         } else {
+          postApprovalInput = JSON.stringify(request);
           await new Promise<never>((_resolve, reject) => {
             if (signal.aborted) reject(signal.reason);
             else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
@@ -275,7 +357,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
       presentationSessionId: 's',
       interactionId: interaction.id,
       expectedRevision: interaction.revision,
-      answer: { kind: 'plan_review', decision: 'approve', mode: 'auto' },
+      answer: { kind: 'plan_review', decision: 'approve' },
     });
     let parts: Awaited<ReturnType<typeof runtime.queryExtension>> = [];
     do {
@@ -296,6 +378,12 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
       { id: 'one', title: 'Actual step' },
     ]);
     expect(body.progress).toBeNull();
+    while (postApprovalInput === undefined) {
+      if (Date.now() > until) throw Error('postapproval_input_timeout');
+      await Bun.sleep(5);
+    }
+    expect(postApprovalInput).toContain('Do not ask again');
+    expect(postApprovalInput).toContain('current tool permissions');
     await runtime.cancelCommand({ ...base, commandId: 'cancel', targetCommandId: 'work' });
     await runtime.waitForCommand('work');
   } finally {

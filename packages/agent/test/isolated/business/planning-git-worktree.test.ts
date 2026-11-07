@@ -63,6 +63,7 @@ function fixture(input: Json, kind: 'tool' | 'job' = 'tool') {
     async getRun(id) {
       return {
         id,
+        requirements: [requirement],
         sessionId: 'session',
         status: 'running',
         isActive: true,
@@ -177,4 +178,43 @@ test('planning list exception does not waive completion or an inherited plan con
   inherited.actual.runId = 'next-run';
   expect((await inherited.evaluate()).outcome).toBe('unsatisfied');
   expect(inherited.calls()).toBe(0);
+});
+
+test('inherited parent plan never reads a child Shell or worktree boundary through the parent read scope', async () => {
+  for (const definitionId of ['shell.execute', 'git.worktree']) {
+    const f = fixture({ action: 'list' });
+    let reads = 0;
+    let classifications = 0;
+    const planning = createPlanningValidation(
+      {},
+      undefined,
+      async () => {
+        classifications++;
+        return {};
+      },
+      async () => {
+        classifications++;
+        return true;
+      },
+      async () => {
+        classifications++;
+        return true;
+      },
+    );
+    const evaluated = await planning.conditions.evaluate([requirement], 'dispatch', {
+      boundary: { ...f.boundary, sessionId: 'child', runId: 'child-run', definitionId },
+      async forRequirement() {
+        return {
+          ...f.read,
+          async getExecution() {
+            reads++;
+            throw new Error('foreign_execution_read');
+          },
+        };
+      },
+    });
+    expect(evaluated[0]!.outcome).toBe('unsatisfied');
+    expect(reads).toBe(0);
+    expect(classifications).toBe(0);
+  }
 });

@@ -1,4 +1,4 @@
-import type { Interaction } from '@kite-ai/client';
+import { type Interaction, readApprovalOptions } from '@kite-ai/client';
 import {
   type InteractionAnswer,
   type InteractionSubmission,
@@ -41,13 +41,7 @@ export function NativeApproval({
   const exact =
     request?.definitionId === interaction.definitionId &&
     request?.definitionVersion === interaction.definitionVersion;
-  const grants =
-    exact && Array.isArray(request?.grants)
-      ? request.grants.filter(
-          (grant): grant is 'approve_once' | 'same_command' =>
-            grant === 'approve_once' || grant === 'same_command',
-        )
-      : [];
+  const options = exact ? readApprovalOptions(request) : [];
   const input = object(request?.input),
     policy = object(request?.policy);
   const shell = ['shell.execute', 'shell.launch', 'shell.command'].includes(
@@ -88,16 +82,20 @@ export function NativeApproval({
                   : '正在提交审批回答。'
             : undefined
         }
-        grants={grants}
+        options={options}
         disabled={disabled || !onAnswer}
         onDecide={(decision) => {
-          if (disabled || !onAnswer || (decision !== 'reject' && !grants.includes(decision)))
+          if (
+            disabled ||
+            !onAnswer ||
+            (decision !== null && !options.some((option) => option.optionId === decision))
+          )
             return;
           void onAnswer(
             interaction,
-            decision === 'reject'
+            decision === null
               ? { kind: 'approval', decision: 'deny' }
-              : { kind: 'approval', decision: 'approve', grant: decision },
+              : { kind: 'approval', decision: 'approve', optionId: decision },
           );
         }}
       />

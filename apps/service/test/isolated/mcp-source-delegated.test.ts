@@ -187,7 +187,7 @@ async function fixture(
       original = selected.snapshot;
       id = selected.servers[0]!.id;
       parent = createFixedModel([
-        ...(cold ? [] : [call('connect_mcp_server', { server_id: id, key: 'parent' })]),
+        ...(cold ? [] : [call('connect_mcp_server', { server_id: id })]),
         call('owned.delegate', {}),
         [finish],
       ]);
@@ -197,7 +197,7 @@ async function fixture(
           signal.throwIfAborted();
           const step = childStep++;
           if (zero || step > 1) yield finish;
-          else if (step === 0) yield* call('connect_mcp_server', { server_id: id, key: 'child' });
+          else if (step === 0) yield* call('connect_mcp_server', { server_id: id });
           else {
             const remote = request.tools.find(
               (tool) => tool.description === 'External MCP tool: effect',
@@ -461,7 +461,7 @@ test(
           interactionId: card.id,
           expectedRevision: card.revision,
           subjectId: 'owner',
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       await f.runtime.waitForCommand('work', {

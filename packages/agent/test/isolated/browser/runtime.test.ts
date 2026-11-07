@@ -8,6 +8,7 @@ import { type AgentRuntime, createRuntime } from '../../../src';
 import type { Json } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
 import {
+  browserPageReference,
   createBrowserController,
   createBrowserExtension,
   createBrowserHumanRequest,
@@ -26,6 +27,182 @@ const until = async (check: () => boolean | Promise<boolean>) => {
     await Bun.sleep(5);
   }
 };
+test('public browser references flow through real receipts; stale elements and foreign scope never reach native input', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-browser-public-refs-'));
+  const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
+  const storeId = (await store.getMetadata()).storeId;
+  let ended!: (value: { confirmed: boolean }) => void;
+  const completion = new Promise<{ confirmed: boolean }>((resolve) => {
+    ended = resolve;
+  });
+  const inputs: Json[] = [];
+  const controller = createBrowserController({
+    captureIntervalMs: 60000,
+    createTransport: () => ({
+      ready: Promise.resolve(),
+      completion,
+      async request(command) {
+        inputs.push(command);
+        return { success: true, data: {} };
+      },
+      async capture() {
+        return {
+          frame: { mimeType: 'image/jpeg', data: 'small', width: 800, height: 600 },
+          annotations: [
+            {
+              ref: '@e1',
+              number: 1,
+              role: 'button',
+              name: 'Once',
+              box: { x: 1, y: 1, width: 20, height: 20 },
+            },
+          ],
+        };
+      },
+      async close() {
+        ended({ confirmed: true });
+        return { confirmed: true };
+      },
+      async dispose() {},
+    }),
+  });
+  let step = 0,
+    page = '',
+    element = '';
+  const runtime = createRuntime({
+    store,
+    modelId: 'fixed',
+    extensions: [createBrowserExtension({ controller })],
+    permissions: { authorize: async () => ({ allowed: true, revision: 'actual' }) },
+    model: {
+      async *stream(request) {
+        const last = request.messages.filter((message) => message.role === 'tool').at(-1);
+        let presented:
+          | {
+              details?: { page_ref: string; element_refs: { element_ref: string }[] };
+              page_ref: string;
+              element_refs: { element_ref: string }[];
+            }
+          | undefined;
+        try {
+          presented = last ? JSON.parse(last.content) : undefined;
+        } catch {
+          presented = undefined;
+        }
+        const receipt = (await store.listExecutions('s'))
+          .filter((row) => row.kind === 'tool')
+          .at(-1)?.result;
+        const body = receipt as { outcome: string; details: unknown } | undefined;
+        const details = (presented?.details ?? presented)!;
+        let name = '',
+          input: Json = {};
+        switch (step++) {
+          case 0:
+            expect(
+              JSON.stringify(request.tools.find((tool) => tool.id === 'browser_open')!.inputSchema),
+            ).not.toContain('"key"');
+            name = 'browser_open';
+            input = { url: 'https://example.test/' };
+            break;
+          case 1:
+            page = details.page_ref;
+            expect(typeof page).toBe('string');
+            name = 'browser_snapshot';
+            input = { page_ref: page };
+            break;
+          case 2:
+            page = details.page_ref;
+            element = details.element_refs[0]!.element_ref;
+            name = 'browser_click';
+            input = { element_ref: element };
+            break;
+          case 3:
+            expect(body?.outcome).toBe('succeeded');
+            name = 'browser_click';
+            input = { element_ref: element };
+            break;
+          case 4:
+            expect(body?.outcome).toBe('failed');
+            expect(
+              inputs.filter((value) => (value as Record<string, Json>).action === 'click'),
+            ).toHaveLength(1);
+            name = 'browser_snapshot';
+            input = {
+              page_ref: browserPageReference(
+                { storeId, sessionId: 'foreign', runId: 'foreign' },
+                controller.view('s')!,
+              ),
+            };
+            break;
+          case 5:
+            expect(body).toMatchObject({ outcome: 'failed', details: { adapterAttempted: false } });
+            name = 'browser_snapshot';
+            input = { page_ref: page };
+            break;
+          case 6:
+            expect(body?.outcome).toBe('succeeded');
+            name = 'browser_fill';
+            input = { element_ref: details.element_refs[0]!.element_ref, value: 'exact' };
+            break;
+          case 7:
+            expect(body?.outcome).toBe('succeeded');
+            name = 'browser_close';
+            input = { page_ref: page };
+            break;
+          default:
+            expect(body?.outcome).toBe('succeeded');
+        }
+        if (name) {
+          yield { type: 'tool_call', id: `public-${step}`, name, arguments: JSON.stringify(input) };
+          yield { ...finish, reason: 'tool_calls' };
+        } else yield finish;
+      },
+    },
+  });
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      rootUri: pathToFileURL(root).href,
+      name: 'test',
+    });
+    await runtime.createSession({
+      expectedStoreId: storeId,
+      commandId: 'create',
+      sessionId: 's',
+      workspaceId: 'w',
+      subjectId: 'owner',
+      title: 'refs',
+    });
+    await runtime.submitCommand({
+      expectedStoreId: storeId,
+      commandId: 'work',
+      sessionId: 's',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'Use exact public browser references' },
+    });
+    const command = await runtime.waitForCommand('work', { timeoutMs: 10000 });
+    expect(
+      (await store.listExecutions('s'))
+        .filter((row) => row.kind === 'model' && row.status !== 'succeeded')
+        .map((row) => row.result),
+    ).toEqual([]);
+    expect(await store.getRun((command.receipt as { runId: string }).runId)).toMatchObject({
+      status: 'completed',
+    });
+    expect(step).toBe(9);
+    expect(
+      inputs.filter((value) => (value as Record<string, Json>).action === 'click'),
+    ).toHaveLength(1);
+    expect(
+      inputs.filter((value) => (value as Record<string, Json>).action === 'fill'),
+    ).toHaveLength(1);
+    expect(controller.view('s')?.state).toBe('closed');
+  } finally {
+    await runtime.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15000);
 async function fixture(
   confirmed: boolean,
   options: { human?: boolean; denyHuman?: boolean; denyResume?: boolean } = {},
@@ -94,7 +271,7 @@ async function fixture(
         type: 'tool_call',
         id: 'open',
         name: 'browser_open',
-        arguments: JSON.stringify({ key: 'original', url: 'https://example.test/' }),
+        arguments: JSON.stringify({ url: 'https://example.test/' }),
       },
       { ...finish, reason: 'tool_calls' },
     ],
@@ -127,9 +304,14 @@ async function fixture(
                   id: 'human',
                   name: 'browser_request_human',
                   arguments: JSON.stringify({
-                    key: 'human-one',
-                    browser_id: view.browserId,
-                    generation: view.generation,
+                    page_ref: browserPageReference(
+                      {
+                        storeId: expectedStoreId,
+                        sessionId: 'session',
+                        runId: (await store.getExecution(request.requestId))!.runId!,
+                      },
+                      view,
+                    ),
                     reason: 'Check the local form, then continue.',
                   }),
                 },
@@ -147,9 +329,14 @@ async function fixture(
                   id: 'after-human',
                   name: 'browser_snapshot',
                   arguments: JSON.stringify({
-                    key: 'after-human',
-                    browser_id: view.browserId,
-                    generation: view.generation,
+                    page_ref: browserPageReference(
+                      {
+                        storeId: expectedStoreId,
+                        sessionId: 'session',
+                        runId: (await store.getExecution(request.requestId))!.runId!,
+                      },
+                      view,
+                    ),
                   }),
                 },
                 { ...finish, reason: 'tool_calls' },
@@ -265,7 +452,10 @@ test('real Runtime keeps the browser Job and Run binding after model completion,
       queryId: 'browser.view',
       input: {},
     });
-    expect(views[0]?.payload).toMatchObject({ state: 'agent', browserId: 'original' });
+    expect(views[0]?.payload).toMatchObject({
+      state: 'agent',
+      browserId: f.controller.view('session')!.browserId,
+    });
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
     expect(f.closes).toBe(0);
     await f.runtime.cancelCommand({

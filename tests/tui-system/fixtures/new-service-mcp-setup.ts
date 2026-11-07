@@ -102,7 +102,7 @@ export function installOriginalMcpSetup(options?: {
                     expectedStoreId: request.expectedStoreId,
                     commandId: randomUUID(),
                     expectedRevision: card.revision,
-                    answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+                    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
                   }),
                 },
               );
@@ -235,7 +235,7 @@ export function installOriginalMcpSetup(options?: {
                     ? {
                         kind: 'approval' as const,
                         decision: 'approve' as const,
-                        grant: 'approve_once' as const,
+                        optionId: 'once' as const,
                       }
                     : card.kind === 'question' &&
                         request.kind === 'mcp_source_approval' &&

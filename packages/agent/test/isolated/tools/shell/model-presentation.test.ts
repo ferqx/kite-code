@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
 import { canonicalJson } from '../../../../src/json';
+import { modelCursor } from '../../../../src/model-cursor';
+import { modelExecutionId } from '../../../../src/model-identifier';
 import { shellOperationKey } from '../../../../src/shell-input';
 import { formatShellResult } from '../../../../src/shell-result-presentation';
 import type { ExecutionRecord, Json } from '../../../../src/storage/types';
@@ -114,6 +116,36 @@ function lifecycle(
   f.result.outcome = 'succeeded';
   return f;
 }
+
+for (const name of [
+  'shell.execute',
+  'shell.launch',
+  'shell.read',
+  'shell.wait',
+  'shell.stop',
+] as const)
+  test(`${name} presents the original starter UUID without borrowing its Job or observer identity`, () => {
+    const f = fixture();
+    if (name === 'shell.launch') f.starter.definitionId = name;
+    else if (name !== 'shell.execute') lifecycle(f, name);
+    const before = structuredClone(f);
+    const body = formatShellResult(f)!;
+    expect(body).toContain(`execution_id: ${JSON.stringify(modelExecutionId(f.starter.id))}`);
+    expect(body).not.toContain(`execution_id: ${JSON.stringify(modelExecutionId(f.operation.id))}`);
+    if (f.execution !== f.starter)
+      expect(body).not.toContain(
+        `execution_id: ${JSON.stringify(modelExecutionId(f.execution.id))}`,
+      );
+    expect(body).toContain(`shell_id: ${JSON.stringify(f.ref.key)}`);
+    expect(body).toContain(`stdout:\n${f.details.stdout}`);
+    expect(f).toEqual(before);
+  });
+
+test('a mismatched claimed starter UUID is not formatted as a verified Shell receipt', () => {
+  const f = fixture();
+  f.details.execution_id = f.operation.id;
+  expect(render(f)).toBeUndefined();
+});
 
 test('completed command preserves original Unicode streams and usable handle without private records', () => {
   const f = fixture();
@@ -303,7 +335,14 @@ test('paged original output keeps stream order, Unicode, cursor and missing-byte
   const f = lifecycle(fixture(), 'shell.read');
   delete f.details.stdout;
   delete f.details.stderr;
-  f.execution.input = { shellId: f.ref.key!, afterSeq: '1', upperSeq: '3' };
+  const scope = { kind: 'shell_output', ref: f.ref };
+  f.execution.input = {
+    shellId: f.ref.key!,
+    cursor: modelCursor(scope, { afterSeq: '1', upperSeq: '3' }),
+  };
+  f.details.next_cursor = modelCursor(scope, { afterSeq: '3' });
+  f.details.caught_up = true;
+  f.details.terminal = true;
   f.details.output = {
     items: [
       {
@@ -328,8 +367,9 @@ test('paged original output keeps stream order, Unicode, cursor and missing-byte
   const body = render(f)!;
   expect(body.indexOf('stderr:\n原错误🪁\n')).toBeLessThan(body.indexOf('stdout:\n下一行\n'));
   expect(body).toContain('Output bytes unavailable: 7');
-  expect(body).toContain('"after_seq":"3"');
-  expect(body).toContain('"upper_seq":"3"');
+  expect(body).toContain(JSON.stringify(f.details.next_cursor));
+  expect(body).toContain('"caught_up":true');
+  expect(body).toContain('"terminal":true');
 });
 
 test('a bounded output preview remains explicitly incomplete and recovers the same shell', () => {

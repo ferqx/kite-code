@@ -37,5 +37,5 @@ test('duplicate tool IDs cannot silently replace an implementation', () => {
         defineExtension({ id: 'fixture.b', version: '1', apiMajor: 1, tools: [tool] }),
       ],
     }),
-  ).toThrow(expect.objectContaining({ code: 'tool_definition_conflict' }));
+  ).toThrow(expect.objectContaining({ code: 'tool_behavior_duplicate_definition' }));
 });

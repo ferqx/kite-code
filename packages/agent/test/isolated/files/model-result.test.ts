@@ -58,13 +58,15 @@ test('read presentation preserves exact body and the complete baseline remains u
   expect(text).toContain('complete file');
   expect(text).not.toContain('"observation"');
   expect(presentedBody(text)).toBe(content);
-  const baseline = JSON.parse(
+  const baseRef = JSON.parse(
     text
       .split('\n')
-      .find((line) => line.startsWith('baseline='))!
-      .slice('baseline='.length),
+      .find((line) => line.startsWith('base_ref='))!
+      .slice('base_ref='.length),
   );
-  expect(baseline).toEqual(JSON.parse(result.content).baseline);
+  expect(baseRef).toBe(JSON.parse(result.content).base_ref);
+  expect(text).not.toContain('baseline=');
+  const baseline = JSON.parse(result.content).baseline;
   const edit = await f.execute('files.edit', {
     path: 'a.txt',
     base: baseline,
@@ -102,14 +104,15 @@ test('external read presentation preserves an available native baseline without 
   };
   const original = JSON.stringify(result);
   const presented = formatFileReadResult({ result })!;
-  const baseline = JSON.parse(
+  const baseRef = JSON.parse(
     presented
       .split('\n')
-      .find((line) => line.startsWith('baseline='))!
-      .slice('baseline='.length),
+      .find((line) => line.startsWith('base_ref='))!
+      .slice('base_ref='.length),
   );
-  expect(baseline).toEqual(body.baseline);
-  expect(presented).toContain('Baseline does not grant write permission');
+  expect(baseRef).toBe(body.base_ref);
+  const baseline = body.baseline;
+  expect(presented).toContain('The reference does not grant write permission');
   expect(presentedBody(presented)).toBe('original\n');
   const edit = await f.execute('files.edit', {
     path: body.path,

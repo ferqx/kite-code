@@ -13,6 +13,7 @@ import {
 import type { ActionDefinition, Extension, Json } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
 import {
+  browserPageReference,
   createBrowserController,
   createBrowserExtension,
   createBrowserHumanCoordinator,
@@ -123,7 +124,7 @@ async function fixture(
               type: 'tool_call',
               id: 'open',
               name: 'browser_open',
-              arguments: JSON.stringify({ key: 'original', url: 'https://example.test/' }),
+              arguments: JSON.stringify({ url: 'https://example.test/' }),
             },
             { ...finish, reason: 'tool_calls' },
           ],
@@ -138,9 +139,14 @@ async function fixture(
               id: 'wait',
               name: waiting === 'approval' ? 'browser_snapshot' : 'browser_request_human',
               arguments: JSON.stringify({
-                key: 'wait',
-                browser_id: view.browserId,
-                generation: view.generation,
+                page_ref: browserPageReference(
+                  {
+                    storeId: storeId,
+                    sessionId: 'session',
+                    runId: (await store.getExecution(request.requestId))!.runId!,
+                  },
+                  view,
+                ),
                 ...(waiting === 'approval' ? {} : { reason: 'Please check the form.' }),
               }),
             },
@@ -423,7 +429,10 @@ test('a same-name spread of the builtin Action still requires ordinary approval'
 test('host permission cannot make a stale browser generation control the current page', async () => {
   const f = await fixture('approval');
   try {
-    await f.invoke('browser.close', { browserId: 'original', generation: 'foreign' });
+    await f.invoke('browser.close', {
+      browserId: f.controller.view('session')!.browserId,
+      generation: 'foreign',
+    });
     const command = await f.runtime.waitForCommand('browser.close', { timeoutMs: 4000 });
     const execution = (await f.store.listExecutions('session')).find(
       (row) => row.originCommandId === command.id,
@@ -575,7 +584,7 @@ for (const depth of [1, 31, 32])
             presentationSessionId: 'session',
             interactionId: approval.id,
             expectedRevision: approval.revision,
-            answer: { kind: 'approval', decision: 'approve' },
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
           })
           .catch(() => {});
         expect(f.resumes).toBe(0);

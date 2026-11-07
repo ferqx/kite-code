@@ -78,6 +78,7 @@ const permissionCopy = {
     placeholder: '审核方式',
     heading: '如何处理操作请求？',
     helper: '为当前对话选择审批方式',
+    grants: '当前会话授权',
     accept_edits: {
       label: '请求批准',
       menuLabel: '请求批准',
@@ -99,6 +100,7 @@ const permissionCopy = {
     placeholder: 'Approval mode',
     heading: 'How should actions be approved?',
     helper: 'Choose an approval mode for this conversation',
+    grants: 'Current session grants',
     accept_edits: {
       label: 'Request Approval',
       menuLabel: 'Request Approval',
@@ -175,6 +177,7 @@ export interface ComposerProps {
     language: 'zh' | 'en';
     signal: AbortSignal;
   }) => Promise<boolean>;
+  onPermissionGrants?: () => void;
   permissionDisabled?: boolean;
   permissionPending?: boolean;
   sessionLoading?: boolean;
@@ -190,6 +193,8 @@ export interface ComposerProps {
   submitStatus?: string;
   sending?: boolean;
   promptHidden?: boolean;
+  /** Keep only the original permission control while a business interaction owns the input. */
+  permissionWhenPromptHidden?: boolean;
 }
 function canConfirmFull(props: ComposerProps) {
   return (
@@ -201,7 +206,7 @@ function canConfirmFull(props: ComposerProps) {
     !props.readGate?.permission &&
     !props.permissionDisabled &&
     !props.permissionPending &&
-    !props.promptHidden
+    (!props.promptHidden || props.permissionWhenPromptHidden === true)
   );
 }
 function samePermissionContext(original: ComposerProps, latest: ComposerProps) {
@@ -281,7 +286,7 @@ export function Composer(props: ComposerProps) {
       props.permissionDisabled ||
       props.readOnly ||
       props.readGate?.permission ||
-      props.promptHidden
+      (props.promptHidden && !props.permissionWhenPromptHidden)
     )
       setPermissionMenuOpen(false);
     current.current = props;
@@ -496,8 +501,151 @@ export function Composer(props: ComposerProps) {
       !props.files?.length &&
       !props.contextHasInput) ||
       props.stopping);
+  const permissionControl = (props.permission || props.sessionLoading) &&
+    props.onPermissionChange && (
+      <DropdownMenu
+        open={permissionMenuOpen}
+        onOpenChange={(open) => {
+          if (
+            !open ||
+            (!fullConfirmation.current &&
+              !current.current.permissionDisabled &&
+              !current.current.readOnly &&
+              !current.current.readGate?.permission &&
+              current.current.permission)
+          )
+            setPermissionMenuOpen(open);
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <ShadcnButton
+            variant="ghost"
+            size="sm"
+            className={cn(
+              'permission-trigger',
+              props.permission === 'full' && 'permission-trigger-full',
+            )}
+            data-permission-trigger
+            readOnly={props.readGate?.permission}
+            aria-busy={
+              confirmingFull || props.permissionPending || props.sessionLoading || undefined
+            }
+            aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionLabel}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
+            disabled={confirmingFull || props.permissionDisabled || !props.permission}
+          >
+            <HugeiconsIcon
+              data-icon="inline-start"
+              icon={
+                permissionModes.find((mode) => mode.value === props.permission)?.icon ??
+                Loading03Icon
+              }
+            />
+            <span>{permissionLabel}</span>
+            <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
+          </ShadcnButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          className="permission-menu"
+          portalled={false}
+          side="top"
+          align="start"
+          sideOffset={6}
+          aria-label={permissionText.name}
+        >
+          <DropdownMenuLabel className="permission-menu-heading">
+            <span>{permissionText.heading}</span>
+            <small>{permissionText.helper}</small>
+          </DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={props.permission}
+            onValueChange={(value) => {
+              if (
+                fullConfirmation.current ||
+                current.current.permissionDisabled ||
+                current.current.readOnly ||
+                current.current.readGate?.permission ||
+                !current.current.permission ||
+                value === current.current.permission
+              )
+                return;
+              if (value === 'full') {
+                void confirmFullPermission();
+              } else {
+                setFullPermissionError(false);
+                current.current.onPermissionChange?.(
+                  value as NonNullable<ComposerProps['permission']>,
+                );
+              }
+            }}
+          >
+            <DropdownMenuGroup>
+              {permissionModes.map((mode) => (
+                <Fragment key={mode.value}>
+                  {mode.value === 'full' && (
+                    <DropdownMenuSeparator className="permission-menu-divider" />
+                  )}
+                  <DropdownMenuRadioItem
+                    value={mode.value}
+                    indicatorPosition="end"
+                    className={cn(
+                      'permission-menu-item',
+                      mode.value === 'full' && 'permission-menu-item-full',
+                    )}
+                  >
+                    <HugeiconsIcon icon={mode.icon} aria-hidden="true" />
+                    <span className="permission-menu-copy">
+                      <span>{permissionText[mode.value].menuLabel}</span>
+                      <small>{permissionText[mode.value].detail}</small>
+                    </span>
+                  </DropdownMenuRadioItem>
+                </Fragment>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuRadioGroup>
+          {props.onPermissionGrants && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => current.current.onPermissionGrants?.()}>
+                {permissionText.grants}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  const fullPermissionDialog = !props.confirmFullPermission && (
+    <FullPermissionConfirmationDialog
+      language={permissionLanguage}
+      open={confirmingFullScope !== null}
+      onOpenChange={(open) => {
+        if (!open) setConfirmingFullScope(null);
+      }}
+      confirmDisabled={!canConfirmFull(props)}
+      onConfirm={() => {
+        if (
+          !canConfirmFull(current.current) ||
+          confirmingFullScope !== (current.current.fullPermissionScope ?? '')
+        )
+          return;
+        current.current.onPermissionChange?.('full');
+      }}
+    />
+  );
+  const permissionError = fullPermissionError && (
+    <p className="composer-input-error" role="alert">
+      {fullPermissionConfirmationCopy[permissionLanguage].failed}
+    </p>
+  );
   if (props.promptHidden) {
-    return null;
+    return props.permissionWhenPromptHidden ? (
+      <ReadGate blocked={props.readOnly}>
+        <div className="composer-toolbar" data-business-permissions>
+          {permissionControl}
+        </div>
+        {permissionError}
+        {fullPermissionDialog}
+      </ReadGate>
+    ) : null;
   }
   return (
     <ReadGate blocked={props.readOnly}>
@@ -633,11 +781,7 @@ export function Composer(props: ComposerProps) {
             {props.imageError || fileError}
           </p>
         )}
-        {fullPermissionError && (
-          <p className="composer-input-error" role="alert">
-            {fullPermissionConfirmationCopy[permissionLanguage].failed}
-          </p>
-        )}
+        {permissionError}
         {preparingFiles && (
           <div
             className="flex items-center gap-2 px-3 py-1 text-sm text-muted-foreground"
@@ -723,109 +867,7 @@ export function Composer(props: ComposerProps) {
             ) : (
               <span>{props.model?.name}</span>
             )}
-            {(props.permission || props.sessionLoading) && props.onPermissionChange && (
-              <DropdownMenu
-                open={permissionMenuOpen}
-                onOpenChange={(open) => {
-                  if (
-                    !open ||
-                    (!fullConfirmation.current &&
-                      !current.current.permissionDisabled &&
-                      !current.current.readOnly &&
-                      !current.current.readGate?.permission &&
-                      current.current.permission)
-                  )
-                    setPermissionMenuOpen(open);
-                }}
-              >
-                <DropdownMenuTrigger asChild>
-                  <ShadcnButton
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      'permission-trigger',
-                      props.permission === 'full' && 'permission-trigger-full',
-                    )}
-                    data-permission-trigger
-                    readOnly={props.readGate?.permission}
-                    aria-busy={
-                      confirmingFull || props.permissionPending || props.sessionLoading || undefined
-                    }
-                    aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionLabel}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
-                    disabled={confirmingFull || props.permissionDisabled || !props.permission}
-                  >
-                    <HugeiconsIcon
-                      data-icon="inline-start"
-                      icon={
-                        permissionModes.find((mode) => mode.value === props.permission)?.icon ??
-                        Loading03Icon
-                      }
-                    />
-                    <span>{permissionLabel}</span>
-                    <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
-                  </ShadcnButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  className="permission-menu"
-                  portalled={false}
-                  side="top"
-                  align="start"
-                  sideOffset={6}
-                  aria-label={permissionText.name}
-                >
-                  <DropdownMenuLabel className="permission-menu-heading">
-                    <span>{permissionText.heading}</span>
-                    <small>{permissionText.helper}</small>
-                  </DropdownMenuLabel>
-                  <DropdownMenuRadioGroup
-                    value={props.permission}
-                    onValueChange={(value) => {
-                      if (
-                        fullConfirmation.current ||
-                        current.current.permissionDisabled ||
-                        current.current.readOnly ||
-                        current.current.readGate?.permission ||
-                        !current.current.permission ||
-                        value === current.current.permission
-                      )
-                        return;
-                      if (value === 'full') {
-                        void confirmFullPermission();
-                      } else {
-                        setFullPermissionError(false);
-                        current.current.onPermissionChange?.(
-                          value as NonNullable<ComposerProps['permission']>,
-                        );
-                      }
-                    }}
-                  >
-                    <DropdownMenuGroup>
-                      {permissionModes.map((mode) => (
-                        <Fragment key={mode.value}>
-                          {mode.value === 'full' && (
-                            <DropdownMenuSeparator className="permission-menu-divider" />
-                          )}
-                          <DropdownMenuRadioItem
-                            value={mode.value}
-                            indicatorPosition="end"
-                            className={cn(
-                              'permission-menu-item',
-                              mode.value === 'full' && 'permission-menu-item-full',
-                            )}
-                          >
-                            <HugeiconsIcon icon={mode.icon} aria-hidden="true" />
-                            <span className="permission-menu-copy">
-                              <span>{permissionText[mode.value].menuLabel}</span>
-                              <small>{permissionText[mode.value].detail}</small>
-                            </span>
-                          </DropdownMenuRadioItem>
-                        </Fragment>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {permissionControl}
           </div>
           <div className="composer-trailing">
             <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
@@ -953,24 +995,7 @@ export function Composer(props: ComposerProps) {
           </div>
         </div>
       </form>
-      {!props.confirmFullPermission && (
-        <FullPermissionConfirmationDialog
-          language={permissionLanguage}
-          open={confirmingFullScope !== null}
-          onOpenChange={(open) => {
-            if (!open) setConfirmingFullScope(null);
-          }}
-          confirmDisabled={!canConfirmFull(props)}
-          onConfirm={() => {
-            if (
-              !canConfirmFull(current.current) ||
-              confirmingFullScope !== (current.current.fullPermissionScope ?? '')
-            )
-              return;
-            current.current.onPermissionChange?.('full');
-          }}
-        />
-      )}
+      {fullPermissionDialog}
       {props.submitStatus && (
         <span className="sr-only" aria-live="polite">
           {props.submitStatus}

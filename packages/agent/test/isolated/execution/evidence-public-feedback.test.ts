@@ -17,6 +17,7 @@ import { artifactPath } from '../../../src/artifacts-files';
 import { createExecutionEvidenceExtension } from '../../../src/business/execution-evidence';
 import type { Extension, JobDefinition, JobEvent, Json } from '../../../src/extensions';
 import { createTaskExtension } from '../../../src/extensions/task';
+import { modelExecutionId } from '../../../src/model-identifier';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import { createShellExtension } from '../../../src/tools/shell';
@@ -202,7 +203,9 @@ test('exact original Shell evidence reaches the next model as public feedback wi
       expect(next.sourceIds).toEqual([read.id]);
       const detail = JSON.parse(next.content);
       expect(detail.items).toHaveLength(1);
-      expect(detail.items[0].execution_id).toBe(index === 1 ? original.id : shell.id);
+      expect(detail.items[0].execution_id).toBe(
+        modelExecutionId(index === 1 ? original.id : shell.id),
+      );
       expect(detail.items[0].result).toContain('The command failed.');
       expect(detail.items[0].result).toContain('Exit code: 17');
       expect(detail.items[0].result).not.toContain('produced no effects');
@@ -336,7 +339,7 @@ test('evidence recovery preserves the complete unknown child evidence instead of
   const requests: ModelRequest[] = [];
   let spawned = false;
   let requestedDetail = false;
-  let cursor = '0';
+  let cursor: string | undefined;
   let originalId = '';
   const evidence = createExecutionEvidenceExtension({
     async read(request) {
@@ -387,12 +390,12 @@ test('evidence recovery preserves the complete unknown child evidence instead of
       } else {
         const observed = request.messages.filter((message) => message.role === 'tool').at(-1);
         if (observed?.toolCallId?.startsWith('wait-'))
-          cursor = JSON.parse(observed.content).next_seq;
+          cursor = JSON.parse(observed.content).next_cursor;
         yield {
           type: 'tool_call',
           id: `wait-${requests.length}`,
           name: 'wait_agent_events',
-          arguments: JSON.stringify({ after_seq: cursor, wait_ms: 10000 }),
+          arguments: JSON.stringify({ ...(cursor ? { cursor } : {}), wait_ms: 10000 }),
         };
       }
       yield { ...finish, reason: 'tool_calls' };
@@ -456,7 +459,7 @@ test('evidence recovery preserves the complete unknown child evidence instead of
       .flatMap((request) => request.messages)
       .find((entry) => entry.toolCallId === 'recover-unknown-child')!;
     const recovered = JSON.parse(message.content);
-    expect(recovered.items[0].execution_id).toBe(originalId);
+    expect(recovered.items[0].execution_id).toBe(modelExecutionId(originalId));
     expect(JSON.parse(recovered.items[0].result)).toEqual(raw);
     expect(recovered.items[0].result).toContain(qualification.futureQualification);
     const restored = JSON.parse(recovered.items[0].result);

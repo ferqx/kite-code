@@ -1,8 +1,10 @@
 import { canonicalJson } from '../../json';
+import { modelCursor, readModelCursor } from '../../model-cursor';
 import { AgentError } from '../../storage/types';
 import type { Extension, Json, ToolContext, ToolResult } from '../index';
 import { isChildPreparationFailure } from './preparation-failure';
 import { defaultTaskRoleId } from './roles';
+import { agentWorkReference, readAgentWorkReference } from './work-reference';
 
 export { createDefaultTaskRequestClassifier } from '../../permissions/task-request';
 export {
@@ -70,7 +72,14 @@ export function createTaskExtension(options: TaskOptions): Extension {
   const presets = options.presets ?? [];
   const content = { type: 'string', minLength: 1, maxLength: 1048576 };
   const agentId = { type: 'string', minLength: 1, maxLength: 128 };
-  const cursor = { type: 'string', pattern: '^(0|[1-9][0-9]*)$' };
+  const cursor = { type: 'string', minLength: 1, maxLength: 4096 };
+  const workReference = {
+    type: 'string',
+    pattern: '^aw_(?:u[A-Za-z0-9_-]{22}|s[A-Za-z0-9_-]+)$',
+    maxLength: 1027,
+    description:
+      'Exact opaque work_ref returned for that work. Copy the entire string verbatim; ordinary UUID-backed references have 26 characters. Never shorten, decode or reconstruct it.',
+  };
   const errors: Record<string, [string, string, boolean | null]> = {
     invalid_task_arguments: ['invalid_request', 'correct_request', false],
     invalid_input_request: ['invalid_request', 'correct_request', false],
@@ -83,6 +92,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
     cursor_expired: ['cursor_expired', 'restart_observation', false],
     cursor_ahead: ['invalid_cursor', 'restart_observation', false],
     invalid_mail_cursor: ['invalid_cursor', 'restart_observation', false],
+    invalid_agent_work_reference: ['invalid_work_reference', 'copy_work_ref', false],
     agent_unavailable: ['agent_unavailable', 'check_agent_id', false],
     input_target_changed: ['target_changed', 'observe_then_new_call', false],
     input_target_stopped: ['target_changed', 'observe_then_new_call', false],
@@ -97,6 +107,8 @@ export function createTaskExtension(options: TaskOptions): Extension {
   const errorMessages: Readonly<Record<string, string>> = {
     invalid_request:
       'The Agent request has invalid arguments or an unavailable role. Correct it using the declared tool schema and available presets.',
+    invalid_work_reference:
+      'The work_ref could not be verified in this parent scope. Copy the exact returned work_ref from spawn_agent, follow_up_agent or list_agents. This reference check did not change existing Agent work; it may still be running.',
     invalid_cursor:
       'The observation cursor is invalid or ahead of the current mailbox or directory. Restart observation from a valid returned cursor; this does not cancel existing Agent work.',
     cursor_expired:
@@ -206,15 +218,23 @@ export function createTaskExtension(options: TaskOptions): Extension {
     (kind: 'follow_up' | 'interrupt') => async (input: Json, context: ToolContext) => {
       const args = value(input);
       if (!context.operations.applyAgentCommand) throw new AgentError('operation_unverifiable');
+      const expectedWork =
+        args.workRef === undefined
+          ? undefined
+          : await readAgentWorkReference(args.workRef, context);
+      if (expectedWork && expectedWork.childSessionId !== args.agentId)
+        throw new AgentError('input_target_changed');
       const receipt = await context.operations.applyAgentCommand({
         agentId: text(args, 'agentId'),
         kind,
+        ...(expectedWork ? { expectedWork } : {}),
         ...(kind === 'follow_up' ? { content: text(args, 'content') } : {}),
       });
       return result({
         accepted: receipt.accepted,
         agent_id: receipt.agentId,
         state: receipt.state,
+        work_ref: agentWorkReference(receipt.ref),
         ...(receipt.mode ? { mode: receipt.mode } : {}),
         ...(receipt.outcome ? { outcome: receipt.outcome } : {}),
       });
@@ -263,7 +283,12 @@ export function createTaskExtension(options: TaskOptions): Extension {
             cancellation: 'attached',
             continuation: { kind: 'agent_completion' },
           });
-          return result({ accepted: true, agent_id: ref.childSessionId!, state: 'queued' });
+          return result({
+            accepted: true,
+            agent_id: ref.childSessionId!,
+            work_ref: agentWorkReference(ref),
+            state: 'queued',
+          });
         },
       ),
       make(
@@ -278,7 +303,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
         'task.interrupt',
         'interrupt_agent',
         'Request interruption of the exact current or queued child work selected atomically at admission. Idle stays idle. Acknowledgment is not stopped confirmation and the collaborator remains reusable.',
-        object({ agentId }, ['agentId']),
+        object({ agentId, workRef: workReference }, ['agentId']),
         true,
         command('interrupt'),
       ),
@@ -308,11 +333,18 @@ export function createTaskExtension(options: TaskOptions): Extension {
       make(
         'task.events',
         'wait_agent_events',
-        'Observe only this Agent mailbox. after_seq defaults to "0" and may return historical events; continue from the last returned next_seq to avoid rereading returned events. seq is an observation position, not a turn identity; follow-up does not reset the mailbox. A completed event or its summary alone does not prove the latest request for that agent finished. Confirm using current work/state and an attributable complete result Source; if the relationship is not evidenced, leave completion unverified. Omitted/null wait_ms continuously waits in finite internal segments; zero takes a snapshot. Events do not acknowledge results; complete results/messages are adopted at ordinary safe checkpoints. Timeout does not cancel children.',
+        'Observe this mailbox or the exact work_refs returned at admission. Pass next_cursor to continue. Without targets or an explicit wait_ms, return a snapshot immediately. Active targets default to at most 30000ms; finished targets or no active work return immediately. wait_ms:0 always takes a snapshot. Observation never cancels children or acknowledges results; acceptance and older results do not prove the selected work completed.',
         object(
           {
-            afterSeq: cursor,
-            waitMs: { type: ['integer', 'null'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+            workRefs: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 200,
+              uniqueItems: true,
+              items: workReference,
+            },
+            cursor,
+            waitMs: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
           },
           [],
         ),
@@ -320,19 +352,30 @@ export function createTaskExtension(options: TaskOptions): Extension {
         async (input, context) => {
           const args = value(input);
           if (!context.operations.waitAgentEvents) throw new AgentError('operation_unverifiable');
+          const refs = Array.isArray(args.workRefs)
+            ? await Promise.all(args.workRefs.map((ref) => readAgentWorkReference(ref, context)))
+            : undefined;
+          const scope = { kind: 'agent_events', sessionId: context.sessionId };
+          const afterSeq =
+            args.cursor === undefined ? undefined : readModelCursor(args.cursor, scope);
+          if (
+            afterSeq !== undefined &&
+            (typeof afterSeq !== 'string' || !/^(0|[1-9][0-9]*)$/.test(afterSeq))
+          )
+            throw new AgentError('invalid_cursor');
           const waited = await context.operations.waitAgentEvents({
-            ...(typeof args.afterSeq === 'string' ? { afterSeq: args.afterSeq } : {}),
-            ...(args.waitMs === null || typeof args.waitMs === 'number'
-              ? { waitMs: args.waitMs }
-              : {}),
+            ...(typeof afterSeq === 'string' ? { afterSeq } : {}),
+            ...(refs ? { workRefs: refs } : {}),
+            waitMs: typeof args.waitMs === 'number' ? args.waitMs : refs ? 30000 : 0,
           });
           return result({
             reason: waited.reason,
-            next_seq: waited.nextSeq,
+            next_cursor: modelCursor(scope, waited.nextSeq),
             events: waited.events.map((event) => ({
               seq: event.seq,
               agent_id: event.agentId,
               kind: event.kind,
+              ...(event.workRef ? { work_ref: agentWorkReference(event.workRef) } : {}),
               ...(event.outcome ? { outcome: event.outcome } : {}),
               summary: event.summary,
             })),
@@ -352,8 +395,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
               uniqueItems: true,
               items: agentId,
             },
-            afterSeq: cursor,
-            upperSeq: cursor,
+            cursor,
             limit: { type: 'integer', minimum: 1, maximum: 200 },
           },
           [],
@@ -362,9 +404,25 @@ export function createTaskExtension(options: TaskOptions): Extension {
         async (input, context) => {
           const args = value(input);
           if (!context.operations.listStableAgents) throw new AgentError('operation_unverifiable');
-          const page = await context.operations.listStableAgents(
-            args as Parameters<NonNullable<typeof context.operations.listStableAgents>>[0],
-          );
+          const scope = {
+            kind: 'agents',
+            sessionId: context.sessionId,
+            agentIds: Array.isArray(args.agentIds) ? [...args.agentIds].sort() : null,
+          };
+          const position =
+            args.cursor === undefined ? {} : value(readModelCursor(args.cursor, scope));
+          if (
+            Object.keys(position).some((key) => !['afterSeq', 'upperSeq'].includes(key)) ||
+            Object.values(position).some(
+              (v) => typeof v !== 'string' || !/^(0|[1-9][0-9]*)$/.test(v),
+            )
+          )
+            throw new AgentError('invalid_cursor');
+          const page = await context.operations.listStableAgents({
+            ...(args.agentIds ? { agentIds: args.agentIds as string[] } : {}),
+            ...position,
+            ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+          });
           const details = {
             items: page.items.map((item) => ({
               agent_id: item.agentId,
@@ -375,12 +433,18 @@ export function createTaskExtension(options: TaskOptions): Extension {
               current_work_source: item.currentWorkSource,
               work_relation: item.workRelation,
               state: item.state,
+              work_ref: agentWorkReference(item.ref),
               last_outcome: item.lastOutcome,
               last_result_source: item.lastResultSource,
+              last_result_work_ref: item.lastResultRef
+                ? agentWorkReference(item.lastResultRef)
+                : null,
               last_result_summary: item.lastResultSource?.content.slice(0, 512) ?? null,
             })),
-            upper_seq: page.upperSeq,
-            next_after_seq: page.nextAfterSeq,
+            next_cursor:
+              page.nextAfterSeq === null
+                ? null
+                : modelCursor(scope, { afterSeq: page.nextAfterSeq, upperSeq: page.upperSeq }),
           } as unknown as Json;
           const complete = canonicalJson(details);
           if (new TextEncoder().encode(complete).byteLength > 32768 && context.artifacts) {

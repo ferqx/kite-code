@@ -563,7 +563,7 @@ test('default Files original capture survives public offline restore to a new pr
       expectedStoreId: storeB,
       commandId: 'approve-b',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const restored = await until(
       () => current.getExecution(card.executionId!),

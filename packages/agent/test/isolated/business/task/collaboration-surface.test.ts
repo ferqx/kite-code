@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
+import { modelIdentifier } from '../../../../src/model-identifier';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
 
@@ -25,6 +26,179 @@ const call = (name: string, input: unknown): ModelEvent[] => [
   { type: 'tool_call', id: crypto.randomUUID(), name, arguments: JSON.stringify(input) },
   { ...finish, reason: 'tool_calls' },
 ];
+
+test('exact work references keep old completion separate and cannot interrupt a new active turn', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-exact-agent-work-')));
+  const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+  const store = await openSqliteStore(profile);
+  const storeId = (await store.getMetadata()).storeId;
+  let stage = 0,
+    childCalls = 0,
+    agentId = '',
+    oldWork = '',
+    newWork = '',
+    cursor = '',
+    interrupted = false;
+  let active!: () => void;
+  const childActive = new Promise<void>((resolve) => {
+    active = resolve;
+  });
+  let snapshotStarted = 0;
+  const parent: ModelAdapter = {
+    async *stream(request) {
+      const last = request.messages.filter((message) => message.role === 'tool').at(-1);
+      const encoded = last?.content.includes('Complete artifact body:\n')
+        ? last.content.split('Complete artifact body:\n')[1]!
+        : last?.content;
+      let body: {
+        agent_id: string;
+        work_ref: string;
+        next_cursor: string;
+        items: { work_ref: string; last_result_work_ref: string }[];
+        accepted: boolean;
+        reason: string;
+      };
+      try {
+        body = encoded ? JSON.parse(encoded) : null;
+      } catch {
+        const result = (await store.listExecutions('root'))
+          .filter((row) => row.kind === 'tool')
+          .at(-1)?.result as { content: string };
+        body = JSON.parse(result.content);
+      }
+      let events: ModelEvent[];
+      switch (stage++) {
+        case 0:
+          events = call('spawn_agent', { prompt: 'Finish first work' });
+          break;
+        case 1:
+          agentId = body.agent_id;
+          oldWork = body.work_ref;
+          events = call('wait_agent_events', { work_refs: [oldWork], wait_ms: 10000 });
+          break;
+        case 2:
+          cursor = body.next_cursor;
+          events = call('follow_up_agent', {
+            agent_id: agentId,
+            content: 'Wait until interrupted',
+          });
+          break;
+        case 3:
+          newWork = body.work_ref;
+          expect(newWork.length).toBeLessThan(35);
+          expect(newWork).not.toBe(oldWork);
+          await childActive;
+          events = call('interrupt_agent', {
+            agent_id: agentId,
+            work_ref: `aw_${modelIdentifier('00000000-0000-0000-0000-000000000000')}`,
+          });
+          break;
+        case 4:
+          expect(body).toMatchObject({
+            accepted: false,
+            error: { code: 'invalid_work_reference' },
+          });
+          expect(interrupted).toBe(false);
+          events = call('list_agents', { agent_ids: [agentId] });
+          break;
+        case 5:
+          expect(body.items[0]).toMatchObject({ work_ref: newWork, last_result_work_ref: oldWork });
+          events = call('interrupt_agent', { agent_id: agentId, work_ref: oldWork });
+          break;
+        case 6:
+          expect(body).toMatchObject({ accepted: false, error: { code: 'target_changed' } });
+          expect(interrupted).toBe(false);
+          snapshotStarted = Date.now();
+          events = call('wait_agent_events', { work_refs: [oldWork], cursor, wait_ms: 30000 });
+          break;
+        case 7:
+          expect(Date.now() - snapshotStarted).toBeLessThan(1500);
+          expect(body.reason).toBe('completed');
+          expect(interrupted).toBe(false);
+          events = call('interrupt_agent', { agent_id: agentId, work_ref: newWork });
+          break;
+        case 8:
+          expect(body.accepted).toBe(true);
+          events = call('wait_agent_events', { work_refs: [newWork], cursor, wait_ms: 10000 });
+          break;
+        default:
+          expect(interrupted).toBe(true);
+          events = [finish];
+      }
+      for (const event of events) yield event;
+    },
+  };
+  const child: ModelAdapter = {
+    async *stream(_request, options) {
+      if (++childCalls === 2) {
+        active();
+        await new Promise<void>((resolve) => {
+          const stop = () => {
+            interrupted = true;
+            resolve();
+          };
+          if (options.signal.aborted) stop();
+          else options.signal.addEventListener('abort', stop, { once: true });
+        });
+        options.signal.throwIfAborted();
+      }
+      yield finish;
+    },
+  };
+  const runtime = createRuntime({
+    store,
+    artifacts: createArtifactStore({ profile, store }),
+    model: parent,
+    modelId: 'parent',
+    modelConcurrency: 2,
+    extensions: [
+      createTaskExtension({
+        roles: [{ id: 'worker', configurationId: 'worker', description: 'Worker' }],
+      }),
+    ],
+    permissions: { authorize: async () => ({ allowed: true, revision: 'actual' }) },
+    childConfigurations: [
+      { id: 'worker', version: '1', model: child, modelId: 'child', toolIds: [], snapshot: {} },
+    ],
+  });
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      rootUri: pathToFileURL(root).href,
+      name: 'test',
+    });
+    await runtime.createSession({
+      expectedStoreId: storeId,
+      commandId: 'create',
+      sessionId: 'root',
+      workspaceId: 'w',
+      subjectId: 'owner',
+      title: 'work refs',
+    });
+    await runtime.submitCommand({
+      expectedStoreId: storeId,
+      commandId: 'work',
+      sessionId: 'root',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'Check exact child work' },
+    });
+    const command = await runtime.waitForCommand('work', { timeoutMs: 10000 });
+    expect(
+      (await store.listExecutions('root'))
+        .filter((row) => row.kind === 'model' && row.status !== 'succeeded')
+        .map((row) => row.result),
+    ).toEqual([]);
+    expect(await store.getRun((command.receipt as { runId: string }).runId)).toMatchObject({
+      status: 'completed',
+    });
+    expect(stage).toBe(10);
+    expect(childCalls).toBe(2);
+  } finally {
+    await runtime.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15000);
 
 test('six public tools reuse one child Session, preserve responsibility and observe real completion without consuming it', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-collaboration-')));
@@ -100,12 +274,12 @@ test('six public tools reuse one child Session, preserve responsibility and obse
           expect(body.events).toContainEqual(
             expect.objectContaining({ kind: 'completed', agent_id: childId }),
           );
-          after = body.next_seq;
+          after = body.next_cursor;
           events = call('list_agents', { limit: 1 });
           break;
         case 3:
           expect(body.items).toHaveLength(1);
-          expect(body.next_after_seq).toBeNull();
+          expect(body.next_cursor).toBeNull();
           expect(body.items[0]).toMatchObject({
             agent_id: childId,
             assignment_source: { content: originalAssignment },
@@ -123,7 +297,7 @@ test('six public tools reuse one child Session, preserve responsibility and obse
             mode: 'new_turn',
             state: 'queued',
           });
-          events = call('wait_agent_events', { after_seq: after, wait_ms: 10000 });
+          events = call('wait_agent_events', { cursor: after, wait_ms: 10000 });
           break;
         case 5:
           expect(body.reason).toBe('events');
@@ -136,7 +310,7 @@ test('six public tools reuse one child Session, preserve responsibility and obse
           expect(body.items[0].current_work_source.content).toBe(
             'Continue in the same saved Session',
           );
-          expect(body.next_after_seq).toBeNull();
+          expect(body.next_cursor).toBeNull();
           const replayCursor = (await store.getMetadata()).lastChangeCursor;
           const replay = await applyAgentCommand(originalFollowUpInput!);
           expect(replay.receipt).toMatchObject({
@@ -871,7 +1045,7 @@ test('public schema is exactly six closed prompt tools, with optional registered
       arguments: '{"prompt":"read","key":"forged"}',
     }).model?.error,
   ).toBe('invalid_tool_arguments');
-  for (const input of [{}, { wait_ms: null }, { wait_ms: 0 }, { wait_ms: 30001 }])
+  for (const input of [{}, { wait_ms: 0 }, { wait_ms: 30001 }])
     expect(
       general.decode({ id: 'wait', name: 'wait_agent_events', arguments: JSON.stringify(input) })
         .model?.error,
@@ -893,9 +1067,11 @@ test('mailbox wait wakes for a durable raw human input before business applicati
   let calls = 0;
   const parent: ModelAdapter = {
     async *stream() {
-      if (calls++ === 0)
-        for (const event of call('wait_agent_events', { after_seq: '0', wait_ms: null }))
-          yield event;
+      const turn = calls++;
+      if (turn === 0) {
+        for (const event of call('spawn_agent', { prompt: 'Wait for cancellation' })) yield event;
+      } else if (turn === 1)
+        for (const event of call('wait_agent_events', { wait_ms: 30000 })) yield event;
       else {
         await gate;
         yield { type: 'text_delta', text: 'finished' };
@@ -921,9 +1097,21 @@ test('mailbox wait wakes for a durable raw human input before business applicati
         return { allowed: true, revision: 'fixture' };
       },
     },
-    modelConcurrency: 1,
+    modelConcurrency: 2,
     childConfigurations: [
-      { id: 'worker', version: '1', model: parent, modelId: 'parent', toolIds: [], snapshot: {} },
+      {
+        id: 'worker',
+        version: '1',
+        model: {
+          async *stream() {
+            await gate;
+            yield finish;
+          },
+        },
+        modelId: 'child',
+        toolIds: [],
+        snapshot: {},
+      },
     ],
   });
   const until = async <T>(read: () => Promise<T | undefined>): Promise<T> => {
@@ -983,7 +1171,7 @@ test('mailbox wait wakes for a durable raw human input before business applicati
     expect(JSON.parse((settled.result as { content: string }).content)).toEqual({
       reason: 'input',
       events: [],
-      next_seq: '0',
+      next_cursor: expect.any(String),
     });
     expect((await store.getCommand('public-input'))!.receipt).toMatchObject({
       outcome: 'human_input_pending',
@@ -1210,13 +1398,18 @@ test('stable idle child mail queues without activation and is adopted once by th
         case 1:
           expect(body).toMatchObject({ accepted: true, state: 'queued' });
           agentId = body.agent_id;
-          events = call('wait_agent_events', { wait_ms: 10000 });
+          events = call('wait_agent_events', { work_refs: [body.work_ref], wait_ms: 10000 });
           break;
         case 2:
-          expect(body.events).toContainEqual(
-            expect.objectContaining({ agent_id: agentId, kind: 'completed' }),
-          );
-          cursor = body.next_seq;
+          // A terminal original carrier returns immediately even before its mailbox notice arrives.
+          expect(
+            body.reason === 'completed' ||
+              body.events.some(
+                (event: { agent_id: string; kind: string }) =>
+                  event.agent_id === agentId && event.kind === 'completed',
+              ),
+          ).toBe(true);
+          cursor = body.next_cursor;
           events = call('list_agents', { agent_ids: [agentId], limit: 1 });
           break;
         case 3: {
@@ -1272,7 +1465,7 @@ test('stable idle child mail queues without activation and is adopted once by th
         }
         case 5:
           expect(body).toMatchObject({ accepted: true, agent_id: agentId, mode: 'new_turn' });
-          events = call('wait_agent_events', { after_seq: cursor, wait_ms: 10000 });
+          events = call('wait_agent_events', { cursor: cursor, wait_ms: 10000 });
           break;
         case 6:
           expect(body.events).toContainEqual(

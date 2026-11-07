@@ -115,6 +115,7 @@ import {
   validateCursorBounds,
 } from './sse';
 
+export { type ApprovalOptionView, readApprovalOptions } from './approval-options';
 export { type CallerCommandRequest, canonicalCallerCommandRequest } from './command-request';
 export type { OrdinaryCommandApplication, OrdinaryCommandObservation } from './ordinary-command';
 export { readOrdinaryCommandApplication } from './ordinary-command';

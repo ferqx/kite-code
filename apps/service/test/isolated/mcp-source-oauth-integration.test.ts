@@ -756,7 +756,7 @@ test('ordinary Auth Ask is independent; explicit execution.cancel closes only ow
       expectedStoreId: host.storeId,
       commandId: 'approve-login',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await until(async () => (f.counts().browser === 1 ? true : null));
     const command = await host.runtime.getCommand('cancel-login'),
@@ -926,7 +926,7 @@ test('approval-time Source drift and mismatched trusted observer/Store cause no 
       expectedStoreId: host.storeId,
       commandId: 'approve-drift',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     expect((await work).execution.status).toBe('failed');
     expect(f.counts().browser).toBe(0);

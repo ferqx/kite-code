@@ -14,22 +14,24 @@ async function read(kind: Interaction['kind'], request: Interaction['request'], 
   }
 }
 
-test('stdio plan review uses only explicitly offered mode and never promotes Full', async () => {
+test('stdio plan review records an explicit business decision without a permission mode', async () => {
   const request = {
     planId: 'original',
     version: 'v1',
     digest: 'digest',
     content: 'original body',
-    allowedModes: ['accept_edits'],
   };
-  expect(await read('plan_review', request, 'approve accept_edits\n')).toEqual({
+  expect(await read('plan_review', request, 'approve\n')).toEqual({
     kind: 'plan_review',
     decision: 'approve',
-    mode: 'accept_edits',
   });
   expect(await read('plan_review', request, 'approve auto\n')).toBeUndefined();
   expect(await read('plan_review', request, 'approve full\n')).toBeUndefined();
-  expect(await read('plan_review', request, 'approve\n')).toBeUndefined();
+  expect(await read('plan_review', request, 'approve accept_edits\n')).toBeUndefined();
+  expect(await read('plan_review', request, '\n')).toBeUndefined();
+  expect(
+    await read('plan_review', { ...request, allowedModes: ['auto'] }, 'approve\n'),
+  ).toBeUndefined();
   expect(await read('plan_review', request, 'revise keep the original identity\n')).toEqual({
     kind: 'plan_review',
     decision: 'revise',

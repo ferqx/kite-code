@@ -320,7 +320,7 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
         expectedStoreId: storeId,
         commandId: `approve-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       facts.push({ card });
     }

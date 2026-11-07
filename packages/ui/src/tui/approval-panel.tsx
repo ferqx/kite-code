@@ -1,8 +1,9 @@
-import type { Interaction } from '@kite-ai/client';
+import { type Interaction, readApprovalOptions } from '@kite-ai/client';
 import { Box } from 'ink';
 import { terminalText } from './controller';
 import OverlayChoiceList from './ink/OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './ink/OverlayFrame';
+import { TuiPanelViewport } from './panel-viewport';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
 /** Pure UI: Root retains the focused original identity and sole submission listener. */
@@ -12,12 +13,14 @@ export function TuiApprovalPanel({
   selected,
   busy = false,
   error,
+  rows = 22,
 }: {
   card: Interaction;
   choices: readonly string[];
   selected?: number;
   busy?: boolean;
   error?: string;
+  rows?: number;
 }) {
   const { t } = useTuiPresentation();
   const { t: translate } = useInkI18n();
@@ -38,33 +41,23 @@ export function TuiApprovalPanel({
           (value) => typeof value === 'string',
         )
       : undefined;
-  const options = choices.map((answer) => ({
-    id: answer,
-    label:
-      answer === 'approve same_command'
-        ? t('same command in original Session')
-        : translate(
-            answer === 'approve'
-              ? 'approval.once'
-              : answer === 'approve same_command'
-                ? 'approval.session'
-                : 'approval.deny',
-          ),
-    description:
-      answer === 'approve same_command'
-        ? t(
-            'Only this exact command in the original Session; other commands still require approval.',
-          )
-        : translate(
-            answer === 'approve'
-              ? 'approval.onceDescription'
-              : answer === 'approve same_command'
-                ? 'approval.sessionToolDescription'
-                : 'approval.denyToolDescription',
-          ),
-  }));
+  const offered = readApprovalOptions(request);
+  const options = choices.map((answer) => {
+    const option =
+      answer === 'approve'
+        ? offered.find((item) => item.kind === 'once')
+        : offered.find((item) => answer === `approve ${item.optionId}`);
+    return {
+      id: answer,
+      label: option ? terminalText(option.presentation.label) : translate('approval.deny'),
+      description: option
+        ? terminalText(option.presentation.details.join('\n'))
+        : translate('approval.denyToolDescription'),
+    };
+  });
   return (
     <OverlayFrame
+      compact
       title={translate('approval.title', { tool: translate('approval.genericTool') })}
       footer={
         <OverlayShortcutBar
@@ -76,36 +69,36 @@ export function TuiApprovalPanel({
         />
       }
     >
-      {typeof card.definitionId === 'string' && (
-        <Text dimColor>{terminalText(card.definitionId)}</Text>
-      )}
-      {target && <Text>{terminalText(target)}</Text>}
-      {typeof summary === 'string' && (
-        <Box
-          marginLeft={1}
-          paddingLeft={1}
-          borderStyle="single"
-          borderTop={false}
-          borderRight={false}
-          borderBottom={false}
-        >
-          <Text>{terminalText(summary)}</Text>
-        </Box>
-      )}
-      <Box marginTop={1}>
-        <OverlayChoiceList
-          options={options}
-          selectedId={selected === undefined ? undefined : options[selected]?.id}
-          selectionBackground={false}
-        />
-      </Box>
-      {selected === undefined && <Text dimColor>{t('none (Enter has no answer)')}</Text>}
-      {busy && (
-        <Text dimColor>
-          {t('Original outcome pending or unknown; check original before another answer')}
-        </Text>
-      )}
-      {error && <Text color="red">{terminalText(error)}</Text>}
+      <OverlayChoiceList
+        options={options.map((option) => ({ id: option.id, label: option.label }))}
+        selectedId={selected === undefined ? undefined : options[selected]?.id}
+        selectionBackground={false}
+        compact
+      />
+      <TuiPanelViewport
+        rows={Math.max(2, rows - options.length - 3)}
+        identity={`${card.id}:${card.revision}:${selected ?? 'none'}`}
+      >
+        {typeof card.definitionId === 'string' && (
+          <Text dimColor>{terminalText(card.definitionId)}</Text>
+        )}
+        <Text dimColor>{terminalText(card.sessionId)}</Text>
+        {target && <Text>{terminalText(target)}</Text>}
+        {typeof summary === 'string' && <Text>{terminalText(summary)}</Text>}
+        {selected !== undefined && options[selected] && (
+          <Box flexDirection="column" flexShrink={0}>
+            <Text bold>{options[selected].label}</Text>
+            {options[selected].description && <Text>{options[selected].description}</Text>}
+          </Box>
+        )}
+        {selected === undefined && <Text dimColor>{t('none (Enter has no answer)')}</Text>}
+        {busy && (
+          <Text dimColor>
+            {t('Original outcome pending or unknown; check original before another answer')}
+          </Text>
+        )}
+        {error && <Text color="red">{terminalText(error)}</Text>}
+      </TuiPanelViewport>
     </OverlayFrame>
   );
 }

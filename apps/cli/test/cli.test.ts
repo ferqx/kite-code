@@ -219,7 +219,7 @@ test('Ctrl+C wakes injected waiting handler and cancels only the saved work comm
   expect(cancelled).toBe(true);
 });
 
-test('CLI plan handler cannot submit Full or missing explicit mode, and preserves exact pending information request', async () => {
+test('CLI plan handler rejects legacy permission modes, and preserves exact pending information request', async () => {
   const { run } = await import('../src');
   let mutations = 0;
   const card = {
@@ -236,7 +236,6 @@ test('CLI plan handler cannot submit Full or missing explicit mode, and preserve
       version: 'v1',
       digest: 'digest',
       content: 'body',
-      allowedModes: ['auto', 'accept_edits'],
     },
   };
   const client = {
@@ -264,7 +263,7 @@ test('CLI plan handler cannot submit Full or missing explicit mode, and preserve
       mutations++;
     },
   } as unknown as AgentClient;
-  for (const mode of [undefined, 'full']) {
+  for (const mode of ['auto', 'accept_edits', 'full']) {
     const result = await run(
       's',
       { kind: 'run.start', expectedStoreId: 'store', commandId: 'c', content: 'test' },

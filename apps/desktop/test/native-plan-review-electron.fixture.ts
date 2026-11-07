@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Interaction, InteractionAttachment, Json } from '@kite-ai/client';
 import { _electron } from 'playwright';
@@ -52,7 +52,6 @@ export type PlanReviewReport = {
   cards: (Omit<RecordedInteraction<PlanRequest>, 'commandId'> & {
     commandId?: string;
     decision?: string;
-    mode?: string;
     version: string;
   })[];
   runs: {
@@ -108,19 +107,32 @@ type DiagnosticWindow = typeof window & {
   planMainProbe?: MainDraftProbe;
 };
 
-const [candidate, home, control, storeId] = process.argv.slice(2) as [
+const [candidate, home, control, storeId, evidenceDirectory] = process.argv.slice(2) as [
+  string,
   string,
   string,
   string,
   string,
 ];
 const startedAt = performance.now();
-const stage = (name: string, facts: Record<string, unknown> = {}) =>
+let currentStage = 'launch';
+const stage = (name: string, facts: Record<string, unknown> = {}) => {
+  currentStage = name;
   console.log(
     JSON.stringify({ stage: name, elapsedMs: Math.round(performance.now() - startedAt), ...facts }),
   );
+};
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 let childPid: number | undefined;
+let observationTimer: ReturnType<typeof setInterval> | undefined;
+let observation: Promise<void> | undefined;
+const frames: {
+  file: string;
+  stage: string;
+  elapsedMs: number;
+  visible: string;
+  scroll: { top: number; height: number; viewport: number }[];
+}[] = [];
 const cards: PlanReviewReport['cards'] = [],
   runs: PlanReviewReport['runs'] = [],
   management: PlanReviewReport['management'] = [],
@@ -140,6 +152,39 @@ try {
     timeout: 10000,
   });
   const page = await nativeRootPage(app, 10000);
+  mkdirSync(evidenceDirectory, { recursive: true });
+  observationTimer = setInterval(() => {
+    if (observation) return;
+    observation = (async () => {
+      const file = `${String(frames.length).padStart(4, '0')}.png`;
+      const snapshot = await page.evaluate(() => ({
+        visible: document.body.innerText.slice(-12000),
+        scroll: [...document.querySelectorAll<HTMLElement>('*')]
+          .filter(
+            (element) =>
+              element.scrollHeight > element.clientHeight + 1 &&
+              element.clientHeight > 100 &&
+              ['auto', 'scroll'].includes(getComputedStyle(element).overflowY),
+          )
+          .map((element) => ({
+            top: element.scrollTop,
+            height: element.scrollHeight,
+            viewport: element.clientHeight,
+          })),
+      }));
+      await page.screenshot({ path: join(evidenceDirectory, file) });
+      frames.push({
+        file,
+        stage: currentStage,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        ...snapshot,
+      });
+    })()
+      .catch((error) => console.error('plan_observation_failure', String(error)))
+      .finally(() => {
+        observation = undefined;
+      });
+  }, 180);
   stage('window_ready', { electronPid: app.process().pid });
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => console.error('plan_renderer_error', error.message));
@@ -394,7 +439,7 @@ try {
       if (request.definitionId === 'planning.write')
         assert.equal(complete.input.body, metadata.bodyText);
     }
-    await page.getByRole('button', { name: '批准一次', exact: true }).click();
+    await page.getByRole('button', { name: '仅此次', exact: true }).click();
     const accepted = await until(
       state,
       (value) =>
@@ -608,7 +653,7 @@ try {
     });
     return card;
   }
-  async function capture(card: Interaction, decision?: string, mode?: string) {
+  async function capture(card: Interaction, decision?: string) {
     assert.ok(card.runId);
     const request = planRequest(card);
     stage('capture_enter', {
@@ -616,7 +661,6 @@ try {
       runId: card.runId,
       interactionId: card.id,
       decision,
-      mode,
     });
     const current = await until(
       state,
@@ -636,7 +680,6 @@ try {
       version: request.version,
       request,
       decision,
-      mode,
       commandId: submission?.intent.commandId,
     });
     stage('capture_complete', {
@@ -644,7 +687,6 @@ try {
       runId: card.runId,
       interactionId: card.id,
       decision,
-      mode,
       commandId: submission?.intent.commandId,
     });
   }
@@ -727,7 +769,7 @@ try {
       ).length,
       0,
     );
-    assert.equal(await page.getByRole('button', { name: '批准一次', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: '仅此次', exact: true }).count(), 0);
     assert.equal(
       readFileSync(join(home, 'workspace', `effect-${id}.txt`), 'utf8'),
       `approved ${id} exact effect\n雪🙂`,
@@ -766,8 +808,6 @@ try {
     await page.getByLabel('计划步骤', { exact: true }).innerText(),
     /Write the approved file/,
   );
-  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).click();
-  await page.getByRole('option', { name: 'accept_edits', exact: true }).click();
   await page
     .getByRole('textbox', { name: 'Plan review feedback', exact: true })
     .fill(metadata.feedback);
@@ -779,10 +819,8 @@ try {
     await page.getByRole('button', { name: 'Load complete attachment', exact: true }).click();
   await page.getByLabel('完整计划正文', { exact: true }).waitFor();
   assert.equal(
-    (
-      await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).textContent()
-    )?.trim(),
-    'accept_edits',
+    await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).count(),
+    0,
   );
   assert.equal(
     await page.getByRole('textbox', { name: 'Plan review feedback', exact: true }).inputValue(),
@@ -797,23 +835,19 @@ try {
   assert.notEqual(second.id, first.id);
   assert.equal(planRequest(second).version, '2');
   assert.equal(
-    (
-      await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).textContent()
-    )?.trim(),
-    'Select a mode explicitly',
+    await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).count(),
+    0,
   );
   assert.equal(
     await page.getByRole('textbox', { name: 'Plan review feedback', exact: true }).inputValue(),
     '',
   );
-  assert.equal(await approve.isDisabled(), true);
+  assert.equal(await approve.isDisabled(), false);
   assert.equal(existsSync(join(home, 'workspace', 'blocked-a-2.txt')), false);
   assert.equal(existsSync(join(home, 'workspace', 'effect-a.txt')), false);
   assert.equal(await posts(), management.length + 1);
-  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).click();
-  await page.getByRole('option', { name: 'auto', exact: true }).click();
   await approve.click();
-  await capture(second, 'approve', 'auto');
+  await capture(second, 'approve');
   await done('a', second.runId!, 'completed', mainDraft);
   await assertWorkspaceWrite('a', second.runId!);
   const postsBeforeHistory = await posts();
@@ -851,11 +885,9 @@ try {
   await history.locator(':scope > summary').click();
   const bDraft = '  B 原草稿 雪🙂  ';
   const b = await start('b', bDraft);
-  assert.equal(await approve.isDisabled(), true);
-  await page.getByRole('combobox', { name: 'Plan review mode', exact: true }).click();
-  await page.getByRole('option', { name: 'accept_edits', exact: true }).click();
+  assert.equal(await approve.isDisabled(), false);
   await approve.click();
-  await capture(b, 'approve', 'accept_edits');
+  await capture(b, 'approve');
   await done('b', b.runId!, 'completed', bDraft);
   await assertWorkspaceWrite('b', b.runId!);
   const dDraft = '拒绝原 Main 草稿';
@@ -863,22 +895,31 @@ try {
   await page
     .getByRole('textbox', { name: 'Plan review feedback', exact: true })
     .fill('原拒绝理由 雪🙂');
+  const deniedModelsBeforeAnswer = Number(
+    await (await fetch(`${control}/count?sessionId=d`)).text(),
+  );
   await page.getByRole('button', { name: 'Deny plan', exact: true }).click();
   await capture(d, 'deny');
-  const diagnostics = await until(
-    async () =>
-      (await (
-        await fetch(`${control}/denied-completion?runId=${encodeURIComponent(d.runId!)}`)
-      ).json()) as { kind: string; key: string; content: string }[],
-    (values) => values.length > 0,
-    'original denied Run completion diagnostic missing',
-  );
-  assert.equal(diagnostics[0]!.kind, 'completion_diagnostic');
-  assert.ok(diagnostics[0]!.key.startsWith('plan-review:'));
-  assert.equal(JSON.parse(diagnostics[0]!.content).code, 'plan_draft_pending');
+  await done('d', d.runId!, 'cancelled', dDraft);
   const deniedState = await state();
   assert.equal(deniedState.selection!.session.id, 'd');
-  assert.equal(deniedState.selection!.runs.find((run) => run.id === d.runId)!.isActive, true);
+  assert.equal(deniedState.selection!.runs.find((run) => run.id === d.runId)!.isActive, false);
+  const deniedReview = deniedState.selection!.executions.find(
+    (execution) => execution.id === d.executionId,
+  )!;
+  assert.equal(deniedReview.status, 'succeeded');
+  const deniedResult = jsonObject(deniedReview.result!);
+  assert.equal(deniedResult.content, '用户拒绝了该计划，已停止本轮对话');
+  assert.deepEqual(deniedResult.control, { kind: 'stop_work' });
+  assert.deepEqual(deniedResult.details, {
+    status: 'not_approved',
+    decision: 'deny',
+    feedback: '原拒绝理由 雪🙂',
+  });
+  assert.equal(
+    Number(await (await fetch(`${control}/count?sessionId=d`)).text()),
+    deniedModelsBeforeAnswer,
+  );
   assert.equal(
     deniedState.selection!.executions.some(
       (execution) =>
@@ -889,20 +930,6 @@ try {
     false,
   );
   assert.equal(existsSync(join(home, 'workspace', 'denied-effect.txt')), false);
-  const dCommand = deniedState.callerSubmissions!.find(
-    (row) => row.scope.sessionId === 'd' && row.request.kind === 'run.start',
-  )!.request.commandId;
-  await page.getByRole('button', { name: `取消原申请 · ${dCommand}`, exact: true }).click();
-  await done('d', d.runId!, 'cancelled', dDraft);
-  assert.ok(
-    (await state()).callerSubmissions?.some(
-      (row) =>
-        row.request.kind === 'command.cancel' &&
-        row.target.kind === 'command' &&
-        row.target.id === dCommand &&
-        ['accepted', 'applied'].includes(row.phase),
-    ),
-  );
   assert.equal(existsSync(join(home, 'workspace', 'denied-effect.txt')), false);
   const cDraft = '取消原 Main 草稿';
   const c = await start('c', cDraft);
@@ -956,7 +983,7 @@ try {
   );
   assert.equal(management.length, 0, 'record-only Planning Tools need no ordinary human approval');
   assert.equal(filesApprovals.length, 0);
-  const expectedPosts = management.length + 4 + filesApprovals.length; // Only the four original Plan answers; both modes allow workspace Files writes.
+  const expectedPosts = management.length + 4 + filesApprovals.length; // Only the four original Plan answers; the original independent tool mode allows workspace Files writes.
   assert.equal(await posts(), expectedPosts);
   stage('all_ui_assertions_complete', {
     planDecisions: 4,
@@ -964,6 +991,9 @@ try {
     filesApprovals: filesApprovals.length,
     answerPosts: expectedPosts,
   });
+  clearInterval(observationTimer);
+  observationTimer = undefined;
+  await observation;
   const owned = app;
   const exit = new Promise<void>((resolve) =>
     owned.process().once('exit', (code, signal) => {
@@ -1115,6 +1145,9 @@ try {
     } catch {}
   throw error;
 } finally {
+  if (observationTimer) clearInterval(observationTimer);
+  await observation;
+  writeFileSync(join(evidenceDirectory, 'frames.json'), JSON.stringify(frames));
   if (childPid)
     try {
       process.kill(childPid, 'SIGKILL');

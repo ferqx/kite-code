@@ -24,7 +24,6 @@ const inputSchema = {
               properties: {
                 label: nonempty,
                 description: nonempty,
-                recommended: { type: 'boolean' },
               },
               required: ['label', 'description'],
               additionalProperties: false,
@@ -68,18 +67,13 @@ function questions(input: Json) {
     if (!Array.isArray(options) || options.length < 2 || options.length > 3)
       throw new AgentError('invalid_ask_user_arguments');
     const choices = options.map((value, choiceIndex) => {
-      const option = object(value, ['label', 'description'], ['recommended']);
-      if (Object.hasOwn(option, 'recommended') && typeof option.recommended !== 'boolean')
-        throw new AgentError('invalid_ask_user_arguments');
+      const option = object(value, ['label', 'description']);
       return {
         id: `q${index + 1}-o${choiceIndex + 1}`,
         label: text(option.label!).trim(),
         description: text(option.description!).trim(),
-        recommended: option.recommended === true,
       };
     });
-    if (choices.filter((choice) => choice.recommended).length > 1)
-      throw new AgentError('invalid_ask_user_arguments');
     return { id: `q${index + 1}`, question: text(question.question!).trim(), choices };
   });
 }
@@ -91,7 +85,7 @@ export function createAskUserExtension(): Extension {
     model: { name: 'ask_user', snakeCase: true },
     version: '1',
     description:
-      'Ask only when a material choice blocks progress. Submit all one to three focused questions in one call using the canonical questions array, each with two to three label/description options. Put the preferred option first; at most one option per question may be recommended=true. Every question also permits free input. Cancelling the answers returns cancelled information and leaves the task running; do not automatically repeat these questions.',
+      'Ask only when a material choice blocks progress. Submit all one to three focused questions in one call, each with two to three label/description options. Put the recommended option first. Every question also permits free input. Cancelling the answers returns cancelled information and leaves the task running; do not automatically repeat these questions.',
     inputSchema,
     async execute(input, context) {
       let parsed: ReturnType<typeof questions>;
@@ -104,8 +98,7 @@ export function createAskUserExtension(): Extension {
       }
       const properties: Record<string, Json> = {};
       for (const question of parsed) {
-        const recommended =
-          question.choices.find((choice) => choice.recommended) ?? question.choices[0]!;
+        const recommended = question.choices[0]!;
         properties[question.id] = {
           title: question.question,
           anyOf: [

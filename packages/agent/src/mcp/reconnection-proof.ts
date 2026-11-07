@@ -16,6 +16,23 @@ export const hash = (value: unknown) =>
     .digest('hex');
 export const equal = (a: unknown, b: unknown) =>
   canonicalJson(a as Json) === canonicalJson(b as Json);
+/** Model inputs omit host-owned keys; explicit host Actions retain their own input contract. */
+export function connectionPublisherInput(
+  execution: PublicExecution,
+  serverId: string,
+  key: string,
+) {
+  return (
+    execution.definitionVersion === '1' &&
+    (execution.kind === 'tool' &&
+    execution.definitionId === 'mcp.connect' &&
+    execution.extensionId === 'builtin.mcp'
+      ? execution.inputDigest === hash({ serverId })
+      : execution.kind === 'job' &&
+        execution.definitionId === 'builtin.mcp/mcp.connect' &&
+        execution.inputDigest === hash({ serverId, key }))
+  );
+}
 const id = (v: unknown, max = 128) =>
   typeof v === 'string' && new RegExp(`^[A-Za-z0-9_-]{1,${max}}$`).test(v);
 export const decimal64 = (v: unknown): v is string =>
@@ -357,11 +374,7 @@ export async function proveConnectionParent(
     throw Error('mcp_reconnection_scope_unavailable');
   const key = r.key.slice(`connection/${serverId}/`.length);
   if (['mcp.connect', 'builtin.mcp/mcp.connect'].includes(parent.definitionId ?? '')) {
-    if (
-      parent.definitionVersion !== '1' ||
-      !['tool', 'job'].includes(parent.kind) ||
-      parent.inputDigest !== hash({ serverId, key })
-    )
+    if (!connectionPublisherInput(parent, serverId, key))
       throw Error('mcp_reconnection_scope_unavailable');
   } else {
     const p = await savedReconnection(context, parent);
@@ -398,14 +411,12 @@ export async function proveCarrier(
     throw Error('mcp_reconnection_scope_unavailable');
   let catalogue: Record<string, unknown>;
   if (['mcp.connect', 'builtin.mcp/mcp.connect'].includes(e.definitionId ?? '')) {
-    if (
-      e.definitionVersion !== '1' ||
-      !['tool', 'job'].includes(e.kind) ||
-      e.inputDigest !== hash({ serverId, key })
-    )
+    if (!connectionPublisherInput(e, serverId, key))
       throw Error('mcp_reconnection_scope_unavailable');
     const details = { ...object(object(e.result).details) };
     delete details.toolsMetadata;
+    delete details.connection_ref;
+    delete details.modelBinding;
     catalogue = decodeCatalogue(details);
   } else {
     const proof = await savedReconnection(context, e);

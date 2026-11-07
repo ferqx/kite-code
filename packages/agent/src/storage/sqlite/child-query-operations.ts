@@ -255,7 +255,7 @@ export function stableAgentsBody(
     if (ref?.runId && (!run || run.origin_store_id !== input.expectedStoreId))
       throw new AgentError('operation_unverifiable');
     const last = db.row(
-      `SELECT e.state,e.result_json ${base} AND s.id=? AND e.state IN ('succeeded','failed','cancelled','outcome_unknown') ORDER BY c.seq DESC LIMIT 1`,
+      `SELECT e.state,e.result_json,e.id AS carrier_id,c.id,c.operation_key ${base} AND s.id=? AND e.state IN ('succeeded','failed','cancelled','outcome_unknown') ORDER BY c.seq DESC LIMIT 1`,
       ...args,
       identity.id!,
     );
@@ -298,6 +298,17 @@ export function stableAgentsBody(
         ? (String(last.state) as import('../agent-collaboration').StableAgentSummary['lastOutcome'])
         : null,
       lastResultSource: last ? { content: String(last.result_json) } : null,
+      lastResultRef: last
+        ? {
+            commandId: String(last.id),
+            sessionId: input.sessionId,
+            extensionId: input.extensionId,
+            originStoreId: input.expectedStoreId,
+            key: String(last.operation_key),
+            executionId: String(last.carrier_id),
+            childSessionId: String(identity.id),
+          }
+        : null,
       ref: {
         commandId: String(current.id),
         sessionId: input.sessionId,
@@ -368,7 +379,7 @@ export function listAgentEvents(
     );
     if (after > BigInt(water)) throw new AgentError('invalid_cursor');
     const rows = db.rows(
-      `SELECT v.cursor,v.type,e.child_session_id,e.state,m.session_id AS sender_session ${predicate} AND v.cursor>? ORDER BY v.cursor LIMIT ?`,
+      `SELECT v.cursor,v.type,e.child_session_id,e.state,e.id AS carrier_id,c.id AS command_id,c.operation_key,m.session_id AS sender_session ${predicate} AND v.cursor>? ORDER BY v.cursor LIMIT ?`,
       ...args,
       after,
       limit,
@@ -380,6 +391,19 @@ export function listAgentEvents(
       ),
       kind: row.type === 'execution.finished' ? ('completed' as const) : ('message' as const),
       ...(row.type === 'execution.finished' ? { outcome: String(row.state) } : {}),
+      ...(row.type === 'execution.finished'
+        ? {
+            workRef: {
+              commandId: String(row.command_id),
+              sessionId: input.sessionId,
+              extensionId: input.extensionId,
+              originStoreId: input.expectedStoreId,
+              key: String(row.operation_key),
+              executionId: String(row.carrier_id),
+              childSessionId: String(row.child_session_id),
+            },
+          }
+        : {}),
       summary:
         row.type === 'execution.finished'
           ? `Child execution ended: ${row.state}. Full result remains in its original source.`

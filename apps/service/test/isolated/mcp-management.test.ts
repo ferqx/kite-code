@@ -118,20 +118,28 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
     async fetch(req) {
       providerBodies.push((await req.json()) as Record<string, unknown>);
       const requested = modelRefresh;
-      modelRefresh = false;
-      const original = requested ? await binding() : null;
-      const call = original
-        ? {
-            name: 'refresh_mcp_catalogue',
-            input: {
-              server_id: original.serverId,
-              connection_key: original.connectionKey,
-              connection_execution_id: original.connectionExecutionId,
-              config_digest: original.configDigest,
-              generation: original.generation,
-            },
-          }
+      const original = requested
+        ? (await store.listExecutions('a'))
+            .filter(
+              (row) =>
+                row.status === 'succeeded' &&
+                (row.result as { details?: { connection_ref?: string } } | null)?.details
+                  ?.connection_ref,
+            )
+            .at(-1)
         : null;
+      const call = !requested
+        ? null
+        : original
+          ? {
+              name: 'refresh_mcp_catalogue',
+              input: {
+                connection_ref: (original.result as { details: { connection_ref: string } }).details
+                  .connection_ref,
+              },
+            }
+          : { name: 'connect_mcp_server', input: { server_id: 'local' } };
+      modelRefresh = requested && !original;
       const chunk = {
         id: 'fixed',
         object: 'chat.completion.chunk',
@@ -556,7 +564,7 @@ async function approve(f: Awaited<ReturnType<typeof fixture>>) {
     presentationSessionId: card.presentationSessionId,
     interactionId: card.id,
     expectedRevision: card.revision,
-    answer: { kind: 'approval', decision: 'approve' },
+    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
   });
 }
 test('actual Client directory is cold; selection CAS preserves JSONC/unknown fields and one original mutation receipt', async () => {

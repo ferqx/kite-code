@@ -78,7 +78,13 @@ test('presentation is explicitly bounded on UTF-8 boundaries while complete writ
     } as Parameters<typeof tool.execute>[1]);
     expect(result.outcome).toBe('succeeded');
     const modelResult = JSON.parse(result.content);
-    expect(Object.keys(modelResult).sort()).toEqual(['baseline', 'fileChange', 'path', 'summary']);
+    expect(Object.keys(modelResult).sort()).toEqual([
+      'base_ref',
+      'baseline',
+      'fileChange',
+      'path',
+      'summary',
+    ]);
     expect(modelResult.baseline.size).toBe(Buffer.byteLength(content));
     expect(modelResult.baseline.hash).toBe(hash(content));
     expect(readFileSync(join(f.root, 'large'), 'utf8')).toBe(content);
@@ -213,7 +219,7 @@ test('real Core saves the preview in original Execution receipts; repeated call 
         type: 'tool_call',
         id: 'repeated-call',
         name: 'write_file',
-        arguments: JSON.stringify({ path, base: null, content: `actual ${path} bytes` }),
+        arguments: JSON.stringify({ path, content: `actual ${path} bytes` }),
       } as ModelEvent,
       { ...finish, reason: 'tool_calls' } as ModelEvent,
     ],

@@ -34,7 +34,7 @@ export async function startCurrentChildResume(directory: string) {
             type: 'tool_call',
             id: 'current-child-write',
             name: 'write_file',
-            arguments: JSON.stringify({ path: target, content: currentChildContent, base: null }),
+            arguments: JSON.stringify({ path: target, content: currentChildContent }),
           };
           yield { ...finish, reason: 'tool_calls' };
         }
@@ -46,7 +46,7 @@ export async function startCurrentChildResume(directory: string) {
           id: 'current-child-spawn',
           name: 'spawn_agent',
           arguments: JSON.stringify({
-            prompt: `Write ${JSON.stringify(currentChildContent)} exactly once at ${JSON.stringify(target)}, base:null, then report the result.`,
+            prompt: `Write ${JSON.stringify(currentChildContent)} exactly once at ${JSON.stringify(target)}, omitting base_ref, then report the result.`,
           }),
         };
         yield { ...finish, reason: 'tool_calls' };
@@ -59,10 +59,10 @@ export async function startCurrentChildResume(directory: string) {
         yield finish;
       } else {
         const last = request.messages.filter((message) => message.role === 'tool').at(-1);
-        let cursor = '0';
+        let cursor: string | undefined;
         try {
           const body = JSON.parse(last?.content ?? '{}');
-          if (typeof body.next_seq === 'string') cursor = body.next_seq;
+          if (typeof body.next_cursor === 'string') cursor = body.next_cursor;
         } catch {
           // A spawn receipt does not supply an event cursor.
         }
@@ -70,7 +70,7 @@ export async function startCurrentChildResume(directory: string) {
           type: 'tool_call',
           id: crypto.randomUUID(),
           name: 'wait_agent_events',
-          arguments: JSON.stringify({ wait_ms: 5000, after_seq: cursor }),
+          arguments: JSON.stringify({ wait_ms: 5000, ...(cursor ? { cursor } : {}) }),
         };
         yield { ...finish, reason: 'tool_calls' };
       }

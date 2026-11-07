@@ -106,14 +106,14 @@ export interface DispatchInput extends OwnedWrite {
   /** Captured by the trusted Host, not extension result or caller input. */
   readSet?: import('./types').DispatchReadSet;
   authorization: {
+    executionConfirmation?: import('../execution-confirmation').ExecutionConfirmationProof;
     worktreeDecisionSeal?: import('../permissions/worktree-authorization').WorktreeDecisionSeal;
-    grant?: { grantId: string; revision: string; commandDigest?: string };
+    grant?: import('../permission-grants').GrantUse;
     snapshot?: { namespace: string; version: string; data: Json };
     controlReads?: readonly PermissionControlRead[];
     checkExecutionId?: string;
     policyEvidenceId?: string;
-    riskReviewApproved?: true;
-    reviewExecutionId?: string;
+    materialReviewed?: true;
     interactionId?: string;
     decisionRevision?: string;
     allowed: boolean;
@@ -197,12 +197,12 @@ export interface PlanActionInput extends OwnedWrite {
   attempt?: number;
 }
 
-export interface AuthorizationReviewIdentity {
+export interface AuthorizationCheckIdentity {
   id: string;
   version: string;
   modelId: string;
 }
-export interface EnsureAuthorizationReviewInput extends OwnedWrite {
+export interface EnsureAuthorizationCheckInput extends OwnedWrite {
   targetExecutionId: string;
   policyRevision: string;
   request: Json;
@@ -211,46 +211,24 @@ export interface EnsureAuthorizationReviewInput extends OwnedWrite {
   rootWorkRequestBody?: import('../model-body').ModelBodyReference;
   targetInputBody?: import('../model-body').ModelBodyReference;
   targetSourceBody?: import('../model-body').ModelBodyReference;
-  reviewer: AuthorizationReviewIdentity;
   requireApproval?: boolean;
-}
-export interface AuthorizationReviewFact {
-  operation: OperationRef;
-  configuration: ChildConfiguration;
-  input: Json;
-  source: Json;
-  created: boolean;
-}
-export interface ReadAuthorizationReviewInput extends WriteContext {
-  targetExecutionId: string;
-  reviewExecutionId: string;
-  policyRevision: string;
-  request: Json;
-  requestBody?: import('../model-body').ModelBodyReference;
-  reviewer: AuthorizationReviewIdentity;
-  requireApproval?: boolean;
-}
-export interface AuthorizationReviewResult {
-  decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
-  reason: string;
-  reviewExecutionId: string;
-}
-
-export type AuthorizationCheckIdentity = AuthorizationReviewIdentity;
-export interface EnsureAuthorizationCheckInput
-  extends Omit<EnsureAuthorizationReviewInput, 'reviewer'> {
   checker: AuthorizationCheckIdentity;
   operationKey?: string;
-  /** Sealed host evidence for the explicit new Shell-risk contract only. */
-  riskReview?: import('../shell-risk-review').ShellRiskPreparation | null;
+  behavior: import('../tool-behavior').ToolBehaviorBinding;
+  review?: import('../tool-behavior').ReviewPreparation | null;
+  parentProof?: Json;
   timeout?: { startedAt: number; deadlineAt: number };
 }
 export interface ResolveAutoAuthorizationInput extends OwnedWrite {
+  /** A generic checker fallback cannot discard a registered material contract to enable reuse. */
+  reuseApproval?: false;
   targetExecutionId: string;
   decision: import('../extensions').PermissionDecision;
   checker: AuthorizationCheckIdentity;
   operationKey: string;
-  riskReview?: import('../shell-risk-review').ShellRiskPreparation | null;
+  behavior: import('../tool-behavior').ToolBehaviorBinding;
+  review?: import('../tool-behavior').ReviewPreparation | null;
+  parentProof?: Json;
   timedOutCheckId?: string;
 }
 export interface ExecutionEvidenceStoreInput {
@@ -266,7 +244,7 @@ export interface AutoAuthorizationEvidence {
   policyEvidenceId: string;
   reason: 'reused_approval' | 'parent_review' | 'timeout_continue';
   snapshot?: import('../extensions').PermissionDecision['snapshot'];
-  riskReviewApproved?: true;
+  materialReviewed?: true;
 }
 export interface AuthorizationCheckFact {
   execution: ExecutionRecord;
@@ -275,16 +253,20 @@ export interface AuthorizationCheckFact {
   source: Json;
   created: boolean;
 }
-export interface ReadAuthorizationCheckInput
-  extends Omit<ReadAuthorizationReviewInput, 'reviewExecutionId' | 'reviewer'> {
+export interface ReadAuthorizationCheckInput extends WriteContext {
+  targetExecutionId: string;
   checkExecutionId: string;
+  policyRevision: string;
+  request: Json;
+  requestBody?: import('../model-body').ModelBodyReference;
+  requireApproval?: boolean;
   checker: AuthorizationCheckIdentity;
 }
 export interface AuthorizationCheckResult {
-  decision: AuthorizationReviewResult['decision'];
+  decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
   reason: string;
   checkExecutionId: string;
-  riskReviewApproved?: true;
+  materialReviewed?: true;
 }
 export interface PrepareAuthorizationCheckInput extends OwnedWrite {
   executionId: string;
@@ -330,15 +312,6 @@ export interface Store {
   refreshApproval(
     input: import('../execution/authorization-refresh').RefreshApprovalInput,
   ): Promise<InteractionRecord>;
-  invalidateAuthorizationReview(
-    input: OwnedWrite & {
-      executionId: string;
-      reviewExecutionId?: string;
-      previousPolicyRevision: string;
-      policyRevision: string;
-      controlReads?: readonly PermissionControlRead[];
-    },
-  ): Promise<void>;
   applyAgentCommand(
     input: import('./agent-collaboration').ApplyAgentCommandInput,
   ): Promise<import('./agent-collaboration').CollaborationCommandResult>;
@@ -548,8 +521,11 @@ export interface Store {
     },
   ): Promise<import('./types').HostControlState>;
   getPermissionGrant(
-    input: WriteContext & { executionId: string; commandDigest?: string },
-  ): Promise<{ grantId: string; revision: string; commandDigest?: string } | null>;
+    input: WriteContext & {
+      executionId: string;
+      offers: readonly import('../permission-grants').GrantOffer[];
+    },
+  ): Promise<import('../permission-grants').GrantUse | null>;
   listPermissionGrants(
     input: WriteContext & {
       subjectId: string;
@@ -838,10 +814,6 @@ export interface Store {
   invalidateAuthorizationCheck(
     input: import('../execution/authorization-refresh').InvalidateAuthorizationCheckInput,
   ): Promise<void>;
-  ensureAuthorizationReview(
-    input: EnsureAuthorizationReviewInput,
-  ): Promise<AuthorizationReviewFact>;
-  getAuthorizationReview(input: ReadAuthorizationReviewInput): Promise<AuthorizationReviewResult>;
   ensureOperation(input: EnsureOperationInput): Promise<OperationRef>;
   getOperation(
     input: RecordScope & { key: string; subjectId: string; originStoreId: string },
@@ -1004,7 +976,10 @@ export interface Store {
   acceptInteractionDecision(
     input: OwnedWrite & {
       interactionId: string;
+      /** Immutable observation sealed with the original information request. */
       informationPermission?: InformationPermissionStamp;
+      /** Fresh admission observation; its reads alone participate in the acceptance CAS. */
+      currentInformationPermission?: InformationPermissionStamp;
       executionId: string;
       attempt: number;
       decisionRevision: string;

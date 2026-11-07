@@ -84,7 +84,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
               name: 'write_file',
               input: {
                 path: 'original.txt',
-                base: read.baseline,
+                base_ref: read.baseRef,
                 content: 'actual compressed write\r\n',
               },
             };
@@ -513,7 +513,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
         expectedStoreId: storeId,
         commandId: 'approve-restore',
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       const restored = await until(
         () => client.getExecution(card.executionId!),

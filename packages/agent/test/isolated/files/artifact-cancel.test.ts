@@ -7,6 +7,7 @@ import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
+import { modelReference } from '../../../src/model-reference';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('precise cancellation while the real scoped Artifact reader is awaited prevents file publication', async () => {
@@ -52,7 +53,11 @@ test('precise cancellation while the real scoped Artifact reader is awaited prev
     reason: 'stop',
     usage: { inputTokens: 1, outputTokens: 1 },
   };
-  const model = createFixedModel([
+  const fixed = createFixedModel([
+    [
+      { type: 'tool_call', id: 'source', name: 'fixture_source', arguments: '{}' },
+      { ...finish, reason: 'tool_calls' },
+    ],
     [
       {
         type: 'tool_call',
@@ -60,19 +65,34 @@ test('precise cancellation while the real scoped Artifact reader is awaited prev
         name: 'write_file',
         arguments: JSON.stringify({
           path: 'never',
-          base: null,
-          content_artifact: {
-            id: ref.id,
-            media_type: ref.mediaType,
-            size: ref.size,
-            scope: ref.scope,
-          },
+          content_ref: 'replaced-with-original-successful-receipt',
         }),
       },
       { ...finish, type: 'finish', reason: 'tool_calls' } as ModelEvent,
     ],
     [finish],
   ]);
+  const model = {
+    async *stream(
+      request: Parameters<typeof fixed.stream>[0],
+      options: Parameters<typeof fixed.stream>[1],
+    ) {
+      const source = (await store.listExecutions('s')).find(
+        (row) => row.definitionId === 'fixture.source' && row.status === 'succeeded',
+      );
+      for await (const event of fixed.stream(request, options)) {
+        if (event.type === 'tool_call' && event.name === 'write_file')
+          yield {
+            ...event,
+            arguments: JSON.stringify({
+              path: 'never',
+              content_ref: modelReference('artifact', source!.id, 0),
+            }),
+          };
+        else yield event;
+      }
+    },
+  };
   const runtime = createRuntime({
     store,
     model,
@@ -96,13 +116,29 @@ test('precise cancellation while the real scoped Artifact reader is awaited prev
         id: 'files',
         version: '2',
         apiMajor: 1,
-        tools: createFileTools({
-          ...files,
-          async write(input) {
-            writes++;
-            return files.write(input);
+        tools: [
+          ...createFileTools({
+            ...files,
+            async write(input) {
+              writes++;
+              return files.write(input);
+            },
+          }),
+          {
+            id: 'fixture.source',
+            version: '1',
+            model: { name: 'fixture_source' },
+            description: 'Expose actual scoped source',
+            inputSchema: { type: 'object', additionalProperties: false },
+            async execute() {
+              return {
+                outcome: 'succeeded',
+                content: 'Original content source',
+                artifactRefs: [ref],
+              };
+            },
           },
-        }),
+        ],
       },
     ],
   });

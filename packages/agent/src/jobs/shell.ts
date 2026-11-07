@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
   JobContext,
@@ -11,6 +11,7 @@ import type {
   StopConfirmation,
   ToolResult,
 } from '@kite-ai/agent/extensions';
+import { JobStartError } from '../extensions';
 import { ownedProcessKernelState } from '../platform/process/owned-process-observation';
 import {
   type ConfinedLaunch,
@@ -77,6 +78,7 @@ interface QueueItem {
 interface State {
   nonce: string;
   process: ChildProcess;
+  brokerNeverStarted?: true;
   queue: QueueItem[];
   queuedBytes: number;
   gaps: Map<'stdout' | 'stderr', QueueItem>;
@@ -234,11 +236,13 @@ function shellJob(
   }
   function finish(state: State, result: ToolResult, groupStopped: boolean): void {
     if (groupStopped) {
-      state.groupStopped = true;
       state.cleanup?.();
       state.cleanup = undefined;
+      state.groupStopped = true;
       state.proveStop();
       state.signal.removeEventListener('abort', state.aborted);
+      if (state.terminalTimer) clearTimeout(state.terminalTimer);
+      state.terminalTimer = undefined;
     }
     if (state.result) return;
     if (!groupStopped) result = { ...result, outcome: 'outcome_unknown' };
@@ -255,6 +259,19 @@ function shellJob(
         status: state.groupStopped ? 'already_finished' : 'unknown',
         details: { processGroupId: state.groupId ?? null },
       };
+    if (state.brokerNeverStarted) {
+      try {
+        // Only the original no-PID spawn failure permits a cleanup-only retry.
+        finish(
+          state,
+          state.result ?? { outcome: 'failed', content: 'Shell supervisor failed' },
+          true,
+        );
+        return { status: 'stopped', details: { processGroupId: null } };
+      } catch {
+        return { status: 'unknown', details: { processGroupId: null } };
+      }
+    }
     const brokerExited = state.process.exitCode !== null || state.process.signalCode !== null;
     if (brokerExited && !(configuration.supervision && state.readyEvidence))
       return { status: 'unknown', details: { processGroupId: state.groupId ?? null } };
@@ -286,34 +303,66 @@ function shellJob(
     description: 'POSIX shell process-group job with a private guardian',
     inputSchema: {
       type: 'object',
-      properties: { command: { type: 'string', minLength: 1, maxLength: 262144 } },
+      properties: {
+        command: { type: 'string', minLength: 1, maxLength: 262144 },
+        workdir: { type: 'string', minLength: 1, maxLength: 4096 },
+      },
       required: ['command'],
       additionalProperties: false,
     },
     resources: { slot: 'process' },
     async start(input: Json, context: JobContext): Promise<JobHandle> {
-      if (process.platform !== 'darwin' && process.platform !== 'linux')
-        throw new Error('shell_platform_unsupported');
-      context.signal.throwIfAborted();
-      const value = object(input);
-      if (
-        typeof value.command !== 'string' ||
-        !value.command ||
-        value.command.length > 262144 ||
-        Object.keys(value).some((key) => key !== 'command')
-      )
-        throw new Error('invalid_shell_input');
-      const supervisor = configuration.supervisorPath ?? shellSupervisorAsset();
-      const bun = configuration.bunExecutable ?? process.execPath;
-      const shell = configuration.shellExecutable ?? '/bin/sh';
-      if (![supervisor, bun, shell].every((path) => isAbsolute(path) && existsSync(path)))
-        throw new Error('shell_supervisor_asset_unavailable');
-      const trusted = configuration.trustedWorkerLaunch?.(value.command, context);
-      const confined = prepare?.(value.command, shell, context);
+      const { command, supervisor, bun, shell, workdir } = (() => {
+        try {
+          if (process.platform !== 'darwin' && process.platform !== 'linux')
+            throw new Error('shell_platform_unsupported');
+          context.signal.throwIfAborted();
+          const value = object(input);
+          if (
+            typeof value.command !== 'string' ||
+            !value.command ||
+            value.command.length > 262144 ||
+            Object.keys(value).some((key) => !['command', 'workdir'].includes(key)) ||
+            (value.workdir !== undefined &&
+              (typeof value.workdir !== 'string' ||
+                !value.workdir ||
+                value.workdir.length > 4096 ||
+                value.workdir.includes('\0')))
+          )
+            throw new Error('invalid_shell_input');
+          const supervisor = configuration.supervisorPath ?? shellSupervisorAsset();
+          const bun = configuration.bunExecutable ?? process.execPath;
+          const shell = configuration.shellExecutable ?? '/bin/sh';
+          if (![supervisor, bun, shell].every((path) => isAbsolute(path) && existsSync(path)))
+            throw new Error('shell_supervisor_asset_unavailable');
+          const workdir =
+            value.workdir === undefined
+              ? configuration.cwd
+              : realpathSync(resolve(configuration.cwd, String(value.workdir)));
+          if (!lstatSync(workdir).isDirectory() || (prepare && workdir !== configuration.cwd))
+            throw new Error('invalid_shell_input');
+          return { command: value.command, supervisor, bun, shell, workdir };
+        } catch (error) {
+          // This boundary has not prepared a temp, called a host resolver, or spawned a broker.
+          const code = context.signal.aborted
+            ? 'shell_start_cancelled'
+            : error instanceof Error &&
+                [
+                  'shell_platform_unsupported',
+                  'invalid_shell_input',
+                  'shell_supervisor_asset_unavailable',
+                ].includes(error.message)
+              ? error.message
+              : 'shell_preparation_failed';
+          throw new JobStartError(undefined, code);
+        }
+      })();
+      const trusted = configuration.trustedWorkerLaunch?.(command, context);
+      const confined = prepare?.(command, shell, context);
       const launch = confined ?? {
         executable: shell,
-        argv: ['-c', value.command],
-        cwd: configuration.cwd,
+        argv: ['-c', command],
+        cwd: workdir,
       };
       const launchEnv = trusted?.env ?? configuration.env;
       const env = confined
@@ -334,7 +383,7 @@ function shellJob(
           }
         : env;
       const proc = spawn(bun, [...(trusted?.bunFlags ?? []), supervisor], {
-        cwd: configuration.cwd,
+        cwd: workdir,
         env: launchEnv,
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -369,9 +418,37 @@ function shellJob(
         rejectReady: (error) => rejectReady(error),
         signal: context.signal,
         aborted: () => {
-          void cancelState(state);
+          void cancelState(state).catch(() => {});
         },
       };
+      const handle: JobHandle = {
+        get reference() {
+          return {
+            nonce,
+            processGroupId: state.groupId ?? null,
+            supervisorPid: proc.pid ?? null,
+            ...(state.readyEvidence
+              ? {
+                  launchdGuardianPid: state.readyEvidence.guardian.pid,
+                  ownedProcesses: copyShellProcessEvidence(state.readyEvidence) as unknown as Json,
+                }
+              : {}),
+            ...(state.coalitionId ? { coalitionId: state.coalitionId } : {}),
+            executionId: context.executionId,
+            ...(confined
+              ? {
+                  confinement: {
+                    backend: 'macos-seatbelt',
+                    profileDigest: confined.profileDigest,
+                    subprocesses: configuration.supervision ? 'coalition_owned' : 'denied',
+                  },
+                }
+              : {}),
+          };
+        },
+      };
+      states.set(handle, state);
+      void state.ready.catch(() => {});
       context.signal.addEventListener('abort', state.aborted, { once: true });
       let buffer = '';
       proc.stdin!.on('error', () => {
@@ -387,12 +464,13 @@ function shellJob(
         buffer += chunk;
         if (buffer.length > 512 * 1024) {
           buffer = '';
-          proc.stdin!.end();
           finish(
             state,
             { outcome: 'outcome_unknown', content: 'Shell supervisor output exceeded frame limit' },
             false,
           );
+          state.rejectReady(new Error('shell_supervisor_protocol_invalid'));
+          void cancelState(state).catch(() => {});
           return;
         }
         while (buffer.includes('\n')) {
@@ -569,21 +647,34 @@ function shellJob(
               state.acknowledge();
             } else throw new Error('invalid_private_frame');
           } catch {
-            proc.stdin!.end();
             finish(
               state,
               { outcome: 'outcome_unknown', content: 'Shell supervisor protocol invalid' },
               false,
             );
             state.rejectReady(new Error('shell_supervisor_protocol_invalid'));
+            void cancelState(state).catch(() => {});
           }
         }
       });
       // Internal diagnostics are bounded by immediate draining; they are not business output.
       proc.stderr!.resume();
       proc.on('error', () => {
-        finish(state, { outcome: 'outcome_unknown', content: 'Shell supervisor failed' }, false);
-        state.rejectReady(new Error('shell_supervisor_failed'));
+        // No PID from this original spawn error certifies that no broker was created.
+        if (proc.pid === undefined) state.brokerNeverStarted = true;
+        let code = 'shell_supervisor_failed';
+        try {
+          finish(
+            state,
+            { outcome: 'failed', content: 'Shell supervisor failed' },
+            state.brokerNeverStarted === true,
+          );
+        } catch {
+          // Preserve the original cleanup and handle until cleanup is actually confirmed.
+          code = 'shell_start_cleanup_unconfirmed';
+          finish(state, { outcome: 'outcome_unknown', content: code }, false);
+        }
+        state.rejectReady(new Error(code));
       });
       proc.once('exit', (code, signal) => {
         state.brokerExit = { code, signal, reaped: true };
@@ -625,66 +716,56 @@ function shellJob(
         );
         state.rejectReady(new Error('shell_supervisor_disconnected'));
       });
-      proc.stdin!.write(
-        `${JSON.stringify({
-          type: 'start',
-          nonce,
-          ...(configuration.supervision
-            ? { sessionId: context.sessionId, executionId: context.executionId }
-            : {}),
-          executable: launch.executable,
-          argv: launch.argv,
-          identities: confined?.identities,
-          runtimeTemp: confined?.runtimeTemp,
-          profileDigest: confined?.profileDigest,
-          cwd: launch.cwd,
-          env: childEnv,
-          graceMs: grace,
-          ...(configuration.supervision
-            ? {
-                supervision: configuration.supervision.kind,
-                controlBase: configuration.supervision.controlBase,
-              }
-            : {}),
-        })}\n`,
-      );
       const timer = setTimeout(() => {
-        proc.stdin!.end();
+        // Keep the original channel alive for a late ready/terminal stop proof.
+        finish(
+          state,
+          { outcome: 'outcome_unknown', content: 'shell_supervisor_start_timeout' },
+          false,
+        );
         state.rejectReady(new Error('shell_supervisor_start_timeout'));
+        void cancelState(state).catch(() => {});
       }, 5000);
       try {
+        proc.stdin!.write(
+          `${JSON.stringify({
+            type: 'start',
+            nonce,
+            ...(configuration.supervision
+              ? { sessionId: context.sessionId, executionId: context.executionId }
+              : {}),
+            executable: launch.executable,
+            argv: launch.argv,
+            identities: confined?.identities,
+            runtimeTemp: confined?.runtimeTemp,
+            profileDigest: confined?.profileDigest,
+            cwd: launch.cwd,
+            env: childEnv,
+            graceMs: grace,
+            ...(configuration.supervision
+              ? {
+                  supervision: configuration.supervision.kind,
+                  controlBase: configuration.supervision.controlBase,
+                }
+              : {}),
+          })}\n`,
+        );
         await state.ready;
       } catch (error) {
-        proc.stdin!.end();
-        throw error;
+        if (!state.result)
+          finish(
+            state,
+            { outcome: 'outcome_unknown', content: 'Shell supervisor start failed' },
+            false,
+          );
+        void cancelState(state).catch(() => {});
+        throw new JobStartError(
+          state.brokerNeverStarted && state.groupStopped ? undefined : handle,
+          error instanceof Error ? error.message : 'shell_supervisor_failed',
+        );
       } finally {
         clearTimeout(timer);
       }
-      const handle: JobHandle = {
-        reference: {
-          nonce,
-          processGroupId: state.groupId ?? null,
-          supervisorPid: proc.pid ?? null,
-          ...(state.readyEvidence
-            ? {
-                launchdGuardianPid: state.readyEvidence.guardian.pid,
-                ownedProcesses: copyShellProcessEvidence(state.readyEvidence) as unknown as Json,
-              }
-            : {}),
-          ...(state.coalitionId ? { coalitionId: state.coalitionId } : {}),
-          executionId: context.executionId,
-          ...(confined
-            ? {
-                confinement: {
-                  backend: 'macos-seatbelt',
-                  profileDigest: confined.profileDigest,
-                  subprocesses: configuration.supervision ? 'coalition_owned' : 'denied',
-                },
-              }
-            : {}),
-        },
-      };
-      states.set(handle, state);
       return handle;
     },
     async *observe(handle: JobHandle): AsyncIterable<JobEvent> {
@@ -712,14 +793,21 @@ function shellJob(
       const state = get(handle);
       if (state.disposed) return state.disposed;
       state.disposed = (async () => {
-        await cancelState(state);
+        const confirmation = await cancelState(state);
+        if (confirmation.status !== 'stopped' && confirmation.status !== 'already_finished')
+          throw new Error('shell_owned_cleanup_unconfirmed');
         state.process.stdin?.end();
         state.signal.removeEventListener('abort', state.aborted);
         state.queue = state.queue.filter((item) => item.event.type === 'terminal');
         state.queuedBytes = 0;
         state.gaps.clear();
       })();
-      return state.disposed;
+      try {
+        await state.disposed;
+      } catch (error) {
+        state.disposed = undefined;
+        throw error;
+      }
     },
   };
 }

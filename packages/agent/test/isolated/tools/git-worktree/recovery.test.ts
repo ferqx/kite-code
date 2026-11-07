@@ -74,6 +74,51 @@ const removePlan: WorktreePlan = {
   },
 };
 const create: Json = { action: 'create', key: 'intent', path: '/target' };
+
+test('short observation locates the exact unknown owner without result metadata, writes or new Jobs', async () => {
+  const h = harness();
+  const ownerId = '1172d244-0afd-48cc-b3bd-7c4906dd5e91';
+  h.setMutationStatus('outcome_unknown');
+  const result = await h.tool.execute({ action: 'create', path: '/target' }, h.context(ownerId));
+  expect(result.outcome).toBe('outcome_unknown');
+  const operationRef = (result.details as { operation_ref: string }).operation_ref;
+  expect(operationRef.length).toBe(26);
+  const before = { ensures: h.ensures.length, writes: h.writes.length };
+  const context = h.context('observer');
+  const original = {
+    id: ownerId,
+    sessionId: 'session',
+    runId: 'run',
+    kind: 'tool' as const,
+    status: 'outcome_unknown' as const,
+    resultRevision: '1',
+    result: {},
+    definitionId: 'git.worktree',
+    definitionVersion: '1',
+    extensionId: 'builtin.shell',
+    originStoreId: 'store',
+    authorization: { dispatched: true },
+  };
+  let source = original;
+  context.getExecution = async (id) => (id === ownerId ? source : { ...original, id });
+  expect(await h.tool.execute({ action: 'observe', operationRef }, context)).toMatchObject({
+    outcome: 'succeeded',
+    details: { original_execution_id: ownerId, phase: 'unresolved' },
+  });
+  for (const change of [
+    { originStoreId: 'foreign' },
+    { sessionId: 'foreign' },
+    { extensionId: 'foreign' },
+    { authorization: { dispatched: false } },
+  ]) {
+    source = { ...original, ...change };
+    expect(await h.tool.execute({ action: 'observe', operationRef }, context)).toMatchObject({
+      outcome: 'failed',
+    });
+  }
+  expect({ ensures: h.ensures.length, writes: h.writes.length }).toEqual(before);
+});
+
 function harness(configuration = config) {
   const records = new Map<string, ExtensionRecord>();
   const jobs = new Map<

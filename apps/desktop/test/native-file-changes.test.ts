@@ -722,7 +722,11 @@ test('paged files.read v4 retains the original baseline-based file target while 
   }
 });
 
-test('managed file editor entry requires the current Session exact registration on every opening', async () => {
+test.each([
+  'report.md',
+  '优化方案.md',
+  '优化 方案.md',
+])('managed file editor entry requires the current Session exact registration on every opening: %s', async (name) => {
   const f = fixture();
   try {
     const path = join(
@@ -732,7 +736,7 @@ test('managed file editor entry requires the current Session exact registration 
       'a'.repeat(64),
       'b'.repeat(64),
       'outputs',
-      'report.md',
+      name,
     );
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, 'confirmed old bytes\r\n');

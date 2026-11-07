@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isManagedWorkingFilePath } from '@kite-ai/agent/files';
 import {
   type AgentClient,
   ClientError,
@@ -265,8 +266,8 @@ export class NativeFileChanges {
     if (
       !path ||
       !isAbsolute(path) ||
-      !/[\\/]files[\\/][a-f0-9]{64}[\\/][a-f0-9]{64}[\\/](?:outputs[\\/][A-Za-z0-9][A-Za-z0-9._-]{0,119}|plans[\\/][a-f0-9]{64}[\\/]plan\.md)$/.test(
-        path,
+      ![5, 6].some((count) =>
+        isManagedWorkingFilePath(path.replaceAll('\\', '/').split('/').slice(-count).join('/')),
       )
     )
       return undefined;

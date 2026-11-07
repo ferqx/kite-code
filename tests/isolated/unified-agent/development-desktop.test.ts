@@ -1,4 +1,6 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -13,7 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
+import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { createDevelopmentDesktopDirectory } from '../../../scripts/development/unified-desktop';
 import {
@@ -260,6 +262,110 @@ test('desktop development pure help and missing built Service never build, launc
     rmSync(root, { recursive: true, force: true });
   }
 }, 15000);
+
+for (const { formatMajor, currentChecksum, label } of [
+  { formatMajor: 1, currentChecksum: false, label: 'same-major legacy schema' },
+  { formatMajor: 1, currentChecksum: true, label: 'old schema behind a forged current header' },
+  { formatMajor: 2, currentChecksum: false, label: 'unsupported major 2' },
+])
+  test(`desktop development rejects ${label} before Electron, cache creation or launch without touching its data`, async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-old-profile-')));
+    const home = join(root, 'home');
+    const userConfiguration = ownedUserConfiguration(home);
+    const profile = join(home, '.kite-code', 'development');
+    privateDirectory(profile);
+    const manifest = join(profile, 'profile.json');
+    const database = join(profile, 'core.db');
+    const security = defaultWindowsPathSecurity();
+    const writePrivate = (path: string, bytes: Uint8Array) => {
+      if (security) security.writePrivateFile(path, bytes);
+      else writeFileSync(path, bytes, { mode: 0o600 });
+    };
+    const header = {
+      formatMajor,
+      ...(currentChecksum
+        ? {
+            schemaChecksum: createHash('sha256')
+              .update(
+                readFileSync(
+                  join(
+                    import.meta.dir,
+                    '../../../packages/agent/src/storage/migrations/0001-baseline.sql',
+                  ),
+                ),
+              )
+              .digest('hex'),
+          }
+        : {}),
+    };
+    writePrivate(manifest, Buffer.from(`${JSON.stringify(header)}\n`));
+    writePrivate(database, Buffer.alloc(0));
+    const db = new Database(database, { create: true });
+    db.exec(
+      `CREATE TABLE storage_meta(format_major INTEGER NOT NULL); INSERT INTO storage_meta VALUES(${formatMajor}); CREATE TABLE legacy_marker(value TEXT NOT NULL); INSERT INTO legacy_marker VALUES('original legacy schema data');`,
+    );
+    db.close(true);
+    const originalManifest = readFileSync(manifest);
+    const originalDatabase = readFileSync(database);
+    const service = join(root, 'apps', 'service', 'dist');
+    mkdirSync(service, { recursive: true });
+    writeFileSync(
+      join(service, 'main.js'),
+      '// Exact selected Service asset; startup must not execute it.',
+    );
+    const launchMarker = join(root, 'unexpected-launch');
+    const entry = pathToFileURL(
+      join(import.meta.dir, '../../../scripts/development/unified-desktop.ts'),
+    ).href;
+    const program = `import {writeFileSync} from 'node:fs';import {runDevelopmentDesktop} from ${JSON.stringify(entry)};try{process.exitCode=await runDevelopmentDesktop({argv:[],root:${JSON.stringify(root)},executable:process.execPath,spawnElectron(){writeFileSync(${JSON.stringify(launchMarker)},'launched');throw Error('unexpected_electron_launch');}});}catch(error){console.error(error.code??error.message);process.exitCode=1;}`;
+    const child = Bun.spawn([process.execPath, '-e', program], {
+      cwd: root,
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: { ...process.env, ...userConfiguration.homeEnvironment },
+    });
+    const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
+    try {
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ code, stdout, stderr }).toEqual({
+        code: 1,
+        stdout: '',
+        stderr: 'store_incompatible\n',
+      });
+      expect(existsSync(join(root, 'apps', 'desktop'))).toBe(false);
+      expect(existsSync(join(root, '.cache'))).toBe(false);
+      expect(existsSync(launchMarker)).toBe(false);
+      expect(readFileSync(manifest)).toEqual(originalManifest);
+      expect(readFileSync(database)).toEqual(originalDatabase);
+      expect(readdirSync(profile).sort()).toEqual(['core.db', 'profile.json']);
+      expect(existsSync(`${database}-wal`)).toBe(false);
+      expect(existsSync(`${database}-shm`)).toBe(false);
+      const reader = new Database(database, { readonly: true });
+      try {
+        expect(reader.query('SELECT value FROM legacy_marker').get()).toEqual({
+          value: 'original legacy schema data',
+        });
+        expect(reader.query('SELECT format_major FROM storage_meta').get()).toEqual({
+          format_major: formatMajor,
+        });
+      } finally {
+        reader.close(true);
+      }
+      expect(readFileSync(database)).toEqual(originalDatabase);
+    } finally {
+      clearTimeout(timeout);
+      if (child.exitCode === null) {
+        child.kill('SIGKILL');
+        await child.exited;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10000);
 
 test.skipIf(process.platform !== 'darwin')(
   'real development Main reports Service admission failure, waits for readiness and drains its owned process',

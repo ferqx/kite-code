@@ -11,6 +11,7 @@ function fixtureCard(id = 'one'): Interaction {
     ...card,
     id,
     request: {
+      options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
       policy: {
         review: {
           kind: 'artifact',
@@ -91,26 +92,28 @@ test('actual DOM keyboard cannot approve unseen/failed attachments; complete loa
     act(async () => {
       const target = button(label);
       target.focus();
-      target.dispatchEvent(
+      const nativeActivation = target.dispatchEvent(
         new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
       );
+      // JSDOM does not synthesize the browser's native Enter activation of buttons.
+      if (nativeActivation) target.click();
     });
   const click = async (label: string) => act(async () => button(label).click());
   try {
     await render(fixtureCard(), undefined);
-    await keyboard('Approve once');
+    await keyboard('仅此次');
     expect(calls).toHaveLength(0);
     await render(fixtureCard());
     mode = 'corrupt';
     await click('Load complete attachment');
     await act(async () => await Bun.sleep(5));
-    expect(button('Approve once').disabled).toBe(true);
+    expect(button('仅此次').disabled).toBe(true);
     expect(host.textContent).toContain('could not be verified');
     expect(calls).toHaveLength(0);
     mode = 'encoding';
     await click('Load complete attachment');
     await act(async () => await Bun.sleep(5));
-    expect(button('Approve once').disabled).toBe(true);
+    expect(button('仅此次').disabled).toBe(true);
     expect(host.querySelector('[data-complete-attachment]')).toBeNull();
     mode = 'late';
     await click('Load complete attachment');
@@ -122,14 +125,14 @@ test('actual DOM keyboard cannot approve unseen/failed attachments; complete loa
     release();
     await act(async () => await Bun.sleep(5));
     expect(host.querySelector('[data-complete-attachment]')).toBeNull();
-    expect(button('Approve once').disabled).toBe(true);
+    expect(button('仅此次').disabled).toBe(true);
     mode = 'valid';
     await click('Load complete attachment');
     await act(async () => await Bun.sleep(5));
     expect(host.querySelector('[data-complete-attachment]')?.textContent).toBe('{}');
-    expect(button('Approve once').disabled).toBe(false);
+    expect(button('仅此次').disabled).toBe(false);
     await act(async () => {
-      const target = button('Approve once');
+      const target = button('仅此次');
       target.focus();
       target.dispatchEvent(
         new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
@@ -196,7 +199,7 @@ test('actual >=17MiB public Auto attachment renders complete DOM text before a k
     );
     const button = (label: string) =>
       [...host.querySelectorAll('button')].find((value) => value.textContent === label)!;
-    expect(button('Approve once').disabled).toBe(true);
+    expect(button('仅此次').disabled).toBe(true);
     await act(async () => button('Load complete attachment').click());
     const end = Date.now() + 7000;
     while (!host.querySelector('[data-complete-attachment]')) {
@@ -206,13 +209,15 @@ test('actual >=17MiB public Auto attachment renders complete DOM text before a k
     const text = host.querySelector('[data-complete-attachment]')!.textContent!;
     expect(new TextEncoder().encode(text).byteLength).toBeGreaterThan(17 * 1024 * 1024);
     expect(JSON.parse(text).task).toBe(f.body);
-    expect(button('Approve once').disabled).toBe(false);
+    expect(button('仅此次').disabled).toBe(false);
     expect(f.effects()).toBe(0);
     await act(async () => {
-      button('Approve once').focus();
-      button('Approve once').dispatchEvent(
+      button('仅此次').focus();
+      const nativeActivation = button('仅此次').dispatchEvent(
         new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
       );
+      // JSDOM omits the native default action; retain the same keyboard-to-click path.
+      if (nativeActivation) button('仅此次').click();
     });
     await saved;
     await f.runtime.waitForCommand('work', { timeoutMs: 8000 });

@@ -472,7 +472,7 @@ test('Session chooser owns keys while a Plan review waits; navigation never answ
         presentationSessionId: 'a',
         runId: 'a-run',
         executionId: 'review',
-        request: { allowedModes: ['auto'] },
+        request: { planId: 'p', version: '1', digest: 'd', content: 'Exact plan' },
       } as unknown as Interaction,
     ],
   });
@@ -746,7 +746,11 @@ test('explicit MCP child readers close locally and the root keeps original whole
         revision: '1',
         definitionId: 'builtin.mcp/mcp.reconnect',
         definitionVersion: '1',
-        request: { grants: ['approve_once'] },
+        request: {
+          options: [
+            { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+          ],
+        },
         answer: null,
       },
     ] as unknown as TuiSnapshot['interactions'],
@@ -758,18 +762,18 @@ test('explicit MCP child readers close locally and the root keeps original whole
   try {
     await tick();
     expect(app.lastFrame()).toContain('Forced reconnects');
-    expect(app.lastFrame()).not.toContain('Approve this execution only');
+    expect(app.lastFrame()).not.toContain('仅此次');
     app.stdin.write('\x03');
     await tick();
     expect(f.controller.state.panel).toBe('mcp');
     expect(f.controller.state.mcpReconnectionOpen).toBe(false);
     expect(app.lastFrame()).toContain('MCP servers');
-    expect(app.lastFrame()).not.toContain('Approve this execution only');
+    expect(app.lastFrame()).not.toContain('仅此次');
     expect(f.cancels).toEqual([]);
     app.stdin.write('\x03');
     await tick();
     expect(f.controller.state.panel).toBeUndefined();
-    expect(app.lastFrame()).toContain('Approve this execution only');
+    expect(app.lastFrame()).toContain('仅此次');
     expect(f.controller.state.snapshot!.interactions[0]).toMatchObject({
       id: 'original-pending-approval',
       state: 'pending',

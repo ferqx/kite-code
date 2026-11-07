@@ -75,6 +75,8 @@
     "tests/e2e/live/model/approval-review-semantics.live.ts",
     "tests/e2e/live/model/loop-continuity.live.ts",
     "tests/e2e/live/model/model-tools-all.live.ts",
+    "tests/e2e/live/model/planning-business-approval.live.ts",
+    "tests/e2e/live/model/planning-business-approval-fixture.test.ts",
     "tests/e2e/live/model/agent-task-quality.live.ts",
     "tests/e2e/live/model/agent-task-quality-checkout-ab.live.ts",
     "tests/e2e/live/model/agent-task-quality-checkout-ab.test.ts",

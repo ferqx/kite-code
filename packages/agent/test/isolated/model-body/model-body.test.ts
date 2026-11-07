@@ -596,7 +596,7 @@ test('large Auto ask_user preserves a real bounded human card with the exact com
       interactionId: interaction!.id,
       expectedRevision: interaction!.revision,
       subjectId: 'owner',
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.runtime.waitForCommand('work');
     expect(f.effects()).toBe(1);

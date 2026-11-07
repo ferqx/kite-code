@@ -1,7 +1,6 @@
-import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -11,33 +10,20 @@ import {
 } from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { createArtifactStore } from '../../../src/artifacts';
-import { canonicalJson } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
-import type { DispatchInput } from '../../../src/storage/port';
-import {
-  authorizationReviewSourceTarget,
-  verifyAuthorizationReviewDispatch,
-} from '../../../src/storage/sqlite/authorization-review';
-import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import { authorizationClockBinding } from './authorization-check-clock-fixture';
 
-// The default runner isolates this file. Use the release engine before any DB;
-// never warm or rewrite a frozen original Profile to make its readonly preflight pass.
+// The runner isolates this file. Select the qualified SQLite engine before opening any DB.
 let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>> | undefined;
 beforeAll(async () => {
   qualified = await prepareQualifiedSqliteFixture();
 }, 60000);
 afterAll(() => qualified?.close());
 
-// Genuine beabc9628afa4684667733a807c9ffddb3d8beb5 Runtime profiles, frozen after a settled review and pending
-// human card (approved), or an ordinary approval with no reviewer (none), then
-// SIGKILL and an SQLite WAL checkpoint. Both contain only synthetic fixture
-// model/tool/approval data, core.db/profile.json, and the generated Store ID; no
-// credentials, real provider calls, user data, or coordination locks. No current
-// producer or rewritten configuration creates these inputs.
+// These actual historical SIGKILL profiles are rejection inputs, never upgraded or replayed.
 function unpack(shape: 'approved' | 'none') {
-  const root = temporaryDirectory('kite-legacy-run-resume-');
+  const root = temporaryDirectory('kite-rejected-run-format-');
   const files = JSON.parse(
     gunzipSync(
       readFileSync(
@@ -52,273 +38,131 @@ function unpack(shape: 'approved' | 'none') {
   }
   return { root, profile: { dataRoot: join(root, 'data'), profile: 'test' } };
 }
-const cases = [
-  { shape: 'approved', mutation: null, projection: false },
-  { shape: 'none', mutation: null, projection: false },
-  { shape: 'approved', mutation: null, projection: true },
-  ...(['checker-id', 'checker-version', 'checker-model', 'tool-version', 'both-keys'] as const).map(
-    (mutation) => ({ shape: 'approved' as const, mutation, projection: false }),
-  ),
-] as const;
-for (const { shape, mutation, projection } of cases)
-  test(`legacy ${shape} Run ${projection ? 'retains its original pending proof after host projection opt-in' : mutation ? `rejects ${mutation} configuration drift` : 'resumes its original human approval without rewriting configuration or replaying review'}`, async () => {
-    const { root, profile } = unpack(shape);
-    if (mutation === 'both-keys') {
-      const db = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
-      try {
-        const row = db
-          .query<{ id: string; config_json: string }, []>(
-            "SELECT id,config_json FROM run WHERE session_id='s'",
-          )
-          .get()!;
-        const config = JSON.parse(row.config_json);
-        config.snapshot.authorizationCheck = config.snapshot.authorizationReview;
-        db.query('UPDATE run SET config_json=? WHERE id=?').run(JSON.stringify(config), row.id);
-      } finally {
-        db.close();
-      }
+function treeBytes(root: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  function visit(relative: string) {
+    for (const entry of readdirSync(join(root, relative), { withFileTypes: true })) {
+      const name = join(relative, entry.name);
+      if (entry.isDirectory()) visit(name);
+      else
+        result[name] = createHash('sha256')
+          .update(readFileSync(join(root, name)))
+          .digest('hex');
     }
-    const store = await openSqliteStore(profile);
-    const expectedStoreId = readFileSync(join(root, 'ready'), 'utf8');
-    let effects = 0,
-      checks = 0,
-      models = 0;
-    const runtime = createRuntime({
-      store,
-      artifacts: createArtifactStore({ profile, store }),
-      modelId: 'business',
-      model: {
-        async *stream() {
-          models++;
-          yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
-        },
-      },
-      ...(shape === 'approved'
-        ? {
-            authorizationCheck: {
-              id: mutation === 'checker-id' ? 'different' : 'reviewer',
-              version: mutation === 'checker-version' ? '2' : '1',
-              modelId: mutation === 'checker-model' ? 'different' : 'review',
-              model: {
-                async *stream() {
-                  checks++;
-                  yield { type: 'text_delta' as const, text: 'unexpected checker replay' };
-                  throw Error('legacy_review_must_not_replay');
-                },
-              },
-            },
-          }
-        : {}),
-      permissions: {
-        async authorize(candidate) {
-          if (candidate.definitionId !== 'effect') return { allowed: true, revision: 'trusted' };
-          const request = {
-            definitionId: 'effect',
-            input: { value: 'exact' },
-            ...(projection ? { context: { reviewInput: 'task_authorization' } } : {}),
-          };
-          return shape === 'approved'
-            ? { allowed: false, revision: 'p1', check: { requireApproval: true, request } }
-            : { allowed: false, revision: 'p1', approval: { request } };
-        },
-      },
-      extensions: [
-        {
-          id: 'fixture',
-          version: '1',
-          apiMajor: 1,
-          tools: [
-            {
-              id: 'effect',
-              version: mutation === 'tool-version' ? '2' : '1',
-              description: 'Owned effect',
-              inputSchema: {
-                type: 'object',
-                properties: { value: { type: 'string' } },
-                required: ['value'],
-              },
-              async execute() {
-                effects++;
-                return { outcome: 'succeeded', content: 'effect' };
-              },
-            },
-          ],
-        },
-      ],
-    });
-    try {
-      const target = (await store.listExecutions('s')).find(
-        (item) => item.definitionId === 'effect',
-      )!;
-      const original = (await store.getRun(target.runId!))!;
-      const card = (
-        await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
-      ).interactions[0]!;
-      expect(card.state).toBe('pending');
-      const before = await store.listExecutions('s');
-      const resume = {
-        expectedStoreId,
-        sessionId: 's',
-        subjectId: 'owner',
-        commandId: 'resume',
-        runId: target.runId!,
-        expectedOwnerGeneration: target.ownerGeneration,
-      };
-      if (mutation) {
-        const error = await runtime.resumeRun(resume).catch((error: unknown) => error);
-        expect(error).toMatchObject({ code: 'run_configuration_mismatch' });
-        expect((await store.getRun(target.runId!))!.configuration).toEqual(original.configuration);
-        expect(await store.listExecutions('s')).toEqual(before);
-        expect(effects).toBe(0);
-        expect(checks).toBe(0);
-        expect(models).toBe(0);
-        return;
-      }
-      await runtime.resumeRun(resume);
-      expect(effects).toBe(0);
-      await runtime.answerInteraction({
-        expectedStoreId,
-        commandId: 'answer',
-        presentationSessionId: 's',
-        interactionId: card.id,
-        expectedRevision: card.revision,
-        subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve' },
-      });
-      await runtime.waitForCommand('work', { timeoutMs: 4000 });
-      expect((await store.getExecution(target.id))!.status).toBe('succeeded');
-      expect((await store.getRun(target.runId!))!.configuration).toEqual(original.configuration);
-      expect(effects).toBe(1);
-      expect(checks).toBe(0);
-      expect(models).toBe(1);
-      expect((await store.listExecutions('s')).filter((item) => item.childSessionId)).toEqual(
-        before
-          .filter((item) => item.childSessionId)
-          .map((item) => ({
-            ...item,
-            ownerGeneration: (BigInt(item.ownerGeneration) + 1n).toString(),
-          })),
-      );
-    } finally {
-      await runtime.close();
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 10000);
-
-test('legacy check pointer still rejects a saved invalidation for the exact original target', () => {
-  const { root, profile } = unpack('approved');
-  const sql = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
-  try {
-    const db = {
-      row(query: string, ...args: (string | number | bigint | null)[]) {
-        const statement = sql.query(query);
-        (
-          statement as typeof statement & { safeIntegers(value: boolean): typeof statement }
-        ).safeIntegers(true);
-        return statement.get(...args);
-      },
-      rows(query: string, ...args: (string | number | bigint | null)[]) {
-        const statement = sql.query(query);
-        (
-          statement as typeof statement & { safeIntegers(value: boolean): typeof statement }
-        ).safeIntegers(true);
-        return statement.all(...args);
-      },
-    } as unknown as SqliteOperations;
-    const target = db.row("SELECT * FROM execution WHERE adapter_id='effect'")!;
-    const carrier = db.row(
-      "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review'",
-    )!;
-    const card = db.row('SELECT * FROM interaction WHERE execution_id=?', target.id!)!;
-    const input = {
-      expectedStoreId: String(target.origin_store_id),
-      executionId: String(target.id),
-      authorization: {
-        allowed: true,
-        revision: 'p1',
-        checkExecutionId: String(carrier.id),
-        interactionId: String(card.id),
-      },
-    } as DispatchInput;
-    expect(() => verifyAuthorizationReviewDispatch(db, input)).not.toThrow();
-    // Fault-inject only a persisted invalidation, retaining the exact scope and
-    // subject of the real original command. No model/result/approval proof is altered.
-    const command = sql
-      .query<Record<string, string | number | null>, [string]>('SELECT * FROM command WHERE id=?')
-      .get(String(target.origin_command_id))!;
-    command.id = 'legacy-invalidation';
-    command.seq = Number(
-      (db.row('SELECT MAX(seq) AS seq FROM command WHERE session_id=?', target.session_id!)!
-        .seq as bigint) + 1n,
-    );
-    command.kind = 'authorization.invalidate';
-    command.status = 'applied';
-    command.receipt_json = JSON.stringify({
-      targetExecutionId: target.id,
-      reviewExecutionId: carrier.id,
-      policyRevision: 'p1',
-    });
-    sql
-      .query(
-        `INSERT INTO command(${Object.keys(command).join(',')}) VALUES(${Object.keys(command)
-          .map(() => '?')
-          .join(',')})`,
-      )
-      .run(...Object.values(command));
-    expect(() => verifyAuthorizationReviewDispatch(db, input)).toThrow('permission_denied');
-  } finally {
-    sql.close();
-    rmSync(root, { recursive: true, force: true });
   }
-});
+  visit('');
+  return result;
+}
+for (const shape of ['approved', 'none'] as const)
+  for (const mode of ['readwrite', 'readonly'] as const)
+    test(`same-major legacy ${shape} Store is rejected before ${mode} opening without changing any original bytes`, async () => {
+      const { root, profile } = unpack(shape);
+      try {
+        const profileDirectory = join(profile.dataRoot, profile.profile);
+        expect(
+          JSON.parse(readFileSync(join(profileDirectory, 'profile.json'), 'utf8')).formatMajor,
+        ).toBe(1);
+        const before = treeBytes(profileDirectory);
+        const error = await openSqliteStore({
+          ...profile,
+          ...(mode === 'readonly' ? { mode: 'readonly' as const } : {}),
+        }).catch((error) => error);
+        expect(error).toMatchObject({ code: 'store_incompatible' });
+        expect(treeBytes(profileDirectory)).toEqual(before);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
 
-for (const shape of ['current', 'pre-metadata', 'host-projection'] as const)
-  test(`native ${shape} settled check survives actual SIGKILL while human approval remains pending without renewing its deadline`, async () => {
-    const directory = temporaryDirectory('kite-native-check-clock-');
-    const child = Bun.spawn(
-      [
-        process.execPath,
-        fileURLToPath(new URL('./authorization-check-clock-crash-child.ts', import.meta.url)),
-        directory,
-        JSON.stringify(qualified!.engine.selection),
-        shape,
-      ],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
+type Ready = {
+  expectedStoreId: string;
+  runId: string;
+  expectedOwnerGeneration: string;
+  targetId: string;
+  checkId: string;
+  checkPayload: unknown;
+};
+async function seed(shape: 'current' | 'context') {
+  const directory = temporaryDirectory('kite-current-check-recovery-');
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      fileURLToPath(new URL('./authorization-check-clock-crash-child.ts', import.meta.url)),
+      directory,
+      JSON.stringify(qualified!.engine.selection),
+      shape,
+    ],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
+  try {
+    const deadline = Date.now() + 8000;
+    while (!existsSync(join(directory, 'ready.json'))) {
+      if (child.exitCode !== null || Date.now() > deadline) {
+        child.kill('SIGKILL');
+        await child.exited;
+        throw Error(`check_seed_failed:${await new Response(child.stderr).text()}`);
+      }
+      await Bun.sleep(5);
+    }
+    const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8')) as Ready;
+    child.kill('SIGKILL');
+    const exit = await child.exited;
+    expect(child.signalCode === 'SIGKILL' || exit === 137).toBe(true);
+    return { directory, ready, profile: { dataRoot: join(directory, 'data'), profile: 'test' } };
+  } catch (error) {
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await child.exited;
+    }
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+for (const shape of ['current', 'context'] as const)
+  test(`new ${shape} settled check survives actual SIGKILL without provider replay, reinterpretation or deadline renewal`, async () => {
+    const { directory, ready, profile } = await seed(shape);
     let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let runtime: ReturnType<typeof createRuntime> | undefined;
     const counts = { checks: 0, models: 0, effects: 0 };
     try {
-      const deadline = Date.now() + 8000;
-      while (!existsSync(join(directory, 'ready.json'))) {
-        if (Date.now() > deadline) {
-          child.kill('SIGKILL');
-          await child.exited;
-          throw Error(
-            `native_check_clock_seed_timeout: ${await new Response(child.stderr).text()}`,
-          );
-        }
-        await Bun.sleep(5);
-      }
-      const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8')) as {
-        expectedStoreId: string;
-        runId: string;
-        expectedOwnerGeneration: string;
-        targetId: string;
-        checkId: string;
-        checkPayload: unknown;
-      };
-      child.kill('SIGKILL');
-      await child.exited;
-      const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
+      // Cold observation consumes only the sealed v1 receipt. Its current interpreter deliberately throws.
+      store = await openSqliteStore({ ...profile, mode: 'readonly' });
+      const cursor = (await store.getMetadata()).lastChangeCursor;
+      const coldCheck = (await store.getExecution(ready.checkId))!;
+      expect(coldCheck.status).toBe('succeeded');
+      expect(
+        (coldCheck.result as { authorizationCheckOutput: { version: number } })
+          .authorizationCheckOutput.version,
+      ).toBe(1);
+      expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(readFileSync(join(directory, 'checks'), 'utf8')).toBe('check\n');
+      expect(readFileSync(join(directory, 'interpretations'), 'utf8')).toBe('interpret\n');
+      await store.close();
       store = await openSqliteStore(profile);
       const originalRun = (await store.getRun(ready.runId))!;
       const originalCheck = (await store.getExecution(ready.checkId))!;
-      expect(originalCheck.status).toBe('succeeded');
+      const configuration = originalRun.configuration as {
+        authorizationCheck: { id: string; version: string; modelId: string; timeoutMs: number };
+        toolBehaviors: unknown[];
+      };
+      expect(configuration.authorizationCheck).toEqual({
+        id: 'checker',
+        version: '1',
+        modelId: 'review',
+        timeoutMs: 3000,
+      });
+      expect(configuration.toolBehaviors).toHaveLength(1);
+      expect(
+        (ready.checkPayload as { timeout: { startedAt: number; deadlineAt: number } }).timeout
+          .deadlineAt -
+          (ready.checkPayload as { timeout: { startedAt: number; deadlineAt: number } }).timeout
+            .startedAt,
+      ).toBe(3000);
       runtime = createRuntime({
         store,
         artifacts: createArtifactStore({ profile, store }),
-        ...authorizationClockBinding(directory, false, counts, shape === 'host-projection'),
+        ...authorizationClockBinding(directory, false, counts, shape === 'context'),
       });
       const base = { expectedStoreId: ready.expectedStoreId, sessionId: 's', subjectId: 'owner' };
       const card = (await runtime.listInteractions({ ...base, state: 'pending' })).interactions[0]!;
@@ -334,77 +178,104 @@ for (const shape of ['current', 'pre-metadata', 'host-projection'] as const)
         presentationSessionId: 's',
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await runtime.waitForCommand('work', { timeoutMs: 5000 });
       expect((await store.getExecution(ready.targetId))!.status).toBe('succeeded');
       expect((await store.getRun(ready.runId))!.configuration).toEqual(originalRun.configuration);
       const check = (await store.getExecution(ready.checkId))!;
       expect(check.result).toEqual(originalCheck.result);
-      const command = (await store.getCommand(check.originCommandId))!;
-      expect((command.request as { input: unknown }).input).toEqual(ready.checkPayload);
+      expect(
+        ((await store.getCommand(check.originCommandId))!.request as { input: unknown }).input,
+      ).toEqual(ready.checkPayload);
       expect(
         (await store.listExecutions('s')).filter(
-          (item) => item.kind === 'model' && item.runId === null,
+          (execution) => execution.kind === 'model' && execution.runId === null,
         ),
       ).toHaveLength(1);
       expect(counts).toEqual({ checks: 0, models: 1, effects: 1 });
       expect(readFileSync(join(directory, 'checks'), 'utf8')).toBe('check\n');
+      expect(readFileSync(join(directory, 'interpretations'), 'utf8')).toBe('interpret\n');
       expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('effect\n');
+      const repeated = await runtime
+        .resumeRun({
+          ...base,
+          commandId: 'resume-again',
+          runId: ready.runId,
+          expectedOwnerGeneration: ready.expectedOwnerGeneration,
+        })
+        .catch((error) => error);
+      expect(repeated).toMatchObject({ code: 'owner_changed' });
+      expect(counts).toEqual({ checks: 0, models: 1, effects: 1 });
     } finally {
-      if (child.exitCode === null) {
-        child.kill('SIGKILL');
-        await child.exited;
-      }
       await runtime?.close();
       await store?.close();
       rmSync(directory, { recursive: true, force: true });
     }
   }, 20000);
 
-// Direct verifier probes mutate disposable copies, never the golden frozen bytes.
-test('legacy review provenance accepts only absent or paired null optional result fields', () => {
-  const { root, profile } = unpack('approved');
-  const sql = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
-  try {
-    const db = new SqliteOperations(sql, true);
-    const carrier = db.row(
-      "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review'",
-    )!;
-    const original = JSON.parse(
-      String(
-        db.row('SELECT request_json FROM command WHERE id=?', carrier.origin_command_id!)!
-          .request_json,
-      ),
-    );
-    const update = (request: import('../../../src/storage/types').Json) => {
-      const encoded = canonicalJson(request);
-      sql
-        .query('UPDATE command SET request_json=?,request_digest=? WHERE id=?')
-        .run(
-          encoded,
-          createHash('sha256').update(encoded).digest('hex'),
-          String(carrier.origin_command_id),
-        );
-    };
-    expect(authorizationReviewSourceTarget(db, carrier)?.id).toBe(carrier.parent_execution_id);
-    const absent = { ...original };
-    delete absent.resultRequirement;
-    delete absent.resultRequirementSchema;
-    update(absent);
-    expect(authorizationReviewSourceTarget(db, carrier)?.id).toBe(carrier.parent_execution_id);
-    for (const request of [
-      { ...absent, resultRequirement: null },
-      { ...absent, resultRequirementSchema: null },
-      { ...original, resultRequirement: 'different' },
-      { ...original, resultRequirementSchema: {} },
-      { ...original, unexpected: null },
-    ]) {
-      update(request);
-      expect(authorizationReviewSourceTarget(db, carrier)).toBeNull();
+for (const mutation of [
+  'checker-missing',
+  'checker-id',
+  'checker-version',
+  'checker-model',
+  'checker-budget',
+  'tool-version',
+  'missing-behavior',
+  'behavior-configuration',
+] as const)
+  test(`new Run explicitly rejects ${mutation} recovery drift without replaying its settled check`, async () => {
+    const { directory, ready, profile } = await seed('current');
+    const store = await openSqliteStore(profile);
+    const counts = { checks: 0, models: 0, effects: 0 };
+    const binding = authorizationClockBinding(directory, false, counts);
+    if (mutation === 'checker-id') binding.authorizationCheck.id = 'different';
+    if (mutation === 'checker-version') binding.authorizationCheck.version = 'different';
+    if (mutation === 'checker-model') binding.authorizationCheck.modelId = 'different';
+    if (mutation === 'checker-budget') binding.authorizationCheck.timeoutMs = 6000;
+    if (mutation === 'tool-version') {
+      binding.extensions[0]!.tools[0]!.version = '2';
+      binding.toolBehaviors = [];
     }
-  } finally {
-    sql.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+    if (mutation === 'missing-behavior') binding.toolBehaviors = [];
+    if (mutation === 'behavior-configuration')
+      binding.toolBehaviors = [
+        { ...binding.toolBehaviors[0]!, configurationDigest: 'b'.repeat(64) },
+      ];
+    const runtime = createRuntime({
+      store,
+      artifacts: createArtifactStore({ profile, store }),
+      ...binding,
+      ...(mutation === 'checker-missing' ? { authorizationCheck: undefined } : {}),
+    });
+    try {
+      const original = (await store.getRun(ready.runId))!;
+      const executions = await store.listExecutions('s');
+      const before = (await store.getMetadata()).lastChangeCursor;
+      const error = await runtime
+        .resumeRun({
+          expectedStoreId: ready.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: 'resume',
+          runId: ready.runId,
+          expectedOwnerGeneration: ready.expectedOwnerGeneration,
+        })
+        .catch((error) => error);
+      expect(error).toMatchObject({ code: 'run_configuration_mismatch' });
+      expect((await store.getRun(ready.runId))!.configuration).toEqual(original.configuration);
+      expect(await store.listExecutions('s')).toEqual(executions);
+      const changes = await store.getChanges({ after: before, limit: 20 });
+      expect(
+        changes.events.map((event) => ({ type: event.type, objectId: event.objectId })),
+      ).toEqual([{ type: 'run.resume_prepared', objectId: 'resume' }]);
+      expect(counts).toEqual({ checks: 0, models: 0, effects: 0 });
+      expect(readFileSync(join(directory, 'checks'), 'utf8')).toBe('check\n');
+      expect(readFileSync(join(directory, 'interpretations'), 'utf8')).toBe('interpret\n');
+      expect(existsSync(join(directory, 'effects'))).toBe(false);
+    } finally {
+      await runtime.close();
+      await store.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20000);

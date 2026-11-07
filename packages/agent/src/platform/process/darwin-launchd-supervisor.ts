@@ -188,8 +188,11 @@ export async function startLaunchdSupervisor(input: {
     finishReject = reject;
   });
   void completion.catch(() => {});
+  const acceptedSockets = new Set<Socket>();
   const server = createServer((socket) => {
-    if (channel) {
+    acceptedSockets.add(socket);
+    socket.once('close', () => acceptedSockets.delete(socket));
+    if (finished || channel) {
       socket.destroy();
       return;
     }
@@ -267,6 +270,7 @@ export async function startLaunchdSupervisor(input: {
               'print',
               `${registration.domain}/${registration.label}`,
             ]);
+            if (finished || socket.destroyed) throw Error('launchd_guardian_disconnected');
             const pid = actual.output.match(/^\tpid = (\d+)$/m);
             if (actual.code !== 0 || !pid || Number(pid[1]) !== frame.pid)
               throw Error('launchd_guardian_identity_changed');
@@ -415,7 +419,10 @@ export async function startLaunchdSupervisor(input: {
       ),
     };
   } catch (error) {
-    channel?.end();
+    finished = true;
+    // Authentication can still be waiting for launchctl when ready times out.
+    // Such sockets are not yet `channel`, but server.close waits for them too.
+    for (const socket of acceptedSockets) socket.destroy();
     const cleanupErrors: unknown[] = [];
     let controlClosed = false;
     try {

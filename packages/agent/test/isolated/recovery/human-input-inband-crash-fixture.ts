@@ -36,7 +36,9 @@ const run = await store.startRun({
     extensions: [],
     tools: [],
     maxConcurrentSubagents: 3,
-    snapshot: { authorizationReview: null, value: null },
+    snapshot: { authorizationCheck: null, value: null },
+    authorizationCheck: null,
+    toolBehaviors: [],
   },
 });
 await store.beginRunRequirementsInitialization({ expectedStoreId, owner, runId: run.id });

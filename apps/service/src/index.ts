@@ -1245,7 +1245,8 @@ export async function startService(options: ServiceOptions) {
         await Promise.allSettled(streaming);
         for (const reader of bodyReaders) void reader.cancel().catch(() => {});
         await options.afterResourceClose?.();
-        await server.stop(false);
+        // Business resources have drained; unread transport output must not retain the process.
+        await server.stop(true);
       },
     );
   app.get('/v1/lifecycle', async (context) => context.json(await lifecycleView()));

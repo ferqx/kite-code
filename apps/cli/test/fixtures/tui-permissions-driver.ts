@@ -91,7 +91,7 @@ try {
   assert.ok(Number.isSafeInteger(servicePid) && servicePid > 0);
   process.kill(servicePid, 0);
   await send('/permissions');
-  await wait('Saved same_command grants: 0');
+  await wait('Saved Session grants: 0');
   await wait('Workspace w: trusted, revision 1');
   const trustRows = rows(
     "SELECT id,origin_store_id,scope,state,safe_request_json,receipt_json FROM host_mutation WHERE kind='workspace.trust'",
@@ -128,8 +128,7 @@ try {
   await key('\x1b');
   await wait('New Run >');
   await send('owned-1');
-  await wait('same command in original Session');
-  await key('\r');
+  await wait('❯ 仅此次');
   await pump();
   assert.equal(
     (
@@ -141,8 +140,7 @@ try {
   );
   assert.equal(existsSync(join(input.workspace, 'effects')), false);
   await key('\x1b[B');
-  await key('\x1b[B');
-  await wait('same command in original Session');
+  await wait('本会话内相同命令');
   await key('\r');
   await wait('interaction.answer: applied');
   await pump();
@@ -150,28 +148,28 @@ try {
   await pump();
   assert.deepEqual(rows("select id from interaction where definition_id='shell.command'"), []);
   await send('/permissions');
-  await wait('Saved same_command grants: 1');
+  await wait('Saved Session grants: 1');
   await key('\x1b');
   await wait('New Run >');
   await send('New task: owned-2');
   await wait('DONE owned-2');
   await pump();
   await send('/permissions');
-  await wait('Saved same_command grants: 1');
+  await wait('Saved Session grants: 1');
   await key('c');
   await wait('Confirm original');
   await key('\r');
   await wait('permission.grants.clear: applied');
-  await wait('Saved same_command grants: 0');
+  await wait('Saved Session grants: 0');
   await key('\x1b');
   await wait('New Run >');
   await send('New task: owned-3');
-  await wait('same command in original Session');
+  await wait('本会话内相同命令');
   await key('\x03');
   await pump();
   await wait('New Run >');
   await send('New task: owned-4');
-  await wait('same command in original Session');
+  await wait('本会话内相同命令');
   const pendingBeforeMode = rows(
     "select id,run_id from interaction where definition_id='shell.execute' and state='pending'",
   ) as { id: string; run_id: string }[];

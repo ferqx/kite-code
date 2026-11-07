@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -21,7 +22,7 @@ const app = await _electron.launch({
 let servicePid = 0;
 const count = async () => Number(await (await fetch(`${control}/count`)).text());
 try {
-  const page = await app.firstWindow();
+  const page = await nativeRootPage(app, 10000);
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();

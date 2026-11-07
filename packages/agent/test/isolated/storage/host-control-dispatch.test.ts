@@ -373,7 +373,7 @@ test('actual final authorization proof reaches SQL through trusted Store barrier
           interactionId: card.id,
           commandId: 'answer-exact',
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       await bounded(barrier.entered);

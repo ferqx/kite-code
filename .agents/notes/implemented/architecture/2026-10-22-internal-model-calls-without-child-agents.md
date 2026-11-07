@@ -2,6 +2,8 @@
 
 Status: implemented
 
+本决定中保留旧 `authorization.review` child 回执读取／闭包兼容的部分，由[统一新版授权决定](2026-11-06-structured-session-grants.md)取代。当前按本轮 schema/checksum 拒绝旧库，只保存和消费统一编号1的完整 check 回执；无 Run 内部 Model、原 Session 身份、来源与最终派发的理由继续适用。
+
 ## Problem
 
 自动审核和标题生成曾复用 child Session／Run／Job carrier。内部材料因此成为普通子会话正文，进入子 Agent 目录、状态和配额模型；同名 review 又混淆代码审查类别与权限审核。用户确认只有通用子 Agent 机制，类别不建立独立 Agent 实现；自动审核和标题生成均不属于子 Agent。
@@ -14,7 +16,7 @@ Status: implemented
 
 标题仍由原生命周期 Action 负责单次 marker、10秒取消、32KiB限制与 rename CAS；内部 Model 保留当前宿主与选定模型的权限 ceiling，申请共享 Model 槽前和等待后分别复核，最终派发原子核输入、定义及 controlReads；内部 Model 不复用主对话 Step checkpoint。无法确认停止时保存原 partial 与 outcome_unknown，晚结果不能改写未知或标题。权限检查从首次准备前登记并保留原配置，命名 Action 保有标题准备期；内部实际 Provider 退出后才释放 Model 槽和配置；标题配置 disposer 只执行一次。Runtime drain 等待真实调用及清理，不因外层超时／取消竞争已结束而提前关闭 Store；Provider 前最后复核取消。代码审查 review 只作为通用子 Agent 类别，主／子消息渲染保持统一。
 
-旧 authorization.review child 历史不删除、转换或重跑。原 proof、Inspector、附件及冷接管保留准确只读验证；旧生产入口关闭。DB5 迁移只调整允许准确内部 runless Model 的约束，事务内保存原行与索引／触发器，提交前核外键，失败回滚。
+以下旧格式兼容段为已被上述新版决定替代的历史取舍：旧 authorization.review child 历史不删除、转换或重跑。原 proof、Inspector、附件及冷接管保留准确只读验证；旧生产入口关闭。DB5 迁移只调整允许准确内部 runless Model 的约束，事务内保存原行与索引／触发器，提交前核外键，失败回滚。
 
 ## Alternatives considered
 

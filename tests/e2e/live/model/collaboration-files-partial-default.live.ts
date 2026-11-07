@@ -659,7 +659,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
                 expectedStoreId,
                 commandId,
                 expectedRevision: card.revision,
-                answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+                answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
               },
               { signal: options.signal },
             )
@@ -676,7 +676,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
           answered.state === 'answered' &&
             answered.answer?.kind === 'approval' &&
             answered.answer.decision === 'approve' &&
-            answered.answer.grant === 'approve_once',
+            answered.answer.optionId === 'once',
           'original_accurate_once_answer_saved',
         );
         const entry = {
@@ -1203,7 +1203,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         exactExecution?.authorization?.dispatched === true &&
           exactExecution.authorization.human?.accepted === true &&
           exactExecution.authorization.human.interactionId === interactionId &&
-          exactExecution.authorization.human.grant === 'approve_once' &&
+          exactExecution.authorization.human.optionId === 'once' &&
           exactExecution.interactionBinding?.interactionId === interactionId &&
           exactExecution.interactionBinding.decisionRevision === card.acceptedDecisionRevision,
         `original_approval_consumed_only_by_exact_execution_${hash(interactionId).slice(0, 12)}`,
@@ -1212,7 +1212,7 @@ export async function runLiveFilesPartialDefault(options: Options): Promise<{ ca
         card.kind === 'approval' &&
           card.answer?.kind === 'approval' &&
           card.answer.decision === 'approve' &&
-          card.answer.grant === 'approve_once' &&
+          card.answer.optionId === 'once' &&
           card.executionId === entry.executionId,
         `durable_exact_once_approval_${hash(interactionId).slice(0, 12)}`,
       );

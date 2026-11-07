@@ -281,7 +281,7 @@ try {
         frame.fresh &&
         viewport.includes(`[${ordinary.id}]`) &&
         viewport.includes('original Session a · pending · revision 1') &&
-        viewport.includes('❯ Allow once') &&
+        viewport.includes('❯ 仅此次') &&
         !viewport.includes('Project sources')
       )
         break;
@@ -337,7 +337,7 @@ try {
       const viewport = normalized(active!.viewport());
       if (
         frame.fresh &&
-        viewport.includes('❯ Allow once') &&
+        viewport.includes('❯ 仅此次') &&
         !viewport.includes('Project sources') &&
         !viewport.includes('Original outcome pending or unknown') &&
         !viewport.includes('Loading')
@@ -347,7 +347,7 @@ try {
         throw Error(`owned_source_approval_focus_deadline:${viewport}`);
       await Bun.sleep(50);
     }
-    await wait('Approve this execution only');
+    await wait('仅此次');
     await key('\r');
     const question = await control(`question/${n}`);
     await wait(`question[${question.id}]originalSessiona`, true);

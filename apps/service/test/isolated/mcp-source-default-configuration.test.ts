@@ -156,7 +156,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
         expect(safeId).toBeDefined();
         call = {
           name: 'connect_mcp_server',
-          input: { server_id: safeId!, key: `owned-${workId}` },
+          input: { server_id: safeId! },
         };
       } else if (actualStep === 2) {
         const tool = tools.find((tool) => tool.function.name.startsWith('mcp_mcp_'));
@@ -357,7 +357,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
         expectedStoreId,
         commandId: `answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     },
     async done() {

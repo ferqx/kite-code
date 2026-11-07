@@ -1,6 +1,17 @@
 import { createHash } from 'node:crypto';
+import { toolBehaviorBinding } from '../authorization-check-output';
 import type { AuthorizationRequest, PermissionDecision, Permissions } from '../extensions';
+import {
+  approvalOptions,
+  capabilityKey,
+  type GrantCandidate,
+  type GrantOffer,
+  grantDigest,
+  parseGrantCandidate,
+  sameCapability,
+} from '../permission-grants';
 import type { Json } from '../storage';
+import type { ToolBehaviorBinding } from '../tool-behavior';
 import { isBuiltinBrowserApprovalExempt } from './capabilities';
 import { sealWorktreeDecision } from './worktree-authorization';
 
@@ -36,7 +47,11 @@ export interface CapabilityDescription extends CapabilityIdentity {
   /** Trusted fixed worktree implementation, after canonical command and asset verification. */
   readonly worktreeAuthorization?: { readonly configurationIdentity: string };
   /** Trusted default-host review contract; absent preserves custom and historical policies. */
-  readonly autoReview?: 'shell_risk' | 'none';
+  readonly autoReview?: 'check' | 'none';
+  readonly reviewBehavior?: ToolBehaviorBinding;
+  readonly grantOffers?: readonly GrantCandidate[];
+  readonly grantBehavior?: { readonly contractRef: string; readonly configurationDigest: string };
+  readonly grantSatisfiesDefaultCheck?: true;
   /** Trusted exact execution semantics, never a remote/Model supplied grant key. */
   readonly commandDigest?: string;
   readonly autoReviewKey?: string;
@@ -146,8 +161,15 @@ function validDescription(description: CapabilityDescription) {
         ((description.kind === 'tool' && description.definitionId === 'git.worktree') ||
           (description.kind === 'job' && description.definitionId === 'shell.command')))) &&
     (description.autoReview === undefined ||
-      description.autoReview === 'shell_risk' ||
+      description.autoReview === 'check' ||
       description.autoReview === 'none') &&
+    (description.reviewBehavior === undefined ||
+      (!!toolBehaviorBinding(description.reviewBehavior) &&
+        matches(description.reviewBehavior.capability, description))) &&
+    (description.grantBehavior === undefined ||
+      (description.grantBehavior !== null &&
+        text(description.grantBehavior.contractRef) &&
+        /^[a-f0-9]{64}$/.test(description.grantBehavior.configurationDigest))) &&
     (description.denialReason === undefined || text(description.denialReason)) &&
     (description.approvalExempt === undefined ||
       (description.approvalExempt === 'builtin.browser' &&
@@ -205,6 +227,8 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.autoTimeoutScope ?? null,
           description.executionScope ?? null,
           description.denialReason ?? null,
+          description.grantBehavior ?? null,
+          description.reviewBehavior ?? null,
           description.internalRecordOnly ?? null,
           ...(description.approvalExempt ? [description.approvalExempt] : []),
           ...(description.autoReview ? [description.autoReview] : []),
@@ -217,7 +241,53 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
 
 /** Pure classification over freshly read host facts; import/factory creation performs no I/O. */
 export function createPermissionPolicy(options: PermissionPolicyOptions): Permissions {
+  const snapshots = new WeakMap<
+    object,
+    { policy: PermissionPolicySnapshot; description: CapabilityDescription | null }
+  >();
+  const reuse: NonNullable<Permissions['reuseRevision']> = async (
+    request,
+    capability,
+    candidate,
+    decision,
+  ) => {
+    const facts = decision.snapshot && snapshots.get(decision.snapshot);
+    if (
+      !facts?.policy.workspaceTrust ||
+      !facts.description?.hardAllowed ||
+      !facts.policy.allowed.some((entry) => sameCapability(entry, capability))
+    )
+      return null;
+    const satisfiesCheck =
+      facts.description.grantSatisfiesDefaultCheck === true &&
+      facts.description.autoReview === 'check';
+    return {
+      reuseRevision: grantDigest({
+        policy: {
+          identity: facts.policy.revision,
+          mode: facts.policy.mode,
+          workspaceTrust: facts.policy.workspaceTrust,
+          allowed: [...facts.policy.allowed].sort((a, b) =>
+            capabilityKey(a).localeCompare(capabilityKey(b)),
+          ) as unknown as Json,
+          controlReads: (facts.policy.controlReads ?? []) as unknown as Json,
+        },
+        sessionId: request.sessionId,
+        capability: capability as unknown as Json,
+        ruleId: candidate.ruleId,
+        contractId: candidate.contractId,
+        scopeDigest: candidate.scopeDigest,
+        effects: [...facts.description.effects].sort(),
+        executionScope: facts.description.executionScope ?? null,
+        satisfiesCheck,
+        behavior: facts.description.grantBehavior ?? null,
+      }),
+      ...(satisfiesCheck ? { satisfiesCheck: true as const } : {}),
+      requireApproval: decision.check?.requireApproval === true,
+    };
+  };
   const policy: Permissions = {
+    reuseRevision: reuse,
     toolDispatchOrder: 'model',
     async authorize(request): Promise<PermissionDecision> {
       request.signal.throwIfAborted();
@@ -288,6 +358,30 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
           },
         },
       };
+      snapshots.set(controlProof.snapshot, { policy, description });
+      const grantOffers: GrantOffer[] = [];
+      if (
+        policy.workspaceTrust &&
+        description?.hardAllowed &&
+        policy.allowed.some((entry) => matches(entry, request))
+      ) {
+        for (const raw of description.grantOffers ?? []) {
+          const candidate = parseGrantCandidate(raw);
+          const policyBindings = [];
+          for (const capability of candidate.bindings) {
+            const binding = await reuse(request, capability, candidate, {
+              ...controlProof,
+              allowed: false,
+              revision: boundRevision,
+            });
+            if (!binding) break;
+            policyBindings.push({ capability, ...binding });
+          }
+          if (policyBindings.length === candidate.bindings.length)
+            grantOffers.push({ ...candidate, policyBindings });
+        }
+      }
+      const offerProof = { ...controlProof, ...(grantOffers.length ? { grantOffers } : {}) };
       const deny = (reason: string): PermissionDecision => ({
         ...controlProof,
         allowed: false,
@@ -304,12 +398,11 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
         return deny(description.denialReason ?? 'capability_unavailable');
       // Model authority is kind-specific and does not grant a namesake Tool access to a Workspace.
       if (request.kind === 'model')
-        return { ...controlProof, allowed: true, revision: boundRevision };
+        return { ...offerProof, allowed: true, revision: boundRevision };
       if (!policy.workspaceTrust) return deny('workspace_untrusted');
       if (description.approvalExempt === 'builtin.browser')
-        return { ...controlProof, allowed: true, revision: boundRevision };
-      if (policy.mode === 'full')
-        return { ...controlProof, allowed: true, revision: boundRevision };
+        return { ...offerProof, allowed: true, revision: boundRevision };
+      if (policy.mode === 'full') return { ...offerProof, allowed: true, revision: boundRevision };
       const safeRead =
         description.safeRead && description.effects.every((effect) => effect === 'read');
       const workspaceEdit = description.effects.every(
@@ -323,11 +416,11 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
         description.internalRecordOnly === true ||
         (policy.mode === 'accept_edits' && (workspaceEdit || scopedWorkspace))
       )
-        return { ...controlProof, allowed: true, revision: boundRevision };
+        return { ...offerProof, allowed: true, revision: boundRevision };
       if (policy.mode === 'auto') {
         if (description.autoReview === 'none')
-          return { ...controlProof, allowed: true, revision: boundRevision };
-        const riskOnly = description.autoReview === 'shell_risk';
+          return { ...offerProof, allowed: true, revision: boundRevision };
+        const riskOnly = description.autoReview === 'check';
         const context =
           !riskOnly && options.readCheckContext
             ? structuredClone(await options.readCheckContext(request))
@@ -335,15 +428,17 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
         request.signal.throwIfAborted();
         const { signal: _signal, ...invocation } = request;
         return {
-          ...controlProof,
+          ...offerProof,
           allowed: false,
           revision: boundRevision,
           reason: 'auto_check_required',
           check: {
+            ...(description.autoReview === 'check' && description.reviewBehavior
+              ? { behavior: description.reviewBehavior }
+              : {}),
             ...(description.autoReviewKey ? { operationKey: description.autoReviewKey } : {}),
             timeoutScope: description.autoTimeoutScope ?? 'governed',
             request: {
-              ...(riskOnly ? { reviewPurpose: 'shell_risk' } : {}),
               mode: policy.mode,
               effects: [...description.effects],
               ...(description.executionScope ? { executionScope: description.executionScope } : {}),
@@ -352,12 +447,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
             },
           },
           approval: {
-            ...(description.commandDigest === undefined
-              ? {}
-              : {
-                  grants: ['approve_once', 'same_command'] as const,
-                  commandDigest: description.commandDigest,
-                }),
+            options: approvalOptions(grantOffers),
             request: {
               mode: policy.mode,
               reason: 'auto_check_unavailable',
@@ -369,7 +459,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       }
       const reason = 'approval_required';
       return {
-        ...controlProof,
+        ...offerProof,
         allowed: false,
         revision: boundRevision,
         reason,
@@ -380,18 +470,23 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
             effects: [...description.effects],
             ...(description.executionScope ? { executionScope: description.executionScope } : {}),
           },
-          ...(description.commandDigest === undefined
-            ? {}
-            : {
-                grants: ['approve_once', 'same_command'],
-                commandDigest: description.commandDigest,
-              }),
+          options: approvalOptions(grantOffers),
         },
       };
     },
   };
   return {
     toolDispatchOrder: policy.toolDispatchOrder,
+    reuseRevision: reuse,
+    async consumesExecutionConfirmation(request, decision) {
+      const facts = decision.snapshot && snapshots.get(decision.snapshot);
+      return !!(
+        facts?.policy.workspaceTrust &&
+        facts.description?.hardAllowed &&
+        matches(facts.description, request) &&
+        facts.policy.allowed.some((entry) => matches(entry, request))
+      );
+    },
     async authorize(request) {
       return sealWorktreeDecision(await policy.authorize(request));
     },
@@ -412,9 +507,6 @@ export {
   taskToolCapability,
 } from './capabilities';
 export { createPermissionCheckContextReader } from './check-context';
-export {
-  createPlanningPermissionPolicy,
-  requireFileRestoreApproval,
-} from './constraints';
+export { createBusinessPermissionPolicy } from './constraints';
 export { dispatchScopeLeaves } from './dispatch-scope';
 export { intersectPermissionPolicies } from './inheritance';

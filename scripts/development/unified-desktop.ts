@@ -53,6 +53,12 @@ export async function runDevelopmentDesktop(
     );
   const root = input.root ?? repositoryRoot;
   const artifact = selectDevelopmentServiceArtifact(root, input.executable);
+  const profile = {
+    dataRoot: join(homedir(), '.kite-code'),
+    profile: 'development',
+  };
+  const { preflightSqliteStore } = await import('@kite-ai/agent/sqlite');
+  await preflightSqliteStore(profile);
   let electron: string, electronPackageDirectory: string;
   try {
     const require = createRequire(join(root, 'apps/desktop/package.json'));
@@ -155,10 +161,7 @@ export async function runDevelopmentDesktop(
         buildId: `development-${service.sha256}`,
         apiMajor: artifact.apiMajor,
         requiredCapabilities: ['file_recovery'],
-        profile: {
-          dataRoot: join(homedir(), '.kite-code'),
-          profile: 'development',
-        },
+        profile,
       },
       outdir,
       {
@@ -242,6 +245,10 @@ if (import.meta.main) {
       process.stderr.write(`${error.message}\n`);
     if (code === 'development_service_asset_unavailable')
       process.stderr.write('Build the local workspaces first: npm run build\n');
+    if (code === 'store_incompatible')
+      process.stderr.write(
+        'The existing development profile does not match the current Store schema (format 1). Its data was preserved; no migration or reset was performed.\n',
+      );
     if (code === 'development_electron_runtime_scope_invalid')
       process.stderr.write(
         "Electron must use its installed package's physical dist directory without links or hard-linked files.\n",

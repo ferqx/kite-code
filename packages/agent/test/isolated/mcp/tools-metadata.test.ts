@@ -164,7 +164,7 @@ async function fixture(
         type: 'tool_call',
         id: 'actual-call',
         name: 'connect_mcp_server',
-        arguments: '{"server_id":"local","key":"original"}',
+        arguments: '{"server_id":"local"}',
       },
       { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } },
     ],
@@ -1041,12 +1041,12 @@ test(
         _meta: { actual: 'second' },
       };
       f.tools = [second];
+      const connected = (await f.store.listExecutions('s')).find(
+        (row) => row.definitionId === 'mcp.connect' && row.kind === 'tool',
+      )!;
       f.refreshInput = {
-        server_id: 'local',
-        connection_key: 'original',
-        connection_execution_id: first.origin.connectionExecutionId,
-        config_digest: first.origin.configDigest,
-        generation: 1,
+        connection_ref: (connected.result as { details: Record<string, Json> }).details
+          .connection_ref!,
       };
       await f.runtime.submitCommand({
         expectedStoreId: f.expectedStoreId,

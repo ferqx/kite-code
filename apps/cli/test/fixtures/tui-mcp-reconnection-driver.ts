@@ -270,7 +270,7 @@ const leave = async (pending = false, parentTitle = 'MCP · w') => {
       (frame) =>
         frame.fresh &&
         !frame.text.includes('Esc Back') &&
-        frame.text.includes('Allow once') &&
+        frame.text.includes('仅此次') &&
         frame.text.includes('Deny'),
       end,
     );

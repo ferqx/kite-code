@@ -141,7 +141,16 @@ async function fixture(source = false) {
           ? {
               allowed: false,
               revision: 'owned-ask',
-              approval: { request: { effects: ['workspace_write'] }, grants: ['approve_once'] },
+              approval: {
+                request: { effects: ['workspace_write'] },
+                options: [
+                  {
+                    optionId: 'once',
+                    kind: 'once',
+                    presentation: { label: '仅此次', details: [] },
+                  },
+                ],
+              },
             }
           : { allowed: true, revision: 'owned-host-allow' };
       },
@@ -402,7 +411,7 @@ test('actual source CAS drift fails before effect and explicit approval waits wi
       expectedStoreId: f.storeId,
       commandId: 'approve-original',
       expectedRevision: pending.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const applied = await until(async () => {
       const o = await port.lookup(saved, signal);

@@ -245,7 +245,7 @@ test('guidance preserves the original pending approval and executes its tool bef
       presentationSessionId: 's',
       interactionId: old.id,
       expectedRevision: old.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.runtime.waitForCommand('work');
     const steerId = await f.appliedSteer('steer');

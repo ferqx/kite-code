@@ -531,14 +531,23 @@ test('approval rows omit redundant pre-dispatch results while preserving indepen
       approval: '已自动批准',
       result: ['执行中', '失败', '结果未知', '已停止'][index],
     })),
-    ...(['approve_once', 'same_command'] as const).map((grant) => ({
+    ...(['once', 'scope'] as const).map((optionKind) => ({
       message: {
         status: 'running' as const,
         settled: false,
         dispatchCommitted: true,
-        approval: { source: 'user' as const, state: 'approved' as const, grant },
+        approval: {
+          source: 'user' as const,
+          state: 'approved' as const,
+          optionId: optionKind === 'once' ? 'once' : 'scope-example',
+          optionKind,
+          presentation: {
+            label: optionKind === 'once' ? '仅此次' : '本会话相同命令',
+            details: ['原完整命令'],
+          },
+        },
       },
-      approval: grant === 'same_command' ? '已人工批准 · 本会话相同命令' : '已人工批准',
+      approval: optionKind === 'scope' ? '已人工批准 · 本会话相同命令' : '已人工批准',
       result: '执行中',
     })),
     {

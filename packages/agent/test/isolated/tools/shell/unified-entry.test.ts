@@ -353,6 +353,7 @@ test('the current Shell model surface has four tools and rejects hidden legacy p
         'execution_timeout_ms',
         'filesystem',
         'network',
+        'workdir',
       ].sort(),
     );
     const decode = (input: Record<string, unknown>) =>
@@ -444,9 +445,9 @@ test('background execution accepts one original Job and read/wait/stop keep that
   const f = await fixture(
     [
       calls(['shell_execute', { command: 'held read', background: true }]),
-      calls(['shell_wait', { shell_id: 'original', wait_timeout_ms: 50 }]),
+      calls(['shell_wait', { shell_id: 'original', wait_ms: 50 }]),
       calls(['shell_read', { shell_id: 'original' }]),
-      calls(['shell_stop', { shell_id: 'original', command_id: 'stop-original' }]),
+      calls(['shell_stop', { shell_id: 'original' }]),
       calls(['shell_wait', { shell_id: 'original' }], ['shell_read', { shell_id: 'original' }]),
       [finish],
     ],
@@ -537,6 +538,7 @@ test('reentering one persisted Tool identity reuses its original Job even when d
     expect(
       view.executions.filter((execution) => execution.definitionId === 'shell.execute'),
     ).toHaveLength(1);
+    expect(observedShellId(f.model.requests[1]!)).toHaveLength(26);
     expect(
       f.model.requests[2]!.messages.some(
         (message) =>

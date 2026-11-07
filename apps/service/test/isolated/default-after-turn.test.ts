@@ -469,21 +469,21 @@ async function fixture(
         name: 'write_plan',
         input: {
           plan_id: 'report-plan',
-          expected_version: null,
+
           title: 'Delegate then report',
           body: 'One original child and one report',
           steps: [{ id: 'delegate', title: 'Accept original child delegation' }],
         },
       };
-    const current = (await store.getExtensionRecord({
-      sessionId: 's',
-      extensionId: planningExtensionId,
-      key: 'plan.current',
-    }))!.value as Record<string, Json>;
+    const planWrite = (await store.listExecutions('s'))
+      .filter((row) => row.definitionId === 'planning.write' && row.status === 'succeeded')
+      .at(-1);
+    const planRef = (planWrite?.result as { details?: Record<string, Json> } | undefined)?.details
+      ?.plan_ref;
     if (index === 1)
       return {
         name: 'request_plan_review',
-        input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+        input: { plan_ref: planRef! },
       };
     if (index === 2)
       return {
@@ -493,18 +493,14 @@ async function fixture(
         },
       };
     if (index === 3) {
-      const run = (await store.getView('s')).runs.find((run) => run.originCommandId === 'work')!;
       const task = (await store.listExecutions('s')).find(
         (e) => e.definitionId === 'task.spawn' && e.status === 'succeeded',
       )!;
       return {
         name: 'update_plan_progress',
         input: {
-          run_id: run.id,
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
-          expected_progress_revision: null,
+          plan_ref: planRef!,
+          progress_ref: null,
           step_id: 'delegate',
           status: 'completed',
           execution_id: task.id,
@@ -736,7 +732,7 @@ async function fixture(
         expectedStoreId,
         commandId: `answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       return card;
     },
@@ -937,7 +933,7 @@ async function plannedReport(singleSlot: boolean, driftPlan = false, continued =
       expectedStoreId: f.expectedStoreId,
       commandId: 'plan-approve',
       expectedRevision: review.revision,
-      answer: { kind: 'plan_review', decision: 'approve', mode: 'accept_edits' },
+      answer: { kind: 'plan_review', decision: 'approve' },
     });
     const task = await f.approve('task.spawn');
     const carrier = await f.approve('agent/general');

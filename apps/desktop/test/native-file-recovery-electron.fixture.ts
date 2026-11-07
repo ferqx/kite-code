@@ -65,7 +65,7 @@ try {
   await panel.getByText(/代码 unknown · 会话 not_started/).waitFor();
   assert.deepEqual(readFileSync(path!), before);
   assert.equal(statSync(path!).ino, inode);
-  const approve = page.getByRole('button', { name: '批准一次', exact: true });
+  const approve = page.getByRole('button', { name: '仅此次', exact: true });
   await approve.waitFor();
   const beforeInvalid = Number(await app.evaluate('globalThis.__filePosts'));
   const invalid = await page.evaluate(async () => {
@@ -75,10 +75,10 @@ try {
       (value) => value.definitionId === 'builtin.files/files.checkpoint.restore',
     );
     if (!card) throw Error('actual_native_card_missing');
-    const answer: { kind: 'approval'; decision: 'approve'; grant: 'approve_once' } = {
+    const answer: { kind: 'approval'; decision: 'approve'; optionId: 'once' } = {
       kind: 'approval',
       decision: 'approve',
-      grant: 'approve_once',
+      optionId: 'once',
     };
     // A malformed renderer protocol probe: the actual card scope and IDs remain unchanged.
     Reflect.set(answer, 'grant', 'all');

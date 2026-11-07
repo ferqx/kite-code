@@ -187,9 +187,15 @@ test('waiting approval holds neither shared Model nor process permit; saved answ
     await f.runtime.waitForCommand('other-work');
     expect(effects).toEqual(['unrelated']);
     expect(f.model.requests).toHaveLength(3);
-    const receipt = await f.answer(record, { kind: 'approval', decision: 'approve' });
+    const receipt = await f.answer(record, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    });
     expect(receipt.receipt).toMatchObject({ outcome: 'answer_saved', decisionRevision: '2' });
-    expect(await f.answer(record, { kind: 'approval', decision: 'approve' })).toEqual(receipt);
+    expect(
+      await f.answer(record, { kind: 'approval', decision: 'approve', optionId: 'once' }),
+    ).toEqual(receipt);
     await f.runtime.waitForCommand('work');
     const accepted = await f.read(record);
     expect(accepted?.acceptedDecisionRevision).toBe('2');
@@ -291,7 +297,7 @@ test('permission withdrawal or policy revision change while answering never acce
       const record = await f.pending();
       if (withdrawal) blocked = true;
       else revision = 'policy-2';
-      await f.answer(record, { kind: 'approval', decision: 'approve' });
+      await f.answer(record, { kind: 'approval', decision: 'approve', optionId: 'once' });
       await f.runtime.waitForCommand('work');
       expect(effects).toBe(0);
       expect((await f.read(record))?.acceptedDecisionRevision).toBeNull();
@@ -342,7 +348,7 @@ test('sources changed during approval invalidate the original call and enter the
     await f.submit();
     const record = await f.pending();
     digest = 'two';
-    await f.answer(record, { kind: 'approval', decision: 'approve' });
+    await f.answer(record, { kind: 'approval', decision: 'approve', optionId: 'once' });
     await f.runtime.waitForCommand('work');
     expect(effects).toBe(0);
     expect((await f.read(record))?.acceptedDecisionRevision).toBeNull();
@@ -450,7 +456,11 @@ test('late approval after original Command cancellation stays history and cannot
       targetCommandId: 'work',
       subjectId: 'owner',
     });
-    const saved = await f.answer(record, { kind: 'approval', decision: 'approve' });
+    const saved = await f.answer(record, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    });
     expect(saved.receipt).toMatchObject({ outcome: 'answer_saved', cancelled: true });
     await f.runtime.waitForCommand('work');
     expect((await f.read(record))?.state).toBe('cancelled');

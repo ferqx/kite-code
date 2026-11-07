@@ -1,6 +1,8 @@
 # 模型工具名称与参数投影
 
-[model-tools.ts](model-tools.ts) 负责 Agent 内部工具名称、参数与模型公开工具表面的转换。[ToolDefinition.model](extensions/index.ts) 只保存纯数据：`name`、`snakeCase`、`parameterNames`、`hidden`、`omitParameters`、`requiredParameters` 和结果呈现的 `resultVersion`，不接收执行函数、权限对象或第二套工具实现。各 leaf 拥有名称、说明与字段选择；实际定义 ID、version、input schema、execute/resume、effects、来源和权限继续由原 owner 负责。
+模型提供业务输入，宿主以原回执引用保管准确基线、版本和执行身份。引用不授予权限，不选择最新对象或重放原操作；持久取舍见[准确引用决定](../../../.agents/notes/implemented/architecture/2026-11-08-model-tool-exact-references.md)。
+
+[model-tools.ts](model-tools.ts) 负责 Agent 内部工具名称、参数与模型公开工具表面的转换。[ToolDefinition.model](extensions/index.ts) 只保存纯数据：`name`、`snakeCase`、`parameterNames`、`hidden`、`omitParameters`、`requiredParameters`、可选公开 `inputSchema` 和结果呈现的 `resultVersion`，不接收执行函数、权限对象或第二套工具实现。可选公开 inputSchema 只控制模型表面，Core 仍校验原定义的完整内部输入；它不转换旧字段或新增执行前处理平台。各 leaf 拥有名称、说明与字段选择；实际定义 ID、version、input schema、execute/resume、effects、来源和权限继续由原 owner 负责。
 
 ## 结果呈现
 
@@ -8,7 +10,7 @@
 
 原 owner、Shell 引用和证据正文的 Store／Artifact 读取在纯 formatter 的异常回退范围外完成。压缩后通过执行证据找回旧结果时，同样完整校验嵌套原正文，并沿本次模型准备的取消信号中止读取；缺失或损坏沿既有模型准备失败路径上报，不以成功目录 JSON 替代不可读正文。纯展示不支持某种形状时仍保留完整原结果，包括未知 evidence 限定和外部工具业务字段；有 Artifact 时同时保留已验证的完整正文，不只取 `content`。
 
-目前 [Files](tools/files/README.md) 对工作区读取和搜索去除重复 envelope，保留正文、基线、行窗、分页和未检查范围；普通确定缺失保准确路径及 `exists:false`，不造正文或基线。[child Source 呈现](model-result-presentation.ts)依据原持久 child 配置和执行身份，前置未核验状态、范围与实际原文预览，再给出完整子报告。准确失败的 child 也保此前工具观察、Shell 输出预览及遗漏限制，失败原因使用公开英文说明，不把失败称为此前零效果。未知证据结构保原完整 Source；未覆盖的工作不能被推断为未发生。成功专用 leaf formatter 不处理失败结果；child 呈现并非 leaf formatter。
+目前 [Files](tools/files/README.md) 对工作区读取去除重复 envelope，保留正文、准确基线引用、行窗、分页和未检查范围；普通确定缺失保准确路径及 `exists:false`，不造正文或基线。[child Source 呈现](model-result-presentation.ts)依据原持久 child 配置和执行身份，前置未核验状态、范围与实际原文预览，再给出完整子报告。准确失败的 child 也保此前工具观察、Shell 输出预览及遗漏限制，失败原因使用公开英文说明，不把失败称为此前零效果。未知证据结构保原完整 Source；未覆盖的工作不能被推断为未发生。成功专用 leaf formatter 不处理失败结果；child 呈现并非 leaf formatter。
 
 [失败说明](tool-failure-presentation.ts)在原 Tool／call／Session／Run／Store 已核实后，为失败、取消及效果未知标注准确状态；工具拥有的解释使用简洁英文，[固定公开原因表](tool-failure-causes.ts)替代裸码，不用内部执行术语代替原因。未知的非空公开 `ToolResult.content` 作为低信任返回正文保留，不按单词、JSON 或错误码形状删除；没有正文时明确说明未返回错误描述。原业务正文和完整 Artifact 继续保留，不靠正文是散文还是 JSON 猜测是否已经表达失败，也不翻译或删除 stdout／stderr、MCP 业务数据及其他非英文原文。是否未派发只取 Core 的实际派发观察，不信任 leaf 自称未执行；确有未派发证明时明确本次未执行、本次 Tool 作用为零，不能误述为本次效果未知，也不否定此前操作的作用。人工拒绝另核原 human answer，不从裸码猜用户决定；Auto 拒绝核原成功审核的拒绝原因。完成决策被新用户输入替代时，下一模型明确获知旧决策已过期，须按当前任务重新判断；不据此自动重放原请求。[真实交错回归](../test/isolated/context/store.test.ts)核原取消回执、同一调用与来源及零派发。取消不证明回滚或后台已停，unknown 明确可能已有作用、须核原操作且不得重投。不把任意 details、私有 Error 或 cause 自动加入模型。后台结果 Source 保原来源，已识别的 Shell 与 child 以公开结果呈现，未知结构继续保原完整 JSON；不主动创建新 Model。原存储回执、机器状态、工具／协议版本和准确封存的旧 ModelInput 不改写。[实际 Runtime 回归](../test/isolated/execution/tool-failure-presentation.test.ts)核下一模型、原回执不变、call/source、未派发与已尝试的区分、私有数据和完整错误 Artifact；[失败子结果回归](../test/isolated/business/task/partial-child-failure.test.ts)核此前真实写入、读取及 Shell 诊断仍交给父模型且无重放。
 
@@ -26,11 +28,13 @@
 4. `ToolCall.model` 只记录原公开名称、实际发生改名的字段路径和必要错误码；内部 `ToolCall.name/arguments` 仍保存规范形态。下一轮由 `modelToolCall`／`modelToolMessages` 重建原公开调用，不咨询今天的定义，也不为每条历史复制整份 schema。
 5. [Model metadata](model-snapshot.ts) 的 `context.toolSurface` 保存当时完整公开工具声明。内部 assembly 仍绑定原 ID/version；[Inspector 只读入口](runtime.ts) 从原请求和封存表面恢复当时模型所见，不拿当前目录补齐旧输入。完整正文、scope、EOF/hash 及原读取资格仍由 [Model body owner](model-body/README.md)核实。
 
+参数校验失败时，Core 保持 `invalid_tool_arguments` 和零派发，在原失败回执的 `details.schemaError` 保存本次选中公开 Schema 的校验位置及说明，例如缺少 `version`。仅拒绝路径复用纯 Schema 编译缓存，不给成功调用增加一次校验、I/O、模型或等待；不回显实参值、任意对象 key、私有异常或完整 Ajv params。下一模型在 Core 已证实未派发时收到该具体反馈，已派发 leaf 自报的同名详情不加入呈现。原调用和封存输入保持，诊断失败沿原通用拒绝，不代填字段、扩大可调用范围或自动重投。验证见[参数投影](../test/isolated/execution/model-tools.test.ts)、[实际失败回路](../test/isolated/execution/tool-failure-presentation.test.ts)与[缺版本计划](../test/isolated/business/planning.test.ts)。
+
 新目录不增加旧名称 alias；已保存模型调用按原 descriptor 还原名称和参数，不用今天的目录重写历史。内部操作身份、文件 `base` 和准确执行引用仍是必需合同；Shell 的新模型输入不含 key，改由原 Tool execution ID 派生，历史显式 key 和封存投影保持可解释；公开名称友好不代表执行去重、文件基线或授权可以省略。
 
 上下文估算和压缩同样使用公开名称、schema 与历史；原实测 token 基线和新增消息必须采用同一种表示，私有 `ToolCall.model` 不计入实际模型输入。持久取舍见[模型工具表面决定](../../../.agents/notes/implemented/architecture/2026-10-18-model-tool-presentation.md)。
 
-`shell_stop` 的 `shell_id` 使用原返回句柄，`command_id` 则由调用方为本次取消创建唯一意图 ID；不能复制 launch／Job 返回的旧 Command ID。只有准确重试同一次取消才复用该 ID。说明与字段描述都表达这一区别，工具版本、输入形状和原去重／权限行为保持。
+Shell 自动生成的 `shell_id` 是原已持久调用 ID 的无损短表示，当前 UUID 对应26字符；读取继续准确查原记录，不新增注册表、旧摘要读取或近似匹配。`shell_stop` 只让模型提供原 `shell_id`。宿主从本次Tool身份生成稳定取消Command ID，结果另给 `cancellation_execution_id`，不把接纳当成已停止。
 
 可信 `RunConfiguration.modelHiddenToolIds` 只收窄该 Run 的模型目录：Runtime 冻结工具副本并设置模型隐藏，内部原定义、版本和每次派发权限保持。Service 在新 Native 统一浏览器配置中用它隐藏原子依赖，同时公开 `browser_execute`；子任务继承与恢复依据原冻结配置，不从今天的默认目录改写旧 Run。调用者的普通 Tool 参数不能声明这个宿主配置。回归见[浏览器配置](../../../apps/service/test/isolated/browser-execution-configuration.test.ts)。
 
@@ -48,6 +52,8 @@
 
 [model-schema.ts](model-schema.ts)仅按完整 JSON 内容复用模型参数投影与分支匹配的 Ajv 编译结果；每个 schema 仍有独立 registry 和私有副本，同 `$id` 的不同正文及本地 `$ref` 不混用。缓存按 LRU 最多128项，键串 UTF-8 合计1MiB、单键64KiB；超出接纳预算、非纯 JSON／访问器等情况保原完整编译路径，不拒绝工具。实际调用只消费本次同步校验结果，不缓存参数、字段映射、权限或文件事实。新 Run 的 schema 改动产生新键，旧 caller 修改 schema 不能污染复用结果。[缓存回归](../test/isolated/execution/model-schema.test.ts)核内容复用、引用隔离、修改、数量／键字节淘汰与非缓存路径；[参数投影](../test/isolated/execution/model-tools.test.ts)和[分支回归](../test/isolated/execution/model-tools-branches.test.ts)继续拥有目录、碰撞和 opaque JSON 语义。
 
+[共享缓存原语](schema-cache.ts)只复用纯 JSON 内容键和上述 LRU 预算；Model 仍按内容读取新键，并以 `allErrors:false` 使用独立 registry。Tool／Extension 输入校验另由 `InputSchemaCompiler` 保持 `allErrors:true`：先以弱对象身份复用原 validator，只有所有对象与数组均冻结、无 `$id`／任意引用／`$schema`／锚点的匿名 JSON Schema 才按准确 `JSON.stringify`（保属性顺序）复用独立编译器。未冻结任一节点、布尔 Schema、注册／引用或不可缓存内容继续使用原共享 Ajv，保留 const／enum 对原对象的引用、跨定义引用和原编译错误；不按 Tool ID／version 合并。LRU 淘汰断开独立编译器的强引用，仍存活的 Schema 对象经 WeakMap 保留原 validator；不缓存实参或权限事实。[输入校验回归](../test/isolated/execution/schema-cache.test.ts)覆盖这两类身份、引用与错误边界、数量／键字节淘汰，以及实际 Runtime 封存后的 Shell Tool／Job Schema 资格。
+
 显式公开名称须为最多 64 字符的 lowercase snake_case 标识。一次准确目录中的名称碰撞、同一对象的字段碰撞和不存在的显式字段路径均拒绝；`hidden:true` 只从模型声明目录移除，内部注册和可信调用资格仍由原合同核实，不通过隐藏授予额外权限。
 
 同一对象跨 `allOf` 的字段声明按来源及替代分支选择核对，碰撞检测不依赖分支遍历顺序，也不枚举组合；互斥分支可分别使用可逆映射。只有名称变化的 MCP/自定义工具直接深拷贝原 schema，不遍历或重编译远端字段，合法空字段和 opaque JSON 保持。
@@ -57,19 +63,20 @@
 | 负责模块／内部工具 | 模型工具名称 | 主要字段选择 |
 | --- | --- | --- |
 | `files.read` | `read_file` | `offset/limit → start_line/max_lines`；工作区相对路径或准确外部绝对路径 |
-| `files.write/edit` | `write_file`、`edit_file` | `base` 保留；`find/replace/occurrences → old_text/new_text/expected_matches` |
-| `shell.execute/read/wait/stop` | `shell_execute`、`shell_read`、`shell_wait`、`shell_stop` | execute 默认前台，`background:true` 后台；顶层 filesystem/network；前台期限 `execution_timeout_ms`；key/cancellation/permissions/旧 timeoutMs 仅内部保留，旧 shell.launch 从新目录隐藏；等待时限 `wait_timeout_ms` 保持 |
+| `files.write/edit` | `write_file`、`edit_file` | 完整基线使用准确 `base_ref`；正文与 `*_ref` 互斥；`expected_matches` 默认1 |
+| `shell.execute/read/wait/stop` | `shell_execute`、`shell_read`、`shell_wait`、`shell_stop` | execute 默认前台，`background:true` 后台；顶层 filesystem/network；前台期限 `execution_timeout_ms`；key/cancellation/permissions/旧 timeoutMs 仅内部保留，旧 shell.launch 从新目录隐藏；workdir进入原审批与实际Job；read使用cursor，wait使用wait_ms，stop意图由宿主生成 |
 | 普通问题、网页 | `ask_user`、`web_fetch` | 问题保留闭合 `{questions}`；网页使用 `max_chars/timeout_ms` |
 | `task.spawn/message/follow_up/interrupt` | `spawn_agent`、`send_agent_message`、`follow_up_agent`、`interrupt_agent` | 创建使用 `prompt/task_name/preset`；后续协作使用稳定 `agent_id`，消息可明确 `target:parent`；不接受内部操作键、Provider 或 Run 身份 |
-| `task.events/list` | `wait_agent_events`、`list_agents` | 事件使用 `after_seq/wait_ms`；列表使用 `agent_ids/after_seq/upper_seq/limit` |
-| `planning.read/write/review/update` | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 只改模型名称和声明字段，原计划批准与版本 CAS 保持 |
-| `browser.execute` | `browser_execute` | `code` 与简短动作 `description`；页面句柄、引用和操作 key 由 [Browser owner](tools/browser/README.md)核实，原子依赖在新 Native 默认目录中隐藏 |
+| `task.events/list` | `wait_agent_events`、`list_agents` | 事件使用 `work_refs/cursor/wait_ms`；列表使用 `agent_ids/cursor/limit`；当前及最近结果分别给出work_ref |
+| `planning.read/write/review/update` | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 进度 Tool 由 owner 绑定本次 Run，不接受模型 `run_id`；模型用 `plan_ref/progress_ref/expected_plan_ref/file_base_ref`，宿主核原版本、摘要与进度CAS |
+| `browser.execute` | `browser_execute` | `code` 与可选动作 `description`；页面句柄、引用和操作 key 由 [Browser owner](tools/browser/README.md)核实，原子依赖在新 Native 默认目录中隐藏 |
 | `skills.load/resource` | `load_skill`、`read_skill_resource` | `id → skill_id`，可选 `version`；资源读取另含 `path`，不接受 `description` |
-| MCP 来源／连接／刷新／搜索 | `list_mcp_sources`、`connect_mcp_server`、`refresh_mcp_catalogue`、`search_mcp_tools` | 内置声明字段转 snake_case；来源目录与当前选中工具搜索分开 |
-| MCP 资源／提示 | `list_mcp_resources`、`read_mcp_resource`、`list_mcp_prompts`、`get_mcp_prompt` | 绑定字段转 snake_case，远端 `arguments` 保持 |
+| MCP 来源／连接／刷新／搜索 | `list_mcp_sources`、`connect_mcp_server`、`refresh_mcp_catalogue`、`search_mcp_tools` | 来源目录用cursor；connect只填server_id；refresh用connection_ref；搜索只给一个准确可调用名与原schema |
+| MCP 资源／提示 | `list_mcp_resources`、`read_mcp_resource`、`list_mcp_prompts`、`get_mcp_prompt` | list用connection_ref；read/get用resource_ref/prompt_ref；arguments省略为{}且远端业务key保持 |
+| Worktree | `git_worktree` | create/remove使用snake_case、顶层filesystem和宿主意图；observe只读原operation_ref，不重放未知效果 |
 | 动态 MCP Tool | `mcp_<server>_<remote>_<hash8>` | 来源和远端名称清理、转小写并限制片段长度，摘要绑定完整原身份；原远端 schema 与 RPC 名称/参数完全保留 |
 
-只有浏览器执行入口声明动作 `description`，沿既有 `model.requiredParameters` 对新模型调用必填，内部 schema 可选；长度为1–10个Unicode字符且不能全为空白，说明本次动作目的，不宣称成功。原输入与公开历史保留该字段，旧记录不补造，页面业务代码不消费它。两个 Skill 读取入口不再声明或要求执行描述；旧历史与封存请求保持原文。该字段不向 MCP／自定义工具注入或改写其业务参数，不升级 Tool／Protocol 版本。
+Browser执行的 `description` 可选，省略使用宿主展示摘要；长说明仅在界面省略显示，完整原文随原调用保存，不进入浏览器代码，不再因10字符限制拒绝执行。两个Skill读取入口不要求执行描述。远端MCP／自定义工具的业务参数不改名或注入展示字段。
 
 文件、Shell、Task 和 MCP 的完整参数、输出与生命周期分别归各 leaf README；本表不是另一份执行 schema。目录查看、文件查找与正文搜索由 Shell 完成，搜索使用内置 rg；原三个文件检索模型工具和五个验证工具已删除，历史记录不会重新开放它们。MCP 搜索范围不因改名扩大。
 
@@ -93,3 +100,5 @@ Files 的目录与检索 API 仍服务客户端文件候选等内部读取，不
 
 
 Skill Workflow 的六个工具和专用外部文件三个工具已移除定义及宿主装配；旧名称没有 alias。`read_file` 的外部读取由 [external-file-reads](tools/external-file-reads.ts) 在同一定义下核准确授权与原生身份，不做外部项目指令发现；普通外部修改仅由 [Full 适配器](tools/full-access-files.ts)在最终有效 Full 下复用 write_file/edit_file，其他模式沿原 Shell 独立申请链路，不新增 Files 权限参数或审批入口。
+
+纯模型元数据可声明 `model.inputSchema`（内部字段名）。表面投影对该Schema做闭合校验，Core仍按准确Tool的inputSchema校验实际输入。当前仅Browser需要同时保留统一入口的内部显式步骤与公开引用入口；公开Schema不开放内部key/generation/seq。没有新执行前处理器、权限缓存或旧模型字段读取。准确引用与原回执范围的取舍见[准确引用决定](../../../.agents/notes/implemented/architecture/2026-11-08-model-tool-exact-references.md)。

@@ -1,12 +1,7 @@
 import { expect, test } from 'bun:test';
-import type { PlanningState } from '../../../src/business/planning';
-import type { AuthorizationRequest } from '../../../src/extensions';
-import {
-  type CapabilityDescription,
-  createPermissionPolicy,
-  createPlanningPermissionPolicy,
-  type PermissionPolicySnapshot,
-} from '../../../src/permissions';
+import type { AuthorizationRequest, PermissionDecision } from '../../../src/extensions';
+import { grantScopeDigest } from '../../../src/permission-grants';
+import { createBusinessPermissionPolicy, createPermissionPolicy } from '../../../src/permissions';
 
 const request: AuthorizationRequest = {
   kind: 'tool',
@@ -18,103 +13,120 @@ const request: AuthorizationRequest = {
   input: { path: '/owned/outside.txt' },
   signal: new AbortController().signal,
 };
-function externalDescription(policy?: Readonly<PermissionPolicySnapshot>): CapabilityDescription {
-  return {
-    kind: request.kind,
-    definitionId: request.definitionId,
-    definitionVersion: request.definitionVersion,
-    revision: 'files-external',
-    effects: ['external'],
-    safeRead: false,
-    hardAllowed: policy?.mode === 'full',
-    ...(policy?.mode === 'full' ? {} : { denialReason: 'file_external_write_requires_full' }),
-  };
-}
-function current(mode: PermissionPolicySnapshot['mode'] = 'full') {
-  return createPermissionPolicy({
-    readPolicy: () => ({
-      mode,
-      workspaceTrust: true,
-      revision: `current-${mode}`,
-      allowed: [
-        {
-          kind: request.kind,
-          definitionId: request.definitionId,
-          definitionVersion: request.definitionVersion,
-        },
-      ],
-    }),
-    describeCapability: (_request, policy) => externalDescription(policy),
-  });
-}
-
-test('planning preapproval classification has no Full policy to infer external authority', async () => {
-  const seen: (PermissionPolicySnapshot['mode'] | undefined)[] = [];
-  const permission = createPlanningPermissionPolicy({
-    required: true,
-    run: () => ({ runId: 'r', sessionId: 's' }),
-    current: current(),
-    readState: async () => ({ status: 'pending' }),
-    describe: (_request, policy) => {
-      seen.push(policy?.mode);
-      return externalDescription(policy);
-    },
-  });
-  expect(await permission.authorize(request)).toMatchObject({
-    allowed: false,
-    reason: 'plan_approval_required',
-  });
-  expect(seen).toEqual([undefined]);
+const gate = (allowed: boolean, revision = 'business-1'): PermissionDecision => ({
+  allowed,
+  revision,
+  ...(!allowed ? { reason: 'business_approval_required' } : {}),
+  snapshot: { namespace: 'fixture.business', version: '1', data: { approved: allowed, revision } },
 });
 
-test('approved planning ceilings receive their own mode and keep Full current policy narrowed', async () => {
-  for (const mode of ['auto', 'accept_edits'] as const) {
-    const seen: (PermissionPolicySnapshot['mode'] | undefined)[] = [];
-    let stateReads = 0;
-    const state: PlanningState = {
-      status: 'approved',
-      mode,
-      planId: 'p',
-      version: 1,
-      digest: 'approved',
-    };
-    const permission = createPlanningPermissionPolicy({
-      required: true,
-      run: () => ({ runId: 'r', sessionId: 's' }),
-      current: current(),
-      readState: async () => {
-        stateReads++;
-        return state;
-      },
-      describe: (_request, policy) => {
-        seen.push(policy?.mode);
-        return externalDescription(policy);
-      },
-    });
-    expect(await permission.authorize(request)).toMatchObject({
+test('an extension business gate blocks current Full without manufacturing permission approval', async () => {
+  const permission = createBusinessPermissionPolicy({
+    current: { authorize: async () => ({ allowed: true, revision: 'current-full' }) },
+    gate: async () => gate(false),
+  });
+  const decision = await permission.authorize(request);
+  expect(decision).toMatchObject({ allowed: false, reason: 'business_approval_required' });
+  expect(decision.approval).toBeUndefined();
+  expect(decision.check).toBeUndefined();
+  expect(decision.grantOffers).toBeUndefined();
+});
+
+test('business approval preserves current Full rather than introducing an Auto or Manual ceiling', async () => {
+  const current: PermissionDecision = {
+    allowed: true,
+    revision: 'current-full',
+    snapshot: { namespace: 'builtin.permissions', version: '1', data: { mode: 'full' } },
+    controlReads: [{ kind: 'permission.mode', scope: 'session:s', revision: '3' }],
+  };
+  const permission = createBusinessPermissionPolicy({
+    current: { authorize: async () => current },
+    gate: async () => gate(true),
+  });
+  const decision = await permission.authorize(request);
+  expect(decision.allowed).toBe(true);
+  expect(decision.approval).toBeUndefined();
+  expect(decision.check).toBeUndefined();
+  expect(decision.controlReads).toEqual(current.controlReads);
+  expect(decision.snapshot).toMatchObject({
+    namespace: 'builtin.business.permissions',
+    data: {
+      current: current.snapshot,
+      gate: { namespace: 'fixture.business', data: { approved: true } },
+    },
+  });
+});
+
+test('business approval cannot replace current check, manual approval or a hard denial', async () => {
+  for (const current of [
+    {
       allowed: false,
-      reason: 'file_external_write_requires_full',
-      snapshot: { data: { current: { data: { mode: 'full' } }, ceiling: { data: { mode } } } },
+      revision: 'auto',
+      check: { request: { exact: 'call' }, requireApproval: true },
+    },
+    { allowed: false, revision: 'manual', approval: { request: { exact: 'call' }, options: [] } },
+    { allowed: false, revision: 'denied', reason: 'workspace_untrusted' },
+  ] satisfies PermissionDecision[]) {
+    const permission = createBusinessPermissionPolicy({
+      current: { authorize: async () => current },
+      gate: async () => gate(true),
     });
-    expect(seen).toEqual([undefined, mode]);
-    expect(stateReads).toBe(1);
+    const decision = await permission.authorize(request);
+    expect(decision.allowed).toBe(false);
+    expect(decision.check).toEqual('check' in current ? current.check : undefined);
+    expect(decision.approval).toEqual('approval' in current ? current.approval : undefined);
+    if ('reason' in current) expect(decision.reason).toBe(current.reason);
   }
 });
 
-test('disabled planning retains current permission without capability reclassification', async () => {
-  const permission = createPlanningPermissionPolicy({
-    required: false,
-    run: () => undefined,
-    current: current(),
-    readState: async () => {
-      throw Error('must not read');
-    },
-    describe: () => {
-      throw Error('must not reclassify');
-    },
+test('changing business proof changes final binding without changing the independent Tool scope grant', async () => {
+  const candidate = {
+    ruleId: 'fixture.location',
+    contractId: 'fixture.exact-location',
+    scope: { path: 'file' },
+    bindings: [
+      {
+        kind: 'tool' as const,
+        definitionId: request.definitionId,
+        definitionVersion: request.definitionVersion,
+      },
+    ],
+    presentation: { label: 'Exact location', details: ['Current Session only'] },
+  };
+  const offer = { ...candidate, scopeDigest: grantScopeDigest(candidate) };
+  const base = createPermissionPolicy({
+    readPolicy: () => ({
+      mode: 'full',
+      workspaceTrust: true,
+      revision: 'base',
+      allowed: candidate.bindings,
+    }),
+    describeCapability: () => ({
+      kind: request.kind,
+      definitionId: request.definitionId,
+      definitionVersion: request.definitionVersion,
+      revision: 'fixture-location',
+      effects: ['process'],
+      safeRead: false,
+      hardAllowed: true,
+      grantOffers: [offer],
+    }),
   });
-  expect(await permission.authorize(request)).toMatchObject({
-    allowed: true,
-    snapshot: { data: { mode: 'full' } },
+  let version = 'plan-1';
+  const permission = createBusinessPermissionPolicy({
+    current: base,
+    gate: async () => gate(true, version),
+  });
+  const original = await base.authorize(request),
+    first = await permission.authorize(request);
+  expect(first.allowed).toBe(true);
+  expect(first.grantOffers).toEqual(original.grantOffers);
+  version = 'plan-2';
+  const changed = await permission.authorize(request);
+  expect(changed.revision).not.toBe(first.revision);
+  expect(changed.grantOffers).toEqual(first.grantOffers);
+  expect(await permission.reuseRevision!(request, candidate.bindings[0]!, offer, changed)).toEqual({
+    reuseRevision: changed.grantOffers![0]!.policyBindings[0]!.reuseRevision,
+    requireApproval: false,
   });
 });

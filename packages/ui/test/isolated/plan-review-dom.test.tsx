@@ -29,11 +29,10 @@ const original = {
     version: '2',
     digest: 'original-digest',
     content: 'Full plan\n1. inspect\n2. verify\nORIGINAL_FULL_TAIL',
-    allowedModes: ['auto', 'accept_edits'],
   },
 } satisfies Interaction;
 
-test('actual DOM restores explicit plan mode and original feedback, locks repeated Enter, and preserves failed drafts', async () => {
+test('actual DOM preserves original feedback without selecting permissions, locks repeated Enter, and preserves failed drafts', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
   const prior = {
     window: globalThis.window,
@@ -100,8 +99,6 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
         />,
       ),
     );
-  const mode = () =>
-    host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="Plan review mode"]')!;
   const feedback = () =>
     host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
   const approve = () =>
@@ -111,48 +108,34 @@ test('actual DOM restores explicit plan mode and original feedback, locks repeat
   try {
     await render('first');
     expect(host.textContent).toContain('ORIGINAL_FULL_TAIL');
-    expect(mode().textContent).toBe('Select a mode explicitly');
-    expect(approve().disabled).toBe(true);
-    const text = '  修改原文\n雪🙂e\u0301 / @  ';
+    expect(host.querySelector('[aria-label="Plan review mode"]')).toBeNull();
+    expect(approve().disabled).toBe(false);
     await act(async () => {
-      mode().dispatchEvent(
-        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
-      );
+      host
+        .querySelector('form')!
+        .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
     });
+    expect(answers).toEqual([]);
+    const text = '  modified original\nfeedback🙂  ';
     await act(async () => {
-      const choice = [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')].find(
-        (option) => option.textContent === 'accept_edits',
-      );
-      expect(choice).toBeDefined();
-      choice!.dispatchEvent(
-        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
       feedback().value = text;
       feedback().dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     });
-    expect(saved).toEqual({ mode: 'accept_edits', feedback: text });
+    expect(saved).toEqual({ feedback: text });
     await render('returned');
-    expect(mode().textContent).toBe('accept_edits');
     expect(feedback().value).toBe(text);
     await act(async () => {
-      host
-        .querySelector('form')!
-        .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
-      host
-        .querySelector('form')!
-        .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      approve().click();
+      approve().click();
     });
-    expect(answers).toEqual([
-      { kind: 'plan_review', decision: 'approve', mode: 'accept_edits', feedback: text },
-    ]);
+    expect(answers).toEqual([{ kind: 'plan_review', decision: 'approve', feedback: text }]);
     expect(approve().disabled).toBe(true);
     await act(async () => reject(new Error('original_answer_unknown')));
     expect(feedback().value).toBe(text);
-    expect(saved).toEqual({ mode: 'accept_edits', feedback: text });
+    expect(saved).toEqual({ feedback: text });
     expect(host.querySelector('[role="alert"]')?.textContent).toBe('original_answer_unknown');
     await render('unknown', { phase: 'unknown', commandId: 'original-answer' });
     expect(approve().disabled).toBe(true);
-    expect(mode().disabled).toBe(true);
     expect(feedback().disabled).toBe(true);
     expect(answers).toHaveLength(1);
   } finally {

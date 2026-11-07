@@ -1,4 +1,4 @@
-import type { Interaction } from '@kite-ai/client';
+import { type Interaction, readApprovalOptions } from '@kite-ai/client';
 import type { CLIOptions } from './index';
 
 /** A finite input port; native stdin is chosen only by this CLI adapter. */
@@ -219,15 +219,12 @@ function answer(
   if (!text) return undefined;
   if (interaction.kind === 'approval') {
     if (text === 'deny') return { kind: 'approval', decision: 'deny' };
-    if (text === 'approve' || text === 'approve approve_once')
-      return { kind: 'approval', decision: 'approve', grant: 'approve_once' };
-    if (
-      text === 'approve same_command' &&
-      record(interaction.request) &&
-      Array.isArray(interaction.request.grants) &&
-      interaction.request.grants.includes('same_command')
-    )
-      return { kind: 'approval', decision: 'approve', grant: 'same_command' };
+    const options = readApprovalOptions(interaction.request);
+    const option =
+      text === 'approve'
+        ? options.find((candidate) => candidate.kind === 'once')
+        : options.find((candidate) => text === `approve ${candidate.optionId}`);
+    if (option) return { kind: 'approval', decision: 'approve', optionId: option.optionId };
     return undefined;
   }
   if (interaction.kind === 'question') {
@@ -242,17 +239,13 @@ function answer(
       return undefined;
     }
   }
-  if (!record(interaction.request) || !Array.isArray(interaction.request.allowedModes))
+  if (!record(interaction.request) || Object.hasOwn(interaction.request, 'allowedModes'))
     return undefined;
   if (text === 'deny') return { kind: 'plan_review', decision: 'deny' };
   if (text === 'revise') return { kind: 'plan_review', decision: 'revise' };
   if (text.startsWith('revise ') && text.slice(7).length <= 8192)
     return { kind: 'plan_review', decision: 'revise', feedback: text.slice(7) };
-  const mode = text.startsWith('approve ') ? text.slice(8) : undefined;
-  return (mode === 'auto' || mode === 'accept_edits') &&
-    interaction.request.allowedModes.includes(mode)
-    ? { kind: 'plan_review', decision: 'approve', mode }
-    : undefined;
+  return text === 'approve' ? { kind: 'plan_review', decision: 'approve' } : undefined;
 }
 
 /** One foreground human input consumer, not an execution or Service lifecycle owner. */
@@ -329,10 +322,15 @@ export function createStdioInteractionHandler(options: StdioInteractionOptions =
         write(`Complete verified attachment: ${JSON.stringify(context.completeAttachment.text)}\n`);
       write(
         interaction.kind === 'approval'
-          ? `Answer approve (once)${record(interaction.request) && Array.isArray(interaction.request.grants) && interaction.request.grants.includes('same_command') ? ', approve same_command (本 Session 相同命令)' : ''}, or deny; empty/EOF keeps waiting.\n`
+          ? `Answer approve (仅此次)${readApprovalOptions(interaction.request)
+              .filter((option) => option.kind === 'scope')
+              .map(
+                (option) => `, approve ${option.optionId} (${JSON.stringify(option.presentation)})`,
+              )
+              .join('')}, or deny; empty/EOF keeps waiting.\n`
           : interaction.kind === 'question'
             ? 'Answer JSON matching the original schema; preserve internal choice IDs. Empty/EOF keeps waiting.\n'
-            : 'Answer approve <offered auto|accept_edits>, deny, or revise <feedback>; plan review grants no Tool permission.\n',
+            : 'Answer approve, deny, or revise <feedback>; approve this exact plan only. Tool permissions stay unchanged.\n',
       );
       if (!started) {
         if (input.readableEnded || input.destroyed) return undefined;

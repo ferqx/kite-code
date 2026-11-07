@@ -132,22 +132,13 @@ function validPlanAnswer(
     )
   )
     return false;
-  const modes = request.allowedModes;
-  if (
-    !Array.isArray(modes) ||
-    !modes.length ||
-    modes.some((mode) => mode !== 'auto' && mode !== 'accept_edits') ||
-    new Set(modes).size !== modes.length
-  )
-    return false;
+  if (Object.hasOwn(request, 'allowedModes') || Object.hasOwn(answer, 'mode')) return false;
   if (
     answer.feedback !== undefined &&
     (typeof answer.feedback !== 'string' || answer.feedback.length > 8192)
   )
     return false;
-  return answer.decision === 'approve'
-    ? (answer.mode === 'auto' || answer.mode === 'accept_edits') && modes.includes(answer.mode)
-    : answer.mode === undefined;
+  return ['approve', 'deny', 'revise'].includes(answer.decision);
 }
 
 export interface RecoveryRunAnchor {

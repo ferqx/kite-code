@@ -4,11 +4,94 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { run } from '../../src';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { planningProfile } from '../fixtures/planning-profile';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
+async function initializePlanningHost(
+  f: Awaited<ReturnType<typeof planningProfile>>,
+  providerURL: string,
+  scopeDraft = false,
+) {
+  const configPath = f.userConfiguration.path;
+  writeFileSync(
+    configPath,
+    JSON.stringify({
+      modelId: 'fixed',
+      models: [
+        {
+          id: 'fixed',
+          provider: 'compatible',
+          model: 'fixed',
+          baseURL: `${providerURL}v1`,
+          // The scripted Planning transport retains the original full plan instead of summarizing it.
+          modelCapabilities: { contextWindowTokens: 1000000 },
+        },
+      ],
+      tools: [
+        { id: 'files.read', definitionVersion: '5' },
+        { id: 'files.write', definitionVersion: '3' },
+      ],
+    }),
+    { mode: 0o600 },
+  );
+  const seed = await launchPairedService({
+    ...f.artifact,
+    spawnChild: f.userConfiguration.spawnChild,
+    profile: f.profile,
+    instanceId: crypto.randomUUID(),
+    requiredCapabilities: ['sessions', 'interactions'],
+  });
+  let storeId: string;
+  try {
+    storeId = seed.bootstrap.storeId!;
+    await seed.client.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      rootUri: pathToFileURL(f.workspace).href,
+      name: 'owned',
+    });
+    const trust = await seed.client.getWorkspaceTrust('w', { storeId });
+    await seed.client.setWorkspaceTrust('w', {
+      expectedStoreId: storeId,
+      commandId: 'trust',
+      ifRevision: trust.revision,
+      trusted: true,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+    });
+    await seed.client.createSession({
+      expectedStoreId: storeId,
+      commandId: 'create',
+      sessionId: 's',
+      workspaceId: 'w',
+      title: 'Original Plan',
+    });
+    if (scopeDraft)
+      await seed.client.createSession({
+        expectedStoreId: storeId,
+        commandId: 'create-other',
+        sessionId: 'b',
+        workspaceId: 'w',
+        title: 'Other original Plan scope',
+      });
+    const mode = await seed.client.getPermissionMode('s', { storeId });
+    await seed.client.setPermissionMode('s', {
+      expectedStoreId: storeId,
+      commandId: 'full',
+      ifRevision: mode.revision,
+      ifDefaultRevision: mode.defaultRevision,
+      makeDefault: false,
+      mode: 'full',
+    });
+  } finally {
+    await seed.close();
+  }
+  return storeId!;
+}
+
 test('native 80x24 PTY observer preserves complete Unicode and styled material across wraps', async () => {
   const samples = [
     '原完整🙂e\u0301方案',
@@ -48,7 +131,13 @@ test('native 80x24 PTY observer preserves complete Unicode and styled material a
     pty.close();
   }
 });
-for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draft'] as const)
+for (const entrance of [
+  'slash-task',
+  'draft-mode',
+  'active-queued',
+  'scope-draft',
+  'deny',
+] as const)
   test(`80x24 actual ${entrance} single Planning intent reviews full original Artifact and never inherits Full authority`, async () => {
     const f = await planningProfile();
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
@@ -82,23 +171,14 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
           );
         }
         const db = new Database(f.profile.databasePath, { readonly: true });
-        let current: Record<string, unknown> | undefined,
-          runId: string | undefined,
-          writeId: string | undefined;
+        let current: Record<string, unknown> | undefined, writeId: string | undefined;
         try {
           const row = db
             .query(
-              "SELECT json FROM extension_record WHERE extension_id='builtin.planning' AND scope_kind='session' AND scope_id='s' AND key='plan.current'",
+              "SELECT result_json AS json FROM execution WHERE adapter_id='planning.write' AND state='succeeded' ORDER BY rowid DESC LIMIT 1",
             )
             .get() as { json: string } | null;
-          current = row ? JSON.parse(row.json) : undefined;
-          runId = (
-            db
-              .query("SELECT id FROM run WHERE session_id='s' ORDER BY rowid DESC LIMIT 1")
-              .get() as {
-              id: string;
-            } | null
-          )?.id;
+          current = row ? JSON.parse(row.json).details : undefined;
           writeId = (
             db
               .query(
@@ -113,14 +193,14 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
           step === 0
             ? {
                 name: 'write_file',
-                input: { path: 'before.txt', content: 'must stay denied', base: null },
+                input: { path: 'before.txt', content: 'must stay denied' },
               }
             : step === 1
               ? {
                   name: 'write_plan',
                   input: {
                     plan_id: 'original-plan',
-                    expected_version: null,
+
                     title: 'Original human plan',
                     body,
                     steps: [{ id: 'write-once', title: 'Write exactly once' }],
@@ -130,9 +210,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
                 ? {
                     name: 'request_plan_review',
                     input: {
-                      plan_id: current?.planId,
-                      version: current?.version,
-                      digest: current?.digest,
+                      plan_ref: current?.plan_ref,
                     },
                   }
                 : step === 3
@@ -141,18 +219,14 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
                       input: {
                         path: 'after.txt',
                         content: 'ORIGINAL_PLAN_ACTUAL_EFFECT',
-                        base: null,
                       },
                     }
                   : step === 4
                     ? {
                         name: 'update_plan_progress',
                         input: {
-                          run_id: runId,
-                          plan_id: current?.planId,
-                          version: current?.version,
-                          digest: current?.digest,
-                          expected_progress_revision: null,
+                          plan_ref: current?.plan_ref,
+                          progress_ref: null,
                           step_id: 'write-once',
                           status: 'completed',
                           execution_id: writeId,
@@ -181,80 +255,11 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       },
     });
     try {
-      const configPath = f.userConfiguration.path;
-      writeFileSync(
-        configPath,
-        JSON.stringify({
-          modelId: 'fixed',
-          models: [
-            {
-              id: 'fixed',
-              provider: 'compatible',
-              model: 'fixed',
-              baseURL: `${provider.url.href}v1`,
-              // The scripted Planning transport retains the original full plan instead of summarizing it.
-              modelCapabilities: { contextWindowTokens: 1000000 },
-            },
-          ],
-          tools: [
-            { id: 'files.read', definitionVersion: '5' },
-            { id: 'files.write', definitionVersion: '3' },
-          ],
-        }),
-        { mode: 0o600 },
+      const storeId = await initializePlanningHost(
+        f,
+        provider.url.href,
+        entrance === 'scope-draft',
       );
-      const seed = await launchPairedService({
-        ...f.artifact,
-        spawnChild: f.userConfiguration.spawnChild,
-        profile: f.profile,
-        instanceId: crypto.randomUUID(),
-        requiredCapabilities: ['sessions', 'interactions'],
-      });
-      let storeId: string;
-      try {
-        storeId = seed.bootstrap.storeId!;
-        await seed.client.createWorkspace({
-          expectedStoreId: storeId,
-          id: 'w',
-          rootUri: pathToFileURL(f.workspace).href,
-          name: 'owned',
-        });
-        const trust = await seed.client.getWorkspaceTrust('w', { storeId });
-        await seed.client.setWorkspaceTrust('w', {
-          expectedStoreId: storeId,
-          commandId: 'trust',
-          ifRevision: trust.revision,
-          trusted: true,
-          canonicalIdentity: trust.canonicalIdentity,
-          externalReadScopeDigest: trust.externalReadScopeDigest,
-        });
-        await seed.client.createSession({
-          expectedStoreId: storeId,
-          commandId: 'create',
-          sessionId: 's',
-          workspaceId: 'w',
-          title: 'Original Plan',
-        });
-        if (entrance === 'scope-draft')
-          await seed.client.createSession({
-            expectedStoreId: storeId,
-            commandId: 'create-other',
-            sessionId: 'b',
-            workspaceId: 'w',
-            title: 'Other original Plan scope',
-          });
-        const mode = await seed.client.getPermissionMode('s', { storeId });
-        await seed.client.setPermissionMode('s', {
-          expectedStoreId: storeId,
-          commandId: 'full',
-          ifRevision: mode.revision,
-          ifDefaultRevision: mode.defaultRevision,
-          makeDefault: false,
-          mode: 'full',
-        });
-      } finally {
-        await seed.close();
-      }
       const runner = join(f.root, 'plan-runner.ts'),
         wire = join(f.root, 'plan-wire.jsonl'),
         firstLost = join(f.root, 'first-plan-get-lost'),
@@ -363,8 +368,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       expect(answers).toHaveLength(1);
       expect(answers[0].body.answer).toEqual({
         kind: 'plan_review',
-        decision: 'approve',
-        mode: 'accept_edits',
+        decision: entrance === 'deny' ? 'deny' : 'approve',
       });
       expect(answers[0].body.expectedStoreId).toBe(storeId!);
       expect(answers[0].path).toContain('/sessions/s/interactions/');
@@ -373,11 +377,13 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
           (row) => row.method === 'GET' && row.path === '/v1/commands/' + answers[0].body.commandId,
         ),
       ).toHaveLength(2);
-      expect(readFileSync(join(f.workspace, 'after.txt'), 'utf8')).toBe(
-        'ORIGINAL_PLAN_ACTUAL_EFFECT',
-      );
+      if (entrance === 'deny') expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
+      else
+        expect(readFileSync(join(f.workspace, 'after.txt'), 'utf8')).toBe(
+          'ORIGINAL_PLAN_ACTUAL_EFFECT',
+        );
       expect(existsSync(join(f.workspace, 'before.txt'))).toBe(false);
-      expect(calls).toBe(entrance === 'active-queued' ? 7 : 6);
+      expect(calls).toBe(entrance === 'deny' ? 3 : entrance === 'active-queued' ? 7 : 6);
       expect(readFileSync(join(f.root, 'plan-attachment.bin'), 'utf8')).toContain(body);
       expect(
         network.filter((row) => row.method === 'GET' && row.path.includes('/artifacts/')),
@@ -393,16 +399,19 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       try {
         const original = db
           .query(
-            "SELECT state,accepted_decision_revision,answer_json,request_json FROM interaction WHERE kind='plan_review'",
+            "SELECT execution_id,state,accepted_decision_revision,answer_json,request_json FROM interaction WHERE kind='plan_review'",
           )
           .get() as {
-          status?: string;
+          execution_id: string;
+          state: string;
           accepted_decision_revision: number;
           answer_json: string;
           request_json: string;
         };
+        expect(original.state).toBe('answered');
         expect(original.accepted_decision_revision).toBe(2);
-        expect(JSON.parse(original.answer_json).mode).toBe('accept_edits');
+        expect(JSON.parse(original.answer_json)).not.toHaveProperty('mode');
+        expect(JSON.parse(original.request_json)).not.toHaveProperty('allowedModes');
         expect(JSON.parse(original.request_json).policy.review).toBeDefined();
         expect(
           db
@@ -410,7 +419,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
               "SELECT COUNT(*) AS n FROM execution WHERE adapter_id='files.write' AND state='succeeded'",
             )
             .get(),
-        ).toEqual({ n: 1 });
+        ).toEqual({ n: entrance === 'deny' ? 0 : 1 });
         expect(
           db
             .query(
@@ -422,25 +431,30 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
           (
             db
               .query(
-                "SELECT json FROM extension_record WHERE extension_id='builtin.planning' AND scope_id='s' AND key='plan.current'",
+                "SELECT json FROM extension_record WHERE extension_id='builtin.planning' AND scope_kind='session' AND scope_id='s' AND key='plan.current'",
               )
               .get() as { json: string }
           ).json,
         );
         expect(current.planId).toBe('original-plan');
-        const progress = JSON.parse(
-          (
-            db
-              .query(
-                "SELECT json FROM extension_record WHERE extension_id='builtin.planning' AND scope_id='s' AND key=?",
-              )
-              .get(`progress/original-plan/${current.version}`) as {
-              json: string;
-            }
-          ).json,
-        );
-        expect(progress.completePlan).toBe(true);
-        expect(progress.steps['write-once'].status).toBe('completed');
+        const progress =
+          entrance === 'deny'
+            ? null
+            : JSON.parse(
+                (
+                  db
+                    .query(
+                      "SELECT json FROM extension_record WHERE extension_id='builtin.planning' AND scope_id='s' AND key=?",
+                    )
+                    .get(`progress/original-plan/${current.version}`) as {
+                    json: string;
+                  }
+                ).json,
+              );
+        if (entrance !== 'deny') {
+          expect(progress.completePlan).toBe(true);
+          expect(progress.steps['write-once'].status).toBe('completed');
+        }
         const actualRun = db
           .query(
             "SELECT id,origin_command_id,status,config_json,requirements_json FROM run WHERE session_id='s' ORDER BY rowid DESC LIMIT 1",
@@ -521,7 +535,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         } else {
           expect(actualRun.origin_command_id).toBe(work[0].body.commandId);
         }
-        expect(actualRun.status).toBe('completed');
+        expect(actualRun.status).toBe(entrance === 'deny' ? 'cancelled' : 'completed');
         if (entrance === 'scope-draft') {
           expect(db.query("SELECT COUNT(*) AS n FROM run WHERE session_id='b'").get()).toEqual({
             n: 0,
@@ -530,7 +544,33 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         expect(JSON.parse(actualRun.config_json).snapshot.planning.intent).toEqual({
           mode: 'plan',
         });
-        expect(progress.runId).toBe(actualRun.id);
+        if (entrance !== 'deny') expect(progress.runId).toBe(actualRun.id);
+        else {
+          expect(
+            db
+              .query('SELECT state,result_json FROM execution WHERE id=?')
+              .get(original.execution_id),
+          ).toMatchObject({ state: 'succeeded', result_json: expect.any(String) });
+          const review = db
+            .query('SELECT result_json FROM execution WHERE id=?')
+            .get(original.execution_id) as { result_json: string };
+          expect(JSON.parse(review.result_json)).toMatchObject({
+            outcome: 'succeeded',
+            content: '用户拒绝了该计划，已停止本轮对话',
+            details: { status: 'not_approved', decision: 'deny' },
+            control: { kind: 'stop_work' },
+          });
+          expect(
+            db
+              .query(
+                "SELECT COUNT(*) AS n FROM execution WHERE state IN ('planned','dispatching','running','outcome_unknown')",
+              )
+              .get(),
+          ).toEqual({ n: 0 });
+          expect(
+            JSON.parse(readFileSync(`${transcript}.deny-frames.json`, 'utf8')).draft,
+          ).toContain('AFTER_DENIAL_UNSENT_DRAFT');
+        }
         const command = db
           .query('SELECT receipt_json FROM command WHERE id=?')
           .get(answers[0].body.commandId) as { receipt_json: string };
@@ -558,7 +598,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
               "SELECT COUNT(*) AS n FROM execution WHERE adapter_id='planning.update' AND state='succeeded'",
             )
             .get(),
-        ).toEqual({ n: 1 });
+        ).toEqual({ n: entrance === 'deny' ? 0 : 1 });
         expect(() =>
           process.kill(Number(readFileSync(join(f.root, 'plan-owned-pid'), 'utf8')), 0),
         ).toThrow();
@@ -588,3 +628,221 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       f.close();
     }
   }, 30000);
+
+test('CLI default Planning reads the complete original body then deny returns cancelled without a successor Model', async () => {
+  const f = await planningProfile();
+  const body = `CLI_ORIGINAL_PLAN ${'完整原文🙂e\u0301'.repeat(6500)} CLI_ORIGINAL_PLAN_TAIL`;
+  let calls = 0;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch() {
+      const step = calls++;
+      const db = new Database(f.profile.databasePath, { readonly: true });
+      let current: { plan_ref: string } | undefined;
+      try {
+        const row = db
+          .query(
+            "SELECT result_json AS json FROM execution WHERE adapter_id='planning.write' AND state='succeeded' ORDER BY rowid DESC LIMIT 1",
+          )
+          .get() as { json: string } | null;
+        current = row ? JSON.parse(row.json).details : undefined;
+      } finally {
+        db.close();
+      }
+      const call =
+        step === 0
+          ? {
+              name: 'write_plan',
+              input: {
+                plan_id: 'cli-denied',
+
+                title: 'CLI original plan',
+                body,
+                steps: [{ id: 'one', title: 'Never execute after denial' }],
+              },
+            }
+          : step === 1
+            ? {
+                name: 'request_plan_review',
+                input: {
+                  plan_ref: current?.plan_ref,
+                },
+              }
+            : step === 2
+              ? {
+                  name: 'write_file',
+                  input: {
+                    path: 'after.txt',
+
+                    content: 'Must never execute after denial',
+                  },
+                }
+              : null;
+      const frame = (delta: unknown, reason: string | null) =>
+        `data: ${JSON.stringify({ id: 'cli-plan', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+      const delta = call
+        ? {
+            tool_calls: [
+              {
+                index: 0,
+                id: `cli-plan-call-${step}`,
+                type: 'function',
+                function: { name: call.name, arguments: JSON.stringify(call.input) },
+              },
+            ],
+          }
+        : { content: 'Unexpected continuation after plan denial' };
+      return new Response(
+        frame(delta, null) + frame({}, call ? 'tool_calls' : 'stop') + 'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+  const originalFetch = globalThis.fetch;
+  const network: { method: string; path: string; body: unknown }[] = [];
+  const lines: string[] = [];
+  let completeBodyReads = 0;
+  try {
+    const storeId = await initializePlanningHost(f, provider.url.href);
+    paired = await launchPairedService({
+      ...f.artifact,
+      spawnChild: f.userConfiguration.spawnChild,
+      profile: f.profile,
+      instanceId: crypto.randomUUID(),
+      requiredCapabilities: ['sessions', 'commands', 'interactions'],
+    });
+    const endpoint = new URL(paired.bootstrap.endpoint).origin;
+    globalThis.fetch = Object.assign(
+      async (...args: Parameters<typeof fetch>) => {
+        const url = new URL(String(args[0]));
+        if (url.origin === endpoint)
+          network.push({
+            method: args[1]?.method ?? 'GET',
+            path: url.pathname,
+            body: args[1]?.body ? JSON.parse(String(args[1].body)) : null,
+          });
+        return originalFetch(...args);
+      },
+      { preconnect: originalFetch.preconnect },
+    );
+    const outcome = await run(
+      's',
+      {
+        expectedStoreId: storeId,
+        commandId: 'cli-plan-deny',
+        kind: 'run.start',
+        content: 'Plan this task, then wait for my explicit review.',
+        extensionInputs: [
+          { extensionId: 'builtin.planning', definitionVersion: '1', input: { mode: 'plan' } },
+        ],
+      },
+      {
+        client: paired.client,
+        write: (line) => lines.push(line),
+        pollIntervalMs: 5,
+        timeoutMs: 8000,
+        answerInteraction: async (card, context) => {
+          expect(card).toMatchObject({
+            kind: 'plan_review',
+            definitionId: 'planning.review',
+            state: 'pending',
+          });
+          expect(context.completeAttachment?.text).toContain(body);
+          completeBodyReads++;
+          return { kind: 'plan_review', decision: 'deny' };
+        },
+      },
+    );
+    expect(outcome).toMatchObject({
+      status: 'cancelled',
+      exitCode: 130,
+      answerIntent: {
+        phase: 'accepted',
+        request: { answer: { kind: 'plan_review', decision: 'deny' } },
+      },
+    });
+    expect(completeBodyReads).toBe(1);
+    expect(calls).toBe(2);
+    expect(lines).toContain('terminal cli-plan-deny cancelled');
+    const answers = network.filter((row) => row.method === 'POST' && row.path.endsWith('/answer'));
+    expect(answers).toHaveLength(1);
+    expect((answers[0]!.body as { commandId: string }).commandId).toBe(
+      outcome.answerIntent!.request.commandId,
+    );
+    expect(
+      network.filter(
+        (row) =>
+          row.method === 'POST' && (row.body as { kind?: string } | null)?.kind === 'run.start',
+      ),
+    ).toHaveLength(1);
+    expect(
+      network.filter((row) => row.method === 'GET' && row.path.includes('/artifacts/')),
+    ).toHaveLength(1);
+    expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
+    expect(f.requests).toHaveLength(0);
+    expect(f.titleRequests).toHaveLength(0);
+    const db = new Database(f.profile.databasePath, { readonly: true });
+    try {
+      const interaction = db
+        .query(
+          "SELECT execution_id,state,accepted_decision_revision,answer_json FROM interaction WHERE kind='plan_review'",
+        )
+        .get() as {
+        execution_id: string;
+        state: string;
+        accepted_decision_revision: number;
+        answer_json: string;
+      };
+      expect(interaction).toMatchObject({ state: 'answered', accepted_decision_revision: 2 });
+      expect(JSON.parse(interaction.answer_json)).toEqual({
+        kind: 'plan_review',
+        decision: 'deny',
+      });
+      const review = db
+        .query('SELECT state,result_json FROM execution WHERE id=?')
+        .get(interaction.execution_id) as { state: string; result_json: string };
+      expect(review.state).toBe('succeeded');
+      expect(JSON.parse(review.result_json)).toMatchObject({
+        content: '用户拒绝了该计划，已停止本轮对话',
+        control: { kind: 'stop_work' },
+      });
+      expect(db.query("SELECT status,is_active FROM run WHERE session_id='s'").get()).toEqual({
+        status: 'cancelled',
+        is_active: 0,
+      });
+      expect(db.query("SELECT COUNT(*) AS n FROM execution WHERE kind='model'").get()).toEqual({
+        n: 2,
+      });
+      expect(
+        db.query("SELECT COUNT(*) AS n FROM execution WHERE adapter_id='files.write'").get(),
+      ).toEqual({ n: 0 });
+      expect(
+        db
+          .query(
+            "SELECT COUNT(*) AS n FROM execution WHERE state IN ('planned','dispatching','running','outcome_unknown')",
+          )
+          .get(),
+      ).toEqual({ n: 0 });
+      writeFileSync(
+        `${f.root}-cli-plan-deny-facts.json`,
+        JSON.stringify({ outcome, calls, completeBodyReads, network, lines, interaction, review }),
+      );
+    } finally {
+      db.close();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    try {
+      if (paired) {
+        await paired.close();
+        expect(await paired.exited).toBe(0);
+        expect(() => process.kill(paired!.pid, 0)).toThrow();
+      }
+    } finally {
+      provider.stop(true);
+      f.close();
+    }
+  }
+}, 30000);

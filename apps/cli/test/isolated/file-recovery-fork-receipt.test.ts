@@ -48,7 +48,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
                 input: {
                   path: 'original.txt',
                   content: 'actual changed bytes\r\n',
-                  base: read!.baseline,
+                  base_ref: read!.baseRef,
                 },
               }
             : null;

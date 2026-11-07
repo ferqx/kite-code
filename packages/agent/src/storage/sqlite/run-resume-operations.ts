@@ -9,7 +9,7 @@ import {
   type RunResumeLease,
   type RunResumeState,
 } from '../types';
-import { transferAuthorizationReviewOwnership } from './authorization-review';
+import { transferAuthorizationCheckOwnership } from './authorization-check';
 import { verifyFirstActivation } from './child-first-activation';
 import { assertConfigurationReads } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
@@ -831,7 +831,7 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
         );
       } else if (e.state === 'planned' || e.kind === 'tool') {
         if (e.state === 'planned')
-          transferAuthorizationReviewOwnership(db, e, String(e.owner_generation), lease.generation);
+          transferAuthorizationCheckOwnership(db, e, String(e.owner_generation), lease.generation);
         const changed = db.row(
           'UPDATE execution SET owner_generation=? WHERE id=? AND owner_generation=? AND state=? RETURNING id',
           BigInt(lease.generation),

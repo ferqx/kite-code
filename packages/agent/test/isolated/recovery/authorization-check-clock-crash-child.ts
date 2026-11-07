@@ -12,12 +12,6 @@ initializeSqliteEngine(JSON.parse(engine));
 const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
 const store = await openSqliteStore(profile);
 const expectedStoreId = (await store.getMetadata()).storeId;
-const ensure = store.ensureAuthorizationCheck.bind(store);
-if (shape === 'pre-metadata')
-  store.ensureAuthorizationCheck = (input) => {
-    const { operationKey: _operation, timeout: _timeout, ...original } = input;
-    return ensure(original);
-  };
 const request = store.requestInteraction.bind(store);
 store.requestInteraction = async (input) => {
   const result = await request(input);
@@ -50,7 +44,7 @@ const runtime = createRuntime({
     directory,
     true,
     { checks: 0, models: 0, effects: 0 },
-    shape === 'host-projection',
+    shape === 'context',
   ),
 });
 await runtime.createWorkspace({

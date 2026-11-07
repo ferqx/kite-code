@@ -2,6 +2,67 @@ import { expect, test } from 'bun:test';
 import { NativeSessionRecovery } from '../src/native-session-recovery';
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const until = async (ready: () => boolean) => {
+  const deadline = Date.now() + 500;
+  while (!ready() && Date.now() < deadline) await wait(1);
+  expect(ready()).toBe(true);
+};
+
+test('a confirmed recovered dependency wakes its existing read without another backoff', async () => {
+  const recovery = new NativeSessionRecovery([100, 1000]);
+  let calls = 0,
+    recovered!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    recovered = resolve;
+  });
+  recovery.reconcile(
+    new Map([
+      [
+        'original-answer',
+        () => {
+          calls++;
+          if (calls === 1) throw Error('offline');
+          recovery.close();
+          recovered();
+        },
+      ],
+    ]),
+  );
+  try {
+    await until(() => calls === 1);
+    recovery.wake('original-answer');
+    expect(await Promise.race([ready.then(() => true), wait(50).then(() => false)])).toBe(true);
+    expect(calls).toBe(2);
+  } finally {
+    recovery.close();
+  }
+});
+
+test('visible original reads promptly probe recovery after repeated failures', async () => {
+  const recovery = new NativeSessionRecovery();
+  let calls = 0;
+  recovery.reconcile(
+    new Map([
+      [
+        'original-answer',
+        () => {
+          calls++;
+          if (calls < 3) throw Error('offline');
+          recovery.close();
+        },
+      ],
+    ]),
+  );
+  try {
+    const deadline = Date.now() + 3000;
+    while (calls < 3 && Date.now() < deadline) await wait(10);
+    expect(calls).toBe(3);
+    await wait(20);
+    expect(calls).toBe(3);
+  } finally {
+    recovery.close();
+  }
+});
 
 test('read reconciliation survives prolonged outages with capped backoff and no concurrent lookup', async () => {
   const recovery = new NativeSessionRecovery([1, 2, 3]);
@@ -164,5 +225,160 @@ test('revoked scope reads retain their tombstones without consuming the current 
     recovery.close();
     releaseOld();
     releaseCurrent();
+  }
+});
+
+test('waking an exact recovery key resets its long backoff without waking another key', async () => {
+  const recovery = new NativeSessionRecovery([1, 1000]);
+  let selected = 0,
+    unrelated = 0;
+  recovery.reconcile(
+    new Map([
+      ['selection', () => selected++],
+      ['unrelated', () => unrelated++],
+    ]),
+  );
+  try {
+    await until(() => selected === 1 && unrelated === 1);
+    await wait(5);
+    recovery.wake('selection');
+    await until(() => selected === 2);
+    await wait(5);
+    expect(selected).toBe(2);
+    expect(unrelated).toBe(1);
+  } finally {
+    recovery.close();
+  }
+});
+
+test('waking an in-flight entry waits for that same lookup and then uses the first delay', async () => {
+  const recovery = new NativeSessionRecovery([1, 1000]);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0,
+    active = 0,
+    peak = 0;
+  recovery.reconcile(
+    new Map([
+      [
+        'selection',
+        async () => {
+          calls++;
+          active++;
+          peak = Math.max(peak, active);
+          if (calls === 1) await held;
+          active--;
+        },
+      ],
+    ]),
+  );
+  try {
+    await until(() => calls === 1);
+    recovery.wake('selection');
+    await wait(15);
+    expect(calls).toBe(1);
+    expect(peak).toBe(1);
+    release();
+    await until(() => calls === 2);
+    await wait(5);
+    expect(calls).toBe(2);
+    expect(peak).toBe(1);
+  } finally {
+    release();
+    recovery.close();
+  }
+});
+
+test('waking a replacement entry keeps retrying past the old same-key tombstone', async () => {
+  const recovery = new NativeSessionRecovery([1, 1000]);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let old = 0,
+    replacement = 0;
+  recovery.reconcile(
+    new Map([
+      [
+        'selection',
+        async () => {
+          old++;
+          await held;
+        },
+      ],
+    ]),
+  );
+  try {
+    await until(() => old === 1);
+    recovery.close();
+    recovery.reconcile(
+      new Map([
+        [
+          'selection',
+          () => {
+            replacement++;
+            recovery.close();
+          },
+        ],
+      ]),
+    );
+    recovery.wake('selection');
+    await wait(10);
+    expect(replacement).toBe(0);
+    release();
+    await until(() => replacement === 1);
+    expect(old).toBe(1);
+  } finally {
+    release();
+    recovery.close();
+  }
+});
+
+test('wake cannot revive a closed or navigated scope even after its held lookup settles', async () => {
+  const recovery = new NativeSessionRecovery([1]);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let old = 0,
+    current = 0;
+  recovery.reconcile(
+    new Map([
+      [
+        'old-scope',
+        async () => {
+          old++;
+          await held;
+        },
+      ],
+    ]),
+  );
+  try {
+    await until(() => old === 1);
+    recovery.reconcile(
+      new Map([
+        [
+          'current-scope',
+          () => {
+            current++;
+            recovery.close();
+          },
+        ],
+      ]),
+    );
+    recovery.wake('old-scope');
+    await until(() => current === 1);
+    recovery.wake('current-scope');
+    release();
+    await wait(15);
+    expect(old).toBe(1);
+    expect(current).toBe(1);
+    expect(recovery.has('old-scope')).toBe(false);
+    expect(recovery.has('current-scope')).toBe(false);
+  } finally {
+    release();
+    recovery.close();
   }
 });

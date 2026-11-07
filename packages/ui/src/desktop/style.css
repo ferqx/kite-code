@@ -4467,6 +4467,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .kite-client .approval-session-option small {
   font-size: 11px;

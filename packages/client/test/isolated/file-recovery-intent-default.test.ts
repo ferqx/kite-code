@@ -102,7 +102,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
           name: 'write_file',
           input: {
             path: `${session}/original.txt`,
-            base: read!.baseline,
+            base_ref: read!.baseRef,
             content: `${session} ${round} modified\r\n`,
           },
         };
@@ -110,7 +110,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
       if (step === 2)
         call = {
           name: 'write_file',
-          input: { path: `${session}/${round}-created.txt`, base: null, content: 'new file\r\n' },
+          input: { path: `${session}/${round}-created.txt`, content: 'new file\r\n' },
         };
       const requestedTool = call?.name;
       if (requestedTool && !body.tools?.some((tool) => tool.function.name === requestedTool))
@@ -524,7 +524,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
           expectedStoreId: storeId,
           commandId: `answer-${scope}`,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
         expect(
           (

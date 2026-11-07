@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +17,13 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../../../apps/service/src';
-import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
+import type { LivePermissionOptions } from './collaboration-permissions.live';
+import {
+  createLivePermissionHost,
+  isLivePermissionShellApproval,
+  livePermissionShellCommand,
+  runLiveDefaultFilePermissionCase,
+} from './collaboration-permissions.live';
 
 export interface LiveTreePermissionOptions {
   model: ModelAdapter;
@@ -27,6 +32,7 @@ export interface LiveTreePermissionOptions {
   requests: () => readonly ModelRequest[];
   caseIds?: readonly string[];
   evidenceRoot?: string;
+  hostModel?: LivePermissionOptions['hostModel'];
 }
 export interface LiveTreePermissionResult {
   id: string;
@@ -34,24 +40,63 @@ export interface LiveTreePermissionResult {
   checks: Record<string, boolean | number>;
   coverage: string[];
   canonicalEvidenceRetained: boolean;
-  reason?: 'branch_not_reached' | 'oracle_violation' | 'execution_unavailable' | 'cleanup_failed';
+  reason?:
+    | 'branch_not_reached'
+    | 'oracle_violation'
+    | 'execution_unavailable'
+    | 'cleanup_failed'
+    | 'default_child_creation_unavailable';
 }
-const ids = [
+export const liveTreePermissionCaseIds = [
   'tree-two-child-exact-approval',
   'tree-descendant-mode-relax',
   'tree-descendant-mode-tighten',
   'tree-queued-mode-relax',
+  'tree-files-accept_edits',
+  'tree-files-auto',
+  'tree-files-full',
 ] as const;
 
 /** Formal default policy and resolver injection: every actual root/child/review uses the caller's adapter. */
 export async function runLiveTreePermissions(
   options: LiveTreePermissionOptions,
 ): Promise<{ cases: LiveTreePermissionResult[] }> {
-  const selected = ids.filter((id) => !options.caseIds || options.caseIds.includes(id));
+  const selected: readonly string[] = liveTreePermissionCaseIds.filter(
+    (id) => !options.caseIds || options.caseIds.includes(id),
+  );
   if (options.evidenceRoot && (!isAbsolute(options.evidenceRoot) || selected.length !== 1))
     throw Error('live_collaboration_evidence_root_invalid');
   const cases: LiveTreePermissionResult[] = [];
   for (const id of selected) {
+    if (id === 'tree-descendant-mode-relax' || id === 'tree-descendant-mode-tighten') {
+      // Retain the original three-level fixture below as historical evidence, but
+      // the current product exposes creation only to roots. Never widen it here.
+      const root =
+        options.evidenceRoot ?? mkdtempSync(join(tmpdir(), 'kite-live-unsupported-tree-'));
+      if (options.evidenceRoot) mkdirSync(root, { mode: 0o700 });
+      const result: LiveTreePermissionResult = {
+        id,
+        status: 'blocked',
+        reason: 'default_child_creation_unavailable',
+        checks: { currentRootOnlyCreation: true, actualModelRequests: 0 },
+        coverage: [
+          'requested-natural-grandchild-topology-unsupported',
+          'current-root-only-spawn-not-bypassed',
+        ],
+        canonicalEvidenceRetained: false,
+      };
+      writeFileSync(join(root, 'unsupported-topology.json'), JSON.stringify(result, null, 2), {
+        mode: 0o600,
+        flag: 'wx',
+      });
+      cases.push(result);
+      continue;
+    }
+    if (id.startsWith('tree-files-')) {
+      const mode = id.slice('tree-files-'.length) as 'accept_edits' | 'auto' | 'full';
+      cases.push(await runLiveDefaultFilePermissionCase(options, { id, mode, tree: true }));
+      continue;
+    }
     options.signal.throwIfAborted();
     if (options.evidenceRoot) mkdirSync(options.evidenceRoot, { mode: 0o700 });
     const root = realpathSync(
@@ -97,41 +142,29 @@ export async function runLiveTreePermissions(
       mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
       const targets = [join(root, 'external-A.txt'), join(root, 'external-B.txt')];
       const bodies = targets.map(() => `live-${crypto.randomUUID()}`);
-      const configurationPath = join(profile.profilePath, 'config.jsonc');
-      writeFileSync(
-        configurationPath,
-        JSON.stringify({
-          modelId: options.modelId,
-          models: [
-            {
-              id: options.modelId,
-              provider: 'compatible',
-              model: 'injected-live',
-              baseURL: 'http://127.0.0.1:1/v1',
-            },
-          ],
-          tools: [
-            'files.write_path',
-            'task.spawn',
-            'task.message',
-            'task.follow_up',
-            'task.events',
-            'task.list',
-            'task.interrupt',
-          ].map((toolId) => ({ id: toolId })),
-        }),
-        { mode: 0o600 },
+      const commands = targets.map((target, index) =>
+        livePermissionShellCommand(target, bodies[index]!),
       );
-      const host = createDefaultProcessConfiguration({
+      const host = await createLivePermissionHost({
+        root,
         profile,
-        userConfigurationPath: configurationPath,
-        authorizationCheck: {
-          id: 'live.review',
-          version: '1',
-          modelId: options.modelId,
-          model: options.model,
-        },
+        modelId: options.modelId,
+        toolIds: [
+          'shell.execute',
+          'shell.read',
+          'shell.wait',
+          'shell.stop',
+          'task.spawn',
+          'task.message',
+          'task.follow_up',
+          'task.events',
+          'task.list',
+          'task.interrupt',
+        ],
+        checker: options.model,
+        hostModel: options.hostModel,
       });
+      checks.independentCustomCheckerNotDefaultAuto = true;
       const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
       ownedStore = store;
       const dispatches: Parameters<typeof store.markDispatching>[0][] = [];
@@ -149,6 +182,7 @@ export async function runLiveTreePermissions(
       });
       const locks = createWorkspaceSerialLocks(profile);
       ownedLocks = locks;
+      host.bindWorkspaceSerialLocks?.(locks);
       let tighten: (() => Promise<void>) | undefined;
       let tightenedAtRealCall = false;
       const model: ModelAdapter = {
@@ -156,7 +190,7 @@ export async function runLiveTreePermissions(
           options.signal.throwIfAborted();
           for await (const event of options.model.stream(request, context)) {
             options.signal.throwIfAborted();
-            if (event.type === 'tool_call' && event.name === 'write_user_file' && tighten) {
+            if (event.type === 'tool_call' && event.name === 'shell_execute' && tighten) {
               const apply = tighten;
               tighten = undefined;
               await apply();
@@ -172,14 +206,14 @@ export async function runLiveTreePermissions(
         permissions: {
           ...binding.permissions!,
           async authorize(request) {
-            if (request.kind === 'tool' && request.definitionId === 'files.write_path') {
+            if (request.kind === 'tool' && request.definitionId === 'shell.execute') {
               const input = request.input;
               if (
                 !input ||
                 typeof input !== 'object' ||
                 Array.isArray(input) ||
-                typeof input.path !== 'string' ||
-                !targets.includes(input.path)
+                typeof input.command !== 'string' ||
+                !commands.includes(input.command)
               )
                 return {
                   allowed: false,
@@ -312,7 +346,7 @@ export async function runLiveTreePermissions(
           await setMode('accept_edits');
         };
       const leaf = (index: number) =>
-        `Use write_user_file exactly once to create ${JSON.stringify(targets[index])} with content ${JSON.stringify(bodies[index])} and base null. Do not use other paths or tools. If denied, report denial and stop; do not retry or create replacement collaborators. Report actual Tool outcome, not assumed success.`;
+        `Use shell_execute exactly once with command ${JSON.stringify(commands[index])}, filesystem="full_access", network="none". It creates exactly the authorized synthetic target ${JSON.stringify(targets[index])}. Do not change the command, use another path/tool, retry, spawn replacements or invent success. Report actual denial or outcome.`;
       const prompt = tree
         ? `New task: Create exactly one collaborator using spawn_agent with only prompt and no preset. In its prompt instruct it to create exactly one further collaborator using spawn_agent with only prompt and no preset. Do not choose code, explore, or any other preset at either level. ONLY that final grandchild performs this task: ${leaf(0)} The intermediate child must NOT write files itself. Each parent should wait for its own collaborator through wait_agent_events and report actual outcomes. Do not create any other collaborators.`
         : `New task: Create exactly two independent collaborators using spawn_agent with only prompt and no preset, one for task A and one for task B. Do not choose code, explore, or any other preset. Task A: ${leaf(0)} Task B: ${leaf(1)} You must not write files yourself. Create both before waiting; use wait_agent_events to collect actual outcomes. Do not retry denied work or replace a collaborator.`;
@@ -327,6 +361,7 @@ export async function runLiveTreePermissions(
       let sibling: Card | undefined;
       let controlled = false;
       let siblingDenied = false;
+      const nestedAnswers = new Set<string>();
       let currentModeRevision: string | undefined;
       let originalLeafRun: string | null | undefined;
       const end = Date.now() + 150_000;
@@ -343,9 +378,7 @@ export async function runLiveTreePermissions(
         const cards = [
           ...new Map(
             allCards
-              .filter(
-                (card) => card.kind === 'approval' && card.definitionId === 'files.write_path',
-              )
+              .filter((card) => card.kind === 'approval' && card.definitionId === 'shell.execute')
               .map((card) => [card.id, card]),
           ).values(),
         ];
@@ -365,7 +398,7 @@ export async function runLiveTreePermissions(
               expectedStoreId,
               commandId: 'approve-one',
               expectedRevision: chosen!.revision,
-              answer: { kind: 'approval', decision: 'approve' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             controlled = true;
           } else if (tree && cards.some((card) => card.ancestry.length >= 3)) {
@@ -381,7 +414,7 @@ export async function runLiveTreePermissions(
                 expectedStoreId,
                 commandId: 'approve-current-mode',
                 expectedRevision: chosen.revision,
-                answer: { kind: 'approval', decision: 'approve' },
+                answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
               });
             }
             controlled = true;
@@ -411,13 +444,43 @@ export async function runLiveTreePermissions(
             }
           }
         }
+        if (controlled && chosen) {
+          for (const card of allCards) {
+            if (card.definitionId !== 'shell.command' || nestedAnswers.has(card.id)) continue;
+            const job = durable.find((execution) => execution.id === card.executionId) ?? null;
+            const parent = job
+              ? (durable.find((execution) => execution.id === job.parentExecutionId) ?? null)
+              : null;
+            if (
+              parent?.id !== chosen.executionId ||
+              !isLivePermissionShellApproval(job, parent, commands)
+            )
+              throw Error('live_tree_unexpected_nested_approval');
+            const index = commands.indexOf(
+              String(
+                parent.input && typeof parent.input === 'object' && !Array.isArray(parent.input)
+                  ? parent.input.command
+                  : '',
+              ),
+            );
+            if (index < 0 || existsSync(targets[index]!))
+              throw Error('live_tree_premature_nested_effect');
+            await client.answerInteraction(card.presentationSessionId, card.id, {
+              expectedStoreId,
+              commandId: `approve-nested-${card.id}`,
+              expectedRevision: card.revision,
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
+            });
+            nestedAnswers.add(card.id);
+          }
+        }
         if (id === 'tree-two-child-exact-approval' && chosen && sibling && !siblingDenied) {
           const exact = durable.find((execution) => execution.id === chosen!.executionId);
           if (exact?.status === 'succeeded') {
             const other = durable.find((execution) => execution.id === sibling!.executionId);
             const otherPath =
               other?.input && typeof other.input === 'object' && !Array.isArray(other.input)
-                ? other.input.path
+                ? targets[commands.indexOf(String(other.input.command))]
                 : null;
             const currentCard = await client.getInteraction(
               sibling.presentationSessionId,
@@ -462,7 +525,7 @@ export async function runLiveTreePermissions(
       ).flat();
       const views = await Promise.all(sessions.map((session) => client.getView(session.id)));
       const writes = executions.filter(
-        (execution) => execution.kind === 'tool' && execution.definitionId === 'files.write_path',
+        (execution) => execution.kind === 'tool' && execution.definitionId === 'shell.execute',
       );
       checks.actualRequests = options.requests().length - requestStart;
       checks.realModelSessions = new Set(
@@ -478,9 +541,11 @@ export async function runLiveTreePermissions(
           Array.isArray(execution.input)
         )
           return false;
-        const index = targets.indexOf(String(execution.input.path));
+        const index = commands.indexOf(String(execution.input.command));
         return (
-          index >= 0 && execution.input.content === bodies[index] && execution.input.base === null
+          index >= 0 &&
+          execution.input.filesystem === 'full_access' &&
+          execution.input.network === 'none'
         );
       });
       checks.settled = views.every((view) =>
@@ -648,17 +713,7 @@ export async function runLiveTreePermissions(
         status = 'failed';
         reason = 'cleanup_failed';
       }
-      canonicalEvidenceRetained = status !== 'passed' && (!!options.evidenceRoot || cleanupFailed);
-      if (!canonicalEvidenceRetained) {
-        try {
-          rmSync(root, { recursive: true, force: true });
-        } catch {
-          checks.resourcesClosed = false;
-          status = 'failed';
-          reason = 'cleanup_failed';
-          canonicalEvidenceRetained = existsSync(root);
-        }
-      }
+      canonicalEvidenceRetained = existsSync(root);
     }
     cases.push({
       id,

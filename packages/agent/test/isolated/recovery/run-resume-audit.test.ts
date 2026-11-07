@@ -238,6 +238,40 @@ for (const mutation of [
     try {
       const db = new Database(f.path);
       const before = db.query('SELECT last_change_cursor FROM storage_meta').get();
+      if (mutation === 'move-run' || mutation === 'replace-run') {
+        // Keep the wrong target referentially valid so this case reaches the
+        // independent audit check rather than failing Store admission first.
+        const original = db
+          .query<AuditRow, [string]>('SELECT * FROM run WHERE id=?')
+          .get(f.input.runId)!;
+        const command = db
+          .query<AuditRow, [string]>('SELECT * FROM command WHERE id=?')
+          .get(String(original.origin_command_id))!;
+        const copiedCommand = {
+          ...command,
+          id: 'unrelated-command',
+          seq: Number(
+            db.query<{ seq: number }, []>('SELECT MAX(seq)+1 AS seq FROM command').get()!.seq,
+          ),
+        };
+        const copiedRun = {
+          ...original,
+          id: 'unrelated',
+          origin_command_id: 'unrelated-command',
+          status: 'completed',
+          is_active: 0,
+        };
+        for (const [table, row] of [
+          ['command', copiedCommand],
+          ['run', copiedRun],
+        ] as const) {
+          const columns = Object.keys(row);
+          db.run(
+            `INSERT INTO ${table}(${columns.join(',')}) VALUES(${columns.map(() => '?').join(',')})`,
+            columns.map((column) => (row as AuditRow)[column]!),
+          );
+        }
+      }
       if (mutation === 'invalid-result')
         db.run("UPDATE execution SET result_json='{}' WHERE id='history-0'");
       if (mutation === 'malformed-source')
@@ -262,6 +296,7 @@ for (const mutation of [
       }
       if (mutation === 'unknown')
         db.run("UPDATE execution SET kind='tool',state='outcome_unknown' WHERE id='history-0'");
+      expect(db.query('PRAGMA foreign_key_check').get()).toBeNull();
       expect(db.query('SELECT last_change_cursor FROM storage_meta').get()).toEqual(before);
       db.close(true);
       const reader = trackedAudit(f.path);
@@ -287,6 +322,46 @@ for (const mutation of [
     }
   });
 
+for (const replace of [false, true])
+  test(`current-format admission rejects a historical ${replace ? 'replacement' : 'move'} to a nonexistent Run without mutating the database`, async () => {
+    const f = await auditFixture();
+    try {
+      const db = new Database(f.path);
+      if (replace) {
+        db.run('PRAGMA recursive_triggers=OFF');
+        const prior = db.query<AuditRow, []>("SELECT * FROM execution WHERE id='history-0'").get()!;
+        const row = { ...prior, run_id: 'missing-run' };
+        const columns = Object.keys(row);
+        db.run(
+          `INSERT OR REPLACE INTO execution(${columns.join(',')}) VALUES(${columns.map(() => '?').join(',')})`,
+          columns.map((column) => (row as AuditRow)[column]!),
+        );
+      } else db.run("UPDATE execution SET run_id='missing-run' WHERE id='history-0'");
+      const states = db
+        .query('SELECT id,state,attempt,dispatched,result_json FROM execution ORDER BY id')
+        .all();
+      expect(db.query('PRAGMA foreign_key_check').get()).not.toBeNull();
+      db.close(true);
+      const original = readFileSync(f.path);
+      await expect(openSqliteStore(f.profile)).rejects.toMatchObject({
+        code: 'store_incompatible',
+      });
+      expect(readFileSync(f.path)).toEqual(original);
+      const reader = new Database(f.path, { readonly: true });
+      try {
+        expect(
+          reader
+            .query('SELECT id,state,attempt,dispatched,result_json FROM execution ORDER BY id')
+            .all(),
+        ).toEqual(states);
+      } finally {
+        reader.close(true);
+      }
+    } finally {
+      f.close();
+    }
+  });
+
 for (const mutation of ['foreign-origin', 'wrong-root', 'malformed-source'] as const)
   test(`live frontier rejects ${mutation} before and after its delta is consumed`, async () => {
     const f = await auditFixture();
@@ -294,8 +369,12 @@ for (const mutation of ['foreign-origin', 'wrong-root', 'malformed-source'] as c
       const db = new Database(f.path);
       if (mutation === 'foreign-origin')
         db.run("UPDATE execution SET origin_store_id='foreign' WHERE id='next'");
-      if (mutation === 'wrong-root')
+      if (mutation === 'wrong-root') {
+        db.run(
+          "INSERT INTO session(id,workspace_id,root_id,title,context_selection_id) VALUES('foreign','w','foreign','foreign','foreign-selection')",
+        );
         db.run("UPDATE execution SET root_session_id='foreign' WHERE id='next'");
+      }
       if (mutation === 'malformed-source')
         db.run("UPDATE execution SET decision_source_json='{broken' WHERE id='next'");
       db.close(true);

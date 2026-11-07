@@ -28,18 +28,46 @@ async function scenario(kind: string) {
   };
   const permissions = await import('@kite-ai/agent/permissions');
   const createPolicy = permissions.createPermissionPolicy;
-  const createPlanning = permissions.createPlanningPermissionPolicy;
+  const createBusiness = permissions.createBusinessPermissionPolicy;
   let ordinary: Parameters<typeof createPolicy>[0]['describeCapability'] | undefined;
-  let planning: Parameters<typeof createPlanning>[0]['describe'] | undefined;
+  let businessGate: Parameters<typeof createBusiness>[0]['gate'] | undefined;
+  let plannedDescription: CapabilityDescription | null | undefined;
+  const planning = async (request: AuthorizationRequest): Promise<CapabilityDescription | null> => {
+    plannedDescription = undefined;
+    await businessGate!(request);
+    return (plannedDescription as CapabilityDescription | null | undefined) ?? null;
+  };
+  const planningModule = await import('@kite-ai/agent/planning');
+  const createPlanning = planningModule.createPlanningValidation;
+  mock.module('@kite-ai/agent/planning', () => ({
+    ...planningModule,
+    createPlanningValidation(...args: Parameters<typeof planningModule.createPlanningValidation>) {
+      const actual = createPlanning(...args);
+      return {
+        ...actual,
+        permissionGate(input: Parameters<typeof actual.permissionGate>[0]) {
+          plannedDescription = input.capability as CapabilityDescription | null;
+          return actual.permissionGate(input);
+        },
+      };
+    },
+  }));
+  const planningConfiguration = await import('../../src/planning-configuration');
+  mock.module('../../src/planning-configuration', () => ({
+    ...planningConfiguration,
+    // Metadata probes deliberately use one actual Model ID for differently shaped requests.
+    // Bypass only this causal read, never dispatch; observe the actual gate's owner descriptor.
+    readPlanningPermissionState: async () => ({ status: 'disabled' as const }),
+  }));
   mock.module('@kite-ai/agent/permissions', () => ({
     ...permissions,
     createPermissionPolicy(input: Parameters<typeof createPolicy>[0]) {
       if (input.readCheckContext) ordinary = input.describeCapability;
       return createPolicy(input);
     },
-    createPlanningPermissionPolicy(input: Parameters<typeof createPlanning>[0]) {
-      planning = input.describe;
-      return createPlanning(input);
+    createBusinessPermissionPolicy(input: Parameters<typeof createBusiness>[0]) {
+      businessGate = input.gate;
+      return createBusiness(input);
     },
   }));
   const shellModule = await import('@kite-ai/agent/permissions/shell');
@@ -322,18 +350,24 @@ async function scenario(kind: string) {
         string,
         import('@kite-ai/agent/extensions').Json
       >;
-      expect(snapshot.defaultAutoReview).toBe(enabled ? 'shell_risk' : undefined);
+      expect(snapshot.defaultAutoReview).toBe(enabled ? 'shell_risk' : null);
       expect(snapshot.defaultAutoReviewDigest).toBe(
         enabled ? permissions.shellRiskReviewContractDigest : undefined,
       );
-      expect(typeof resolvedBinding!.authorizationCheck!.prepareRiskReview).toBe(
-        enabled ? 'function' : 'undefined',
-      );
+      const shellBehavior = resolvedBinding!.toolBehaviors!.find(
+        (behavior) =>
+          behavior.capability.kind === 'tool' &&
+          behavior.capability.definitionId === 'shell.execute',
+      )!;
+      expect(typeof shellBehavior.prepareReview).toBe(enabled ? 'function' : 'undefined');
+      expect(typeof shellBehavior.interpretReview).toBe(enabled ? 'function' : 'undefined');
+      expect(shellBehavior.grantSatisfiesDefaultCheck).toBe(enabled ? true : undefined);
+      expect(typeof shellBehavior.grantOffers).toBe('function');
       owner = 'shell';
       expect(
         (await ordinary!({ ...request('shell.execute'), input: { key: 'query', command: 'pwd' } }))
           ?.autoReview,
-      ).toBe(enabled ? 'shell_risk' : undefined);
+      ).toBe(enabled ? 'check' : undefined);
       owner = 'files';
       expect(
         (
@@ -364,7 +398,11 @@ async function scenario(kind: string) {
           expect(rebound.authorizationCheck?.version).toBe(
             resolvedBinding!.authorizationCheck!.version,
           );
-          expect(rebound.authorizationCheck?.prepareRiskReview).toBeFunction();
+          expect(
+            rebound.toolBehaviors!.find(
+              (behavior) => behavior.capability.definitionId === 'shell.execute',
+            )?.prepareReview,
+          ).toBeFunction();
         } finally {
           await rebound.dispose?.();
         }
@@ -377,25 +415,9 @@ async function scenario(kind: string) {
           (oldRun.configuration as Record<string, import('@kite-ai/agent/extensions').Json>)
             .snapshot as Record<string, import('@kite-ai/agent/extensions').Json>
         ).defaultAutoReviewDigest;
-        const legacy = await host.resolveRecoveryRunConfiguration!({ ...recovery, run: oldRun });
-        try {
-          expect((legacy.snapshot as Record<string, unknown>).defaultAutoReview).toBeUndefined();
-          expect(legacy.authorizationCheck?.prepareRiskReview).toBeUndefined();
-          expect(legacy.authorizationCheck?.version).not.toBe(
-            resolvedBinding!.authorizationCheck!.version,
-          );
-          owner = 'shell';
-          expect(
-            (
-              await ordinary!({
-                ...request('shell.execute'),
-                input: { key: 'query', command: 'pwd' },
-              })
-            )?.autoReview,
-          ).toBeUndefined();
-        } finally {
-          await legacy.dispose?.();
-        }
+        await expect(
+          host.resolveRecoveryRunConfiguration!({ ...recovery, run: oldRun }),
+        ).rejects.toMatchObject({ code: 'recovery_configuration_unavailable' });
         const damaged = structuredClone(run);
         (
           (damaged.configuration as Record<string, import('@kite-ai/agent/extensions').Json>)

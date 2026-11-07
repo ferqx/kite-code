@@ -149,7 +149,11 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
     !snapshot.configuration ||
     typeof snapshot.configuration !== 'object' ||
     Array.isArray(snapshot.configuration) ||
-    createConfigurationSnapshot(snapshot.configuration).digest !== snapshot.digest
+    createConfigurationSnapshot(snapshot.configuration).digest !== snapshot.digest ||
+    !snapshot.authorizationCheckPreset ||
+    typeof snapshot.authorizationCheckPreset !== 'object' ||
+    Array.isArray(snapshot.authorizationCheckPreset) ||
+    !Object.hasOwn(snapshot, 'defaultAutoReview')
   )
     throw new AgentError('recovery_configuration_unavailable');
   const defaultAutoReview = defaultAutoReviewContract(
@@ -160,6 +164,7 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
     snapshot,
     recovery: {
       digest: snapshot.digest,
+      authorizationCheckPreset: snapshot.authorizationCheckPreset,
       planningSnapshot: snapshot.planning ?? null,
       mcpSourceSnapshot:
         snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)
@@ -403,7 +408,7 @@ export function createDefaultProcessConfiguration(options: {
       return (
         !result.hardDenied &&
         readOnlySearchCommand(
-          result.plainCommands,
+          result,
           shellOptions.shellExecutable,
           shellOptions.windows?.coreutilsPath,
         ) !== undefined
@@ -708,6 +713,7 @@ export function createDefaultProcessConfiguration(options: {
         models: new Map([[selected.id, binding]]),
         preset,
         supportsCheckOutputLimit: false,
+        supportsCheckReasoning: true,
       });
     }
     const apiKey =
@@ -722,11 +728,13 @@ export function createDefaultProcessConfiguration(options: {
       apiKey,
       fetch: transport.fetch,
     });
+    const preset = parseModelPreset(selected.options);
     return createRunModelAdapters({
       modelId: selected.id,
       models: new Map([[selected.id, binding]]),
-      preset: parseModelPreset(selected.options),
+      preset,
       supportsCheckOutputLimit: true,
+      supportsCheckReasoning: preset.reasoningEffort !== undefined,
     });
   };
   type ResolveInput = Parameters<NonNullable<RuntimeOptions['resolveRunConfiguration']>>[0];
@@ -1137,10 +1145,7 @@ export function createDefaultProcessConfiguration(options: {
           readOnlyDefinitions,
           policy: {
             completionGuidance: planningOptions.completionGuidance === true,
-            allowedExecutionModes: planningOptions.allowedExecutionModes ?? [
-              'auto',
-              'accept_edits',
-            ],
+            approval: 'human-business',
           },
           tools: runExtensions.flatMap((extension) =>
             (extension.tools ?? [])
@@ -1232,13 +1237,27 @@ export function createDefaultProcessConfiguration(options: {
               .digest('hex'),
             modelId: selected.id,
             model: checkModel,
-            ...(defaultAutoReview ? { prepareRiskReview: shell.prepareRiskReview } : {}),
           }),
           timeoutMs:
             options.authorizationCheck?.timeoutMs ??
             snapshot.configuration.autoApproval?.timeoutMs ??
-            10000,
+            8000,
         };
+        const authorizationCheckPreset = {
+          checker: {
+            id: authorizationCheck.id,
+            version: authorizationCheck.version,
+            modelId: authorizationCheck.modelId,
+          },
+          options: options.authorizationCheck ? null : checkOptions,
+          timeoutMs: authorizationCheck.timeoutMs,
+        };
+        if (
+          recovery &&
+          planningSnapshotDigest(authorizationCheckPreset as unknown as Json) !==
+            planningSnapshotDigest(recovery.authorizationCheckPreset)
+        )
+          throw new AgentError('recovery_configuration_changed');
         const runPermissions = permissionConfiguration.forRun({
           command,
           modelId: selected.id,
@@ -1361,6 +1380,8 @@ export function createDefaultProcessConfiguration(options: {
           dispose,
           snapshot: {
             ...snapshot,
+            authorizationCheckPreset,
+            defaultAutoReview: defaultAutoReview ?? null,
             ...(defaultAutoReview
               ? { defaultAutoReview, defaultAutoReviewDigest: shellRiskReviewContractDigest }
               : {}),
@@ -1392,10 +1413,7 @@ export function createDefaultProcessConfiguration(options: {
               intent: planningIntent,
               binding: planningBinding,
               requirePlan,
-              allowedExecutionModes: planningOptions.allowedExecutionModes ?? [
-                'auto',
-                'accept_edits',
-              ],
+              approval: 'human-business',
               tools: [...businessTools.values()]
                 .filter((tool) => assembly.toolIds.includes(tool.id))
                 .map((tool) => ({ id: tool.id, definitionVersion: tool.version })),
@@ -1568,6 +1586,14 @@ export function createDefaultProcessConfiguration(options: {
                   ...readServiceRecoverySnapshot(saved).recovery,
                   signal: input.signal,
                   newChildTurn: input.originalConfigurationPurpose === 'follow_up',
+                  ...(input.originalRun
+                    ? {
+                        runIdentity: {
+                          runId: input.originalRun.id,
+                          sessionId: input.originalRun.sessionId,
+                        },
+                      }
+                    : {}),
                 };
               })()
             : undefined,
@@ -1638,5 +1664,6 @@ export function createDefaultProcessConfiguration(options: {
       }),
     permissionManagement: permissionConfiguration.permissionManagement,
     permissions: permissionConfiguration.permissions,
+    toolBehaviors: files.toolBehaviors,
   };
 }

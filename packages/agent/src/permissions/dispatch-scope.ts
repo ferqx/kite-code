@@ -21,36 +21,23 @@ export function* dispatchScopeLeaves(
     )
       throw new AgentError(unavailable);
     const data = current.data;
-    if (current.namespace === 'builtin.planning.permissions') {
-      if (
-        Object.keys(data).sort().join(',') !== 'ceiling,current,originalRun,planning' ||
-        !data.planning ||
-        typeof data.planning !== 'object' ||
-        Array.isArray(data.planning) ||
-        !['disabled', 'pending', 'approved'].includes(String(data.planning.status)) ||
-        !data.originalRun ||
-        typeof data.originalRun !== 'object' ||
-        Array.isArray(data.originalRun) ||
-        typeof data.originalRun.sessionId !== 'string' ||
-        typeof data.originalRun.runId !== 'string'
-      )
-        throw new AgentError(unavailable);
-      for (const [key, value] of [
-        ['current', data.current],
-        ['ceiling', data.ceiling],
-      ] as const) {
-        if (value === null && key === 'ceiling') continue;
+    if (current.namespace === 'builtin.business.permissions') {
+      if (Object.keys(data).sort().join(',') !== 'current,gate') throw new AgentError(unavailable);
+      const permission = data.current;
+      const gate = data.gate;
+      for (const value of [permission, ...(gate === null ? [] : [gate])]) {
         if (
           !value ||
           typeof value !== 'object' ||
           Array.isArray(value) ||
           typeof value.namespace !== 'string' ||
-          typeof value.version !== 'string' ||
+          value.version !== '1' ||
           !Object.hasOwn(value, 'data')
         )
           throw new AgentError(unavailable);
-        pending.push(value as Snapshot);
       }
+      // Business evidence is retained, but is never an execution-scope permission leaf.
+      pending.push(permission as Snapshot);
       continue;
     }
     if (current.namespace !== 'agent.permission-intersection') {

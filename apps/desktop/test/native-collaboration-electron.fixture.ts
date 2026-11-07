@@ -327,7 +327,16 @@ try {
   await (await showApproval(oldA.id))
     .getByRole('button', { name: '更多批准方式', exact: true })
     .click();
-  const sessionOption = page.getByRole('menuitem', { name: '本次会话批准', exact: false });
+  const scope = (
+    oldA.request as {
+      options: { optionId: string; kind: string; presentation: { label: string } }[];
+    }
+  ).options.find((option) => option.kind === 'scope');
+  assert.ok(scope, 'original child card offers a frozen scope');
+  const sessionOption = page.getByRole('menuitem', {
+    name: scope.presentation.label,
+    exact: false,
+  });
   await sessionOption.waitFor();
   await page.screenshot({ path: join(home, '02-child-session-approval-menu.png') });
   await sessionOption.click();
@@ -419,7 +428,11 @@ try {
       (entry) => entry.interaction.id === original.id,
     )!;
     assert.equal(submitted.interaction.sessionId, a.childSessionId);
-    assert.equal((submitted.intent.answer as { grant?: string }).grant, 'same_command');
+    assert.deepEqual(submitted.intent.answer, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: scope.optionId,
+    });
     assert.equal(submitted.phase, 'accepted');
   }
   assert.equal(
@@ -440,7 +453,7 @@ try {
   log('same_command_child_scope', {
     sessionId: a.childSessionId,
     siblingSessionId: b.childSessionId,
-    grant: 'same_command',
+    optionId: scope.optionId,
     effects: 2,
   });
   await fetch(`${control}/follow?agent=${encodeURIComponent(a.childSessionId!)}`);
@@ -487,7 +500,7 @@ try {
           generation: 1,
           interactionId: id,
           revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       } catch (error) {
         return { code: (error as { code?: string }).code ?? (error as Error).message };
@@ -576,7 +589,7 @@ try {
           generation: 1,
           interactionId: id,
           revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       } catch (error) {
         return { code: (error as { code?: string }).code ?? (error as Error).message };
@@ -781,7 +794,7 @@ try {
   const coldTasks = cold.selection!.executions.filter(
     (row) =>
       row.childSessionId &&
-      row.definitionId === 'agent/worker' &&
+      row.definitionId === a.definitionId &&
       cold.selection!.executions.some(
         (parent) =>
           parent.id === row.parentExecutionId &&
@@ -821,6 +834,7 @@ try {
     oldRun: oldA.runId,
     nextRun,
     approvedShellToolId: oldA.executionId,
+    approvedOptionId: scope.optionId,
     lateA,
     oldStop,
     lateB,

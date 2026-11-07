@@ -77,12 +77,21 @@ async function fixture() {
     policyRevision: 'policy-1',
     requiredRefs: [],
     source,
-    request: { title: 'exact request' },
+    request: {
+      title: 'exact request',
+      ...(kind === 'approval'
+        ? {
+            options: [
+              { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+            ],
+          }
+        : {}),
+    },
   });
   const answer = (
     id: string,
     commandId = `answer-${id}`,
-    value: InteractionAnswer = { kind: 'approval', decision: 'approve' },
+    value: InteractionAnswer = { kind: 'approval', decision: 'approve', optionId: 'once' },
     presentationSessionId = 's',
   ) => ({
     expectedStoreId,
@@ -265,7 +274,7 @@ test('request/answer rollback, late cancellation history, generation and wrong S
           interactionId: 'a',
         })
       )?.answer,
-    ).toEqual({ kind: 'approval', decision: 'approve' });
+    ).toEqual({ kind: 'approval', decision: 'approve', optionId: 'once' });
     await rejected(f.store.acceptInteractionDecision(f.accept('a')), 'cancelled_before_dispatch');
     await rejected(
       f.store.answerInteraction({ ...f.answer('a'), expectedStoreId: 'other' }),
@@ -411,7 +420,7 @@ test('saved answer survives Worker loss, exact acceptance rejects changed params
           interactionId: 'a',
         })
       )?.answer,
-    ).toEqual({ kind: 'approval', decision: 'approve' });
+    ).toEqual({ kind: 'approval', decision: 'approve', optionId: 'once' });
     await rejected(reopened.acceptInteractionDecision(f.accept('a')), 'owner_changed');
   } finally {
     await reopened?.close();
@@ -807,7 +816,7 @@ test('question schema rejects invalid answers and never becomes approval; plan m
       'interaction_binding_changed',
     );
     await f.store.answerInteraction(
-      f.answer('p', 'answer-p', { kind: 'plan_review', decision: 'approve', mode: 'execute' }),
+      f.answer('p', 'answer-p', { kind: 'plan_review', decision: 'approve' }),
     );
     await rejected(
       f.store.acceptInteractionDecision({
@@ -889,7 +898,7 @@ test('child authoritative request projects only to root; detached parent complet
         f.answer(
           'child-card',
           'child-direct',
-          { kind: 'approval', decision: 'approve' },
+          { kind: 'approval', decision: 'approve', optionId: 'once' },
           child.childSessionId!,
         ),
       ),
@@ -1016,7 +1025,6 @@ test('dispatched Tool informational plan_review/question preserve its accepted a
         kind: 'plan_review',
         decision: 'revise',
         feedback: 'change this plan',
-        mode: 'accept_edits',
       }),
     );
     await f.store.answerInteraction(
@@ -1044,7 +1052,6 @@ test('dispatched Tool informational plan_review/question preserve its accepted a
       kind: 'plan_review',
       decision: 'revise',
       feedback: 'change this plan',
-      mode: 'accept_edits',
     });
     await f.store.acceptInteractionDecision(f.accept('question', 'approved'));
     expect((await f.store.getExecution('approved'))!.interactionBinding).toEqual(binding);
@@ -1112,7 +1119,7 @@ test('unsatisfied persistent requirements do not block informational decisions, 
           `answer-${kind}`,
           kind === 'question'
             ? { kind, answers: { note: 'information' } }
-            : { kind, decision: 'approve', mode: 'auto' },
+            : { kind, decision: 'approve' },
         ),
       );
       const accepted = await f.store.acceptInteractionDecision({
@@ -1207,7 +1214,6 @@ test('late informational plan answer remains historical after cancellation and c
       f.answer('review-late', 'late-answer', {
         kind: 'plan_review',
         decision: 'approve',
-        mode: 'auto',
       }),
     );
     expect(saved.receipt).toMatchObject({ outcome: 'answer_saved', cancelled: true });
@@ -1217,7 +1223,7 @@ test('late informational plan answer remains historical after cancellation and c
       interactionId: 'review-late',
     });
     expect(review!.state).toBe('cancelled');
-    expect(review!.answer).toEqual({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    expect(review!.answer).toEqual({ kind: 'plan_review', decision: 'approve' });
     await rejected(
       f.store.acceptInteractionDecision(f.accept('review-late', 'tool')),
       'cancelled_before_dispatch',
@@ -1230,7 +1236,6 @@ test('late informational plan answer remains historical after cancellation and c
         f.answer('review-late', 'late-answer', {
           kind: 'plan_review',
           decision: 'approve',
-          mode: 'auto',
         }),
       ),
     ).toEqual(saved);

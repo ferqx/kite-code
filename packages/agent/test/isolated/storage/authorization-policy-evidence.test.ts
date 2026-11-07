@@ -2,17 +2,36 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fixtureGrant as basicFixtureGrant } from '../../../../../tests/fixtures/permission-grant';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { authorizationCheckInput } from '../../../src/authorization-check-input';
 import { InteractionGate } from '../../../src/execution/interactions';
 import type { PermissionDecision } from '../../../src/extensions';
 import { canonicalJson, semanticDigest } from '../../../src/json';
+import { approvalOptions } from '../../../src/permission-grants';
+import { shellRiskInstructions } from '../../../src/shell-risk-review';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { AutoAuthorizationEvidence } from '../../../src/storage/port';
 import { authorizationTaskContext } from '../../../src/storage/sqlite/authorization-check-context';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import type { InteractionRecord, Json } from '../../../src/storage/types';
+import {
+  ensureFixtureAuthorizationCheck,
+  fixtureCheckResult,
+  resolveFixtureAutoAuthorization,
+} from '../../fixtures/review-behavior';
 
+const fixtureGrant: typeof basicFixtureGrant = (...args) => {
+  const offer = basicFixtureGrant(...args);
+  return {
+    ...offer,
+    policyBindings: offer.policyBindings.map((binding) => ({
+      ...binding,
+      satisfiesCheck: true as const,
+      requireApproval: false,
+    })),
+  };
+};
 const checker = { id: 'checker', version: '1', modelId: 'reviewer' };
 const operationKey = 'a'.repeat(64);
 async function rejects(promise: Promise<unknown>, code: string) {
@@ -62,6 +81,7 @@ async function fixture(
   const preparation = options.missingPreparation
     ? null
     : {
+        instructions: shellRiskInstructions,
         material: { cwd: '/fixture', command: 'printf fixture' },
         fingerprint: 'b'.repeat(64),
         reusable: options.reusable ?? true,
@@ -100,7 +120,10 @@ async function fixture(
   const run = await store.startRun({
     ...owned,
     commandId: 'work',
-    configuration: { tools: [{ id: 'shell.execute', version: '1', extensionId: 'builtin.shell' }] },
+    configuration: {
+      authorizationCheck: { ...checker, timeoutMs: 3000 },
+      tools: [{ id: 'shell.execute', version: '1', extensionId: 'builtin.shell' }],
+    },
   });
   const source = { kind: 'host_intent', commandId: 'work' };
   const ids = new Map<string, string>();
@@ -155,14 +178,14 @@ async function fixture(
   ) {
     const now = Date.now(),
       timeout = { startedAt: now - 50, deadlineAt: future ? now + 60000 : now - 1 };
-    const fact = await store.ensureAuthorizationCheck({
+    const fact = await ensureFixtureAuthorizationCheck(store, {
       ...owned,
       targetExecutionId: ids.get(id) ?? id,
       checker,
       policyRevision: 'policy-tool',
       operationKey,
       request: currentDecision().check!.request,
-      ...(options.risk ? { riskReview: preparation } : {}),
+      ...(options.risk ? { review: preparation } : {}),
       timeout,
       requireApproval,
     });
@@ -207,36 +230,54 @@ async function fixture(
         ...owned,
         executionId: fact.execution.id,
         status: 'succeeded',
-        result: {
-          content: JSON.stringify(
-            options.risk
-              ? {
-                  risk:
-                    answer === 'approve_once'
-                      ? 'ordinary'
-                      : answer === 'reject'
-                        ? 'critical'
-                        : 'high',
-                  reason: 'Exact fixture risk',
-                }
-              : { decision: answer, reason: 'Exact fixture decision' },
-          ),
-          toolCalls: [],
-          finishReason: 'stop',
-          usage: {},
-        },
+        result: await fixtureCheckResult(
+          store,
+          fact.execution.id,
+          {
+            content: JSON.stringify(
+              options.risk
+                ? {
+                    risk:
+                      answer === 'approve_once'
+                        ? 'ordinary'
+                        : answer === 'reject'
+                          ? 'critical'
+                          : 'high',
+                    reason: 'Exact fixture risk',
+                  }
+                : { decision: answer, reason: 'Exact fixture decision' },
+            ),
+            toolCalls: [],
+            finishReason: 'stop',
+            usage: {},
+          },
+          {
+            decision: answer,
+            reason: options.risk ? 'Exact fixture risk' : 'Exact fixture decision',
+          },
+          options.risk
+            ? {
+                risk:
+                  answer === 'approve_once'
+                    ? 'ordinary'
+                    : answer === 'reject'
+                      ? 'critical'
+                      : 'high',
+              }
+            : undefined,
+        ),
       });
     }
     return fact;
   }
   function resolve(id: string, current = currentDecision(), timedOutCheckId?: string) {
-    return store.resolveAutoAuthorization({
+    return resolveFixtureAutoAuthorization(store, {
       ...owned,
       targetExecutionId: ids.get(id) ?? id,
       decision: current,
       checker,
       operationKey,
-      ...(options.risk ? { riskReview: preparation } : {}),
+      ...(options.risk ? { review: preparation } : {}),
       ...(timedOutCheckId ? { timedOutCheckId } : {}),
     });
   }
@@ -256,7 +297,7 @@ async function fixture(
         inputDigest: await semanticDigest(target.input),
         snapshot: proof.snapshot,
         policyEvidenceId: proof.policyEvidenceId,
-        ...(proof.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+        ...(proof.materialReviewed ? { materialReviewed: true as const } : {}),
       },
       requirements: [],
       freshness: { checked: true, source },
@@ -264,8 +305,9 @@ async function fixture(
   }
   async function humanApproval(
     id: string,
-    grant: 'approve_once' | 'same_command' = 'approve_once',
+    selection: 'approve_once' | 'same_command' = 'approve_once',
     commandDigest?: string,
+    coversDefaultCheck = true,
   ) {
     const target = (await store.getExecution(ids.get(id) ?? id))!;
     const binding = {
@@ -277,6 +319,11 @@ async function fixture(
       inputDigest: await semanticDigest(target.input),
       policyRevision: 'policy-tool',
     };
+    const scopeOffer = (coversDefaultCheck ? fixtureGrant : basicFixtureGrant)(
+      target.definitionId!,
+      commandDigest ?? target.input,
+      target.kind as 'tool' | 'job',
+    );
     const interactionId = `card-${id}`;
     await store.requestInteraction({
       ...binding,
@@ -285,8 +332,7 @@ async function fixture(
       requiredRefs: [],
       source: target.decisionSource,
       request: {
-        grants: ['approve_once', 'same_command'],
-        ...(commandDigest ? { commandDigest } : {}),
+        options: approvalOptions([scopeOffer]) as unknown as Json,
       },
     });
     await store.answerInteraction({
@@ -296,7 +342,14 @@ async function fixture(
       presentationSessionId: 's',
       interactionId,
       expectedRevision: '1',
-      answer: { kind: 'approval', decision: 'approve', grant },
+      answer: {
+        kind: 'approval',
+        decision: 'approve',
+        optionId:
+          selection === 'same_command'
+            ? `scope-${fixtureGrant(target.definitionId!, commandDigest ?? target.input, target.kind as 'tool' | 'job').scopeDigest}`
+            : 'once',
+      },
     });
     await store.acceptInteractionDecision({
       ...binding,
@@ -367,7 +420,11 @@ test('a risk ask followed by exact human approval is inherited by its own Job wi
       kind: 'approval',
       requiredRefs: [],
       source: target.decisionSource,
-      request: { grants: ['approve_once'] },
+      request: {
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
     });
     await f.store.answerInteraction({
       expectedStoreId: f.owned.expectedStoreId,
@@ -376,7 +433,7 @@ test('a risk ask followed by exact human approval is inherited by its own Job wi
       presentationSessionId: 's',
       interactionId: 'risk-card',
       expectedRevision: '1',
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.store.acceptInteractionDecision({
       ...binding,
@@ -396,27 +453,27 @@ test('a risk ask followed by exact human approval is inherited by its own Job wi
         snapshot: f.currentDecision().snapshot,
         interactionId: 'risk-card',
         decisionRevision: '2',
-        riskReviewApproved: true,
+        materialReviewed: true,
       },
       requirements: [],
       freshness: { checked: true, source: target.decisionSource },
     });
     const job = await f.plan('risk-human-job', 'job', target.id);
     const proof = await f.resolve('risk-human-job', f.currentDecision('job'));
-    expect(proof).toMatchObject({ reason: 'parent_review', riskReviewApproved: true });
+    expect(proof).toMatchObject({ reason: 'parent_review', materialReviewed: true });
     await f.dispatch('risk-human-job', proof!, f.currentDecision('job'));
     expect((await f.store.getExecution(job.id))!.authorization?.policy).toMatchObject({
       reason: 'parent_review',
     });
     const changed = await f.plan('risk-human-changed', 'job', target.id);
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...f.owned,
         targetExecutionId: changed.id,
         decision: f.currentDecision('job'),
         checker,
         operationKey,
-        riskReview: { ...f.preparation!, fingerprint: 'c'.repeat(64) },
+        review: { ...f.preparation!, fingerprint: 'c'.repeat(64) },
       }),
     ).toBeNull();
   } finally {
@@ -430,9 +487,9 @@ test('risk classification preserves raw risk, omits business material and cannot
     const tool = await f.plan('risk-tool');
     const checked = await f.check('risk-tool', 'approve_once');
     expect(checked.input).toMatchObject({
-      reviewPurpose: 'shell_risk',
+      behavior: { contractRef: 'kite.authorization-check' },
       decisionContext: null,
-      riskReview: { reusable: false },
+      review: { reusable: false },
     });
     expect(checked.input).not.toHaveProperty('authorizationContext');
     const result = await f.store.getAuthorizationCheck({
@@ -443,7 +500,7 @@ test('risk classification preserves raw risk, omits business material and cannot
       request: f.currentDecision().check!.request,
       checker,
     });
-    expect(result).toMatchObject({ decision: 'approve_once', riskReviewApproved: true });
+    expect(result).toMatchObject({ decision: 'approve_once', materialReviewed: true });
     expect((await f.store.getExecution(checked.execution.id))!.result).toMatchObject({
       content: JSON.stringify({ risk: 'ordinary', reason: 'Exact fixture risk' }),
     });
@@ -457,14 +514,14 @@ test('risk classification preserves raw risk, omits business material and cannot
         inputDigest: await semanticDigest(tool.input),
         snapshot: f.currentDecision().snapshot,
         checkExecutionId: checked.execution.id,
-        riskReviewApproved: true,
+        materialReviewed: true,
       },
       requirements: [],
       freshness: { checked: true, source: tool.decisionSource },
     });
     await f.plan('risk-job', 'job', tool.id);
     const inherited = await f.resolve('risk-job', f.currentDecision('job'));
-    expect(inherited).toMatchObject({ reason: 'parent_review', riskReviewApproved: true });
+    expect(inherited).toMatchObject({ reason: 'parent_review', materialReviewed: true });
     await f.dispatch('risk-job', inherited!, f.currentDecision('job'));
     await f.plan('independent');
     expect(await f.resolve('independent')).toBeNull();
@@ -492,14 +549,14 @@ test('risk human dispatch cannot drop reviewed-material proof or override a crit
         await rejects(
           f.store.markDispatching({
             ...input,
-            authorization: { ...authorization, riskReviewApproved: true },
+            authorization: { ...authorization, materialReviewed: true },
           }),
           'permission_denied',
         );
       else
         await f.store.markDispatching({
           ...input,
-          authorization: { ...authorization, riskReviewApproved: true },
+          authorization: { ...authorization, materialReviewed: true },
         });
     }
   } finally {
@@ -514,17 +571,17 @@ test('risk exact independent cache requires matching reusable material and prese
     await f.check('cache-source', 'approve_once');
     const target = await f.plan('cache-target');
     const proof = await f.resolve(target.id);
-    expect(proof).toMatchObject({ reason: 'reused_approval', riskReviewApproved: true });
+    expect(proof).toMatchObject({ reason: 'reused_approval', materialReviewed: true });
     await f.dispatch(target.id, proof!);
     const changed = await f.plan('cache-changed');
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...f.owned,
         targetExecutionId: changed.id,
         decision: f.currentDecision(),
         checker,
         operationKey,
-        riskReview: { ...f.preparation!, fingerprint: 'c'.repeat(64) },
+        review: { ...f.preparation!, fingerprint: 'c'.repeat(64) },
       }),
     ).toBeNull();
   } finally {
@@ -543,7 +600,7 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
     const grant = await f.store.getPermissionGrant({
       expectedStoreId: f.owned.expectedStoreId,
       executionId: parent.id,
-      commandDigest,
+      offers: [fixtureGrant(parent.definitionId!, commandDigest)],
     });
     expect(grant).not.toBeNull();
     await f.store.markDispatching({
@@ -567,11 +624,11 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
       decision: f.currentDecision('job'),
       checker,
       operationKey: 'f'.repeat(64),
-      riskReview: { ...f.preparation!, fingerprint: 'c'.repeat(64), reusable: false },
+      review: { ...f.preparation!, fingerprint: 'c'.repeat(64), reusable: false },
     };
-    const proof = await f.store.resolveAutoAuthorization(current);
+    const proof = await resolveFixtureAutoAuthorization(f.store, current);
     expect(proof).toMatchObject({ reason: 'parent_review' });
-    expect(proof).not.toHaveProperty('riskReviewApproved');
+    expect(proof).not.toHaveProperty('materialReviewed');
     await f.dispatch(job.id, proof!, f.currentDecision('job'));
     expect((await f.store.getExecution(job.id))!.authorization?.policy).toMatchObject({
       reason: 'parent_review',
@@ -579,11 +636,11 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
     });
     const changed = await f.plan('grant-changed', 'job', parent.id, 'printf CHANGED');
     expect(
-      await f.store.resolveAutoAuthorization({ ...current, targetExecutionId: changed.id }),
+      await resolveFixtureAutoAuthorization(f.store, { ...current, targetExecutionId: changed.id }),
     ).toBeNull();
     const independent = await f.plan('grant-independent');
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...current,
         targetExecutionId: independent.id,
         decision: f.currentDecision(),
@@ -591,7 +648,7 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
     ).toBeNull();
     const manualGate = await f.plan('grant-independent-human-gate', 'job', parent.id);
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...current,
         targetExecutionId: manualGate.id,
         decision: {
@@ -600,12 +657,13 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
         },
       }),
     ).toBeNull();
-    const legacy = await f.plan('grant-legacy', 'job', parent.id);
+    const unbound = await f.plan('grant-without-owner-bridge', 'job', parent.id);
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...current,
-        targetExecutionId: legacy.id,
-        decision: decision('job'),
+        targetExecutionId: unbound.id,
+        decision: f.currentDecision('job'),
+        parentProof: null,
       }),
     ).toBeNull();
     const changedScope = await f.plan('grant-scope-changed', 'job', parent.id);
@@ -613,7 +671,7 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
     const scopedSnapshot = JSON.parse(JSON.stringify(scopedDecision.snapshot));
     scopedSnapshot.data.capability.executionScope.network = 'none';
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...current,
         targetExecutionId: changedScope.id,
         decision: { ...scopedDecision, snapshot: scopedSnapshot },
@@ -621,14 +679,14 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
     ).toBeNull();
     const changedControl = await f.plan('grant-control-changed', 'job', parent.id);
     expect(
-      await f.store.resolveAutoAuthorization({
+      await resolveFixtureAutoAuthorization(f.store, {
         ...current,
         targetExecutionId: changedControl.id,
         decision: { ...f.currentDecision('job'), controlReads: [] },
       }),
     ).toBeNull();
     const pending = await f.plan('grant-before-clear', 'job', parent.id);
-    const beforeClear = await f.store.resolveAutoAuthorization({
+    const beforeClear = await resolveFixtureAutoAuthorization(f.store, {
       ...current,
       targetExecutionId: pending.id,
     });
@@ -645,7 +703,7 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
       'permission_grant_changed',
     );
     expect(
-      await f.store.resolveAutoAuthorization({ ...current, targetExecutionId: pending.id }),
+      await resolveFixtureAutoAuthorization(f.store, { ...current, targetExecutionId: pending.id }),
     ).toBeNull();
   } finally {
     await f.close();
@@ -663,7 +721,7 @@ test('revoked original human command grant cannot authorize its later Tool child
     const grant = await f.store.getPermissionGrant({
       expectedStoreId: f.owned.expectedStoreId,
       executionId: parent.id,
-      commandDigest,
+      offers: [fixtureGrant(parent.definitionId!, commandDigest)],
     });
     await f.store.markDispatching({
       ...f.owned,
@@ -705,7 +763,7 @@ test('timeout with no preparation passes only its exact builtin child despite la
     const check = await f.check('risk-timeout', 'timeout');
     const proof = await f.resolve('risk-timeout', f.currentDecision(), check.execution.id);
     expect(proof).toMatchObject({ reason: 'timeout_continue' });
-    expect(proof).not.toHaveProperty('riskReviewApproved');
+    expect(proof).not.toHaveProperty('materialReviewed');
     await f.dispatch('risk-timeout', proof!);
     const job = await f.plan('risk-timeout-job', 'job', tool.id);
     const next = {
@@ -714,15 +772,20 @@ test('timeout with no preparation passes only its exact builtin child despite la
       decision: f.currentDecision('job'),
       checker,
       operationKey: 'c'.repeat(64),
-      riskReview: { material: { cwd: '/fixture' }, fingerprint: 'd'.repeat(64), reusable: false },
+      review: {
+        instructions: shellRiskInstructions,
+        material: { cwd: '/fixture' },
+        fingerprint: 'd'.repeat(64),
+        reusable: false,
+      },
     };
-    const inherited = await f.store.resolveAutoAuthorization(next);
+    const inherited = await resolveFixtureAutoAuthorization(f.store, next);
     expect(inherited).toMatchObject({ reason: 'parent_review' });
-    expect(inherited).not.toHaveProperty('riskReviewApproved');
+    expect(inherited).not.toHaveProperty('materialReviewed');
     await f.dispatch('risk-timeout-job', inherited!, f.currentDecision('job'));
     const different = await f.plan('different-command', 'job', tool.id, 'printf DIFFERENT');
     expect(
-      await f.store.resolveAutoAuthorization({ ...next, targetExecutionId: different.id }),
+      await resolveFixtureAutoAuthorization(f.store, { ...next, targetExecutionId: different.id }),
     ).toBeNull();
   } finally {
     await f.close();
@@ -944,7 +1007,7 @@ test('a pending check keeps its sealed prior-effect snapshot when that exact ear
       status: 'succeeded',
       result: { outcome: 'succeeded', content: 'completed' },
     });
-    const again = await f.store.ensureAuthorizationCheck({
+    const again = await ensureFixtureAuthorizationCheck(f.store, {
       ...f.owned,
       targetExecutionId: 'pending',
       checker,
@@ -956,7 +1019,7 @@ test('a pending check keeps its sealed prior-effect snapshot when that exact ear
     expect(again.created).toBe(false);
     expect(again.execution.id).toBe(check.execution.id);
     expect(again.input).toEqual(check.input);
-    const changed = await f.store.ensureAuthorizationCheck({
+    const changed = await ensureFixtureAuthorizationCheck(f.store, {
       ...f.owned,
       targetExecutionId: 'pending',
       checker,
@@ -1448,44 +1511,76 @@ test('timeout preserves received partial output and usage, and historical policy
   }
 });
 
-test('timeout never widens a narrower approved Planning filesystem ceiling', async () => {
+test('timeout retains business proof and never widens an independent parent-child filesystem ceiling', async () => {
   const f = await fixture();
   try {
-    await f.plan('planning');
-    const check = await f.check('planning', 'timeout');
+    await f.plan('business');
+    const check = await f.check('business', 'timeout');
     const current = decision(),
-      ceiling = structuredClone(current.snapshot!);
-    (ceiling.data as { mode: string }).mode = 'accept_edits';
+      narrower = structuredClone(current.snapshot!);
+    (narrower.data as { mode: string }).mode = 'accept_edits';
     (
-      ceiling.data as { capability: { executionScope: { filesystem: string; network: string } } }
+      narrower.data as { capability: { executionScope: { filesystem: string; network: string } } }
     ).capability.executionScope = { filesystem: 'workspace_write', network: 'none' };
-    current.snapshot = {
-      namespace: 'builtin.planning.permissions',
+    const gate = {
+      namespace: 'builtin.planning',
       version: '1',
       data: {
-        current: current.snapshot!,
-        ceiling,
-        planning: { status: 'approved' },
+        planning: { status: 'approved', planId: 'p', version: 1, digest: 'exact' },
         originalRun: { sessionId: 's', runId: f.run.id },
       },
     };
-    const proof = await f.resolve('planning', current, check.execution.id);
-    expect(proof?.snapshot).toMatchObject({
+    current.snapshot = {
+      namespace: 'builtin.business.permissions',
+      version: '1',
       data: {
+        gate,
         current: {
+          namespace: 'agent.permission-intersection',
+          version: '1',
           data: {
-            capability: { executionScope: { filesystem: 'full_access', network: 'internet' } },
+            policies: [current.snapshot!, narrower].map((snapshot, index) => ({
+              scope: index === 0 ? 'parent' : 'child',
+              revision: 'exact-current',
+              allowed: true,
+              snapshot,
+            })),
           },
         },
-        ceiling: {
+      },
+    };
+    const proof = await f.resolve('business', current, check.execution.id);
+    expect(proof?.snapshot).toMatchObject({
+      data: {
+        gate,
+        current: {
           data: {
-            mode: 'accept_edits',
-            capability: { executionScope: { filesystem: 'workspace_write', network: 'none' } },
+            policies: [
+              {
+                snapshot: {
+                  data: {
+                    capability: {
+                      executionScope: { filesystem: 'full_access', network: 'internet' },
+                    },
+                  },
+                },
+              },
+              {
+                snapshot: {
+                  data: {
+                    mode: 'accept_edits',
+                    capability: {
+                      executionScope: { filesystem: 'workspace_write', network: 'none' },
+                    },
+                  },
+                },
+              },
+            ],
           },
         },
       },
     });
-    await f.dispatch('planning', proof!, current);
+    await f.dispatch('business', proof!, current);
   } finally {
     await f.close();
   }
@@ -1521,7 +1616,11 @@ test('only a durable timeout preserves the independent actual human approval gat
         kind: 'approval',
         requiredRefs: [],
         source: target.decisionSource,
-        request: { grants: ['approve_once'] },
+        request: {
+          options: [
+            { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+          ],
+        },
       });
       await f.store.answerInteraction({
         expectedStoreId: f.owned.expectedStoreId,
@@ -1530,7 +1629,7 @@ test('only a durable timeout preserves the independent actual human approval gat
         presentationSessionId: 's',
         interactionId: `card-${id}`,
         expectedRevision: '1',
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await f.store.acceptInteractionDecision({
         ...binding,
@@ -1589,6 +1688,44 @@ test('timeout Shell Job inherits the exact parent scope and a workspace/offline 
       data: { capability: { executionScope: { filesystem: 'workspace_write', network: 'none' } } },
     });
     await f.dispatch('workspace-only', bounded!, narrow);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a parent human range without explicit default-check coverage cannot satisfy its own Job review', async () => {
+  const f = await fixture({ risk: true, reusable: false });
+  const commandDigest = 'e'.repeat(64);
+  try {
+    await f.plan('manual-original');
+    await f.check('manual-original', 'ask_user');
+    await f.humanApproval('manual-original', 'same_command', commandDigest, false);
+    const parent = await f.plan('manual-parent');
+    const grant = await f.store.getPermissionGrant({
+      expectedStoreId: f.owned.expectedStoreId,
+      executionId: parent.id,
+      offers: [basicFixtureGrant(parent.definitionId!, commandDigest)],
+    });
+    expect(grant).not.toBeNull();
+    await f.store.markDispatching({
+      ...f.owned,
+      executionId: parent.id,
+      authorization: {
+        allowed: true,
+        revision: 'policy-tool',
+        definitionVersion: '1',
+        inputDigest: await semanticDigest(parent.input),
+        snapshot: f.currentDecision().snapshot,
+        grant: grant!,
+      },
+      requirements: [],
+      freshness: { checked: true, source: parent.decisionSource },
+    });
+    const job = await f.plan('manual-job', 'job', parent.id);
+    const before = (await f.store.getMetadata()).lastChangeCursor;
+    expect(await f.resolve(job.id, f.currentDecision('job'))).toBeNull();
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
+    expect((await f.store.getExecution(job.id))!.status).toBe('planned');
   } finally {
     await f.close();
   }

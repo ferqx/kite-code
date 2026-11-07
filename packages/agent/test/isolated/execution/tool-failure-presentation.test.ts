@@ -24,6 +24,7 @@ for (const entry of [
     beforeDispatch: true,
   },
   { id: 'schema', code: 'invalid_tool_arguments', hint: 'required fields', beforeDispatch: true },
+  { id: 'adapter-schema', code: 'invalid_tool_arguments', hint: 'declared parameter names' },
   {
     id: 'missing-tool',
     code: 'tool_not_available',
@@ -120,6 +121,7 @@ for (const entry of [
                   content: entry.code,
                   details: {
                     privateDiagnostic: 'PRIVATE_DETAIL_DO_NOT_PUBLISH',
+                    schemaError: 'PRIVATE_ADAPTER_SCHEMA_DO_NOT_PUBLISH',
                     adapterAttempted: false,
                   },
                   ...(reference
@@ -171,10 +173,15 @@ for (const entry of [
       expect(feedback.content).not.toContain('Core dispatch record:');
       expect(feedback.content).not.toContain('PRIVATE_EXCEPTION_DO_NOT_PUBLISH');
       expect(feedback.content).not.toContain('PRIVATE_DETAIL_DO_NOT_PUBLISH');
+      expect(feedback.content).not.toContain('PRIVATE_ADAPTER_SCHEMA_DO_NOT_PUBLISH');
       if ('beforeDispatch' in entry) {
         expect(attempts).toBe(0);
         expect(feedback.content).toContain('not executed');
         expect(feedback.content).toContain('produced no effects');
+        if (entry.id === 'invalid-json' || entry.id === 'schema')
+          expect(feedback.content).toContain(
+            entry.id === 'invalid-json' ? 'Arguments must be valid JSON' : 'must be number',
+          );
       } else {
         expect(attempts).toBe(1);
         // Leaf payload claims cannot override Core's actual dispatch observation.

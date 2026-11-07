@@ -69,7 +69,16 @@ if (!process.stdin.isTTY) {
               ? {
                   allowed: false,
                   revision: 'owned-tools-ask',
-                  approval: { request: { effects: ['external'] }, grants: ['approve_once'] },
+                  approval: {
+                    request: { effects: ['external'] },
+                    options: [
+                      {
+                        optionId: 'once',
+                        kind: 'once',
+                        presentation: { label: '仅此次', details: [] },
+                      },
+                    ],
+                  },
                 }
               : { allowed: true, revision: 'owned-tools-read' };
           },

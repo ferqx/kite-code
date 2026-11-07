@@ -108,6 +108,8 @@ export interface WorkspaceFiles {
   relativePath(path: string): string;
   /** Trusted host metadata only: strict parent/file identity from the actual native IO. */
   inspectIdentity(path: string): Promise<{ parent: FileIdentity; file: FileIdentity | null }>;
+  /** Stable identity of the actual held workspace directory, without reading a file. */
+  inspectRootIdentity?(): Promise<FileIdentity>;
   /** Trusted host byte primitives; not additional Model tools or authority. */
   readBytes(
     path: string,
@@ -939,6 +941,12 @@ export function createWorkspaceFiles(options: {
       }
       if (windows && /^[a-z]:/i.test(path)) fail('file_path_invalid');
       return segments(logical).join('/');
+    },
+    async inspectRootIdentity() {
+      check();
+      io.verifyOwner(rootFd);
+      const stat = io.stat(rootFd);
+      return { device: String(stat.dev), inode: String(stat.ino) };
     },
     async inspectIdentity(path) {
       return withParent(

@@ -44,7 +44,12 @@ export function parallelBinding(directory: string): RunConfiguration {
           return {
             allowed: false,
             revision: 'original-policy',
-            approval: { request: { title: 'Approve exact original A' }, grants: ['approve_once'] },
+            approval: {
+              request: { title: 'Approve exact original A' },
+              options: [
+                { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+              ],
+            },
           };
         return { allowed: true, revision: 'original-policy' };
       },

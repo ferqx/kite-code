@@ -24,6 +24,8 @@ Native HTTP、CLI 与便携 Desktop/UI 固定原 Store、目标、观察和命�
 
 ## same_command 与准确 Session 清除
 
+本节的专用 same_command、全 input 缺省与按当前展示选项消费部分由[统一结构化范围决定](2026-11-06-structured-session-grants.md)替代；以下保留原设计动机与历史范围。Store/subject/真实 Session、控制 CAS、原意图查询、最终 read-set 和明确撤销的理由仍适用，当前完整合同以新决定链接的 owner 为准。
+
 同命令批准不是跨 Session 的通行证，也不能从 Tool 名称或任意 JSON 推测作用范围。Core 保留真实 Store/subject/Workspace/Session、kind/definition/version、原 accepted Interaction/decision revision/Execution 与完整 input digest；可信 policy 可以另给严格 command digest。只有当前 policy 仍明确提供 same_command 时才复用，最后派发事务核 grant epoch 与原控制/必要义务读集。child 与 root 不能互借；creator 只能按实际 scope 管理准确 child。
 
 默认 Shell 的 command digest 在 Service 可信 factory 中构造，固定实际 command、Tool attached/detached、host configuration、canonical cwd、克隆 env、真实 guardian/Bun/Shell bytes hash 和实际 grace/output queue，排除 operation key。默认值和 Job 保持 200ms/256KiB；新 key 是新的明确效果，原 key 查询和重试仍沿原回执。非 Shell 默认用完整 input digest，Model/JSONC 不能登记 digest。

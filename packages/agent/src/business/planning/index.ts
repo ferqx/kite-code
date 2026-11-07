@@ -4,19 +4,25 @@ import type {
   ActionContext,
   ActionDefinition,
   ArtifactRef,
+  AuthorizationRequest,
   ConditionReadContext,
   Extension,
   ExtensionRecord,
   Json,
   JsonSchema,
   NecessaryConditions,
+  PermissionDecision,
   PublicExecution,
   ReadContext,
   RunInitializationContext,
+  ToolContext,
   ToolDefinition,
   ToolResult,
 } from '../../extensions';
+import { readModelExecutionId } from '../../model-identifier';
+import { modelReference, readModelReference } from '../../model-reference';
 import { AgentError } from '../../storage/types';
+import { fileBaselineReference } from '../../tools/files-tools';
 import type { PlanFile, PlanFiles } from './files';
 
 export { createPlanFiles } from './files';
@@ -42,7 +48,6 @@ export interface PlanningOptions {
   /** Trusted host opt-in: a premature completion returns one keyed planning diagnostic. */
   completionGuidance?: boolean;
   requirePlan?: boolean;
-  allowedExecutionModes?: readonly string[];
 }
 export interface PlanningRunPolicy {
   /** Trusted host only; false never weakens the factory's existing obligation. */
@@ -58,7 +63,6 @@ export type PlanningState =
   | { status: 'disabled' | 'pending' }
   | {
       status: 'approved';
-      mode: 'auto' | 'accept_edits';
       planId: string;
       version: number;
       digest: string;
@@ -290,11 +294,7 @@ export function createPlanningValidation(
   isReadOnlyShell?: (input: Json) => Promise<boolean>,
   isReadOnlyGitWorktree?: (execution: Readonly<PublicExecution>, input: Json) => Promise<boolean>,
 ) {
-  if (
-    Object.keys(inputOptions).some(
-      (key) => !['completionGuidance', 'requirePlan', 'allowedExecutionModes'].includes(key),
-    )
-  )
+  if (Object.keys(inputOptions).some((key) => !['completionGuidance', 'requirePlan'].includes(key)))
     throw new AgentError('planning_options_unavailable');
   async function isShellSearch(
     read: ConditionReadContext,
@@ -302,6 +302,7 @@ export function createPlanningValidation(
   ) {
     if (
       !isReadOnlyShell ||
+      boundary.sessionId !== read.sessionId ||
       !readExecutionInput ||
       !boundary.executionId ||
       boundary.definitionVersion !== '1' ||
@@ -333,6 +334,7 @@ export function createPlanningValidation(
   ) {
     if (
       !isReadOnlyGitWorktree ||
+      boundary.sessionId !== read.sessionId ||
       !readExecutionInput ||
       !boundary.executionId ||
       boundary.definitionVersion !== '1' ||
@@ -408,15 +410,7 @@ export function createPlanningValidation(
       return false;
     return true;
   }
-  const options = Object.freeze({
-    ...inputOptions,
-    allowedExecutionModes: Object.freeze([
-      ...(inputOptions.allowedExecutionModes ?? ['auto', 'accept_edits']),
-    ]),
-  });
-  const modes = [...options.allowedExecutionModes];
-  if (!modes.length || modes.some((mode) => !['auto', 'accept_edits'].includes(mode)))
-    throw new Error('planning_execution_mode_invalid');
+  const options = Object.freeze({ ...inputOptions });
   const management = new Set([
     'planning.read',
     'planning.write',
@@ -503,7 +497,6 @@ export function createPlanningValidation(
     version: String(current.version),
     digest: current.digest!,
     content: canonical(plan),
-    allowedModes: modes,
   });
   const attachmentRequest = (current: Record<string, Json>, seal: Record<string, Json>): Json => ({
     kind: 'plan_review',
@@ -512,7 +505,6 @@ export function createPlanningValidation(
     digest: current.digest!,
     content:
       'The complete plan is in the verified attachment. Read its full content before answering.',
-    allowedModes: modes,
     // Existing complete-Interaction attachment protocol; this is information, never a policy grant.
     policy: {
       review: {
@@ -800,6 +792,39 @@ export function createPlanningValidation(
         const execution = await context.getExecution(context.executionId);
         if (!execution?.originStoreId || execution.sessionId !== context.sessionId)
           throw new Error('planning_run_mismatch');
+        if (execution.runId) {
+          if (!context.requirements)
+            throw new Error('planning_requirement_registration_unavailable');
+          const policy = decode(
+            await context.records.get(`run/${execution.runId}/planning.policy`),
+          );
+          if (
+            policy?.kind !== 'planning_policy' ||
+            policy.runId !== execution.runId ||
+            !Array.isArray(policy.readOnlyDefinitions)
+          )
+            throw new Error('planning_run_policy_unavailable');
+          const obligation = await write(
+            context,
+            `run/${execution.runId}/plan.required`,
+            {
+              kind: 'plan',
+              runId: execution.runId,
+              requirementId: 'plan.required',
+              readOnlyDefinitions: policy.readOnlyDefinitions,
+            },
+            true,
+          );
+          await context.requirements.register([
+            {
+              definitionVersion: '1',
+              requirementId: 'plan.required',
+              recordKey: obligation.key,
+              revision: obligation.revision,
+              phase: 'both',
+            },
+          ]);
+        }
         let request = reviewRequest(current, plan);
         let bodyReference: ArtifactRef | undefined;
         let bodyRecordKey: string | undefined;
@@ -841,13 +866,19 @@ export function createPlanningValidation(
         if (
           proof.answer.kind !== 'plan_review' ||
           !['approve', 'revise', 'deny'].includes(proof.answer.decision) ||
-          (proof.answer.decision === 'approve' && !modes.includes(proof.answer.mode ?? ''))
+          Object.hasOwn(proof.answer, 'mode')
         )
           return result({ status: 'not_approved' });
         const review = {
           decision: proof.answer.decision,
           ...(proof.answer.feedback !== undefined ? { feedback: proof.answer.feedback } : {}),
         };
+        if (proof.answer.decision === 'deny')
+          return {
+            ...result({ status: 'not_approved', ...review }),
+            content: '用户拒绝了该计划，已停止本轮对话',
+            control: { kind: 'stop_work' },
+          };
         if (proof.answer.decision !== 'approve')
           return result({ status: 'not_approved', ...review });
         if (bodyReference) await verifyReviewBody(context, bodyReference, plan);
@@ -891,10 +922,7 @@ export function createPlanningValidation(
           `approval.current/${encodeURIComponent(string(current.planId))}/${current.version}`,
           approval,
         );
-        const legacyKey = `approval/${encodeURIComponent(string(current.planId))}/${current.version}`;
-        if (!(await context.records.get(legacyKey)))
-          await write(context, legacyKey, approval, true);
-        return result({ status: 'approved', mode: proof.answer.mode!, ...review });
+        return result({ status: 'approved', ...review });
       },
     },
     'planning.update': {
@@ -1055,31 +1083,155 @@ export function createPlanningValidation(
   const modelTools: Readonly<Record<string, { name: string; description: string }>> = {
     'planning.read': {
       name: 'read_plan',
-      description: 'Read the current plan, version and progress before changing or reviewing it.',
+      description:
+        'Read the current complete plan and its exact plan_ref/progress_ref before changing, reviewing or updating it.',
     },
     'planning.write': {
       name: 'write_plan',
       description:
-        'Save a new plan version with its goal and steps; saving does not approve execution.',
+        'Save a new plan version with its goal and steps. Copy expected_plan_ref from read_plan when a current plan exists; omit only for first creation. Saving never approves implementation. file_base_ref is only for explicit reconciliation of the exact externally changed plan file.',
     },
     'planning.review': {
       name: 'request_plan_review',
-      description: 'Present the exact current plan to the user for approval or revision.',
+      description:
+        'Present the exact plan_ref returned by read_plan or write_plan to the user for approval, revision or rejection. Every permission mode requires this human answer; the reference is not approval.',
     },
     'planning.update': {
       name: 'update_plan_progress',
       description:
-        'Update progress for the current plan using actual execution receipts; cannot approve a plan.',
+        'Update this current task’s progress using exact plan_ref/progress_ref from its latest plan read or update. The host binds the task. completed/compensated require execution_id from an actual successful operation receipt. A null progress_ref asserts no progress record exists. Cannot approve implementation.',
     },
   };
+  const reference = { type: 'string', minLength: 1, maxLength: 4096 };
+  const planProperties = planInput.properties as Record<string, JsonSchema>;
+  const modelSchemas: Record<string, JsonSchema> = {
+    'planning.read': empty,
+    'planning.write': schema(
+      {
+        planId: text,
+        expectedPlanRef: reference,
+        title: planProperties.title!,
+        body: planProperties.body!,
+        steps: planProperties.steps!,
+        fileBaseRef: { anyOf: [reference, { type: 'null' }] },
+      },
+      ['planId', 'title', 'body', 'steps'],
+    ),
+    'planning.review': schema({ planRef: reference }),
+    'planning.update': {
+      ...schema(
+        {
+          planRef: reference,
+          progressRef: { anyOf: [reference, { type: 'null' }] },
+          stepId: text,
+          status: { enum: ['pending', 'running', 'completed', 'failed', 'blocked', 'compensated'] },
+          executionId: text,
+          completePlan: { type: 'boolean' },
+        },
+        ['planRef', 'progressRef', 'stepId', 'status'],
+      ),
+      allOf: [
+        {
+          if: {
+            properties: { status: { enum: ['completed', 'compensated'] } },
+            required: ['status'],
+          },
+          // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional data.
+          then: { required: ['executionId'] },
+        },
+      ],
+    },
+  };
+  async function referred(value: Json, kind: 'plan' | 'progress', context: ToolContext) {
+    const { result, execution } = await readModelReference(
+      value,
+      kind,
+      context,
+      planningExtensionId,
+      {
+        'planning.read': ['1'],
+        'planning.write': ['1'],
+        'planning.update': ['1'],
+      },
+    );
+    const data = object(result.details);
+    if (data[`${kind}_ref`] !== value) throw new AgentError('tool_reference_unavailable');
+    if (kind === 'plan') return object(data.current ?? data);
+    if (execution.runId !== context.runId) throw new AgentError('tool_reference_scope_denied');
+    return object(data.progress ?? data);
+  }
+  async function modelInput(id: string, raw: Json, context: ToolContext): Promise<Json> {
+    const value = { ...object(raw) };
+    if (id === 'planning.write') {
+      if (value.expectedPlanRef !== undefined) {
+        value.expectedVersion = (await referred(value.expectedPlanRef, 'plan', context)).version!;
+        delete value.expectedPlanRef;
+      } else if (value.expectedVersion === undefined) value.expectedVersion = null;
+      if (value.fileBaseRef !== undefined) {
+        if (value.fileBaseRef === null) value.fileBase = null;
+        else {
+          const current = decode(await context.records.get('plan.current'));
+          const saved = current ? decode(await context.records.get(string(current.key))) : null;
+          if (!planFiles || !saved?.file) throw new AgentError('tool_reference_target_mismatch');
+          value.fileBase = await fileBaselineReference(
+            value.fileBaseRef,
+            context,
+            planFiles.path(saved.file as unknown as PlanFile),
+          );
+        }
+        delete value.fileBaseRef;
+      }
+    }
+    if (value.planRef !== undefined) {
+      const plan = await referred(value.planRef, 'plan', context);
+      for (const name of ['planId', 'version', 'digest']) value[name] = plan[name]!;
+      delete value.planRef;
+    }
+    if (id === 'planning.update') {
+      if (typeof value.executionId === 'string')
+        value.executionId = readModelExecutionId(value.executionId);
+      if (value.runId === undefined) value.runId = context.runId;
+      if (value.progressRef !== undefined) {
+        value.expectedProgressRevision =
+          value.progressRef === null
+            ? null
+            : (await referred(value.progressRef, 'progress', context)).revision!;
+        delete value.progressRef;
+      }
+    }
+    return value;
+  }
   for (const [id, fn] of Object.entries(functions))
     tools.push({
       id,
       version: '1',
-      model: { name: modelTools[id]!.name, snakeCase: true },
+      model: {
+        name: modelTools[id]!.name,
+        snakeCase: true,
+      },
       description: modelTools[id]!.description,
-      inputSchema: fn.input,
-      execute: guarded(fn.execute),
+      inputSchema: modelSchemas[id]!,
+      execute: (input, context) =>
+        guarded(async (raw, owner) => {
+          const response = await fn.execute(await modelInput(id, raw, context), owner);
+          if (
+            response.outcome !== 'succeeded' ||
+            !['planning.read', 'planning.write', 'planning.update'].includes(id)
+          )
+            return response;
+          const data = { ...object(response.details) };
+          data.plan_ref =
+            id === 'planning.read' && !data.current
+              ? null
+              : modelReference('plan', context.executionId);
+          if (id === 'planning.read')
+            data.progress_ref = data.progress
+              ? modelReference('progress', context.executionId)
+              : null;
+          if (id === 'planning.update')
+            data.progress_ref = modelReference('progress', context.executionId);
+          return { ...response, content: canonical(data), details: data };
+        })(input, context),
     });
   const actions: ActionDefinition[] = ['planning.write', 'planning.review', 'planning.update'].map(
     (id) => ({
@@ -1301,7 +1453,7 @@ export function createPlanningValidation(
                       planning: 'planning_draft',
                       current: current?.value ?? null,
                       instruction:
-                        'The required plan is not approved. Save a complete plan and request planning.review for its exact version and digest. Text claiming completion cannot approve a plan or dispatch work.',
+                        'The required plan is not approved. Respect the original planning.review feedback: after deny or revise, do not request the same implementation consent for the unchanged plan again. Only when the original task still authorizes continuation and the feedback calls for a revision, save a new plan version and request review for its exact version and digest; otherwise explain that implementation was not performed and finish. If no review has occurred, save a complete plan and request its exact review. Text claiming completion cannot approve a plan or dispatch work.',
                     }),
                   };
                 }
@@ -1322,6 +1474,18 @@ export function createPlanningValidation(
         contentVersion: 1,
         schema: {
           oneOf: [
+            schema({
+              kind: { const: 'planning_policy' },
+              runId: text,
+              readOnlyDefinitions: {
+                type: 'array',
+                items: schema({
+                  kind: { const: 'tool' },
+                  definitionId: text,
+                  definitionVersion: text,
+                }),
+              },
+            }),
             ['plan', 'validation'].map((kind) => ({
               ...schema({ kind: { const: kind }, runId: text, requirementId: text }),
               additionalProperties: true,
@@ -1596,8 +1760,30 @@ export function createPlanningValidation(
   ): Promise<PlanningState> {
     const run = await read.getRun(identity.runId);
     if (!run || run.sessionId !== read.sessionId) throw new Error('planning_run_mismatch');
+    if (!Array.isArray(run.requirements)) throw new Error('planning_run_requirements_unavailable');
+    const refs = run.requirements.filter(
+      (ref) =>
+        ref.extensionId === planningExtensionId &&
+        ref.requirementId === 'plan.required' &&
+        ref.runId === identity.runId,
+    );
+    if (!refs.length) return { status: 'disabled' };
+    if (refs.length !== 1) throw new Error('planning_run_mismatch');
+    const registered = refs[0]!;
     const record = await read.records.get(`run/${identity.runId}/plan.required`);
-    if (!record) return { status: 'disabled' };
+    if (
+      !record ||
+      registered.definitionVersion !== '1' ||
+      registered.recordKey !== record.key ||
+      registered.revision !== record.revision ||
+      registered.sessionId !== read.sessionId ||
+      registered.runId !== identity.runId ||
+      registered.originStoreId !== identity.originStoreId ||
+      registered.phase !== 'both' ||
+      registered.executionId !== undefined ||
+      registered.attempt !== undefined
+    )
+      throw new Error('planning_run_mismatch');
     const obligation = decode(record)!;
     if (
       record.originStoreId !== identity.originStoreId ||
@@ -1654,15 +1840,47 @@ export function createPlanningValidation(
       !(await proofValid(read, approval, request, ref)) ||
       answer.kind !== 'plan_review' ||
       answer.decision !== 'approve' ||
-      !modes.includes(String(answer.mode))
+      Object.hasOwn(answer, 'mode')
     )
       return { status: 'pending' };
     return {
       status: 'approved',
-      mode: answer.mode as 'auto' | 'accept_edits',
       planId: string(current.planId),
       version: Number(current.version),
       digest: string(current.digest),
+    };
+  }
+  function permissionGate(input: {
+    request: AuthorizationRequest;
+    state: PlanningState;
+    identity: { runId: string; sessionId: string } | undefined;
+    capability: { safeRead: boolean; effects: readonly string[] } | null;
+    planFileEdit: boolean;
+  }): PermissionDecision {
+    const { request, state, identity } = input;
+    const allowed =
+      state.status === 'disabled' ||
+      state.status === 'approved' ||
+      request.kind === 'model' ||
+      (request.kind === 'job' &&
+        request.definitionId === `${planningExtensionId}/planning.write` &&
+        request.definitionVersion === '1') ||
+      (request.kind === 'tool' &&
+        request.definitionVersion === '1' &&
+        management.has(request.definitionId)) ||
+      ((request.kind === 'tool' || request.kind === 'job') &&
+        input.capability?.safeRead === true &&
+        input.capability.effects.every((effect) => effect === 'read')) ||
+      input.planFileEdit;
+    return {
+      allowed,
+      revision: canonical({ state: state as unknown as Json, identity: identity ?? null }),
+      ...(!allowed ? { reason: 'plan_approval_required' } : {}),
+      snapshot: {
+        namespace: 'builtin.planning',
+        version: '1',
+        data: { planning: state as unknown as Json, originalRun: identity ?? null },
+      },
     };
   }
   async function initializeRequirements(
@@ -1692,6 +1910,12 @@ export function createPlanningValidation(
       throw new Error('planning_host_read_only_invalid');
     const context = await input.forExtension(planningExtensionId),
       refs: Ref[] = [];
+    await context.records.create({
+      key: `run/${input.run.id}/planning.policy`,
+      contentType,
+      contentVersion: 1,
+      value: { kind: 'planning_policy', runId: input.run.id, readOnlyDefinitions },
+    });
     for (const kind of ['plan'] as const) {
       if (!(options.requirePlan || policy.requirePlan === true)) continue;
       const requirementId = `${kind}.required`,
@@ -1893,6 +2117,11 @@ export function createPlanningValidation(
       `run: ${run.id}`,
       `plan_requirement: ${canonical(state as unknown as Json)}`,
       'Planning is a plan mode, not an Agent execution phase. This observes the actual Run-specific plan approval requirement; approval does not grant tool permissions.',
+      ...(state.status === 'approved'
+        ? [
+            'The user has already approved implementation of the exact planId, version and digest above for this Run. Continue the original task within that approved scope and current tool permissions. Do not ask again through ask_user or request_plan_review for the same implementation consent. Still ask necessary substantive clarifications; a changed goal, new plan version or digest requires its own applicable approval. This observation does not approve those changes or bypass tool permissions.',
+          ]
+        : []),
       'This is Runtime-generated observation, not a user request or execution grant.',
     ].join('\n');
     return [
@@ -1944,6 +2173,7 @@ export function createPlanningValidation(
     } satisfies Extension,
     conditions,
     initializeRequirements,
+    permissionGate,
     readPlanningState,
     sourcesFor,
   };

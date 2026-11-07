@@ -768,14 +768,19 @@ test('original code-only internal browser inputs remain valid without a public p
   );
   expect(validate({ code: '0' })).toBe(true);
   expect(validate({ code: '0', description: '读取北京天气' })).toBe(true);
-  expect(validate({ code: '0', description: '读'.repeat(11) })).toBe(false);
+  expect(validate({ code: '0', description: '读'.repeat(11) })).toBe(true);
 });
 
 test.each([
   '读取北京天气',
   '读'.repeat(10),
   '🙂'.repeat(10),
-])('browser call purpose is bounded, persisted and kept out of the interpreter: %s', async (description) => {
+  undefined,
+  '',
+  '   ',
+  '读'.repeat(100),
+  '🙂'.repeat(100),
+])('optional browser purpose is preserved and kept out of the interpreter: %s', async (description) => {
   const f = await fixture(
     [
       async (batch) => {
@@ -784,36 +789,37 @@ test.each([
         return null;
       },
     ],
-    { callInputs: [{ code: '0', description }] },
+    { callInputs: [{ code: '0', ...(description === undefined ? {} : { description }) }] },
   );
   try {
     const tool = f.model.requests[0]!.tools.find((tool) => tool.id === 'browser_execute')!;
     expect(tool.inputSchema).toMatchObject({
-      required: ['code', 'description'],
-      properties: { description: { maxLength: 10, pattern: '\\S' } },
+      required: ['code'],
+      properties: { description: { type: 'string' } },
     });
     expect(f.executorCalls).toEqual(['0']);
     const saved = (await f.store.listExecutions('session')).find(
       (entry) => entry.definitionId === 'browser.execute',
     )!;
-    expect(saved.input).toEqual({ code: '0', description });
+    expect(saved.input).toEqual({
+      code: '0',
+      ...(description === undefined ? {} : { description }),
+    });
     const call = f.model.requests[1]!.messages.flatMap((message) => message.toolCalls ?? []).find(
       (call) => call.name === 'browser_execute',
     )!;
-    expect(JSON.parse(call.arguments)).toEqual({ code: '0', description });
+    expect(JSON.parse(call.arguments)).toEqual({
+      code: '0',
+      ...(description === undefined ? {} : { description }),
+    });
   } finally {
     await f.close();
   }
 });
 
-test.each([
-  undefined,
-  '',
-  '   ',
-  '读'.repeat(11),
-  '🙂'.repeat(11),
-  1,
-])('invalid or missing browser purpose fails before interpreter dispatch: %s', async (description) => {
+test.each(
+  [1, true, {}, []].map((description) => ({ description })),
+)('non-string browser purpose fails before interpreter dispatch: %s', async ({ description }) => {
   const f = await fixture([async () => null], {
     callInputs: [{ code: '0', ...(description === undefined ? {} : { description }) }],
   });

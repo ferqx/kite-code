@@ -5,6 +5,7 @@ import {
   createPermissionPolicy,
   type PermissionPolicySnapshot,
 } from '@kite-ai/agent/permissions';
+import { fixtureGrant } from '../../../../../tests/fixtures/permission-grant';
 
 type Scope = { filesystem: 'workspace_write' | 'full_access'; network: 'none' | 'internet' };
 const baseline: Scope = { filesystem: 'workspace_write', network: 'none' };
@@ -40,7 +41,19 @@ function fixture(mode: PermissionPolicySnapshot['mode'] = 'accept_edits') {
   let checks = 0;
   const permissions = createPermissionPolicy({
     readPolicy: () => policy,
-    describeCapability: () => description,
+    describeCapability: () => ({
+      ...description,
+      ...(description.commandDigest
+        ? {
+            grantOffers: [
+              fixtureGrant(description.definitionId, {
+                commandDigest: description.commandDigest,
+                executionScope: description.executionScope ?? null,
+              }),
+            ],
+          }
+        : {}),
+    }),
     readCheckContext() {
       checks++;
       return { task: 'actual task', plan: null, rejectionReasons: [] };
@@ -104,8 +117,10 @@ test('external write and internet scope require original per-command approval an
     expect(result.allowed).toBe(false);
     expect(result.reason).toBe('approval_required');
     expect(result.approval).toMatchObject({
-      grants: ['approve_once', 'same_command'],
-      commandDigest: 'a'.repeat(64),
+      options: [
+        { kind: 'once' },
+        { kind: 'scope', scope: { commandDigest: 'a'.repeat(64), executionScope } },
+      ],
     });
     expect(capability(result).executionScope).toEqual(executionScope);
     expect(result.check).toBeUndefined();
@@ -151,7 +166,9 @@ test('execution scope, command digest and permission control changes bind fresh 
   f.description = { ...f.description, commandDigest: 'b'.repeat(64) };
   const command = await f.permissions.authorize(f.request);
   expect(command.revision).not.toBe(network.revision);
-  expect(original.approval!.commandDigest).toBe('a'.repeat(64));
+  expect(original.approval!.options?.find((option) => option.kind === 'scope')).toMatchObject({
+    scope: { commandDigest: 'a'.repeat(64), executionScope: requested },
+  });
   f.policy = {
     ...f.policy,
     controlReads: [{ kind: 'permission.mode', scope: 's', revision: '3' }],

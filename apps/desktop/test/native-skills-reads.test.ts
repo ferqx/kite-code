@@ -168,6 +168,7 @@ test('close during a pending controller refresh aborts the user read and stale g
   const caller = Object.assign(Object.create(NativeCaller.prototype), {
     generation: 1,
     closed: false,
+    controller: { snapshot: null },
     refreshing: refresh.promise,
     skills: reads,
   }) as NativeCaller;

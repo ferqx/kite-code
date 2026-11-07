@@ -289,13 +289,15 @@ export function authorizationApproval(
         source: 'user',
         state,
         interactionId: human.interactionId,
-        grant: human.grant,
-        ...(state === 'awaiting_user' && (authorization?.check ?? authorization?.review)?.reason
-          ? { reason: (authorization.check ?? authorization.review)!.reason }
+        optionId: human.optionId,
+        optionKind: human.optionKind,
+        presentation: human.presentation,
+        ...(state === 'awaiting_user' && authorization?.check?.reason
+          ? { reason: authorization.check!.reason }
           : {}),
       };
   }
-  const check = authorization?.check ?? authorization?.review;
+  const check = authorization?.check;
   if (!check) return;
   return {
     source: 'auto',
@@ -692,9 +694,7 @@ export function liveToolMessages(
                   state: 'awaiting_user' as const,
                   source: 'user' as const,
                   interactionId: approvals[0]!.id,
-                  reason:
-                    (execution.authorization?.check ?? execution.authorization?.review)?.reason ??
-                    undefined,
+                  reason: execution.authorization?.check?.reason ?? undefined,
                 },
               }
             : {}),

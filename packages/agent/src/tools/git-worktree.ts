@@ -10,6 +10,7 @@ import type {
   ToolResult,
 } from '../extensions';
 import { canonicalJson } from '../json';
+import { modelIdentifier, readModelIdentifier } from '../model-identifier';
 import {
   captureTemporaryWorktreeRoots,
   inspectTemporaryWorktreeTarget,
@@ -24,9 +25,11 @@ import {
   type GitWorktreeConfiguration,
   type GitWorktreeInput,
   gitWorktreeInputSchema,
+  gitWorktreeModelSchema,
   jsonObject,
   type Mutation,
   parseGitWorktreeInput,
+  parseGitWorktreeRequest,
   type ResolvedWorktreeTarget,
   resolveDefaultWorktreeTarget,
   validateFrame,
@@ -36,6 +39,7 @@ import {
   type WorktreePhase,
   type WorktreePlan,
   type WorktreeRequest,
+  worktreeIntentKey,
 } from './git-worktree/protocol';
 import { assertOriginalWorktreeJob, readWorktreeOutput } from './git-worktree/read-output';
 
@@ -430,7 +434,7 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
   const configuration = Object.freeze(structuredClone(options.configuration));
   const configurationIdentity = digest(configuration);
   async function invoke(raw: Json, context: ToolContext, resuming: boolean): Promise<ToolResult> {
-    const parsedInput = parseGitWorktreeInput(raw);
+    const parsedInput = parseGitWorktreeRequest(raw, context.executionId);
     if (!parsedInput)
       return {
         outcome: 'failed',
@@ -890,15 +894,76 @@ export function createGitWorktreeTool(options: GitWorktreeToolOptions): ToolDefi
       return makeResult(input, 'failed', { code, mutation: 'not_started' });
     }
   }
+  async function run(input: Json, context: ToolContext, resuming: boolean): Promise<ToolResult> {
+    if (jsonObject(input) && input.action === 'observe') {
+      try {
+        if (typeof input.operationRef !== 'string' || !input.operationRef.startsWith('gw_'))
+          throw new AgentError('worktree_operation_unverifiable');
+        const ownerId = readModelIdentifier(input.operationRef.slice(3));
+        const [own, original] = await Promise.all([
+          context.getExecution(context.executionId),
+          context.getExecution(ownerId),
+        ]);
+        if (
+          !own?.originStoreId ||
+          !original ||
+          original.kind !== 'tool' ||
+          original.sessionId !== context.sessionId ||
+          original.originStoreId !== own.originStoreId ||
+          original.extensionId !== 'builtin.shell' ||
+          original.definitionId !== 'git.worktree' ||
+          original.definitionVersion !== '1' ||
+          original.authorization?.dispatched !== true
+        )
+          throw new AgentError('worktree_operation_unverifiable');
+        const saved = await context.records.get(`git-worktree/${worktreeIntentKey(original.id)}`);
+        if (!saved) throw new AgentError('worktree_operation_unverifiable');
+        const value = recordValue(saved, context.sessionId, configuration.sourceCwd);
+        if (value.ownerExecutionId !== original.id || saved.originStoreId !== own.originStoreId)
+          throw new AgentError('worktree_operation_unverifiable');
+        const jobs = await Promise.all(
+          Object.entries(value.steps).map(async ([phase, step]) => ({
+            phase,
+            execution: step?.ref ? await context.operations.get(step.ref) : null,
+          })),
+        );
+        const observation = {
+          action: 'observe',
+          operation_ref: input.operationRef!,
+          phase: value.phase,
+          original_execution_id: value.ownerExecutionId,
+          original_result: asJson(value.stableResult ?? value.lastObservation ?? null),
+          jobs: asJson(jobs),
+          cwdChanged: false,
+        };
+        return { outcome: 'succeeded', content: canonicalJson(observation), details: observation };
+      } catch (error) {
+        return {
+          outcome: context.signal.aborted ? 'cancelled' : 'failed',
+          content: errorCode(error),
+          details: { code: errorCode(error), mutation: 'not_started' },
+        };
+      }
+    }
+    const result = await invoke(input, context, resuming);
+    const operation =
+      jsonObject(result.details) && jsonObject(result.details.operation)
+        ? result.details.operation
+        : null;
+    if (!operation || typeof operation.ownerExecutionId !== 'string') return result;
+    const ref = `gw_${modelIdentifier(operation.ownerExecutionId)}`;
+    const details = { ...((result.details ?? {}) as Record<string, Json>), operation_ref: ref };
+    return { ...result, details, content: `${result.content}\noperation_ref: ${ref}` };
+  }
   return {
     id: 'git.worktree',
     version: '1',
-    model: { name: 'git_worktree' },
+    model: { name: 'git_worktree', snakeCase: true },
     description:
-      'List registered Git worktrees, create a worktree from a frozen commit, or remove a protected clean linked worktree. To list, send exactly {"action":"list"}; no key, path, baseRef, newBranch, timeoutMs or permissions. create requires key; omit path for a stable persistent target under ~/.kite-code/worktrees, or supply an absolute path. Temporary create targets are refused. remove requires key and absolute path and forbids baseRef/newBranch. Invalid argument combinations start no Git Job; correct the fields without requesting broader permissions. create defaults to detached at the source checkout HEAD; newBranch creates a new local branch. Creation returns the real path and never changes Session cwd. Reuse the same key only to observe the original intent; changed arguments conflict and unknown operations must not be restarted. Removal refuses local content, unprotected HEAD/reflog commits, links, mounts, registered Workspaces and uncertain occupancy; it preserves branches and tags.',
-    inputSchema: gitWorktreeInputSchema as ToolDefinition['inputSchema'],
+      'List, create or remove Git worktrees. list accepts only action. create omits path for the persistent host root, defaults to detached HEAD, and optionally selects base_ref (Git branch/commit) and new_branch. remove requires an absolute path and preserves branches/tags; protected, dirty or uncertain targets are refused. filesystem requests existing scope, network remains none. The host creates the intent. Observe an earlier operation using action:observe and its exact operation_ref; observation starts no Job and never retries an unknown mutation. Session cwd never changes.',
+    inputSchema: gitWorktreeModelSchema as ToolDefinition['inputSchema'],
     recovery: { version: '1' },
-    execute: (input, context) => invoke(input, context, false),
-    resume: (input, context) => invoke(input, context, true),
+    execute: (input, context) => run(input, context, false),
+    resume: (input, context) => run(input, context, true),
   };
 }

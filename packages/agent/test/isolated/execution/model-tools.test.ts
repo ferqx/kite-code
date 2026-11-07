@@ -10,7 +10,11 @@ import { createArtifactStore } from '../../../src/artifacts';
 import type { CompressionInput } from '../../../src/context';
 import { projectModelContext } from '../../../src/context-estimate';
 import type { AuthorizationRequest, Json, ToolDefinition } from '../../../src/extensions';
-import { createModelToolSurface, modelToolCall } from '../../../src/model-tools';
+import {
+  createModelToolSurface,
+  modelToolArgumentError,
+  modelToolCall,
+} from '../../../src/model-tools';
 import { openSqliteStore } from '../../../src/sqlite';
 
 const finish: ModelEvent = {
@@ -32,6 +36,94 @@ function request(tools: readonly ToolDefinition[]): ModelRequest {
   };
 }
 const execute: ToolDefinition['execute'] = async () => ({ outcome: 'succeeded', content: 'done' });
+
+test('model-only input schema rejects internal identities while the canonical Tool contract retains them', () => {
+  const internal = {
+    type: 'object',
+    properties: { key: { type: 'string' } },
+    required: ['key'],
+    additionalProperties: false,
+  };
+  const publicInput = {
+    type: 'object',
+    properties: { pageRef: { type: 'string' } },
+    required: ['pageRef'],
+    additionalProperties: false,
+  };
+  const tool: ToolDefinition = {
+    id: 'fixture.reference',
+    version: '1',
+    description: 'Exact reference',
+    model: { name: 'use_reference', snakeCase: true, inputSchema: publicInput },
+    inputSchema: { anyOf: [internal, publicInput] },
+    execute,
+  };
+  const original = structuredClone(tool.inputSchema);
+  const surface = createModelToolSurface(request([tool]), new Map([[tool.id, tool]]));
+  expect(surface.tools[0]!.inputSchema).toMatchObject({
+    properties: { page_ref: { type: 'string' } },
+    required: ['page_ref'],
+  });
+  expect(
+    surface.decode({ id: 'internal', name: 'use_reference', arguments: '{"key":"hidden"}' }).model
+      ?.error,
+  ).toBe('invalid_tool_arguments');
+  const decoded = surface.decode({
+    id: 'public',
+    name: 'use_reference',
+    arguments: '{"page_ref":"exact"}',
+  });
+  expect(decoded.model?.error).toBeUndefined();
+  expect(JSON.parse(decoded.arguments)).toEqual({ pageRef: 'exact' });
+  expect(tool.inputSchema).toEqual(original);
+});
+
+test('invalid arguments identify public schema constraints without echoing input keys or values', () => {
+  const tool: ToolDefinition = {
+    id: 'fixture.identity',
+    version: '1',
+    description: 'Validate exact identities',
+    model: { name: 'verify_identity', snakeCase: true },
+    inputSchema: {
+      type: 'object',
+      properties: { expectedVersion: { type: 'integer' } },
+      required: ['expectedVersion'],
+      additionalProperties: false,
+    },
+    execute,
+  };
+  const surface = createModelToolSurface(request([tool]), new Map([[tool.id, tool]]));
+  for (const [input, constraint] of [
+    [{}, "must have required property 'expected_version'"],
+    [{ expected_version: 'PRIVATE_ARGUMENT_VALUE' }, 'must be integer'],
+    [
+      { expected_version: 1, PRIVATE_ARGUMENT_KEY: 'PRIVATE_ARGUMENT_VALUE' },
+      'must NOT have additional properties',
+    ],
+  ] as const) {
+    const call = surface.decode({
+      id: 'invalid',
+      name: 'verify_identity',
+      arguments: JSON.stringify(input),
+    });
+    const original = structuredClone(call);
+    expect(call.model?.error).toBe('invalid_tool_arguments');
+    const error = modelToolArgumentError(tool, call)!;
+    expect(error).toContain(constraint);
+    expect(error).not.toContain('expectedVersion');
+    expect(error).not.toContain('PRIVATE_ARGUMENT');
+    expect(call).toEqual(original);
+  }
+  expect(
+    modelToolArgumentError(
+      tool,
+      surface.decode({ id: 'valid', name: 'verify_identity', arguments: '{"expected_version":1}' }),
+    ),
+  ).toBeUndefined();
+  expect(
+    modelToolArgumentError(tool, { id: 'malformed', name: tool.id, arguments: '{' }),
+  ).toBeUndefined();
+});
 
 test('projected schema and arguments preserve opaque JSON, array fields and conditional requirements', () => {
   const tool: ToolDefinition = {
@@ -172,14 +264,14 @@ test('Agent tools expose exactly the current six definitions and reject retired 
     );
   }
   const event = surface.tools.find((tool) => tool.id === 'wait_agent_events')!;
-  expect(Object.keys(event.inputSchema.properties!)).toEqual(['after_seq', 'wait_ms']);
+  expect(Object.keys(event.inputSchema.properties!)).toEqual(['work_refs', 'cursor', 'wait_ms']);
   expect(
     surface.decode({
       id: 'valid',
       name: 'wait_agent_events',
-      arguments: '{"after_seq":"0","wait_ms":0}',
+      arguments: '{"wait_ms":0}',
     }).arguments,
-  ).toBe('{"afterSeq":"0","waitMs":0}');
+  ).toBe('{"waitMs":0}');
   for (const [name, args] of [
     ['spawn_agent', { prompt: 'work', key: 'old', role: 'worker', result_disposition: 'required' }],
     ['wait_agent_events', { task_ids: ['old'] }],

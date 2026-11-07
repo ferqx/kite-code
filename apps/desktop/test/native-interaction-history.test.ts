@@ -168,7 +168,7 @@ test('historical attachment reading keeps the original body proof isolated from 
     definitionId: 'custom.question',
     definitionVersion: '7',
     input: { value: '原完整请求雪🙂\r\n'.repeat(6000) },
-    grants: ['approve_once'],
+    options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
   });
   const content = new TextEncoder().encode(text),
     hash = createHash('sha256').update(content).digest('hex');

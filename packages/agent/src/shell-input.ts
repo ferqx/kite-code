@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { modelIdentifier } from './model-identifier';
 import type { Json } from './storage/types';
 
 export type ShellScope = {
@@ -8,9 +8,7 @@ export type ShellScope = {
 
 /** The persisted logical Tool identity survives attempts; command text never selects an identity. */
 export function shellOperationKey(key: Json | undefined, executionId: string): string {
-  return typeof key === 'string'
-    ? key
-    : `shell-${createHash('sha256').update(executionId).digest('hex')}`;
+  return typeof key === 'string' ? key : `sh_${modelIdentifier(executionId)}`;
 }
 
 /** Shared request interpretation, not an authorization result. Jobs retain their historical input. */
@@ -26,12 +24,14 @@ export function parseShellCommandInput(
       background: boolean;
       executionScope: ShellScope;
       permissions?: ShellScope;
+      workdir?: string;
     }
   | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return;
   const tool = kind !== 'job';
   const allowed = [
     'command',
+    'workdir',
     ...(tool ? ['key', 'cancellation', 'description'] : []),
     ...(kind === 'execute' ? ['background', 'execution_timeout_ms', 'timeoutMs'] : []),
     ...(scoped ? ['permissions', ...(tool ? ['filesystem', 'network'] : [])] : []),
@@ -41,6 +41,11 @@ export function parseShellCommandInput(
     typeof input.command !== 'string' ||
     !input.command ||
     input.command.length > 262144 ||
+    (input.workdir !== undefined &&
+      (typeof input.workdir !== 'string' ||
+        !input.workdir ||
+        input.workdir.length > 4096 ||
+        input.workdir.includes('\0'))) ||
     (input.key !== undefined &&
       (typeof input.key !== 'string' || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.key))) ||
     (input.description !== undefined && typeof input.description !== 'string') ||
@@ -84,6 +89,7 @@ export function parseShellCommandInput(
   const permissions = scope as ShellScope | undefined;
   return {
     command: input.command,
+    ...(typeof input.workdir === 'string' ? { workdir: input.workdir } : {}),
     cancellation: tool ? (input.cancellation === 'detached' ? 'detached' : 'attached') : null,
     timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : null,
     background,

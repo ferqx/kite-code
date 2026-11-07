@@ -1,3 +1,9 @@
+import {
+  consumesExecutionConfirmation,
+  type ExecutionConfirmationProof,
+  type PreparedExecutionConfirmation,
+  sameExecutionConfirmation,
+} from '../execution-confirmation';
 import type {
   AcceptedInformation,
   AuthorizationRequest,
@@ -5,8 +11,13 @@ import type {
   Permissions,
 } from '../extensions';
 import { semanticDigest } from '../json';
-import { validWorktreeDecision } from '../permissions/worktree-authorization';
-import { isShellRiskRequest } from '../shell-risk-review';
+import {
+  approvalOptions,
+  type GrantUse,
+  parseGrantOffer,
+  sameCapability,
+  selectedApprovalOption,
+} from '../permission-grants';
 import type {
   AutoAuthorizationEvidence,
   ReadAuthorizationCheckInput,
@@ -14,6 +25,7 @@ import type {
 } from '../storage/port';
 import {
   AgentError,
+  type ExecutionRecord,
   type InformationPermissionStamp,
   type InteractionRecord,
   type Json,
@@ -70,6 +82,15 @@ export class QuestionCancelledError extends AgentError {
 
 export interface InteractionScope {
   final?: boolean;
+  resourcesHeldByAncestor?: boolean;
+  executionConfirmation?: PreparedExecutionConfirmation | null;
+  prepareExecutionConfirmation?: (
+    execution: ExecutionRecord,
+  ) => Promise<PreparedExecutionConfirmation | null>;
+  authorizeParent?: (
+    request: AuthorizationRequest,
+    decision: PermissionDecision,
+  ) => Promise<AutoAuthorizationEvidence | null>;
   previousCheck?: ReadAuthorizationCheckInput;
   previousPolicy?: PermissionDecision;
   check?: (
@@ -81,6 +102,8 @@ export interface InteractionScope {
   executionId: string;
   signal: AbortSignal;
   requiredRefs: readonly RequirementRef[];
+  /** Set only by the executing host from the actual Tool/Action resource declaration. */
+  informationResourcesHeld?: boolean;
   requirements(): Promise<RequirementEvaluation[]>;
   checkFreshness?: () => Promise<void>;
   checkpoint?: () => Promise<void>;
@@ -88,8 +111,9 @@ export interface InteractionScope {
   verifyApprovalRequest?: (saved: Json, actual: Json) => Promise<void>;
 }
 export type AcceptedAuthorization = PermissionDecision & {
-  riskReviewApproved?: true;
-  grant?: { grantId: string; revision: string; commandDigest?: string };
+  executionConfirmation?: ExecutionConfirmationProof;
+  materialReviewed?: true;
+  grant?: GrantUse;
   checkExecutionId?: string;
   policyEvidenceId?: string;
   interactionId?: string;
@@ -250,6 +274,7 @@ export class InteractionGate {
     interaction: InteractionRecord,
     information = false,
     informationPermission?: InformationPermissionStamp,
+    currentInformationPermission?: InformationPermissionStamp,
   ) {
     const requirements = information ? [] : await scope.requirements();
     await scope.checkFreshness?.();
@@ -258,6 +283,7 @@ export class InteractionGate {
       expectedStoreId: scope.expectedStoreId,
       owner: scope.owner,
       ...(informationPermission ? { informationPermission } : {}),
+      ...(currentInformationPermission ? { currentInformationPermission } : {}),
       interactionId: interaction.id,
       executionId: scope.executionId,
       attempt: interaction.attempt,
@@ -286,6 +312,158 @@ export class InteractionGate {
     }
   }
 
+  private async confirmExecution(
+    scope: InteractionScope,
+    request: AuthorizationRequest,
+    source: Json,
+    initial: PermissionDecision,
+  ): Promise<AcceptedAuthorization> {
+    const prepared = scope.executionConfirmation!;
+    const proof = 'proof' in prepared ? prepared.proof : undefined;
+    const binding = proof?.binding ?? ('binding' in prepared ? prepared.binding : undefined)!;
+    const checkPolicy = async (decision: PermissionDecision): Promise<void> => {
+      if (!decision.allowed && !decision.approval && !decision.check)
+        throw publicDenial(decision.reason ?? 'permission_denied');
+      if (
+        !(await consumesExecutionConfirmation(this.permissions, request, decision, binding.owner))
+      )
+        throw new AgentError('execution_confirmation_policy_unsupported');
+    };
+    await checkPolicy(initial);
+    if (proof?.stepKey !== undefined)
+      return { ...initial, allowed: true, executionConfirmation: proof };
+    if (scope.resourcesHeldByAncestor)
+      throw new AgentError('execution_confirmation_resources_held');
+    if (!proof && !('declaration' in prepared))
+      throw new AgentError('execution_confirmation_invalid');
+    const execution = await this.store.getExecution(request.executionId);
+    if (
+      !execution ||
+      execution.id !== binding.executionId ||
+      execution.attempt !== binding.attempt ||
+      request.kind !== binding.owner.capability.kind ||
+      request.definitionId !== binding.owner.capability.definitionId ||
+      request.definitionVersion !== binding.owner.capability.definitionVersion ||
+      (await semanticDigest(request.input)) !== binding.inputDigest
+    )
+      throw new AgentError('execution_confirmation_changed');
+    const revision = `execution-confirmation/${await semanticDigest(binding as unknown as Json)}`;
+    let interaction = execution.interactionBinding
+      ? await this.store.getInteraction({
+          expectedStoreId: scope.expectedStoreId,
+          sessionId: execution.sessionId,
+          interactionId: execution.interactionBinding.interactionId,
+        })
+      : null;
+    if (
+      proof &&
+      (!interaction ||
+        interaction.id !== proof.interactionId ||
+        interaction.state !== 'answered' ||
+        interaction.acceptedDecisionRevision !== proof.decisionRevision ||
+        interaction.revision !== proof.decisionRevision ||
+        execution.interactionBinding?.decisionRevision !== proof.decisionRevision)
+    )
+      throw new AgentError('execution_confirmation_changed');
+    if (!interaction) {
+      if (!('declaration' in prepared)) throw new AgentError('execution_confirmation_changed');
+      if (scope.final) throw new AgentError('authorization_refresh_required');
+      const body: Json = {
+        policy: {
+          reason: 'owner_execution_confirmation',
+          confirmation: prepared.declaration.request,
+          originalPermission: initial.snapshot ?? null,
+          originalPolicyRevision: initial.revision,
+          originalApproval: initial.approval?.request ?? null,
+          originalCheck: initial.check?.request ?? null,
+        },
+        options: approvalOptions() as unknown as Json,
+        definitionId: request.definitionId,
+        definitionVersion: request.definitionVersion,
+        input: request.input,
+        executionConfirmation: binding as unknown as Json,
+      };
+      interaction = await this.store.requestInteraction({
+        expectedStoreId: scope.expectedStoreId,
+        owner: scope.owner,
+        interactionId: `confirmation-${await semanticDigest({ executionId: execution.id, attempt: execution.attempt })}`,
+        executionId: execution.id,
+        attempt: execution.attempt,
+        kind: 'approval',
+        definitionId: request.definitionId,
+        definitionVersion: request.definitionVersion,
+        inputDigest: binding.inputDigest,
+        policyRevision: revision,
+        requiredRefs: [...scope.requiredRefs],
+        source,
+        request: scope.sealApprovalRequest ? await scope.sealApprovalRequest(body) : body,
+      });
+    }
+    const saved = interaction.request as {
+      executionConfirmation?: Json;
+      policy?: Json;
+      approvalRequestDigest?: Json;
+    };
+    if (
+      interaction.kind !== 'approval' ||
+      interaction.definitionId !== request.definitionId ||
+      interaction.definitionVersion !== request.definitionVersion ||
+      interaction.executionId !== request.executionId ||
+      interaction.attempt !== binding.attempt ||
+      interaction.policyRevision !== revision ||
+      !sameExecutionConfirmation(saved.executionConfirmation, binding) ||
+      interaction.inputDigest !== binding.inputDigest
+    )
+      throw new AgentError('execution_confirmation_changed');
+    if (!Object.hasOwn(saved, 'approvalRequestDigest')) {
+      const policy = saved.policy;
+      if (
+        !policy ||
+        typeof policy !== 'object' ||
+        Array.isArray(policy) ||
+        !Object.hasOwn(policy, 'confirmation') ||
+        (await semanticDigest(policy.confirmation!)) !== binding.requestDigest
+      )
+        throw new AgentError('execution_confirmation_changed');
+    } else if (!scope.verifyApprovalRequest) throw new AgentError('artifact_content_unavailable');
+    await scope.verifyApprovalRequest?.(interaction.request, {
+      definitionId: request.definitionId,
+      definitionVersion: request.definitionVersion,
+      input: request.input,
+      executionConfirmation: binding as unknown as Json,
+    });
+    interaction = await this.wait(
+      {
+        ...scope,
+        checkpoint: async () => {
+          await scope.checkpoint?.();
+          await scope.checkFreshness?.();
+          const current = await this.permissions.authorize(request);
+          await checkPolicy(current);
+        },
+      },
+      interaction,
+      true,
+    );
+    if (interaction.answer?.kind !== 'approval' || interaction.answer.decision !== 'approve')
+      throw new AgentError('approval_denied');
+    if (interaction.answer.optionId !== 'once') throw new AgentError('interaction_answer_invalid');
+    const current = await this.permissions.authorize(request);
+    await checkPolicy(current);
+    const accepted = await this.accept(scope, interaction);
+    return {
+      ...current,
+      allowed: true,
+      interactionId: accepted.id,
+      decisionRevision: accepted.acceptedDecisionRevision!,
+      executionConfirmation: {
+        binding,
+        interactionId: accepted.id,
+        decisionRevision: accepted.acceptedDecisionRevision!,
+      },
+    };
+  }
+
   private async authorizeOnce(
     scope: InteractionScope,
     request: AuthorizationRequest,
@@ -299,6 +477,19 @@ export class InteractionGate {
     scope.signal.throwIfAborted();
     const execution = await this.store.getExecution(scope.executionId);
     if (!execution) throw new AgentError('execution_not_found');
+    const confirmation =
+      scope.executionConfirmation ??
+      (decision.allowed || decision.approval || decision.check
+        ? await scope.prepareExecutionConfirmation?.(execution)
+        : null);
+    scope.signal.throwIfAborted();
+    if (confirmation)
+      return this.confirmExecution(
+        { ...scope, executionConfirmation: confirmation },
+        request,
+        source,
+        decision,
+      );
     if (execution.interactionBinding) {
       const original = await this.store.getInteraction({
         expectedStoreId: scope.expectedStoreId,
@@ -310,6 +501,45 @@ export class InteractionGate {
         await this.refresh(scope, original, decision);
     }
     const previous = scope.previousPolicy as AcceptedAuthorization | undefined;
+    let reusableGrant: GrantUse | null = null;
+    if (
+      (!execution.interactionBinding || previous?.grant) &&
+      !decision.allowed &&
+      decision.grantOffers?.length
+    ) {
+      reusableGrant = await this.store.getPermissionGrant({
+        expectedStoreId: scope.expectedStoreId,
+        executionId: scope.executionId,
+        offers: decision.grantOffers,
+      });
+      if (reusableGrant) {
+        const binding = reusableGrant.offer.policyBindings.find((binding) =>
+          sameCapability(binding.capability, request),
+        );
+        if (!binding) throw new AgentError('permission_grant_changed');
+        if (
+          !execution.interactionBinding &&
+          binding.satisfiesCheck &&
+          !(binding.requireApproval ?? decision.check?.requireApproval)
+        ) {
+          const { check: _check, approval: _approval, ...rest } = decision;
+          return { ...rest, allowed: true, grant: reusableGrant };
+        }
+        if (decision.check)
+          decision = {
+            ...decision,
+            check: {
+              ...decision.check,
+              requireApproval:
+                execution.interactionBinding && scope.previousCheck
+                  ? scope.previousCheck.requireApproval === true
+                  : (binding.requireApproval ?? decision.check?.requireApproval) === true,
+            },
+          };
+        if (!execution.interactionBinding && !decision.check)
+          return { ...decision, allowed: true, grant: reusableGrant };
+      }
+    }
     if (
       !execution.interactionBinding &&
       previous?.policyEvidenceId &&
@@ -322,13 +552,14 @@ export class InteractionGate {
         ...decision,
         allowed: true,
         policyEvidenceId: previous.policyEvidenceId,
-        ...(previous.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+        ...(reusableGrant ? { grant: reusableGrant } : {}),
+        ...(previous.materialReviewed ? { materialReviewed: true as const } : {}),
         ...(previous.snapshot ? { snapshot: previous.snapshot } : {}),
       };
     let reference = scope.previousCheck;
     let policyEvidence: AutoAuthorizationEvidence | undefined;
     let checkedGrant: string | undefined;
-    let riskReviewApproved = false;
+    let materialReviewed = false;
     if (
       reference &&
       (reference.policyRevision !== decision.revision ||
@@ -349,47 +580,18 @@ export class InteractionGate {
     if (!execution.interactionBinding && decision.allowed) return decision;
     if (
       !execution.interactionBinding &&
-      request.kind === 'job' &&
-      request.definitionId === 'shell.command' &&
-      request.definitionVersion === '1' &&
-      validWorktreeDecision(decision) &&
-      !decision.check?.requireApproval &&
+      scope.authorizeParent &&
       (decision.approval || decision.check)
     ) {
-      const inherited = await this.store.resolveWorktreeAuthorization({
-        expectedStoreId: scope.expectedStoreId,
-        owner: scope.owner,
-        targetExecutionId: scope.executionId,
-        decision,
-      });
+      const inherited = await scope.authorizeParent(request, decision);
       scope.signal.throwIfAborted();
       if (inherited)
         return { ...decision, allowed: true, policyEvidenceId: inherited.policyEvidenceId };
     }
-    if (!execution.interactionBinding && decision.approval?.grants?.includes('same_command')) {
-      const grant = await this.store.getPermissionGrant({
-        expectedStoreId: scope.expectedStoreId,
-        executionId: scope.executionId,
-        ...(decision.approval!.commandDigest === undefined
-          ? {}
-          : { commandDigest: decision.approval!.commandDigest }),
-      });
-      if (grant) {
-        const original = await this.store.getInteraction({
-          expectedStoreId: scope.expectedStoreId,
-          sessionId: execution.sessionId,
-          interactionId: grant.grantId,
-        });
-        if (original?.policyRevision === decision.revision)
-          return { ...decision, allowed: true, grant } satisfies AcceptedAuthorization;
-      }
-    }
     if (request.kind === 'model') throw new AgentError('permission_denied', decision.reason);
     if (
       decision.check &&
-      (!execution.interactionBinding ||
-        decision.check.requireApproval ||
-        (reference && isShellRiskRequest(decision.check.request)))
+      (!execution.interactionBinding || decision.check.requireApproval || reference)
     ) {
       if (!reference && scope.check && !scope.final) {
         const controller = new AbortController();
@@ -419,7 +621,24 @@ export class InteractionGate {
         }
       }
       if (policyEvidence) {
-        const current = await this.permissions.authorize(request);
+        let current = await this.permissions.authorize(request);
+        if (reusableGrant && current.check) {
+          const binding = current.grantOffers
+            ?.find((offer) => offer.scopeDigest === reusableGrant.offer.scopeDigest)
+            ?.policyBindings.find((binding) => sameCapability(binding.capability, request));
+          if (!binding || binding.reuseRevision !== reusableGrant.reuseRevision)
+            throw new AgentError('permission_grant_changed');
+          current = {
+            ...current,
+            check: {
+              ...current.check,
+              requireApproval:
+                execution.interactionBinding && scope.previousCheck
+                  ? scope.previousCheck.requireApproval === true
+                  : (binding.requireApproval ?? current.check?.requireApproval) === true,
+            },
+          };
+        }
         scope.signal.throwIfAborted();
         await scope.checkFreshness?.();
         if (
@@ -432,7 +651,8 @@ export class InteractionGate {
           ...current,
           allowed: true,
           policyEvidenceId: policyEvidence.policyEvidenceId,
-          ...(policyEvidence.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+          ...(reusableGrant ? { grant: reusableGrant } : {}),
+          ...(policyEvidence.materialReviewed ? { materialReviewed: true as const } : {}),
           ...(policyEvidence.snapshot ? { snapshot: policyEvidence.snapshot } : {}),
         };
       }
@@ -441,6 +661,23 @@ export class InteractionGate {
       if (reference) {
         const checkedDecision = decision;
         decision = await this.permissions.authorize(request);
+        if (reusableGrant && decision.check) {
+          const reusable = decision.grantOffers
+            ?.find((offer) => offer.scopeDigest === reusableGrant.offer.scopeDigest)
+            ?.policyBindings.find((binding) => sameCapability(binding.capability, request));
+          if (!reusable || reusable.reuseRevision !== reusableGrant.reuseRevision)
+            throw new AgentError('permission_grant_changed');
+          decision = {
+            ...decision,
+            check: {
+              ...decision.check,
+              requireApproval:
+                execution.interactionBinding && scope.previousCheck
+                  ? scope.previousCheck.requireApproval === true
+                  : (reusable.requireApproval ?? decision.check?.requireApproval) === true,
+            },
+          };
+        }
         scope.signal.throwIfAborted();
         await scope.checkFreshness?.();
         if (
@@ -460,7 +697,7 @@ export class InteractionGate {
           throw new AgentError('authorization_check_binding_changed');
         }
         const checked = await this.store.getAuthorizationCheck(reference);
-        riskReviewApproved = checked.riskReviewApproved === true;
+        materialReviewed = checked.materialReviewed === true;
         // A configured checker that failed technically supplied no human decision.
         // Settle the undispatched operation so its caller can continue the Agent Loop.
         if (checked.decision === 'unavailable') {
@@ -498,7 +735,8 @@ export class InteractionGate {
             allowed: true,
             revision: decision.revision,
             checkExecutionId: checked.checkExecutionId,
-            ...(riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+            ...(reusableGrant ? { grant: reusableGrant } : {}),
+            ...(materialReviewed ? { materialReviewed: true as const } : {}),
             ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
             ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
           } satisfies AcceptedAuthorization;
@@ -530,6 +768,14 @@ export class InteractionGate {
         },
       };
     }
+    if (reusableGrant && !decision.check?.requireApproval && checkedGrant)
+      return {
+        ...decision,
+        allowed: true,
+        grant: reusableGrant,
+        checkExecutionId: checkedGrant,
+        ...(materialReviewed ? { materialReviewed: true as const } : {}),
+      };
     if (
       !decision.allowed &&
       !decision.approval &&
@@ -541,10 +787,9 @@ export class InteractionGate {
     const inputDigest = await semanticDigest(request.input);
     const approvalRequest = (): Json => ({
       policy: decision.approval!.request,
-      grants: [...(decision.approval!.grants ?? ['approve_once'])],
-      ...(decision.approval!.commandDigest === undefined
-        ? {}
-        : { commandDigest: decision.approval!.commandDigest }),
+      options: [
+        ...(decision.approval!.options ?? approvalOptions(decision.grantOffers)),
+      ] as unknown as Json,
       definitionId: request.definitionId,
       definitionVersion: request.definitionVersion,
       input: request.input,
@@ -624,14 +869,24 @@ export class InteractionGate {
       interaction.inputDigest !== inputDigest
     )
       throw new AgentError('interaction_binding_changed');
-    if (
-      interaction.answer?.kind === 'approval' &&
-      interaction.answer.grant === 'same_command' &&
-      (!decision.approval?.grants?.includes('same_command') ||
-        (interaction.request as { commandDigest?: string }).commandDigest !==
-          decision.approval.commandDigest)
-    )
-      throw new AgentError('interaction_binding_changed');
+    if (interaction.answer?.kind === 'approval' && interaction.answer.decision === 'approve') {
+      const selected = selectedApprovalOption(interaction.request, interaction.answer.optionId);
+      if (
+        selected.kind === 'scope' &&
+        !decision.grantOffers?.some(
+          (offer) =>
+            offer.scopeDigest === selected.scopeDigest &&
+            offer.policyBindings.every((binding) =>
+              selected.policyBindings.some(
+                (original) =>
+                  sameCapability(original.capability, binding.capability) &&
+                  original.reuseRevision === binding.reuseRevision,
+              ),
+            ),
+        )
+      )
+        throw new AgentError('interaction_binding_changed');
+    }
     await scope.verifyApprovalRequest?.(
       interaction.request,
       decision.approval
@@ -645,26 +900,21 @@ export class InteractionGate {
     const accepted = await this.accept(scope, interaction);
     if (accepted.answer?.kind !== 'approval' || accepted.answer.decision !== 'approve')
       throw new AgentError('permission_denied');
+    const selected = selectedApprovalOption(accepted.request, accepted.answer.optionId);
     const grant =
-      accepted.answer.grant === 'same_command'
+      selected.kind === 'scope'
         ? await this.store.getPermissionGrant({
             expectedStoreId: scope.expectedStoreId,
             executionId: scope.executionId,
-            ...(decision.approval?.commandDigest === undefined
-              ? {}
-              : { commandDigest: decision.approval.commandDigest }),
+            offers: [parseGrantOffer(selected)],
           })
         : null;
-    if (
-      accepted.answer.grant === 'same_command' &&
-      (!decision.approval?.grants?.includes('same_command') || !grant)
-    )
-      throw new AgentError('permission_grant_changed');
+    if (selected.kind === 'scope' && !grant) throw new AgentError('permission_grant_changed');
     return {
       ...(decision.worktreeDecisionSeal
         ? { worktreeDecisionSeal: decision.worktreeDecisionSeal }
         : {}),
-      ...(grant ? { grant } : {}),
+      ...((grant ?? reusableGrant) ? { grant: grant ?? reusableGrant! } : {}),
       allowed: true,
       revision: decision.revision,
       interactionId: accepted.id,
@@ -672,18 +922,8 @@ export class InteractionGate {
       ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
       ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
       ...(checkedGrant ? { checkExecutionId: checkedGrant } : {}),
-      ...(riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+      ...(materialReviewed ? { materialReviewed: true as const } : {}),
     } satisfies AcceptedAuthorization;
-  }
-
-  requester(
-    scope: InteractionScope,
-  ): (input: { kind: 'question' | 'plan_review'; request: Json }) => Promise<Json> {
-    const request = this.informationRequester(scope);
-    return async (input) => {
-      const { answer } = await request(input);
-      return answer.kind === 'question' ? answer.answers : (answer as unknown as Json);
-    };
   }
 
   informationRequester(
@@ -692,6 +932,8 @@ export class InteractionGate {
     let ordinal = 0;
     return async ({ kind, request }) => {
       scope.signal.throwIfAborted();
+      if (scope.informationResourcesHeld)
+        throw new AgentError('interaction_execution_resource_held');
       if (!['question', 'plan_review'].includes(kind))
         throw new AgentError('interaction_kind_invalid');
       if (++ordinal > 64) throw new AgentError('interaction_limit');
@@ -746,14 +988,31 @@ export class InteractionGate {
         request,
       });
       const answered = await this.wait(scope, interaction);
-      const currentPermission = await observePermission();
-      if (
-        (await semanticDigest(currentPermission as unknown as Json)) !==
-        (await semanticDigest(informationPermission as unknown as Json))
-      )
-        throw new AgentError('information_permission_changed');
-      const accepted = await this.accept(scope, answered, true, currentPermission);
-      if (accepted.answer?.kind !== kind) throw new AgentError('interaction_answer_invalid');
+      let accepted: InteractionRecord | undefined;
+      // A saved human answer survives mode changes. Re-observe only a stale
+      // current-control CAS; never repeat the question or retry another guard.
+      for (let observation = 0; observation < 3; observation++) {
+        const currentPermission = await observePermission();
+        try {
+          accepted = await this.accept(
+            scope,
+            answered,
+            true,
+            informationPermission,
+            currentPermission,
+          );
+          break;
+        } catch (error) {
+          if (
+            !(error instanceof AgentError) ||
+            error.code !== 'information_permission_control_changed' ||
+            observation === 2
+          )
+            throw error;
+        }
+      }
+      if (!accepted || accepted.answer?.kind !== kind)
+        throw new AgentError('interaction_answer_invalid');
       if (!accepted.acceptedDecisionRevision) throw new AgentError('interaction_answer_invalid');
       return structuredClone({
         interactionId: accepted.id,

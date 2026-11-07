@@ -245,7 +245,7 @@ test('Request Approval web_fetch waits before DNS/socket; original public approv
       expectedStoreId: f.expectedStoreId,
       commandId: 'approve-fetch',
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await f.done();
     expect(await f.tool()).toMatchObject({ status: 'succeeded' });

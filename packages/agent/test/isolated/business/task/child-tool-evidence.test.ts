@@ -11,7 +11,7 @@ import {
   type ModelRequest,
 } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
-import type { JobDefinition, JobEvent } from '../../../../src/extensions';
+import type { AuthorizationRequest, JobDefinition, JobEvent } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createFileTools, createWorkspaceFiles } from '../../../../src/files';
 import { createPermissionPolicy } from '../../../../src/permissions';
@@ -19,6 +19,8 @@ import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
 import type { childToolEvidence } from '../../../../src/tool-observations';
 import { createShellExtension } from '../../../../src/tools/shell';
+import { createShellToolBehaviors } from '../../../../src/tools/shell-approval';
+import { fixtureReviewBinding } from '../../../fixtures/review-behavior';
 
 const finish = {
   type: 'finish',
@@ -208,7 +210,7 @@ test('child result Sources attribute actual read windows and isolate a same-Sess
           break;
         case 2: {
           expect(body.reason).toBe('events');
-          cursor = body.next_seq;
+          cursor = body.next_cursor;
           const sources = await sourceResults(request, store);
           expect(sources).toHaveLength(1);
           const { message, payload } = sources[0]!;
@@ -288,7 +290,7 @@ test('child result Sources attribute actual read windows and isolate a same-Sess
           break;
         case 5:
           expect(body).toMatchObject({ agent_id: childId, accepted: true, mode: 'new_turn' });
-          events = call('wait_agent_events', { after_seq: cursor, wait_ms: 10000 });
+          events = call('wait_agent_events', { ...(cursor ? { cursor } : {}), wait_ms: 10000 });
           break;
         case 6: {
           expect(body.reason).toBe('events');
@@ -898,7 +900,8 @@ for (const registration of [
           effects: shell ? ['process', 'unknown'] : [],
           ...(shell
             ? {
-                autoReview: 'shell_risk' as const,
+                autoReview: 'check' as const,
+                reviewBehavior: fixtureReviewBinding(behaviors, request),
                 executionScope: scope,
                 autoReviewKey: hash(JSON.stringify({ command: input.command, scope })),
                 commandDigest: hash(
@@ -913,12 +916,34 @@ for (const registration of [
         };
       },
     });
+    const prepareRiskReview = async (request: AuthorizationRequest) => ({
+      material: { command: (request.input as { command: string }).command },
+      fingerprint: hash((request.input as { command: string }).command),
+      reusable: false,
+    });
+    const behaviors =
+      registration === 'auto-approved'
+        ? createShellToolBehaviors({
+            extensions: [selectedShell],
+            snapshot: { fixture: 'controlled-child-shell', host: {} },
+            commandDigest: (request) =>
+              hash(
+                JSON.stringify({
+                  kind: request.kind,
+                  definitionId: request.definitionId,
+                  input: request.input,
+                }),
+              ),
+            prepareRiskReview,
+          })
+        : [];
     const runtime = createRuntime({
       store,
       model: parent,
       modelId: 'parent-fixed',
       modelConcurrency: 1,
       extensions,
+      toolBehaviors: behaviors,
       permissions:
         registration === 'auto-approved'
           ? policy
@@ -934,13 +959,6 @@ for (const registration of [
               version: '1',
               modelId: 'review-fixed',
               timeoutMs: 5000,
-              async prepareRiskReview(request) {
-                return {
-                  material: { command: (request.input as { command: string }).command },
-                  fingerprint: hash((request.input as { command: string }).command),
-                  reusable: false,
-                };
-              },
               model: createFixedModel(
                 Array.from({ length: 2 }, () => [
                   {

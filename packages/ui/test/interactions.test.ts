@@ -18,13 +18,17 @@ export const card: Interaction = {
   inputDigest: 'digest',
   policyRevision: 'policy',
   requiredRefs: [],
-  request: { path: 'actual.txt' },
+  request: {
+    path: 'actual.txt',
+    options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
+  },
   answer: null,
   revision: '7',
   acceptedDecisionRevision: null,
   state: 'pending',
 };
 function nodes(element: unknown): Array<{ type: unknown; props: Record<string, unknown> }> {
+  if (Array.isArray(element)) return element.flatMap(nodes);
   if (!element || typeof element !== 'object') return [];
   const node = element as { type: unknown; props: Record<string, unknown> };
   const children = node.props?.children;
@@ -35,7 +39,7 @@ test('pure React element projection preserves true child and exact request; read
   expect(JSON.stringify(element)).toContain('child');
   expect(JSON.stringify(element)).toContain('actual.txt');
   const buttons = nodes(element).filter((node) => node.type === Button);
-  expect(buttons.map((button) => button.props.children)).toEqual(['Approve once', 'Deny']);
+  expect(buttons.map((button) => button.props.children)).toEqual(['仅此次', 'Deny']);
   expect(buttons.every((button) => button.props.disabled)).toBe(true);
 });
 test('submitting panel persists and disables offered approvals; saved plan is display only', () => {

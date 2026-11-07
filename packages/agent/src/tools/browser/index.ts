@@ -18,6 +18,11 @@ import { canonicalJson } from '../../json';
 import { AgentError } from '../../storage/types';
 import type { BrowserHumanCoordinator } from './human-async';
 import {
+  browserElementReference,
+  browserPageReference,
+  readBrowserReference,
+} from './model-reference';
+import {
   asJson,
   type BrowserCommand,
   type BrowserController,
@@ -40,6 +45,7 @@ export {
 export { createBrowserExecution } from './execute';
 export { browserHumanQuestion, createBrowserHumanRequest } from './human';
 export { createBrowserHumanCoordinator } from './human-async';
+export { browserPageReference } from './model-reference';
 
 export {
   BrowserTransportError,
@@ -71,6 +77,8 @@ export const browserToolIds = [
   'browser.scroll',
   'browser.close',
 ] as const;
+export const browserModelIntentKey = (executionId: string) =>
+  `browser-${createHash('sha256').update(executionId).digest('hex').slice(0, 48)}`;
 const intentType = 'application/vnd.kite.browser-intent+json';
 const referenceType = 'application/vnd.kite.browser-reference+json';
 const objectSchema = (properties: Record<string, Json>, required: string[]) => ({
@@ -524,12 +532,97 @@ export function createBrowserExtension(options: {
   ];
   if (options.human)
     actions.push(sealBrowserRevocationAction(options.human.response, 'human-stop'));
+  const referenceSchema = { type: 'string', minLength: 1, maxLength: 4096 };
+  const modelTools = tools.map((tool): ToolDefinition => {
+    const name = tool.id.slice('browser.'.length);
+    const element = name === 'click' || name === 'fill';
+    const originalProperties = tool.inputSchema.properties as Record<string, Json>;
+    const fields = Object.fromEntries(
+      Object.entries(originalProperties).filter(
+        ([key]) => !['key', 'browserId', 'generation', 'ref', 'seq'].includes(key),
+      ),
+    );
+    if (name !== 'open') fields[element ? 'elementRef' : 'pageRef'] = referenceSchema;
+    const publicSchema = objectSchema(fields, Object.keys(fields));
+    return {
+      ...tool,
+      model: { ...tool.model!, inputSchema: publicSchema },
+      description: `${name === 'open' ? 'Open the requested URL and return page_ref.' : element ? 'Use the exact element_ref from a successful snapshot; stale page, generation or sequence is refused.' : 'Use the exact page_ref from this task. snapshot returns element_ref values for input.'} Host owns the intent key. Never replay unknown effects. ${name === 'request_human' ? 'Explain the blocker in reason; human ownership and continuation remain mandatory.' : ''}`,
+      inputSchema: { anyOf: [tool.inputSchema, publicSchema] },
+      async execute(input, context) {
+        const raw = record(input);
+        if (raw.key !== undefined) return tool.execute(input, context); // Explicit trusted internal calls retain their sealed identity.
+        const own = await context.getExecution(context.executionId);
+        if (
+          !own?.originStoreId ||
+          !context.runId ||
+          own.runId !== context.runId ||
+          own.sessionId !== context.sessionId
+        )
+          return {
+            outcome: 'failed',
+            content: 'tool_reference_scope_denied',
+            details: { code: 'tool_reference_scope_denied', adapterAttempted: false },
+          };
+        const scope = {
+          storeId: own.originStoreId,
+          sessionId: context.sessionId,
+          runId: context.runId,
+        };
+        let resolved: Record<string, Json> = {
+          ...raw,
+          key: browserModelIntentKey(context.executionId),
+        };
+        if (name !== 'open') {
+          const value = raw[element ? 'elementRef' : 'pageRef'];
+          try {
+            resolved = { ...resolved, ...readBrowserReference(value!, scope, element) };
+          } catch (error) {
+            if (!(error instanceof AgentError)) throw error;
+            return {
+              outcome: 'failed',
+              content: error.code,
+              details: { code: error.code, adapterAttempted: false },
+            };
+          }
+          delete resolved.pageRef;
+          delete resolved.elementRef;
+        }
+        const result = await tool.execute(resolved, context);
+        if (result.outcome !== 'succeeded' || name === 'close') return result;
+        const details: Record<string, Json> = {
+          ...(name === 'open'
+            ? {}
+            : { browserId: resolved.browserId!, generation: resolved.generation ?? null }),
+          ...record(result.details!),
+        };
+        details.page_ref = browserPageReference(scope, {
+          browserId: String(details.browserId),
+          generation: typeof details.generation === 'string' ? details.generation : null,
+        });
+        if (name === 'snapshot') {
+          const entries = Array.isArray(details.elements) ? details.elements : details.annotations;
+          if (Array.isArray(entries))
+            details.element_refs = entries.map((entry) => ({
+              ...record(entry),
+              element_ref: browserElementReference(scope, {
+                browserId: String(details.browserId),
+                generation: String(details.generation),
+                seq: String(details.seq),
+                ref: String(record(entry).ref),
+              }),
+            }));
+        }
+        return { ...result, details, content: canonicalJson(details) };
+      },
+    };
+  });
   return {
     id: browserExtensionId,
     version: '1',
     apiMajor: 1,
     ...(options.human ? { conditions: options.human.conditions } : {}),
-    tools,
+    tools: modelTools,
     jobs: [controller.job, ...(options.human ? [options.human.job] : [])],
     actions,
     records: [

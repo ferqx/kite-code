@@ -39,7 +39,6 @@ const card = {
     version: '1',
     digest: 'plan-digest',
     content: 'Full original attachment required',
-    allowedModes: ['auto', 'accept_edits'],
     policy: {
       review: {
         kind: 'artifact',
@@ -288,7 +287,7 @@ test.each([
     generation: 1,
     interactionId: card.id,
     revision: card.revision,
-    answer: { kind: 'plan_review', decision: 'approve', mode: 'auto' },
+    answer: { kind: 'plan_review', decision: 'approve' },
   } as const;
   try {
     await main.invoke({ method: 'attach' });

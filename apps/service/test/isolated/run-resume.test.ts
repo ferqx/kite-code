@@ -238,7 +238,7 @@ test('SIGKILL with complete original Model and pending approval resumes original
       expectedStoreId: ready.storeId,
       commandId: 'answer-original',
       expectedRevision: ready.interaction.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const deadline = Date.now() + 5000;
     for (;;) {

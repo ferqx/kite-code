@@ -7,6 +7,11 @@ import type { PermissionDecision } from '../../../src/extensions';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { AutoAuthorizationEvidence } from '../../../src/storage/port';
+import {
+  ensureFixtureAuthorizationCheck,
+  fixtureCheckResult,
+  resolveFixtureAutoAuthorization,
+} from '../../fixtures/review-behavior';
 
 const checker = { id: 'checker', version: '1', modelId: 'reviewer' };
 const operationKey = 'a'.repeat(64);
@@ -69,7 +74,10 @@ async function fixture() {
   const run = await store.startRun({
     ...owned,
     commandId: 'work',
-    configuration: { tools: [{ id: 'shell.execute', version: '1', extensionId: 'builtin.shell' }] },
+    configuration: {
+      authorizationCheck: { ...checker, timeoutMs: 3000 },
+      tools: [{ id: 'shell.execute', version: '1', extensionId: 'builtin.shell' }],
+    },
   });
   const source = { kind: 'host_intent', commandId: 'work' };
   const ids = new Map<string, string>();
@@ -119,7 +127,7 @@ async function fixture() {
   ) {
     const now = Date.now(),
       timeout = { startedAt: now - 50, deadlineAt: future ? now + 60000 : now - 1 };
-    const fact = await store.ensureAuthorizationCheck({
+    const fact = await ensureFixtureAuthorizationCheck(store, {
       ...owned,
       targetExecutionId: ids.get(id) ?? id,
       checker,
@@ -165,18 +173,23 @@ async function fixture() {
         ...owned,
         executionId: fact.execution.id,
         status: 'succeeded',
-        result: {
-          content: JSON.stringify({ decision: answer, reason: 'Exact fixture decision' }),
-          toolCalls: [],
-          finishReason: 'stop',
-          usage: {},
-        },
+        result: await fixtureCheckResult(
+          store,
+          fact.execution.id,
+          {
+            content: JSON.stringify({ decision: answer, reason: 'Exact fixture decision' }),
+            toolCalls: [],
+            finishReason: 'stop',
+            usage: {},
+          },
+          { decision: answer, reason: 'Exact fixture decision' },
+        ),
       });
     }
     return fact;
   }
   function resolve(id: string, current = decision(), timedOutCheckId?: string) {
-    return store.resolveAutoAuthorization({
+    return resolveFixtureAutoAuthorization(store, {
       ...owned,
       targetExecutionId: ids.get(id) ?? id,
       decision: current,

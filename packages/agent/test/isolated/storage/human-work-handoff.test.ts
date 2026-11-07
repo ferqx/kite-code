@@ -156,7 +156,11 @@ test('real raw independent input safely closes only A technical Run, retires pla
       policyRevision: 'policy',
       requiredRefs: [],
       source: { kind: 'model_decision', modelExecutionId: 'model' },
-      request: { grants: ['approve_once'] },
+      request: {
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
+      },
     });
     const raw = await f.register();
     const decision = await f.store.decideHumanInput({

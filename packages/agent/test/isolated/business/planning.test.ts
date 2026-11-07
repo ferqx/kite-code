@@ -57,6 +57,7 @@ async function fixture(
     args: Parameters<NecessaryConditions['evaluate']>,
     f: Awaited<ReturnType<typeof fixture>>,
   ) => Promise<void>,
+  extraExtensions: readonly Extension[] = [],
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-business-planning-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
@@ -174,6 +175,7 @@ async function fixture(
           },
         ],
       },
+      ...extraExtensions,
     ],
     permissions: {
       async authorize() {
@@ -229,6 +231,35 @@ async function fixture(
     async record(key: string) {
       return store.getExtensionRecord({ sessionId: 's', extensionId: planningExtensionId, key });
     },
+    async planRef(plan: Record<string, Json>): Promise<string> {
+      for (const row of (await store.listExecutions('s')).reverse()) {
+        const data = (row.result as { details?: Record<string, Json> } | null)?.details;
+        const original = (data?.current ?? data) as Record<string, Json> | undefined;
+        if (
+          row.status === 'succeeded' &&
+          typeof data?.plan_ref === 'string' &&
+          original?.planId === plan.planId &&
+          original?.version === plan.version &&
+          original?.digest === plan.digest
+        )
+          return data.plan_ref;
+      }
+      throw Error('fixture_exact_plan_reference_missing');
+    },
+    async progressRef(revision: string | null): Promise<string | null> {
+      if (revision === null) return null;
+      for (const row of (await store.listExecutions('s')).reverse()) {
+        const data = (row.result as { details?: Record<string, Json> } | null)?.details;
+        const original = (data?.progress ?? data) as Record<string, Json> | undefined;
+        if (
+          row.status === 'succeeded' &&
+          typeof data?.progress_ref === 'string' &&
+          original?.revision === revision
+        )
+          return data.progress_ref;
+      }
+      throw Error('fixture_exact_progress_reference_missing');
+    },
     async runId() {
       return (await store.listExecutions('s')).find((x) => x.runId !== null)!.runId!;
     },
@@ -277,12 +308,103 @@ const plan = (version: number | null) => ({
   body: 'Harmless precise task',
   steps: [{ id: 'a', title: 'effect' }],
 });
-const modelPlan = (version: number | null) => ({
+const modelPlan = (_version: number | null) => ({
   plan_id: 'p',
-  expected_version: version,
   title: 'Plan',
   body: 'Harmless precise task',
   steps: [{ id: 'a', title: 'effect' }],
+});
+
+test('model progress binds the actual current Run and rejects a supplied Run instead of correcting its identity', async () => {
+  const f = await fixture({ requirePlan: true }, async (step, current) => {
+    if (step === 0) return call('write_plan', modelPlan(null));
+    const plan = (await current.record('plan.current'))!.value as Record<string, Json>;
+    if (step === 1)
+      return call('request_plan_review', {
+        plan_ref: await current.planRef({
+          planId: plan.planId!,
+          version: plan.version!,
+          digest: plan.digest!,
+        }),
+      });
+    if (step === 2) return call('fixture.effect');
+    if (step >= 3 && step <= 5) {
+      if (step === 5) {
+        const feedback = current.modelRequests
+          .at(-1)!
+          .messages.filter((m) => m.role === 'tool')
+          .at(-1)!;
+        expect(feedback.content).toContain("must have required property 'plan_ref'");
+      }
+      const effect = (await current.store.listExecutions('s')).find(
+        (execution) => execution.definitionId === 'fixture.effect',
+      )!;
+      return call('update_plan_progress', {
+        ...(step === 3 ? { run_id: 'forged-current-run' } : {}),
+        ...(step === 4 ? {} : { plan_ref: await current.planRef(plan) }),
+        progress_ref: null,
+        step_id: 'a',
+        status: 'completed',
+        execution_id: effect.id,
+        complete_plan: true,
+      });
+    }
+    return [finish];
+  });
+  try {
+    await f.submit();
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
+    expect(await f.done()).toMatchObject({ status: 'completed' });
+    const schema = f.modelRequests[0]!.tools.find(
+      (tool) => tool.id === 'update_plan_progress',
+    )!.inputSchema;
+    expect(schema.properties).not.toHaveProperty('run_id');
+    const updates = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.definitionId === 'planning.update',
+    );
+    expect(updates).toHaveLength(3);
+    expect(updates[0]).toMatchObject({
+      status: 'failed',
+      result: { details: { code: 'invalid_tool_arguments' } },
+    });
+    expect(updates[1]).toMatchObject({
+      status: 'failed',
+      result: {
+        details: {
+          code: 'invalid_tool_arguments',
+          schemaError: "#/required: must have required property 'plan_ref'",
+        },
+      },
+    });
+    expect(updates[2]).toMatchObject({ status: 'succeeded', runId: await f.runId() });
+    expect(updates[2]!.input).not.toHaveProperty('runId');
+    expect((await f.record('progress/p/1'))!.value).toMatchObject({
+      runId: await f.runId(),
+      completePlan: true,
+    });
+    expect(f.effects).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('canonical progress keeps explicit Run validation and the user Action still requires its original Run field', async () => {
+  const extension = createPlanningValidation().extension;
+  const tool = extension.tools!.find((item) => item.id === 'planning.update')!;
+  const action = extension.actions!.find((item) => item.id === 'planning.update')!;
+  expect(action.inputSchema.required).toContain('runId');
+  const context = {
+    executionId: 'actual-tool',
+    runId: 'actual-child-run',
+    getExecution: async () => ({ id: 'actual-tool', runId: 'actual-child-run' }),
+    getRun: async () => {
+      throw Error('wrong_run_must_fail_before_further_reads');
+    },
+  } as unknown as ToolContext;
+  expect(await tool.execute({ runId: 'parent-run' }, context)).toMatchObject({
+    outcome: 'failed',
+    content: 'planning_run_mismatch',
+  });
 });
 
 test('actual plan review feedback reaches the next Model input and revised v2 needs exact new approval before effects', async () => {
@@ -293,13 +415,22 @@ test('actual plan review feedback reaches the next Model input and revised v2 ne
     if (step === 1 || step === 5) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       return call('request_plan_review', {
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
       });
     }
     if (step === 2 || step === 4 || step === 6) return call('fixture.effect');
-    if (step === 3) return call('write_plan', { ...modelPlan(1), body: feedback });
+    if (step === 3)
+      return call('write_plan', {
+        ...modelPlan(null),
+        expected_plan_ref: await f.planRef(
+          (await f.record('plan.current'))!.value as Record<string, Json>,
+        ),
+        body: feedback,
+      });
     if (step === 7) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       const effect = (await f.store.listExecutions('s')).find(
@@ -307,11 +438,12 @@ test('actual plan review feedback reaches the next Model input and revised v2 ne
           execution.definitionId === 'fixture.effect' && execution.status === 'succeeded',
       )!;
       return call('update_plan_progress', {
-        run_id: await f.runId(),
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
-        expected_progress_revision: null,
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
+        progress_ref: null,
         step_id: 'a',
         status: 'completed',
         execution_id: effect.id,
@@ -341,13 +473,11 @@ test('actual plan review feedback reaches the next Model input and revised v2 ne
     await f.answer({
       kind: 'plan_review',
       decision: 'approve',
-      mode: 'auto',
       feedback: approvalFeedback,
     });
     const run = await f.done();
     expect(lastResult(6)).toEqual({
       status: 'approved',
-      mode: 'auto',
       decision: 'approve',
       feedback: approvalFeedback,
     });
@@ -365,20 +495,71 @@ test('actual plan review feedback reaches the next Model input and revised v2 ne
   }
 });
 
-test('actual plan review denial and empty revision preserve feedback without approval; invalid answers cannot grant effects', async () => {
+test('denied plan preserves its receipt and stops the original work without another Model', async () => {
+  const f = await fixture({ requirePlan: true, completionGuidance: true }, async (step, f) => {
+    if (step === 0) return call('write_plan', modelPlan(null));
+    if (step === 1) {
+      const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+      return call('request_plan_review', {
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
+      });
+    }
+    if (step > 3) throw new Error('fixture_duplicate_completion_model');
+    return [finish];
+  });
+  try {
+    await f.submit();
+    const card = await f.answer({ kind: 'plan_review', decision: 'deny' });
+    const settled = await f.done();
+    const run = await eventually(async () => {
+      const value = await f.store.getRun(settled!.id);
+      return value && !value.isActive ? value : null;
+    });
+    expect(run.status).toBe('cancelled');
+    expect(f.steps).toBe(2);
+    expect(f.effects).toBe(0);
+    expect(await f.record(`run/${run!.id}/approval/p/1`)).toBeNull();
+    expect(await f.runtime.getInteraction({ ...f.base, interactionId: card.id })).toMatchObject({
+      state: 'answered',
+      answer: { kind: 'plan_review', decision: 'deny' },
+      acceptedDecisionRevision: expect.any(String),
+    });
+    const review = (await f.store.listExecutions('s')).find(
+      (row) => row.definitionId === 'planning.review',
+    )!;
+    expect(review).toMatchObject({
+      status: 'succeeded',
+      result: {
+        content: '用户拒绝了该计划，已停止本轮对话',
+        details: { status: 'not_approved', decision: 'deny' },
+        control: { kind: 'stop_work' },
+      },
+    });
+    expect((await f.store.listExecutions('s')).every((e) => e.status === 'succeeded')).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('actual plan denial stops its work while empty revision preserves next-Model feedback; invalid answers grant no effects', async () => {
   for (const answer of [
     { kind: 'plan_review', decision: 'deny', feedback: '拒绝当前方案\n e\u0301' },
     { kind: 'plan_review', decision: 'revise', feedback: '' },
-    { kind: 'plan_review', decision: 'approve', mode: 'unknown', feedback: '不能授权' },
   ] as const) {
     const f = await fixture({ requirePlan: true }, async (step, f) => {
       if (step === 0) return call('write_plan', modelPlan(null));
       if (step === 1) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         return call('request_plan_review', {
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
+          plan_ref: await f.planRef({
+            planId: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+          }),
         });
       }
       return step === 2 ? call('fixture.effect') : [finish];
@@ -394,7 +575,7 @@ test('actual plan review denial and empty revision preserve feedback without app
           presentationSessionId: 's',
           interactionId: pending.id,
           expectedRevision: pending.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       } catch (error) {
         invalidAnswer = error;
@@ -402,15 +583,24 @@ test('actual plan review denial and empty revision preserve feedback without app
       await f.answer(answer);
       const run = await f.done();
       expect((invalidAnswer as { code?: string })?.code).toBe('interaction_answer_invalid');
-      const reviewResult = JSON.parse(
-        f.modelRequests[2]!.messages.filter((message) => message.role === 'tool').at(-1)!.content,
-      );
-      expect(reviewResult).toEqual(
-        answer.decision === 'approve'
-          ? { status: 'not_approved' }
-          : { status: 'not_approved', decision: answer.decision, feedback: answer.feedback },
-      );
-      expect(run!.status).toBe('failed');
+      const reviewResult =
+        answer.decision === 'deny'
+          ? (
+              (await f.store.listExecutions('s')).find(
+                (row) => row.definitionId === 'planning.review',
+              )!.result as Record<string, Json>
+            ).details
+          : JSON.parse(
+              f.modelRequests[2]!.messages.filter((message) => message.role === 'tool').at(-1)!
+                .content,
+            );
+      expect(reviewResult).toEqual({
+        status: 'not_approved',
+        decision: answer.decision,
+        feedback: answer.feedback,
+      });
+      expect(run!.status).toBe(answer.decision === 'deny' ? 'cancelled' : 'failed');
+      if (answer.decision === 'deny') expect(f.modelRequests).toHaveLength(2);
       expect(f.effects).toBe(0);
       expect(await f.record(`run/${run!.id}/approval/p/1`)).toBeNull();
       expect((await f.record('plan.current'))!.value).toMatchObject({ version: 1 });
@@ -420,7 +610,7 @@ test('actual plan review denial and empty revision preserve feedback without app
   }
 }, 20000);
 
-test('actual plan review binds mode/current digest; v2 invalidates v1 and only fresh user review permits the second effect', async () => {
+test('actual plan review binds the original decision/current digest; v2 invalidates v1 and only fresh user review permits the second effect', async () => {
   for (const scenario of ['no-review', 'new-receipt', 'old-receipt'] as const) {
     const reviewV2 = scenario !== 'no-review';
     const f = await fixture({ requirePlan: true }, async (step, f) => {
@@ -428,24 +618,33 @@ test('actual plan review binds mode/current digest; v2 invalidates v1 and only f
       if (step === 1 || (reviewV2 && step === 4)) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         return call('request_plan_review', {
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
+          plan_ref: await f.planRef({
+            planId: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+          }),
         });
       }
       if (step === 2 || step === (reviewV2 ? 5 : 4)) return call('fixture.effect');
-      if (step === 3) return call('write_plan', modelPlan(1));
+      if (step === 3)
+        return call('write_plan', {
+          ...modelPlan(null),
+          expected_plan_ref: await f.planRef(
+            (await f.record('plan.current'))!.value as Record<string, Json>,
+          ),
+        });
       if (reviewV2 && step === 6) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         const effects = (await f.store.listExecutions('s')).filter(
           (e) => e.definitionId === 'fixture.effect' && e.status === 'succeeded',
         );
         return call('update_plan_progress', {
-          run_id: await f.runId(),
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
-          expected_progress_revision: null,
+          plan_ref: await f.planRef({
+            planId: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+          }),
+          progress_ref: null,
           step_id: 'a',
           status: 'completed',
           execution_id: effects.find((e) =>
@@ -465,14 +664,14 @@ test('actual plan review binds mode/current digest; v2 invalidates v1 and only f
       const old = await f.answer({
         kind: 'plan_review',
         decision: 'approve',
-        mode: 'accept_edits',
       });
-      expect(old.request).toMatchObject({ version: '1', allowedModes: ['auto', 'accept_edits'] });
+      expect(old.request).toMatchObject({ version: '1' });
+      expect(old.request).not.toHaveProperty('allowedModes');
       expect(JSON.parse((old.request as { content: string }).content).body).toBe(
         'Harmless precise task',
       );
       expect((old.request as Record<string, Json>).plan).toBeUndefined();
-      if (reviewV2) await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+      if (reviewV2) await f.answer({ kind: 'plan_review', decision: 'approve' });
       const run = await f.done();
       expect(run!.status).toBe(scenario === 'new-receipt' ? 'completed' : 'failed');
       expect(f.effects).toBe(reviewV2 ? 2 : 1);
@@ -485,11 +684,12 @@ test('actual plan review binds mode/current digest; v2 invalidates v1 and only f
           runId: run!.id,
           steps: { a: { status: 'completed' } },
         });
-      const approval = (await f.record('approval/p/1'))!.value as {
-        proof: { interactionId: string; answer: { mode: string } };
+      const approval = (await f.record(`run/${run!.id}/approval/p/1`))!.value as {
+        proof: { interactionId: string; answer: { decision: string } };
       };
       expect(approval.proof.interactionId).toBe(old.id);
-      expect(approval.proof.answer.mode).toBe('accept_edits');
+      expect(approval.proof.answer.decision).toBe('approve');
+      expect(approval.proof.answer).not.toHaveProperty('mode');
       expect((await f.record('plan.current'))!.value).toMatchObject({ version: 2 });
       expect(
         (await f.runtime.getInteraction({
@@ -511,9 +711,11 @@ test('compensation requires prior completion and a distinct real receipt, preser
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       if (step === 1)
         return call('request_plan_review', {
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
+          plan_ref: await f.planRef({
+            planId: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+          }),
         });
       if (step === 2 || (scenario === 'distinct' && step === 4)) return call('fixture.effect');
       if (
@@ -530,11 +732,12 @@ test('compensation requires prior completion and a distinct real receipt, preser
               .receipt.executionId
           : null;
         return call('update_plan_progress', {
-          run_id: await f.runId(),
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
-          expected_progress_revision: progress?.revision ?? null,
+          plan_ref: await f.planRef({
+            planId: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+          }),
+          progress_ref: await f.progressRef(progress?.revision ?? null),
           step_id: 'a',
           status: step === 3 && scenario !== 'no-prior' ? 'completed' : 'compensated',
           execution_id:
@@ -548,7 +751,7 @@ test('compensation requires prior completion and a distinct real receipt, preser
     });
     try {
       await f.submit();
-      await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+      await f.answer({ kind: 'plan_review', decision: 'approve' });
       expect((await f.done())!.status).toBe('failed');
       expect(f.effects).toBe(scenario === 'distinct' ? 2 : 1);
       const record = await f.record('progress/p/1');
@@ -612,7 +815,12 @@ test('planning.write retains its original pointer CAS when a real nested writer 
                             kind: 'tool',
                             definitionId: 'planning.write',
                             definitionVersion: '1',
-                            input: { ...plan(null), planId: 'new' },
+                            input: {
+                              planId: 'new',
+                              title: 'Plan',
+                              body: 'Harmless precise task',
+                              steps: [{ id: 'a', title: 'effect' }],
+                            },
                           },
                         });
                         nestedExecutionId = (await context.operations.wait(operation)).id;
@@ -664,11 +872,8 @@ test('planning.update preserves a concurrent same-namespace progress update inst
       if (step === 1) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         return call('update_plan_progress', {
-          run_id: runId,
-          plan_id: 'p',
-          version: 1,
-          digest: current.digest!,
-          expected_progress_revision: null,
+          plan_ref: await f.planRef({ planId: 'p', version: 1, digest: current.digest! }),
+          progress_ref: null,
           step_id: 'a',
           status: 'running',
         });
@@ -835,9 +1040,11 @@ test('actual accepted plan approval is exclusive to its original Run and old com
     if (step === 1) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       return call('request_plan_review', {
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
       });
     }
     if (step === 2 || step === 4) return call('fixture.effect');
@@ -857,7 +1064,7 @@ test('actual accepted plan approval is exclusive to its original Run and old com
   };
   try {
     await f.submit('first');
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'accept_edits' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     const first = await f.done('first');
     expect(f.effects).toBe(1);
     const state = await f.business.readPlanningState(read, {
@@ -866,7 +1073,6 @@ test('actual accepted plan approval is exclusive to its original Run and old com
     });
     expect(state).toMatchObject({
       status: 'approved',
-      mode: 'accept_edits',
       planId: 'p',
       version: 1,
     });
@@ -916,9 +1122,10 @@ test('a real runless user Action review remains readable and cannot grant a late
       version: current.version!,
       digest: current.digest!,
     });
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     await f.runtime.waitForCommand('review', { timeoutMs: 5000 });
-    expect((await f.record('approval/p/1'))!.value).toMatchObject({ runId: null });
+    expect((await f.record('approval.current/p/1'))!.value).toMatchObject({ runId: null });
+    expect(await f.record('approval/p/1')).toBeNull();
     await f.submit();
     const run = await f.done();
     expect(run!.status).toBe('failed');
@@ -938,9 +1145,11 @@ test('an accepted original plan cannot dispatch effects after its actual conditi
       if (step === 1) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         return call('request_plan_review', {
-          plan_id: current.planId!,
-          version: current.version!,
-          digest: current.digest!,
+          plan_ref: await f.planRef({
+            planId: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+          }),
         });
       }
       if (step === 2) return call('fixture.effect');
@@ -967,7 +1176,7 @@ test('an accepted original plan cannot dispatch effects after its actual conditi
   );
   try {
     await f.submit();
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     expect((await f.done())!.status).toBe('failed');
     expect(drifted).toBe(true);
     expect(f.effects).toBe(0);
@@ -988,9 +1197,11 @@ test('a complete UTF8 and escaped plan above 300KiB is reviewed through its orig
     if (step === 1) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       return call('request_plan_review', {
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
       });
     }
     if (step === 2) return call('fixture.effect');
@@ -1000,11 +1211,12 @@ test('a complete UTF8 and escaped plan above 300KiB is reviewed through its orig
         (execution) => execution.definitionId === 'fixture.effect',
       )!;
       return call('update_plan_progress', {
-        run_id: await f.runId(),
-        plan_id: current.planId!,
-        version: current.version!,
-        digest: current.digest!,
-        expected_progress_revision: null,
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
+        progress_ref: null,
         step_id: 'a',
         status: 'completed',
         execution_id: effect.id,
@@ -1042,7 +1254,7 @@ test('a complete UTF8 and escaped plan above 300KiB is reviewed through its orig
     expect(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(full.content)).body).toBe(
       body,
     );
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     const run = await f.done();
     expect(run!.status).toBe('completed');
     expect(f.effects).toBe(1);
@@ -1059,7 +1271,7 @@ test('a complete UTF8 and escaped plan above 300KiB is reviewed through its orig
         runId: run!.id,
         originStoreId: f.base.expectedStoreId,
       }),
-    ).toMatchObject({ status: 'approved', mode: 'auto' });
+    ).toMatchObject({ status: 'approved' });
     expect((await f.record(`review.body/${card.executionId}`))!.value).toMatchObject({
       planRecordRevision: '1',
       bodyRecordRevision: '1',
@@ -1132,9 +1344,11 @@ const attachmentPlanScript: Script = async (step, f) => {
   if (step === 1) {
     const current = (await f.record('plan.current'))!.value as Record<string, Json>;
     return call('request_plan_review', {
-      plan_id: current.planId!,
-      version: current.version!,
-      digest: current.digest!,
+      plan_ref: await f.planRef({
+        planId: current.planId!,
+        version: current.version!,
+        digest: current.digest!,
+      }),
     });
   }
   if (step === 2) return call('fixture.effect');
@@ -1168,7 +1382,7 @@ test('original accepted Artifact request cannot be rebound by hash/ref/foreign s
       } finally {
         db.close();
       }
-      await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+      await f.answer({ kind: 'plan_review', decision: 'approve' });
       const run = await f.done();
       expect(run!.status).toBe('failed');
       expect(f.effects).toBe(0);
@@ -1213,7 +1427,7 @@ test('physically incomplete original attachment and foreign public scope cannot 
       incompleteRejected = true;
     }
     expect(incompleteRejected).toBe(true);
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     const run = await f.done();
     expect(run!.status).toBe('failed');
     expect(f.effects).toBe(0);
@@ -1299,7 +1513,7 @@ test('after actual accepted full-plan proof read, concurrent seal revision commi
   );
   try {
     await f.submit();
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     const run = await f.done();
     expect(run!.status).toBe('failed');
     expect(drifted).toBe(true);
@@ -1316,18 +1530,21 @@ test('historical completed plan receipt retains original approval source while c
     const pointer = (await f.record('plan.current'))!.value as Record<string, Json>;
     if (step === 1)
       return call('request_plan_review', {
-        plan_id: pointer.planId!,
-        version: pointer.version!,
-        digest: pointer.digest!,
+        plan_ref: await f.planRef({
+          planId: pointer.planId!,
+          version: pointer.version!,
+          digest: pointer.digest!,
+        }),
       });
     if (step === 2) return call('fixture.effect');
     if (step === 3)
       return call('update_plan_progress', {
-        run_id: await f.runId(),
-        plan_id: pointer.planId!,
-        version: pointer.version!,
-        digest: pointer.digest!,
-        expected_progress_revision: null,
+        plan_ref: await f.planRef({
+          planId: pointer.planId!,
+          version: pointer.version!,
+          digest: pointer.digest!,
+        }),
+        progress_ref: null,
         step_id: 'a',
         status: 'completed',
         execution_id: (await f.store.listExecutions('s')).find(
@@ -1363,7 +1580,7 @@ test('historical completed plan receipt retains original approval source while c
   };
   try {
     await f.submit('first');
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'accept_edits' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     const original = (await f.done('first'))!;
     expect(original.status).toBe('completed');
     await f.submit('next');
@@ -1424,9 +1641,11 @@ test('plan progress updates preserve sibling tools and original successful recei
     const current = (await currentFixture.record('plan.current'))!.value as Record<string, Json>;
     if (step === 1)
       return call('request_plan_review', {
-        plan_id: 'p',
-        version: current.version!,
-        digest: current.digest!,
+        plan_ref: await currentFixture.planRef({
+          planId: 'p',
+          version: current.version!,
+          digest: current.digest!,
+        }),
       });
     if (step === 2) return call('fixture.effect');
     if (step === 3 || step === 4) {
@@ -1436,11 +1655,12 @@ test('plan progress updates preserve sibling tools and original successful recei
       )!;
       const progress = await currentFixture.record('progress/p/1');
       const update = call('update_plan_progress', {
-        run_id: await currentFixture.runId(),
-        plan_id: 'p',
-        version: current.version!,
-        digest: current.digest!,
-        expected_progress_revision: progress?.revision ?? null,
+        plan_ref: await currentFixture.planRef({
+          planId: 'p',
+          version: current.version!,
+          digest: current.digest!,
+        }),
+        progress_ref: await currentFixture.progressRef(progress?.revision ?? null),
         step_id: 'a',
         status: 'completed',
         execution_id: original.id,
@@ -1453,7 +1673,7 @@ test('plan progress updates preserve sibling tools and original successful recei
   });
   try {
     await f.submit();
-    await f.answer({ kind: 'plan_review', decision: 'approve', mode: 'auto' });
+    await f.answer({ kind: 'plan_review', decision: 'approve' });
     expect((await f.done())!.status).toBe('completed');
     expect(f.effects).toBe(2);
     const executions = await f.store.listExecutions('s');
@@ -1477,5 +1697,268 @@ test('plan progress updates preserve sibling tools and original successful recei
     }
   } finally {
     await f.close();
+  }
+});
+
+test('ordinary plan saving does not require approval, but an explicit implementation review registers its original Run gate', async () => {
+  const readOnlyDefinitions = [
+    { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '5' },
+  ];
+  for (const decision of [null, 'deny', 'approve'] as const) {
+    const review = decision !== null;
+    const f = await fixture(
+      {},
+      async (step, f) => {
+        if (step === 0) return call('write_plan', modelPlan(null));
+        if (review && step === 1) {
+          const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+          return call('request_plan_review', {
+            plan_ref: await f.planRef({
+              planId: current.planId!,
+              version: current.version!,
+              digest: current.digest!,
+            }),
+          });
+        }
+        if (step === (review ? 2 : 1)) return call('fixture.effect');
+        if (decision === 'approve' && step === 3) {
+          const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+          const effect = (await f.store.listExecutions('s')).find(
+            (e) => e.definitionId === 'fixture.effect' && e.status === 'succeeded',
+          )!;
+          return call('update_plan_progress', {
+            plan_ref: await f.planRef({
+              planId: current.planId!,
+              version: current.version!,
+              digest: current.digest!,
+            }),
+            progress_ref: null,
+            step_id: 'a',
+            status: 'completed',
+            execution_id: effect.id,
+            complete_plan: true,
+          });
+        }
+        return [finish];
+      },
+      true,
+      undefined,
+      { readOnlyDefinitions },
+    );
+    try {
+      await f.submit();
+      if (review) {
+        const card = await f.pending(),
+          runId = await f.runId();
+        expect(card.kind).toBe('plan_review');
+        expect(card.request).not.toHaveProperty('allowedModes');
+        expect((await f.store.getRun(runId))!.requirements).toMatchObject([
+          {
+            requirementId: 'plan.required',
+            runId,
+            sessionId: 's',
+            recordKey: `run/${runId}/plan.required`,
+          },
+        ]);
+        expect((await f.record(`run/${runId}/plan.required`))!.value).toMatchObject({
+          readOnlyDefinitions,
+        });
+        expect(f.effects).toBe(0);
+        await f.answer({
+          kind: 'plan_review',
+          decision: decision!,
+          feedback: 'Exact business decision',
+        });
+      }
+      const run = (await f.done())!;
+      expect(run.status).toBe(decision === 'deny' ? 'cancelled' : 'completed');
+      expect(run.requirements).toHaveLength(review ? 1 : 0);
+      expect(f.effects).toBe(decision === 'deny' ? 0 : 1);
+      if (review) {
+        const interactions = await f.runtime.listInteractions({ ...f.base });
+        expect(interactions.interactions).toHaveLength(1);
+        expect({
+          accepted: interactions.interactions[0]!.acceptedDecisionRevision,
+          reviewResult: (await f.store.listExecutions('s')).find(
+            (e) => e.definitionId === 'planning.review',
+          )?.result,
+        }).toMatchObject({ accepted: expect.any(String) });
+      }
+      expect((await f.record(`run/${run.id}/planning.policy`))!.value).toMatchObject({
+        kind: 'planning_policy',
+        runId: run.id,
+        readOnlyDefinitions,
+      });
+      if (!review) expect(await f.record(`run/${run.id}/plan.required`)).toBeNull();
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('retired mode-bearing plan answers are rejected without consuming the pending business decision', async () => {
+  const f = await fixture({ requirePlan: true }, async (step, f) => {
+    if (step === 0) return call('write_plan', modelPlan(null));
+    if (step === 1) {
+      const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+      return call('request_plan_review', {
+        plan_ref: await f.planRef({
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        }),
+      });
+    }
+    return step === 2 ? call('fixture.effect') : [finish];
+  });
+  try {
+    await f.submit();
+    const card = await f.pending();
+    let rejected: unknown;
+    try {
+      await f.runtime.answerInteraction({
+        ...f.base,
+        commandId: 'retired-mode-answer',
+        presentationSessionId: 's',
+        interactionId: card.id,
+        expectedRevision: card.revision,
+        answer: {
+          kind: 'plan_review',
+          decision: 'approve',
+          mode: 'auto',
+        } as unknown as InteractionAnswer,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+    expect((rejected as { code?: string })?.code).toBe('interaction_answer_invalid');
+    expect(await f.runtime.getInteraction({ ...f.base, interactionId: card.id })).toMatchObject({
+      state: 'pending',
+      answer: null,
+      acceptedDecisionRevision: null,
+      revision: card.revision,
+    });
+    expect(f.effects).toBe(0);
+    await f.answer({ kind: 'plan_review', decision: 'deny' });
+    expect((await f.done())!.status).toBe('cancelled');
+    expect(f.effects).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('requirement registration never absorbs earlier foreign context or later plan and other-owner drift', async () => {
+  for (const scenario of ['before_foreign', 'after_plan', 'after_foreign'] as const) {
+    let revision = 0;
+    const other: Extension = {
+      id: 'other.owner',
+      version: '1',
+      apiMajor: 1,
+      context: {
+        async capture(request) {
+          return [
+            {
+              id: 'other.owner:runtime',
+              kind: 'runtime_state',
+              role: 'user',
+              placement: 'after_history',
+              scope: request.sessionId,
+              content: `External state ${revision}`,
+              digest: String(revision),
+            },
+          ];
+        },
+      },
+    };
+    const f = await fixture(
+      {},
+      async (step, f) => {
+        if (step === 0) return call('write_plan', modelPlan(null));
+        if (step === 1) {
+          const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+          return call('request_plan_review', {
+            plan_ref: await f.planRef({
+              planId: current.planId!,
+              version: current.version!,
+              digest: current.digest!,
+            }),
+          });
+        }
+        if (step === 2 && scenario !== 'before_foreign') return call('fixture.effect');
+        return [finish];
+      },
+      true,
+      (extension) => ({
+        ...extension,
+        tools: extension.tools!.map((tool) =>
+          tool.id !== 'planning.review'
+            ? tool
+            : {
+                ...tool,
+                async execute(input, context) {
+                  const register = context.requirements!.register;
+                  return tool.execute(input, {
+                    ...context,
+                    requirements: {
+                      register: async (refs) => {
+                        if (scenario === 'before_foreign') revision++;
+                        const registered = await register(refs);
+                        if (scenario === 'after_foreign') revision++;
+                        if (scenario === 'after_plan') {
+                          const record = (await context.records.get('plan/p/1'))!;
+                          await context.records.write({
+                            key: record.key,
+                            expectedRevision: record.revision,
+                            contentType: record.contentType,
+                            contentVersion: record.contentVersion,
+                            executable: true,
+                            value: {
+                              ...(record.value as Record<string, Json>),
+                              body: 'Changed after registration',
+                            },
+                          });
+                        }
+                        return registered;
+                      },
+                    },
+                  });
+                },
+              },
+        ),
+      }),
+      undefined,
+      undefined,
+      [other],
+    );
+    try {
+      await f.submit();
+      const waiting = await eventually(async () => {
+        const card = (await f.runtime.listInteractions({ ...f.base, state: 'pending' }))
+          .interactions[0];
+        const execution = (await f.store.listExecutions('s')).find(
+          (e) => e.definitionId === 'planning.review',
+        );
+        return card
+          ? { card }
+          : execution && ['failed', 'outcome_unknown'].includes(execution.status)
+            ? { execution }
+            : null;
+      });
+      if ('card' in waiting) await f.answer({ kind: 'plan_review', decision: 'approve' });
+      await f.done();
+      const review = (await f.store.listExecutions('s')).find(
+        (e) => e.definitionId === 'planning.review',
+      )!;
+      expect(review.status).toBe('outcome_unknown');
+      expect(review.result).toMatchObject({ content: 'context_refresh_required' });
+      const interactions = (await f.runtime.listInteractions({ ...f.base })).interactions;
+      expect(interactions.every((i) => i.acceptedDecisionRevision === null)).toBe(true);
+      expect(f.effects).toBe(0);
+      const run = (await f.store.getRun(review.runId!))!;
+      expect(run.requirements).toHaveLength(scenario === 'before_foreign' ? 0 : 1);
+      expect(await f.record(`run/${run.id}/approval/p/1`)).toBeNull();
+    } finally {
+      await f.close();
+    }
   }
 });

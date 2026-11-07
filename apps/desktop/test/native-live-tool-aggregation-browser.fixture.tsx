@@ -713,7 +713,7 @@ window.liveAggregationFixture = {
                 acceptedDecisionRevision: '2',
                 accepted: true,
                 decision: 'approve',
-                grant: 'approve_once',
+                optionId: 'once',
               },
             }
           : {}),
@@ -1001,7 +1001,13 @@ window.liveAggregationFixture = {
         acceptedDecisionRevision: state === 'answered' ? '1' : null,
         accepted: state === 'answered',
         decision,
-        ...(decision === 'approve' ? { grant: 'same_command' as const } : {}),
+        ...(decision === 'approve'
+          ? {
+              optionId: 'scope-example',
+              optionKind: 'scope' as const,
+              presentation: { label: '本会话相同命令', details: ['原完整命令'] },
+            }
+          : {}),
       },
     });
     const matrix: {

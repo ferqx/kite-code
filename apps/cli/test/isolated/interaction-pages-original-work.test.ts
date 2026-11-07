@@ -246,7 +246,7 @@ test('actual CLI answers original second-page question while 20 unrelated earlie
           expectedStoreId: storeId,
           commandId: crypto.randomUUID(),
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         }),
       ),
     );

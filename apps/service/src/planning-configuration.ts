@@ -364,7 +364,7 @@ export async function readPlanningPermissionState(
     execution.definitionVersion !== request.definitionVersion
   )
     throw new AgentError('planning_run_scope_unavailable');
-  // Core composes this parent's ceiling into actual delegated children. Observe
+  // Core composes this parent's business gate into actual delegated children. Observe
   // durable causality here; a new same-Session Run cannot borrow the old plan.
   if (
     execution.rootWorkCommandId !== boundRun.rootWorkCommandId ||

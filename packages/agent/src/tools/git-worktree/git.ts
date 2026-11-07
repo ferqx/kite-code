@@ -147,9 +147,12 @@ export function parseWorktrees(bytes: Buffer, sourceRoot: string): ListedWorktre
 
 export class Git {
   private readonly env: NodeJS.ProcessEnv;
+  private readonly signal?: AbortSignal;
   readonly path: string;
   readonly hooksPath: string;
-  constructor(path: string, expectedSha: string, hooksPath: string) {
+  constructor(path: string, expectedSha: string, hooksPath: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    this.signal = signal;
     this.path = path;
     this.hooksPath = hooksPath;
     if (!exists(path))
@@ -204,6 +207,7 @@ export class Git {
       location?: { gitDir: string; workTree: string };
     } = {},
   ): Promise<GitResult> {
+    this.signal?.throwIfAborted();
     const env = { ...this.env };
     const configuration: [string, string][] = [
       ['core.hooksPath', this.hooksPath],
@@ -232,7 +236,7 @@ export class Git {
       ...args,
     ];
     const result = await (process.platform === 'win32'
-      ? runWindowsGitProcess(this.path, argv, { cwd, env, ...options })
+      ? runWindowsGitProcess(this.path, argv, { cwd, env, ...options, signal: this.signal })
       : new Promise<GitResult>((resolve, reject) => {
           let child: ReturnType<typeof spawn>;
           try {
@@ -253,6 +257,9 @@ export class Git {
             ? createHash(options.outputHash.algorithm).update(options.outputHash.prefix)
             : undefined;
           let hashedSize = 0n;
+          const abort = () => child.kill('SIGKILL');
+          this.signal?.addEventListener('abort', abort, { once: true });
+          if (this.signal?.aborted) abort();
           let outSize = 0,
             errSize = 0,
             overflow = false;
@@ -279,18 +286,21 @@ export class Git {
             } else stderr.push(data);
           });
           child.on('error', (error) => reject(processEventFailure(error, child.pid !== undefined)));
-          child.on('close', (code) =>
-            overflow
-              ? reject(new Error('inspection_limit'))
-              : resolve({
-                  exitCode: code ?? -1,
-                  stdout: Buffer.concat(stdout),
-                  stderr: Buffer.concat(stderr),
-                  ...(hash && options.outputHash && hashedSize === options.outputHash.bytes
-                    ? { stdoutHash: hash.digest('hex') }
-                    : {}),
-                }),
-          );
+          child.on('close', (code) => {
+            this.signal?.removeEventListener('abort', abort);
+            return this.signal?.aborted
+              ? reject(this.signal.reason)
+              : overflow
+                ? reject(new Error('inspection_limit'))
+                : resolve({
+                    exitCode: code ?? -1,
+                    stdout: Buffer.concat(stdout),
+                    stderr: Buffer.concat(stderr),
+                    ...(hash && options.outputHash && hashedSize === options.outputHash.bytes
+                      ? { stdoutHash: hash.digest('hex') }
+                      : {}),
+                  });
+          });
           if (child.stdin) {
             child.stdin.on('error', () => {});
             child.stdin.end(options.input ?? '');

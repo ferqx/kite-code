@@ -41,6 +41,7 @@ test.skipIf(process.platform !== 'darwin')(
       }),
       workspace = join(home, 'workspace');
     mkdirSync(workspace);
+    mkdirSync(join(workspace, 'missing-tool-target.txt'));
     let provider: ReturnType<typeof Bun.serve> | undefined,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let requests = 0;
@@ -143,7 +144,7 @@ test.skipIf(process.platform !== 'darwin')(
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
               const value = JSON.parse(message.content);
-              return value?.purpose === 'authorization_check' ? [value] : [];
+              return value?.purpose === 'shell_risk' ? [value] : [];
             } catch {
               return [];
             }
@@ -151,14 +152,15 @@ test.skipIf(process.platform !== 'darwin')(
           if (reviews.length) {
             expect(reviews).toHaveLength(1);
             expect(body.tools ?? []).toEqual([]);
-            expect(reviews[0].target).toMatchObject({
-              originStoreId: storeId,
-              definitionId: 'files.write',
-              definitionVersion: '3',
-              input: { path: 'bundled.txt', base: null, content: 'actual bundled bytes\r\n' },
+            expect(reviews[0].operation).toMatchObject({
+              definitionId: 'shell.execute',
+              definitionVersion: '1',
+              input: {
+                command: "printf '%s' 'bundle approval probe'",
+                filesystem: 'workspace_write',
+                network: 'none',
+              },
             });
-            expect(reviews[0].target.executionId).toBeString();
-            expect(reviews[0].target.runId).toBeString();
             authorizationReviewCalls++;
             const frame = (delta: unknown, finish_reason: string | null) =>
               `data: ${JSON.stringify({ id: `native-review-${authorizationReviewCalls}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -166,8 +168,9 @@ test.skipIf(process.platform !== 'darwin')(
               frame(
                 {
                   content: JSON.stringify({
-                    decision: 'ask_user',
-                    reason: 'Exact original Files write needs user decision',
+                    risk: 'high',
+                    reason:
+                      'Controlled reviewer requests independent human approval for this exact Shell probe.',
                   }),
                 },
                 null,
@@ -178,58 +181,77 @@ test.skipIf(process.platform !== 'darwin')(
             );
           }
           requests++;
-          const call = requests === 1;
-          const read = requests === 2;
+          const probe = requests === 1;
+          const call = requests === 2;
+          const read = requests === 3;
           const sample = [
             [100, 40],
             [200, 160],
+            [100, 0],
             [100, 0],
           ][requests - 1]!;
           const frame = (delta: unknown, finish_reason: string | null) =>
             `data: ${JSON.stringify({ id: `native-${requests}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }], ...(finish_reason ? { usage: { prompt_tokens: sample[0], completion_tokens: 4, total_tokens: sample[0]! + 4, prompt_tokens_details: { cached_tokens: sample[1] } } } : {}) })}\n\n`;
           return new Response(
             frame(
-              call
+              probe
                 ? {
                     tool_calls: [
                       {
                         index: 0,
-                        id: 'bundled-write',
+                        id: 'bundled-permission-probe',
                         type: 'function',
                         function: {
-                          name: 'write_file',
+                          name: 'shell_execute',
                           arguments: JSON.stringify({
-                            path: 'bundled.txt',
-                            base: null,
-                            content: 'actual bundled bytes\r\n',
+                            command: "printf '%s' 'bundle approval probe'",
+                            filesystem: 'workspace_write',
+                            network: 'none',
                           }),
                         },
                       },
                     ],
                   }
-                : read
+                : call
                   ? {
                       tool_calls: [
                         {
                           index: 0,
-                          id: 'bundled-failed-read',
+                          id: 'bundled-write',
                           type: 'function',
                           function: {
-                            name: 'read_file',
+                            name: 'write_file',
                             arguments: JSON.stringify({
-                              path: 'missing-tool-target.txt',
+                              path: 'bundled.txt',
+                              content: 'actual bundled bytes\r\n',
                             }),
                           },
                         },
                       ],
                     }
-                  : {
-                      content:
-                        'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
-                    },
+                  : read
+                    ? {
+                        tool_calls: [
+                          {
+                            index: 0,
+                            id: 'bundled-failed-read',
+                            type: 'function',
+                            function: {
+                              name: 'read_file',
+                              arguments: JSON.stringify({
+                                path: 'missing-tool-target.txt',
+                              }),
+                            },
+                          },
+                        ],
+                      }
+                    : {
+                        content:
+                          'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
+                      },
               null,
             ) +
-              frame({}, call || read ? 'tool_calls' : 'stop') +
+              frame({}, probe || call || read ? 'tool_calls' : 'stop') +
               'data: [DONE]\n\n',
             { headers: { 'content-type': 'text/event-stream' } },
           );
@@ -250,6 +272,7 @@ test.skipIf(process.platform !== 'darwin')(
           tools: [
             { id: 'files.write', definitionVersion: '3' },
             { id: 'files.read', definitionVersion: '5' },
+            { id: 'shell.execute', definitionVersion: '1' },
           ],
         }),
       );
@@ -389,7 +412,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         await cold.close();
       }
-      expect(requests).toBe(3);
+      expect(requests).toBe(4);
       expect(authorizationReviewCalls).toBe(1);
       expect(physicalRequests).toBe(requests + authorizationReviewCalls + titleCalls);
       const quitFixture = join(root, 'quit-driver.ts');
@@ -465,7 +488,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         clearTimeout(quitTimer);
       }
-      expect(requests).toBe(3);
+      expect(requests).toBe(4);
       expect(authorizationReviewCalls).toBe(1);
       expect(physicalRequests).toBe(requests + authorizationReviewCalls + titleCalls);
       expect(readFileSync(join(home, 'old-user-data/old-database'), 'utf8')).toBe(
@@ -615,7 +638,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         clearTimeout(diagnosticTimer);
       }
-      expect(requests).toBe(3);
+      expect(requests).toBe(4);
       expect(authorizationReviewCalls).toBe(1);
       expect(physicalRequests).toBe(requests + authorizationReviewCalls + titleCalls);
       expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);

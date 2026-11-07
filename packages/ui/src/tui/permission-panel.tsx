@@ -1,9 +1,10 @@
-import { useInput } from 'ink';
+import { Box, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import TuiOverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './ink/OverlayFrame';
 import { OverlayListRow, OverlaySection } from './ink/OverlayPrimitives';
 import { useInkWindowSize } from './ink/window-size';
+import { TuiPanelViewport } from './panel-viewport';
 import type { TuiPermissionSnapshot } from './permissions';
 import { TuiText as Text, useInkI18n, useTuiPresentation } from './presentation';
 
@@ -20,7 +21,8 @@ type Choice =
 export function TuiPermissionPanel({ controller }: { controller: TuiController }) {
   const { t: originalLabel, language: inkLanguage } = useInkI18n();
   const { t, testDiagnostics } = useTuiPresentation();
-  const compact = useInkWindowSize().rows < 32;
+  const rows = useInkWindowSize().rows;
+  const compact = rows < 32;
   const state = controller.state,
     observed = state.permissions;
   const [index, setIndex] = useState(0),
@@ -141,37 +143,8 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
             {t('Future Session default:')} {makeDefault ? t('yes') : t('no')}{' '}
             {t('· D toggle · Enter review mode choice')}
           </Text>
-          {compact ? (
-            <Text bold>{t('Workspace trust')}</Text>
-          ) : (
-            <OverlaySection>{t('Workspace trust')}</OverlaySection>
-          )}
           <Text>
-            {t('Workspace')} {testDiagnostics && terminalText(observed.trust.workspaceId)}
-            {':'} {observed.trust.status}
-            {testDiagnostics && (
-              <>
-                {t(', revision')} {observed.trust.revision}
-              </>
-            )}
-          </Text>
-          <Text>
-            {t('Identity')} {observed.trust.canonicalIdentity}{' '}
-            {testDiagnostics && !compact && (
-              <>
-                {t('· read scope')} {observed.trust.externalReadScopeDigest}
-              </>
-            )}
-          </Text>
-          {observed.trust.readScopes.map((scope, i) => (
-            <Text key={i}>
-              {terminalText(scope.kind)}
-              {':'} {terminalText(scope.description)}
-            </Text>
-          ))}
-          <Text>{t('T review trust / U review untrust · trust does not approve every Tool')}</Text>
-          <Text>
-            {t('Saved same_command grants:')} {observed.grants.items.length}{' '}
+            {t('Saved Session grants:')} {observed.grants.items.length}{' '}
             {testDiagnostics && (
               <>
                 {t('· revision')} {observed.grants.revision} {t('· frozen upper')}{' '}
@@ -179,16 +152,74 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
               </>
             )}
           </Text>
-          {testDiagnostics &&
-            !compact &&
-            observed.grants.items.map(({ grant }) => (
-              <Text key={grant.id}>{terminalText(JSON.stringify(grant))}</Text>
-            ))}
-          <Text>
-            {t(
-              'C review clear this exact Session only; earlier effects remain · R refresh · K original outcome lookup · Esc close',
+          <TuiPanelViewport
+            rows={Math.max(
+              2,
+              rows - (compact ? 12 : 18) - (pending ? 1 : 0) - (state.permissionOutcome ? 1 : 0),
             )}
-          </Text>
+            identity={`${state.sessionId}:${observed.mode.revision}:${observed.trust.revision}:${observed.grants.revision}`}
+          >
+            {compact ? (
+              <Text bold>{t('Workspace trust')}</Text>
+            ) : (
+              <OverlaySection>{t('Workspace trust')}</OverlaySection>
+            )}
+            <Text>
+              {t('Workspace')} {testDiagnostics && terminalText(observed.trust.workspaceId)}
+              {':'} {observed.trust.status}
+              {testDiagnostics && (
+                <>
+                  {t(', revision')} {observed.trust.revision}
+                </>
+              )}
+            </Text>
+            <Text>
+              {t('Identity')} {observed.trust.canonicalIdentity}{' '}
+              {testDiagnostics && !compact && (
+                <>
+                  {t('· read scope')} {observed.trust.externalReadScopeDigest}
+                </>
+              )}
+            </Text>
+            {observed.trust.readScopes.map((scope, i) => (
+              <Text key={i}>
+                {terminalText(scope.kind)}
+                {':'} {terminalText(scope.description)}
+              </Text>
+            ))}
+            <Text>
+              {t('T review trust / U review untrust · trust does not approve every Tool')}
+            </Text>
+            {observed.grants.items.map(({ grant }) => (
+              <Box key={grant.id} flexDirection="column">
+                <Text>{terminalText(grant.presentation.label)}</Text>
+                {grant.presentation.details.map((detail, index) => (
+                  <Text key={index}>{terminalText(detail)}</Text>
+                ))}
+                <Text>
+                  {terminalText(
+                    grant.bindings
+                      .map(
+                        (binding) =>
+                          `${binding.kind} ${binding.definitionId}@${binding.definitionVersion}`,
+                      )
+                      .join(' · '),
+                  )}
+                </Text>
+                <Text dimColor>
+                  {terminalText(
+                    `Session ${grant.sessionId} · ${grant.ruleId} · ${JSON.stringify(grant.scope)} · Interaction ${grant.interactionId} · Execution ${grant.executionId}`,
+                  )}
+                </Text>
+                {testDiagnostics && !compact && <Text>{terminalText(JSON.stringify(grant))}</Text>}
+              </Box>
+            ))}
+            <Text>
+              {t(
+                'C review clear this exact Session only; earlier effects remain · R refresh · K original outcome lookup · Esc close',
+              )}
+            </Text>
+          </TuiPanelViewport>
         </>
       )}
       {pending && (
@@ -200,7 +231,7 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
               ? `${modeLabels[pending.choice.mode]} · ${t('Future Session default:')} ${t(pending.choice.makeDefault ? 'yes' : 'no')}`
               : pending.choice.kind === 'trust'
                 ? t(pending.choice.trusted ? 'Trust' : 'Untrust')
-                : t('Saved same_command grants:') + ' 0'}{' '}
+                : t('Saved Session grants:') + ' 0'}{' '}
           {t('· Enter explicitly submits · Esc leaves unchanged')}
         </Text>
       )}

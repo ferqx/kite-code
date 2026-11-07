@@ -56,6 +56,7 @@ async function fixture(
   privateDirectory(profile.profilePath);
   const requests: Record<string, unknown>[] = [];
   const steps = new Map<string, number>();
+  const referenceReads = new Set<string>();
   let currentCommand = 'work';
   const provider = Bun.serve({
     hostname: '127.0.0.1',
@@ -77,7 +78,22 @@ async function fixture(
       } catch {}
       const step = steps.get(currentCommand) ?? 0;
       if (!review) steps.set(currentCommand, step + 1);
-      const call: Call = review ? null : await script(step, f);
+      let call: Call;
+      try {
+        call = review ? null : await script(step, f);
+      } catch (error) {
+        const key = `${currentCommand}/${step}`;
+        if (
+          !(error instanceof Error) ||
+          error.message !== 'fixture_exact_plan_reference_missing' ||
+          referenceReads.has(key)
+        )
+          throw error;
+        // Model scripts must read a plan that a separate Files operation revised.
+        referenceReads.add(key);
+        steps.set(currentCommand, step);
+        call = { name: 'read_plan', input: {} };
+      }
       const chunk = {
         id: 'response',
         object: 'chat.completion.chunk',
@@ -127,7 +143,12 @@ async function fixture(
         baseURL: `http://127.0.0.1:${provider.port}/v1`,
       },
     ],
-    tools: toolIds.map((id) => ({
+    tools: [
+      ...new Set([
+        ...toolIds,
+        ...(toolIds.some((id) => id.startsWith('planning.')) ? ['planning.read'] : []),
+      ]),
+    ].map((id) => ({
       id,
       definitionVersion:
         id === 'files.read' ? '5' : id === 'files.write' ? '3' : id === 'files.edit' ? '2' : '1',
@@ -149,7 +170,8 @@ async function fixture(
                 revision: 'actual-business-host-1',
                 allowed: [
                   { kind: 'model' as const, definitionId: 'local', definitionVersion: '1' },
-                  ...toolIds
+                  ...configuration.tools
+                    .map((tool) => tool.id)
                     .filter((id) => !policy.exclude?.includes(id))
                     .map((id) => ({
                       kind: 'tool' as const,
@@ -249,6 +271,21 @@ async function fixture(
     async record(key: string) {
       return store.getExtensionRecord({ sessionId: 's', extensionId: planningExtensionId, key });
     },
+    async planRef(plan: Record<string, Json>): Promise<string> {
+      for (const row of (await store.listExecutions('s')).reverse()) {
+        const data = (row.result as { details?: Record<string, Json> } | null)?.details;
+        const original = (data?.current ?? data) as Record<string, Json> | undefined;
+        if (
+          row.status === 'succeeded' &&
+          typeof data?.plan_ref === 'string' &&
+          original?.planId === plan.planId &&
+          original?.version === plan.version &&
+          original?.digest === plan.digest
+        )
+          return data.plan_ref;
+      }
+      throw Error('fixture_exact_plan_reference_missing');
+    },
     async submit(commandId = 'work', sessionId = 's') {
       currentCommand = commandId;
       return runtime.submitCommand({
@@ -277,9 +314,7 @@ async function fixture(
         interactionId: card.id,
         expectedRevision: card.revision,
         answer:
-          kind === 'question'
-            ? { kind, answers: { waive: true } }
-            : { kind, decision: 'approve', mode: 'auto' },
+          kind === 'question' ? { kind, answers: { waive: true } } : { kind, decision: 'approve' },
       });
       return card;
     },
@@ -385,7 +420,6 @@ async function askAfterFailure(f: Fixture, cause: string, question: string): Pro
             {
               label: '核实后恢复',
               description: '读取当前原件并重新取得准确批准。',
-              recommended: true,
             },
             { label: '停止任务', description: '保留当前文件和失败证据，停止本次执行。' },
           ],
@@ -413,7 +447,7 @@ test('external Plan drift during review rejects late approval and blocks workspa
           name: 'write_plan',
           input: {
             plan_id: 'late',
-            expected_version: null,
+
             title: 'Review race',
             body: 'Review these exact bytes',
             steps: [{ id: 'a', title: 'Write output' }],
@@ -423,12 +457,12 @@ test('external Plan drift during review rejects late approval and blocks workspa
       if (step === 1)
         return {
           name: 'request_plan_review',
-          input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+          input: { plan_ref: await f.planRef(current) },
         };
       if (step === 2)
         return {
           name: 'write_file',
-          input: { path: 'must-not-exist.txt', content: 'forbidden stale effect', base: null },
+          input: { path: 'must-not-exist.txt', content: 'forbidden stale effect' },
         };
       if (step === 3)
         return askAfterFailure(
@@ -505,12 +539,12 @@ test('Fork materializes an independent output from the selected immutable delive
           hash(f.base.expectedStoreId),
           hash('s'),
           'outputs',
-          'fork.md',
+          '分支 方案.md',
         );
         return step === 0
           ? {
               name: 'write_file',
-              input: { path: sourcePath, content: 'Selected delivery', base: null },
+              input: { path: sourcePath, content: 'Selected delivery' },
             }
           : null;
       }
@@ -533,7 +567,7 @@ test('Fork materializes an independent output from the selected immutable delive
         expect(value.content).toBe('Selected delivery');
         return {
           name: 'write_file',
-          input: { path: forkPath, content: 'Branch edit', base: value.baseline },
+          input: { path: forkPath, content: 'Branch edit', base_ref: value.base_ref },
         };
       }
       return null;
@@ -622,7 +656,11 @@ test('uploaded PDF pages flow through the exact file tool result to the next mod
   }
 }, 20000);
 
-test('session outputs persist current edits and immutable delivery snapshots through ordinary file tools', async () => {
+test.each([
+  'report.md',
+  '优化方案.md',
+  'é'.repeat(120),
+])('session outputs persist current edits and immutable delivery snapshots through ordinary file tools: %s', async (outputName) => {
   let outputPath = '';
   const f = await fixture(
     {},
@@ -635,12 +673,12 @@ test('session outputs persist current edits and immutable delivery snapshots thr
         hash(f.base.expectedStoreId),
         hash('s'),
         'outputs',
-        'report.md',
+        outputName,
       );
       if (step === 0)
         return {
           name: 'write_file',
-          input: { path: outputPath, base: null, content: 'First report 中文' },
+          input: { path: outputPath, content: 'First report 中文' },
         };
       if (step === 1) {
         const write = (await f.store.listExecutions('s')).find(
@@ -661,7 +699,7 @@ test('session outputs persist current edits and immutable delivery snapshots thr
           name: 'edit_file',
           input: {
             path: outputPath,
-            base: result.baseline,
+            base_ref: result.base_ref,
             old_text: 'First',
             new_text: 'Updated',
             expected_matches: 1,
@@ -706,7 +744,7 @@ test('session outputs persist current edits and immutable delivery snapshots thr
       queryId: 'files.outputs',
       input: {},
     });
-    expect(views[0]!.payload).toMatchObject([{ value: { state: 'saved', name: 'report.md' } }]);
+    expect(views[0]!.payload).toMatchObject([{ value: { state: 'saved', name: outputName } }]);
     await f.runtime.close();
     await f.workspaceSerialLocks.close();
     const orphan = join(dirname(outputPath), 'orphan.md');
@@ -741,6 +779,13 @@ test('session outputs persist current edits and immutable delivery snapshots thr
     });
     expect(backup.manifest.version).toBe(20);
     await inspectProfileBackup({ directory: backup.directory });
+    const inventory = readFileSync(join(backup.directory, 'working-files.jsonl'));
+    expect([...inventory].every((byte) => (byte >= 32 && byte <= 126) || byte === 10)).toBe(true);
+    const inventoryLines = inventory.toString('ascii').trimEnd().split('\n');
+    expect(inventoryLines.every((line) => Buffer.byteLength(line) <= 1024)).toBe(true);
+    expect(inventoryLines.map((line) => JSON.parse(line).path)).toContain(
+      relative(f.profile.profilePath, outputPath).split('\\').join('/'),
+    );
     const backedOutput = join(backup.directory, relative(f.profile.profilePath, outputPath));
     const originalBackupBytes = readFileSync(backedOutput);
     writeFileSync(backedOutput, 'tampered current output');
@@ -784,6 +829,79 @@ test('session outputs persist current edits and immutable delivery snapshots thr
   }
 }, 30000);
 
+test('Unicode session outputs do not authorize another Session path', async () => {
+  let outputPath = '';
+  const f = await fixture(
+    {},
+    ['files.write'],
+    async (step, f): Promise<Call> => {
+      const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+      outputPath = join(
+        f.profile.profilePath,
+        'files',
+        hash(f.base.expectedStoreId),
+        hash('s'),
+        'outputs',
+        '优化 方案.md',
+      );
+      return step === 0
+        ? {
+            name: 'write_file',
+            input: {
+              path: outputPath,
+              content: f.commandId === 'owner' ? 'original owner bytes' : 'foreign overwrite',
+            },
+          }
+        : null;
+    },
+    { mode: 'full' },
+  );
+  try {
+    await f.submit('owner');
+    expect((await f.done()).run?.status).toBe('completed');
+    expect(readFileSync(outputPath, 'utf8')).toBe('original owner bytes');
+    await f.runtime.createSession({
+      ...f.base,
+      sessionId: 'other',
+      commandId: 'create-other',
+      workspaceId: 'w',
+      title: 'other',
+    });
+    await initializeLivePermissionFixture({
+      runtime: f.runtime,
+      profile: f.profile,
+      ...f.base,
+      sessionId: 'other',
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+    });
+    await f.submit('foreign', 'other');
+    expect((await f.done()).run?.status).toBe('completed');
+    const write = (await f.store.listExecutions('other')).find(
+      (execution) => execution.definitionId === 'files.write',
+    )!;
+    expect(write.status).toBe('failed');
+    expect(write.authorization?.dispatched).toBe(false);
+    expect(write.result).toMatchObject({
+      content: 'output_file_scope_denied',
+      details: { dispatchCommitted: false, adapterAttempted: false },
+    });
+    expect(readFileSync(outputPath, 'utf8')).toBe('original owner bytes');
+    expect(
+      (
+        await f.store.listExtensionRecords({
+          sessionId: 'other',
+          extensionId: 'builtin.files',
+          limit: 100,
+        })
+      ).filter((record) => record.contentType === 'builtin.files.output'),
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
 test('ordinary file tools edit the exact Plan before approval through its owner; backup restores the actual latest bytes', async () => {
   let path = '';
   const f = await fixture(
@@ -795,7 +913,7 @@ test('ordinary file tools edit the exact Plan before approval through its owner;
           name: 'write_plan',
           input: {
             plan_id: 'file-plan',
-            expected_version: null,
+
             title: 'Persisted plan',
             body: 'Original 中文 plan',
             steps: [{ id: 'a', title: 'Write result' }],
@@ -824,7 +942,7 @@ test('ordinary file tools edit the exact Plan before approval through its owner;
         expect(value.content).toBe('External changed 中文 plan');
         return {
           name: 'write_file',
-          input: { path, base: value.baseline, content: 'Revised 中文 plan' },
+          input: { path, base_ref: value.base_ref, content: 'Revised 中文 plan' },
         };
       }
       if (step === 4) {
@@ -833,13 +951,13 @@ test('ordinary file tools edit the exact Plan before approval through its owner;
         expect(readFileSync(path, 'utf8')).toBe(String(plan.body));
         return {
           name: 'request_plan_review',
-          input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+          input: { plan_ref: await f.planRef(current) },
         };
       }
       if (step === 5)
         return {
           name: 'write_file',
-          input: { path: 'result.txt', base: null, content: 'approved result' },
+          input: { path: 'result.txt', content: 'approved result' },
         };
       if (step === 6) {
         const effect = (await f.store.listExecutions('s'))
@@ -848,11 +966,8 @@ test('ordinary file tools edit the exact Plan before approval through its owner;
         return {
           name: 'update_plan_progress',
           input: {
-            run_id: await f.runId(),
-            plan_id: current.planId!,
-            version: current.version!,
-            digest: current.digest!,
-            expected_progress_revision: null,
+            plan_ref: await f.planRef(current),
+            progress_ref: null,
             step_id: 'a',
             status: 'completed',
             execution_id: effect.id,
@@ -993,7 +1108,7 @@ test('requirePlan initializes before first real Provider call; user review and a
           name: 'write_plan',
           input: {
             plan_id: 'p',
-            expected_version: null,
+
             title: 'Private plan',
             body: 'Write one harmless ledger',
             steps: [{ id: 'a', title: 'write' }],
@@ -1004,12 +1119,12 @@ test('requirePlan initializes before first real Provider call; user review and a
       if (step === 1)
         return {
           name: 'request_plan_review',
-          input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+          input: { plan_ref: await f.planRef(current) },
         };
       if (step === 2)
         return {
           name: 'write_file',
-          input: { path: 'ledger.txt', content: 'one actual effect', base: null },
+          input: { path: 'ledger.txt', content: 'one actual effect' },
         };
       if (step === 3) {
         const actual = (await f.store.listExecutions('s')).find(
@@ -1018,11 +1133,8 @@ test('requirePlan initializes before first real Provider call; user review and a
         return {
           name: 'update_plan_progress',
           input: {
-            run_id: runId,
-            plan_id: current.planId!,
-            version: current.version!,
-            digest: current.digest!,
-            expected_progress_revision: null,
+            plan_ref: await f.planRef(current),
+            progress_ref: null,
             step_id: 'a',
             status: 'completed',
             execution_id: actual.id,
@@ -1138,7 +1250,7 @@ test('global exact Planning Action requests approval in Request Approval, allows
           presentationSessionId: 's',
           interactionId: card.id,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       const done = await f.runtime.waitForCommand('idle-governance', { timeoutMs: 5000 });
@@ -1223,7 +1335,7 @@ test('new Store restore projects registered files and fresh ordinary tools edit 
           );
           return {
             name: 'write_file',
-            input: { path: outputPath, base: null, content: 'Original delivered report' },
+            input: { path: outputPath, content: 'Original delivered report' },
           };
         }
         if (step === 1)
@@ -1231,7 +1343,7 @@ test('new Store restore projects registered files and fresh ordinary tools edit 
             name: 'write_plan',
             input: {
               plan_id: 'restored-plan',
-              expected_version: null,
+
               title: 'Restorable plan',
               body: 'Original editable plan',
               steps: [{ id: 'a', title: 'Keep the real file' }],
@@ -1272,7 +1384,7 @@ test('new Store restore projects registered files and fresh ordinary tools edit 
           name: 'edit_file',
           input: {
             path: step === 1 ? outputPath : planPath,
-            base: value.baseline,
+            base_ref: value.base_ref,
             old_text: step === 1 ? 'Latest unsubmitted' : 'Original editable',
             new_text: 'Edited after restore',
             expected_matches: 1,
@@ -1400,7 +1512,13 @@ test('reusing an earlier Plan ID keeps old reviews historical and requires a new
           name: 'write_plan',
           input: {
             plan_id: planId,
-            expected_version: step === 0 ? null : step - 1,
+            ...(step === 0
+              ? {}
+              : {
+                  expected_plan_ref: await f.planRef(
+                    (await f.record('plan.current'))!.value as Record<string, Json>,
+                  ),
+                }),
             title: `Plan ${planId}`,
             body: step === 3 ? 'Reused A requires a new review' : `Original ${planId}`,
             steps: [{ id: 'a', title: 'One precise workspace write' }],
@@ -1411,14 +1529,13 @@ test('reusing an earlier Plan ID keeps old reviews historical and requires a new
       if (step === 1 || step === 5)
         return {
           name: 'request_plan_review',
-          input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+          input: { plan_ref: await f.planRef(current) },
         };
       if (step === 4 || step === 6)
         return {
           name: 'write_file',
           input: {
             path: step === 4 ? 'old-a-approval.txt' : 'new-a-approval.txt',
-            base: null,
             content: 'Exact A version only',
           },
         };
@@ -1430,11 +1547,8 @@ test('reusing an earlier Plan ID keeps old reviews historical and requires a new
         return {
           name: 'update_plan_progress',
           input: {
-            run_id: await f.runId(),
-            plan_id: current.planId!,
-            version: current.version!,
-            digest: current.digest!,
-            expected_progress_revision: null,
+            plan_ref: await f.planRef(current),
+            progress_ref: null,
             step_id: 'a',
             status: 'completed',
             execution_id: written.id,
@@ -1506,7 +1620,7 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
           name: 'write_plan',
           input: {
             plan_id: 'approved-file',
-            expected_version: null,
+
             title: 'Approved current file',
             body: 'Original approved plan',
             steps: [{ id: 'a', title: 'A precise workspace write' }],
@@ -1519,9 +1633,7 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
         return {
           name: 'request_plan_review',
           input: {
-            plan_id: current.planId!,
-            version: current.version!,
-            digest: current.digest!,
+            plan_ref: await f.planRef(current),
           },
         };
       if (step === 2) return { name: 'read_file', input: { path: planPath } };
@@ -1535,7 +1647,7 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
           name: 'edit_file',
           input: {
             path: planPath,
-            base: value.baseline,
+            base_ref: value.base_ref,
             old_text: 'Original approved',
             new_text: 'Changed unapproved',
             expected_matches: 1,
@@ -1547,7 +1659,7 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
         expect(plan.body).toBe('Changed unapproved plan');
         return {
           name: 'write_file',
-          input: { path: 'stale-approval.txt', base: null, content: 'Must never be written' },
+          input: { path: 'stale-approval.txt', content: 'Must never be written' },
         };
       }
       if (step === 6)
@@ -1555,7 +1667,6 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
           name: 'write_file',
           input: {
             path: 'fresh-approval.txt',
-            base: null,
             content: 'Written under the exact new approval',
           },
         };
@@ -1566,11 +1677,8 @@ test('ordinary Plan file edit after approval creates v2 and cannot spend the ori
         return {
           name: 'update_plan_progress',
           input: {
-            run_id: await f.runId(),
-            plan_id: current.planId!,
-            version: current.version!,
-            digest: current.digest!,
-            expected_progress_revision: null,
+            plan_ref: await f.planRef(current),
+            progress_ref: null,
             step_id: 'a',
             status: 'completed',
             execution_id: written.id,
@@ -1628,7 +1736,7 @@ test('Plan publication after physical write rejects pending approval and preserv
     let injected = 0;
     const planInput = {
       plan_id: 'publication-recovery',
-      expected_version: null,
+
       title: 'Exact publication',
       body: 'Complete bytes before SQL commit',
       steps: [{ id: 'a', title: 'Write only after complete publication' }],
@@ -1653,9 +1761,7 @@ test('Plan publication after physical write rejects pending approval and preserv
             ? {
                 name: 'request_plan_review',
                 input: {
-                  plan_id: current.planId!,
-                  version: current.version!,
-                  digest: current.digest!,
+                  plan_ref: await f.planRef(current),
                 },
               }
             : step === 1
@@ -1671,7 +1777,6 @@ test('Plan publication after physical write rejects pending approval and preserv
                 name: 'write_file',
                 input: {
                   path: 'pending-publication.txt',
-                  base: null,
                   content: 'Must not be dispatched',
                 },
               }
@@ -1692,14 +1797,13 @@ test('Plan publication after physical write rejects pending approval and preserv
         if (step === 1 && !externalChange)
           return {
             name: 'request_plan_review',
-            input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+            input: { plan_ref: await f.planRef(current) },
           };
         if (step === 2 && !externalChange)
           return {
             name: 'write_file',
             input: {
               path: 'recovered-publication.txt',
-              base: null,
               content: 'Publication is complete and approved',
             },
           };
@@ -1710,11 +1814,8 @@ test('Plan publication after physical write rejects pending approval and preserv
           return {
             name: 'update_plan_progress',
             input: {
-              run_id: await f.runId(),
-              plan_id: current.planId!,
-              version: current.version!,
-              digest: current.digest!,
-              expected_progress_revision: null,
+              plan_ref: await f.planRef(current),
+              progress_ref: null,
               step_id: 'a',
               status: 'completed',
               execution_id: written.id,
@@ -1889,7 +1990,7 @@ test('session output publication failures preserve the actual file and original 
         );
         if (f.commandId === 'work')
           return step === 0
-            ? { name: 'write_file', input: { path: outputPath, base: null, content: originalBody } }
+            ? { name: 'write_file', input: { path: outputPath, content: originalBody } }
             : null;
         if (step === 0) return { name: 'read_file', input: { path: outputPath } };
         return null;

@@ -36,6 +36,79 @@ test('Shell Tool factory is pure and includes the exact selected Job rather than
   ]);
   expect(extension.records?.[0]?.contentType).toBe('application/vnd.kite.shell-reference+json');
 });
+
+for (const entry of [
+  { id: 'shell.execute', background: false },
+  { id: 'shell.execute', background: true },
+  { id: 'shell.launch', background: false },
+])
+  test(`${entry.id} background=${entry.background} returns the original Tool UUID separately from its Shell handle and Job`, async () => {
+    const extension = createShellExtension({ job: definition() });
+    const executionId = 'e6c8e6bf-ccdd-4a0c-b247-d310e837ad78';
+    const ref = {
+      originStoreId: 'store',
+      sessionId: 's',
+      extensionId: 'builtin.shell',
+      key: 'original-handle',
+      commandId: 'original-operation',
+      executionId: '0c0c2e7b-59d0-4e77-95a9-a2829b4a4cb8',
+    };
+    const calls: string[] = [];
+    const context = {
+      executionId,
+      signal: new AbortController().signal,
+      records: {
+        async get() {
+          calls.push('record.get');
+          return null;
+        },
+        async write() {
+          calls.push('record.write');
+        },
+      },
+      operations: {
+        async ensure() {
+          calls.push('ensure');
+          return ref;
+        },
+        async wait() {
+          calls.push('wait');
+          return {
+            id: ref.executionId,
+            sessionId: ref.sessionId,
+            originStoreId: ref.originStoreId,
+            kind: 'job',
+            definitionId: 'shell.command',
+            status: 'succeeded',
+          };
+        },
+        async readOutput() {
+          calls.push('readOutput');
+          return { items: [], highWaterSeq: '0', nextAfterSeq: null };
+        },
+      },
+    } as unknown as ToolContext;
+    const result = await extension
+      .tools!.find((tool) => tool.id === entry.id)!
+      .execute(
+        {
+          key: ref.key,
+          command: 'printf original',
+          ...(entry.background ? { background: true } : {}),
+        },
+        context,
+      );
+    expect(result.details).toMatchObject({ execution_id: executionId, shell_id: ref.key, ref });
+    expect(JSON.parse(result.content).execution_id).toBe(executionId);
+    expect(executionId).not.toBe(ref.executionId);
+    expect(executionId).not.toBe(ref.key);
+    expect(calls).toEqual([
+      'ensure',
+      'record.get',
+      'record.write',
+      ...(entry.id === 'shell.execute' && !entry.background ? ['wait', 'readOutput'] : []),
+    ]);
+  });
 test('Shell stop Tool reports only requested cancellation and preserves the exact own-record reference; no stopped claim is synthesized', async () => {
   const extension = createShellExtension({ job: definition() });
   const ref = {
@@ -71,14 +144,49 @@ test('Shell stop Tool reports only requested cancellation and preserves the exac
   } as unknown as ToolContext;
   const result = await extension
     .tools!.find((tool) => tool.id === 'shell.stop')!
-    .execute({ shellId: 'work', commandId: 'exact-stop' }, context);
-  expect(calls).toEqual([{ commandId: 'exact-stop' }]);
+    .execute({ shellId: 'work' }, { ...context, executionId: 'cancel-tool' });
+  expect(calls).toEqual([{ commandId: 'shell-stop-cancel-tool' }]);
   expect(result.details).toMatchObject({
     cancelRequested: true,
     ref,
     execution: { status: 'outcome_unknown' },
   });
   expect(result.content).not.toContain('stopped');
+});
+
+test('non-JSON foreground feedback retains its original warning and both exact identities', async () => {
+  const extension = createShellExtension({ job: definition() });
+  const executionId = '9f42221e-a025-47df-a634-f3aa8ce060d6';
+  const signal = AbortSignal.abort();
+  const context = {
+    executionId,
+    signal,
+    records: {
+      async get() {
+        return null;
+      },
+      async write() {},
+    },
+    operations: {
+      async ensure() {
+        return { key: 'original-handle', executionId: 'original-job' };
+      },
+      async get() {
+        throw Error('original_stop_unconfirmed');
+      },
+    },
+  } as unknown as ToolContext;
+  const result = await extension
+    .tools!.find((tool) => tool.id === 'shell.execute')!
+    .execute({ key: 'original-handle', command: 'printf original' }, context);
+  const prefix =
+    'Stopping the command could not be confirmed. It may still be running or have produced effects. Use its original shell_id to check its state; do not restart it.';
+  expect(result.outcome).toBe('outcome_unknown');
+  expect(result.content.startsWith(`${prefix}\nShell handle: `)).toBe(true);
+  expect(JSON.parse(result.content.slice(`${prefix}\nShell handle: `.length))).toEqual({
+    execution_id: executionId,
+    shell_id: 'original-handle',
+  });
 });
 
 for (const id of ['shell.read', 'shell.wait', 'shell.stop'])
@@ -186,6 +294,7 @@ for (const id of ['shell.execute', 'shell.launch'])
     const records = new Map<string, unknown>();
     const ensured: unknown[] = [];
     const context = {
+      executionId: 'historical-tool',
       signal: new AbortController().signal,
       records: {
         async get(key: string) {

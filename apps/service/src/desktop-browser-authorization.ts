@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentRuntime } from '@kite-ai/agent';
-import { type BrowserSharedPageIdentity, browserExtensionId } from '@kite-ai/agent/browser';
+import {
+  type BrowserSharedPageIdentity,
+  browserExtensionId,
+  browserModelIntentKey,
+} from '@kite-ai/agent/browser';
 import type {
   AcceptedInformation,
   ExtensionRecord,
@@ -332,7 +336,7 @@ export function createDesktopBrowserAuthorization(options: {
       !['dispatching', 'running'].includes(own.status) ||
       own.cancelRequestedAt !== null ||
       !object(own.input) ||
-      own.input.key !== intent.key ||
+      (own.input.key ?? browserModelIntentKey(own.id)) !== intent.key ||
       normalizedUrl(own.input.url) !== intent.url
     )
       throw Error('browser_page_grant_scope_invalid');
@@ -618,7 +622,7 @@ export function createDesktopBrowserAuthorization(options: {
       saved.attempt !== original.attempt ||
       saved.requestId !== marker.grantId ||
       !object(original.input) ||
-      original.input.key !== saved.key ||
+      (original.input.key ?? browserModelIntentKey(original.id)) !== saved.key ||
       normalizedUrl(original.input.url) !== saved.url
     )
       throw Error('browser_page_grant_refusal_unconfirmed');
@@ -1256,7 +1260,7 @@ export function createDesktopBrowserAuthorization(options: {
       !object(job.input) ||
       !object(parent.input) ||
       job.input.browserId !== browserId ||
-      parent.input.key !== browserId ||
+      (parent.input.key ?? browserModelIntentKey(parent.id)) !== browserId ||
       job.input.url !== normalizedUrl(parent.input.url)
     )
       throw Error('browser_page_grant_scope_invalid');

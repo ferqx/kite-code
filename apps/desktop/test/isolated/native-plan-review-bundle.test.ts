@@ -32,6 +32,13 @@ test.skipIf(process.platform !== 'darwin')(
   'relocated source-free Native Plan reviews preserve exact feedback, explicit Plan approval, real Files progress and cold Store proofs',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-plan-review-bundle-'));
+    const evidenceDirectory = resolve(
+      import.meta.dir,
+      '../../../../dist/acceptance/tool-parameters-native-plan-review',
+      String(Date.now()),
+    );
+    mkdirSync(evidenceDirectory, { recursive: true });
+    console.log('Native process observation:', evidenceDirectory);
     const home = join(root, 'home'),
       moved = join(root, 'relocated');
     privateDirectory(home);
@@ -103,7 +110,16 @@ test.skipIf(process.platform !== 'darwin')(
       const feedback = '  修改原计划 🪁\n保持组合字符 e\u0301 与空格  ';
       const bodyText = `# Original Unicode plan\n${'完整正文 雪🙂 e\u0301\n'.repeat(3000)}\n原完整正文尾部`;
       const stages = new Map<string, number>();
-      const pointers = new Map<string, { planId: string; version: number; digest: string }>();
+      const pointers = new Map<
+        string,
+        {
+          planId: string;
+          version: number;
+          digest: string;
+          planRef: string;
+          progressRef: string | null;
+        }
+      >();
       const callNames = new Map<string, string>();
       const observed: { sessionId: string; decision: string; feedback: string | undefined }[] = [];
       provider = Bun.serve({
@@ -111,43 +127,18 @@ test.skipIf(process.platform !== 'darwin')(
         port: 0,
         async fetch(request) {
           const url = new URL(request.url);
-          if (url.pathname === '/count') return new Response(String(businessBodies.length));
-          if (url.pathname === '/metadata') return Response.json({ feedback, bodyText });
-          if (url.pathname === '/denied-completion') {
-            const runId = url.searchParams.get('runId');
-            const body = businessBodies.find(
-              (body) =>
-                runId &&
-                hasOriginalTask(body, planTask('d')) &&
-                body.messages.some(
-                  (message) =>
-                    typeof message.content === 'string' &&
-                    message.content.includes(`run: ${runId}\n`),
-                ) &&
-                body.messages.some((message) => {
-                  try {
-                    return (
-                      message.role === 'user' &&
-                      typeof message.content === 'string' &&
-                      JSON.parse(message.content).kind === 'completion_diagnostic'
-                    );
-                  } catch {
-                    return false;
-                  }
-                }),
-            );
-            return Response.json(
-              body?.messages.flatMap((message) => {
-                try {
-                  const value =
-                    typeof message.content === 'string' ? JSON.parse(message.content) : null;
-                  return value?.kind === 'completion_diagnostic' ? [value] : [];
-                } catch {
-                  return [];
-                }
-              }) ?? [],
+          if (url.pathname === '/count') {
+            const sessionId = url.searchParams.get('sessionId');
+            return new Response(
+              String(
+                sessionId
+                  ? businessBodies.filter((body) => hasOriginalTask(body, planTask(sessionId)))
+                      .length
+                  : businessBodies.length,
+              ),
             );
           }
+          if (url.pathname === '/metadata') return Response.json({ feedback, bodyText });
           if (url.pathname === '/quit-facts') {
             const reader = await openSqliteStore({
               dataRoot: profile.dataRoot,
@@ -247,7 +238,9 @@ test.skipIf(process.platform !== 'darwin')(
           let value: Record<string, unknown> | undefined;
           if (toolMessage) {
             try {
-              const parsed: unknown = JSON.parse(toolMessage.content);
+              const parsed: unknown = JSON.parse(
+                toolMessage.content.split('Complete artifact body:\n').at(-1)!,
+              );
               if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed))
                 value = parsed as Record<string, unknown>;
             } catch {}
@@ -255,6 +248,8 @@ test.skipIf(process.platform !== 'darwin')(
           const previous = toolMessage?.tool_call_id
             ? callNames.get(toolMessage.tool_call_id)
             : undefined;
+          if (sessionId === 'd' && previous === 'request_plan_review')
+            throw Error('plan_denial_must_not_request_another_model');
           if (previous?.startsWith('planning.') && value === undefined) {
             // Preserve the actual semantic failure while letting Electron observe and report it.
             const failure = {
@@ -359,11 +354,20 @@ test.skipIf(process.platform !== 'darwin')(
                 'plan.md',
               ),
             );
-            expect(Object.keys(value).sort()).toEqual(['digest', 'filePath', 'planId', 'version']);
+            expect(typeof value.plan_ref).toBe('string');
+            expect(Object.keys(value).sort()).toEqual([
+              'digest',
+              'filePath',
+              'planId',
+              'plan_ref',
+              'version',
+            ]);
             pointers.set(sessionId, {
               planId: value.planId,
               version: value.version,
               digest: value.digest,
+              planRef: value.plan_ref as string,
+              progressRef: null,
             });
             console.log(
               'provider_actual_planning_pointer',
@@ -374,6 +378,12 @@ test.skipIf(process.platform !== 'darwin')(
                 parsed: JSON.stringify(value).slice(0, 3000),
               }),
             );
+          }
+          if (previous === 'read_plan') {
+            assert.ok(value && typeof value.plan_ref === 'string');
+            const pointer = pointers.get(sessionId)!;
+            pointer.planRef = value.plan_ref;
+            pointer.progressRef = value.progress_ref as string | null;
           }
           if (previous === 'request_plan_review') {
             assert.ok(value);
@@ -393,7 +403,7 @@ test.skipIf(process.platform !== 'darwin')(
           const pointer = pointers.get(sessionId);
           const planWrite = (version: number | null, text: string) => ({
             plan_id: `p-${sessionId}`,
-            expected_version: version,
+            ...(version === null ? {} : { expected_plan_ref: pointer!.planRef }),
             title: `Original ${sessionId} plan`,
             body: text,
             steps: [{ id: 'write', title: 'Write the approved file and verify its receipt' }],
@@ -402,7 +412,6 @@ test.skipIf(process.platform !== 'darwin')(
             name = 'write_file';
             input = {
               path: `blocked-${sessionId}-0.txt`,
-              base: null,
               content: 'must remain absent',
             };
           } else if (!pointer) {
@@ -412,7 +421,6 @@ test.skipIf(process.platform !== 'darwin')(
             name = 'write_file';
             input = {
               path: `blocked-${sessionId}-${pointer!.version}.txt`,
-              base: null,
               content: 'must remain absent',
             };
           } else if (
@@ -422,21 +430,23 @@ test.skipIf(process.platform !== 'darwin')(
             !value?.path
           ) {
             name = 'request_plan_review';
-            input = { plan_id: pointer.planId, version: pointer.version, digest: pointer.digest };
+            input = { plan_ref: pointer.planRef };
           } else if (previous === 'request_plan_review' && value?.decision === 'revise') {
             // The exact accepted review result, rather than a request counter, drives v2.
             expect(value).toEqual({ status: 'not_approved', decision: 'revise', feedback });
             name = 'write_plan';
             input = planWrite(1, `# Revised original plan\n${value.feedback}\n新版正文尾部`);
           } else if (previous === 'request_plan_review' && value?.decision === 'approve') {
-            expect(value.mode).toBe(sessionId === 'a' ? 'auto' : 'accept_edits');
+            expect(value).not.toHaveProperty('mode');
             name = 'write_file';
             input = {
               path: `effect-${sessionId}.txt`,
-              base: null,
               content: `approved ${sessionId} exact effect\n雪🙂`,
             };
           } else if (previous === 'write_file' && value?.path) {
+            name = 'read_plan';
+            input = {};
+          } else if (previous === 'read_plan') {
             const reader = await openSqliteStore({
               dataRoot: profile.dataRoot,
               profile: profile.profile,
@@ -449,11 +459,8 @@ test.skipIf(process.platform !== 'darwin')(
               expect(execution).toBeDefined();
               name = 'update_plan_progress';
               input = {
-                plan_id: pointer.planId,
-                version: pointer.version,
-                digest: pointer.digest,
-                run_id: execution.runId,
-                expected_progress_revision: null,
+                plan_ref: pointer.planRef,
+                progress_ref: pointer.progressRef,
                 step_id: 'write',
                 status: 'completed',
                 execution_id: execution.id,
@@ -462,12 +469,7 @@ test.skipIf(process.platform !== 'darwin')(
             } finally {
               await reader.close();
             }
-          } else if (previous === 'request_plan_review' && value?.decision === 'deny') {
-            name = 'write_file';
-            input = { path: 'denied-effect.txt', base: null, content: 'must remain absent' };
           }
-          // An unapproved necessary plan keeps the same Run active until explicit cancellation.
-          if (sessionId === 'd' && stage >= 5) name = undefined;
           const id = `native-plan-call-${serial}`;
           if (name) callNames.set(id, name);
           if (name === 'request_plan_review') {
@@ -569,6 +571,7 @@ test.skipIf(process.platform !== 'darwin')(
           home,
           provider.url.href.replace(/\/$/, ''),
           storeId,
+          evidenceDirectory,
         ],
         {
           cwd: home,
@@ -601,7 +604,6 @@ test.skipIf(process.platform !== 'darwin')(
         { sessionId: 'a', decision: 'revise', feedback },
         { sessionId: 'a', decision: 'approve', feedback: undefined },
         { sessionId: 'b', decision: 'approve', feedback: undefined },
-        { sessionId: 'd', decision: 'deny', feedback: '原拒绝理由 雪🙂' },
       ]);
       expect(authorizationReviewCalls).toBe(0);
       expect(bodies).toHaveLength(businessBodies.length);
@@ -702,7 +704,7 @@ test.skipIf(process.platform !== 'darwin')(
           expect(card.answer).toEqual({
             kind: 'approval',
             decision: 'approve',
-            grant: 'approve_once',
+            optionId: 'once',
           });
           expect((await cold.getCommand(original.commandId))?.receipt).toMatchObject({
             outcome: 'answer_saved',
@@ -768,11 +770,12 @@ test.skipIf(process.platform !== 'darwin')(
             expect((await cold.getRun(original.runId))?.status).toBe('cancelled');
           }
           if (original.decision) {
+            expect(card.answer).not.toHaveProperty('mode');
+            expect(card.request).not.toHaveProperty('allowedModes');
             expect(card.state).toBe('answered');
             expect(card.answer).toMatchObject({
               kind: 'plan_review',
               decision: original.decision,
-              ...(original.mode ? { mode: original.mode } : {}),
             });
             expect((await cold.getCommand(original.commandId!))?.receipt).toMatchObject({
               outcome: 'answer_saved',
@@ -787,7 +790,10 @@ test.skipIf(process.platform !== 'darwin')(
           });
           if (original.decision === 'approve')
             expect(approval?.value).toMatchObject({
-              proof: { interactionId: original.id, answer: { mode: original.mode } },
+              proof: {
+                interactionId: original.id,
+                answer: { kind: 'plan_review', decision: 'approve' },
+              },
             });
           else expect(approval).toBeNull();
           if (original.request.policy) {

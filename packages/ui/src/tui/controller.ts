@@ -15,12 +15,14 @@ import {
   type Message,
   type ModelOutputSnapshot,
   type PendingInputPage,
+  readApprovalOptions,
   requiresInteractionAttachment,
   type SessionView,
   type StartCommandRequest,
   type SteerCommandRequest,
 } from '@kite-ai/client';
 import { canonicalFileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
+import { describePlanReview } from '../plan-review';
 import {
   callerKey,
   type TuiCallerIntent,
@@ -456,14 +458,12 @@ export function interactionAnswer(
   if (card.state !== 'pending') return undefined;
   if (card.kind === 'approval') {
     if (text === 'deny') return { kind: 'approval', decision: 'deny' };
-    if (text === 'approve') return { kind: 'approval', decision: 'approve', grant: 'approve_once' };
-    if (
-      text === 'approve same_command' &&
-      record(card.request) &&
-      Array.isArray(card.request.grants) &&
-      card.request.grants.includes('same_command')
-    )
-      return { kind: 'approval', decision: 'approve', grant: 'same_command' };
+    const options = readApprovalOptions(card.request);
+    const option =
+      text === 'approve'
+        ? options.find((candidate) => candidate.kind === 'once')
+        : options.find((candidate) => text === `approve ${candidate.optionId}`);
+    if (option) return { kind: 'approval', decision: 'approve', optionId: option.optionId };
     return undefined;
   }
   if (card.kind === 'question') {
@@ -474,13 +474,12 @@ export function interactionAnswer(
       return undefined;
     }
   }
-  if (!record(card.request) || !Array.isArray(card.request.allowedModes)) return undefined;
+  if (describePlanReview(card.request).kind !== 'supported') return undefined;
   if (text === 'deny') return { kind: 'plan_review', decision: 'deny' };
+  if (text === 'revise') return { kind: 'plan_review', decision: 'revise' };
   if (text.startsWith('revise ') && text.slice(7).length <= 8192)
     return { kind: 'plan_review', decision: 'revise', feedback: text.slice(7) };
-  const mode = text.startsWith('approve ') ? text.slice(8) : undefined;
-  if ((mode === 'auto' || mode === 'accept_edits') && card.request.allowedModes.includes(mode))
-    return { kind: 'plan_review', decision: 'approve', mode };
+  if (text === 'approve') return { kind: 'plan_review', decision: 'approve' };
   return undefined;
 }
 /** Legacy ports without connection identity retain their existing observation contract. */

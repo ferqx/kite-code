@@ -180,7 +180,7 @@ test('invalid mode is rejected before refinement and old one-argument callbacks 
 });
 
 test('trusted Auto review selection skips business context but retains hard boundaries', async () => {
-  for (const selection of ['shell_risk', 'none'] as const) {
+  for (const selection of ['check', 'none'] as const) {
     const f = await fixture('auto');
     try {
       f.capability = { ...f.capability, autoReview: selection };
@@ -199,7 +199,8 @@ test('trusted Auto review selection skips business context but retains hard boun
       if (selection === 'none') expect(decision.allowed).toBe(true);
       else {
         expect(decision.allowed).toBe(false);
-        expect(decision.check?.request).toMatchObject({ reviewPurpose: 'shell_risk' });
+        expect(decision.check?.request).toMatchObject({ mode: 'auto' });
+        expect(decision.check?.request).not.toHaveProperty('reviewPurpose');
         expect(decision.check?.request).not.toHaveProperty('context');
       }
       f.capability = { ...f.capability, hardAllowed: false };
@@ -399,7 +400,7 @@ async function fixture(
         interactionId: card.id,
         expectedRevision: card.revision,
         subjectId: 'owner',
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
     },
     async close() {

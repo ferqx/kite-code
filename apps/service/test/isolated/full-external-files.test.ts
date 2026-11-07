@@ -308,13 +308,12 @@ test('Full actual Service writes and edits an external file with native baseline
   const edited = 'after external 😀\r\n';
   const f = await fixture({
     program(body, step, _actor, paths): Call | null {
-      if (step === 0)
-        return { name: 'write_file', input: { path: paths.target, base: null, content: first } };
+      if (step === 0) return { name: 'write_file', input: { path: paths.target, content: first } };
       if (step === 1 || step === 3) return { name: 'read_file', input: { path: paths.target } };
       if (step === 2) {
         const feedback = body.messages.filter((message) => message.role === 'tool').at(-1)!;
         const externalNotice =
-          'External file; outside workspace checkpoints. Baseline does not grant write permission.\n';
+          'External file; outside workspace checkpoints. The reference does not grant write permission.\n';
         expect(feedback.content).toContain(externalNotice);
         const actual = taskQualityPresentedRead(feedback.content.replace(externalNotice, ''));
         expect(actual?.path).toBe(paths.target);
@@ -322,7 +321,7 @@ test('Full actual Service writes and edits an external file with native baseline
           name: 'edit_file',
           input: {
             path: paths.target,
-            base: actual!.baseline,
+            base_ref: actual!.baseRef,
             old_text: 'before',
             new_text: 'after',
             expected_matches: 1,
@@ -332,7 +331,7 @@ test('Full actual Service writes and edits an external file with native baseline
       return step === 4
         ? {
             name: 'write_file',
-            input: { path: 'local.txt', base: null, content: 'local checkpoint control' },
+            input: { path: 'local.txt', content: 'local checkpoint control' },
           }
         : null;
     },
@@ -404,7 +403,7 @@ for (const mode of ['accept_edits', 'auto'] as const) {
         step === 0
           ? {
               name: 'write_file',
-              input: { path: paths.target, base: null, content: 'must not publish' },
+              input: { path: paths.target, content: 'must not publish' },
             }
           : null,
     });
@@ -419,7 +418,7 @@ for (const mode of ['accept_edits', 'auto'] as const) {
         sessionId: 's',
         originStoreId: f.storeId,
         definitionVersion: '3',
-        input: { path: f.target, base: null, content: 'must not publish' },
+        input: { path: f.target, content: 'must not publish' },
       });
       expect(tool.authorization?.dispatched).toBe(false);
       expect(tool.result).toMatchObject({
@@ -489,7 +488,7 @@ test('Full external file support keeps the private Profile protected', async () 
       step === 0
         ? {
             name: 'write_file',
-            input: { path: paths.privateTarget, base: null, content: 'must not publish' },
+            input: { path: paths.privateTarget, content: 'must not publish' },
           }
         : null,
   });
@@ -531,7 +530,7 @@ for (const change of ['demote', 'untrust'] as const) {
         step === 0
           ? {
               name: 'write_file',
-              input: { path: paths.target, base: null, content: 'must not publish' },
+              input: { path: paths.target, content: 'must not publish' },
             }
           : null,
     });
@@ -574,7 +573,7 @@ for (const preset of ['general', 'explore'] as const) {
               }
             : null
           : step === 0
-            ? { name: 'write_file', input: { path: paths.target, base: null, content: 'child' } }
+            ? { name: 'write_file', input: { path: paths.target, content: 'child' } }
             : null,
     });
     try {

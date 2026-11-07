@@ -15,7 +15,7 @@ const question: { question: string; options: Record<string, Json>[] } = {
   question: '  Which approach?  ',
   options: [
     { label: '  First  ', description: '  First explanation  ' },
-    { label: 'Second', description: 'Second explanation', recommended: true },
+    { label: 'Second', description: 'Second explanation' },
   ],
 };
 const input = { questions: [question] };
@@ -232,10 +232,14 @@ test('real Core/SQLite asks all questions in one original interaction and return
               q1: {
                 title: 'Which approach?',
                 anyOf: [
-                  { const: 'q1-o1', title: 'First', description: 'First explanation' },
+                  {
+                    const: 'q1-o1',
+                    title: 'First (Recommended)',
+                    description: 'First explanation',
+                  },
                   {
                     const: 'q1-o2',
-                    title: 'Second (Recommended)',
+                    title: 'Second',
                     description: 'Second explanation',
                   },
                   {
@@ -365,7 +369,7 @@ test('exact Question Execution cancellation preserves the root Run and continues
     expect(f.model.requests).toHaveLength(2);
     expect(
       f.model.requests[1]!.messages.filter((m) => m.role === 'tool').map((m) => m.content),
-    ).toContain('execution_cancel_requested');
+    ).toEqual([expect.stringContaining('The operation was cancelled.')]);
   } finally {
     await f.close();
   }
@@ -551,7 +555,7 @@ test('saved Question cancellation evidence must match this exact current Tool an
   }
 });
 
-test('real canonical duplicate recommendation is a known failure with zero questions and allows the next Model response', async () => {
+test('retired option recommendation fields fail public schema with zero questions and allows the next Model response', async () => {
   const f = await fixture({
     questions: [
       {
@@ -566,7 +570,10 @@ test('real canonical duplicate recommendation is a known failure with zero quest
       (value) => value.definitionId === 'ask_user',
     );
     expect(execution?.status).toBe('failed');
-    expect(execution?.result).toEqual({ outcome: 'failed', content: 'invalid_ask_user_arguments' });
+    expect(execution?.result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'invalid_tool_arguments' },
+    });
     expect((await f.interactions()).interactions).toHaveLength(0);
     expect(f.model.requests).toHaveLength(2);
   } finally {

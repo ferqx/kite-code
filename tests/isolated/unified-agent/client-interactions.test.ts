@@ -156,7 +156,11 @@ async function fixture(options: { artifacts?: boolean; sealed?: boolean } = {}) 
                 additionalProperties: false,
               },
             }
-          : {}),
+          : {
+              options: [
+                { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+              ],
+            }),
       },
     });
   await request('child-card', 'child-tool');
@@ -270,7 +274,6 @@ test('restored public history preserves questions, plans, child approvals, cance
                 version: '1',
                 digest: 'original-digest',
                 content: '原完整计划',
-                allowedModes: ['auto'],
               },
       });
       await f.client.answerInteraction('root', `${id}-card`, {
@@ -289,7 +292,7 @@ test('restored public history preserves questions, plans, child approvals, cance
           expectedStoreId: f.expectedStoreId,
           commandId: 'answer-child',
           expectedRevision: '1',
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       await f.store.acceptInteractionDecision({
         ...f.write,
@@ -306,7 +309,10 @@ test('restored public history preserves questions, plans, child approvals, cance
       });
     }
     await f.plan('large-tool');
-    const text = JSON.stringify({ originalInput: '完整审批末尾雪🙂\r\n'.repeat(6000) });
+    const options = [
+      { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+    ];
+    const text = JSON.stringify({ originalInput: '完整审批末尾雪🙂\r\n'.repeat(6000), options });
     const reference = await f.artifacts!.publish({
       expectedStoreId: f.expectedStoreId,
       sessionId: 'root',
@@ -329,6 +335,7 @@ test('restored public history preserves questions, plans, child approvals, cance
       requiredRefs: [],
       source: f.source,
       request: {
+        options,
         policy: {
           review: {
             kind: 'artifact',
@@ -525,7 +532,7 @@ test('restored public history preserves questions, plans, child approvals, cance
               expectedStoreId: restored.storeId,
               commandId: 'must-not-answer-restored',
               expectedRevision: '1',
-              answer: { kind: 'approval', decision: 'approve' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             }),
             'interaction_not_found',
           );
@@ -587,7 +594,7 @@ test('paired HTTP projects one child Interaction and answers only the root bindi
       expectedStoreId: f.expectedStoreId,
       commandId: 'answer-child',
       expectedRevision: '1',
-      answer: { kind: 'approval' as const, decision: 'approve' as const },
+      answer: { kind: 'approval' as const, decision: 'approve' as const, optionId: 'once' },
     };
     await code(
       f.client.answerInteraction(f.child.session.id, child.id, intent),
@@ -697,7 +704,7 @@ test('paired cancellation precedes a late answer; question schema is enforced an
       expectedStoreId: f.expectedStoreId,
       commandId: 'late-answer',
       expectedRevision: '1',
-      answer: { kind: 'approval' as const, decision: 'approve' as const },
+      answer: { kind: 'approval' as const, decision: 'approve' as const, optionId: 'once' },
     };
     const receipt = await f.client.answerInteraction('root', 'child-card', late);
     expect(receipt.receipt).toMatchObject({ outcome: 'answer_saved' });
@@ -886,7 +893,7 @@ test('actual Core approval and Tool question wait for HTTP answers before the or
       expectedStoreId,
       commandId: 'approve',
       expectedRevision: approval.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const question = await pending('question');
     expect(effects).toBe(1);

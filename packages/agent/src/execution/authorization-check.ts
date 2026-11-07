@@ -1,7 +1,7 @@
 import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
-import {
-  type AuthorizationCheckOutput,
-  authorizationCheckAnswerForContract,
+import type {
+  AuthorizationCheckAnswer,
+  AuthorizationCheckOutput,
 } from '../authorization-check-output';
 import { semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
@@ -15,6 +15,7 @@ import {
   type Json,
   type OwnerRef,
 } from '../storage/types';
+import type { ToolBehaviorBinding } from '../tool-behavior';
 import { type AuthorizationTimingState, authorizationTimingSnapshot } from './authorization-timing';
 import type { ModelResponse } from './index';
 import type { ExecutionResources } from './resources';
@@ -22,7 +23,13 @@ import type { ExecutionResources } from './resources';
 /** One internal Model call. Its owning operation supplies the sealed purpose and persistence. */
 export async function runInternalModelCall(options: {
   purpose: 'authorization_check' | 'session_title';
-  reviewPurpose?: 'shell_risk';
+  review?: {
+    behavior: ToolBehaviorBinding;
+    target: AuthorizationCheckOutput['target'];
+    checkInputDigest: string;
+    materialFingerprint?: string;
+    interpret(content: string): { answer: AuthorizationCheckAnswer; evidence?: Json } | null;
+  };
   store: Store;
   resources: ExecutionResources;
   owner: OwnerRef;
@@ -180,13 +187,10 @@ export async function runInternalModelCall(options: {
     }
     if (!finished) throw new AgentError('model_response_incomplete');
     signal.throwIfAborted();
-    let assessment: ReturnType<typeof authorizationCheckAnswerForContract> = null;
+    let assessment: { answer: AuthorizationCheckAnswer; evidence?: Json } | null = null;
     if (permissionCheck) {
       try {
-        assessment = authorizationCheckAnswerForContract(
-          JSON.parse(content),
-          options.reviewPurpose,
-        );
+        assessment = options.review?.interpret(content) ?? null;
       } catch {
         /* Invalid text cannot authorize or become a request for human approval. */
       }
@@ -198,18 +202,35 @@ export async function runInternalModelCall(options: {
         );
     }
     const descriptor = output?.descriptor(true);
+    const completeOutput = descriptor ?? {
+      content,
+      reasoning,
+      ...(firstOutput ? { firstOutput } : {}),
+      toolCalls: [],
+      usage,
+      finishReason: 'stop',
+    };
     let receipt: AuthorizationCheckOutput | undefined;
-    if (descriptor && permissionCheck) {
+    if (permissionCheck) {
+      if (!options.review || !assessment)
+        throw new AgentError('authorization_check_binding_invalid');
       receipt = {
         kind: 'authorization_check_output',
         version: 1,
         modelExecutionId: execution.id,
-        modelOutputDigest: await semanticDigest(descriptor as unknown as Json),
+        behavior: structuredClone(options.review.behavior),
+        target: structuredClone(options.review.target),
+        checkInputDigest: options.review.checkInputDigest,
+        sealedInputHash: expectedHash,
+        modelOutputDigest: await semanticDigest(completeOutput as unknown as Json),
         contentHash: await semanticDigestBytes(Buffer.from(content), signal),
-        answer: assessment!.answer,
-        ...(assessment?.risk ? { reviewPurpose: 'shell_risk', risk: assessment.risk } : {}),
+        ...(options.review.materialFingerprint
+          ? { materialFingerprint: options.review.materialFingerprint }
+          : {}),
+        answer: assessment.answer,
+        ...(assessment.evidence !== undefined ? { evidence: assessment.evidence } : {}),
       };
-      await options.publishReceipt!(receipt, signal);
+      if (descriptor) await options.publishReceipt!(receipt, signal);
     }
     const input = prepared.input as Record<string, Json>;
     const body = bodyReference(input.body);
@@ -223,13 +244,6 @@ export async function runInternalModelCall(options: {
         toolCalls: [],
         usage,
         finishReason: 'stop',
-        ...(assessment?.risk
-          ? {
-              reviewPurpose: 'shell_risk',
-              risk: assessment.risk,
-              decision: assessment.answer.decision,
-            }
-          : {}),
         ...(timing() ? { timing: timing()! } : {}),
         ...(body ? { modelInputBodyHash: body.reference.hash } : {}),
         ...(descriptor ? { modelOutput: descriptor as unknown as Json } : {}),

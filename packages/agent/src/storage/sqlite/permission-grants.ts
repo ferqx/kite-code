@@ -1,16 +1,17 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
+import {
+  type GrantOffer,
+  type GrantUse,
+  parseGrantOffer,
+  sameCapability,
+  selectedApprovalOption,
+} from '../../permission-grants';
 import type { DispatchInput, Store } from '../port';
 import { AgentError, type InteractionAnswer, type Json, type PermissionGrant } from '../types';
 import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null | undefined>;
-function commandDigest(value: unknown): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value))
-    throw new AgentError('invalid_command_digest');
-  return value;
-}
 function decimal(value: string): bigint {
   if (!/^(0|[1-9]\d{0,18})$/.test(value) || BigInt(value) > 9223372036854775807n)
     throw new AgentError('invalid_permission_revision');
@@ -97,7 +98,7 @@ export function revokePermissionGrant(
 }
 function projection(row: Row): PermissionGrant {
   return {
-    ...(row.command_digest === null ? {} : { commandDigest: String(row.command_digest) }),
+    ...publicOffer(parseGrantOffer(JSON.parse(String(row.payload_json)))),
     id: String(row.id),
     originStoreId: String(row.origin_store_id),
     sessionId: String(row.session_id),
@@ -125,21 +126,23 @@ function target(db: SqliteOperations, executionId: string, storeId: string) {
   const session = scope(db, String(execution.session_id), String(command.subject_id));
   return { execution, command, session };
 }
-function exact(row: Row, value: ReturnType<typeof target>, currentDigest?: string): boolean {
+function publicOffer(offer: GrantOffer) {
+  const { policyBindings: _bindings, ...publicValue } = offer;
+  return publicValue;
+}
+function exact(row: Row, value: ReturnType<typeof target>, offer: GrantOffer): boolean {
   return (
     row.subject_id === value.command.subject_id &&
     row.session_id === value.execution.session_id &&
     row.workspace_id === value.session.workspace_id &&
-    row.kind === value.execution.kind &&
-    row.definition_id === value.execution.adapter_id &&
-    row.definition_version === value.execution.definition_version &&
-    (row.command_digest === null
-      ? currentDigest === undefined &&
-        row.input_digest ===
-          createHash('sha256')
-            .update(canonicalJson(JSON.parse(String(value.execution.intent_json)) as Json))
-            .digest('hex')
-      : row.command_digest === commandDigest(currentDigest))
+    row.scope_digest === offer.scopeDigest &&
+    offer.bindings.some((binding) =>
+      sameCapability(binding, {
+        kind: String(value.execution.kind) as 'tool' | 'job',
+        definitionId: String(value.execution.adapter_id),
+        definitionVersion: String(value.execution.definition_version),
+      }),
+    )
   );
 }
 function proof(db: SqliteOperations, row: Row): void {
@@ -162,7 +165,7 @@ function proof(db: SqliteOperations, row: Row): void {
     String(interaction.revision) !== row.decision_revision ||
     answer?.kind !== 'approval' ||
     answer.decision !== 'approve' ||
-    answer.grant !== 'same_command' ||
+    !answer.optionId ||
     original.origin_store_id !== row.origin_store_id ||
     original.session_id !== row.session_id ||
     Number(original.attempt) !== Number(interaction.attempt) ||
@@ -173,9 +176,14 @@ function proof(db: SqliteOperations, row: Row): void {
       createHash('sha256')
         .update(canonicalJson(JSON.parse(String(original.intent_json)) as Json))
         .digest('hex') ||
-    commandDigest(
-      (JSON.parse(String(interaction.request_json)) as { commandDigest?: string }).commandDigest,
-    ) !== row.command_digest
+    canonicalJson(
+      parseGrantOffer(
+        selectedApprovalOption(
+          JSON.parse(String(interaction.request_json)),
+          answer.kind === 'approval' && answer.decision === 'approve' ? answer.optionId : null,
+        ),
+      ) as unknown as Json,
+    ) !== row.payload_json
   )
     throw new AgentError('permission_grant_unverifiable');
 }
@@ -186,16 +194,26 @@ export function savePermissionGrant(db: SqliteOperations, interaction: Row, exec
     interaction.kind !== 'approval' ||
     answer.kind !== 'approval' ||
     answer.decision !== 'approve' ||
-    answer.grant !== 'same_command'
+    !answer.optionId
   )
     return;
   if (execution.kind === 'model') throw new AgentError('permission_denied');
-  const body = JSON.parse(String(interaction.request_json)) as {
-    grants?: string[];
-    commandDigest?: string;
-  };
-  const digest = commandDigest(body.commandDigest);
-  if (!body.grants?.includes('same_command')) throw new AgentError('interaction_answer_invalid');
+  const selected = selectedApprovalOption(
+    JSON.parse(String(interaction.request_json)),
+    answer.optionId,
+  );
+  if (selected.kind === 'once') return;
+  const offer = parseGrantOffer(selected);
+  if (
+    !offer.bindings.some((binding) =>
+      sameCapability(binding, {
+        kind: String(execution.kind) as 'tool' | 'job',
+        definitionId: String(execution.adapter_id),
+        definitionVersion: String(execution.definition_version),
+      }),
+    )
+  )
+    throw new AgentError('interaction_answer_invalid');
   if (db.row('SELECT id FROM permission_grant WHERE id=?', interaction.id!)) return;
   const value = target(db, String(execution.id), String(interaction.origin_store_id));
   const seq = change(
@@ -206,7 +224,7 @@ export function savePermissionGrant(db: SqliteOperations, interaction: Row, exec
     'grant',
   );
   db.run(
-    'INSERT INTO permission_grant(id,origin_store_id,subject_id,session_id,workspace_id,kind,definition_id,definition_version,input_digest,command_digest,execution_id,decision_revision,seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO permission_grant(id,origin_store_id,subject_id,session_id,workspace_id,kind,definition_id,definition_version,input_digest,scope_digest,payload_json,execution_id,decision_revision,seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     interaction.id!,
     interaction.origin_store_id!,
     interaction.subject_id!,
@@ -216,7 +234,8 @@ export function savePermissionGrant(db: SqliteOperations, interaction: Row, exec
     interaction.definition_id!,
     interaction.definition_version!,
     interaction.input_digest!,
-    digest,
+    offer.scopeDigest,
+    canonicalJson(offer as unknown as Json),
     execution.id!,
     String(interaction.revision),
     seq,
@@ -234,16 +253,36 @@ export function verifyPermissionGrantDispatch(db: SqliteOperations, input: Dispa
     typeof reference.revision !== 'string'
   )
     throw new AgentError('permission_grant_unverifiable');
-  if (Object.keys(reference).some((key) => !['grantId', 'revision', 'commandDigest'].includes(key)))
+  if (
+    Object.keys(reference).some(
+      (key) =>
+        !['grantId', 'revision', 'acceptedRevision', 'offer', 'binding', 'reuseRevision'].includes(
+          key,
+        ),
+    )
+  )
     throw new AgentError('permission_grant_unverifiable');
   decimal(reference.revision);
+  const offer = parseGrantOffer(reference.offer);
+  const policyBinding = offer.policyBindings.find((binding) =>
+    sameCapability(binding.capability, reference.binding),
+  );
+  if (!policyBinding || policyBinding.reuseRevision !== reference.reuseRevision)
+    throw new AgentError('permission_grant_changed');
   const value = target(db, input.executionId, input.expectedStoreId);
   const row = db.row('SELECT * FROM permission_grant WHERE id=?', reference.grantId);
   if (
     !row ||
     row.origin_store_id !== input.expectedStoreId ||
     row.revoked_seq !== null ||
-    !exact(row, value, reference.commandDigest) ||
+    !exact(row, value, offer) ||
+    row.payload_json !== canonicalJson(offer as unknown as Json) ||
+    String(row.decision_revision) !== reference.acceptedRevision ||
+    !sameCapability(reference.binding, {
+      kind: String(value.execution.kind) as 'tool' | 'job',
+      definitionId: String(value.execution.adapter_id),
+      definitionVersion: String(value.execution.definition_version),
+    }) ||
     epoch(
       db,
       input.expectedStoreId,
@@ -326,43 +365,67 @@ export function callPermissionGrant(
   try {
     const input = args[0] as Parameters<Store['listPermissionGrants']>[0] & {
       executionId: string;
-      commandDigest?: string;
+      offers: readonly GrantOffer[];
     };
     db.identity(input.expectedStoreId);
     let result: unknown;
     if (method === 'getPermissionGrant') {
       const value = target(db, input.executionId, input.expectedStoreId);
-      const rows = db.db
-        .query(
-          'SELECT * FROM permission_grant WHERE origin_store_id=? AND subject_id=? AND session_id=? AND workspace_id=? AND kind=? AND definition_id=? AND definition_version=? AND command_digest IS ? AND (command_digest IS NOT NULL OR input_digest=?) AND revoked_seq IS NULL ORDER BY seq DESC LIMIT 1',
-        )
-        .all(
-          input.expectedStoreId,
-          value.command.subject_id!,
-          value.execution.session_id!,
-          value.session.workspace_id!,
-          value.execution.kind!,
-          value.execution.adapter_id!,
-          value.execution.definition_version!,
-          commandDigest(input.commandDigest),
-          createHash('sha256')
-            .update(canonicalJson(JSON.parse(String(value.execution.intent_json)) as Json))
-            .digest('hex')!,
-        ) as Row[];
-      const row = rows[0];
-      if (row) proof(db, row);
-      result = row
-        ? {
+      result = null;
+      for (const current of input.offers) {
+        parseGrantOffer(current);
+        const rows = db.db
+          .query(
+            'SELECT * FROM permission_grant WHERE origin_store_id=? AND subject_id=? AND session_id=? AND workspace_id=? AND scope_digest=? AND revoked_seq IS NULL ORDER BY seq DESC',
+          )
+          .all(
+            input.expectedStoreId,
+            value.command.subject_id!,
+            value.execution.session_id!,
+            value.session.workspace_id!,
+            current.scopeDigest,
+          ) as Row[];
+        for (const row of rows) {
+          const offer = parseGrantOffer(JSON.parse(String(row.payload_json)));
+          const binding = {
+            kind: String(value.execution.kind) as 'tool' | 'job',
+            definitionId: String(value.execution.adapter_id),
+            definitionVersion: String(value.execution.definition_version),
+          };
+          const prior = offer.policyBindings.find((entry) =>
+            sameCapability(entry.capability, binding),
+          );
+          const now = current.policyBindings.find((entry) =>
+            sameCapability(entry.capability, binding),
+          );
+          if (
+            !exact(row, value, current) ||
+            !prior ||
+            !now ||
+            canonicalJson(prior as unknown as Json) !== canonicalJson(now as unknown as Json) ||
+            canonicalJson(offer.scope) !== canonicalJson(current.scope) ||
+            offer.ruleId !== current.ruleId ||
+            offer.contractId !== current.contractId
+          )
+            continue;
+          proof(db, row);
+          result = {
             grantId: String(row.id),
-            ...(row.command_digest === null ? {} : { commandDigest: String(row.command_digest) }),
             revision: epoch(
               db,
               input.expectedStoreId,
               String(value.command.subject_id),
               String(value.execution.session_id),
             ),
-          }
-        : null;
+            acceptedRevision: String(row.decision_revision),
+            offer,
+            binding,
+            reuseRevision: now.reuseRevision,
+          } satisfies GrantUse;
+          break;
+        }
+        if (result) break;
+      }
     } else {
       scope(db, input.sessionId, input.subjectId);
       const highWaterSeq = String(

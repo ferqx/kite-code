@@ -79,7 +79,17 @@ test('the original Approval form consumes the verified complete request and subm
   const request = {
     definitionId: 'shell.execute',
     definitionVersion: '1',
-    grants: ['approve_once', 'same_command'],
+    options: [
+      { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+      {
+        optionId: 'scope-example',
+        kind: 'scope',
+        presentation: {
+          label: '本 Session 相同命令',
+          details: ['仅限此会话的完整相同命令、环境与执行范围'],
+        },
+      },
+    ],
     policy: { reason: '原人工原因' },
     input: { command: 'printf "原命令 雪🙂"\r\n' },
   };
@@ -117,7 +127,7 @@ test('the original Approval form consumes the verified complete request and subm
     await act(async () => render());
     const approve = () =>
       [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent === '批准一次',
+        (button) => button.textContent === '仅此次',
       )!;
     expect(approve().disabled).toBe(true);
     expect(f.host.querySelector('[aria-label="更多批准方式"]')).toBeNull();
@@ -148,11 +158,14 @@ test('the original Approval form consumes the verified complete request and subm
       ),
     );
     const same = f.dom.window.document.querySelector<HTMLElement>('[role="menuitem"]')!;
-    expect(same.textContent).toContain('本次会话批准');
-    expect(same.textContent).toContain('本次及本会话内的相同命令');
+    expect(same.textContent).toContain('本 Session 相同命令');
+    expect(same.textContent).toContain('仅限此会话的完整相同命令、环境与执行范围');
     await act(async () => same.click());
     expect(answers).toEqual([
-      { id: 'approval', answer: { kind: 'approval', decision: 'approve', grant: 'same_command' } },
+      {
+        id: 'approval',
+        answer: { kind: 'approval', decision: 'approve', optionId: 'scope-example' },
+      },
     ]);
     await act(async () => render({ ...original, id: 'other-card', revision: '2' }));
     expect(approve().disabled).toBe(true);
@@ -172,7 +185,9 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
     acceptedDecisionRevision: null,
     accepted: false,
     decision: 'approve',
-    grant: 'same_command',
+    optionId: 'scope-example',
+    optionKind: 'scope',
+    presentation: { label: '本会话相同命令', details: ['原完整命令'] },
   };
   const render = async (
     authorization: NonNullable<Execution['authorization']>,
@@ -215,18 +230,6 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       },
     });
     expect(f.host.querySelector('[role="img"][aria-label="已自动批准"]')).not.toBeNull();
-    // Historical review observations remain readable; only new producers use check.
-    await render({
-      dispatched: true,
-      review: {
-        executionId: 'legacy-review',
-        status: 'succeeded',
-        decision: 'approve_once',
-        reason: '历史自动批准原因',
-        requireApproval: false,
-      },
-    });
-    expect(f.host.querySelector('[role="img"][aria-label="已自动批准"]')).not.toBeNull();
     await render({
       dispatched: false,
       check: {
@@ -243,7 +246,14 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       const awaiting = await render(
         {
           dispatched: false,
-          human: { ...human, state: 'pending', decision: null, grant: undefined },
+          human: {
+            ...human,
+            state: 'pending',
+            decision: null,
+            optionId: undefined,
+            optionKind: undefined,
+            presentation: undefined,
+          },
           check: {
             executionId: 'check',
             status: decision === 'ask_user' ? 'succeeded' : 'failed',
@@ -303,7 +313,9 @@ test('compact Shell approval exposes the exact permission scope on keyboard focu
       const request = {
         definitionId: 'shell.execute',
         definitionVersion: '1',
-        grants: ['approve_once'],
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+        ],
         input: { key: 'deploy', command, permissions, cancellation: 'detached' },
         policy: { reason: 'approval_required', executionScope: permissions },
       };

@@ -45,13 +45,13 @@ const provider = Bun.serve({
     if (step === 0) call = { name: 'read_file', input: { path: 'original.txt', max_lines: 10000 } };
     if (step === 1) {
       const result = JSON.parse(body.messages.filter((m) => m.role === 'tool').at(-1)!.content) as {
-        baseline: unknown;
+        base_ref: string;
       };
       call = {
         name: 'write_file',
         input: {
           path: 'original.txt',
-          base: result.baseline,
+          base_ref: result.base_ref,
           content: `${key} modified UTF8 😀\r\n`,
         },
       };
@@ -59,7 +59,7 @@ const provider = Bun.serve({
     if (step === 2)
       call = {
         name: 'write_file',
-        input: { path: `${key}-created.txt`, base: null, content: `${key} created\r\n` },
+        input: { path: `${key}-created.txt`, content: `${key} created\r\n` },
       };
     const frame = (delta: unknown, finish_reason: string | null) =>
       `data: ${JSON.stringify({ id: `actual-${requests.length}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -222,7 +222,7 @@ try {
     expectedStoreId: storeId,
     commandId: 'approve-restore',
     expectedRevision: card.revision,
-    answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
   });
   const restored = await until(
     () => client.getExecution(card.executionId!),

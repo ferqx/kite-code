@@ -32,7 +32,7 @@ test('Interaction reads and answers require admission/capability and validate cl
     expectedStoreId: 'original-store',
     commandId: 'original-command',
     expectedRevision: '9223372036854775807',
-    answer: { kind: 'approval', decision: 'approve' },
+    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
   };
   const operations = [
     () => client.listInteractions('root', { storeId: 'store' }),

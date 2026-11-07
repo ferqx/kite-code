@@ -23,6 +23,7 @@ import type { ExecutionRecord, ExtensionRecord } from '@kite-ai/agent/storage';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../../../apps/service/src';
+import { createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
 import {
   createDefaultProcessConfiguration,
   createUserConfiguration,
@@ -163,6 +164,7 @@ export async function runGitWorktreeLive(
   selectedCase: Case = 'primary',
   providerConfigurationPath?: string,
   launchPreflightOnly = false,
+  modelSelection?: { model: string; reasoningEffort: 'low' | 'medium' | 'high' },
 ) {
   assert.equal(
     process.env.KITE_RUN_LIVE_GIT_WORKTREE,
@@ -284,7 +286,7 @@ export async function runGitWorktreeLive(
     executionStack: 'default-service-http-client-sqlite-native-shell',
     transportQualification:
       'test-injected actual configured adapter; no model/protocol substitution or response edits; no installed UI qualification',
-    modelSelection: 'existing configured default; no explicit model override',
+    modelSelection: modelSelection ?? 'existing configured default; no explicit model override',
     requestLimit: null,
     timeoutMs: null,
     requestTimeoutMs: null,
@@ -324,6 +326,7 @@ export async function runGitWorktreeLive(
     signal.throwIfAborted();
     live = await createLiveModelFixture({
       userConfigurationPath: providerConfigurationPath,
+      ...modelSelection,
       signal,
       requestTimeoutMs: null,
       captureWireRequests: true,
@@ -430,9 +433,6 @@ export async function runGitWorktreeLive(
       return {
         ...binding,
         model: observedModel,
-        ...(binding.authorizationCheck
-          ? { authorizationCheck: { ...binding.authorizationCheck, model: observedModel } }
-          : {}),
       };
     };
     runtime = createRuntime({
@@ -634,7 +634,7 @@ export async function runGitWorktreeLive(
               expectedStoreId: expectedStoreId!,
               commandId: `approve-${card.id}`,
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             approvals.push({ ...entry, answer });
             save(join(evidence, 'approvals.json'), approvals);
@@ -1481,14 +1481,15 @@ export async function runGitWorktreeLive(
             );
             if (selectedCase === 'child-auto')
               check(
-                owner.authorization?.check?.decision === 'approve_once' &&
-                  policy!.checkExecutionId === owner.authorization.check.executionId,
-                `${object(owner.input).action}-internal-job-reuses-exact-original-generic-check`,
+                !owner.authorization?.check &&
+                  !owner.authorization?.human &&
+                  policy!.checkExecutionId === undefined,
+                `${object(owner.input).action}-internal-job-reuses-exact-auto-exempt-tool`,
               );
             else
               check(
                 owner.authorization?.human?.accepted === true &&
-                  owner.authorization.human.grant === 'approve_once' &&
+                  owner.authorization.human.optionId === 'once' &&
                   policy!.checkExecutionId === undefined,
                 `${object(owner.input).action}-internal-job-reuses-exact-user-tool-approval`,
               );
@@ -1507,21 +1508,10 @@ export async function runGitWorktreeLive(
           const checksPerformed = modelsWithCommands.filter(
             (row) => row.command?.kind === 'authorization.check',
           );
-          const expectedCheckIds = new Set(
-            mutationTools.map((row) => row.authorization?.check?.executionId),
-          );
           save(join(evidence, 'generic-authorization-checks.json'), checksPerformed);
           check(
-            checksPerformed.length === 2 &&
-              expectedCheckIds.size === 2 &&
-              !expectedCheckIds.has(undefined) &&
-              checksPerformed.every(
-                (row) =>
-                  expectedCheckIds.has(row.execution.id) &&
-                  mutationTools.some((owner) => owner.id === row.execution.parentExecutionId) &&
-                  row.execution.status === 'succeeded',
-              ),
-            'auto-exactly-two-original-generic-checks-not-six',
+            checksPerformed.length === 0,
+            'auto-worktree-and-exact-internal-jobs-have-no-reviewer',
           );
           save(join(evidence, 'generic-authorization-checks.json'), checksPerformed);
         }
@@ -1988,6 +1978,8 @@ if (import.meta.main) {
   const outputArgs = args.filter((value) => value.startsWith('--output=')),
     caseArgs = args.filter((value) => value.startsWith('--case=')),
     providerArgs = args.filter((value) => value.startsWith('--provider-configuration=')),
+    modelArgs = args.filter((value) => value.startsWith('--model=')),
+    effortArgs = args.filter((value) => value.startsWith('--reasoning-effort=')),
     preflightArgs = args.filter((value) => value === '--launch-preflight');
   const selectedCase = (caseArgs[0]?.slice('--case='.length) ?? 'primary') as Case;
   const launchPreflightOnly = preflightArgs.length === 1;
@@ -1995,9 +1987,16 @@ if (import.meta.main) {
     outputArgs.length === 1 &&
       caseArgs.length <= 1 &&
       providerArgs.length <= 1 &&
+      modelArgs.length <= 1 &&
+      effortArgs.length <= 1 &&
       preflightArgs.length <= 1 &&
       args.length ===
-        outputArgs.length + caseArgs.length + providerArgs.length + preflightArgs.length &&
+        outputArgs.length +
+          caseArgs.length +
+          providerArgs.length +
+          preflightArgs.length +
+          modelArgs.length +
+          effortArgs.length &&
       [
         'primary',
         'child-approval',
@@ -2009,6 +2008,17 @@ if (import.meta.main) {
     'live-worktree-arguments',
   );
   const output = outputArgs[0]!.slice('--output='.length);
+  const model = modelArgs[0]?.slice('--model='.length);
+  const reasoningEffort = effortArgs[0]?.slice('--reasoning-effort='.length) ?? 'medium';
+  assert(
+    (model === undefined || ['gpt-6-luna', 'gpt-6.1-terra'].includes(model)) &&
+      ['low', 'medium', 'high'].includes(reasoningEffort) &&
+      (effortArgs.length === 0 || model !== undefined),
+    'live-worktree-model-selection-invalid',
+  );
+  const modelSelection = model
+    ? { model, reasoningEffort: reasoningEffort as 'low' | 'medium' | 'high' }
+    : undefined;
   const providerConfigurationPath = providerArgs[0]?.slice('--provider-configuration='.length);
   if (providerConfigurationPath === undefined) {
     // No credentials are copied. The child resolves the same original user
@@ -2025,7 +2035,12 @@ if (import.meta.main) {
         `--provider-configuration=${originalConfigurationPath}`,
       ],
       {
-        env: { ...process.env, HOME: startupHome, USERPROFILE: startupHome },
+        env: {
+          ...process.env,
+          ...(modelSelection ? { CODEX_HOME: dirname(createCodexLocalSource().authPath) } : {}),
+          HOME: startupHome,
+          USERPROFILE: startupHome,
+        },
         stdin: 'inherit',
         stdout: 'inherit',
         stderr: 'inherit',
@@ -2059,6 +2074,7 @@ if (import.meta.main) {
         selectedCase,
         providerConfigurationPath,
         launchPreflightOnly,
+        modelSelection,
       );
       console.log(
         JSON.stringify({

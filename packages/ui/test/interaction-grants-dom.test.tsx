@@ -20,7 +20,10 @@ const original: Interaction = {
   inputDigest: 'digest',
   policyRevision: 'policy',
   requiredRefs: [],
-  request: { input: { command: 'exact' } },
+  request: {
+    input: { command: 'exact' },
+    options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
+  },
   answer: null,
   revision: '7',
   acceptedDecisionRevision: null,
@@ -54,28 +57,37 @@ test('actual DOM offers same-command only from the original approval request and
       root.render(<InteractionCard interaction={original} onAnswer={onAnswer} />),
     );
     expect(button('本 Session 相同命令')).toBeUndefined();
-    await act(async () => button('Approve once')!.click());
+    await act(async () => button('仅此次')!.click());
     expect(answers[0]).toEqual({
       card: original,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     const offered = {
       ...original,
       id: 'offered-card',
       revision: '9',
-      request: { ...(original.request as object), grants: ['approve_once', 'same_command'] },
+      request: {
+        ...(original.request as object),
+        options: [
+          { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+          {
+            optionId: 'scope-example',
+            kind: 'scope',
+            presentation: {
+              label: '本 Session 相同命令',
+              details: ['仅限此会话的完整相同命令、环境与执行范围'],
+            },
+          },
+        ],
+      },
     };
     await act(async () =>
       root.render(<InteractionCard interaction={offered} onAnswer={onAnswer} />),
     );
-    await act(async () =>
-      button('本 Session 相同命令')!.dispatchEvent(
-        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
-      ),
-    );
+    await act(async () => button('本 Session 相同命令')!.click());
     expect(answers[1]).toEqual({
       card: offered,
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'scope-example' },
     });
     expect(answers[1]!.card).toBe(offered);
     await act(async () => button('Deny')!.click());

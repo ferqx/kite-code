@@ -100,7 +100,7 @@ test('Native Files finite IPC rejects renderer authority, missing observation re
     generation: 1,
     interactionId: 'card',
     revision: '1',
-    answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
   } as const;
   expect(decodeNativeRequest(approved)).toEqual(approved);
   expect(() =>
@@ -117,7 +117,7 @@ test('Native Files finite IPC rejects renderer authority, missing observation re
   for (const extra of [
     { commandId: 'new' },
     { expectedStoreId: 'other' },
-    { grant: 'approve_once' },
+    { optionId: 'once' },
     { request: {} },
     { pointId: 'not-hash' },
     { inputRevision: undefined },

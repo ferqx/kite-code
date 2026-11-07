@@ -6,12 +6,22 @@ export class NativeSessionRecovery {
   private entries = new Map<string, Entry>();
   private running = new Map<string, Entry>();
   private readonly delays: readonly number[];
-  constructor(delays: readonly number[] = [250, 1000, 3000, 15000]) {
+  constructor(delays: readonly number[] = [250, 500, 1000]) {
     this.delays = delays;
   }
 
   has(key: string) {
     return this.entries.has(key);
+  }
+
+  /** A recovered dependency expedites only the existing read; its identity stays unchanged. */
+  wake(key: string) {
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    entry.attempts = 0;
+    clearTimeout(entry.timer);
+    // A replacement entry still needs its timer while an older same-key read settles.
+    if (this.running.get(key) !== entry) this.schedule(key, entry, 0);
   }
 
   reconcile(work: ReadonlyMap<string, Work>) {
@@ -31,8 +41,11 @@ export class NativeSessionRecovery {
     }
   }
 
-  private schedule(key: string, entry: Entry) {
-    const delay = this.delays[Math.min(entry.attempts, this.delays.length - 1)];
+  private schedule(
+    key: string,
+    entry: Entry,
+    delay = this.delays[Math.min(entry.attempts, this.delays.length - 1)],
+  ) {
     if (delay === undefined || this.entries.get(key) !== entry) return;
     entry.timer = setTimeout(async () => {
       if (this.entries.get(key) !== entry) return;

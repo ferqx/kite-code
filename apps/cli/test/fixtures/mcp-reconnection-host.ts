@@ -674,11 +674,10 @@ export async function reconnectionHostFixture(ask = false, many = false) {
           expectedStoreId: storeId,
           commandId: `answer_${card.id}`,
           expectedRevision: card.revision,
-          answer: {
-            kind: 'approval',
-            decision,
-            ...(decision === 'approve' ? { grant: 'approve_once' as const } : {}),
-          },
+          answer:
+            decision === 'approve'
+              ? { kind: 'approval', decision: 'approve', optionId: 'once' }
+              : { kind: 'approval', decision: 'deny' },
         });
       },
     };

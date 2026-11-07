@@ -390,7 +390,7 @@ for (const slow of [false, true])
           presentationSessionId: 's',
           interactionId: card.id,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
         await runtime.waitForCommand('work', { timeoutMs: 6000 });
         const rows = await store.listExecutions('s');

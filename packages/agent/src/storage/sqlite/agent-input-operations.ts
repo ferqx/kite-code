@@ -307,6 +307,7 @@ export function applyAgentCommand(
       agentId: input.agentId,
       content: input.content ?? null,
       sourceExecutionId: input.parentExecutionId,
+      ...(input.expectedWork ? { expectedWork: input.expectedWork as unknown as Json } : {}),
     };
     const requestDigest = digest(body);
     const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
@@ -349,6 +350,12 @@ export function applyAgentCommand(
     });
     const target = page.items[0];
     if (!target) throw new AgentError('agent_unavailable');
+    if (
+      input.expectedWork &&
+      canonicalJson(input.expectedWork as unknown as Json) !==
+        canonicalJson(target.ref as unknown as Json)
+    )
+      throw new AgentError('input_target_changed');
     const carrier = db.row('SELECT * FROM execution WHERE id=?', target.ref.executionId!)!;
     if (carrier.state === 'outcome_unknown') throw new AgentError('operation_needs_review');
     const active = !['succeeded', 'failed', 'cancelled'].includes(String(carrier.state));

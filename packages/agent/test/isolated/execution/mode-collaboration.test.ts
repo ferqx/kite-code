@@ -485,7 +485,7 @@ test('an ended parent child replaces pending human approval with a real automati
       presentationSessionId: current.presentationSessionId,
       interactionId: current.id,
       expectedRevision: current.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     await until(async () => (f.effects() === 1 ? true : null));
     await until(async () =>

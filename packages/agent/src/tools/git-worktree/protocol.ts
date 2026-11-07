@@ -196,6 +196,77 @@ export function strictText(value: unknown, maxBytes: number, nonempty = true): v
     Buffer.from(value).toString('utf8') === value
   );
 }
+/** Model intents use the persisted Tool identity; internal worker inputs keep their frozen key. */
+export const worktreeIntentKey = (executionId: string) => `worktree-${digest(executionId)}`;
+export function parseGitWorktreeRequest(
+  input: unknown,
+  executionId: string,
+): GitWorktreeInput | null {
+  if (!jsonObject(input)) return null;
+  if ('key' in input || 'permissions' in input) return parseGitWorktreeInput(input);
+  const { filesystem, ...fields } = input;
+  return parseGitWorktreeInput({
+    ...fields,
+    ...(fields.action === 'list'
+      ? {}
+      : {
+          key: worktreeIntentKey(executionId),
+          ...(filesystem === undefined ? {} : { permissions: { filesystem, network: 'none' } }),
+        }),
+    ...(fields.action === 'list' && filesystem !== undefined ? { filesystem } : {}),
+  });
+}
+export const gitWorktreeModelSchema: Json = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['action'],
+  properties: {
+    action: { enum: ['list', 'create', 'remove', 'observe'] },
+    path: {
+      type: 'string',
+      minLength: 1,
+      maxLength: limits.pathBytes,
+      pattern: process.platform === 'win32' ? '^(?:[A-Za-z]:[\\\\/]|\\\\\\\\)' : '^/',
+      description: 'Native absolute target path; omitted create uses the persistent host root.',
+    },
+    baseRef: {
+      type: 'string',
+      minLength: 1,
+      maxLength: 256,
+      pattern: '^[^\\u0000]+$',
+      description: 'Git branch or commit, not a file baseline reference; defaults to HEAD.',
+    },
+    newBranch: {
+      type: 'string',
+      minLength: 1,
+      maxLength: limits.payloadBytes,
+      pattern: '^(?!refs/)(?!-)(?!.*@\\{)[^\\u0000]+$',
+    },
+    timeoutMs: { type: 'integer', minimum: 1000, maximum: 600000 },
+    filesystem: { enum: ['workspace_write', 'full_access'] },
+    operationRef: {
+      type: 'string',
+      pattern: '^gw_(?:u[A-Za-z0-9_-]{22}|s[A-Za-z0-9_-]+)$',
+      maxLength: 1027,
+    },
+  },
+  oneOf: [
+    { properties: { action: { const: 'list' } }, maxProperties: 1 },
+    { properties: { action: { const: 'create' } }, not: { required: ['operationRef'] } },
+    {
+      properties: { action: { const: 'remove' } },
+      required: ['path'],
+      not: {
+        anyOf: [
+          { required: ['baseRef'] },
+          { required: ['newBranch'] },
+          { required: ['operationRef'] },
+        ],
+      },
+    },
+    { properties: { action: { const: 'observe' } }, required: ['operationRef'], maxProperties: 2 },
+  ],
+};
 function path(value: unknown): value is string {
   return strictText(value, limits.pathBytes) && isAbsolute(value);
 }

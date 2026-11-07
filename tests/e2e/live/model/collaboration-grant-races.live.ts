@@ -343,7 +343,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
               expectedStoreId,
               commandId,
               expectedRevision: chosen.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             },
             { signal: options.signal },
           );

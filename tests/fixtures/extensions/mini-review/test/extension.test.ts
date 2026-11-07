@@ -24,7 +24,7 @@ function fixture() {
             sessionId: 's',
             status: 'completed',
             isActive: false,
-
+            requirements: [],
             createdAt: 1,
             finishedAt: 2,
           }

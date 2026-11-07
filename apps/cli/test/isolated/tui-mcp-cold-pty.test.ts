@@ -235,7 +235,7 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
               expectedStoreId: storeId,
               commandId: `approve-original-${ordinal}`,
               expectedRevision: card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
             const execution = await until(async () => {
               const row = await client.getExecution(executionId);

@@ -1,5 +1,7 @@
 # Store 边界
 
+当前未投产版本按用户确认统一为 Store `formatMajor=1`、内部自动审核回执 `version=1`，公开 API 保持 `/v1`。当前 reviewed schema 与新版审批完整合同保持；既有 Tool／Job、Native 私库和备份清单版本不属于本次重编号。Profile 的 `schemaChecksum` 在打开 SQLite 前区分历史同编号旧结构，实际数据库仍完整核 schema/checksum。此次 SQL baseline 仅首行编号注释改变，DDL 逐字保持。
+
 ## 回复完成与原工具未知
 
 [finishRun](sqlite/operations.ts)允许准确Run中已保存的Tool `outcome_unknown` 随解释性回复完成；它不改原Execution、结果、修订或效果状态。准确Run中仍planned／dispatching／running的执行，以及Model／Job unknown，仍阻止completed。独立nested Job按原run_id、资源owner及监督合同归属，不能把其他Run或已结束的业务unknown当成新全局fence，也不能因回复完成释放仍活Job的permit／binding。
@@ -34,13 +36,13 @@
 
 [pending-input-queue.ts](sqlite/pending-input-queue.ts)在原根 Session／Store／subject 内读取和变更尚未消费的输入。`getPendingInputQueue` 返回原完整 Command request、独立顺序游标 `orders`、`revision` 和快照水位；首 revision 固定后续分页，变化报 `input_queue_changed`。普通 steer／follow-up 包含空正文附件输入，均可撤回或重排；`result.include` 保留原固定槽。`input.withdraw` 原子标记准确目标 `withdrawn_before_apply` 并保存独立 applied／`input_withdrawn` 回执，已消费竞争返回 `input_already_consumed`，不进入 Run／Execution 取消链。`input.reorder` 必须提交完整当前可移动 ID 集合，保留原请求、附件、request digest 和不可变 Command.seq。
 
-[迁移0004](migrations/0004-pending-input-order.sql)为原 `command` 增加独立 `pending_order`，顺序读取使用 `COALESCE(pending_order,seq),seq`。事务内队列 revision 结合原成员／顺序／digest 与每 Session 单调变更计数；新增、消费、撤回、删除和重排都推进计数，A→B→A 不恢复旧观察资格。重排只置换普通输入占用的槽，固定 `result.include` 位置、事件和历史 seq 保持。重复原 operation ID 返回原回执，原 ID 换内容冲突，写入故障整项回滚。
+[当前基线](migrations/0001-baseline.sql)为原 `command` 增加独立 `pending_order`，顺序读取使用 `COALESCE(pending_order,seq),seq`。事务内队列 revision 结合原成员／顺序／digest 与每 Session 单调变更计数；新增、消费、撤回、删除和重排都推进计数，A→B→A 不恢复旧观察资格。重排只置换普通输入占用的槽，固定 `result.include` 位置、事件和历史 seq 保持。重复原 operation ID 返回原回执，原 ID 换内容冲突，写入故障整项回滚。
 
 [operations](sqlite/operations.ts)、[输入事务](sqlite/inputs/README.md)和 Runtime checkpoint 共用实际 pending 顺序，最终应用／派发再核当前顺序，不能只改变 UI 后继续按旧 seq 消费。Worker 构建闭包纳入该迁移；历史、导出与 Fork 原 seq 语义保持。[真实 Store 回归](../../test/isolated/storage/inputs.test.ts)覆盖重排后的 steer 与 follow-up 实际消费、撤回／消费及重排／消费竞争、防 ABA、错误成员和作用域、故障回滚、冷重开，以及图片／文件 only 的原元数据保真。跨包接口归 [Service](../../../../apps/service/README.md#待消费输入队列协议)，尚在解释或未决的人类原输入不进入该窄队列；决定后尚未消费的业务输入仍可排序和撤回。撤回在同一事务沿原决定关联结算公开 Command 与人类输入 applicationState，不改变已保存的工作选择，不取消活动 Run／Execution。
 
 ## 用户图片引用
 
-旧普通文件的 `files` 名称／URI 仍只是路径数据，不授予文件访问。新上传另外携带完整 Artifact 引用，由[输入文件登记](sqlite/input-file-imports.ts)和[迁移0006](migrations/0006-input-file-imports.sql)保存稳定导入身份、原主体／会话、名称、原引用与 prepared／bound／released 状态。start、steer 和 follow-up 在原输入事务核全部引用元数据并绑定准确 Command；绑定与释放竞争串行，释放不能撤销已接受输入。释放记录保留原引用，历史 GC 证明无依赖后才收集，不用草稿 TTL 删除已接受消息的唯一原件。`MessageRecord.content` 始终保留原文，模型端可读路径由 Runtime 按当前 Profile 与原引用投影，旧历史不会自动迁移。
+旧普通文件的 `files` 名称／URI 仍只是路径数据，不授予文件访问。新上传另外携带完整 Artifact 引用，由[输入文件登记](sqlite/input-file-imports.ts)和[当前基线](migrations/0001-baseline.sql)保存稳定导入身份、原主体／会话、名称、原引用与 prepared／bound／released 状态。start、steer 和 follow-up 在原输入事务核全部引用元数据并绑定准确 Command；绑定与释放竞争串行，释放不能撤销已接受输入。释放记录保留原引用，历史 GC 证明无依赖后才收集，不用草稿 TTL 删除已接受消息的唯一原件。`MessageRecord.content` 始终保留原文，模型端可读路径由 Runtime 按当前 Profile 与原引用投影，旧历史不会自动迁移。
 
 用户输入的 `images` 在原消息 source JSON 保存名称和完整、不可变的 session Artifact 引用；[输入受理](sqlite/input-operations.ts)在原事务调用[引用核验](sqlite/artifact-operations.ts)比对 Store、Session、subject、scope 和全部原元数据。图片正文由既有 Artifact owner 保存，不新增 SQL 表或迁移。Fork 保留原来源链，离线 GC 继续依据原消息／会话关系保留被存活分支依赖的源会话；Runtime 按原出处完整读回图片，不能借当前会话重新声明原发布权。测试与语义见 [Agent](../../README.md#用户图片输入)。
 
@@ -52,15 +54,25 @@
 
 [Interaction owner](sqlite/interactions/README.md)区分当前原卡观察与明确 `origin:'all'` 的历史读取。当前 Store 仍是准入身份，实际保存的恢复记录保原 origin／来源与 presentation 关系，不隐式查 Fork／Include 祖先；默认查询、回答、决定接纳和派发继续要求当前出处。完整附件沿既有 Artifact 原引用校验，不建立回答 proof。SQL baseline 和维护格式不变；真实公共恢复与 Native 的分别验证范围见 [HTTP／Client 回归](../../../../tests/isolated/unified-agent/client-interactions.test.ts)和 [Native owner](../../../../apps/desktop/README.md#原交互记录只读历史)。
 
+## 业务信息与单次执行确认
+
+[Interaction 事务](sqlite/interactions/README.md)保存请求时的完整信息权限 stamp，接纳时逐字核原证据，同时独立以当前 `controlReads` 做 CAS；原 stamp 不作为跨人类等待的当前权限相等键。当前读集竞争使用专门错误，只有它可由 Core 有界重新观察；原身份、来源、必要 refs、版本、取消和 owner 校验继续拒绝漂移。信息接纳不写工具授权 binding，计划批准不成为后续工具 grant。
+
+准确 owner 单次执行确认使用原 approval Interaction 和封存 binding；最终 `markDispatching` 事务核原 accepted revision／once 答案、Store／Session／work／generation、定义／attempt／输入、来源和必要 refs。内部 Job 另核实际直接父执行、附着取消、原 operation key 和完整封闭步骤输入，并拒绝同一步骤被另一已派发执行消费。证明不跨 scope、Run 或兄弟调用借用；外层派发的当前权限、来源、条件及控制读集检查继续执行。完整实现入口、有限范围和反例归 [Interaction owner](sqlite/interactions/README.md)，Core 等待与资源边界归 [Agent owner](../../README.md#入口与职责)。
+
 ## 只读授权观察
 
-Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authorization-check.ts)从准确原记录推导；历史 `authorization.review` 仅按[旧 proof](sqlite/authorization-review.ts)只读解释。派发状态、原检查的有限状态／决定／原因，以及原人工答案的保存／accepted revision 分别保留，观察字段不是 grant。新检查优先沿实际 dispatch.checkExecutionId 读取，未派发只接受唯一准确候选，不猜最新。独立 prepared-input 与 completed-result digest 防止篡改单侧数据后降为仅人工放行。
+Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authorization-check.ts)从准确原记录推导；不读取旧 child 审核回执。派发状态、原检查的有限状态／决定／原因，以及原人工答案的保存／accepted revision 分别保留，观察字段不是 grant。新检查优先沿实际 dispatch.checkExecutionId 读取，未派发只接受唯一准确候选，不猜最新。独立 prepared-input 与 completed-result digest 防止篡改单侧数据后降为仅人工放行。
 
-观察复核原 Store／Session／Run／attempt／定义／输入／purpose、完整模型结果与原 Artifact proof，不公开原请求、主体、owner、私有上下文或审查全文。历史展示仅跳过当前可变取消标记与重新计算的当前 decision context，以保停止或后续上下文改变后可核对的原决定；这项例外只由只读 observer 显式使用。原 `fact` 授权路径默认仍检查全部当前条件，`getAuthorizationReview`、受理和最终派发不消费观察字段作为资格。
+观察复核原 Store／Session／Run／attempt／定义／输入／purpose、完整模型结果与原 Artifact proof，不公开原请求、主体、owner、私有上下文或审查全文。历史展示仅跳过当前可变取消标记与重新计算的当前 decision context，以保停止或后续上下文改变后可核对的原决定；这项例外只由只读 observer 显式使用。原 `fact` 授权路径默认仍检查全部当前条件，`getAuthorizationCheck`、受理和最终派发不消费观察字段作为资格。
 
 [原授权回归](../../test/isolated/execution/authorization-check.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
 准确 Worktree 内部 Job 复用原业务来源时，沿现有 `authorization.policy` 返回 `parent_review`、原 Tool 的 `sourceExecutionId`。真实 Auto 免审来源不伪造 `checkExecutionId`；旧模型审核及人工批准继续保留各自原证明。[专用边界](sqlite/worktree-authorization.ts)从实际原行、冻结步骤和完整 prepare 输出核资格，并在最终派发事务复核，公开观察字段本身不授予权限。普通 Shell 及旧记录解释不变，完整规则归[权限 owner](../permissions/README.md#git-worktree-的准确权限)。
+
+当前[独立基线](migrations/0001-baseline.sql)另外按实际读取条件登记访问索引：`context_result_execution` 以 execution/revision/seq 定位跨 Session 接收记录并保持原顺序；`execution_origin_command` 定位原 Command 的全部执行，仍用原 `LIMIT 2` 拒绝审核身份歧义；`authorization_invalidation_check` 同时定位准确 check 的失效记录和最终派发所核的完整 Store/target/policy 条件；`execution_work_effect` 定位原 Store/root-work 的已派发 Tool/Job，继续核全部中间效果及状态。`command_work_authority` 按原 Store/root-work 定位稳定授权上下文，沿原 Session/seq 顺序读取根命令、准确子命令和已应用 steer，保留跨 Session 与取消标记，不再先遍历整个 Store 的 Command。`command_mail_recipient` 只索引具有邮件接收 Session 的 Command，按准确 recipient/subject 读取同时包含普通邮件与子结果的 high-water，避免空收件箱也反向遍历全 Store；原 `agent.message` 专用索引仍保留。原 Session 索引、SQL 过滤与证明校验均保留，不以缩小 Session 范围或删减校验避免累计历史扫描。索引不授予执行资格，也不缓存授权结果。
+
+[访问回归](../../test/isolated/storage/authorization-access-indexes.test.ts)捕获实际生产查询后核 EXPLAIN 的按键定位，覆盖跨 Session 接收投影的 selection/diagnostic/pending 过滤、原工作授权输入的跨 Session 顺序与取消、其他 Store/work 分离、重复审核执行拒绝、真实失效记录和中间写效果撤销原复用证明；空收件箱沿相同生产 high-water 查询核 recipient/subject 索引。[真实统一收件箱回归](../../test/isolated/business/task/unified-inbox.test.ts)另外核普通邮件与子结果的原行、分页水位、receivedSeq、准确接收 Run，以及错误 Store/subject、其他 Session 和 cursor ahead。[格式预检](../../test/isolated/storage/preflight.test.ts)继续严格比对当前 schema/checksum；缺少全部访问索引、仅缺工作授权索引或仅缺邮件接收索引的先前未交付格式2候选都明确拒绝，原库及 Profile 字节保持，不迁移或自动补索引。未投产期间按用户确认将 Store 编号还原为1，公开协议仍为 v1；当前 schema/checksum 校验保持。
 
 ## Store 关闭未确认时的锁归属
 
@@ -172,7 +184,7 @@ Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Ru
 
 Session 完整原始记录的只读导出与分块文本范围见 [export owner](sqlite/export/README.md)。SQL 冻结读集完成验证、完整下载 footer 和原 scope 媒体 EOF 是独立证明；导出不恢复或消费旧工作。
 
-`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的闭合 baseline／增量迁移 schema 与 checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表；已支持原 0001 和加 0002 的闭合版本，写入打开才升级旧库。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
+`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的当前独立 baseline schema 与 checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表；只接纳新版独立基线；旧 major／schema／checksum 明确拒绝，不转换或重写旧库。已存在的私有 `profile.json` 必须声明当前 major 1 与本轮 baseline 的 `schemaChecksum`，在打开 SQLite 前拒绝不匹配的标记，不创建或改动 WAL／SHM；这只用于提前拒绝，数据库实际 major、完整 schema 与 migration checksum 仍独立校验。缺失该文件时仍沿原未完成建库路径核实际数据库。其他 SQLite 只读 WAL 发现可能建立空 sidecar，不改变原库／profile 字节或业务记录。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
 
 未完成 restore journal、exclusive 维护占用、rollback journal、链接/非私有文件和未知/损坏格式明确拒绝。只读连接使用 strict close 后才释放 lease；若数据库关闭未获确认，返回 `store_preflight_cleanup_failed` 并保留该进程的 profile-use 锁，不能冒充已释放。`compatible` 仅证明该次观察的格式与身份，未来 launch 仍须重新执行正式格式和身份准入，也不是完整业务历史的健康证明。源码与发布 SQLite leaf 分别使用各自真实包内 migration SQL，不回退到源码树。
 
@@ -187,13 +199,13 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 只读预检和原申请回执查询先于恢复工厂。同 ID 已登记 accepted 或 applied 意图只返回原回执，不重新准备、派发或执行；同 ID 改变原 Run／epoch 等意图冲突。内部 `RunResumeInput.expectedOwnerGeneration` 做持久 epoch CAS，公开 HTTP 不接收客户端 generation，由 Service 查询原回执或当前 Session 推导。`before_model_dispatch`、`tool_calls`、`completion` checkpoint 封存当前 Run 读集摘要、原 selection 与初始化状态；Runtime 另核完整 Model 正文和原调用身份。
 
-正常写事务通过闭合 0002-recovery-audit 迁移维护增量恢复证明：trigger 保 OLD/NEW 身份及资格依赖，原子认证变更并推进单调序号。健康证明的首次冷读只审当前前沿与未认证增量，不扫描累计已认证历史；无事件 SQL、历史删除/移动和未知效果仍失效或阻挡，最终 CAS 不依赖通知 cursor。新 Model 的 version 1 continuation 保原来源请求和失败计数，大正文沿原 Artifact 完整核验；旧记录仍用私有200项历史页。0001 旧历史首次升级及失效证明回退仍完整审计，B-tree、实际 live 树和必要来源成本各自保留，准确边界归[协议 owner](sqlite/run-resume.README.md)。
+正常写事务通过当前基线中的 recovery audit 维护增量恢复证明：trigger 保 OLD/NEW 身份及资格依赖，原子认证变更并推进单调序号。健康证明的首次冷读只审当前前沿与未认证增量，不扫描累计已认证历史；无事件 SQL、历史删除/移动和未知效果仍失效或阻挡，最终 CAS 不依赖通知 cursor。新 Model 的 version 1 continuation 保原来源请求和失败计数，大正文沿原 Artifact 完整核验；旧记录仍用私有200项历史页。新版失效证明回退仍完整审计，不提供旧库升级，B-tree、实际 live 树和必要来源成本各自保留，准确边界归[协议 owner](sqlite/run-resume.README.md)。
 
 begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际 carrier/父 Run 顺序准备全部可信绑定、权限 ceiling 和 record read-set；最终 commit 核完整组摘要和配置后原子交接 planned/continuation frontier、child carrier 与原监督祖先的 generation。已知终态只改变监督所属 epoch，不改变状态、结果 revision、身份或 attempt；未闭合纯 Model 另保存失败结果。Host 先登记原操作，唯一 Loop 再继续；实际 Job 观察、槽位、取消与 Run binding lease 共用正常路径，子超期先结算。
 
-零派发 Tool 已有结算的 Auto 检查时，同一恢复 commit 核实准确 `authorization.check` 来源、target、封存输入和终态结果，原检查 Model 与目标一并交接 fencing generation；active、unknown、取消或身份不实不取得接管资格，任一代次失真令整项事务回滚。旧 child 审核保留原 carrier/child/Model 三方核验，不能据命名继承新权限例外。原请求、输出凭据、ID/attempt 与人工决定保持，零新 Model/子会话/授权。[交接回归](../../test/isolated/recovery/run-resume-check-ownership.test.ts)验证真实冷接续。
+零派发 Tool 已有结算的 Auto 检查时，同一恢复 commit 核实准确 `authorization.check` 来源、target、封存输入和终态结果，原检查 Model 与目标一并交接 fencing generation；active、unknown、取消或身份不实不取得接管资格，任一代次失真令整项事务回滚。新版内部检查只消费原统一回执，不接管旧 child 审核格式。原请求、输出凭据、ID/attempt 与人工决定保持，零新 Model/子会话/授权。[交接回归](../../test/isolated/recovery/run-resume-check-ownership.test.ts)验证真实冷接续。
 
-原普通根 Run 的显式恢复仅将宿主快照中旧 `authorizationReview` 与新 `authorizationCheck` 的准确 `id/version/modelId`（或 null）视为同一字段；双字段、其他配置或身份变化仍拒绝。SQL commit 消费原保存配置，绝不改写历史快照。旧结算审核经当前 check 指针仍复核原 legacy proof、失效记录及独立真人批准，不重跑旧 child。[旧版本冻结回归](../../test/isolated/recovery/run-resume-configuration-compatibility.test.ts)覆盖真实旧 producer 的有／无审核恢复、原卡一次效果与配置漂移拒绝；这不放宽子任务当前权限 revision 或恢复旧内部 child 的执行。
+新版 Run 显式恢复核原封存的审核 preset／预算、checker 与全部工具行为绑定；缺失或配置漂移明确失败，不再把 `authorizationReview` 映射成 `authorizationCheck`，也不推断缺省设置。SQL commit 只消费原保存配置，不改写历史快照；已结算检查只消费原 v1 回执，不运行当前解释器或 Provider。原期限、结果、准确 target 与独立真人要求保持。[新版自身强杀恢复与旧库拒绝回归](../../test/isolated/recovery/run-resume-configuration-compatibility.test.ts)的环境、完整结果及未覆盖范围归[恢复证据](#会话状态核实与私有恢复边界)。
 
 所有四处具名 Run 创建事务捕获 `context_selection_id`；当前 selection 漂移拒绝恢复。`initialization_state` 持久区分 unstarted／started／completed：任何初始化回调前先登记 started，注册 requirement 结果与 completed 同事务提交，空 refs 也必须完成封存。恢复 completed 复用原 refs，不重跑回调；started 拒绝重放半执行的闭包；unstarted 只有零 Execution 时可进入原初始化入口。
 
@@ -232,11 +244,11 @@ Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历�
 
 Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原投影摘要和 revision，缺失与分页 absence 也属于最终依赖。getter 随 prepare 结束关闭。Ask、权限和普通 freshness 完成后，只刷新已注册的当前执行组静止谓词，原记录读集与原 `contextRevision` 不替换；`markDispatching` 在原 OwnedWrite 的短事务内重复检查记录与完整组事实。`contextRevision` 绑定全组真实 Session/selection、完整消息和 Part revision，不把本 Action 的 Command/Ask 分配水位当上下文变化。先拒绝非静止组，再拒绝原上下文漂移；重新读到“目前静止”不能批准未在原 prepare 中消费的新历史。原active/pending/unfinished安全域保持8192项有限闭合边界；累计已完成Session/Message/Part不以该数额拒绝。
 
-本 guarded Action 的准确私有 reviewer 可以提供中立审阅上下文，但须已完成真实纯用途闭包：原 sealed request、唯一 completed Run/成功 Model、原两 Command/两完整 Message 及 parts、原 selector、无额外工作或后代。重建审核消息时逐字保留正式 Model producer 已保存的合法 `firstOutput` 等字段，继续核完整 canonical JSON、原正文和消息 parts；缺失或陌生字段不取得资格。`authorizationReviewContextSession` 只在这些条件和原 target 绑定均有效时排除该 Session 的 context 摘要；原完整父子树、全部 group safety、unknown 与最终审批证明仍参与核验。额外 Run/Command/Message/part/selector/后代或正文漂移使排除失效，原 pin 拒绝派发，不重写原 prepare。真实 [reviewer 上下文回归](../../test/isolated/execution/guarded-check-context.test.ts)明确区分实际 Model/Ask 与 owned SQLite 故障注入。
+新版权限检查是原 Session 内的无 Run Model，不创建审核 child Session，不建立子会话上下文排除规则。原全组 Session、完整消息和 Part revision 都参与 `contextRevision`；真实 Model/Ask 期间新增、替换或漂移的业务上下文仍使原 pin 拒绝派发，不能用后来静止洗掉 prepare 时的依据。旧 child 审核的纯用途闭包、消息重建和上下文排除 reader 已移除。真实[检查上下文回归](../../test/isolated/execution/guarded-check-context.test.ts)保留这些漂移负例。
 
 普通空读集不扩大 authority，子 operation 保留父 provenance，但不继承原 Action collector 或 guard 授权。Action 已通过最终原读集核验并进入 adapter 后，合法业务写入可以消费自己的 prepared missing-record；后继 Job 仍核原外部 source 和自身独立权限/read-set，不重新用父的旧 absence 否定父刚完成的合法写入。外部 source 在 Job Ask 后漂移仍在 adapter 前拒绝。普通 Query 缺省绑定实际当前 Store，显式 expectedStoreId 不被替换，缺 subject 的私有读取仍拒绝。
 
-`inheritsActionSource` 沿实际 parent Execution 与 Operation Command 证明同 Store/Session/rootWork/主体的 runless 来源，最多 64 个节点（含当前与原 Action），核每个真实请求、取消边、已派发祖先及原 prepared input。多跳 Tool→Job 仍只继承 provenance，不获得父 collector/guard。唯一未派发父节点例外是 `authorizationReviewSourceTarget` 完整封存的真实 reviewer 与准确 planned target；它不批准 target。链断裂、循环、漂移、65 节点或注入父读集均拒绝，原权限、Ask、freshness、requirements 与控制 revision 继续核验。实际 [来源链回归](../../test/isolated/storage/action-source-inheritance.test.ts)与 [Runtime 审阅回归](../../test/isolated/execution/authorization-check.test.ts)分别负责 Store 负例和真实 Model＋独立人类批准。
+`inheritsActionSource` 沿实际 parent Execution 与 Operation Command 证明同 Store/Session/rootWork/主体的 runless 来源，最多 64 个节点（含当前与原 Action），核每个真实请求、取消边、已派发祖先及原 prepared input。多跳 Tool→Job 仍只继承 provenance，不获得父 collector/guard。准确 `authorizationCheckSourceTarget` 与 `internalModelSourceTarget` 核实的内部 Model 只继承原来源，不批准 target，也不取得父 collector／guard；不再为旧审核 child 放宽未派发祖先校验。链断裂、循环、漂移、65 节点或注入父读集均拒绝，原权限、Ask、freshness、requirements 与控制 revision 继续核验。实际 [来源链回归](../../test/isolated/storage/action-source-inheritance.test.ts)与 [Runtime 审阅回归](../../test/isolated/execution/authorization-check.test.ts)分别负责 Store 负例和真实 Model＋独立人类批准。
 
 原 Action `decision_source_json` 中闭合、宿主创建的 `execution_group_quiescence@1` guard 与原 Store/Command/definition/prepared input 绑定。已提交 dispatching/running carrier 是持久的同 root fence：新 Run、普通 Execution/operation、child 激活、压缩与恢复派发不得跨越；已接受申请仍可留在原队列。Job report 原结果仍可落定，只有实际后继 Run 创建被挡并保留 deferred 申请。取消请求不释放 fence；已知实际终态释放，crash/unknown 和冷读不自动解除。其他 root 独立继续。该边界防止受监督的新效果进入正在执行的 guarded Action 窗口；它不把 SQLite 与外部文件或不合作进程的 I/O 变成原子事务。
 
@@ -246,7 +258,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 新增 immutable readonly source delegation 与上述 live records observer 各有范围：明确 `sourceReads:'declared'` 的可信 rebuild 通过有限准确源声明封存 Execution/Run/Model input/output 和 Artifact refs，读取只能从 current Session/extension 的实际 anchor 打开，不能指定 foreign scope。`openForkSourceProjection` 保留完整 ancestor aliases 与原来源身份；最终 Fork SQL 复核真实 Run/Cmd/Model/Tool、完整请求摘要、namespace/source stamps 和 source-root quiescence。immutable projection 不跟随 Fork 后的 mutable head；来源root的tombstone仍允许存活Fork按原证明读取未清理历史，当前namespace必须未删除，已清理来源拒绝。GC保留存活Fork的完整祖先依赖，ordinary Artifact/foreign readers 没有新授权。最终新文件 [20/313](../../test/isolated/storage/fork-readonly-sources.test.ts) 与此前相邻七文件62/601分别验证，最后深度/全文断言仅新文件重跑。当前合同与持久理由见 [Fork owner](../extensions/fork/README.md)及[封存只读来源 Note](../../../../.agents/notes/implemented/architecture/2026-10-03-sealed-readonly-fork-sources.md)。
 
-私有 reviewer 的完整 ModelOutput 不能由 `response.content` 的 preview 代替。Core 验同一 captured descriptor 的完整 EOF，严格解析答案后将[有限凭据](../authorization-review-output.ts)登记到原 Model execution scope 的不可变 Artifact。`authorization-review.fact` 保留原 purpose、唯一 Run/Model、binding、终态和空 tools 条件，并核当前完整 descriptor 摘要、凭据登记的原 scope/MIME/hash/size、原始全文 hash/bytes，以及 inline 重解析或准确原 carrier Artifact metadata；普通 Extension 的同名 details 不取得这条资格。SQL 不读取 graph／正文文件，冷 proof 不生成凭据或新调用。[实际审阅测试](../../test/isolated/execution/authorization-check-complete-output.test.ts)验证大合法 JSON、独立 Ask、效果一次及 descriptor/答案/登记元数据漂移零目标派发；完整读取、冷 metadata proof 与恢复后的新授权保持各自边界，细节归[输出 owner](../model-output/README.md)。
+私有 checker 的完整 ModelOutput 不能用 preview 代替。Core 在完整 EOF／stop／零 ToolCall 后经可信工具解释器生成[统一 v1 回执](../authorization-check-output.ts)，内联和 Artifact 都核行为绑定、目标 Execution／attempt／inputDigest、封存输入和完整输出摘要、通用 answer；Artifact 另核原 scope／MIME／hash／size 与私有发布出处。Worker 只消费该原回执，不调用解释器或解析工具领域格式；普通 ToolResult／Extension records 无法自报回执。缺失、错绑定、不完整输出和迟到回执失败关闭，冷读不产生模型调用。当前验证归[非内置格式回归](../../test/isolated/execution/tool-behavior-review.test.ts)与[完整输出回归](../../test/isolated/execution/authorization-check-complete-output.test.ts)。
 
 ## 跨会话原 Job 目录
 
@@ -319,9 +331,15 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 ## 会话状态核实与私有恢复边界
 
-[session-reconciliation](sqlite/session-reconciliation.ts)是 `reconcileSession` 的事务 owner，按准确 OS 锁、主体和 generation 结算整个主／子组。0003 只新增私有 `session_reconciliation`，原 checksum 不变，Worker protocol／包内资产同步迁移链。公开历史读保存的中断／未执行／未知事实，显式接续通过 savepoint 叠加与最终 CAS 还原原边界；详细合同和验证归[冷恢复 owner](sqlite/run-resume.README.md#会话恢复时的状态核实)。
+新版 Run 冷恢复要求实际审核 preset／预算、准确 checker 与工具行为 contractRef/configurationDigest 都能从原封存配置重建；缺失或不一致返回明确 `run_configuration_mismatch`，不推断旧缺省值。已完成检查只消费原统一 v1 回执，不调用当前解释器或 Provider，不重新准备材料、续审核期限或重放原效果。已存在且显式不支持的 Profile 格式头在 SQLite 打开之前拒绝；库内 major/schema 校验继续独立执行，不因格式头存在而放行。
+
+2026-11-06，macOS／Bun1.4.4、独立选择的真实动态 SQLite 3.51.3：[配置恢复整文件](../../test/isolated/recovery/run-resume-configuration-compatibility.test.ts)14项／124断言通过。真实历史格式1的 approved/none 两个冻结 Profile 在 readwrite/readonly 打开前均被拒绝，原 Profile 文件名与完整字节摘要不变，也不新建 WAL/SHM；测试不转换这些输入。新版实际非内置解释器及 context 材料两例在 settled check／pending human 时 SIGKILL，冷只读零变更、v2 结果及原3000ms期限保持；准确恢复只执行原 Tool 一次，原检查与解释 ledger 各仍一次。缺 checker、checker身份／模型／预算、工具版本、缺行为与行为配置漂移八例均明确失败，原 Run 配置及 Execution 不变、零 Provider/效果；仅保留原 `run.resume_prepared` 准备事件。当前解释器在恢复实例中故意拒绝再次运行，测试不以重解释历史输出使恢复通过。这些证据不补齐其他平台、真实模型或安装发行资格。
+
+[session-reconciliation](sqlite/session-reconciliation.ts)是 `reconcileSession` 的事务 owner，按准确 OS 锁、主体和 generation 结算整个主／子组。私有 `session_reconciliation` 与必要触发器包含在当前独立基线，不依赖旧0003迁移链。公开历史读保存的中断／未执行／未知事实，显式接续通过 savepoint 叠加与最终 CAS 还原原边界；详细合同和验证归[冷恢复 owner](sqlite/run-resume.README.md#会话恢复时的状态核实)。
 
 原主体成功 Rewind 时，在同一事务先核当前 selection、完整执行组已结算且没有未知 Tool／Job，再由 [retireReconciliationForRewind](sqlite/session-reconciliation.ts) 完整验证旧 checkpoint 的来源、generation、组与原行读集，并与新 selection／Command 一起退休该准确边界。准备中的恢复 owner 仍拒绝 Rewind；校验仅临时叠加并回滚原 frontier，不恢复旧活动状态或执行。退休后的新明确 start／follow-up 可以正常开始，旧 Run 仍为 interrupted 且不可 resume；错误主体／Store／selection、损坏证明、未知效果及后续 SQL 失败均保原 checkpoint。[真实强杀与事务回归](../../test/isolated/recovery/reconciled-rewind-runtime.test.ts)覆盖新输入、旧恢复拒绝、子组未知效果、恢复 lease、双 Worker 选择 CAS 与整体回滚。
 
 
-内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。DB5 的[增量迁移](migrations/0005-authorization-check.sql)事务重建原 execution 约束、复制原行及重建索引／触发器，提交前核外键，失败回滚；不删除或重标旧审核历史。
+内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。[独立基线](migrations/0001-baseline.sql)直接定义当前 execution 约束、索引和恢复触发器；Worker 资产只复制该 reviewed SQL。旧格式在只读 preflight 即拒绝，不执行旧迁移／清空或转换。
+
+2026-11-07 本轮编号统一回归：20个相关整文件206项／2718断言通过，覆盖 Store build／preflight、维护备份恢复、真实历史 major 1 归档拒绝且全文件／sidecar不变、新版完整 v1 回执与旧同编号形状拒绝、非内置工具及冷恢复。伪造当前清单指纹的旧 schema 仍拒绝，未放宽最终校验。真实开发入口整文件10项／177断言含原 Main 三场景，TUI工作区信任1项／28断言通过；6545文件／9项目类型检查通过。当前本机开发库在独占、完整旧／新 schema 相同及原checksum确认后，只重标版本／准确checksum／清单指纹，26张表其他事实与Store ID不变；原 `bun run desktop:dev` 随后5.11秒就绪，准确原生窗口已实际核对。旧实模及历史报告保原来源与当时编号，这组验证不重授其他平台或发行资格。

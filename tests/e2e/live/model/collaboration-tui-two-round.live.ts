@@ -553,7 +553,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     require(approved?.state === 'answered' &&
       approved.answer?.kind === 'approval' &&
       approved.answer.decision === 'approve' &&
-      approved.answer.grant === 'approve_once' &&
+      approved.answer.optionId === 'once' &&
       approved.acceptedDecisionRevision !== null &&
       approved.acceptedDecisionRevision !== chosen!.revision, 'exact_chosen_card_once_saved');
     const untouched = await ownedRuntime.getInteraction({
@@ -909,7 +909,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     require(newApproved?.state === 'answered' &&
       newApproved.answer?.kind === 'approval' &&
       newApproved.answer.decision === 'approve' &&
-      newApproved.answer.grant === 'approve_once' &&
+      newApproved.answer.optionId === 'once' &&
       newApproved.acceptedDecisionRevision !== null &&
       existsSync(targets[2]!) &&
       readFileSync(targets[2]!, 'utf8') === bodies[2] &&

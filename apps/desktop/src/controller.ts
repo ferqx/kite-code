@@ -741,15 +741,13 @@ export class DesktopController {
     )!;
     const frozen = structuredClone(offered);
     if (frozen.kind === 'plan_review') {
-      if (answer.kind !== 'plan_review')
+      if (
+        answer.kind !== 'plan_review' ||
+        Object.keys(answer).some((key) => !['kind', 'decision', 'feedback'].includes(key))
+      )
         return Promise.reject(new ClientError('interaction_answer_invalid'));
       try {
-        answer = serializePlanReviewAnswer(
-          frozen.request,
-          answer.decision,
-          answer.feedback,
-          answer.mode,
-        );
+        answer = serializePlanReviewAnswer(frozen.request, answer.decision, answer.feedback);
       } catch {
         return Promise.reject(new ClientError('interaction_answer_invalid'));
       }

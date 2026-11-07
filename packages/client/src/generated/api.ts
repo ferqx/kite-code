@@ -990,6 +990,13 @@ export type PermissionGrantQuery = {
   upperSeq?: string;
   limit?: number;
 };
+type PermissionGrantPage___schema0 =
+  | string
+  | number
+  | boolean
+  | null
+  | Array<PermissionGrantPage___schema0>
+  | { [key: string]: PermissionGrantPage___schema0 };
 export type PermissionGrantPage = {
   storeId: string;
   sessionId: string;
@@ -1005,7 +1012,16 @@ export type PermissionGrantPage = {
       definitionId: string;
       definitionVersion: string;
       inputDigest: string;
-      commandDigest?: string;
+      ruleId: string;
+      contractId: string;
+      scope: PermissionGrantPage___schema0;
+      scopeDigest: string;
+      bindings: Array<{
+        kind: 'model' | 'tool' | 'job';
+        definitionId: string;
+        definitionVersion: string;
+      }>;
+      presentation: { label: string; details: Array<string> };
       interactionId: string;
       decisionRevision: string;
       executionId: string;
@@ -1568,18 +1584,12 @@ export type Interaction = {
   request: Interaction___schema0;
   answer:
     | (
-        | {
-            kind: 'approval';
-            decision: 'approve' | 'deny';
-            grant?: 'approve_once' | 'same_command';
-          }
+        | (
+            | { kind: 'approval'; decision: 'approve'; optionId: string }
+            | { kind: 'approval'; decision: 'deny' }
+          )
         | { kind: 'question'; answers: Interaction___schema0 }
-        | {
-            kind: 'plan_review';
-            decision: 'approve' | 'deny' | 'revise';
-            feedback?: string;
-            mode?: string;
-          }
+        | { kind: 'plan_review'; decision: 'approve' | 'deny' | 'revise'; feedback?: string }
       )
     | null;
   revision: string;
@@ -1623,18 +1633,12 @@ export type InteractionPage = {
     request: InteractionPage___schema0;
     answer:
       | (
-          | {
-              kind: 'approval';
-              decision: 'approve' | 'deny';
-              grant?: 'approve_once' | 'same_command';
-            }
+          | (
+              | { kind: 'approval'; decision: 'approve'; optionId: string }
+              | { kind: 'approval'; decision: 'deny' }
+            )
           | { kind: 'question'; answers: InteractionPage___schema0 }
-          | {
-              kind: 'plan_review';
-              decision: 'approve' | 'deny' | 'revise';
-              feedback?: string;
-              mode?: string;
-            }
+          | { kind: 'plan_review'; decision: 'approve' | 'deny' | 'revise'; feedback?: string }
         )
       | null;
     revision: string;
@@ -1656,14 +1660,12 @@ export type AnswerInteractionRequest = {
   commandId: string;
   expectedRevision: string;
   answer:
-    | { kind: 'approval'; decision: 'approve' | 'deny'; grant?: 'approve_once' | 'same_command' }
+    | (
+        | { kind: 'approval'; decision: 'approve'; optionId: string }
+        | { kind: 'approval'; decision: 'deny' }
+      )
     | { kind: 'question'; answers: AnswerInteractionRequest___schema0 }
-    | {
-        kind: 'plan_review';
-        decision: 'approve' | 'deny' | 'revise';
-        feedback?: string;
-        mode?: string;
-      };
+    | { kind: 'plan_review'; decision: 'approve' | 'deny' | 'revise'; feedback?: string };
 };
 export type InteractionListQuery = {
   storeId: string;
@@ -2149,20 +2151,6 @@ export type Execution = {
       reason: string;
       requireApproval: boolean;
     };
-    review?: {
-      executionId: string;
-      status:
-        | 'planned'
-        | 'dispatching'
-        | 'running'
-        | 'succeeded'
-        | 'failed'
-        | 'cancelled'
-        | 'outcome_unknown';
-      decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
-      reason: string;
-      requireApproval: boolean;
-    };
     human?: {
       interactionId: string;
       state: 'pending' | 'answered' | 'cancelled';
@@ -2170,7 +2158,9 @@ export type Execution = {
       acceptedDecisionRevision: string | null;
       accepted: boolean;
       decision: ('approve' | 'deny') | null;
-      grant?: 'approve_once' | 'same_command';
+      optionId?: string;
+      optionKind?: 'once' | 'scope';
+      presentation?: { label: string; details: Array<string> };
     };
   };
   originStoreId?: string;
@@ -2981,20 +2971,6 @@ export type BrowserView = {
         reason: string;
         requireApproval: boolean;
       };
-      review?: {
-        executionId: string;
-        status:
-          | 'planned'
-          | 'dispatching'
-          | 'running'
-          | 'succeeded'
-          | 'failed'
-          | 'cancelled'
-          | 'outcome_unknown';
-        decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
-        reason: string;
-        requireApproval: boolean;
-      };
       human?: {
         interactionId: string;
         state: 'pending' | 'answered' | 'cancelled';
@@ -3002,7 +2978,9 @@ export type BrowserView = {
         acceptedDecisionRevision: string | null;
         accepted: boolean;
         decision: ('approve' | 'deny') | null;
-        grant?: 'approve_once' | 'same_command';
+        optionId?: string;
+        optionKind?: 'once' | 'scope';
+        presentation?: { label: string; details: Array<string> };
       };
     };
     originStoreId?: string;
@@ -3737,20 +3715,6 @@ export type SessionView = {
         reason: string;
         requireApproval: boolean;
       };
-      review?: {
-        executionId: string;
-        status:
-          | 'planned'
-          | 'dispatching'
-          | 'running'
-          | 'succeeded'
-          | 'failed'
-          | 'cancelled'
-          | 'outcome_unknown';
-        decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
-        reason: string;
-        requireApproval: boolean;
-      };
       human?: {
         interactionId: string;
         state: 'pending' | 'answered' | 'cancelled';
@@ -3758,7 +3722,9 @@ export type SessionView = {
         acceptedDecisionRevision: string | null;
         accepted: boolean;
         decision: ('approve' | 'deny') | null;
-        grant?: 'approve_once' | 'same_command';
+        optionId?: string;
+        optionKind?: 'once' | 'scope';
+        presentation?: { label: string; details: Array<string> };
       };
     };
     originStoreId?: string;

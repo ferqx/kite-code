@@ -245,7 +245,7 @@ test('approved Runtime writes persist the actual result and send actionable pare
       type: 'tool_call',
       id,
       name: 'write_file',
-      arguments: JSON.stringify({ path, base: null, content: 'example' }),
+      arguments: JSON.stringify({ path, content: 'example' }),
     },
     { ...finish, reason: 'tool_calls' },
   ];

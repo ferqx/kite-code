@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { fixtureGrant, fixtureScopeOption } from '../../../../../tests/fixtures/permission-grant';
 import { AgentError, createRuntime } from '../../../src';
 import { Semaphore } from '../../../src/execution/resources';
 import type { Extension, Json, ToolContext } from '../../../src/extensions';
-import { semanticDigest } from '../../../src/json';
+import { approvalOptions } from '../../../src/permission-grants';
 import { createProjectSources } from '../../../src/sources';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { InteractionRecord } from '../../../src/storage';
@@ -382,13 +383,25 @@ async function fixture(
           allowed: false,
           revision: 'owned',
           reason: 'approval_required',
+          ...(mode === 'grant-dispatch-race'
+            ? {
+                grantOffers: [
+                  fixtureGrant(request.definitionId, request.input, request.kind as 'tool' | 'job'),
+                ],
+              }
+            : {}),
           approval: {
-            ...(mode === 'grant-dispatch-race'
-              ? { commandDigest: await semanticDigest(request.input) }
-              : {}),
             request: { title: 'Approve original completion check' },
-            grants:
-              mode === 'grant-dispatch-race' ? ['approve_once', 'same_command'] : ['approve_once'],
+            options:
+              mode === 'grant-dispatch-race'
+                ? approvalOptions([
+                    fixtureGrant(
+                      request.definitionId,
+                      request.input,
+                      request.kind as 'tool' | 'job',
+                    ),
+                  ])
+                : approvalOptions(),
           },
         };
       },
@@ -566,7 +579,7 @@ async function fixture(
     },
     async approve(
       card: InteractionRecord,
-      grant: 'approve_once' | 'same_command' = 'approve_once',
+      selection: 'approve_once' | 'same_command' = 'approve_once',
     ) {
       await runtime.answerInteraction({
         ...base,
@@ -574,7 +587,11 @@ async function fixture(
         presentationSessionId: 's',
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: selection === 'same_command' ? fixtureScopeOption(card.request) : 'once',
+        },
       });
     },
     async done() {
@@ -702,7 +719,7 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
       presentationSessionId: 's',
       interactionId: old.id,
       expectedRevision: old.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     expect(late.receipt).toMatchObject({
       outcome: 'answer_saved',
@@ -718,7 +735,7 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
     expect(await readCard(old.id)).toMatchObject({
       state: 'cancelled',
       acceptedDecisionRevision: null,
-      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
     expect(await readCard(fresh.id)).toEqual(fresh);
     expect(fresh).toMatchObject({ state: 'pending', answer: null, acceptedDecisionRevision: null });
@@ -1040,9 +1057,7 @@ test('retiring an approved completion decision revokes its same_command grant be
     expect(fresh.executionId).not.toBe(old.executionId);
     expect(f.prepared).toHaveLength(2);
     expect(f.prepared[1]).toEqual(f.prepared[0]);
-    expect((fresh.request as { commandDigest: string }).commandDigest).toBe(
-      (old.request as { commandDigest: string }).commandDigest,
-    );
+    expect(fixtureScopeOption(fresh.request)).toBe(fixtureScopeOption(old.request));
     expect(await readOld()).toMatchObject({
       state: 'cancelled',
       acceptedDecisionRevision: accepted!.acceptedDecisionRevision,

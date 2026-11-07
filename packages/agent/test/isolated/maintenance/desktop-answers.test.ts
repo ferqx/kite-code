@@ -188,6 +188,28 @@ test('DB5 answer rows fail closed for forged PK, digests, phase, authority, dupl
       expect(await code(createProfileBackup(f))).toBe('backup_ui_invalid');
       expect(readFileSync(f.path)).toEqual(before);
     }
+    for (const answer of [
+      { kind: 'approval', decision: 'approve' },
+      { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      { kind: 'approval', decision: 'approve', optionId: 'once', grant: 'approve_once' },
+      { kind: 'approval', decision: 'approve', optionId: '../forged' },
+      { kind: 'approval', decision: 'deny', optionId: 'once' },
+    ]) {
+      reset();
+      const row = structuredClone(
+        original.find((item) => item.intent.request.commandId === 'answer-approval')!,
+      );
+      row.intent.request.answer = answer;
+      proofs(row);
+      mutate(f.path, (db) =>
+        db
+          .query('UPDATE answer_intents SET state=? WHERE command_id=?')
+          .run(JSON.stringify(row), String(row.intent.request.commandId)),
+      );
+      const before = readFileSync(f.path);
+      expect(await code(createProfileBackup(f))).toBe('backup_ui_invalid');
+      expect(readFileSync(f.path)).toEqual(before);
+    }
     for (const kind of ['utf8', 'target', 'count', 'bytes', 'row'] as const) {
       reset();
       mutate(f.path, (db) => {
@@ -210,7 +232,7 @@ test('DB5 answer rows fail closed for forged PK, digests, phase, authority, dupl
               row.intent.request.answer = {
                 kind: 'approval',
                 decision: 'approve',
-                grant: 'approve_once',
+                optionId: 'once',
               };
             if (kind !== 'count') {
               const r = row as unknown as {

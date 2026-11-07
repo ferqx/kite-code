@@ -20,7 +20,8 @@ function schemaProjection(schema: JsonSchema, model: NonNullable<ToolDefinition[
     !model.snakeCase &&
     !Object.keys(model.parameterNames ?? {}).length &&
     !model.omitParameters?.length &&
-    !model.requiredParameters?.length
+    !model.requiredParameters?.length &&
+    !model.inputSchema
   )
     return { inputSchema: structuredClone(schema), parameters };
   const seen = new Map<string, string>();
@@ -123,7 +124,10 @@ function schemaProjection(schema: JsonSchema, model: NonNullable<ToolDefinition[
       throw new AgentError('model_tool_parameter_unknown');
   // Each tool owns its schema registry. Remote/name-only tools need no second validator.
   const transformed =
-    parameters.length > 0 || !!model.omitParameters?.length || !!model.requiredParameters?.length;
+    parameters.length > 0 ||
+    !!model.omitParameters?.length ||
+    !!model.requiredParameters?.length ||
+    !!model.inputSchema;
   if (!transformed) return { inputSchema, parameters };
   const validate = compileModelSchema(inputSchema);
   const branches = new WeakMap<object, ReturnType<Ajv['compile']>>();
@@ -269,6 +273,27 @@ export function modelToolMessages(messages: ModelRequest['messages']): ModelRequ
   }));
 }
 
+/** Diagnose an already rejected call against its selected public schema, never its values. */
+export function modelToolArgumentError(
+  definition: ToolDefinition,
+  call: ToolCall,
+): string | undefined {
+  try {
+    const schema = definition.model
+      ? schemaProjection(definition.model.inputSchema ?? definition.inputSchema, definition.model)
+          .inputSchema
+      : definition.inputSchema;
+    const validate = compileModelSchema(schema);
+    if (validate(JSON.parse(modelToolCall(call).arguments))) return;
+    // Ajv's schema path and default message describe declared constraints. Do not
+    // expose instancePath, params or data: they can contain arbitrary argument keys/values.
+    return validate.errors?.map((error) => `${error.schemaPath}: ${error.message}`).join('\n');
+  } catch {
+    // A diagnostic must never replace the original refusal or make a call executable.
+    return;
+  }
+}
+
 /** One exact selected catalogue. No builtin IDs or authority are inferred from public names. */
 export function createModelToolSurface(
   request: ModelRequest,
@@ -298,7 +323,7 @@ export function createModelToolSurface(
       throw new AgentError('model_tool_name_invalid');
     if (catalogue.has(name)) throw new AgentError('model_tool_name_collision');
     const projected = presentation
-      ? schemaProjection(tool.inputSchema, presentation)
+      ? schemaProjection(presentation.inputSchema ?? tool.inputSchema, presentation)
       : {
           inputSchema: tool.inputSchema,
           parameters: [],

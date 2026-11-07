@@ -47,6 +47,8 @@ npm run desktop:dev
 
 四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
+Desktop 在准备 Electron／Vite 前先只读预检这个实际 development Profile。不匹配的 Store major／schema 会明确返回 `store_incompatible` 和当前结构说明，原数据保持原样，不能靠重跑构建解决。入口不自动重建或迁移已有不兼容数据；其保留方式须由用户决定。全新 Profile 仍由 Service 按原流程初始化。具体实现与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
 Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预热页面模块，不另做这两页的生产构建。终端会分项输出准备／构建耗时，并在真实 Service 就绪后输出总耗时；初次依赖优化与本机文件系统状态仍会影响耗时。具体构建边界及本机前后对照归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
 构建完成后，终端继续输出 `Service shell_runtime/configuration/store/runtime/http` 的开始、完成或失败及耗时，最后输出 Electron／Service 握手耗时；阶段日志不包含路径、凭据或原始服务输出。`desktop:dev` 的 Service bootstrap 与连接等待各有30秒上限，外层父控制仍最多等待45秒；编译时间不计入 Service 的等待期限。Windows 首次准备 Git Bash 会复制并校验两套运行时，优化后的并发文件处理仍完整核对资产；后续启动保留副本并重新校验。

@@ -49,7 +49,7 @@ test('ordinary root and child approvals retain prompt and permission access; que
       definitionId: 'files.write',
       definitionVersion: '2',
       input: { path: 'file.txt' },
-      grants: ['approve_once'],
+      options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
     },
     answer: null,
     revision: '1',
@@ -145,7 +145,7 @@ test('ordinary root and child approvals retain prompt and permission access; que
     expect(host.querySelector('[aria-label="parent input"]')).not.toBeNull();
     await act(async () =>
       [...host.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent === '批准一次')!
+        .find((button) => button.textContent === '仅此次')!
         .click(),
     );
     expect(answers).toEqual(['child-approval']);

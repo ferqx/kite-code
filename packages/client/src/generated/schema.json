@@ -5783,9 +5783,65 @@
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
                 },
-                "commandDigest": {
+                "ruleId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "contractId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "scope": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "scopeDigest": {
                   "type": "string",
                   "pattern": "^[a-f0-9]{64}$"
+                },
+                "bindings": {
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["model", "tool", "job"]
+                      },
+                      "definitionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 512
+                      },
+                      "definitionVersion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": ["kind", "definitionId", "definitionVersion"],
+                    "additionalProperties": false
+                  }
+                },
+                "presentation": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["label", "details"],
+                  "additionalProperties": false
                 },
                 "interactionId": {
                   "type": "string",
@@ -5813,6 +5869,12 @@
                 "definitionId",
                 "definitionVersion",
                 "inputDigest",
+                "ruleId",
+                "contractId",
+                "scope",
+                "scopeDigest",
+                "bindings",
+                "presentation",
                 "interactionId",
                 "decisionRevision",
                 "executionId"
@@ -5858,7 +5920,40 @@
       "nextAfterSeq",
       "snapshotCursor"
     ],
-    "additionalProperties": false
+    "additionalProperties": false,
+    "$defs": {
+      "__schema0": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema0"
+            }
+          }
+        ]
+      }
+    }
   },
   "ClearPermissionGrantsRequest": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8888,23 +8983,44 @@
           {
             "oneOf": [
               {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "approval"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "approval"
+                      },
+                      "decision": {
+                        "type": "string",
+                        "const": "approve"
+                      },
+                      "optionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_-]+$"
+                      }
+                    },
+                    "required": ["kind", "decision", "optionId"],
+                    "additionalProperties": false
                   },
-                  "decision": {
-                    "type": "string",
-                    "enum": ["approve", "deny"]
-                  },
-                  "grant": {
-                    "type": "string",
-                    "enum": ["approve_once", "same_command"]
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "approval"
+                      },
+                      "decision": {
+                        "type": "string",
+                        "const": "deny"
+                      }
+                    },
+                    "required": ["kind", "decision"],
+                    "additionalProperties": false
                   }
-                },
-                "required": ["kind", "decision"],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -8934,10 +9050,6 @@
                   "feedback": {
                     "type": "string",
                     "maxLength": 8192
-                  },
-                  "mode": {
-                    "type": "string",
-                    "maxLength": 128
                   }
                 },
                 "required": ["kind", "decision"],
@@ -9185,23 +9297,44 @@
                 {
                   "oneOf": [
                     {
-                      "type": "object",
-                      "properties": {
-                        "kind": {
-                          "type": "string",
-                          "const": "approval"
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "approval"
+                            },
+                            "decision": {
+                              "type": "string",
+                              "const": "approve"
+                            },
+                            "optionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9_-]+$"
+                            }
+                          },
+                          "required": ["kind", "decision", "optionId"],
+                          "additionalProperties": false
                         },
-                        "decision": {
-                          "type": "string",
-                          "enum": ["approve", "deny"]
-                        },
-                        "grant": {
-                          "type": "string",
-                          "enum": ["approve_once", "same_command"]
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "approval"
+                            },
+                            "decision": {
+                              "type": "string",
+                              "const": "deny"
+                            }
+                          },
+                          "required": ["kind", "decision"],
+                          "additionalProperties": false
                         }
-                      },
-                      "required": ["kind", "decision"],
-                      "additionalProperties": false
+                      ]
                     },
                     {
                       "type": "object",
@@ -9231,10 +9364,6 @@
                         "feedback": {
                           "type": "string",
                           "maxLength": 8192
-                        },
-                        "mode": {
-                          "type": "string",
-                          "maxLength": 128
                         }
                       },
                       "required": ["kind", "decision"],
@@ -9368,23 +9497,44 @@
       "answer": {
         "oneOf": [
           {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "const": "approval"
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "approval"
+                  },
+                  "decision": {
+                    "type": "string",
+                    "const": "approve"
+                  },
+                  "optionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                },
+                "required": ["kind", "decision", "optionId"],
+                "additionalProperties": false
               },
-              "decision": {
-                "type": "string",
-                "enum": ["approve", "deny"]
-              },
-              "grant": {
-                "type": "string",
-                "enum": ["approve_once", "same_command"]
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "approval"
+                  },
+                  "decision": {
+                    "type": "string",
+                    "const": "deny"
+                  }
+                },
+                "required": ["kind", "decision"],
+                "additionalProperties": false
               }
-            },
-            "required": ["kind", "decision"],
-            "additionalProperties": false
+            ]
           },
           {
             "type": "object",
@@ -9414,10 +9564,6 @@
               "feedback": {
                 "type": "string",
                 "maxLength": 8192
-              },
-              "mode": {
-                "type": "string",
-                "maxLength": 128
               }
             },
             "required": ["kind", "decision"],
@@ -12134,42 +12280,6 @@
             "required": ["executionId", "status", "decision", "reason", "requireApproval"],
             "additionalProperties": false
           },
-          "review": {
-            "type": "object",
-            "properties": {
-              "executionId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128,
-                "pattern": "^[A-Za-z0-9_-]+$"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "planned",
-                  "dispatching",
-                  "running",
-                  "succeeded",
-                  "failed",
-                  "cancelled",
-                  "outcome_unknown"
-                ]
-              },
-              "decision": {
-                "type": "string",
-                "enum": ["approve_once", "reject", "ask_user", "unavailable"]
-              },
-              "reason": {
-                "type": "string",
-                "maxLength": 8192
-              },
-              "requireApproval": {
-                "type": "boolean"
-              }
-            },
-            "required": ["executionId", "status", "decision", "reason", "requireApproval"],
-            "additionalProperties": false
-          },
           "human": {
             "type": "object",
             "properties": {
@@ -12212,9 +12322,32 @@
                   }
                 ]
               },
-              "grant": {
+              "optionId": {
                 "type": "string",
-                "enum": ["approve_once", "same_command"]
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "optionKind": {
+                "type": "string",
+                "enum": ["once", "scope"]
+              },
+              "presentation": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": ["label", "details"],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -16790,42 +16923,6 @@
                   "required": ["executionId", "status", "decision", "reason", "requireApproval"],
                   "additionalProperties": false
                 },
-                "review": {
-                  "type": "object",
-                  "properties": {
-                    "executionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "pattern": "^[A-Za-z0-9_-]+$"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "planned",
-                        "dispatching",
-                        "running",
-                        "succeeded",
-                        "failed",
-                        "cancelled",
-                        "outcome_unknown"
-                      ]
-                    },
-                    "decision": {
-                      "type": "string",
-                      "enum": ["approve_once", "reject", "ask_user", "unavailable"]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "maxLength": 8192
-                    },
-                    "requireApproval": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["executionId", "status", "decision", "reason", "requireApproval"],
-                  "additionalProperties": false
-                },
                 "human": {
                   "type": "object",
                   "properties": {
@@ -16868,9 +16965,32 @@
                         }
                       ]
                     },
-                    "grant": {
+                    "optionId": {
                       "type": "string",
-                      "enum": ["approve_once", "same_command"]
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "optionKind": {
+                      "type": "string",
+                      "enum": ["once", "scope"]
+                    },
+                    "presentation": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "details": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["label", "details"],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -21199,42 +21319,6 @@
                   "required": ["executionId", "status", "decision", "reason", "requireApproval"],
                   "additionalProperties": false
                 },
-                "review": {
-                  "type": "object",
-                  "properties": {
-                    "executionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 128,
-                      "pattern": "^[A-Za-z0-9_-]+$"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "planned",
-                        "dispatching",
-                        "running",
-                        "succeeded",
-                        "failed",
-                        "cancelled",
-                        "outcome_unknown"
-                      ]
-                    },
-                    "decision": {
-                      "type": "string",
-                      "enum": ["approve_once", "reject", "ask_user", "unavailable"]
-                    },
-                    "reason": {
-                      "type": "string",
-                      "maxLength": 8192
-                    },
-                    "requireApproval": {
-                      "type": "boolean"
-                    }
-                  },
-                  "required": ["executionId", "status", "decision", "reason", "requireApproval"],
-                  "additionalProperties": false
-                },
                 "human": {
                   "type": "object",
                   "properties": {
@@ -21277,9 +21361,32 @@
                         }
                       ]
                     },
-                    "grant": {
+                    "optionId": {
                       "type": "string",
-                      "enum": ["approve_once", "same_command"]
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "optionKind": {
+                      "type": "string",
+                      "enum": ["once", "scope"]
+                    },
+                    "presentation": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "details": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["label", "details"],
+                      "additionalProperties": false
                     }
                   },
                   "required": [

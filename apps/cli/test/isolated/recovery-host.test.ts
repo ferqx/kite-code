@@ -105,7 +105,7 @@ for (const mode of ['run', 'interrupt'] as const)
             expectedStoreId: f.storeId,
             commandId: `approval-${id}`,
             expectedRevision: revision,
-            answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+            answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
           });
         const pending = (
           await actual.listInteractions('s', { storeId: f.storeId, state: 'pending' })
@@ -200,11 +200,13 @@ for (const mode of ['paired', 'shared'] as const)
           id: 'fixture.recovery.task-review',
           version: '1',
           modelId: 'fixed',
+          timeoutMs: 8000,
         });
         expect(original.tools).toContainEqual({
           extensionId: 'builtin.files',
           id: 'files.write',
           version: '3',
+          resultPresentationVersion: '1',
         });
 
         let daemonManager: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
@@ -337,9 +339,7 @@ for (const mode of ['paired', 'shared'] as const)
               cwd: f.workspace,
               env: { ...process.env, ...f.userConfiguration.homeEnvironment },
               stdin:
-                operation === 'run' && action === 'run'
-                  ? new Blob(['approve approve_once\n'])
-                  : 'ignore',
+                operation === 'run' && action === 'run' ? new Blob(['approve once\n']) : 'ignore',
               stdout: 'pipe',
               stderr: 'pipe',
             },
@@ -445,7 +445,7 @@ for (const mode of ['paired', 'shared'] as const)
             expect(JSON.parse(answers[0]!.request_json)).toMatchObject({
               interactionId: f.card.id,
               expectedRevision: f.card.revision,
-              answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+              answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
           }
 

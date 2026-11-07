@@ -16,7 +16,7 @@ def state():
 def waitfor(condition,label):
  deadline=time.monotonic()+8
  while not condition():
-  if time.monotonic()>deadline:raise RuntimeError('expected '+label+' state='+json.dumps({k:state().get(k) for k in ['sessionId','observation','childCalls','effects','outputProduced','starts','stops','jobStops','stopReads','scopeProof']})+' read='+json.dumps({k:state().get('read',{}).get(k) for k in ['phase','error','target']})+' tail='+buffer[-3000:].decode(errors='replace'))
+  if time.monotonic()>deadline:raise RuntimeError('expected '+label+' state='+json.dumps({k:state().get(k) for k in ['sessionId','observation','childCalls','effects','outputProduced','starts','stops','jobStops','stopReads','scopeProof']})+' read='+json.dumps({k:state().get('read',{}).get(k) for k in ['phase','error','target']})+' frame='+json.dumps(last_frame_lines())+' tail='+buffer[-3000:].decode(errors='replace'))
   pump()
 def visible(text):return text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace')))
 def wait_selection(current,target):

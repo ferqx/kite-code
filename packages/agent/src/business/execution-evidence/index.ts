@@ -1,4 +1,5 @@
 import type { Extension, Json, PublicExecution, ToolContext, ToolResult } from '../../extensions';
+import { readModelExecutionId } from '../../model-identifier';
 import { AgentError } from '../../storage/types';
 
 export interface ExecutionEvidenceReadRequest {
@@ -58,11 +59,24 @@ export function createExecutionEvidenceExtension(options: ExecutionEvidenceOptio
         inputSchema: {
           type: 'object',
           properties: {
-            executionId: { type: 'string', minLength: 1, maxLength: 256 },
+            executionId: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 256,
+              description:
+                'Exact execution_id from an original operation receipt or this reader’s list. Page text, response tokens, shell_id, run_id and tool-call IDs are not execution IDs. Omit to list actual receipt IDs.',
+            },
             cursor: { type: 'string', minLength: 1, maxLength: 4096 },
             limit: { type: 'integer', minimum: 1, maximum: 100 },
           },
           additionalProperties: false,
+          oneOf: [
+            {
+              required: ['executionId'],
+              not: { anyOf: [{ required: ['cursor'] }, { required: ['limit'] }] },
+            },
+            { not: { required: ['executionId'] } },
+          ],
         },
         async execute(input, context) {
           const value = object(input);
@@ -71,7 +85,8 @@ export function createExecutionEvidenceExtension(options: ExecutionEvidenceOptio
             Object.keys(value).some((key) => !['executionId', 'cursor', 'limit'].includes(key)) ||
             (value.executionId !== undefined && !identifier(value.executionId, 256)) ||
             (value.cursor !== undefined && !identifier(value.cursor, 4096)) ||
-            (value.executionId !== undefined && value.cursor !== undefined) ||
+            (value.executionId !== undefined &&
+              (value.cursor !== undefined || value.limit !== undefined)) ||
             (value.limit !== undefined &&
               (typeof value.limit !== 'number' ||
                 !Number.isSafeInteger(value.limit) ||
@@ -88,11 +103,23 @@ export function createExecutionEvidenceExtension(options: ExecutionEvidenceOptio
               'The current task scope is unavailable. No execution history was read and no operation was rerun.',
             );
           context.signal.throwIfAborted();
+          let executionId: string | undefined;
+          try {
+            executionId =
+              typeof value.executionId === 'string'
+                ? readModelExecutionId(value.executionId)
+                : undefined;
+          } catch {
+            return failure(
+              'execution_evidence_input_invalid',
+              'Copy an exact execution_id from the original receipt or this task evidence list. No operation was rerun.',
+            );
+          }
           const request: ExecutionEvidenceReadRequest = {
             sessionId: context.sessionId,
             runId: context.runId,
             callerExecutionId: context.executionId,
-            ...(typeof value.executionId === 'string' ? { executionId: value.executionId } : {}),
+            ...(executionId === undefined ? {} : { executionId }),
             ...(typeof value.cursor === 'string' ? { cursor: value.cursor } : {}),
             limit:
               typeof value.executionId === 'string'

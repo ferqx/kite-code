@@ -56,6 +56,7 @@ export interface ProcessHostConfiguration {
   model?: RuntimeOptions['model'];
   modelId?: string;
   permissions?: RuntimeOptions['permissions'];
+  toolBehaviors?: RuntimeOptions['toolBehaviors'];
   authorizationCheck?: RuntimeOptions['authorizationCheck'];
   /** Trusted host construction only; startup JSON and Model configuration cannot set it. */
   maxConcurrentSubagents?: RuntimeOptions['maxConcurrentSubagents'];

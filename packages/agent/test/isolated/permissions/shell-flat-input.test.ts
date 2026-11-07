@@ -70,6 +70,59 @@ async function fixture() {
 }
 
 test.skipIf(process.platform !== 'darwin')(
+  'literal search && chains bypass Auto review only in the original workspace offline scope',
+  async () => {
+    const f = await fixture();
+    let reviewContexts = 0;
+    try {
+      for (const [command, scope, safe] of [
+        ['pwd && ls && rg needle .', {}, true],
+        ['pwd && ls', { filesystem: 'full_access' }, false],
+        ['pwd && ls', { network: 'internet' }, false],
+        ['pwd || ls', {}, false],
+        ['pwd; ls', {}, false],
+        ['pwd && printf changed', {}, false],
+        ['pwd && rg --pre=helper needle .', {}, false],
+      ] as const) {
+        const request = f.request({ key: 'one', command, ...scope });
+        const described = await f.configuration.describeRequest(request);
+        expect(described?.safeRead === true, command).toBe(safe);
+        const policy = createPermissionPolicy({
+          readPolicy: () => ({
+            mode: 'auto',
+            workspaceTrust: true,
+            revision: 'auto-chain',
+            allowed: [{ kind: 'tool', definitionId: 'shell.execute', definitionVersion: '1' }],
+          }),
+          describeCapability: () => ({
+            ...f.configuration.describe('shell.execute'),
+            ...described,
+            kind: 'tool',
+            definitionId: 'shell.execute',
+            definitionVersion: '1',
+            revision: 'shell-chain',
+            hardAllowed: described?.hardAllowed === true,
+          }),
+          readCheckContext: () => {
+            reviewContexts++;
+            return { task: 'search', plan: null, rejectionReasons: [] };
+          },
+        });
+        const before = reviewContexts;
+        const decision = await policy.authorize(request);
+        if (safe) {
+          expect(decision.allowed).toBe(true);
+          expect(decision.check).toBeUndefined();
+          expect(reviewContexts).toBe(before);
+        } else expect(decision.check).toBeDefined();
+      }
+    } finally {
+      f.close();
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'darwin')(
   'flat Shell requests default each dimension independently and preserve policy modes',
   async () => {
     const f = await fixture();
@@ -130,14 +183,14 @@ test.skipIf(process.platform !== 'darwin')(
 );
 
 test.skipIf(process.platform !== 'darwin')(
-  'Shell legacy digest bytes stay stable; description is excluded and scope or execution semantics change authority',
+  'Shell command digest binds workdir, scope and execution semantics while excluding display and operation keys',
   async () => {
     const f = await fixture();
     try {
       const assets = await inspectShellAssets(f.options);
       for (const definitionId of ['shell.execute', 'shell.launch']) {
         const original = f.request({ key: 'one', command: 'printf original' }, definitionId);
-        const expectedLegacyDigest = createHash('sha256')
+        const expectedDigest = createHash('sha256')
           .update(
             JSON.stringify({
               namespace: 'builtin.shell.command-permission',
@@ -147,6 +200,7 @@ test.skipIf(process.platform !== 'darwin')(
               definitionVersion: '1',
               configurationId: f.options.configurationId,
               command: 'printf original',
+              workdir: null,
               cancellation: 'attached',
               timeoutMs: null,
               executionScope: { filesystem: 'workspace_write', network: 'none' },
@@ -160,7 +214,7 @@ test.skipIf(process.platform !== 'darwin')(
             }),
           )
           .digest('hex');
-        expect(f.configuration.commandDigest(original)).toBe(expectedLegacyDigest);
+        expect(f.configuration.commandDigest(original)).toBe(expectedDigest);
       }
       const baseline = f.request({ key: 'one', command: 'printf original' });
       const digest = f.configuration.commandDigest(baseline);
@@ -198,6 +252,7 @@ test.skipIf(process.platform !== 'darwin')(
         { cancellation: 'detached' },
         { filesystem: 'full_access' },
         { network: 'internet' },
+        { workdir: 'another-directory' },
       ])
         expect(
           f.configuration.commandDigest(

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { fixtureGrant, fixtureScopeOption } from '../../../../../tests/fixtures/permission-grant';
 import { type ChildAgentConfiguration, createRuntime, type RuntimeOptions } from '../../../src';
 import type {
   AuthorizationRequest,
@@ -14,6 +15,7 @@ import type {
   Permissions,
   ToolDefinition,
 } from '../../../src/extensions';
+import { approvalOptions, grantDigest } from '../../../src/permission-grants';
 import { createPermissionPolicy } from '../../../src/permissions';
 import { openSqliteStore } from '../../../src/sqlite';
 import { AgentError } from '../../../src/storage';
@@ -174,16 +176,41 @@ const commandDigest = 'a'.repeat(64);
 const commandApproval = (
   grants: readonly ('approve_once' | 'same_command')[] = ['approve_once', 'same_command'],
   digest: string | null = commandDigest,
-): PermissionDecision => ({
-  allowed: false,
-  revision: 'host-policy',
-  approval: {
-    request: { reason: 'exact command needs approval' },
-    grants,
-    ...(digest === null ? {} : { commandDigest: digest }),
-  },
-});
+): PermissionDecision => {
+  const scope = digest ?? { exact: 'full-fixture-input' };
+  const offer = fixtureGrant('extra.effect', scope);
+  const offers = grants.includes('same_command') ? [offer] : [];
+  return {
+    allowed: false,
+    revision: 'host-policy',
+    grantOffers: offers,
+    approval: {
+      request: { reason: 'exact command needs approval' },
+      options: approvalOptions(offers),
+    },
+  };
+};
 const commandPolicy = (decision: PermissionDecision): Permissions => ({
+  async reuseRevision(_request, capability, candidate) {
+    const binding = decision.grantOffers
+      ?.find((offer) => offer.scopeDigest === candidate.scopeDigest)
+      ?.policyBindings.find(
+        (binding) =>
+          binding.capability.definitionId === capability.definitionId &&
+          binding.capability.kind === capability.kind,
+      );
+    return binding
+      ? { reuseRevision: binding.reuseRevision }
+      : decision.allowed
+        ? {
+            reuseRevision: grantDigest({
+              policy: 'fixture.explicit-full',
+              scopeDigest: candidate.scopeDigest,
+              capability: capability as unknown as import('../../../src/storage/types').Json,
+            }),
+          }
+        : null;
+  },
   async authorize(request) {
     return request.definitionId === 'extra.effect'
       ? decision
@@ -271,16 +298,15 @@ for (const scenario of childApprovalScenarios) {
             })
           ).interactions[0],
       );
-      const request = card.request as { grants: string[]; commandDigest?: string };
+      const request = card.request as { options: { kind: string; scope?: unknown }[] };
       expect(effects).toBe(0);
       expect(card.sessionId).not.toBe('s');
       expect(card.presentationSessionId).toBe('s');
-      expect(request.grants).toEqual(
-        scenario.sameCommand ? ['approve_once', 'same_command'] : ['approve_once'],
+      expect(request.options.map((option) => option.kind)).toEqual(
+        scenario.sameCommand ? ['once', 'scope'] : ['once'],
       );
-      expect(request.commandDigest).toBe(
-        scenario.sameCommand && !scenario.noDigest ? commandDigest : undefined,
-      );
+      if (scenario.sameCommand && !scenario.noDigest)
+        expect(request.options[1]!.scope).toBe(commandDigest);
       await f.runtime.answerInteraction({
         expectedStoreId: f.expectedStoreId,
         subjectId: 'owner',
@@ -291,7 +317,7 @@ for (const scenario of childApprovalScenarios) {
         answer: {
           kind: 'approval',
           decision: 'approve',
-          grant: scenario.sameCommand ? 'same_command' : 'approve_once',
+          optionId: scenario.sameCommand ? fixtureScopeOption(card.request) : 'once',
         },
       });
       await f.done();
@@ -369,14 +395,18 @@ test('a child same_command grant applies only to its own Session, never its pare
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant },
+      answer: {
+        kind: 'approval',
+        decision: 'approve',
+        optionId: grant === 'same_command' ? fixtureScopeOption(card.request) : 'once',
+      },
     });
   try {
     await f.submit();
     const a = await pending();
     expect(a.sessionId).not.toBe('s');
     expect(effects).toEqual([]);
-    expect((a.request as { grants: string[] }).grants).toContain('same_command');
+    expect(fixtureScopeOption(a.request)).toBeString();
     await answer(a, 'same_command');
     const root = await pending();
     expect(root.sessionId).toBe('s');
@@ -387,7 +417,7 @@ test('a child same_command grant applies only to its own Session, never its pare
       await f.store.getPermissionGrant({
         expectedStoreId: f.expectedStoreId,
         executionId: root.executionId,
-        commandDigest,
+        offers: [fixtureGrant('extra.effect', commandDigest)],
       }),
     ).toBeNull();
     await answer(root, 'same_command');
@@ -410,7 +440,7 @@ test('a child same_command grant applies only to its own Session, never its pare
       await f.store.getPermissionGrant({
         expectedStoreId: f.expectedStoreId,
         executionId: b.executionId,
-        commandDigest,
+        offers: [fixtureGrant('extra.effect', commandDigest)],
       }),
     ).toBeNull();
     await answer(b, 'approve_once');
@@ -440,6 +470,14 @@ for (const change of ['grants', 'commandDigest'] as const) {
       }),
     ]);
     const policy: Permissions = {
+      async reuseRevision(_request, capability, candidate, decision) {
+        const binding = decision.grantOffers
+          ?.find((offer) => offer.scopeDigest === candidate.scopeDigest)
+          ?.policyBindings.find(
+            (binding) => binding.capability.definitionId === capability.definitionId,
+          );
+        return binding ? { reuseRevision: binding.reuseRevision } : null;
+      },
       async authorize(request: AuthorizationRequest) {
         if (request.definitionId !== 'extra.effect') return { allowed: true, revision: 'allowed' };
         return commandApproval(
@@ -478,18 +516,26 @@ for (const change of ['grants', 'commandDigest'] as const) {
         presentationSessionId: 's',
         interactionId: first.id,
         expectedRevision: first.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: fixtureScopeOption(first.request),
+        },
       });
       const second = await pending();
       expect(effects).toBe(1);
       expect(second.sessionId).toBe(first.sessionId);
       expect(second.id).not.toBe(first.id);
       expect(second.policyRevision).not.toBe(first.policyRevision);
-      expect(second.request).toMatchObject(
-        change === 'grants'
-          ? { grants: ['approve_once'] }
-          : { grants: ['approve_once', 'same_command'], commandDigest: 'b'.repeat(64) },
-      );
+      expect(
+        (second.request as { options: { kind: string; scope?: unknown }[] }).options.map(
+          (option) => option.kind,
+        ),
+      ).toEqual(change === 'grants' ? ['once'] : ['once', 'scope']);
+      if (change === 'commandDigest')
+        expect((second.request as { options: { scope?: unknown }[] }).options[1]!.scope).toBe(
+          'b'.repeat(64),
+        );
       await f.runtime.answerInteraction({
         expectedStoreId: f.expectedStoreId,
         subjectId: 'owner',
@@ -497,7 +543,7 @@ for (const change of ['grants', 'commandDigest'] as const) {
         presentationSessionId: 's',
         interactionId: second.id,
         expectedRevision: second.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await f.done();
       expect(effects).toBe(2);
@@ -570,7 +616,7 @@ test('a child grant cannot authorize another Agent level and still applies to it
       presentationSessionId: 's',
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      answer: { kind: 'approval', decision: 'approve', optionId: fixtureScopeOption(card.request) },
     });
   try {
     await f.submit();
@@ -647,9 +693,21 @@ for (const reviewSide of ['parent', 'child'] as const) {
           safeRead: false,
           effects: ['external'],
           commandDigest,
+          grantOffers: [fixtureGrant('extra.effect', commandDigest)],
         }),
       });
       const policy = (side: 'parent' | 'child'): Permissions => ({
+        async reuseRevision(request, capability, candidate, decision) {
+          if (mandatory) return null;
+          if (side === reviewSide)
+            return automatic.reuseRevision?.(request, capability, candidate, decision) ?? null;
+          const binding = decision.grantOffers
+            ?.find((offer) => offer.scopeDigest === candidate.scopeDigest)
+            ?.policyBindings.find(
+              (binding) => binding.capability.definitionId === capability.definitionId,
+            );
+          return binding ? { reuseRevision: binding.reuseRevision } : null;
+        },
         async authorize(request) {
           if (request.definitionId !== 'extra.effect')
             return { allowed: true, revision: 'allowed' };
@@ -709,7 +767,7 @@ for (const reviewSide of ['parent', 'child'] as const) {
           answer: {
             kind: 'approval',
             decision: 'approve',
-            grant: mandatory ? 'approve_once' : 'same_command',
+            optionId: mandatory ? 'once' : fixtureScopeOption(card.request),
           },
         });
       try {
@@ -717,21 +775,21 @@ for (const reviewSide of ['parent', 'child'] as const) {
         const first = await pending();
         expect(effects).toBe(0);
         expect(review.requests).toHaveLength(1);
-        expect((first.request as { grants: string[] }).grants).toEqual(
-          mandatory ? ['approve_once'] : ['approve_once', 'same_command'],
-        );
+        expect(
+          (first.request as { options: { kind: string }[] }).options.map((option) => option.kind),
+        ).toEqual(mandatory ? ['once'] : ['once', 'scope']);
         await answer(first);
-        if (mandatory) {
+        {
           const second = await pending();
           expect(effects).toBe(1);
           expect(second.id).not.toBe(first.id);
           expect(review.requests).toHaveLength(2);
-          expect((second.request as { grants: string[] }).grants).toEqual(['approve_once']);
+          expect((second.request as { options: { kind: string }[] }).options[0]!.kind).toBe('once');
           await answer(second);
         }
         await f.done();
         expect(effects).toBe(2);
-        expect(review.requests).toHaveLength(mandatory ? 2 : 1);
+        expect(review.requests).toHaveLength(2);
       } finally {
         await f.close();
       }
@@ -892,8 +950,7 @@ for (const mode of [
             approval: {
               ...(mode === 'ask_review' || mode === 'ask_review_fallback'
                 ? {
-                    grants: ['approve_once', 'same_command'] as const,
-                    commandDigest,
+                    options: approvalOptions([fixtureGrant('extra.effect', commandDigest)]),
                   }
                 : {}),
               request: { requires: `${side} human`, exact: request.input },
@@ -1029,7 +1086,9 @@ for (const mode of [
           expect(JSON.stringify(card.request)).toContain('child human');
         }
         if (mode === 'ask_review' || mode === 'ask_review_fallback')
-          expect((card.request as { grants: string[] }).grants).toEqual(['approve_once']);
+          expect(
+            (card.request as { options: { kind: string }[] }).options.map((option) => option.kind),
+          ).toEqual(['once']);
         if (mode === 'ask_review_fallback') {
           expect(JSON.stringify(card.request)).toContain('parent human');
           expect(JSON.stringify(review.requests[0]!.messages)).toContain('child reviewer');
@@ -1044,7 +1103,7 @@ for (const mode of [
           interactionId: card.id,
           expectedRevision: card.revision,
           subjectId: 'owner',
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       await f.done();

@@ -461,7 +461,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         expectedStoreId: storeId,
         commandId: `answer-${card.id}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       const fact = await until(
         'saved original',

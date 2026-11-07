@@ -88,7 +88,10 @@ async function fixture() {
     policyRevision: '1',
     requiredRefs: [],
     source,
-    request: { title: 'Approve exact temporary record writer' },
+    request: {
+      title: 'Approve exact temporary record writer',
+      options: [{ optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } }],
+    },
   });
   await store.answerInteraction({
     ...base,
@@ -96,7 +99,7 @@ async function fixture() {
     presentationSessionId: 's',
     interactionId: 'approval',
     expectedRevision: '1',
-    answer: { kind: 'approval', decision: 'approve' },
+    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
   });
   await store.acceptInteractionDecision({
     ...write,

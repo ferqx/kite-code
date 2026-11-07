@@ -115,7 +115,11 @@ test('event refresh re-reads the current later window with fresh revision; expli
   expect(refreshed!.interactions.map((card) => card.id)).toEqual(['b']);
   expect(refreshed!.interactions[0]!.revision).toBe('1');
   await expect(
-    f.controller.answerInteraction(old, { kind: 'approval', decision: 'approve' }),
+    f.controller.answerInteraction(old, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    }),
   ).rejects.toThrow('interaction_scope_mismatch');
   expect(f.posts()).toBe(0);
   f.client.getView = async () => ({
@@ -278,14 +282,22 @@ test('unread complete attachment on a later page sends zero answers; unknown lat
   await f.controller.selectSession('s');
   await f.controller.nextInteractionPage(1, 'a');
   await expect(
-    f.controller.answerInteraction(attachment, { kind: 'approval', decision: 'approve' }),
+    f.controller.answerInteraction(attachment, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    }),
   ).rejects.toThrow('attachment_not_loaded');
   expect(f.posts()).toBe(0);
   const g = fixture(async () => ({ interactions: [card('b')], nextAfterId: null }));
   await g.controller.selectSession('s');
   await g.controller.nextInteractionPage(1, 'a');
   await expect(
-    g.controller.answerInteraction(card('b'), { kind: 'approval', decision: 'approve' }),
+    g.controller.answerInteraction(card('b'), {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    }),
   ).rejects.toThrow('lost');
   const original = g.controller.interactionSubmission(card('b'))!;
   await g.controller.selectSession('other');

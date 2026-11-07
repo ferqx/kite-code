@@ -1,5 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
 import { runLiveAgentIdentities } from './collaboration-agent-identities.live';
 import { runLiveApprovalRaces } from './collaboration-approval-races.live';
 import {
@@ -56,13 +57,22 @@ if (process.env.KITE_RUN_LIVE_COLLABORATION !== '1')
 const args = process.argv.slice(2);
 const parsed = new Map<string, string>();
 for (const arg of args) {
-  const match = /^--(group|case|output)=(.+)$/.exec(arg);
+  const match = /^--(group|case|output|model|reasoning-effort)=(.+)$/.exec(arg);
   if (!match || parsed.has(match[1]!)) throw Error('live_collaboration_arguments_invalid');
   parsed.set(match[1]!, match[2]!);
 }
 const group = parsed.get('group');
 const caseId = parsed.get('case');
 const output = parsed.get('output');
+const selectedModel = parsed.get('model');
+const selectedEffort = parsed.get('reasoning-effort');
+if (selectedModel !== undefined && !['gpt-6-luna', 'gpt-6.1-terra'].includes(selectedModel))
+  throw Error('live_collaboration_model_invalid');
+if (selectedEffort !== undefined && !['low', 'medium', 'high'].includes(selectedEffort))
+  throw Error('live_collaboration_reasoning_effort_invalid');
+if (selectedEffort !== undefined && selectedModel === undefined)
+  throw Error('live_collaboration_reasoning_requires_model');
+const reasoningEffort = (selectedEffort ?? 'medium') as 'low' | 'medium' | 'high';
 const inputCases = [
   'I01',
   'I02',
@@ -92,6 +102,10 @@ const permissionCases = [
   'permissions-relax',
   'permissions-tighten',
   'permissions-untrusted',
+  'permissions-descendant-and-readonly-ceiling',
+  'permissions-files-accept_edits',
+  'permissions-files-auto',
+  'permissions-files-full',
 ];
 const titleCases = ['S01', 'S02', 'S03'];
 const questionCases = ['R02', 'R09'];
@@ -165,6 +179,9 @@ const treeCases = [
   'tree-descendant-mode-relax',
   'tree-descendant-mode-tighten',
   'tree-queued-mode-relax',
+  'tree-files-accept_edits',
+  'tree-files-auto',
+  'tree-files-full',
 ];
 const idleQuestionCases = [
   'R08-idle-parent-one-real-30000ms-question-observation-pending',
@@ -317,6 +334,7 @@ const report: Record<string, unknown> = {
 let fixture: Awaited<ReturnType<typeof createLiveModelFixture>> | undefined;
 try {
   fixture = await createLiveModelFixture({
+    ...(selectedModel ? { model: selectedModel, reasoningEffort } : {}),
     requestLimit: 40,
     timeoutMs: 600_000,
     ...(caseId === 'F04-bounded-complete-Files-child-carrier-parent-body-8192-output-tokens'
@@ -324,11 +342,36 @@ try {
       : {}),
   });
   Object.assign(report, fixture.metadata);
+  const selectedCodexSource = selectedModel ? createCodexLocalSource() : undefined;
+  const selectedProviderName = selectedCodexSource?.discover()?.alias;
+  if (selectedModel && !selectedProviderName)
+    throw Error('live_collaboration_selected_codex_unavailable');
   const options = {
     model: fixture.model,
     modelId: fixture.modelId,
     signal: fixture.signal,
     requests: () => fixture!.requests,
+    ...(selectedModel
+      ? {
+          hostModel: {
+            localCodex: selectedCodexSource!,
+            configuration: {
+              modelId: fixture.modelId,
+              models: [
+                {
+                  id: fixture.modelId,
+                  provider: 'codex',
+                  providerName: selectedProviderName!,
+                  model: selectedModel,
+                  baseURL: CODEX_BASE_URL,
+                  protocol: 'responses',
+                  options: { reasoningEffort },
+                },
+              ],
+            },
+          },
+        }
+      : {}),
     ...(output ? { evidenceRoot: `${output}.workspace` } : {}),
   };
   const results =

@@ -1,5 +1,4 @@
 import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
-import Ajv from 'ajv';
 import type { ContextSource } from '../context';
 import type {
   ActionContext,
@@ -13,6 +12,7 @@ import type {
   JobHandle,
   NecessaryConditions,
   Permissions,
+  ResourceRequest,
   StopConfirmation,
   ToolDefinition,
   ToolResult,
@@ -22,8 +22,9 @@ import { canonicalJson, semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
-import { createModelToolSurface, modelToolMessages } from '../model-tools';
+import { createModelToolSurface, modelToolArgumentError, modelToolMessages } from '../model-tools';
 import type { AuthorizationCheckBinding } from '../runtime';
+import { InputSchemaCompiler } from '../schema-cache';
 import type {
   AutoAuthorizationEvidence,
   ReadAuthorizationCheckInput,
@@ -157,6 +158,14 @@ class ConditionSnapshotChangedError extends AgentError {
     super('necessary_condition_snapshot_changed');
   }
 }
+export interface RequirementRegistrationTransition {
+  readonly extensionId: string;
+  readonly executionId: string;
+  readonly attempt: number;
+  readonly runId: string;
+  readonly before: readonly RequirementRef[];
+  readonly after: readonly RequirementRef[];
+}
 export interface ExecutionScope {
   /** Core-owned interpretation of one durable human input, never a business grant. */
   humanInputInterpretation?: { inputCommandId: string; inputDigest: string };
@@ -171,11 +180,13 @@ export interface ExecutionScope {
   signal: AbortSignal;
   decisionSources?: readonly ContextSource[];
   checkFreshness?: () => Promise<void>;
+  onRequirementsRegistered?: (transition: RequirementRegistrationTransition) => Promise<void>;
   checkpoint?: () => Promise<void>;
   bindings?: ScopedBindings;
 }
 export interface ScopedBindings {
   readonly authorizationCheck?: AuthorizationCheckBinding;
+  readonly toolBehaviors?: readonly import('../tool-behavior').TrustedToolBehavior[];
   readonly extensions: readonly Extension[];
   readonly tools: ReadonlyMap<string, ToolDefinition>;
   readonly jobs: ReadonlyMap<string, JobDefinition>;
@@ -185,6 +196,7 @@ export interface ScopedBindings {
   retain(): () => Promise<void>;
 }
 export interface StandaloneScope {
+  resourcesHeldByAncestor?: boolean;
   /** Trusted host dispatch class, never supplied in an Action input. */
   controlOnly?: true;
   command: CommandRecord;
@@ -196,6 +208,7 @@ export interface StandaloneScope {
   cancelWithParent?: boolean;
   requirements?: readonly RequirementRef[];
   checkFreshness?: () => Promise<void>;
+  onRequirementsRegistered?: (transition: RequirementRegistrationTransition) => Promise<void>;
   checkpoint?: () => Promise<void>;
   bindings?: ScopedBindings;
   /** Host-sealed preparation reads and a freshly observed current dispatch predicate. */
@@ -220,11 +233,21 @@ function identity(scope: ToolScope) {
       };
 }
 export interface ExecutionOptions {
+  prepareExecutionConfirmation?: (
+    scope: ToolScope,
+    request: AuthorizationRequest,
+    execution: ExecutionRecord,
+  ) => Promise<import('../execution-confirmation').PreparedExecutionConfirmation | null>;
   waitForChange?: AuthorizationChangeWait;
   /** Internal observation after dispatch acknowledgement, before entering the adapter. */
   onModelStart?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
   /** Internal post-commit observation; never a gate or an extension execution context. */
   onModelSettled?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
+  authorizeParent?: (
+    scope: ToolScope,
+    request: AuthorizationRequest,
+    decision: import('../extensions').PermissionDecision,
+  ) => Promise<AutoAuthorizationEvidence | null>;
   checkAuthorization?: (
     scope: ToolScope,
     request: AuthorizationRequest,
@@ -277,7 +300,7 @@ export interface ExecutionOptions {
 }
 
 export class UnifiedExecution {
-  private readonly validator = new Ajv({ allErrors: true, strict: false });
+  private readonly validator = new InputSchemaCompiler();
   private readonly options: ExecutionOptions;
   private readonly interactions: InteractionGate;
   private readonly authorizationChecks = new Map<string, ReadAuthorizationCheckInput>();
@@ -300,10 +323,20 @@ export class UnifiedExecution {
       owner: scope.owner,
       executionId,
       signal: scope.signal,
+      resourcesHeldByAncestor:
+        'resourcesHeldByAncestor' in scope && scope.resourcesHeldByAncestor === true,
       requiredRefs: 'run' in scope ? scope.run.requirements : (scope.requirements ?? []),
       requirements: () => this.requirements(scope, 'dispatch', executionId),
       checkFreshness: scope.checkFreshness,
       checkpoint: scope.checkpoint,
+      ...(this.options.authorizeParent
+        ? {
+            authorizeParent: (
+              request: AuthorizationRequest,
+              decision: import('../extensions').PermissionDecision,
+            ) => this.options.authorizeParent!(scope, request, decision),
+          }
+        : {}),
       ...(this.options.sealApprovalRequest
         ? {
             sealApprovalRequest: (request: Json) =>
@@ -318,14 +351,11 @@ export class UnifiedExecution {
         : {}),
     };
   }
-  inputRequester(scope: ToolScope, executionId: string) {
-    const request = this.interactionRequester(scope, executionId);
-    return (input: Json) => request({ kind: 'question', request: input });
-  }
-  interactionRequester(scope: ToolScope, executionId: string) {
-    return this.interactions.requester(this.interactionScope(scope, executionId));
-  }
-  interactionRequesterWithReceipt(scope: ToolScope, executionId: string) {
+  interactionRequesterWithReceipt(
+    scope: ToolScope,
+    executionId: string,
+    resources?: ResourceRequest,
+  ) {
     const gate = scope.bindings?.permissions
       ? new InteractionGate(
           this.options.store,
@@ -333,9 +363,16 @@ export class UnifiedExecution {
           this.options.waitForChange,
         )
       : this.interactions;
-    return gate.informationRequester(this.interactionScope(scope, executionId));
+    return gate.informationRequester({
+      ...this.interactionScope(scope, executionId),
+      informationResourcesHeld: !!(
+        resources?.slot ||
+        resources?.serial ||
+        ('resourcesHeldByAncestor' in scope && scope.resourcesHeldByAncestor)
+      ),
+    });
   }
-  private authorize(
+  private async authorize(
     scope: ToolScope,
     request: AuthorizationRequest,
     source: Json,
@@ -348,13 +385,23 @@ export class UnifiedExecution {
           this.options.waitForChange,
         )
       : this.interactions;
+    const previousPolicy = this.authorizationDecisions.get(request.executionId);
+    const executionConfirmation = previousPolicy?.executionConfirmation;
     return gate
       .authorize(
         {
           ...this.interactionScope(scope, request.executionId),
           final,
+          ...(executionConfirmation
+            ? { executionConfirmation: { proof: executionConfirmation } }
+            : this.options.prepareExecutionConfirmation
+              ? {
+                  prepareExecutionConfirmation: (execution: ExecutionRecord) =>
+                    this.options.prepareExecutionConfirmation!(scope, request, execution),
+                }
+              : {}),
           previousCheck: this.authorizationChecks.get(request.executionId),
-          previousPolicy: this.authorizationDecisions.get(request.executionId),
+          previousPolicy: previousPolicy?.executionConfirmation ? undefined : previousPolicy,
           ...(!final && this.options.checkAuthorization
             ? {
                 check: async (
@@ -390,6 +437,13 @@ export class UnifiedExecution {
           this.authorizationChecks.delete(request.executionId);
         return decision;
       });
+  }
+  private resetAuthorizationForRefresh(executionId: string): void {
+    this.authorizationChecks.delete(executionId);
+    // A mode refresh discards permission authority, not the original human fact.
+    // authorize passes only this proof onward and always observes current policy.
+    if (!this.authorizationDecisions.get(executionId)?.executionConfirmation)
+      this.authorizationDecisions.delete(executionId);
   }
   private async liveScope<T extends ToolScope, R>(
     scope: T,
@@ -876,8 +930,7 @@ export class UnifiedExecution {
               }
               await this.options.waitForChange(state.cursor, scope.signal, 30000);
             }
-            this.authorizationChecks.delete(executionId);
-            this.authorizationDecisions.delete(executionId);
+            this.resetAuthorizationForRefresh(executionId);
             continue;
           }
         }
@@ -905,8 +958,7 @@ export class UnifiedExecution {
           )
             throw error;
         }
-        this.authorizationChecks.delete(executionId);
-        this.authorizationDecisions.delete(executionId);
+        this.resetAuthorizationForRefresh(executionId);
         scope.signal.throwIfAborted();
       }
     }
@@ -964,8 +1016,11 @@ export class UnifiedExecution {
           : { snapshot: structuredClone(decision.snapshot) }),
         ...(controlReads === undefined ? {} : { controlReads }),
         allowed: true,
+        ...(decision.executionConfirmation
+          ? { executionConfirmation: structuredClone(decision.executionConfirmation) }
+          : {}),
         revision: decision.revision,
-        ...(decision.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+        ...(decision.materialReviewed ? { materialReviewed: true as const } : {}),
         definitionVersion,
         inputDigest: await semanticDigest(input),
         ...(decision.checkExecutionId ? { checkExecutionId: decision.checkExecutionId } : {}),
@@ -992,7 +1047,7 @@ export class UnifiedExecution {
     }
     return {
       revision: decision.revision,
-      ...(decision.riskReviewApproved ? { riskReviewApproved: true as const } : {}),
+      ...(decision.materialReviewed ? { materialReviewed: true as const } : {}),
       ...(decision.snapshot === undefined ? {} : { snapshot: structuredClone(decision.snapshot) }),
     };
   }
@@ -1452,6 +1507,8 @@ export class UnifiedExecution {
           source,
           null,
           'invalid_tool_arguments',
+          definition?.version,
+          'Arguments must be valid JSON matching the declared tool schema.',
         ),
         dispatched: false,
       };
@@ -1467,6 +1524,9 @@ export class UnifiedExecution {
           input,
           call.model.error,
           definition?.version,
+          call.model.error === 'invalid_tool_arguments' && definition
+            ? modelToolArgumentError(definition, call)
+            : undefined,
         ),
         dispatched: false,
       };
@@ -1494,6 +1554,7 @@ export class UnifiedExecution {
           input,
           'invalid_tool_arguments',
           definition.version,
+          modelToolArgumentError(definition, call),
         ),
         dispatched: false,
       };
@@ -1597,6 +1658,7 @@ export class UnifiedExecution {
       const requestInteractionWithReceipt = this.interactionRequesterWithReceipt(
         scope,
         executionId,
+        definition.resources,
       );
       const requestInteraction = async (input: {
         kind: 'question' | 'plan_review';
@@ -2175,6 +2237,7 @@ export class UnifiedExecution {
     input: Json,
     code: string,
     version = 'unavailable',
+    schemaError?: string,
   ): Promise<ToolResult> {
     const work = identity(scope);
     await this.prepare(scope, {
@@ -2187,7 +2250,11 @@ export class UnifiedExecution {
       input,
       decisionSource: source,
     });
-    const result: ToolResult = { outcome: 'failed', content: code, details: { code } };
+    const result: ToolResult = {
+      outcome: 'failed',
+      content: code,
+      details: { code, ...(schemaError ? { schemaError } : {}) },
+    };
     await this.options.store.finishExecution({
       expectedStoreId: work.originStoreId,
       owner: scope.owner,

@@ -465,7 +465,7 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
           expectedStoreId: storeId,
           commandId: `allow-auth-${n}`,
           expectedRevision: card.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
         const fact = await until(
           'completed-auth',

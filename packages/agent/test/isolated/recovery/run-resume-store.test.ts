@@ -180,7 +180,12 @@ async function fixture(
           policyRevision: 'fixed',
           requiredRefs: [],
           source: { kind: 'fixed' },
-          request: { description: 'original approval' },
+          request: {
+            description: 'original approval',
+            options: [
+              { optionId: 'once', kind: 'once', presentation: { label: '仅此次', details: [] } },
+            ],
+          },
         })
       : null;
   const original = await store.getExecution('model');

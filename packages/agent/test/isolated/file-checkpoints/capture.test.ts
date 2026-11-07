@@ -26,6 +26,7 @@ import {
 import { semanticDigest } from '../../../src/json';
 import { createWorkspaceSerialLocks } from '../../../src/resources';
 import { openSqliteStore } from '../../../src/sqlite';
+import { presentedFileRead } from '../../fixtures/presented-file-read';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -165,13 +166,25 @@ async function fixture(
   let stage = 0,
     generation = 0;
   const model: ModelAdapter = {
-    async *stream() {
+    async *stream(request) {
       calls++;
-      if (stage === 3) {
+      if (stage === 5) {
         yield finish;
         return;
       }
-      const step = stage++;
+      const turn = stage++;
+      if (turn === 0 || turn === 2) {
+        yield {
+          type: 'tool_call',
+          id: `read-${turn}`,
+          name: 'read_file',
+          arguments: JSON.stringify({ path: 'original' }),
+        };
+        yield { ...finish, reason: 'tool_calls' };
+        return;
+      }
+      const step = turn === 1 ? 0 : turn === 3 ? 1 : 2;
+      const feedback = request.messages.filter((message) => message.role === 'tool').at(-1);
       const input =
         step === 2
           ? {
@@ -181,12 +194,11 @@ async function fixture(
                   : generation
                     ? 'created-next'
                     : 'created',
-              base: null,
               content: 'created\r\n',
             }
           : {
               path: 'original',
-              base: (await checkpoint.files.read('original')).baseline,
+              base_ref: presentedFileRead(feedback!.content)!.baseRef,
               content: step === 0 ? 'middle\r\n' : generation ? 'next-last\r\n' : 'last\r\n',
             };
       yield {
@@ -216,7 +228,7 @@ async function fixture(
             capability.close = async () => {
               closed++;
               await close();
-              if (mode === 'lazy-close' && resolved === 5)
+              if (mode === 'lazy-close' && resolved === 7)
                 throw new Error('scoped close after confirmed physical restore');
             };
             return capability;
@@ -238,7 +250,8 @@ async function fixture(
               const reader = context.getExecution;
               let reads = 0;
               context.getExecution = async (id) => {
-                if (++reads === 2) throw new Error('actual after publication proof read fails');
+                if (id === context.executionId && ++reads === 3)
+                  throw new Error('actual after publication proof read fails');
                 return reader(id);
               };
               return tool.execute(input, context);
@@ -548,7 +561,7 @@ test('nested create receipts retain recoverable file preimages and restore leave
   try {
     await f.run();
     const writes = (await f.store.getView('s')).executions.filter(
-      (execution) => execution.kind === 'tool',
+      (execution) => execution.kind === 'tool' && execution.definitionId === 'files.write',
     );
     expect(writes.map((execution) => execution.status)).toEqual([
       'succeeded',
@@ -582,7 +595,7 @@ test('actual Files Tool receipts seal first full preimage and last postimage; re
   try {
     await f.run();
     const writes = (await f.store.getView('s')).executions.filter(
-      (execution) => execution.kind === 'tool',
+      (execution) => execution.kind === 'tool' && execution.definitionId === 'files.write',
     );
     expect(
       writes.map((execution) => ({
@@ -1079,7 +1092,7 @@ async function approveRestore(
     interactionId: record.id,
     expectedRevision: record.revision,
     subjectId: 'owner',
-    answer: { kind: 'approval', decision: 'approve' },
+    answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
   });
 }
 async function earliestPoint(f: Awaited<ReturnType<typeof fixture>>) {
@@ -1301,7 +1314,7 @@ test('confirmed later restore and a new Run retain full earlier preimages and us
     expect(f.calls).toBe(modelCalls);
     expect((await f.store.getSession('s'))!.contextSelectionId).toBe(selection);
     await f.runAgain('work-after-confirmed-restores');
-    expect(f.calls).toBe(modelCalls + 4);
+    expect(f.calls).toBe(modelCalls + 6);
     const subsequent = await f.checkpoint.preview(f.read, early);
     expect(subsequent.files.map((file) => [file.path, file.status])).toEqual([
       ['created', 'unchanged'],
@@ -1318,7 +1331,7 @@ test('confirmed later restore and a new Run retain full earlier preimages and us
     ).toMatchObject({ phase: 'restored' });
     expect(readFileSync(join(f.workspace, 'original')).equals(f.original)).toBe(true);
     expect(existsSync(join(f.workspace, 'created-next'))).toBe(false);
-    expect(f.calls).toBe(modelCalls + 4);
+    expect(f.calls).toBe(modelCalls + 6);
   } finally {
     await f.close();
   }
@@ -1882,7 +1895,9 @@ test('pure scoped registration shares original descriptors and lazily owns/close
       id: extension.id,
       version: extension.version,
       records: extension.records,
-      tools: extension.tools?.map(({ execute: _execute, ...metadata }) => metadata),
+      tools: extension.tools?.map(
+        ({ execute: _execute, formatModelResult: _formatter, ...metadata }) => metadata,
+      ),
       actions: extension.actions
         ?.filter((action) => action.id === 'files.checkpoint.restore')
         .map(({ prepare: _prepare, execute: _execute, ...metadata }) => metadata),
@@ -1892,7 +1907,7 @@ test('pure scoped registration shares original descriptors and lazily owns/close
     await f.run();
     const id = await earliestPoint(f);
     const calls = f.calls;
-    expect([f.resolved, f.closed]).toEqual([3, 3]);
+    expect([f.resolved, f.closed]).toEqual([5, 5]);
     const before = (await f.store.getMetadata()).lastChangeCursor;
     const views = await f.runtime.queryExtension({
       expectedStoreId: f.storeId,
@@ -1906,7 +1921,7 @@ test('pure scoped registration shares original descriptors and lazily owns/close
       (views[0]!.payload as { files: { status: string }[] }).files.map((file) => file.status),
     ).toEqual(['remove', 'restore']);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
-    expect([f.resolved, f.closed]).toEqual([4, 4]);
+    expect([f.resolved, f.closed]).toEqual([6, 6]);
     await invokeRestore(f, id);
     const ask = await restoreApproval(f);
     expect(f.resolved).toBe(f.closed);

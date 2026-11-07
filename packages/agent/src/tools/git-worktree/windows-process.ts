@@ -37,8 +37,10 @@ export async function runWindowsGitProcess(
     input?: string;
     inputFd?: number;
     outputHash?: { algorithm: 'sha1' | 'sha256'; prefix: string; bytes: bigint };
+    signal?: AbortSignal;
   },
 ): Promise<GitResult> {
+  options.signal?.throwIfAborted();
   const root = mkdtempSync(join(canonicalDirectory(tmpdir()), 'kite-worktree-git-'));
   const rootIdentity = identity(root);
   const files: { path: string; identity: PathIdentity }[] = [];
@@ -159,6 +161,12 @@ export async function runWindowsGitProcess(
         return;
       }
       let failure: unknown;
+      const abort = () => {
+        failure ??= options.signal?.reason ?? new Error('worktree_inspection_cancelled');
+        child.kill('SIGKILL');
+      };
+      options.signal?.addEventListener('abort', abort, { once: true });
+      if (options.signal?.aborted) abort();
       const timer = setInterval(() => {
         if (failure) return;
         try {
@@ -172,6 +180,7 @@ export async function runWindowsGitProcess(
         failure ??= processEventFailure(error, child.pid !== undefined);
       });
       child.on('close', (code) => {
+        options.signal?.removeEventListener('abort', abort);
         clearInterval(timer);
         try {
           if (!failure) drain(true);

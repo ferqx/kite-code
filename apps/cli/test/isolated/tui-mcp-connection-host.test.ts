@@ -347,7 +347,7 @@ async function fixture(ask = false) {
           expectedStoreId: storeId,
           commandId: `answer-${interaction.id}`,
           expectedRevision: interaction.revision,
-          answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
         return interaction;
       },

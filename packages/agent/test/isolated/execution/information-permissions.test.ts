@@ -6,7 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { Permissions, ToolDefinition } from '../../../src/extensions';
+import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
+import type { Store } from '../../../src/storage';
 import type { InteractionAnswer, InteractionRecord } from '../../../src/storage/types';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
@@ -26,6 +28,67 @@ async function eventually<T>(read: () => Promise<T | null>, label: string): Prom
     if (Date.now() >= deadline) throw new Error(`Timed out: ${label}`);
     await Bun.sleep(10);
   }
+}
+
+async function setMode(
+  store: Store,
+  expectedStoreId: string,
+  mode: 'accept_edits' | 'auto' | 'full',
+) {
+  const identity = { expectedStoreId, subjectId: 'owner' };
+  const current = await store.readHostControl({
+    ...identity,
+    kind: 'permission.mode',
+    scope: 'session:s',
+  });
+  const defaults = await store.readHostControl({
+    ...identity,
+    kind: 'permission.mode',
+    scope: 'user',
+  });
+  const safeRequest = {
+    scope: 'session',
+    sessionId: 's',
+    mode,
+    ifRevision: current.revision,
+    makeDefault: false,
+    ifDefaultRevision: defaults.revision,
+  };
+  const request = {
+    ...identity,
+    commandId: crypto.randomUUID(),
+    kind: 'permission.mode' as const,
+    scope: 'session:s',
+    safeRequest,
+    requestDigest: await semanticDigest(safeRequest),
+  };
+  await store.beginHostMutation(request);
+  return store.finishHostMutation({
+    ...identity,
+    commandId: request.commandId,
+    requestDigest: request.requestDigest,
+    state: 'applied',
+    receipt: { status: 'applied' },
+  });
+}
+
+function informationPolicy(read: () => { store: Store; expectedStoreId: string }): Permissions {
+  return {
+    async authorize() {
+      const { store, expectedStoreId } = read();
+      const control = await store.readHostControl({
+        expectedStoreId,
+        subjectId: 'owner',
+        kind: 'permission.mode',
+        scope: 'session:s',
+      });
+      return {
+        allowed: true,
+        revision: `information:${control.revision}`,
+        controlReads: [{ kind: 'permission.mode', scope: 'session:s', revision: control.revision }],
+      };
+    },
+  };
 }
 async function rejected(work: Promise<unknown>, code: string) {
   let error: unknown;
@@ -213,8 +276,10 @@ for (const change of [
       await f.answer(question, { kind: 'question', answers: { waive: true } });
       await f.runtime.waitForCommand('work');
       const stored = await f.read(question);
-      expect(stored?.acceptedDecisionRevision).toBe(change === 'none' ? '2' : null);
-      expect(proofs).toBe(change === 'none' ? 1 : 0);
+      const mayAcceptInformation = change !== 'deny_same_revision';
+      expect(stored?.acceptedDecisionRevision).toBe(mayAcceptInformation ? '2' : null);
+      expect(proofs).toBe(mayAcceptInformation ? 1 : 0);
+      expect(stored?.informationPermission).toEqual(question.informationPermission);
       expect((await f.store.listExecutions('s')).filter((e) => e.kind === 'tool')).toHaveLength(1);
       expect((await f.store.getExecution(question.executionId))?.interactionBinding).toBeNull();
       expect(
@@ -232,6 +297,218 @@ for (const change of [
     }
   }, 10000);
 }
+for (const kind of ['question', 'plan_review'] as const)
+  for (const from of ['accept_edits', 'auto', 'full'] as const)
+    for (const to of ['accept_edits', 'auto', 'full'] as const) {
+      if (from === to) continue;
+      test(`${kind} preserves the exact human answer across ${from} -> ${to}`, async () => {
+        let bound!: { store: Store; expectedStoreId: string };
+        let proofs = 0;
+        const f = await fixture(
+          [
+            {
+              ...base,
+              async execute(_input, context) {
+                const receipt = await context.requestInteractionWithReceipt!({
+                  kind,
+                  request: { title: 'Exact business decision', object: { id: 'one', version: 1 } },
+                });
+                expect(receipt.executionId).toBe(context.executionId);
+                expect(receipt.runId).toBe(context.runId!);
+                expect(receipt.originStoreId).toBe(bound.expectedStoreId);
+                proofs++;
+                return { outcome: 'succeeded', content: 'accepted business decision' };
+              },
+            },
+          ],
+          [call(), [finish]],
+          informationPolicy(() => bound),
+        );
+        bound = f;
+        try {
+          await setMode(f.store, f.expectedStoreId, from);
+          await f.submit();
+          const question = await f.pending();
+          expect(question.kind).toBe(kind);
+          await setMode(f.store, f.expectedStoreId, to);
+          expect((await f.read(question))?.state).toBe('pending');
+          expect(f.model.requests).toHaveLength(1);
+          await f.answer(
+            question,
+            kind === 'question'
+              ? { kind, answers: { decision: 'approve' } }
+              : { kind, decision: 'approve' },
+          );
+          await f.runtime.waitForCommand('work');
+          const accepted = await f.read(question);
+          expect(accepted?.acceptedDecisionRevision).toBe('2');
+          expect(accepted?.request).toEqual(question.request);
+          expect(accepted?.informationPermission).toEqual(question.informationPermission);
+          expect(proofs).toBe(1);
+          expect(
+            (await f.store.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+              .interactions,
+          ).toHaveLength(1);
+          expect((await f.store.getExecution(question.executionId))?.interactionBinding).toBeNull();
+          expect(
+            (
+              await f.store.listPermissionGrants({
+                expectedStoreId: f.expectedStoreId,
+                subjectId: 'owner',
+                sessionId: 's',
+                limit: 10,
+              })
+            ).items,
+          ).toHaveLength(0);
+        } finally {
+          await f.close();
+        }
+      }, 10000);
+    }
+
+for (const keepChanging of [false, true])
+  test(`a saved answer only retries a stale current-control CAS: churn=${keepChanging}`, async () => {
+    let bound!: { store: Store; expectedStoreId: string };
+    let proofs = 0;
+    const f = await fixture(
+      [
+        {
+          ...base,
+          async execute(_input, context) {
+            await context.requestInteractionWithReceipt!({
+              kind: 'question',
+              request: { title: 'One saved answer' },
+            });
+            proofs++;
+            return { outcome: 'succeeded', content: 'one accepted answer' };
+          },
+        },
+      ],
+      [call(), [finish]],
+      informationPolicy(() => bound),
+    );
+    bound = f;
+    const original = f.store.acceptInteractionDecision.bind(f.store);
+    let attempts = 0;
+    const inputs: Parameters<Store['acceptInteractionDecision']>[0][] = [];
+    f.store.acceptInteractionDecision = async (input) => {
+      if (input.informationPermission) {
+        attempts++;
+        inputs.push(structuredClone(input));
+        if (attempts === 1 || keepChanging)
+          await setMode(f.store, f.expectedStoreId, attempts % 2 ? 'full' : 'auto');
+      }
+      return original(input);
+    };
+    try {
+      await f.submit();
+      const question = await f.pending();
+      await f.answer(question, { kind: 'question', answers: {} });
+      await f.runtime.waitForCommand('work');
+      expect(attempts).toBe(keepChanging ? 3 : 2);
+      expect(proofs).toBe(keepChanging ? 0 : 1);
+      expect((await f.read(question))?.acceptedDecisionRevision).toBe(keepChanging ? null : '2');
+      for (const input of inputs)
+        expect(input.informationPermission).toEqual(question.informationPermission);
+      expect(inputs[0]?.currentInformationPermission?.controlReads).not.toEqual(
+        inputs[1]?.currentInformationPermission?.controlReads,
+      );
+      const page = await f.store.listInteractions({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+      });
+      expect(page.interactions).toHaveLength(1);
+      expect(page.interactions[0]?.answer).toEqual({ kind: 'question', answers: {} });
+      expect((await f.store.getExecution(question.executionId))?.interactionBinding).toBeNull();
+    } finally {
+      f.store.acceptInteractionDecision = original;
+      await f.close();
+    }
+  }, 10000);
+
+test('a resource-free human wait leaves the only process slot available to another Session', async () => {
+  let processes = 0;
+  const f = await fixture(
+    [
+      {
+        ...base,
+        id: 'fixture.review',
+        async execute(_input, context) {
+          await context.requestInteractionWithReceipt!({
+            kind: 'question',
+            request: { title: 'Business approval' },
+          });
+          return { outcome: 'succeeded', content: 'approved' };
+        },
+      },
+      {
+        ...base,
+        id: 'fixture.process',
+        resources: { slot: 'process' },
+        async execute() {
+          processes++;
+          return { outcome: 'succeeded', content: 'actual process slot acquired' };
+        },
+      },
+    ],
+    [call('fixture.review'), call('fixture.process'), [finish], [finish]],
+    { authorize: async () => ({ allowed: true, revision: 'allowed' }) },
+  );
+  try {
+    await f.submit();
+    const question = await f.pending();
+    await f.session('other');
+    await f.submit('other-work', 'other');
+    await f.runtime.waitForCommand('other-work');
+    expect(processes).toBe(1);
+    expect((await f.read(question))?.state).toBe('pending');
+    await f.answer(question, { kind: 'question', answers: { approved: true } });
+    await f.runtime.waitForCommand('work');
+    expect((await f.read(question))?.acceptedDecisionRevision).toBe('2');
+  } finally {
+    await f.close();
+  }
+}, 10000);
+
+for (const resources of [
+  { slot: 'process' as const },
+  { serial: { scope: 'runtime' as const, key: 'one' } },
+])
+  test(`an executing Tool cannot hold a scarce resource while asking a human: ${JSON.stringify(resources)}`, async () => {
+    let blocked = false;
+    const f = await fixture(
+      [
+        {
+          ...base,
+          resources,
+          async execute(_input, context) {
+            try {
+              await context.requestInteractionWithReceipt!({ kind: 'question', request: {} });
+            } catch (error) {
+              expect((error as { code?: string }).code).toBe('interaction_execution_resource_held');
+              blocked = true;
+              return { outcome: 'failed', content: 'approval must precede resource acquisition' };
+            }
+            throw new Error('resource-holding question was unexpectedly permitted');
+          },
+        },
+      ],
+      [call(), [finish]],
+      { authorize: async () => ({ allowed: true, revision: 'allowed' }) },
+    );
+    try {
+      await f.submit();
+      await f.runtime.waitForCommand('work');
+      expect(blocked).toBe(true);
+      expect(
+        (await f.store.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+          .interactions,
+      ).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  }, 10000);
+
 test('already approved exact Tool can ask information without obtaining a second grant', async () => {
   let proofs = 0;
   const f = await fixture(
@@ -254,7 +531,7 @@ test('already approved exact Tool can ask information without obtaining a second
   try {
     await f.submit();
     const approval = await f.pending();
-    await f.answer(approval, { kind: 'approval', decision: 'approve', grant: 'approve_once' });
+    await f.answer(approval, { kind: 'approval', decision: 'approve', optionId: 'once' });
     const question = await f.pending('s', [approval.id]);
     expect(question.kind).toBe('question');
     await f.answer(question, { kind: 'question', answers: {} });

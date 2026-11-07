@@ -15,6 +15,7 @@ import type {
 } from '../../extensions';
 import type { AgentRuntime } from '../../runtime';
 import { AgentError, type RequirementEvaluation } from '../../storage/types';
+import { browserPageReference } from './model-reference';
 import type { BrowserController, BrowserTarget } from './types';
 
 const contentType = 'application/vnd.kite.browser-human-request+json';
@@ -840,6 +841,19 @@ export function createBrowserHumanCoordinator(options: {
         choice: value.choice!,
         browserId: pending.target.browserId,
         state: value.choice === 'continue' ? 'agent' : 'closed',
+        ...(value.choice === 'continue' && resumedTarget
+          ? {
+              generation: resumedTarget.generation,
+              page_ref: browserPageReference(
+                {
+                  storeId: pending.storeId,
+                  sessionId: pending.sessionId,
+                  runId: pending.taskRunId,
+                },
+                resumedTarget,
+              ),
+            }
+          : {}),
       };
       settle(pending, { outcome: 'succeeded', content: JSON.stringify(details), details });
       const terminal = await context.operations

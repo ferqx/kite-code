@@ -144,7 +144,32 @@ test('ordinary preferences and three permission choices retain useful descriptio
         readScopes: [],
       },
       grants: {
-        items: [{ grant: { id: 'private-grant', definitionId: 'private-definition' } }],
+        items: [
+          {
+            seq: '1',
+            grant: {
+              id: 'private-grant',
+              originStoreId: 'private-store',
+              sessionId: 'private-session',
+              workspaceId: 'private-workspace',
+              kind: 'tool',
+              definitionId: 'private-definition',
+              definitionVersion: '1',
+              inputDigest: 'a'.repeat(64),
+              ruleId: 'original-rule',
+              contractId: 'original-contract',
+              scope: { path: '/actual/workspace/target' },
+              scopeDigest: 'b'.repeat(64),
+              bindings: [
+                { kind: 'tool', definitionId: 'private-definition', definitionVersion: '1' },
+              ],
+              presentation: { label: 'Original file slot', details: ['Only the original path'] },
+              interactionId: 'source-approval',
+              decisionRevision: '1',
+              executionId: 'source-execution',
+            },
+          },
+        ],
         revision: '2',
         upperSeq: '4',
       },
@@ -185,13 +210,23 @@ test('ordinary preferences and three permission choices retain useful descriptio
       'extremely dangerous',
       'Current',
       '/actual/workspace',
+      'Original file slot',
+      'Only the original path',
+      'tool private-definition@1',
+      'Session private-session',
+      'original-rule',
+      '{"path":"/actual/workspace/target"}',
+      'source-approval',
+      'Execution source-execution',
     ])
       expect(ui.lastFrame()).toContain(text);
     for (const text of [
       'private-grant',
-      'private-definition',
-      'private-session',
+      'private-store',
       'private-workspace',
+      'original-contract',
+      'a'.repeat(64),
+      'b'.repeat(64),
       '"definitionId"',
       'revision',
     ])
@@ -205,6 +240,26 @@ test('ordinary preferences and three permission choices retain useful descriptio
     await tick();
     expect(ui.lastFrame()).toContain('model reviews commands');
     expect(ui.lastFrame()).not.toContain('Workspace writes are allowed.');
+    const pages = [ui.lastFrame()!];
+    for (let page = 0; page < 3; page++) {
+      expect(ui.lastFrame()!.split('\n').length).toBeLessThanOrEqual(24);
+      expect(ui.lastFrame()).toContain('Clear Session grants');
+      ui.stdin.write('\u001b[6~');
+      await tick();
+      pages.push(ui.lastFrame()!);
+    }
+    for (const text of [
+      'Only the original path',
+      'tool private-definition@1',
+      'source-approval',
+      'Execution source-execution',
+    ])
+      expect(pages.join('\n')).toContain(text);
+    ui.stdin.write('c');
+    await tick();
+    expect(ui.lastFrame()!.split('\n').length).toBeLessThanOrEqual(24);
+    expect(ui.lastFrame()).toContain('Confirm original');
+    expect(ui.lastFrame()).toContain('Enter explicitly submits');
   } finally {
     ui.unmount();
   }

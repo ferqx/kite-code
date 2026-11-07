@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
+import { approvalOptions, grantDigest, grantScopeDigest } from '../../../src/permission-grants';
 import { openSqliteStore } from '../../../src/sqlite';
 
 test('grant directory has frozen keyset upper, preserves over 200 accepted facts and is cold-readable without replay', async () => {
@@ -65,13 +66,35 @@ test('grant directory has frozen keyset upper, preserves over 200 accepted facts
         input,
         decisionSource: source,
       });
+      const candidate = {
+        ruleId: 'fixture',
+        contractId: 'fixture.scope',
+        scope: { command: input.command },
+        bindings: [
+          {
+            kind: 'tool' as const,
+            definitionId: binding.definitionId,
+            definitionVersion: binding.definitionVersion,
+          },
+        ],
+        presentation: { label: 'Scope', details: ['exact'] },
+      };
+      const candidateOffer = {
+        ...candidate,
+        scopeDigest: grantScopeDigest(candidate),
+        policyBindings: candidate.bindings.map((capability) => ({
+          capability,
+          reuseRevision: grantDigest({ policy: 'fixture' }),
+        })),
+      };
+      const options = approvalOptions(offer ? [candidateOffer] : []);
       await store.requestInteraction({
         ...binding,
         interactionId: `interaction-${index}`,
         kind: 'approval',
         requiredRefs: [],
         source,
-        request: { grants: offer ? ['approve_once', 'same_command'] : ['approve_once'] },
+        request: { options: options as unknown as import('../../../src/storage/types').Json },
       });
       await store.answerInteraction({
         expectedStoreId,
@@ -80,7 +103,11 @@ test('grant directory has frozen keyset upper, preserves over 200 accepted facts
         presentationSessionId: 's',
         interactionId: `interaction-${index}`,
         expectedRevision: '1',
-        answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          optionId: `scope-${candidateOffer.scopeDigest}`,
+        },
       });
       await store.acceptInteractionDecision({
         ...binding,

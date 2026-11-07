@@ -139,7 +139,7 @@ test('real HTTP CLI opt-in answers approval then schema question, only actual Ru
           expect(interaction.presentationSessionId).toBe('s');
           expect(interaction.state).toBe('pending');
           return interaction.kind === 'approval'
-            ? { kind: 'approval', decision: 'approve' }
+            ? { kind: 'approval', decision: 'approve', optionId: 'once' }
             : { kind: 'question', answers: { reply: 'second' } };
         },
       },
@@ -176,7 +176,11 @@ test('noninteractive waiting is known; Desktop freezes exact target and ignores 
     const desktop = createDesktopController({ admittedClient: f.client, onSnapshot() {} });
     const snapshot = await desktop.selectSession('s');
     const card = snapshot!.interactions[0]!;
-    const one = desktop.answerInteraction(card, { kind: 'approval', decision: 'approve' });
+    const one = desktop.answerInteraction(card, {
+      kind: 'approval',
+      decision: 'approve',
+      optionId: 'once',
+    });
     const duplicate = desktop.answerInteraction(card, { kind: 'approval', decision: 'deny' });
     expect(duplicate).toBe(one);
     await desktop.selectSession('other');
@@ -185,6 +189,7 @@ test('noninteractive waiting is known; Desktop freezes exact target and ignores 
     expect(desktop.interactionSubmission(card)?.intent.answer).toEqual({
       kind: 'approval',
       decision: 'approve',
+      optionId: 'once',
     });
     expect(desktop.interactionSubmission(card)?.phase).toBe('accepted');
     expect((await desktop.lookupInteractionAnswer(card)).id).toBe(receipt.id);
@@ -253,7 +258,7 @@ test('actual private paired Service process completes opt-in CLI approval/questi
         answerInteraction: async (interaction) => {
           calls.push(interaction.kind);
           return interaction.kind === 'approval'
-            ? { kind: 'approval', decision: 'approve' }
+            ? { kind: 'approval', decision: 'approve', optionId: 'once' }
             : { kind: 'question', answers: { reply: 'second' } };
         },
       },
@@ -343,7 +348,7 @@ test('actual denied approval reaches the next Model without tool effects; invali
         pollIntervalMs: 5,
         answerInteraction: async (interaction) =>
           interaction.kind === 'approval'
-            ? { kind: 'approval', decision: 'approve' }
+            ? { kind: 'approval', decision: 'approve', optionId: 'once' }
             : { kind: 'question', answers: { reply: 4 } },
       },
     );

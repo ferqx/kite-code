@@ -171,7 +171,7 @@ try {
         expectedStoreId: scope.storeId,
         commandId: `approve-native-${kind}`,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       await until(
         () => client.getExecution(card.executionId!),

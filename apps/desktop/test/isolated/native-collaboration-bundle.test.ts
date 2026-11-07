@@ -349,7 +349,7 @@ test.skipIf(process.platform !== 'darwin')(
                 tool_calls: [
                   call(
                     'write_file',
-                    { path: 'child-a-follow.txt', base: null, content: 'A follow-up approved\n' },
+                    { path: 'child-a-follow.txt', content: 'A follow-up approved\n' },
                     `write-${task}`,
                   ),
                 ],
@@ -503,6 +503,7 @@ test.skipIf(process.platform !== 'darwin')(
         oldRun: string;
         nextRun: string;
         approvedShellToolId: string;
+        approvedOptionId: string;
         coldZeroReplay: boolean;
         staticCreationHistory: boolean;
         staticHistoryStages: { phase: string; cold: boolean; names: string[] }[];
@@ -626,7 +627,12 @@ test.skipIf(process.platform !== 'darwin')(
         expect(
           childView.executions.find((row) => row.id === report.approvedShellToolId)?.authorization
             ?.human,
-        ).toMatchObject({ accepted: true, decision: 'approve', grant: 'same_command' });
+        ).toMatchObject({
+          accepted: true,
+          decision: 'approve',
+          optionId: report.approvedOptionId,
+          optionKind: 'scope',
+        });
         const followFiles = childView.executions.filter(
           (row) => row.runId === report.nextRun && row.kind === 'tool',
         );
@@ -637,7 +643,7 @@ test.skipIf(process.platform !== 'darwin')(
           status: 'succeeded',
           sessionId: report.agentId,
           parentExecutionId: report.next,
-          input: { path: 'child-a-follow.txt', base: null, content: 'A follow-up approved\n' },
+          input: { path: 'child-a-follow.txt', content: 'A follow-up approved\n' },
           authorization: { dispatched: true },
         });
         expect(followFiles[0]!.authorization?.policy).toBeUndefined();

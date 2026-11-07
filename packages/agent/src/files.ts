@@ -32,6 +32,7 @@ export {
   type FileSnapshot,
   type WorkspaceFiles,
 } from './tools/files';
+export { createFileToolBehaviors } from './tools/files-approval';
 export type { FileMutationCapture } from './tools/files-tools';
 export { createFileTools } from './tools/files-tools';
 export { withFullAccessFiles } from './tools/full-access-files';
@@ -40,4 +41,9 @@ export { createImageFileReads } from './tools/images/reader';
 export { createViewImagesTool } from './tools/images/tool';
 export { withInputFileReads } from './tools/input-files';
 export { type EditablePlanFile, withPlanFileTools } from './tools/plan-files';
+export {
+  isManagedWorkingFilePath,
+  isSessionOutputName,
+  isSessionOutputPath,
+} from './tools/session-output-path';
 export { type SessionOutput, withSessionOutputs } from './tools/session-outputs';

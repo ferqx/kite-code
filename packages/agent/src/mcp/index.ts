@@ -1151,6 +1151,7 @@ export {
   mcpReadToolIds,
   mcpSourceConnectionJobId,
 } from './lifecycle';
+export { mcpModelInputHint } from './model-reference';
 export {
   createMcpOAuthProvider,
   McpOAuthError,

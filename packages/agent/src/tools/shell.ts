@@ -9,6 +9,7 @@ import type {
   ToolResult,
 } from '../extensions';
 import { canonicalJson } from '../json';
+import { modelCursor, readModelCursor } from '../model-cursor';
 import { parseShellCommandInput, shellOperationKey } from '../shell-input';
 import { AgentError } from '../storage/types';
 import {
@@ -33,7 +34,6 @@ export function gitWorktreeAssetDirectory(): string {
   return join(basename(module) === 'tools' ? module : join(module, 'tools'), 'git-worktree');
 }
 const idSchema = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_.-]+$' };
-const decimal = { type: 'string', pattern: '^(0|[1-9][0-9]{0,18})$' };
 const object = (properties: Record<string, Json>, required: string[]) => ({
   type: 'object',
   properties,
@@ -86,6 +86,14 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             'A new unique key for each new execution. Do not reuse an earlier key for a different command or a new execution. To recover an earlier result, use shell_read with that key instead of running it again.',
         },
         command: { type: 'string', minLength: 1, maxLength: 262144 },
+        workdir: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 4096,
+          pattern: '^[^\\u0000]+$',
+          description:
+            'Execution directory, absolute or relative to the host fixed workspace directory. Does not change Session cwd; existing filesystem/network scopes still apply.',
+        },
         description: {
           type: 'string',
           description:
@@ -102,7 +110,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
                 type: 'boolean',
                 default: false,
                 description:
-                  'False waits for the original command and output; true returns its handle and acceptance state. Background acceptance is not success or completion. Cancelling the parent still cancels this command. Cannot be combined with execution_timeout_ms.',
+                  'Omit or use false when foreground execution is required. True returns the original command handle and acceptance state, not completion. After acceptance, use shell_wait or shell_read; never rerun the command merely to change foreground/background waiting. Cancelling the parent still cancels this command. Cannot be combined with execution_timeout_ms.',
               },
               execution_timeout_ms: {
                 type: 'integer',
@@ -157,6 +165,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         accepted: true;
         shellId: string;
         shell_id: string;
+        execution_id: string;
         ref: Json;
         presentation: 'exploration' | 'standalone';
       }
@@ -183,6 +192,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           definitionVersion: job.version,
           input: {
             command,
+            ...(parsed.workdir ? { workdir: parsed.workdir } : {}),
             ...(parsed.permissions !== undefined ? { permissions: parsed.permissions } : {}),
           },
         },
@@ -214,6 +224,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       accepted: true,
       shellId: key,
       shell_id: key,
+      execution_id: context.executionId,
       ref: ref as unknown as Json,
       presentation,
     };
@@ -237,7 +248,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command. Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned shell_id identifies this exact execution. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
+        description: `Execute one supervised command. Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
@@ -257,13 +268,17 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             parsed.timeoutMs ?? undefined,
             launched.presentation,
           );
-          const details = { ...args(completed.details ?? {}), shell_id: launched.shell_id };
+          const details = {
+            ...args(completed.details ?? {}),
+            shell_id: launched.shell_id,
+            execution_id: launched.execution_id,
+          };
           return {
             ...completed,
             content:
               completed.details && completed.content === canonicalJson(completed.details)
                 ? canonicalJson(details)
-                : `${completed.content}\nShell handle: ${canonicalJson({ shell_id: launched.shell_id })}`,
+                : `${completed.content}\nShell handle: ${canonicalJson({ shell_id: launched.shell_id, execution_id: launched.execution_id })}`,
             details,
           };
         },
@@ -272,7 +287,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         id: 'shell.launch',
         model: { name: 'shell_launch', snakeCase: true, hidden: true },
         version: '1',
-        description: `Start one supervised command. Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion.${scopeGuidance}`,
+        description: `Start one supervised command. Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
         inputSchema: schema(false),
         async execute(input, context) {
           const launched = await launch(input, context, 'launch');
@@ -287,8 +302,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         inputSchema: object(
           {
             shellId: idSchema,
-            afterSeq: decimal,
-            upperSeq: decimal,
+            cursor: { type: 'string', minLength: 1, maxLength: 4096 },
             limit: { type: 'integer', minimum: 1, maximum: 200 },
           },
           ['shellId'],
@@ -301,15 +315,32 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           const { ref } = resolved;
           const execution = await context.operations.get(ref);
           if (!execution) throw new AgentError('shell_unverifiable');
+          const scope = { kind: 'shell_output', ref: ref as unknown as Json };
+          const position =
+            inputArgs.cursor === undefined ? {} : args(readModelCursor(inputArgs.cursor, scope));
+          if (
+            Object.keys(position).some((key) => !['afterSeq', 'upperSeq'].includes(key)) ||
+            Object.values(position).some(
+              (value) => typeof value !== 'string' || !/^(0|[1-9][0-9]{0,18})$/.test(value),
+            )
+          )
+            throw new AgentError('invalid_cursor');
           const output = await context.operations.readOutput(ref, {
-            ...(typeof inputArgs.afterSeq === 'string' ? { afterSeq: inputArgs.afterSeq } : {}),
-            ...(typeof inputArgs.upperSeq === 'string' ? { upperSeq: inputArgs.upperSeq } : {}),
+            ...position,
             ...(typeof inputArgs.limit === 'number' ? { limit: inputArgs.limit } : {}),
           });
+          const afterSeq = output.items.at(-1)?.throughSeq ?? String(position.afterSeq ?? '0');
+          const upperSeq = String(position.upperSeq ?? output.highWaterSeq);
+          const caughtUp = BigInt(afterSeq) >= BigInt(upperSeq);
           return result({
             ref: ref as unknown as Json,
             execution: execution as unknown as Json,
             output: output as unknown as Json,
+            next_cursor: modelCursor(scope, { afterSeq, ...(caughtUp ? {} : { upperSeq }) }),
+            caught_up: caughtUp,
+            terminal: ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+              execution.status,
+            ),
           });
         },
       },
@@ -318,11 +349,11 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         model: {
           name: 'shell_wait',
           snakeCase: true,
-          parameterNames: { timeoutMs: 'wait_timeout_ms' },
+          parameterNames: { timeoutMs: 'wait_ms' },
         },
         version: '1',
         description:
-          'Wait for this exact command for up to wait_timeout_ms milliseconds (0–30000; default 30000). Timeout returns its current durable state and does not stop the command.',
+          'Wait for this exact command for up to wait_ms milliseconds (0–30000; default 30000). Timeout returns its current durable state and does not stop the command.',
         inputSchema: object(
           { shellId: idSchema, timeoutMs: { type: 'integer', minimum: 0, maximum: 30000 } },
           ['shellId'],
@@ -356,17 +387,12 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         model: { name: 'shell_stop', snakeCase: true },
         version: '1',
         description:
-          'Request cancellation of one exact command. shell_id is the returned Shell handle; command_id is a new unique ID chosen for this cancellation, not an ID copied from an earlier operation. Reuse command_id only to query/retry the same cancellation intent. Acceptance alone does not confirm that the command stopped.',
+          'Request cancellation of one exact shell_id. The host binds the cancellation intent and returns its receipt; acceptance alone does not confirm that the command stopped. Inspect the original Shell before any new execution.',
         inputSchema: object(
           {
             shellId: idSchema,
-            commandId: {
-              ...idSchema,
-              description:
-                'New unique cancellation intent ID. Do not copy ref.commandId or any existing command ID.',
-            },
           },
-          ['shellId', 'commandId'],
+          ['shellId'],
         ),
         async execute(input, context) {
           const inputArgs = args(input);
@@ -375,9 +401,13 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           if (!resolved) return missingReference(shellId);
           const { ref } = resolved;
           if (!context.operations.cancel) throw new AgentError('shell_stop_unavailable');
-          await context.operations.cancel(ref, { commandId: text(inputArgs, 'commandId') });
+          const commandId = `shell-stop-${context.executionId}`;
+          const receipt = await context.operations.cancel(ref, { commandId });
           return result({
             cancelRequested: true,
+            command_id: commandId,
+            cancellation_execution_id: context.executionId,
+            receipt: (receipt as unknown as Json) ?? null,
             ref: ref as unknown as Json,
             execution: (await context.operations.get(ref)) as unknown as Json,
           });
@@ -386,3 +416,4 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     ],
   };
 }
+export { createShellToolBehaviors } from './shell-approval';

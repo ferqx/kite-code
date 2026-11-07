@@ -184,7 +184,7 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
         subjectId: 'owner',
         interactionId: card.id,
         expectedRevision: card.revision,
-        answer: { kind: 'approval', decision: 'approve' },
+        answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
       });
       if (change === 'none') {
         const second = await pending(runtime, expectedStoreId);
@@ -202,7 +202,7 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
           subjectId: 'owner',
           interactionId: second.id,
           expectedRevision: second.revision,
-          answer: { kind: 'approval', decision: 'approve' },
+          answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
       }
       await runtime.waitForCommand('work', { timeoutMs: 5000 });

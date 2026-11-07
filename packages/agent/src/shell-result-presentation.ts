@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { modelExecutionId } from './model-identifier';
 import { parseShellCommandInput, shellOperationKey } from './shell-input';
 import type { ExecutionRecord, Json } from './storage/types';
 import { failureOutcomeExplanation, toolFailurePresentation } from './tool-failure-presentation';
@@ -25,6 +26,7 @@ export function formatShellResult(input: {
   if (
     !details ||
     !ref ||
+    (details.execution_id !== undefined && details.execution_id !== starter.id) ||
     operation.kind !== 'job' ||
     operation.definitionId !== 'shell.command' ||
     operation.definitionVersion !== '1' ||
@@ -54,6 +56,7 @@ export function formatShellResult(input: {
     !started ||
     !operated ||
     started.command !== operated.command ||
+    started.workdir !== operated.workdir ||
     !isDeepStrictEqual(started.permissions ?? null, operated.permissions ?? null)
   )
     return;
@@ -87,6 +90,7 @@ export function formatShellResult(input: {
   if (details.accepted === true && !observed) {
     lines.push(
       'The command was accepted for background execution. Completion has not been confirmed.',
+      'Observe this command with shell_wait or shell_read using its shell_id. Changing how you wait does not require another execution; do not rerun it to turn background work into foreground work.',
     );
   } else if (observed) {
     const status = String(observed.status);
@@ -193,11 +197,17 @@ export function formatShellResult(input: {
       if (explanation) lines.push(explanation);
     }
   } else return;
-  lines.push(handle);
+  lines.push(`execution_id: ${JSON.stringify(modelExecutionId(starter.id))}`, handle);
   for (const stream of ['stdout', 'stderr']) {
     if (typeof details[stream] === 'string') lines.push(`${stream}:\n${details[stream]}`);
   }
   if (output) {
+    if (
+      typeof details.next_cursor !== 'string' ||
+      typeof details.caught_up !== 'boolean' ||
+      typeof details.terminal !== 'boolean'
+    )
+      return;
     if (!Array.isArray(output.items)) return;
     for (const raw of output.items) {
       const item = object(raw);
@@ -213,9 +223,11 @@ export function formatShellResult(input: {
         lines.push(`Output bytes unavailable: ${item.droppedBytes}.`);
     }
     lines.push(
-      `Output cursor: ${JSON.stringify({ after_seq: output.items.length ? object(output.items.at(-1))?.throughSeq : (object(execution.input)?.afterSeq ?? '0'), upper_seq: output.highWaterSeq })}`,
+      `Output cursor: ${JSON.stringify({ cursor: details.next_cursor, caught_up: details.caught_up, terminal: details.terminal })}`,
     );
   }
+  if (execution.definitionId === 'shell.stop' && details.cancellation_execution_id === execution.id)
+    lines.push(`cancellation_execution_id: ${JSON.stringify(modelExecutionId(execution.id))}`);
   if (
     details.truncated === true ||
     (typeof details.droppedBytes === 'string' && details.droppedBytes !== '0')

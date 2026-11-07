@@ -1,18 +1,24 @@
-import { type ShellRiskLevel, shellRiskAnswer, shellRiskDecision } from './shell-risk-review';
+import type { Json } from './storage/types';
+import type { ToolBehaviorBinding } from './tool-behavior';
 
 export type AuthorizationCheckAnswer = {
   decision: 'approve_once' | 'reject' | 'ask_user';
   reason: string;
 };
+/** Private owner receipt, sealed only after complete EOF, stop and zero ToolCalls. */
 export type AuthorizationCheckOutput = {
   kind: 'authorization_check_output';
   version: 1;
   modelExecutionId: string;
+  behavior: ToolBehaviorBinding;
+  target: { executionId: string; attempt: number; inputDigest: string };
+  checkInputDigest: string;
+  sealedInputHash: string;
   modelOutputDigest: string;
   contentHash: string;
+  materialFingerprint?: string;
   answer: AuthorizationCheckAnswer;
-  reviewPurpose?: 'shell_risk';
-  risk?: ShellRiskLevel;
+  evidence?: Json;
 };
 export const authorizationCheckOutputMediaType =
   'application/vnd.kite.authorization-check-output+json';
@@ -21,6 +27,10 @@ export const authorizationCheckOutputRefId = (digest: string) => `check-output-$
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
+const digest = (value: unknown): value is string =>
+  typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const text = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 512;
 export function authorizationCheckAnswer(value: unknown): AuthorizationCheckAnswer | null {
   if (
     !object(value) ||
@@ -32,60 +42,65 @@ export function authorizationCheckAnswer(value: unknown): AuthorizationCheckAnsw
     value.reason.length > 8192
   )
     return null;
-  return {
-    decision: value.decision as AuthorizationCheckAnswer['decision'],
-    reason: value.reason,
-  };
+  return { decision: value.decision as AuthorizationCheckAnswer['decision'], reason: value.reason };
 }
-/** Preserve the raw Model JSON; only the selected trusted contract derives a decision. */
-export function authorizationCheckAnswerForContract(
-  value: unknown,
-  purpose?: 'shell_risk',
-): { answer: AuthorizationCheckAnswer; risk?: ShellRiskLevel } | null {
-  if (purpose === 'shell_risk') {
-    const risk = shellRiskAnswer(value);
-    return risk ? { answer: shellRiskDecision(risk), risk: risk.risk } : null;
-  }
-  const answer = authorizationCheckAnswer(value);
-  return answer ? { answer } : null;
+export function toolBehaviorBinding(value: unknown): ToolBehaviorBinding | null {
+  if (
+    !object(value) ||
+    Object.keys(value).sort().join(',') !== 'capability,configurationDigest,contractRef' ||
+    !text(value.contractRef) ||
+    !digest(value.configurationDigest) ||
+    !object(value.capability)
+  )
+    return null;
+  const capability = value.capability;
+  if (
+    Object.keys(capability).sort().join(',') !== 'definitionId,definitionVersion,kind' ||
+    !['tool', 'job', 'model'].includes(String(capability.kind)) ||
+    !text(capability.definitionId) ||
+    !text(capability.definitionVersion)
+  )
+    return null;
+  return structuredClone(value) as unknown as ToolBehaviorBinding;
 }
-/** Finite purpose-bound receipt; no private ModelOutput head or original subject is exposed. */
+/** No domain parser or previous receipt format is installed in the Worker. */
 export function authorizationCheckOutput(value: unknown): AuthorizationCheckOutput | null {
   if (
     !object(value) ||
-    ![
-      'answer,contentHash,kind,modelExecutionId,modelOutputDigest,version',
-      'answer,contentHash,kind,modelExecutionId,modelOutputDigest,reviewPurpose,risk,version',
-    ].includes(Object.keys(value).sort().join(',')) ||
+    Object.keys(value).some(
+      (key) =>
+        ![
+          'kind',
+          'version',
+          'modelExecutionId',
+          'behavior',
+          'target',
+          'checkInputDigest',
+          'sealedInputHash',
+          'modelOutputDigest',
+          'contentHash',
+          'materialFingerprint',
+          'answer',
+          'evidence',
+        ].includes(key),
+    ) ||
     value.kind !== 'authorization_check_output' ||
     value.version !== 1 ||
-    typeof value.modelExecutionId !== 'string' ||
-    !value.modelExecutionId ||
-    value.modelExecutionId.length > 256 ||
-    typeof value.modelOutputDigest !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(value.modelOutputDigest) ||
-    typeof value.contentHash !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(value.contentHash)
+    !text(value.modelExecutionId) ||
+    !toolBehaviorBinding(value.behavior) ||
+    !object(value.target) ||
+    Object.keys(value.target).sort().join(',') !== 'attempt,executionId,inputDigest' ||
+    !text(value.target.executionId) ||
+    !Number.isSafeInteger(value.target.attempt) ||
+    Number(value.target.attempt) < 1 ||
+    !digest(value.target.inputDigest) ||
+    !digest(value.checkInputDigest) ||
+    !digest(value.sealedInputHash) ||
+    !digest(value.modelOutputDigest) ||
+    !digest(value.contentHash) ||
+    (value.materialFingerprint !== undefined && !digest(value.materialFingerprint)) ||
+    !authorizationCheckAnswer(value.answer)
   )
     return null;
-  const answer = authorizationCheckAnswer(value.answer);
-  if (!answer) return null;
-  const risk =
-    value.reviewPurpose === 'shell_risk'
-      ? shellRiskAnswer({ risk: value.risk, reason: answer.reason })
-      : null;
-  if (
-    (Object.hasOwn(value, 'reviewPurpose') || Object.hasOwn(value, 'risk')) &&
-    (!risk || shellRiskDecision(risk).decision !== answer.decision)
-  )
-    return null;
-  return {
-    kind: value.kind,
-    version: value.version,
-    modelExecutionId: value.modelExecutionId,
-    modelOutputDigest: value.modelOutputDigest,
-    contentHash: value.contentHash,
-    answer,
-    ...(risk ? { reviewPurpose: 'shell_risk' as const, risk: risk.risk } : {}),
-  };
+  return structuredClone(value) as unknown as AuthorizationCheckOutput;
 }

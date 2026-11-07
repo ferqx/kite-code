@@ -303,7 +303,7 @@ async function fixture(
       presentationSessionId: card.presentationSessionId,
       interactionId: card.id,
       expectedRevision: card.revision,
-      answer: { kind: 'approval', decision: 'approve' },
+      answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
     });
   return {
     runtime,
