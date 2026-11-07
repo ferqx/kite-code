@@ -81,7 +81,7 @@ test('Windows hands seam paint to Native only after admission and updates grip i
 
 async function fixture(
   initial: NativeBrowserState = loaded(),
-  panels: boolean | 'windows' = false,
+  panels: boolean | 'windows' | 'windows-shell' = false,
   nativeFrame = false,
 ) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', {
@@ -103,24 +103,38 @@ async function fixture(
   const restore = prepareDesktopDom(dom);
   if (nativeFrame) document.documentElement.dataset.platform = 'windows';
   Object.assign(dom.window, { innerWidth: 1000, innerHeight: 800 });
+  const windowsPanels = panels === 'windows' || panels === 'windows-shell';
+  const shellInset = panels === 'windows-shell' ? 6 : 0;
   let x = 600,
-    width = panels === 'windows' ? 394 : 400,
+    width = windowsPanels ? 394 : 400,
     clipWidth = 1000;
   let overlayRect = new dom.window.DOMRect(0, 0, 1000, 800);
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
-    if (panels === 'windows') {
+    if (windowsPanels) {
       if (this.classList.contains('right-sidebar'))
         return new dom.window.DOMRect(x, 38, width, 756);
       if (this.classList.contains('resizable-grip'))
         return new dom.window.DOMRect(x - 1.5, 402, 3, 28);
-      if (this.id === 'navigation') return new dom.window.DOMRect(0, 32, 200, 768);
-      if (this.id === 'navigation-handle') return new dom.window.DOMRect(200, 32, 1, 768);
-      if (this.id === 'workspace') return new dom.window.DOMRect(201, 32, 799, 768);
-      if (
-        this.classList.contains('native-window-content') ||
-        this.classList.contains('client-panels')
-      )
+      if (this.id === 'navigation')
+        return new dom.window.DOMRect(shellInset, 32 + shellInset, 200, 768 - shellInset * 2);
+      if (this.id === 'navigation-handle')
+        return new dom.window.DOMRect(200 + shellInset, 32 + shellInset, 1, 768 - shellInset * 2);
+      if (this.id === 'workspace')
+        return new dom.window.DOMRect(
+          201 + shellInset,
+          32 + shellInset,
+          799 - shellInset * 2,
+          768 - shellInset * 2,
+        );
+      if (this.classList.contains('native-window-content'))
         return new dom.window.DOMRect(0, 32, 1000, 768);
+      if (this.classList.contains('client-panels'))
+        return new dom.window.DOMRect(
+          shellInset,
+          32 + shellInset,
+          1000 - shellInset * 2,
+          768 - shellInset * 2,
+        );
       if (
         this.classList.contains('client-content-frame') ||
         this.classList.contains('client-content-panels')
@@ -278,7 +292,7 @@ async function fixture(
       });
       const pane = panels ? (
         <div
-          className={panels === 'windows' ? 'client-content-panels' : 'client-panels'}
+          className={windowsPanels ? 'client-content-panels' : 'client-panels'}
           data-slot="resizable-panel-group"
           style={{ display: 'flex', flexDirection: 'row' }}
         >
@@ -306,8 +320,8 @@ async function fixture(
       );
       root.render(
         <div id="clip" style={{ overflow: 'hidden' }}>
-          {panels === 'windows' ? (
-            <div className="native-window-content">
+          {windowsPanels ? (
+            <div className="native-window-content" style={{ padding: `${shellInset}px` }}>
               <div
                 className="client-panels"
                 data-slot="resizable-panel-group"
@@ -317,7 +331,10 @@ async function fixture(
                 <div id="navigation-handle" data-slot="resizable-handle" />
                 <div id="workspace" data-panel data-native-browser-layout={policy}>
                   <div>
-                    <div className="client-content-frame" style={{ margin: '6px' }}>
+                    <div
+                      className="client-content-frame"
+                      style={{ margin: `${shellInset ? 0 : 6}px` }}
+                    >
                       {pane}
                     </div>
                   </div>
@@ -1100,6 +1117,32 @@ test('Windows titlebar and material frame margins establish a coherent layout wh
     await f.flush(() => Object.assign(window, { innerWidth: 1000, innerHeight: 900 }));
     await f.remeasure();
     expect(f.layouts).toHaveLength(count);
+  } finally {
+    await f.close();
+  }
+});
+
+test('one outer shell gutter is measured once and inconsistent shell geometry waits for recovery', async () => {
+  const f = await fixture(loaded(), 'windows-shell');
+  try {
+    await f.show();
+    expect(f.layouts.at(-1)?.bounds).toMatchObject({ x: 600, width: 394 });
+    expect(f.layouts.at(-1)?.layout?.groups).toMatchObject([
+      { left: 6, right: 6, panels: [{ size: 200 }, { size: 787 }] },
+      { left: 0, right: 0, panels: [{ size: 392 }, { size: 394 }] },
+    ]);
+    const count = f.layouts.length;
+    await f.flush(() => {
+      document.querySelector<HTMLElement>('.native-window-content')!.style.padding = '8px';
+    });
+    await f.remeasure();
+    expect(f.layouts).toHaveLength(count);
+    await f.flush(() => {
+      document.querySelector<HTMLElement>('.native-window-content')!.style.padding = '6px';
+    });
+    await f.remeasure();
+    expect(f.layouts.length).toBeGreaterThan(count);
+    expect(f.layouts.at(-1)?.layout?.groups[0]).toMatchObject({ left: 6, right: 6 });
   } finally {
     await f.close();
   }

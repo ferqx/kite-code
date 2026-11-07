@@ -1,0 +1,39 @@
+/* Tint each navigation host once; its transparent children retain native glass. */
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="vibrancy"]
+  ) .kite-client
+  :is(.client-sidebar-panel, .settings-sidebar) {
+  --native-navigation-gray: #fafafa;
+  --native-navigation-tint: color-mix(in srgb, var(--native-navigation-gray) 60%, transparent);
+  background: var(--native-navigation-tint);
+  backdrop-filter: blur(24px) saturate(110%);
+}
+
+html[data-native-window][data-theme="dark"]:is(
+    [data-window-material="mica"],
+    [data-window-material="vibrancy"]
+  )
+  .kite-client
+  :is(.client-sidebar-panel, .settings-sidebar) {
+  --native-navigation-gray: #1f1f1f;
+  --native-navigation-tint: color-mix(in srgb, var(--native-navigation-gray) 55%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+    .kite-client
+    :is(.client-sidebar-panel, .settings-sidebar) {
+    background: var(--native-navigation-gray);
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+    .kite-client
+    :is(.client-sidebar-panel, .settings-sidebar) {
+    background: Canvas;
+    backdrop-filter: none;
+  }
+}

@@ -5,13 +5,13 @@ import { cn } from '../../lib/utils';
 import { useReadGate } from '../../ReadGate';
 
 const buttonVariants = cva(
-  "box-border inline-flex shrink-0 items-center justify-center gap-2 rounded-[var(--button-radius,8px)] border-0 text-sm font-medium whitespace-nowrap text-foreground transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-[var(--ui-icon-size,14px)]",
+  "box-border inline-flex shrink-0 items-center justify-center gap-2 rounded-[var(--button-radius,8px)] border-0 text-sm font-medium whitespace-nowrap text-foreground transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/75 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-[var(--ui-icon-size,14px)]",
   {
     variants: {
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-primary/90',
         destructive:
-          'bg-[var(--destructive-fill)] text-white hover:bg-[var(--destructive-fill-hover)] active:bg-[var(--destructive-fill-pressed)] focus-visible:ring-destructive/40',
+          'bg-[var(--destructive-fill)] text-white hover:bg-[var(--destructive-fill-hover)] active:bg-[var(--destructive-fill-pressed)] focus-visible:ring-destructive/75',
         outline:
           'border border-border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',

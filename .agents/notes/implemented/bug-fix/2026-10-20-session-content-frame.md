@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[共享 SessionPage](../../../../packages/ui/src/desktop/SessionPage.tsx) 用外层 Group 分配导航与工作区，工作区共同外框包含阅读区和右侧工具的内层 Group。内部开合不改变共同外框的右边缘；[Native 样式](../../../../apps/desktop/src/native-tailwind.css) 把材质留白、外沿描边、圆角和阴影集中在该框，工具区只拥有左侧接缝。右栏所需合计最小宽度传给外层，避免内层空间不足时过早折叠；展开恢复观察内层实际可用宽度。
+[共享 SessionPage](../../../../packages/ui/src/desktop/SessionPage.tsx) 用外层 Group 分配导航与工作区，工作区共同外框包含阅读区和右侧工具的内层 Group。内部开合不改变共同外框的右边缘；[Native 样式](../../../../apps/desktop/src/native-tailwind.css) 最初把材质留白、外沿描边、圆角和阴影集中在该框，工具区只拥有左侧接缝。2026-11-06用户进一步确认三栏整体协调：唯一外沿描边、圆角和阴影移到包住导航、主区和右栏的最外层Group／设置Grid，Windows四周6px留白由native内容宿主统一提供；内部内容框不再单独留白或设置圆角。原两层分栏、共同阅读／工具布局及固定外侧边界仍保留。右栏所需合计最小宽度传给外层，避免内层空间不足时过早折叠；展开恢复观察内层实际可用宽度。
 
 共同外框是布局和视觉边界，不是读取或业务权限边界。标签模型仍高于响应式 Group，隐藏立即结束工具 reader 和原生网页显示，退出动画只保留可裁切的栏体；浏览器隔离决定继续适用，见[原记录](../architecture/2026-10-20-sidebar-browser-isolation.md)。2026-11-01，设置主区与编辑栏也纳入同一外框：移除两边各自的材质留白和圆角，保留独立portal宿主、关闭清理和响应式覆盖行为。设置内部仍由Grid分配宽度，动画期间表单保持目标宽度，避免聚焦零宽表单改变初始阅读位置；右栏表单与定时任务共用固定标题、独立滚动正文及固定底栏结构。
 
@@ -20,6 +20,6 @@ Status: implemented
 
 ## Consequences
 
-阅读区与右栏沿同一180ms缓出过渡调宽，外沿描边持续覆盖整框。导航与工作区使用外层约束，工具区使用内层约束，关闭与调宽回调保持原用途语义。Windows Mica 右侧6px留白固定，macOS 内容仍铺满且无外沿描边；主题色值和权限端口保持。
+阅读区与右栏沿同一180ms缓出过渡调宽，外沿描边持续覆盖整框。导航与工作区使用外层约束，工具区使用内层约束，关闭与调宽回调保持原用途语义。Windows Mica四周6px留白固定，macOS内容仍铺满且无外沿描边。主区与右栏共用Dark Modern配色，左栏保留灰色玻璃；布局测量沿原协议表达外层padding，权限端口与协议版本保持。
 
 用户行为归[桌面手册](../../../../docs/handbook/clients/desktop/README.md#配置编辑交互)，布局与验证归[UI owner](../../../../packages/ui/README.md#原桌面展示层)和[Native owner](../../../../apps/desktop/README.md#windows-原生-mica)。本机原生夹具验证与其他平台 CSS 标记核对不能提升为正式安装包或其他系统原生合成资格。

@@ -29,7 +29,7 @@
   margin-bottom: 12px;
   color: var(--muted-foreground);
   font-size: 12px;
-  font-weight: 550;
+  font-weight: 400;
 }
 .kite-client
   .desktop-settings
@@ -74,7 +74,7 @@
   border-radius: 6px;
   color: var(--muted-foreground);
   font-size: 10px;
-  font-weight: 450;
+  font-weight: 400;
   line-height: 1.4;
   white-space: nowrap;
 }
@@ -147,6 +147,7 @@
   h3 {
   margin: 0 0 4px;
   font-size: 15px;
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
 .kite-client
@@ -187,7 +188,7 @@
   gap: 7px;
   margin: 0 0 14px;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 400;
 }
 .kite-client
   .desktop-settings
@@ -216,7 +217,7 @@
   gap: 7px;
   margin: 0;
   font-size: var(--ui-text-size);
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
 }
 .kite-client
   .desktop-settings
@@ -308,22 +309,25 @@
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-notice {
   margin: 0 0 20px;
   padding: 11px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--info-border);
   border-radius: 8px;
-  background: var(--accent);
-  color: var(--foreground);
+  background: var(--info-background);
+  color: var(--info-foreground);
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-notice-error {
-  border-color: var(--destructive);
+  border-color: var(--error-border);
   color: var(--destructive);
-  background: var(--card);
+  background: var(--error-background);
 }
 .kite-client
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-notice-success {
+  border-color: color-mix(in srgb, var(--success) 75%, var(--card));
   border-left: 3px solid var(--success);
+  background: var(--success-background);
+  color: var(--success);
 }
 .kite-client
   .desktop-settings
@@ -401,7 +405,7 @@
   .provider-instance-info
   strong {
   font-size: var(--ui-text-size);
-  font-weight: 600;
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 .kite-client
@@ -431,6 +435,7 @@
   padding: 6px 9px;
   background: transparent;
   border-color: transparent;
+  color: var(--muted-foreground);
 }
 .kite-client
   .desktop-settings
@@ -447,9 +452,23 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-button.provider-remove {
-  background: var(--destructive);
-  border-color: var(--destructive);
-  color: var(--destructive-foreground, white);
+  background: var(--destructive-fill);
+  border-color: var(--destructive-fill);
+  color: white;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-button.provider-remove:hover:not(:disabled) {
+  background: var(--destructive-fill-hover);
+  border-color: var(--destructive-fill-hover);
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-button.provider-remove:active:not(:disabled) {
+  background: var(--destructive-fill-pressed);
+  border-color: var(--destructive-fill-pressed);
 }
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-empty {
   display: flex;
@@ -498,6 +517,7 @@
   h4 {
   margin: 0 0 12px;
   font-size: var(--ui-text-size);
+  font-weight: 400;
 }
 .kite-client
   .desktop-settings
@@ -557,7 +577,7 @@
 .kite-client .desktop-settings .catalogue-settings .provider-instance-info h4 {
   margin: 0;
   font-size: var(--ui-text-size);
-  font-weight: 600;
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .catalogue-settings .catalogue-identifier {
@@ -730,6 +750,7 @@
 }
 .kite-client .desktop-settings .mcp-settings .mcp-tool-list strong,
 .kite-client .desktop-settings .mcp-settings .mcp-confirm-name {
+  font-weight: 400;
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .mcp-settings .mcp-tool-trigger {

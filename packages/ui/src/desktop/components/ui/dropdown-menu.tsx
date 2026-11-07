@@ -111,9 +111,12 @@ const DropdownMenuCheckboxItem = React.forwardRef<
     checked={checked}
     {...props}
   >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-      <DropdownMenuPrimitive.ItemIndicator>
-        <HugeiconsIcon icon={Tick02Icon} />
+    <span className="absolute left-2 flex size-[var(--ui-icon-size,14px)] items-center justify-center">
+      <DropdownMenuPrimitive.ItemIndicator asChild>
+        <HugeiconsIcon
+          className="block size-[var(--ui-icon-size,14px)] shrink-0"
+          icon={Tick02Icon}
+        />
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
     {children}
@@ -140,12 +143,15 @@ const DropdownMenuRadioItem = React.forwardRef<
     {showIndicator && (
       <span
         className={cn(
-          'absolute flex h-3.5 w-3.5 items-center justify-center',
+          'absolute flex size-[var(--ui-icon-size,14px)] items-center justify-center',
           indicatorPosition === 'start' ? 'left-2' : 'right-2',
         )}
       >
-        <DropdownMenuPrimitive.ItemIndicator>
-          <HugeiconsIcon icon={Tick02Icon} />
+        <DropdownMenuPrimitive.ItemIndicator asChild>
+          <HugeiconsIcon
+            className="block size-[var(--ui-icon-size,14px)] shrink-0"
+            icon={Tick02Icon}
+          />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
     )}

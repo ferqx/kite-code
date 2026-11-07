@@ -88,33 +88,38 @@ body {
   --primary-foreground: #fff;
   --diagram-accent: #4b68b1;
   --diagram-secondary: #478079;
-  /* Vermilion, pine and amber keep clear color against the neutral surfaces.
-   * Filled actions have their own contrast-safe ramp, separate from status text. */
-  --destructive: #ae3e36;
-  --destructive-fill: #bd433b;
-  --destructive-fill-hover: #ae3933;
-  --destructive-fill-pressed: #9b322d;
-  --permission-full-foreground: #9a6728;
-  --success: #247553;
-  --attention-background: #f4e9d5;
-  --attention-foreground: #80591f;
+  /* Semantic text, tinted surfaces and filled actions have separate contrast roles. */
+  --destructive: #b83a31;
+  --destructive-fill: #b53f36;
+  --destructive-fill-hover: #a5352e;
+  --destructive-fill-pressed: #922c28;
+  --error-background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+  --attention-foreground: #9b4f34;
+  --attention-background: color-mix(in srgb, var(--attention-foreground) 12%, var(--card));
+  --permission-full-foreground: var(--attention-foreground);
+  --success: #276749;
+  --info-foreground: #305f9c;
+  --info-background: color-mix(in srgb, var(--info-foreground) 12%, var(--card));
+  --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
+  --important-foreground: #765299;
+  --identity-secondary: #236f78;
   --conversation-text-size: var(--ui-text-size);
   --markdown-code-background: color-mix(in srgb, var(--foreground) 5%, transparent);
   --markdown-inline-code-background: color-mix(in srgb, var(--foreground) 7%, transparent);
   --markdown-inline-code-radius: 4px;
-  --markdown-link-color: #386fba;
+  --markdown-link-color: var(--info-foreground);
   --conversation-inline-padding: 28px;
   --conversation-scrollbar-width: 10px;
   --scrollbar-thumb: #b8b8b8;
   --scrollbar-thumb-hover: #999;
   --navigation-foreground: #484848;
-  --success-background: #e4f0e9;
+  --success-background: color-mix(in srgb, var(--success) 12%, var(--card));
   --success-foreground: var(--success);
   --diff-added-background: var(--success-background);
   --diff-added-foreground: var(--success);
-  --diff-removed-background: #f8e7e3;
+  --diff-removed-background: var(--error-background);
   --diff-removed-foreground: var(--destructive);
-  --error-border: color-mix(in srgb, var(--destructive) 50%, var(--border));
+  --error-border: color-mix(in srgb, var(--destructive) 75%, var(--card));
   --error-foreground: var(--destructive);
 }
 .kite-client {
@@ -523,6 +528,7 @@ body {
   .space-row {
     justify-content: flex-start;
     text-align: left;
+    gap: 10px;
     padding: 8px 10px;
     background: transparent;
     border: 0;
@@ -548,6 +554,12 @@ body {
     font-size: inherit;
     line-height: 20px;
     font-weight: 400;
+  }
+  /* Align visible Geist/CJK glyphs with the icon, beyond the line box center. */
+  .primary-navigation .button > span,
+  .space-row > .nav-copy {
+    position: relative;
+    top: 0.5px;
   }
   .sidebar-sessions {
     display: flex;
@@ -583,8 +595,8 @@ body {
     flex: 0 0 8px;
     margin-inline: 3px;
     border-radius: 50%;
-    background: #3b82f6;
-    box-shadow: 0 0 6px rgb(59 130 246 / 65%);
+    background: var(--info-foreground);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--info-foreground) 65%, transparent);
   }
   :is(.primary-navigation .button, .session-row, .profile-card):active:is(
       :not(:disabled),
@@ -652,7 +664,7 @@ body {
   }
   .profile-card strong {
     font-size: inherit;
-    font-weight: var(--font-weight-semibold);
+    font-weight: 400;
   }
   .profile-avatar {
     width: 20px;
@@ -1489,6 +1501,7 @@ body {
   .notice.error {
     color: var(--error-foreground);
     border-color: var(--error-border);
+    background: var(--error-background);
     max-height: 25vh;
     overflow: auto;
   }
@@ -2107,26 +2120,32 @@ body {
   --primary-foreground: #1c1c1c;
   --diagram-accent: #9aafe6;
   --diagram-secondary: #85b9b2;
-  --markdown-link-color: #6487bf;
-  --destructive: #eb8b81;
-  --destructive-fill: #bc463f;
-  --destructive-fill-hover: #c54c44;
-  --destructive-fill-pressed: #ab3e38;
-  --permission-full-foreground: #d4a562;
-  --success: #69bd92;
-  --attention-background: #423521;
-  --attention-foreground: #e0b574;
+  --markdown-link-color: var(--info-foreground);
+  --destructive: #f48771;
+  --destructive-fill: #a83b36;
+  --destructive-fill-hover: #b8443d;
+  --destructive-fill-pressed: #96332f;
+  --error-background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+  --attention-foreground: #e5a184;
+  --attention-background: color-mix(in srgb, var(--attention-foreground) 12%, var(--card));
+  --permission-full-foreground: var(--attention-foreground);
+  --success: #89c797;
+  --info-foreground: #8ab4e8;
+  --info-background: color-mix(in srgb, var(--info-foreground) 12%, var(--card));
+  --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
+  --important-foreground: #bda4d8;
+  --identity-secondary: #84c8d0;
   --scrollbar-thumb: #606060;
   --scrollbar-thumb-hover: #7a7a7a;
   --sidebar-accent: #303030;
   --navigation-foreground: #d2d2d2;
-  --success-background: #203e30;
+  --success-background: color-mix(in srgb, var(--success) 12%, var(--card));
   --success-foreground: var(--success);
   --diff-added-background: var(--success-background);
   --diff-added-foreground: var(--success);
-  --diff-removed-background: #462d2a;
+  --diff-removed-background: var(--error-background);
   --diff-removed-foreground: var(--destructive);
-  --error-border: color-mix(in srgb, var(--destructive) 50%, var(--border));
+  --error-border: color-mix(in srgb, var(--destructive) 75%, var(--card));
   --error-foreground: var(--destructive);
 }
 [data-theme="dark"] .kite-client {
@@ -2934,7 +2953,7 @@ body {
 }
 
 .kite-client .typeset-chat .markdown-alert {
-  --markdown-alert-accent: color-mix(in srgb, var(--diagram-accent) 85%, var(--foreground));
+  --markdown-alert-accent: var(--info-foreground);
   padding: 12px 16px;
   border: 0;
   border-radius: var(--button-radius);
@@ -2958,10 +2977,10 @@ body {
   flex: none;
 }
 .kite-client .typeset-chat .markdown-alert[data-alert="tip"] {
-  --markdown-alert-accent: color-mix(in srgb, var(--success) 85%, var(--foreground));
+  --markdown-alert-accent: var(--success);
 }
 .kite-client .typeset-chat .markdown-alert[data-alert="important"] {
-  --markdown-alert-accent: color-mix(in srgb, var(--diagram-secondary) 85%, var(--foreground));
+  --markdown-alert-accent: var(--important-foreground);
 }
 .kite-client .typeset-chat .markdown-alert[data-alert="warning"] {
   --markdown-alert-accent: var(--attention-foreground);
@@ -3980,6 +3999,8 @@ body {
   white-space: pre-wrap;
 }
 .kite-client .alert-destructive {
+  border-color: var(--error-border);
+  background: var(--error-background);
   color: var(--destructive);
 }
 .kite-client .turn-failure-details {
@@ -4383,22 +4404,22 @@ body {
   flex-shrink: 0;
 }
 .kite-client .approval-child-icon[data-child-color="0"] {
-  color: var(--color-blue-500);
+  color: var(--info-foreground);
 }
 .kite-client .approval-child-icon[data-child-color="1"] {
-  color: var(--color-violet-500);
+  color: var(--important-foreground);
 }
 .kite-client .approval-child-icon[data-child-color="2"] {
-  color: var(--color-teal-500);
+  color: var(--success);
 }
 .kite-client .approval-child-icon[data-child-color="3"] {
-  color: var(--color-amber-500);
+  color: var(--attention-foreground);
 }
 .kite-client .approval-child-icon[data-child-color="4"] {
-  color: var(--color-rose-500);
+  color: var(--destructive);
 }
 .kite-client .approval-child-icon[data-child-color="5"] {
-  color: var(--color-sky-500);
+  color: var(--identity-secondary);
 }
 .kite-client .approval-heading-label svg,
 .kite-client .approval-tool-label svg {
@@ -5090,19 +5111,13 @@ body {
 /* The accepted gemstone treatment extends the installed shadcn Slider;
    dragging, stepping, keyboard input and accessibility stay with Radix. */
 .effort-value {
-  color: #3068cc;
+  color: var(--info-foreground);
   font-size: 14px;
   line-height: 20px;
   font-weight: 550;
 }
 .effort-value[data-maximum="true"] {
-  color: #7852bf;
-}
-[data-theme="dark"] .effort-value {
-  color: #78a8fa;
-}
-[data-theme="dark"] .effort-value[data-maximum="true"] {
-  color: #b9a0ef;
+  color: var(--important-foreground);
 }
 .gem-slider {
   height: 40px;
@@ -5983,6 +5998,7 @@ body {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: start;
   white-space: nowrap;
 }
 .pill-select-leading,
