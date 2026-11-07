@@ -16,7 +16,7 @@
 
 Desktop DB10 使用独立 closed manifest v19；定时任务快照与旧格式隔离见[DB10合同](#desktop-db10-与-manifest-v19)。
 
-2026-11-07 授权方案联验发现当前 Native 的既有范围差异：[私有数据 owner](../../../../apps/desktop/electron/private-data.ts)已经写入 DB11／DB12，而本维护入口的 [Desktop 资产验证](assets.ts)仍只接纳 DB1–10。真实普通 Native 的后台任务、准确停止及正常退出完成后，`native-background-bundle` 的公开备份恢复因此返回 `backup_ui_incompatible`，没有完成该例的备份冷开。两处行为在基线 `fb4bebd0dcea5b59a3fa717b7e19321d7dc7229e` 已同时存在，本次 Core 格式2与审批字段替换没有扩大 Desktop 维护格式。当前授权的同 Store 正常冷开验证不代替这项备份恢复资格，历史 DB8／DB9／DB10 的有限证据也不证明 DB11／DB12 已可维护。
+2026-11-07 授权方案联验发现当前 Native 的既有范围差异：[私有数据 owner](../../../../apps/desktop/electron/private-data.ts)已经写入 DB11／DB12，而本维护入口的 [Desktop 资产验证](assets.ts)仍只接纳 DB1–10。真实普通 Native 的后台任务、准确停止及正常退出完成后，`native-background-bundle` 的公开备份恢复因此返回 `backup_ui_incompatible`，没有完成该例的备份冷开。两处行为在基线 `fb4bebd0dcea5b59a3fa717b7e19321d7dc7229e` 已同时存在，Core 新 schema（当前 formatMajor=1）与审批字段替换没有扩大 Desktop 维护格式。当前授权的同 Store 正常冷开验证不代替这项备份恢复资格，历史 DB8／DB9／DB10 的有限证据也不证明 DB11／DB12 已可维护。
 
 MCP 五类申请与文件恢复申请的 document reader 共用内部 [intent-document](intent-document.ts)：沿原 `openPrivate/closePrivate` 保有同一 FD／Windows pin，执行 16MiB 完整读取、实体前后复核、fatal UTF-8 和闭合 version/records envelope；各资产继续独立核原 records grammar、摘要、数量及错误码。普通 caller reader 保留自己的 `backup_content_changed`、实体字段、平台前置检查及布尔返回合同，不以共享 reader 改写其兼容语义。
 

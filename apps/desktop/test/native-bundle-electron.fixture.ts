@@ -927,8 +927,8 @@ try {
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();
-  await page.locator('.composer-cache-rate').waitFor({ state: 'hidden' });
-  assert.equal(await page.locator('.composer-cache-rate').count(), 0);
+  await page.locator('.composer-cache-rate[title="暂无缓存用量数据"]').waitFor();
+  assert.equal(await page.locator('.composer-cache-rate').innerText(), '缓存 0%');
   const empty = await page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
@@ -940,7 +940,7 @@ try {
     .click();
   await readOriginalCacheMetrics(page);
   console.log(
-    'native_driver_stage: original cumulative cache usage, absent samples hidden and GET-only Session scope',
+    'native_driver_stage: original cumulative cache usage, absent samples labelled and GET-only Session scope',
   );
   await readOriginalFileChanges(page);
   // Capture the complete public directory after result/command publication and all reading checks.

@@ -1600,7 +1600,7 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 
 [实际 Electron 授权目录测试](test/isolated/native-grants-electron.test.ts) 从真实临时 SQLite/Core 已接受的两份会话范围授权启动私有构建 Service 与窗口。实际键盘清除后断开真实 HTTP 回应 socket，切换会话查询原 ID，原清除 POST 仅一次，另一会话原授权仍在；另一真实 host Command 造成 epoch 冲突时拒绝且不重试。失败 GET 使清除只读，退出核实所属实际 Service PID 消失，随后 readonly 重开确认两 Session 的原 Run/Model 执行数量没有增加。该窗口 fixture 含 13 条实际 Node 断言；它是 macOS 开发制品证据，尚不代表完整安装、旧正式入口切换、child 窗口清除或 Linux/Windows 资格。
 
-2026-11-08 本轮整仓复核让该授权目录夹具选择实际主 renderer，避免辅助窗口先出现时未找到会话；全部13条窗口断言和冷读检查通过。默认候选中的权限审批改用独立 Shell 探针，Files 写入继续按当前透明业务权限直接执行，文件读取失败使用真实非普通文件对象；不能再要求普通 Files 自动审核额外弹卡。
+2026-11-08 本轮整仓复核让该授权目录夹具选择实际主 renderer，避免辅助窗口先出现时未找到会话；全部13条窗口断言和冷读检查通过。默认候选中的权限审批改用独立 Shell 探针，Files 写入继续按当前透明业务权限直接执行，文件读取失败使用真实非普通文件对象；不能再要求普通 Files 自动审核额外弹卡。 同轮默认候选实际已走过 Shell 单次人工批准、唯一自身 Job、Files 写入和真实非普通文件读取失败，但完整 `native-bundle` 仍在缺失文件链接的旧错误提示断言失败：现有 `messageFile.open` 调用经非业务 `report` 吞掉异常，未出现夹具要求的 alertdialog。该调用与通用错误显示行为在基线已相同，本轮未改；本次窗口前缀不能写成完整候选／冷开整例通过。
 
 当前原窗口首次选择准确会话后，先核原标题并打开私有诊断制品的“会话工具”，再读取授权；后续选择已有的侧栏步骤保持。只补该首次导航，全部原driver字节、13Node断言及预算保留。同一完整文件1pass／10Bun断言通过，Desktop types／Biome通过；本轮默认真实失败与阶段范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不把私有制品窗口资格提升为完整安装或整体退出。
 
