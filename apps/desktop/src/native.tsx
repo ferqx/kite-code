@@ -1177,8 +1177,12 @@ function NativeDesktopContent({
           value &&
           'generation' in value &&
           value.selection?.storeId === firstRef.current.creation.expectedStoreId
-        )
+        ) {
+          // The target now owns the latest cached draft, including edits made
+          // after acceptance. Do not leave a copy in the next preparation page.
+          setNewDraft('');
           setPreparing(false);
+        }
       }
     } catch (cause) {
       if (!isCurrentRead(current, epoch, nonce)) return;
@@ -2049,9 +2053,12 @@ function NativeDesktopContent({
       original &&
       firstOpenPage.current === pageIntent.current &&
       original.creation.expectedStoreId === directory?.storeId &&
-      (!original.result || original.result.phase === 'unknown')
+      (!original.result ||
+        original.result.phase === 'unknown' ||
+        original.result.phase === 'accepted')
     )
-      // Edits made while the first receipt is pending belong to its target Session.
+      // Edits belong to the first Session until its selection has taken over,
+      // including after acceptance while target reads are still pending.
       draftCache.current.set(
         imageScope(original.creation.expectedStoreId, original.creation.sessionId),
         { content },
@@ -2305,17 +2312,9 @@ function NativeDesktopContent({
         (page === pageIntent.current || firstOpenPage.current === pageIntent.current) &&
         (selected.current !== sessionId || preparing)
       ) {
-        const preparationRevision = newDraftRevision.current;
         // The selection records its own read recovery. Its failure cannot
         // invalidate the already acknowledged first-submission receipt.
         await select(sessionId, false).catch(() => {});
-        if (
-          draftOwner.current === key &&
-          selected.current === sessionId &&
-          preparationRevision === newDraftRevision.current
-        )
-          // Clear the preparation copy only after its Session owns the visible draft.
-          setNewDraft('');
       }
     } else if (
       value.phase !== 'accepted' &&

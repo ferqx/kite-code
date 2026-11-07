@@ -2168,6 +2168,43 @@ test('first-send loading preserves editable next drafts through Session handoff 
   }
 });
 
+test('accepted first-send handoff preserves edits made during target selection and model reads', async () => {
+  for (const held of ['selection', 'models'] as const) {
+    for (const later of ['accepted 后的新草稿 雪🙂', '']) {
+      const f = fixture(true);
+      try {
+        await act(async () => f.root.render(<NativeDesktop />));
+        await f.click('在 Workspace 中新建对话');
+        await f.edit('已提交的首条消息');
+        await f.chooseModel();
+        await f.click('发送首条消息');
+        await f.edit('回执前的旧草稿');
+        if (held === 'selection') f.holdSelection();
+        else f.holdModels();
+        const sent = await f.resolve('accepted');
+        await f.until(() =>
+          held === 'selection' ? f.selected() === sent.creation.sessionId : f.modelsHeld(),
+        );
+        const editor = f.input() as HTMLTextAreaElement;
+        expect(editor.readOnly).toBe(false);
+        expect(editor.disabled).toBe(false);
+        await f.edit(later);
+        expect(promptValue(editor)).toBe(later);
+        if (held === 'selection') await f.releaseSelection();
+        else await f.releaseModels();
+        await f.until(() => !!f.input('当前会话私有草稿'));
+        expect(f.input('当前会话私有草稿')).toBe(editor);
+        expect(promptValue(editor)).toBe(later);
+        expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+        await f.click('在 Workspace 中新建对话');
+        expect(promptValue(f.input())).toBe('');
+      } finally {
+        await f.close();
+      }
+    }
+  }
+});
+
 test('a lost first-send response cannot restore text over edits or an explicit clear made while loading', async () => {
   for (const later of ['等待期间的新提示词', '']) {
     const f = fixture(true);
