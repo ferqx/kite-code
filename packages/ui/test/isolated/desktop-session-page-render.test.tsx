@@ -64,6 +64,105 @@ afterAll(() => {
   }
 });
 
+test('a new page presents its first message tree and composer together, including retained pages and later refreshes', async () => {
+  for (const retained of [false, true]) {
+    const host = document.getElementById('root')!;
+    const root = createRoot(host);
+    const show = (id: string, loading = false, grouping = false, tasks = false, preview = false) =>
+      act(async () =>
+        root.render(
+          <SessionPage
+            workspaces={[]}
+            selected={id}
+            sessionLabel={id}
+            readingKey={id}
+            messages={[
+              {
+                id: `message-${id}`,
+                role: 'assistant',
+                text: `Body ${id}`,
+                status: 'completed',
+                settled: true,
+              },
+            ]}
+            loading={loading}
+            initialPresentationPending={grouping}
+            synchronizePresentation
+            retainedPresentation={preview}
+            conversationCache={
+              retained
+                ? { scope: 'store', revision: '1', readActive: !loading && !grouping }
+                : undefined
+            }
+            scheduledTasks={tasks ? { tasks: [], workspaces: [], models: [] } : undefined}
+            connected
+            connectionLabel=""
+            actions={{}}
+            composer={{
+              draft: `Draft ${id}`,
+              scopeKey: id,
+              onChange: () => {},
+              active: false,
+              stopping: false,
+              disabled: false,
+            }}
+          />,
+        ),
+      );
+    const pending = () => !!host.querySelector('[data-presentation-pending]');
+    const frames: { history: string; footer: string }[] = [];
+    const observer = new MutationObserver(() => {
+      const history = host.querySelector<HTMLElement>('.history-panel');
+      const footer = host.querySelector<HTMLElement>('.conversation-footer');
+      if (history && footer)
+        frames.push({ history: history.style.visibility, footer: footer.style.visibility });
+    });
+    try {
+      observer.observe(host, { subtree: true, childList: true, attributes: true });
+      await show('a');
+      expect(pending()).toBe(false);
+      const composer = host.querySelector('.composer');
+      if (retained)
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      await show('a', false, false, true);
+      await show('b', true, false, false, true);
+      expect(pending()).toBe(true);
+      expect(host.querySelector('.history-panel')?.hasAttribute('inert')).toBe(true);
+      expect(host.querySelector('.conversation-footer')?.hasAttribute('inert')).toBe(true);
+      await show('b', false, true);
+      expect(pending()).toBe(true);
+      await show('b');
+      expect(pending()).toBe(false);
+      expect(host.querySelector('.conversation-footer')?.hasAttribute('inert')).toBe(false);
+      expect(host.textContent).toContain('Body b');
+      if (retained)
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      await show('b', false, false, true);
+      await show('a', true, false, false, retained);
+      expect(pending()).toBe(!retained);
+      await show('a', false, true, false, retained);
+      expect(pending()).toBe(!retained);
+      await show('a');
+      expect(pending()).toBe(false);
+      expect(host.textContent).toContain('Body a');
+      const currentComposer = host.querySelector('.composer');
+      expect(currentComposer !== null).toBe(true);
+      await show('a', true);
+      expect(pending()).toBe(false);
+      expect(host.querySelector('.composer') === currentComposer).toBe(true);
+      expect(composer !== null).toBe(true);
+      expect(frames.every((frame) => frame.history === frame.footer)).toBe(true);
+    } finally {
+      observer.disconnect();
+      await act(async () => root.unmount());
+    }
+  }
+});
+
 test('tab scope reconciliation preserves the page shell without closing native browser pages', async () => {
   const host = document.getElementById('root')!;
   const root = createRoot(host);

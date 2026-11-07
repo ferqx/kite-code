@@ -2,6 +2,7 @@ import type {
   NativeBridge,
   NativeDirectory,
   NativeEvent,
+  NativeReasoningEffort,
   NativeRequest,
   NativeResult,
   NativeState,
@@ -14,6 +15,9 @@ export function sessionSwitchBridge(
     active?: boolean;
     drafts?: Record<string, string>;
     sameModel?: boolean;
+    unselectedModel?: boolean;
+    withoutPermissions?: boolean;
+    modelEfforts?: Record<string, NativeReasoningEffort>;
     modelErrors?: Record<string, string>;
     modelNames?: Record<string, string>;
     replyParagraphs?: number;
@@ -171,7 +175,10 @@ export function sessionSwitchBridge(
             canReadModelOutput: false,
             viewLoading: refreshing,
             permissionUnavailable: refreshing || failed,
-            ...(!refreshing && !failed && !unavailableWorkspaces.has(selected)
+            ...(!options.withoutPermissions &&
+            !refreshing &&
+            !failed &&
+            !unavailableWorkspaces.has(selected)
               ? {
                   permissions: {
                     observationId: view,
@@ -218,6 +225,8 @@ export function sessionSwitchBridge(
     async request(request) {
       requests.push(request);
       switch (request.method) {
+        case 'scheduled.list':
+          return { kind: 'scheduled.tasks', tasks: [], runs: [] };
         case 'session.markRead':
           if (receiptFailure) throw Error('turn_read_storage_unavailable');
           return wait('receipt', () => {
@@ -322,7 +331,11 @@ export function sessionSwitchBridge(
               errors: [],
               defaultModelId: 'model-a',
               ...(request.method === 'input.models.read'
-                ? { selectedModelId: `model-${options.sameModel ? 'a' : id}` }
+                ? {
+                    selectedModelId: options.unselectedModel
+                      ? undefined
+                      : `model-${options.sameModel ? 'a' : id}`,
+                  }
                 : {}),
               models: ['a', 'b'].map((model) => ({
                 id: `model-${model}`,
@@ -332,7 +345,7 @@ export function sessionSwitchBridge(
                 configured: true,
                 enabled: true,
                 diagnostics: [],
-                reasoningEffort: 'medium',
+                reasoningEffort: options.modelEfforts?.[model] ?? 'medium',
                 reasoningEffortChoices: ['low', 'medium', 'high'],
               })),
             };
@@ -482,6 +495,11 @@ export function sessionSwitchBridge(
       refreshing = false;
       revision++;
       send();
+    },
+    modelFailure(sessionId: string, code?: string) {
+      options.modelErrors ??= {};
+      if (code) options.modelErrors[sessionId] = code;
+      else delete options.modelErrors[sessionId];
     },
     failReceipt(value: boolean) {
       receiptFailure = value;

@@ -1,6 +1,7 @@
 import {
   BrowserIcon,
   InformationCircleIcon,
+  KiteIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
 } from '@hugeicons/core-free-icons';
@@ -177,6 +178,12 @@ function NavigationPanel({ defaultSize, ...props }: ComponentProps<typeof Resiza
   return <ResizablePanel {...props} defaultSize={initialSize.current} />;
 }
 
+/** This sibling prepares footer geometry before cached message effects restore scrolling. */
+function PrepareConversationLayout({ prepare }: { prepare: () => void }) {
+  useLayoutEffect(prepare, [prepare]);
+  return null;
+}
+
 export interface SessionPageProps {
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
@@ -196,6 +203,10 @@ export interface SessionPageProps {
   loading: boolean;
   /** Cold history waits for its initial grouping without pausing an existing reading. */
   initialPresentationPending?: boolean;
+  /** Reveal the first message tree and footer together after host data and layout preparation. */
+  synchronizePresentation?: boolean;
+  /** A same-scope readonly footer can accompany an existing retained message tree immediately. */
+  retainedPresentation?: boolean;
   connected: boolean;
   connectionLabel: string;
   busy?: boolean;
@@ -1078,28 +1089,69 @@ function SessionPageContent({
   else if (props.detailPanel || props.fileChangesContent) retainedRightSidebarPanel.current = null;
   const historyVisible = !props.scheduledTasks && !props.workbench && !props.diagnosticView;
   const welcoming = !!(props.newConversation && props.composer && !messages.length);
+  const presentationIdentity =
+    props.synchronizePresentation && historyVisible
+      ? JSON.stringify([props.conversationCache?.scope, props.readingKey])
+      : undefined;
+  const [presentation, setPresentation] = useState({
+    identity: presentationIdentity,
+    ready: !props.synchronizePresentation || welcoming,
+  });
+  if (presentation.identity !== presentationIdentity)
+    setPresentation({
+      identity: presentationIdentity,
+      ready: !props.synchronizePresentation || welcoming,
+    });
+  const presentationGuard = useRef({ identity: presentationIdentity, ready: false });
+  presentationGuard.current = {
+    identity: presentationIdentity,
+    ready: !!props.retainedPresentation || (!props.loading && !props.initialPresentationPending),
+  };
+  const finishPresentation = useCallback((identity: string | undefined) => {
+    if (presentationGuard.current.identity !== identity || !presentationGuard.current.ready) return;
+    setPresentation((previous) =>
+      previous.identity === identity && !previous.ready ? { ...previous, ready: true } : previous,
+    );
+  }, []);
+  const presentationPending = !!(
+    props.synchronizePresentation &&
+    historyVisible &&
+    !welcoming &&
+    !props.historyError &&
+    (presentation.identity !== presentationIdentity || !presentation.ready)
+  );
+  // Descendant transitions can keep inherited visibility painted after hiding.
+  // Composite the whole prepared subtree away without changing its measured layout.
+  const presentationStyle: CSSProperties | undefined = presentationPending
+    ? { visibility: 'hidden', opacity: 0 }
+    : undefined;
+  const hasComposer = !!props.composer;
   const headerOverlay =
     historyVisible && !welcoming && !props.historyError && !props.beforeConversation;
-  useLayoutEffect(() => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Scope and composer mounting change geometry before message layout effects resume.
+  const prepareConversationLayout = useCallback(() => {
     const header = headerElement.current;
     const panel = header?.parentElement;
     const footer = historyVisible ? footerElement.current : null;
     if (!header || !panel) return;
-    const measure = () => {
-      const height = header.getBoundingClientRect().height;
-      if (height > 0) panel.style.setProperty('--session-header-height', `${height}px`);
-      panel.style.setProperty(
-        '--conversation-footer-height',
-        `${footer?.getBoundingClientRect().height ?? 0}px`,
-      );
-    };
-    measure();
+    const height = header.getBoundingClientRect().height;
+    if (height > 0) panel.style.setProperty('--session-header-height', `${height}px`);
+    panel.style.setProperty(
+      '--conversation-footer-height',
+      `${footer?.getBoundingClientRect().height ?? 0}px`,
+    );
+  }, [historyVisible, props.readingKey, hasComposer]);
+  useLayoutEffect(() => {
+    const header = headerElement.current;
+    if (!header) return;
+    const footer = historyVisible ? footerElement.current : null;
+    prepareConversationLayout();
     if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(prepareConversationLayout);
     observer.observe(header, { box: 'border-box' });
     if (footer) observer.observe(footer, { box: 'border-box' });
     return () => observer.disconnect();
-  }, [historyVisible]);
+  }, [historyVisible, prepareConversationLayout]);
   const keepAlive = !!props.conversationCache && typeof document !== 'undefined';
   const conversation = (
     <Conversation
@@ -1113,6 +1165,7 @@ function SessionPageContent({
       lazyHistory={keepAlive}
       loading={props.loading}
       initialPresentationPending={props.initialPresentationPending}
+      onPresentationReady={() => finishPresentation(presentationIdentity)}
       selected={!!props.selected}
       emptyState={
         !props.composer
@@ -1336,6 +1389,8 @@ function SessionPageContent({
                       <div
                         className={`session-view environment-information-${environmentMode}${animateEnvironment ? ' environment-information-animated' : ''}`}
                         ref={setSessionViewElement}
+                        data-presentation-pending={presentationPending || undefined}
+                        aria-busy={presentationPending || undefined}
                       >
                         {props.environmentInformation}
                         {props.beforeConversation}
@@ -1366,9 +1421,14 @@ function SessionPageContent({
                         ) : (
                           props.diagnosticView
                         )}
+                        <PrepareConversationLayout prepare={prepareConversationLayout} />
                         <section
                           className="history-panel"
-                          style={historyVisible ? undefined : { display: 'none' }}
+                          style={{
+                            display: historyVisible ? undefined : 'none',
+                            ...presentationStyle,
+                          }}
+                          inert={presentationPending || undefined}
                           role={props.historyPanel ? 'tabpanel' : undefined}
                           id={props.historyPanel?.id}
                           aria-labelledby={props.historyPanel?.labelledBy}
@@ -1397,7 +1457,12 @@ function SessionPageContent({
                           )}
                         </section>
                         {!props.workbench && !props.scheduledTasks && (
-                          <footer ref={footerElement} className="conversation-footer">
+                          <footer
+                            ref={footerElement}
+                            className="conversation-footer"
+                            style={presentationStyle}
+                            inert={presentationPending || undefined}
+                          >
                             <div className="bottom-controls">
                               {props.statusNotice}
                               {props.interaction && (
@@ -1429,6 +1494,19 @@ function SessionPageContent({
                               )}
                             </div>
                           </footer>
+                        )}
+                        {presentationPending && (
+                          <div
+                            className="conversation-loading"
+                            role="status"
+                            aria-label="正在加载聊天"
+                          >
+                            <HugeiconsIcon
+                              aria-hidden="true"
+                              data-icon="kite-loading"
+                              icon={KiteIcon}
+                            />
+                          </div>
                         )}
                       </div>
                     </div>

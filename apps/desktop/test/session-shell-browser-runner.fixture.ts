@@ -8,10 +8,12 @@ import { build } from 'vite';
 import type {} from './session-shell-browser.fixture';
 import {
   verifyColdSessionToolbarWidth,
+  verifyComposerHandoff,
   verifyFormControlStyles,
   verifyMcpCustomForms,
   verifyMcpFailureFeedback,
   verifyMcpSettingsProduct,
+  verifyModelCatalogueNavigation,
   verifySessionShellGeometry,
   verifySettingsGeometry,
   verifySwitchGeometry,
@@ -111,7 +113,36 @@ const writes = new Set([
 try {
   const worktreeOnly = process.argv.includes('--worktree-indicator');
   const navigationOnly = process.argv.includes('--worktree-navigation');
-  const focusedWorktree = worktreeOnly || navigationOnly;
+  const modelsOnly = process.argv.includes('--model-navigation');
+  const composerOnly = process.argv.includes('--composer-handoff');
+  const auditOnly = process.argv.includes('--session-audit');
+  const focused = worktreeOnly || navigationOnly || modelsOnly || composerOnly || auditOnly;
+  if (auditOnly) {
+    report.cases.push(
+      ...(await verifyModelCatalogueNavigation(browser, server.url.toString(), artifact)),
+    );
+    report.cases.push(
+      ...(await verifyModelCatalogueNavigation(browser, server.url.toString(), artifact, true)),
+    );
+    report.cases.push(
+      ...(await verifyModelCatalogueNavigation(
+        browser,
+        server.url.toString(),
+        artifact,
+        true,
+        true,
+      )),
+    );
+    report.cases.push(...(await verifyComposerHandoff(browser, server.url.toString(), artifact)));
+  }
+  if (composerOnly) {
+    report.cases.push(...(await verifyComposerHandoff(browser, server.url.toString(), artifact)));
+  }
+  if (modelsOnly) {
+    report.cases.push(
+      ...(await verifyModelCatalogueNavigation(browser, server.url.toString(), artifact)),
+    );
+  }
   if (navigationOnly) {
     report.cases.push(
       ...(await verifyWorktreeNavigation(browser, server.url.toString(), artifact)),
@@ -120,7 +151,7 @@ try {
   if (worktreeOnly) {
     report.cases.push(...(await verifyWorktreeIndicator(browser, server.url.toString(), artifact)));
   }
-  if (!focusedWorktree)
+  if (!focused)
     report.cases.push(
       ...(await verifyFormControlStyles(browser, server.url.toString(), artifact)),
       ...(await verifySwitchGeometry(browser, server.url.toString(), artifact)),
@@ -131,7 +162,7 @@ try {
       ...(await verifyMcpFailureFeedback(browser, server.url.toString(), artifact)),
       ...(await verifyMcpCustomForms(browser, server.url.toString(), artifact)),
     );
-  for (const theme of focusedWorktree ? [] : (['light', 'dark'] as const)) {
+  for (const theme of focused ? [] : (['light', 'dark'] as const)) {
     const page = await browser.newPage({
       // This segment exercises the docked environment controls; narrow layouts are covered above.
       viewport: { width: 1920, height: 1000 },
@@ -577,9 +608,15 @@ try {
     JSON.stringify({
       browser: report.browser,
       themes: 2,
-      ...(focusedWorktree
-        ? { worktreeCases: report.cases.length }
-        : { switches: 200, heldFrames: 192 }),
+      ...(auditOnly
+        ? { sessionAuditCases: report.cases.length }
+        : composerOnly
+          ? { composerHandoffCases: report.cases.length }
+          : modelsOnly
+            ? { modelNavigationCases: report.cases.length }
+            : focused
+              ? { worktreeCases: report.cases.length }
+              : { switches: 200, heldFrames: 192 }),
       artifact,
     }),
   );

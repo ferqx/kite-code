@@ -28,7 +28,7 @@ export function useNativeScheduledTasks(options: {
   current.current = identity;
   const sequence = useRef(0);
   const creations = useRef(new Map<string, { id: string; storeId: string; confirmed: boolean }>());
-  const publish = useCallback((value: unknown, original: string) => {
+  const publish = useCallback((value: unknown, original: string, request: number) => {
     if (
       !value ||
       typeof value !== 'object' ||
@@ -37,7 +37,7 @@ export function useNativeScheduledTasks(options: {
     )
       throw Error('scheduled_tasks_unavailable');
     const result = value as NativeScheduledResult;
-    if (current.current === original) {
+    if (current.current === original && sequence.current === request) {
       for (const creation of creations.current.values())
         if (
           result.tasks.some((task) => task.id === creation.id && task.storeId === creation.storeId)
@@ -58,11 +58,11 @@ export function useNativeScheduledTasks(options: {
       try {
         const value = await bridge.request({ method: 'scheduled.list', generation });
         if (!stopped && current.current === original && request === sequence.current) {
-          publish(value, original);
+          publish(value, original, request);
           setError('');
         }
       } catch (cause) {
-        if (!stopped && current.current === original)
+        if (!stopped && current.current === original && request === sequence.current)
           setError(cause instanceof Error ? cause.message : '读取失败');
       } finally {
         if (!stopped) {
@@ -117,10 +117,26 @@ export function useNativeScheduledTasks(options: {
   }, [active, identity, bridge, generation, storeId, publish]);
   async function mutate(request: NativeScheduledRequest) {
     const original = identity;
-    sequence.current++;
+    const sequenceId = ++sequence.current;
     const value = await bridge.request(request);
-    publish(value, original);
-    if (current.current === original) setError('');
+    publish(value, original, sequenceId);
+    if (current.current !== original) return;
+    if (sequence.current === sequenceId) {
+      setError('');
+      return;
+    }
+    // An intervening GET may have preceded this mutation's commit. Reconcile
+    // the current list instead of publishing its old reply or replaying a write.
+    const read = ++sequence.current;
+    try {
+      const latest = await bridge.request({ method: 'scheduled.list', generation });
+      if (current.current !== original || sequence.current !== read) return;
+      publish(latest, original, read);
+      setError('');
+    } catch (cause) {
+      if (current.current === original && sequence.current === read)
+        setError(cause instanceof Error ? cause.message : '读取失败');
+    }
   }
   async function save(draft: ScheduledTaskDraft, id?: string, creationKey?: string) {
     if (!storeId) throw Error('store_identity_unavailable');
@@ -132,10 +148,11 @@ export function useNativeScheduledTasks(options: {
     if (!id && !pending) creations.current.set(key, { id: taskId, storeId, confirmed: false });
     if (pending) {
       const original = identity;
-      sequence.current++;
+      const request = ++sequence.current;
       const result = publish(
         await bridge.request({ method: 'scheduled.list', generation }),
         original,
+        request,
       );
       if (current.current !== original) throw Error('scheduled_tasks_scope_changed');
       const saved = result.tasks.find((task) => task.id === taskId);

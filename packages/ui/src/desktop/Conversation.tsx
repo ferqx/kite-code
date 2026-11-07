@@ -491,6 +491,7 @@ export function Conversation({
   messages: incomingMessages,
   loading: historyLoading,
   initialPresentationPending = false,
+  onPresentationReady,
   lazyHistory = false,
   turnActivity: incomingTurnActivity,
 
@@ -512,6 +513,8 @@ export function Conversation({
   loading: boolean;
   /** First mount waits for host-owned grouping; an already readable tree stays live. */
   initialPresentationPending?: boolean;
+  /** The initial readable message tree has committed; this never grants read or write authority. */
+  onPresentationReady?: () => void;
   /** Native limits cold large-history mounting; data and read admission stay host-owned. */
   lazyHistory?: boolean;
   turnActivity?: TurnActivity;
@@ -538,6 +541,9 @@ export function Conversation({
   useLayoutEffect(() => {
     if (!historyLoading && !initialPresentationPending) presented.current = true;
   }, [historyLoading, initialPresentationPending]);
+  useLayoutEffect(() => {
+    if (!historyLoading && !initialPresentationPending) onPresentationReady?.();
+  });
   const preparing = initialPresentationPending && !presented.current;
   const messages = preparing ? [] : incomingMessages;
   const loading = historyLoading || preparing;

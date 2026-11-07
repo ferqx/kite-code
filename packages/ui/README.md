@@ -114,6 +114,12 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 宿主可通过 `initialPresentationPending` 延迟尚未呈现的 Conversation 首次内容提交，让已保存消息和结构事实同时进入原轮次布局；UI不读取或推断轮次／工具事实。第一次可读 layout commit 后该标记不再遮住正文，普通流式更新、缓存恢复和阅读滚动继续原行为；换 readingKey 或DOM淘汰后重新挂载才重新等待。Native的失败、缓存及首条输入豁免由 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)负责；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)核首次等待、后续更新、重新挂载及原滚动生命周期。
 
+[SessionPage](src/desktop/SessionPage.tsx)的 `synchronizePresentation` 将初次消息和 footer 作为同一可见提交；[Conversation](src/desktop/Conversation.tsx)完成布局后回报准确 scope／readingKey，旧页回调不能提前放开新页。宿主已有同会话只读输入区快照时传 `retainedPresentation`，现存缓存树恢复即可立即一起显示，不等待后台读取；正文 DOM 被淘汰时，新树仍须完成准备，不能只放开输入区。已经显示的同页普通刷新不重新隐藏。footer 几何由前置 sibling 的 layout effect 在缓存消息恢复滚动前确定，避免首帧以旧输入区高度夹紧阅读位置；ResizeObserver 继续跟随实际尺寸变化，不使用固定延时。缓存预算及 `readActive`／`interactive` 准入保持，显示快照不授予读取或写入资格。[页面回归](test/isolated/desktop-session-page-render.test.tsx)分别核冷页、完整缓存、仅输入区缓存、首次分组与普通刷新时消息和 footer 的同步可见性；Native过程证据见 [Desktop owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。
+
+准备期的 history／footer 共用 `presentationStyle`，同时设置 `visibility:hidden` 和父层 `opacity:0`，并沿原 `inert` 关闭交互。按钮的 `transition-all` 会过渡继承的 visibility，使父层已隐藏时子控件短暂保持可见；父层透明度将整个子树一起停止绘制，几何测量与原 DOM 继续保留。完成准备后同步撤下此样式；缓存已就绪和普通刷新沿原显示路径。验证逐项核对子控件的 computed visibility 及祖先透明度，原仅检查 Composer 父节点的结果不足以排除残影；修前／修后及真实开发窗口证据归上述 Desktop owner。
+
+Native 提供 `retainedPresentation` 时，输入区的模型或审核标签可以保持已核实的空态；该标记不要求页面已经具备发送或权限操作资格。首次页面的模型读取是否结束由 Native 通过 `initialPresentationPending` 一起交付，纯 UI 不推断默认模型、权限或读取结果。原缓存回归中的无标签历史、保留 DOM／展开、新消息接管、成本淘汰和只读准入继续适用。
+
 [SessionPage](src/desktop/SessionPage.tsx)在 layout effect 中取得首个正宽度并直接确定环境卡占位，首次测量不启动 padding 过渡，防止已绘制正文／Composer 再横移及换行。后续实际尺寸跨阈值和用户开合仍使用原动画；Native环境卡从scope建立就保留原节点，业务内容晚到不新增占位。[侧栏回归](test/isolated/desktop-sidebar.test.tsx)核初始占位、晚填内容、窗口阈值和窄窗浮层。
 
 同一组件的 `.response-status` 与 `.message-meta` 沿[共享 CSS](src/desktop/style.css)共用28px信息行高度并垂直居中。独立流式消息直接在原 `.message-meta` 中显示提示，完成后替换为原时间与具备资格的复制控件；回复期间不叠加第二行时间或额外占位。准确轮次的提示继续位于处理过程折叠区外；上方为展开过程的最后一条Agent正文时，与完成后的工具栏同样距正文2px，轮次底部保留8px，避免原24px轮次留白造成完成时下一条消息上移16px。上方为展开工具时仍使用原混合间距，收起过程或尚无正文时保留原正文块间距。显示提示时过程区不叠加底部padding。底部跟随继续由阅读内容高度驱动，复制资格、过程内无信息栏与活动状态的来源规则保持。

@@ -69,12 +69,18 @@ function fixture(
     await act(async () => nextDesktopPresentation(dom));
   };
   const ready = async (id: string) =>
-    until(
-      () =>
+    until(() => {
+      const permission = query<HTMLButtonElement>('[data-permission-trigger]'),
+        model = query<HTMLButtonElement>('[data-model-trigger]');
+      return !!(
         query('.breadcrumb strong')?.textContent === `Session ${id.toUpperCase()}` &&
-        !query<HTMLButtonElement>('[data-permission-trigger]')?.disabled &&
-        !query<HTMLButtonElement>('[data-model-trigger]')?.disabled,
-    );
+        permission &&
+        !permission.disabled &&
+        model &&
+        !model.disabled &&
+        !query('[data-presentation-pending]')
+      );
+    });
   return {
     ...control,
     host,
@@ -339,7 +345,7 @@ test('a new renderer origin restores the committed receipt and only a newer term
   }
 });
 
-test('the full Native shell retains observed controls and the old draft until Main confirms a session handoff', async () => {
+test('a cached Session restores its own model, permission and draft before Main confirms while reads and writes remain revoked', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -350,6 +356,7 @@ test('the full Native shell retains observed controls and the old draft until Ma
     await f.edit('Local A');
     const permission = f.query<HTMLButtonElement>('[data-permission-trigger]'),
       model = f.query<HTMLButtonElement>('[data-model-trigger]'),
+      attachment = f.query<HTMLButtonElement>('.composer-attach'),
       editor = f.query('.composer [role="textbox"]'),
       action = f.query<HTMLButtonElement>('.composer-actions button'),
       environment = f.query('.environment-information'),
@@ -361,19 +368,21 @@ test('the full Native shell retains observed controls and the old draft until Ma
     await f.click('b');
     await f.until(() => f.pending('selection') > 0);
     expect(f.query('[data-permission-trigger]')).toBe(permission);
-    expect(permission.textContent).toBe('自动审核');
+    expect(permission.textContent).toBe('完全访问');
     expect(permission.disabled).toBe(true);
-    expect(promptValue(editor)).toBe('Local A');
+    expect(promptValue(editor)).toBe('Draft B');
     expect(editor.getAttribute('contenteditable')).toBe('false');
     expect(editor.dataset.disabled).toBeUndefined();
     expect(f.query('.composer-actions button')).toBe(action);
     expect(action.disabled).toBe(true);
     expect(action.dataset.readGated).toBe('true');
     expect(f.query('.environment-information')).toBe(environment);
-    expect(f.query('.background-execution-stop')).toBe(stop);
-    expect(stop.disabled).toBe(true);
+    expect(f.query<HTMLButtonElement>('.background-execution-stop')?.disabled).toBe(true);
     expect(environment.textContent).not.toContain('上次状态');
-    expect(model.textContent).toContain('Model A');
+    expect(model.textContent).toContain('Model B');
+    expect(attachment !== null).toBe(true);
+    expect(f.query('.composer-attach') === attachment).toBe(true);
+    expect(attachment.disabled).toBe(true);
     expect(f.requests.filter((request) => request.method === 'input.models.read')).toHaveLength(
       reads,
     );
@@ -386,7 +395,7 @@ test('the full Native shell retains observed controls and the old draft until Ma
     expect(f.requests.filter((request) => businessMethods.has(request.method))).toHaveLength(0);
     expect(f.host.querySelector('[role="menu"]')).toBeNull();
     await f.release('selection');
-    await f.until(() => f.pending('history') > 0 && f.pending('models') > 0);
+    await f.until(() => f.pending('models') > 0);
     expect(f.query('[data-permission-trigger]')).toBe(permission);
     expect(permission.textContent).toBe('完全访问');
     expect(permission.disabled).toBe(true);
@@ -396,9 +405,11 @@ test('the full Native shell retains observed controls and the old draft until Ma
     expect(model.disabled).toBe(true);
     expect(f.query('.composer-cache-rate').textContent).toBe('缓存 30%');
     expect(f.query<HTMLButtonElement>('.composer-actions button').dataset.readGated).toBe('true');
+    await f.release('models');
+    await f.until(() => f.pending('history') > 0);
     await f.release('history');
     await f.until(() => !permission.disabled);
-    expect(model.disabled).toBe(true);
+    expect(model.disabled).toBe(false);
     await f.resume();
     await f.ready('b');
     expect(f.requests.filter((request) => businessMethods.has(request.method))).toHaveLength(0);
@@ -757,6 +768,8 @@ test('a normally disabled empty send stays dim, and a running empty draft keeps 
       expect(action.disabled).toBe(true);
       expect(action.dataset.readGated).toBe(active ? 'true' : undefined);
       await f.release('selection');
+      await f.until(() => f.pending('models') > 0);
+      await f.release('models');
       await f.until(() => f.pending('history') > 0);
       expect(f.query('.composer-actions button')).toBe(action);
       expect(action.getAttribute('aria-label')).toBe(active ? '停止任务' : '发送明确的新轮次');
@@ -787,6 +800,261 @@ test('a known environment failure stays visible while another selection is await
     await f.resume();
     await f.fail(false);
     await f.ready('b');
+  } finally {
+    await f.close();
+  }
+});
+
+test('scheduled returns prepare cold frames and restore coherent cached frames immediately while revalidating', async () => {
+  const f = fixture({ active: false });
+  const openTasks = async () => {
+    await act(async () => {
+      [...f.host.querySelectorAll('button')]
+        .find((button) => button.textContent === '定时任务')!
+        .click();
+    });
+    await f.until(() => !!f.query('.scheduled-page'));
+  };
+  const reads = () => f.requests.filter((input) => input.method === 'input.models.read').length;
+  const alerts: string[] = [];
+  const observer = new window.MutationObserver(() => {
+    for (const element of f.host.querySelectorAll('[role="alert"]'))
+      if (element.textContent?.includes('模型目录不可用')) alerts.push(element.textContent);
+  });
+  try {
+    await f.render();
+    await f.edit('Preserved session A draft');
+    observer.observe(f.host, { childList: true, subtree: true, characterData: true });
+    for (const id of ['b', 'a']) {
+      await openTasks();
+      const before = reads();
+      f.hold();
+      await f.click(id);
+      await f.until(() => f.pending('selection') > 0);
+      expect(reads()).toBe(before);
+      expect(f.query('.composer') === null).toBe(id === 'b');
+      if (id === 'a') {
+        expect(f.query('[data-model-trigger]').textContent).toContain('Model A');
+        expect(f.query('[data-permission-trigger]').textContent).toBe('自动审核');
+        expect(promptValue(f.query('.composer [role="textbox"]'))).toBe(
+          'Preserved session A draft',
+        );
+        expect(f.query<HTMLButtonElement>('[data-model-trigger]').disabled).toBe(true);
+      }
+      await f.release('selection');
+      await f.until(() => f.pending('models') > 0);
+      expect(f.query('.composer') === null).toBe(id === 'b');
+      await act(async () => f.publish());
+      expect(f.query('.composer') === null).toBe(id === 'b');
+      await f.resume();
+      await f.ready(id);
+      await f.until(() => f.host.textContent!.includes(`Reply ${id}`));
+      expect(reads()).toBe(before + 1);
+      expect(f.query('[data-model-trigger]').textContent).toContain(`Model ${id.toUpperCase()}`);
+      expect(f.query('[data-permission-trigger]').textContent).toContain(
+        id === 'a' ? '自动审核' : '完全访问',
+      );
+      expect(promptValue(f.query('.composer [role="textbox"]'))).toBe(
+        id === 'a' ? 'Preserved session A draft' : 'Draft B',
+      );
+    }
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Preserved session A draft');
+    await openTasks();
+    f.hold();
+    await f.click('b');
+    await f.until(() => f.pending('selection') > 0);
+    await f.click('a');
+    await f.resume();
+    await f.ready('a');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Preserved session A draft');
+    expect(f.host.textContent).not.toContain('Reply b');
+    expect(alerts).toEqual([]);
+    expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
+  } finally {
+    observer.disconnect();
+    await f.close();
+  }
+});
+
+test('a cached Session with no chosen model restores its complete readonly page without borrowing a model', async () => {
+  const f = fixture({ active: false, unselectedModel: true });
+  try {
+    await f.render();
+    await f.click('b');
+    await f.ready('b');
+    await f.click('a');
+    await f.ready('a');
+    f.hold();
+    await f.click('b');
+    await f.until(() => f.pending('selection') > 0);
+    expect(f.query('.breadcrumb strong').textContent).toBe('Session B');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+    expect(f.query('[data-model-trigger]').textContent).toBe('选择模型');
+    expect(f.query('[data-permission-trigger]').textContent).toBe('完全访问');
+    expect(f.query('[data-presentation-pending]') === null).toBe(true);
+    expect(f.query('.composer [role="textbox"]').getAttribute('contenteditable')).toBe('false');
+    await act(async () => f.publish());
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+    await f.resume();
+    await f.ready('b');
+    expect(f.query('[data-model-trigger]').textContent).toBe('选择模型');
+    expect(f.query<HTMLButtonElement>('.composer-actions button').disabled).toBe(true);
+    expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a cached absent permission label stays absent while its own history is revalidated', async () => {
+  const f = fixture({ active: false });
+  const request = f.bridge.request.bind(f.bridge);
+  let withoutPermissions = false;
+  f.bridge.request = async (input) => {
+    const value = await request(input);
+    return withoutPermissions && value && 'generation' in value && value.selection
+      ? { ...value, selection: { ...value.selection, permissions: undefined } }
+      : value;
+  };
+  const read = (id: string) =>
+    f.until(
+      () =>
+        f.query('.breadcrumb strong')?.textContent === `Session ${id.toUpperCase()}` &&
+        !f.query('[data-presentation-pending]') &&
+        !f.query<HTMLButtonElement>('[data-model-trigger]')?.disabled &&
+        !f.query('[data-permission-trigger]'),
+    );
+  try {
+    await f.render();
+    withoutPermissions = true;
+    await f.click('b');
+    await read('b');
+    await f.click('a');
+    await read('a');
+    f.hold();
+    await f.click('b');
+    await f.until(() => f.pending('selection') > 0);
+    expect(f.query('[data-permission-trigger]') === null).toBe(true);
+    await f.release('selection');
+    await f.until(() => f.pending('models') > 0);
+    await f.release('models');
+    await f.until(() => f.pending('history') > 0);
+    expect(f.query('[data-permission-trigger]') === null).toBe(true);
+    expect(f.query('[data-presentation-pending]') === null).toBe(true);
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+    await f.resume();
+    await read('b');
+    expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const failure of ['select', 'draft.read'] as const) {
+  test(`a failed direct cold ${failure} holds its target identity and loading pair until recovery`, async () => {
+    const f = fixture({ active: false });
+    const request = f.bridge.request.bind(f.bridge);
+    let rejectTarget = true,
+      attempts = 0;
+    f.bridge.request = async (input) => {
+      if (input.method === failure && input.sessionId === 'b' && rejectTarget) {
+        attempts++;
+        throw Error('fixture_selection_prepare_failed');
+      }
+      return request(input);
+    };
+    try {
+      await f.render();
+      await f.click('b');
+      await f.until(() => attempts > 0);
+      expect(f.query('.breadcrumb strong').textContent).toBe('Session B');
+      expect(f.query('[data-presentation-pending]') !== null).toBe(true);
+      await act(async () => f.publish());
+      expect(f.query('.breadcrumb strong').textContent).toBe('Session B');
+      expect(f.query('[data-presentation-pending]') !== null).toBe(true);
+      rejectTarget = false;
+      await f.click('b');
+      await f.ready('b');
+      expect(f.query('[data-model-trigger]').textContent).toContain('Model B');
+      expect(f.query('[data-permission-trigger]').textContent).toBe('完全访问');
+      expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+      expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('a failed scheduled return cannot republish the prior Session through Main state updates and can recover', async () => {
+  const f = fixture({ active: false });
+  const request = f.bridge.request.bind(f.bridge);
+  let rejectSelection = true,
+    attempts = 0;
+  f.bridge.request = async (input) => {
+    if (input.method === 'select' && input.sessionId === 'b' && rejectSelection) {
+      attempts++;
+      throw Error('selection_read_failed');
+    }
+    return request(input);
+  };
+  try {
+    await f.render();
+    await act(async () =>
+      [...f.host.querySelectorAll('button')]
+        .find((button) => button.textContent === '定时任务')!
+        .click(),
+    );
+    await f.click('b');
+    await f.until(() => attempts > 0);
+    expect(f.query('.composer') === null).toBe(true);
+    await act(async () => f.publish());
+    expect(f.query('.composer') === null).toBe(true);
+    rejectSelection = false;
+    await f.click('b');
+    await f.ready('b');
+    expect(f.query('[data-model-trigger]').textContent).toContain('Model B');
+    expect(f.query('[data-permission-trigger]').textContent).toContain('完全访问');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+    expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a scheduled return waits for a verified draft and failed draft reads cannot partially publish target controls', async () => {
+  const f = fixture({ active: false, holdDraft: true });
+  const request = f.bridge.request.bind(f.bridge);
+  let rejectDraft = true;
+  f.bridge.request = async (input) => {
+    const result = await request(input);
+    if (input.method === 'draft.read' && input.sessionId === 'b' && rejectDraft)
+      throw Error('draft_read_failed');
+    return result;
+  };
+  try {
+    await f.render();
+    await act(async () =>
+      [...f.host.querySelectorAll('button')]
+        .find((button) => button.textContent === '定时任务')!
+        .click(),
+    );
+    f.hold();
+    await f.click('b');
+    await f.release('selection');
+    await f.until(() => f.pending('models') > 0);
+    await f.release('models');
+    await f.until(() => f.pending('draft') > 0);
+    expect(f.query('.composer') === null).toBe(true);
+    await f.release('draft');
+    await act(async () => f.publish());
+    expect(f.query('.composer') === null).toBe(true);
+    await f.resume();
+    rejectDraft = false;
+    await f.click('b');
+    await f.ready('b');
+    expect(f.query('[data-model-trigger]').textContent).toContain('Model B');
+    expect(f.query('[data-permission-trigger]').textContent).toContain('完全访问');
+    expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Draft B');
+    expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
   } finally {
     await f.close();
   }
@@ -867,6 +1135,8 @@ test('late cold model preparation cannot publish a departed page or start its hi
     await f.until(() => f.pending('models') > 0);
     await f.click('a');
     await f.release('selection');
+    await f.until(() => f.pending('models') > 0);
+    await f.release('models');
     await f.until(() => f.pending('history') > 0);
     await f.resume();
     await f.ready('a');

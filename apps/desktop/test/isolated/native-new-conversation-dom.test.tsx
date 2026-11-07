@@ -2629,7 +2629,7 @@ for (const withHistory of [true, false]) {
   });
 }
 
-test('a held Session switch shows the target title while retaining the current draft and controls until Main confirms, with writes gated', async () => {
+test('a held cached Session switch restores the target draft and controls together while Main confirmation gates writes', async () => {
   const f = fixture(true);
   try {
     await act(async () => f.root.render(<NativeDesktop />));
@@ -2642,16 +2642,16 @@ test('a held Session switch shows the target title while retaining the current d
       model = f.host.querySelector('[data-model-trigger]');
     f.holdSelection();
     await f.click('Other B');
-    expect(f.input('当前会话私有草稿')).toBe(input);
-    expect(promptValue(input)).toBe('A own draft');
+    expect(f.input('当前会话私有草稿') === input).toBe(true);
+    expect(promptValue(input)).toBe('B own draft');
     expect(input?.getAttribute('contenteditable')).toBe('false');
     expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Other B');
-    expect(f.host.querySelector('[data-model-trigger]')).toBe(model);
+    expect(f.host.querySelector('[data-model-trigger]') === model).toBe(true);
     expect((model as HTMLButtonElement).disabled).toBe(true);
     await f.refreshWhileSelecting();
-    expect(f.input('当前会话私有草稿')).toBe(input);
-    expect(promptValue(input)).toBe('A own draft');
-    expect(f.host.querySelector('[data-model-trigger]')).toBe(model);
+    expect(f.input('当前会话私有草稿') === input).toBe(true);
+    expect(promptValue(input)).toBe('B own draft');
+    expect(f.host.querySelector('[data-model-trigger]') === model).toBe(true);
     const send = f.host.querySelector<HTMLButtonElement>('button[aria-label="发送明确的新轮次"]')!;
     expect(send.disabled).toBe(true);
     await act(async () => send.click());
