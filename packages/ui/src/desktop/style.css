@@ -110,8 +110,8 @@ body {
   --markdown-link-color: var(--info-foreground);
   --conversation-inline-padding: 28px;
   --conversation-scrollbar-width: 10px;
-  --scrollbar-thumb: #b8b8b8;
-  --scrollbar-thumb-hover: #999;
+  --scrollbar-thumb: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 18%, transparent);
   --navigation-foreground: #484848;
   --success-background: color-mix(in srgb, var(--success) 12%, var(--card));
   --success-foreground: var(--success);
@@ -121,6 +121,31 @@ body {
   --diff-removed-foreground: var(--destructive);
   --error-border: color-mix(in srgb, var(--destructive) 75%, var(--card));
   --error-foreground: var(--destructive);
+}
+.kite-client::-webkit-scrollbar,
+.kite-client ::-webkit-scrollbar,
+[data-slot="scroll-area-viewport"][data-native-scrollbars]::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.kite-client::-webkit-scrollbar-track,
+.kite-client ::-webkit-scrollbar-track,
+[data-slot="scroll-area-viewport"][data-native-scrollbars]::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kite-client::-webkit-scrollbar-thumb,
+.kite-client ::-webkit-scrollbar-thumb,
+[data-slot="scroll-area-viewport"][data-native-scrollbars]::-webkit-scrollbar-thumb {
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+.kite-client::-webkit-scrollbar-thumb:hover,
+.kite-client ::-webkit-scrollbar-thumb:hover,
+[data-slot="scroll-area-viewport"][data-native-scrollbars]::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 .kite-client {
   & {
@@ -152,23 +177,6 @@ body {
   }
   * {
     box-sizing: border-box;
-  }
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    border: 1px solid transparent;
-    border-radius: 9999px;
-    background: var(--scrollbar-thumb);
-    background-clip: padding-box;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--scrollbar-thumb-hover);
-    background-clip: padding-box;
   }
   .sidebar[hidden],
   .session-view[hidden],
@@ -2135,8 +2143,8 @@ body {
   --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
   --important-foreground: #bda4d8;
   --identity-secondary: #84c8d0;
-  --scrollbar-thumb: #606060;
-  --scrollbar-thumb-hover: #7a7a7a;
+  --scrollbar-thumb: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 18%, transparent);
   --sidebar-accent: #303030;
   --navigation-foreground: #d2d2d2;
   --success-background: color-mix(in srgb, var(--success) 12%, var(--card));
@@ -5717,7 +5725,7 @@ body {
   padding: 0;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
-  scrollbar-color: var(--muted-foreground) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scroll-padding-inline: 0;
 }
 .kite-client .message-attachments-list::-webkit-scrollbar {
@@ -6044,4 +6052,23 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  @media (forced-colors: none) {
+    /* Standard scrollbar properties override thumb hover/active styling in Chromium. */
+    :is(.kite-client, .kite-client *, [data-slot="scroll-area-viewport"][data-native-scrollbars]) {
+      scrollbar-color: auto;
+      scrollbar-width: auto;
+    }
+    /* Match Chromium's thin native track so changing the paint path keeps its gutter. */
+    .kite-client[data-native-scrollbars] ::-webkit-scrollbar,
+    [data-slot="scroll-area-viewport"][data-native-scrollbars]::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    .kite-client .message-attachments-list::-webkit-scrollbar {
+      height: 10px;
+    }
+  }
 }
