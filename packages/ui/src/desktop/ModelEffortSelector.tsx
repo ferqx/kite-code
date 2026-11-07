@@ -13,8 +13,19 @@ import { cn } from './lib/utils';
 import { useReadGate } from './ReadGate';
 
 const effortValues = ['low', 'medium', 'high', 'xhigh', 'max', 'ultar'] as const;
-const defaultEffortIndex = effortValues.indexOf('medium');
 export type ThinkingEffort = (typeof effortValues)[number];
+/** Resolve the value displayed and submitted by desktop callers, including legacy configured values. */
+export function resolveThinkingEffort<T extends string>(
+  effort: T | null | undefined,
+  choices?: readonly string[],
+): T | ThinkingEffort {
+  return (
+    effort ??
+    (choices === undefined || choices.includes('medium')
+      ? 'medium'
+      : (effortValues.find((value) => choices.includes(value)) ?? 'medium'))
+  );
+}
 export interface ModelOption {
   readonly id?: string;
   readonly provider: string;
@@ -71,14 +82,17 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       : model.provider === props.model?.provider && model.name === props.model.name,
   );
   const canAdjustEffort = !!selected && !!props.onReasoningEffortChange;
-  const configuredEffort = props.reasoningEffort ?? selected?.reasoningEffort;
-  const effortIndex = (effortValues as readonly string[]).indexOf(configuredEffort ?? '');
+  const configuredEffort = resolveThinkingEffort(
+    props.reasoningEffort ?? selected?.reasoningEffort,
+    selected?.reasoningEffortChoices,
+  );
+  const effortIndex = (effortValues as readonly string[]).indexOf(configuredEffort);
   const effortLabel =
     effortIndex >= 0
-      ? effortNames[effortIndex]
+      ? effortNames[effortIndex]!
       : configuredEffort === 'none'
         ? '关闭'
-        : configuredEffort || '未指定';
+        : configuredEffort;
   const choices = effortValues.filter(
     (value) =>
       selected?.reasoningEffortChoices === undefined ||
@@ -224,13 +238,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
               <div className="mt-1">
                 {choices.length > 1 ? (
                   <GemSlider
-                    value={
-                      allowedPositions.includes(effortIndex)
-                        ? effortIndex
-                        : allowedPositions.includes(defaultEffortIndex)
-                          ? defaultEffortIndex
-                          : allowedPositions[0]!
-                    }
+                    value={allowedPositions.includes(effortIndex) ? effortIndex : undefined}
                     valueText={effortLabel}
                     allowedValues={allowedPositions}
                     onValueChange={(value) => props.onReasoningEffortChange?.(effortValues[value]!)}

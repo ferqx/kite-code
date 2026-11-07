@@ -30,7 +30,7 @@ export function paintBrowserDecoration(id: string, value: BrowserDecoration) {
   shadow.replaceChildren();
   const glow = document.createElement('div');
   glow.style.cssText =
-    'position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 0 2px #60a5fa88,inset 0 0 24px 3px #3b82f67a;';
+    'position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 0 2px #7190b7,inset 0 0 24px 3px #7190b77a;';
   shadow.append(glow);
   const cursor = value.cursor;
   if (
@@ -54,7 +54,7 @@ export function paintBrowserDecoration(id: string, value: BrowserDecoration) {
     'd',
     cursor.phase === 'type' ? 'M8 3h12M14 3v26M8 29h12' : 'M3 2v26l7-7 5 11 5-2-5-11h10Z',
   );
-  path.setAttribute('fill', cursor.phase === 'type' ? 'none' : '#3b82f6');
+  path.setAttribute('fill', cursor.phase === 'type' ? 'none' : '#7190b7');
   path.setAttribute('stroke', '#fff');
   path.setAttribute('stroke-width', '2');
   pointer.append(path);

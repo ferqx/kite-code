@@ -101,6 +101,7 @@ export {
   ModelEffortSelector,
   type ModelEffortSelectorProps,
   type ModelOption,
+  resolveThinkingEffort,
   type ThinkingEffort,
 } from './ModelEffortSelector';
 export {
@@ -111,6 +112,7 @@ export {
   rememberDesktopMarkdownParse,
 } from './markdown-parse-cache';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
+export { PromptMarkdown } from './PromptMarkdown';
 export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';
 export { ReadGate } from './ReadGate';
 export {

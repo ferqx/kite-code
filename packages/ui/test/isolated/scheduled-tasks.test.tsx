@@ -190,9 +190,47 @@ test('async edit preserves complete fields on failure, blocks duplicate save, an
   expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe(draft.prompt);
   await submit();
   expect(calls).toBe(2);
-  expect(saved[1]).toEqual(draft);
+  expect(saved[1]).toEqual({ ...draft, reasoningEffort: 'low' });
   await act(async () => resolve());
   expect(closed).toBe(1);
+});
+
+test.each([
+  { configured: undefined, choices: undefined, expected: 'medium', label: '中' },
+  { configured: 'xhigh', choices: undefined, expected: 'xhigh', label: '极高' },
+  { configured: undefined, choices: ['high', 'ultar'], expected: 'high', label: '高' },
+] as const)('the task editor saves its displayed default without adjusting effort: %j', async ({
+  configured,
+  choices,
+  expected,
+  label,
+}) => {
+  const saved: ScheduledTaskDraft[] = [];
+  await render(
+    <ScheduledTaskEditor
+      task={task}
+      props={{
+        ...base,
+        models: [
+          {
+            id: 'm',
+            provider: 'Provider',
+            name: 'Model',
+            reasoningEffort: configured,
+            reasoningEffortChoices: choices,
+          },
+        ],
+        onUpdate: (_id, value) => {
+          saved.push(value);
+        },
+      }}
+      onClose={() => {}}
+    />,
+  );
+  expect(document.querySelector('[data-effort-trigger]')?.textContent).toBe(label);
+  expect(document.body.textContent).not.toContain('未指定');
+  await submit();
+  expect(saved).toEqual([{ ...draft, reasoningEffort: expected }]);
 });
 test('task card edit, pause, run now, exact history session and explicit delete use host callbacks', async () => {
   const actions: string[] = [];

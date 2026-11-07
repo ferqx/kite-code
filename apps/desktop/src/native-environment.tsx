@@ -161,6 +161,7 @@ export function useNativeEnvironment({
   bridge,
   generation,
   selection,
+  preview,
   revision,
   historyEpoch = 0,
   unavailable,
@@ -174,6 +175,8 @@ export function useNativeEnvironment({
   bridge?: NativeBridge;
   generation: number;
   selection?: NativeSelection;
+  /** Display identity only; it never supplies an observation, read scope or control permission. */
+  preview?: { storeId: string; sessionId: string };
   revision: number;
   historyEpoch?: number;
   unavailable: boolean;
@@ -205,6 +208,9 @@ export function useNativeEnvironment({
       : undefined;
   const cacheKey = rootSessionId
     ? JSON.stringify([generation, historyEpoch, storeId, rootSessionId])
+    : undefined;
+  const previewKey = preview
+    ? JSON.stringify([generation, historyEpoch, preview.storeId, preview.sessionId])
     : undefined;
   const live = useRef(scope);
   live.current = scope;
@@ -642,7 +648,9 @@ export function useNativeEnvironment({
   }, [view?.facts, scope, unavailable, paused]);
 
   const current = view?.scope === scope ? view : undefined,
-    display = current?.display ?? (cacheKey ? cache.current.get(cacheKey) : undefined),
+    display =
+      current?.display ??
+      (cacheKey || previewKey ? cache.current.get(cacheKey ?? previewKey!) : undefined),
     stale = !!current?.error || (!paused && unavailable),
     busy = !stale && (paused || !current?.facts || current.busy || controlUnavailable);
   const blocked = new Set(
@@ -832,52 +840,53 @@ export function useNativeEnvironment({
           visibleChild.executionId ?? visibleChild.facts?.item.execution.id,
         );
     },
-    card: scope ? (
-      <>
-        <BackgroundExecutions
-          id="session-environment-information"
-          executions={
-            display?.rows.map((row) => ({
-              ...row,
-              ...(executionUnconfirmed &&
-              ['queued', 'starting', 'running', 'stopping'].includes(row.status)
-                ? diagnostics
-                  ? { activity: '执行状态待核实' }
-                  : {}
-                : visibleChild?.facts?.item.execution.id === row.executionId &&
-                    !visibleChild.loading &&
-                    !visibleChild.error
-                  ? { activity: nativeChildActivity(visibleChild.facts) }
-                  : {}),
-              canStop: row.canStop && !executionUnconfirmed && !blocked.has(row.executionId),
-            })) ?? []
-          }
-          currentOnly
-          stale={stale}
-          busy={busy}
-          stoppingExecutionId={stopping}
-          onStop={!stale ? (execution) => void stop(execution) : undefined}
-          subagentDetails={{
-            sessionIdsByExecutionId: display?.children ?? new Map(),
-            loading: !display && (current?.busy ?? true),
-            error: diagnostics ? current?.error : undefined,
-            onOpen: (sessionId, executionId) => {
-              if (!onOpenChild) return void openChild(sessionId, executionId);
-              if (!bridge || !scope || unavailable || paused || awaitingFreshRead || !executionId)
-                return;
-              const row = display?.rows.find((row) => row.executionId === executionId);
-              onOpenChild(
-                sessionId,
-                executionId,
-                row?.displayName ?? '子 Agent',
-                row?.childAgentIdentity,
-              );
-            },
-            onRefresh: () => setRefresh((value) => value + 1),
-          }}
-        />
-        {diagnostics && stopNotice && <p role="status">{stopNotice}</p>}
-      </>
-    ) : undefined,
+    card:
+      scope || previewKey ? (
+        <>
+          <BackgroundExecutions
+            id="session-environment-information"
+            executions={
+              display?.rows.map((row) => ({
+                ...row,
+                ...(executionUnconfirmed &&
+                ['queued', 'starting', 'running', 'stopping'].includes(row.status)
+                  ? diagnostics
+                    ? { activity: '执行状态待核实' }
+                    : {}
+                  : visibleChild?.facts?.item.execution.id === row.executionId &&
+                      !visibleChild.loading &&
+                      !visibleChild.error
+                    ? { activity: nativeChildActivity(visibleChild.facts) }
+                    : {}),
+                canStop: row.canStop && !executionUnconfirmed && !blocked.has(row.executionId),
+              })) ?? []
+            }
+            currentOnly
+            stale={stale}
+            busy={busy}
+            stoppingExecutionId={stopping}
+            onStop={!stale ? (execution) => void stop(execution) : undefined}
+            subagentDetails={{
+              sessionIdsByExecutionId: display?.children ?? new Map(),
+              loading: !display && (current?.busy ?? true),
+              error: diagnostics ? current?.error : undefined,
+              onOpen: (sessionId, executionId) => {
+                if (!onOpenChild) return void openChild(sessionId, executionId);
+                if (!bridge || !scope || unavailable || paused || awaitingFreshRead || !executionId)
+                  return;
+                const row = display?.rows.find((row) => row.executionId === executionId);
+                onOpenChild(
+                  sessionId,
+                  executionId,
+                  row?.displayName ?? '子 Agent',
+                  row?.childAgentIdentity,
+                );
+              },
+              onRefresh: () => setRefresh((value) => value + 1),
+            }}
+          />
+          {diagnostics && stopNotice && <p role="status">{stopNotice}</p>}
+        </>
+      ) : undefined,
   };
 }

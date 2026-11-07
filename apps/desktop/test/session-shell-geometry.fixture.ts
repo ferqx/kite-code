@@ -3,6 +3,618 @@ import path from 'node:path';
 import type { Browser } from 'playwright';
 import type {} from './session-shell-browser.fixture';
 
+/** Hidden preparation must paint no leaf controls, including inherited visibility transitions. */
+export async function verifyComposerHandoff(browser: Browser, url: string, artifact: string) {
+  const cases = [];
+  for (const theme of ['light', 'dark'] as const) {
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 850 },
+      colorScheme: theme,
+      locale: 'zh-CN',
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (cause) => errors.push(cause.message));
+    try {
+      await page.goto(`${url}?model-navigation=1&metrics=both`);
+      const row = (id: string) =>
+        page.getByRole('button', { name: `Session ${id.toUpperCase()}`, exact: true });
+      const ready = (id: string) =>
+        page.waitForFunction((id) => {
+          const model = document.querySelector<HTMLButtonElement>('[data-model-trigger]');
+          const permission = document.querySelector<HTMLButtonElement>('[data-permission-trigger]');
+          return (
+            document.querySelector('.breadcrumb strong')?.textContent ===
+              `Session ${id.toUpperCase()}` &&
+            model &&
+            !model.disabled &&
+            permission &&
+            !permission.disabled &&
+            !document.querySelector('[data-presentation-pending]')
+          );
+        }, id);
+      await row('a').click();
+      await ready('a');
+      await page.waitForFunction(() =>
+        document
+          .querySelector('.composer-context-usage')
+          ?.getAttribute('aria-label')
+          ?.includes('%'),
+      );
+      await page.evaluate(() => {
+        const state = { phase: 'initial', frames: [] as unknown[] };
+        Reflect.set(window, 'composerHandoffObservation', state);
+        const capture = () => {
+          const painted = (element: HTMLElement) => {
+            const style = getComputedStyle(element);
+            if (
+              !element.getBoundingClientRect().height ||
+              style.visibility === 'hidden' ||
+              style.display === 'none'
+            )
+              return false;
+            for (
+              let ancestor: Element | null = element;
+              ancestor;
+              ancestor = ancestor.parentElement
+            )
+              if (Number(getComputedStyle(ancestor).opacity) === 0) return false;
+            return true;
+          };
+          const overlays = [
+            ...document.querySelectorAll<HTMLElement>(
+              '.model-effort-popover,.composer-attach-menu,.permission-menu,.composer-context-tooltip',
+            ),
+          ]
+            .filter(painted)
+            .map((element) => ({
+              label: element.getAttribute('aria-label') ?? element.className,
+              state: element.dataset.state,
+              opacity: getComputedStyle(element).opacity,
+              animation: getComputedStyle(element).animationName,
+              text: element.textContent,
+            }));
+          state.frames.push({
+            phase: state.phase,
+            title: document.querySelector('.breadcrumb strong')?.textContent,
+            overlays,
+            model: document.querySelector('[data-model-trigger]')?.textContent,
+            permission: document.querySelector('[data-permission-trigger]')?.textContent,
+            pending: !!document.querySelector('[data-presentation-pending]'),
+            controls: [
+              ...document.querySelectorAll<HTMLElement>(
+                '.composer-attach,[data-model-trigger],[data-permission-trigger],.model-effort-summary,.composer-cache-rate,.composer-context-usage,.composer-actions button',
+              ),
+            ]
+              .filter(painted)
+              .map((element) => element.getAttribute('aria-label') ?? element.textContent),
+          });
+        };
+        new MutationObserver(capture).observe(document.body, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true,
+        });
+        const tick = () => {
+          capture();
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      // A cold direct switch keeps the Composer DOM for layout measurement.
+      // Its leaf controls can transition inherited visibility after the form hides.
+      await page.evaluate(() => {
+        Reflect.get(window, 'composerHandoffObservation').phase = 'cold';
+        window.sessionShellFixture.hold();
+      });
+      await row('b').click();
+      await page.waitForFunction(() => !!document.querySelector('[data-presentation-pending]'));
+      await page.screenshot({ path: path.join(artifact, `handoff-${theme}-cold-pending.png`) });
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            let frames = 0;
+            const tick = () => (++frames === 12 ? resolve() : requestAnimationFrame(tick));
+            requestAnimationFrame(tick);
+          }),
+      );
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await ready('b');
+      await page.screenshot({ path: path.join(artifact, `handoff-${theme}-cold-ready.png`) });
+      for (const overlay of ['model', 'permission', 'attachment', 'context']) {
+        await row('a').click();
+        await ready('a');
+        await page.evaluate((overlay) => {
+          Reflect.get(window, 'composerHandoffObservation').phase = overlay;
+        }, overlay);
+        const popup =
+          overlay === 'model'
+            ? '.model-effort-popover'
+            : overlay === 'permission'
+              ? '.permission-menu'
+              : overlay === 'attachment'
+                ? '.composer-attach-menu'
+                : '.composer-context-tooltip';
+        if (overlay === 'model') await page.locator('[data-model-trigger]').click();
+        else if (overlay === 'permission') await page.locator('[data-permission-trigger]').click();
+        else if (overlay === 'attachment') await page.locator('.composer-attach').click();
+        else await page.locator('.composer-context-usage').hover();
+        await page.locator(popup).waitFor({ state: 'visible' });
+        await page.screenshot({
+          path: path.join(artifact, `handoff-${theme}-${overlay}-open.png`),
+        });
+        // Modal dropdowns dismiss before the sidebar becomes a pointer target.
+        if (overlay === 'permission' || overlay === 'attachment')
+          await page.keyboard.press('Escape');
+        await page.evaluate(() => window.sessionShellFixture.hold());
+        await row('b').click();
+        await page.waitForFunction(
+          () => document.querySelector('.breadcrumb strong')?.textContent === 'Session B',
+        );
+        await page.screenshot({
+          path: path.join(artifact, `handoff-${theme}-${overlay}-selected.png`),
+        });
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              let frames = 0;
+              const tick = () => (++frames === 12 ? resolve() : requestAnimationFrame(tick));
+              requestAnimationFrame(tick);
+            }),
+        );
+        await page.evaluate(() => window.sessionShellFixture.resume());
+        await ready('b');
+        await page.screenshot({
+          path: path.join(artifact, `handoff-${theme}-${overlay}-ready.png`),
+        });
+      }
+      const frames = (await page.evaluate(
+        () => Reflect.get(window, 'composerHandoffObservation').frames,
+      )) as {
+        phase: string;
+        title?: string;
+        overlays: unknown[];
+        pending: boolean;
+        controls: unknown[];
+      }[];
+      const violations = frames.filter(
+        (frame) =>
+          (frame.pending && frame.controls.length) ||
+          (frame.title === 'Session B' && frame.overlays.length),
+      );
+      await Bun.write(
+        path.join(artifact, `handoff-${theme}.json`),
+        JSON.stringify({ frames, errors, violations }, null, 2),
+      );
+      assert.deepEqual(
+        violations.slice(0, 3),
+        [],
+        `${theme}: hidden composer descendants still paint`,
+      );
+      assert.deepEqual(errors, []);
+      cases.push({ kind: 'composer-handoff', theme, frames, errors });
+    } finally {
+      await page.close();
+    }
+  }
+  return cases;
+}
+
+/** Observe every navigation frame; controlled failures remain distinct from departed reads. */
+export async function verifyModelCatalogueNavigation(
+  browser: Browser,
+  url: string,
+  artifact: string,
+  unselected = false,
+  withoutPermissions = false,
+) {
+  const cases = [];
+  for (const theme of ['light', 'dark'] as const) {
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 850 },
+      colorScheme: theme,
+      locale: 'zh-CN',
+    });
+    page.setDefaultTimeout(10000);
+    const errors: string[] = [],
+      phases: unknown[] = [];
+    page.on('pageerror', (cause) => errors.push(cause.message));
+    try {
+      await page.goto(
+        `${url}?model-navigation=1&distinct-efforts=1${unselected ? '&unselected-model=1' : ''}${withoutPermissions ? '&without-permissions=1' : ''}`,
+      );
+      const row = (id: string) =>
+        page.getByRole('button', { name: `Session ${id.toUpperCase()}`, exact: true });
+      const ready = (id: string) =>
+        page.waitForFunction(
+          ({ id, withoutPermissions }) => {
+            const model = document.querySelector<HTMLButtonElement>('[data-model-trigger]');
+            const permission = document.querySelector<HTMLButtonElement>(
+              '[data-permission-trigger]',
+            );
+            return (
+              model &&
+              !model.disabled &&
+              (withoutPermissions ? !permission : permission && !permission.disabled) &&
+              !document.querySelector('[data-presentation-pending]') &&
+              document.querySelector('.composer')?.getAttribute('data-session-loading') !==
+                'true' &&
+              document.querySelector('.breadcrumb strong')?.textContent ===
+                `Session ${id.toUpperCase()}`
+            );
+          },
+          { id, withoutPermissions },
+        );
+      await row('a').click();
+      await ready('a');
+      await page.evaluate(() => {
+        Reflect.set(window, 'readModelNavigationDraft', () => {
+          const editor = document.querySelector('.composer [role="textbox"]');
+          // innerText inserts two newlines between block paragraphs, while
+          // the editor's preserved Markdown line boundary is one newline.
+          const text = (node: Node): string =>
+            node.nodeName === 'BR'
+              ? '\n'
+              : node.nodeType === 3
+                ? (node.textContent ?? '')
+                : [...node.childNodes].map(text).join('');
+          return editor
+            ? [...editor.children]
+                .map((child) => (child.textContent ? text(child) : ''))
+                .join('\n')
+                .replace(/\r\n?/g, '\n')
+            : undefined;
+        });
+      });
+      const readDraft = () =>
+        page.evaluate(() => Reflect.get(window, 'readModelNavigationDraft')());
+      const editor = page.locator('.composer [role="textbox"]');
+      await editor.fill('保留会话 A 的未发送草稿');
+      await editor.press('End');
+      for (const line of ['第二行草稿', '第三行草稿', '第四行草稿', '第五行草稿']) {
+        await editor.press('Shift+Enter');
+        await page.keyboard.insertText(line);
+      }
+      const draftA = await readDraft();
+      assert.equal(draftA.split('\n').filter(Boolean).length, 5);
+      const originalComposerTop = await page
+        .locator('.composer')
+        .evaluate((element) => element.getBoundingClientRect().top);
+      const originalModelLeft = await page
+        .locator('[data-model-trigger]')
+        .evaluate((element) => element.getBoundingClientRect().left);
+      const originalScroll = await page.locator('.conversation-viewport').evaluate((viewport) => {
+        viewport.scrollTop = Math.min(140, viewport.scrollHeight - viewport.clientHeight);
+        viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
+        return viewport.scrollTop;
+      });
+      assert.ok(originalScroll > 0);
+      await page.evaluate(() => {
+        const state = {
+          phase: 'initial',
+          expected: undefined as string | undefined,
+          frames: [] as unknown[],
+        };
+        Reflect.set(window, 'modelNavigationObservation', state);
+        const capture = () => {
+          const editor = document.querySelector<HTMLElement>('.composer [role="textbox"]');
+          const visible = (element: Element | null) => {
+            if (
+              !element?.getBoundingClientRect().height ||
+              getComputedStyle(element).visibility === 'hidden'
+            )
+              return false;
+            for (
+              let ancestor: Element | null = element;
+              ancestor;
+              ancestor = ancestor.parentElement
+            )
+              if (Number(getComputedStyle(ancestor).opacity) === 0) return false;
+            return true;
+          };
+          const composer = document.querySelector<HTMLElement>('.composer');
+          state.frames.push({
+            phase: state.phase,
+            expected: state.expected,
+            title: document.querySelector('.breadcrumb strong')?.textContent,
+            model: document.querySelector('[data-model-trigger]')?.textContent,
+            effort: document.querySelector('.model-effort-summary')?.textContent,
+            modelLeft: document.querySelector('[data-model-trigger]')?.getBoundingClientRect().left,
+            attachment: !!document.querySelector('.composer-attach'),
+            permission: document.querySelector('[data-permission-trigger]')?.textContent,
+            composerVisible: visible(composer),
+            composerTop: composer?.getBoundingClientRect().top,
+            scrollTop: document.querySelector('.conversation-viewport')?.scrollTop,
+            presentationPending: !!document.querySelector('[data-presentation-pending]'),
+            paintedControls: [
+              ...document.querySelectorAll(
+                '.composer-attach,[data-model-trigger],[data-permission-trigger],.model-effort-summary,.composer-cache-rate,.composer-context-usage,.composer-actions button',
+              ),
+            ].filter(visible).length,
+            disabled: document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled,
+            readonly: editor?.getAttribute('contenteditable'),
+            draft: Reflect.get(window, 'readModelNavigationDraft')(),
+            alerts: [...document.querySelectorAll('[role="alert"]')].map(
+              (node) => node.textContent,
+            ),
+            messages: [...document.querySelectorAll<HTMLElement>('article.message')]
+              .filter(visible)
+              .map((node) => node.dataset.messageId),
+            welcome: !!document.querySelector('.new-conversation-welcome'),
+          });
+        };
+        const observer = new MutationObserver(capture);
+        observer.observe(document.querySelector('.kite-client')!, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true,
+        });
+        const observe = () => {
+          capture();
+          requestAnimationFrame(observe);
+        };
+        requestAnimationFrame(observe);
+      });
+      const phase = async (name: string) => {
+        await page.evaluate((name) => {
+          Reflect.get(window, 'modelNavigationObservation').phase = name;
+        }, name);
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              let count = 0;
+              const tick = () => (++count === 6 ? resolve() : requestAnimationFrame(tick));
+              requestAnimationFrame(tick);
+            }),
+        );
+        await page.screenshot({
+          path: path.join(
+            artifact,
+            `${withoutPermissions ? 'unlabeled-models' : unselected ? 'unset-models' : 'models'}-${theme}-${name}.png`,
+          ),
+        });
+        phases.push({
+          name,
+          ...(await page.evaluate(() =>
+            Reflect.get(window, 'modelNavigationObservation').frames.at(-1),
+          )),
+        });
+      };
+      const inputReads = () =>
+        page.evaluate(
+          () =>
+            window.sessionShellFixture.requests.filter(
+              (input) => input.method === 'input.models.read',
+            ).length,
+        );
+      const tasks = async () => {
+        await page.getByRole('button', { name: '定时任务', exact: true }).click();
+        await page.locator('.scheduled-page').waitFor();
+      };
+      const expectTarget = (id?: string) =>
+        page.evaluate((id) => {
+          Reflect.get(window, 'modelNavigationObservation').expected = id;
+        }, id);
+      for (const [visit, id] of ['a', 'b', 'a'].entries()) {
+        const name = visit === 0 ? 'same-a' : id;
+        await tasks();
+        await expectTarget(id);
+        const before = await inputReads();
+        await page.evaluate(() => window.sessionShellFixture.hold());
+        await row(id).click();
+        await page.waitForFunction(() => window.sessionShellFixture.pending('selection') > 0);
+        await phase(`${name}-selection`);
+        assert.equal(await page.locator('.composer').isVisible(), id === 'a');
+        if (id === 'a') {
+          assert.equal(await page.locator('[data-model-trigger]').isDisabled(), true);
+          if (withoutPermissions)
+            assert.equal(await page.locator('[data-permission-trigger]').count(), 0);
+          else
+            assert.equal(await page.locator('[data-permission-trigger]').innerText(), '自动审核');
+        }
+        assert.equal(await inputReads(), before);
+        await page.evaluate(() => window.sessionShellFixture.release('selection'));
+        await page.waitForFunction(() => window.sessionShellFixture.pending('models') > 0);
+        await phase(`${name}-models`);
+        assert.equal(await page.locator('.composer').isVisible(), id === 'a');
+        assert.equal(await inputReads(), before + 1);
+        await page.evaluate(() => window.sessionShellFixture.release('models'));
+        if (id === 'b') {
+          await page.waitForFunction(() => window.sessionShellFixture.pending('draft') > 0);
+          await phase('b-draft');
+          assert.equal(await page.locator('.composer').count(), 0);
+          await page.evaluate(() => window.sessionShellFixture.release('draft'));
+        }
+        await phase(`${name}-history`);
+        assert.equal(await page.locator('.composer').isVisible(), id === 'a');
+        await page.evaluate(() => window.sessionShellFixture.resume());
+        await ready(id);
+        await page.getByText(`Reply ${id}`, { exact: true }).waitFor();
+        await phase(`${name}-ready`);
+        if (id === 'a')
+          assert.ok(
+            Math.abs(
+              (await page
+                .locator('.conversation-viewport')
+                .evaluate((element) => element.scrollTop)) - originalScroll,
+            ) < 2,
+          );
+      }
+      assert.equal(await readDraft(), draftA);
+      await tasks();
+      await expectTarget('b');
+      await page.evaluate(() => window.sessionShellFixture.hold());
+      await row('b').click();
+      await phase('rapid-b');
+      await expectTarget('a');
+      await row('a').click();
+      await phase('rapid-a');
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await ready('a');
+      await phase('rapid-ready');
+      const selections = await page.evaluate(
+        () =>
+          window.sessionShellFixture.requests.filter((input) => input.method === 'select').length,
+      );
+      await tasks();
+      await row('a').click();
+      await ready('a');
+      await phase('same-session');
+      assert.equal(
+        await page.evaluate(
+          () =>
+            window.sessionShellFixture.requests.filter((input) => input.method === 'select').length,
+        ),
+        selections + 1,
+      );
+      await tasks();
+      await expectTarget('b');
+      await page.evaluate(() =>
+        window.sessionShellFixture.modelFailure('b', 'catalogue_network_failed'),
+      );
+      await row('b').click();
+      await page.getByText('模型目录不可用：catalogue_network_failed', { exact: true }).waitFor();
+      await phase('genuine-failure');
+      assert.equal(await page.locator('.composer-actions button').isDisabled(), true);
+      await page.evaluate(() => window.sessionShellFixture.modelFailure('b'));
+      await tasks();
+      await row('b').click();
+      await ready('b');
+      await phase('recovered');
+      await expectTarget(undefined);
+      await row('a').click();
+      await ready('a');
+      await phase('final');
+      assert.equal(await readDraft(), draftA);
+      const frames = (await page.evaluate(
+        () => Reflect.get(window, 'modelNavigationObservation').frames,
+      )) as {
+        phase: string;
+        expected?: string;
+        title?: string;
+        model?: string;
+        effort?: string;
+        modelLeft?: number;
+        attachment: boolean;
+        permission?: string;
+        draft?: string;
+        composerVisible: boolean;
+        composerTop?: number;
+        presentationPending: boolean;
+        paintedControls: number;
+        scrollTop?: number;
+        alerts: string[];
+        messages: string[];
+        welcome: boolean;
+      }[];
+      assert.ok(frames.length > 60);
+      for (const frame of frames) {
+        assert.equal(
+          frame.alerts.some((alert) => alert.includes('native_request_failed')),
+          false,
+        );
+        assert.equal(new Set(frame.messages).size, frame.messages.length);
+        assert.equal(frame.welcome, false);
+        if (frame.presentationPending)
+          assert.equal(frame.paintedControls, 0, `${theme}/${frame.phase}: no hidden leaf paint`);
+        if (frame.expected) {
+          assert.equal(
+            frame.composerVisible,
+            frame.messages.length > 0,
+            `${theme}/${frame.phase}: message and composer visibility`,
+          );
+        }
+        const displayed =
+          frame.title === 'Session A' ? 'a' : frame.title === 'Session B' ? 'b' : undefined;
+        if (displayed && frame.composerVisible) {
+          assert.equal(frame.attachment, true, `${theme}/${frame.phase}: attachment control`);
+          assert.ok(
+            Math.abs(frame.modelLeft! - originalModelLeft) < 1,
+            `${theme}/${frame.phase}: stable model control position`,
+          );
+          assert.ok(
+            frame.alerts.some((alert) => alert.includes('catalogue_network_failed')) ||
+              (unselected
+                ? frame.model === '选择模型'
+                : frame.model?.includes(`Model ${displayed.toUpperCase()}`)),
+            `${theme}/${frame.phase}: ${frame.model}`,
+          );
+          if (withoutPermissions)
+            assert.equal(
+              frame.permission,
+              undefined,
+              `${theme}/${frame.phase}: no synthetic permission label`,
+            );
+          else
+            assert.ok(
+              frame.permission?.includes(displayed === 'a' ? '自动审核' : '完全访问'),
+              `${theme}/${frame.phase}: ${frame.permission}`,
+            );
+          assert.equal(frame.draft, displayed === 'a' ? draftA : 'Draft B');
+          assert.ok(
+            frame.messages.every((id) => id === `u-${displayed}` || id === `m-${displayed}`),
+            `${theme}/${frame.phase}: own Session messages`,
+          );
+          if (!frame.alerts.some((alert) => alert.includes('catalogue_network_failed')))
+            assert.equal(
+              frame.effort,
+              unselected ? undefined : displayed === 'a' ? '高' : '轻度',
+              `${theme}/${frame.phase}: own reasoning effort`,
+            );
+          if (displayed === 'a') {
+            assert.ok(
+              Math.abs(frame.composerTop! - originalComposerTop) < 1,
+              `${theme}/${frame.phase}: stable multiline composer height`,
+            );
+            assert.ok(
+              Math.abs(frame.scrollTop! - originalScroll) < 2,
+              `${theme}/${frame.phase}: restored reading position`,
+            );
+          }
+        }
+      }
+      assert.deepEqual(errors, []);
+      assert.equal(
+        await page.locator('[role="alert"]').filter({ hasText: '模型目录不可用' }).count(),
+        0,
+      );
+      assert.deepEqual(
+        await page.evaluate(() =>
+          window.sessionShellFixture.requests.filter((input) =>
+            [
+              'caller.prepare',
+              'caller.submit',
+              'input.prepare',
+              'input.submit',
+              'submit',
+              'conversation.send',
+              'scheduled.runNow',
+              'scheduled.save',
+            ].includes(input.method),
+          ),
+        ),
+        [],
+      );
+      cases.push({
+        kind: 'model-navigation',
+        unselected,
+        withoutPermissions,
+        theme,
+        phases,
+        frames,
+        errors,
+        originalScroll,
+        originalModelLeft,
+        originalComposerTop,
+      });
+    } finally {
+      await page.close();
+    }
+  }
+  return cases;
+}
+
 /** Exercises the real Native navigation branch, including its delayed reads, without a Service. */
 export async function verifyWorktreeNavigation(browser: Browser, url: string, artifact: string) {
   const cases = [];

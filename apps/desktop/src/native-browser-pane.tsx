@@ -149,18 +149,30 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
       const parentBox = parent?.getBoundingClientRect() ?? new DOMRect(0, top, width, height - top);
       let expected = parentBox;
       const frame: HTMLElement | null = group.parentElement;
-      if (
+      const frameStyle =
         parent &&
         frame?.classList.contains('client-content-frame') &&
         frame.parentElement?.closest('[data-panel]') === parent
-      ) {
-        const style = getComputedStyle(frame);
-        const [left, right, top, bottom] = [
-          style.marginLeft,
-          style.marginRight,
-          style.marginTop,
-          style.marginBottom,
-        ].map((value) => Number.parseFloat(value) || 0);
+          ? getComputedStyle(frame)
+          : !parent && nativeContent
+            ? getComputedStyle(nativeContent)
+            : undefined;
+      if (frameStyle) {
+        const [left, right, top, bottom] = (
+          parent
+            ? [
+                frameStyle.marginLeft,
+                frameStyle.marginRight,
+                frameStyle.marginTop,
+                frameStyle.marginBottom,
+              ]
+            : [
+                frameStyle.paddingLeft,
+                frameStyle.paddingRight,
+                frameStyle.paddingTop,
+                frameStyle.paddingBottom,
+              ]
+        ).map((value) => Number.parseFloat(value) || 0);
         expected = new DOMRect(
           parentBox.left + left!,
           parentBox.top + top!,
@@ -181,8 +193,8 @@ function measuredLayout(node: HTMLElement, bounds: NativeBrowserBounds): NativeL
         handle.width > 2
       )
         return { kind: 'unsupported' };
-      // Root fills the viewport below the native titlebar; the nested Group
-      // fills its content frame, including Windows' material margins. Compare
+      // Root fills the native content box inside the shell padding; the nested
+      // Group fills its content frame, including any material margins. Compare
       // against CSS policy, so old DOM sizes cannot masquerade as new gutters.
       if (
         !fills(box, expected) ||

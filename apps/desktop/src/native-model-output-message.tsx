@@ -1,6 +1,7 @@
 import { ModelOutputMessage, type ModelOutputMessageProps } from '@kite-ai/ui';
 import {
   MessageContent,
+  PromptMarkdown,
   useConversationReadActive,
   useConversationResourceRetention,
 } from '@kite-ai/ui/desktop';
@@ -137,6 +138,10 @@ function NativeMarkdownBody({
     },
     [],
   );
+  if (message.role === 'user' && !message.agentMessage && !message.agentResult)
+    return (
+      <PromptMarkdown key={scope} text={displayed} openFile={retained ? undefined : openFile} />
+    );
   return (
     <MessageContent
       key={scope}

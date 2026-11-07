@@ -1,34 +1,13 @@
-import { CodeNode } from '@lexical/code-core';
-import { LinkNode } from '@lexical/link';
-import { ListItemNode, ListNode } from '@lexical/list';
 import {
-  $convertFromMarkdownString,
-  $convertToMarkdownString,
-  $generateNodesFromMarkdownString,
-  TRANSFORMERS,
-} from '@lexical/markdown';
-import { LexicalComposer } from '@lexical/react/LexicalComposer';
-import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { ContentEditable } from '@lexical/react/LexicalContentEditable';
-import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
-import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
-import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
-import { ListPlugin } from '@lexical/react/LexicalListPlugin';
-import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
-import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
-import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
-import { HeadingNode, QuoteNode } from '@lexical/rich-text';
-import {
-  $getRoot,
-  $getSelection,
-  $isRangeSelection,
-  CLEAR_HISTORY_COMMAND,
-  COMMAND_PRIORITY_HIGH,
-  KEY_ENTER_COMMAND,
-  PASTE_COMMAND,
-  SKIP_DOM_SELECTION_TAG,
-} from 'lexical';
-import { type Ref, useImperativeHandle, useLayoutEffect, useRef } from 'react';
+  type Ref,
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { useConversationReadActive } from '../conversation-activity';
+import { Textarea } from './components/ui/textarea';
 import { useReadGate } from './ReadGate';
 
 export interface PromptEditorHandle {
@@ -45,158 +24,150 @@ export interface PromptEditorProps {
   onSend(): void;
   onFiles?(files: readonly File[]): void;
 }
-const externalUpdate = 'kite-prompt-source';
 
-function InputPlugin(props: PromptEditorProps) {
-  const [editor] = useLexicalComposerContext();
-  const current = useRef(props);
+/** Plain text in, original Markdown out. Only messages render Markdown. */
+export function PromptEditor(props: PromptEditorProps) {
+  const blocked = useReadGate();
+  const readActive = useConversationReadActive();
+  const unavailable = props.disabled || blocked || !readActive;
+  const root = useRef<HTMLTextAreaElement>(null);
+  const current = useRef({ ...props, unavailable });
+  current.current = { ...props, unavailable };
+  const installed = useRef({ value: props.value, scope: props.scopeKey });
+  const committedScope = useRef(props.scopeKey);
+  const composition = useRef<string | undefined>(undefined);
+  const pendingFocus = useRef(false);
   const source = useRef(props.value);
-  const scope = useRef(props.scopeKey);
-  useLayoutEffect(() => {
-    current.current = props;
-    editor.setEditable(!props.disabled);
-    const changedScope = scope.current !== props.scopeKey;
-    if (changedScope || source.current !== props.value) {
+  const [text, setText] = useState(props.value);
+  const [generation, setGeneration] = useState(0);
+
+  if (installed.current.value !== props.value || installed.current.scope !== props.scopeKey) {
+    const scopeChanged = installed.current.scope !== props.scopeKey;
+    installed.current = { value: props.value, scope: props.scopeKey };
+    if (source.current !== props.value) {
       source.current = props.value;
-      scope.current = props.scopeKey;
-      editor.update(
-        () => {
-          $convertFromMarkdownString(props.value, TRANSFORMERS, undefined, true);
-          $getRoot().selectEnd();
-        },
-        { tag: [externalUpdate, SKIP_DOM_SELECTION_TAG], discrete: true },
-      );
-      if (changedScope) editor.dispatchCommand(CLEAR_HISTORY_COMMAND, undefined);
+      setText(props.value);
     }
-  });
+    // A composing native control must not deliver its old candidate into a new document.
+    if (scopeChanged && composition.current !== undefined) {
+      pendingFocus.current = root.current?.ownerDocument.activeElement === root.current;
+      composition.current = undefined;
+      setGeneration((value) => value + 1);
+    }
+  }
+  const focus = useCallback((end = false) => {
+    if (current.current.unavailable || !root.current) return;
+    root.current.focus({ preventScroll: true });
+    if (end) root.current.setSelectionRange(root.current.value.length, root.current.value.length);
+  }, []);
   useImperativeHandle(
     props.inputRef,
     () => ({
-      focus: () => editor.focus(),
-      moveCaretToEnd: () => editor.focus(() => editor.update(() => $getRoot().selectEnd())),
+      focus: () => focus(),
+      moveCaretToEnd: () => focus(true),
     }),
-    [editor],
+    [focus],
   );
-  useLayoutEffect(() => {
-    const enter = editor.registerCommand(
-      KEY_ENTER_COMMAND,
-      (event) => {
-        if (
-          !event ||
-          event.shiftKey ||
-          event.altKey ||
-          event.isComposing ||
-          event.keyCode === 229 ||
-          editor.isComposing()
-        )
-          return false;
-        event.preventDefault();
-        current.current.onSend();
-        return true;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-    const paste = editor.registerCommand(
-      PASTE_COMMAND,
-      (event) => {
-        if (current.current.disabled) return false;
-        if (!(event instanceof ClipboardEvent) || !event.clipboardData) return false;
-        const files = [...event.clipboardData.files];
-        if (files.length && current.current.onFiles) {
-          event.preventDefault();
-          current.current.onFiles(files);
-          return true;
-        }
-        const text = event.clipboardData.getData('text/plain');
-        const selection = $getSelection();
-        if (!text || !$isRangeSelection(selection)) return false;
-        event.preventDefault();
-        selection.insertNodes($generateNodesFromMarkdownString(text, TRANSFORMERS, true));
-        return true;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-    return () => {
-      enter();
-      paste();
-    };
-  }, [editor]);
-  return (
-    <OnChangePlugin
-      ignoreSelectionChange
-      onChange={(state, _editor, tags) => {
-        if (tags.has(externalUpdate)) return;
-        const text = state.read(() => $convertToMarkdownString(TRANSFORMERS, undefined, true));
-        if (text !== source.current) {
-          source.current = text;
-          current.current.onChange(text);
-        }
-      }}
-    />
-  );
-}
 
-export function PromptEditor(props: PromptEditorProps) {
-  const readGate = useReadGate();
-  const input = { ...props, disabled: props.disabled || readGate };
+  useLayoutEffect(() => {
+    if (committedScope.current === props.scopeKey) return;
+    committedScope.current = props.scopeKey;
+    const element = root.current;
+    if (!element) return;
+    // Native undo survives assigning an equal value. Reset it before paint when
+    // the shared control changes scope, without publishing an input event.
+    element.value = source.current ? '' : '\n';
+    element.value = source.current;
+    if (pendingFocus.current) {
+      pendingFocus.current = false;
+      focus(true);
+    }
+  }, [props.scopeKey, focus]);
+
+  const admitted = (element: HTMLTextAreaElement) =>
+    element === root.current &&
+    !current.current.unavailable &&
+    current.current.scopeKey === props.scopeKey;
+  const publish = (element: HTMLTextAreaElement) => {
+    if (element !== root.current) return;
+    if (
+      !admitted(element) ||
+      (composition.current !== undefined && composition.current !== props.scopeKey)
+    ) {
+      element.value = source.current;
+      return;
+    }
+    const next = element.value;
+    if (source.current === next) return;
+    source.current = next;
+    setText(next);
+    current.current.onChange(next);
+  };
+  const receiveFiles = (element: HTMLTextAreaElement, files: FileList | null) => {
+    if (files?.length && admitted(element)) current.current.onFiles?.([...files]);
+  };
   return (
-    <LexicalComposer
-      initialConfig={{
-        namespace: 'kite-prompt',
-        editable: !input.disabled,
-        nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, CodeNode, LinkNode],
-        editorState: () => $convertFromMarkdownString(props.value, TRANSFORMERS, undefined, true),
-        onError: (error) => {
-          throw error;
-        },
-        theme: {
-          paragraph: 'prompt-paragraph',
-          heading: { h1: 'prompt-heading', h2: 'prompt-heading', h3: 'prompt-heading' },
-          quote: 'prompt-quote',
-          code: 'prompt-code-block',
-          text: {
-            bold: 'prompt-bold',
-            italic: 'prompt-italic',
-            strikethrough: 'prompt-strike',
-            code: 'prompt-inline-code',
-          },
-          list: { ul: 'prompt-list', ol: 'prompt-list', listitem: 'prompt-list-item' },
-          link: 'prompt-file-link',
-        },
-      }}
-    >
-      <div className="prompt-editor-shell">
-        <RichTextPlugin
-          contentEditable={
-            <ContentEditable
-              className="prompt-editor"
-              data-disabled={props.disabled || undefined}
-              onClick={(event) => {
-                if ((event.target as Element).closest('a')) event.preventDefault();
-              }}
-              aria-label={props.label}
-              aria-placeholder="描述你想完成的工作…"
-              placeholder={<span className="prompt-editor-placeholder">描述你想完成的工作…</span>}
-              onDragOver={(event) => {
-                if (event.dataTransfer.types.includes('Files')) event.preventDefault();
-              }}
-              onDropCapture={(event) => {
-                if (!event.dataTransfer.files.length) return;
-                event.preventDefault();
-                event.stopPropagation();
-                if (input.disabled) return;
-                props.onFiles?.([...event.dataTransfer.files]);
-              }}
-            />
+    <div className="prompt-editor-shell">
+      <Textarea
+        key={generation}
+        ref={root}
+        className="prompt-editor"
+        role="textbox"
+        rows={1}
+        aria-label={props.label}
+        aria-multiline="true"
+        aria-disabled={unavailable || undefined}
+        data-disabled={props.disabled || undefined}
+        placeholder={props.label}
+        value={text}
+        disabled={props.disabled}
+        readOnly={unavailable}
+        onInput={(event) => publish(event.currentTarget)}
+        onCompositionStart={(event) => {
+          if (admitted(event.currentTarget)) composition.current = props.scopeKey;
+        }}
+        onCompositionEnd={(event) => {
+          if (event.currentTarget !== root.current) return;
+          composition.current = undefined;
+          publish(event.currentTarget);
+        }}
+        onKeyDown={(event) => {
+          if (
+            event.key !== 'Enter' ||
+            event.shiftKey ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey
+          )
+            return;
+          if (!admitted(event.currentTarget)) {
+            event.preventDefault();
+            return;
           }
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-      </div>
-      <HistoryPlugin />
-      <ListPlugin />
-      <LinkPlugin />
-      <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
-      <InputPlugin {...input} />
-    </LexicalComposer>
+          if (
+            composition.current !== undefined ||
+            event.nativeEvent.isComposing ||
+            event.keyCode === 229
+          )
+            return;
+          event.preventDefault();
+          current.current.onSend();
+        }}
+        onPaste={(event) => {
+          if (current.current.unavailable || event.clipboardData.files.length) {
+            event.preventDefault();
+            receiveFiles(event.currentTarget, event.clipboardData.files);
+          }
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          receiveFiles(event.currentTarget, event.dataTransfer.files);
+        }}
+      />
+    </div>
   );
 }

@@ -16,7 +16,11 @@ import {
 import { Input } from './components/ui/input';
 import { PillSelectTrigger } from './components/ui/pill-select-trigger';
 import { TimePicker } from './components/ui/time-picker';
-import { ModelEffortSelector, type ModelEffortSelectorProps } from './ModelEffortSelector';
+import {
+  ModelEffortSelector,
+  type ModelEffortSelectorProps,
+  resolveThinkingEffort,
+} from './ModelEffortSelector';
 import { ProjectSelector } from './NewConversation';
 import {
   type ScheduledTaskDraft,
@@ -100,7 +104,12 @@ export function ScheduledTaskEditor({
     initial?.reasoningEffort,
   );
   const selectedModel = props.models?.find((model) => model.id === modelId);
-  const effort = reasoningEffort ?? selectedModel?.reasoningEffort;
+  const effort = selectedModel
+    ? resolveThinkingEffort(
+        reasoningEffort ?? selectedModel.reasoningEffort,
+        selectedModel.reasoningEffortChoices,
+      )
+    : undefined;
   const [frequency, setFrequency] = useState<ScheduledTaskDraft['schedule']['frequency']>(
     initial?.schedule.frequency ?? 'weekdays',
   );

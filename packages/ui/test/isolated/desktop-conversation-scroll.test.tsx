@@ -16,6 +16,7 @@ test('native Conversation follows, restores manual reading and retires its obser
     'cancelAnimationFrame',
     'getComputedStyle',
     'HTMLElement',
+    'MutationObserver',
   ] as const;
   const original = keys.map(
     (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
@@ -78,6 +79,7 @@ test('native Conversation follows, restores manual reading and retires its obser
     window: dom.window,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
     HTMLElement: dom.window.HTMLElement,
+    MutationObserver: dom.window.MutationObserver,
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
     ResizeObserver: ResizeObserverStub,

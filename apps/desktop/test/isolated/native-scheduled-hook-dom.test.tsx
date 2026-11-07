@@ -139,6 +139,121 @@ test('model read failures survive list and mutation success, retry independently
   }
 });
 
+test('superseded scheduled reads and mutations cannot publish stale failures or replace a newer list', async () => {
+  const dom = new JSDOM('<div id="root"></div>');
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  let props!: ScheduledTasksProps;
+  const lists: {
+    resolve: (value: NativeScheduledResult) => void;
+    reject: (cause: Error) => void;
+  }[] = [];
+  const mutations: ((value: NativeScheduledResult) => void)[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      if (request.method === 'scheduled.list')
+        return new Promise<NativeScheduledResult>((resolve, reject) =>
+          lists.push({ resolve, reject }),
+        );
+      if (request.method === 'scheduled.toggle')
+        return new Promise<NativeScheduledResult>((resolve) => mutations.push(resolve));
+      if (request.method === 'conversation.models.read')
+        return {
+          kind: 'settings.models',
+          storeId: 'store',
+          scope: 'user',
+          observationId: 1,
+          canWrite: false,
+          errors: [],
+          defaultModelId: null,
+          models: [],
+        };
+      throw Error('unexpected_request');
+    },
+  };
+  function Harness() {
+    props = useNativeScheduledTasks({
+      bridge,
+      generation: 1,
+      storeId: 'store',
+      active: true,
+      workspaces: [],
+      onOpen: async () => {},
+    });
+    return <div>{props.error}</div>;
+  }
+  const facts = (count = 0): NativeScheduledResult => ({
+    kind: 'scheduled.tasks',
+    runs: [],
+    tasks: Array.from({ length: count }, (_, index) => ({
+      id: `task-${index}`,
+      name: 'Current task',
+      prompt: 'Prompt',
+      storeId: 'store',
+      workspaceId: 'workspace',
+      modelId: 'model',
+      enabled: false,
+      schedule: { frequency: 'daily', time: '09:00', timeZone: 'UTC' },
+      nextRunAt: null,
+      createdAt: 1,
+      updatedAt: 1,
+    })),
+  });
+  try {
+    await act(async () => root.render(<Harness />));
+    let first!: Promise<void>;
+    await act(async () => {
+      first = Promise.resolve(props.onToggle!('task', false));
+    });
+    await act(async () => {
+      mutations[0]!(facts(1));
+      await first;
+    });
+    expect(props.tasks).toHaveLength(1);
+    await act(async () => lists[0]!.reject(Error('obsolete_read_failed')));
+    expect(props.error).toBe('');
+
+    let old!: Promise<void>, current!: Promise<void>;
+    await act(async () => {
+      old = Promise.resolve(props.onToggle!('task', true));
+    });
+    await act(async () => {
+      current = Promise.resolve(props.onToggle!('task', false));
+    });
+    await act(async () => {
+      mutations[2]!(facts(1));
+      await current;
+    });
+    await act(async () => {
+      mutations[1]!(facts());
+    });
+    expect(props.tasks).toHaveLength(1);
+    expect(lists).toHaveLength(2);
+    await act(async () => {
+      lists[1]!.resolve(facts(1));
+      await old;
+    });
+    expect(props.tasks).toHaveLength(1);
+    expect(props.error).toBe('');
+  } finally {
+    await act(async () => root.unmount());
+    Object.assign(globalThis, previous);
+    dom.window.close();
+  }
+});
+
 test('scheduled page reads do not navigate; create retry reuses identity and results open exact session', async () => {
   const dom = new JSDOM('<div id="root"></div>');
   const previous = {

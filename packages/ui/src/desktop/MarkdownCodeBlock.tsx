@@ -29,26 +29,24 @@ export function MarkdownCodeBlock({ children, node }: { children?: ReactNode } &
     <CodeBlock className="markdown-code-block">
       <CodeBlockHeader>
         <CodeBlockTitle>{language || '代码'}</CodeBlockTitle>
-        {(canCopy || diagram) && (
-          <CodeBlockActions>
-            {diagram && (
-              <Button
-                variant="ghost"
-                size="xs"
-                type="button"
-                className="markdown-source-toggle"
-                aria-pressed={sourceVisible}
-                aria-disabled={!readActive || undefined}
-                onClick={() => {
-                  if (readActive) setSourceVisible((value) => !value);
-                }}
-              >
-                {sourceVisible ? '图表' : '源码'}
-              </Button>
-            )}
-            {canCopy && <CodeBlockCopyButton value={code} />}
-          </CodeBlockActions>
-        )}
+        <CodeBlockActions>
+          {diagram && (
+            <Button
+              variant="ghost"
+              size="xs"
+              type="button"
+              className="markdown-source-toggle"
+              aria-pressed={sourceVisible}
+              aria-disabled={!readActive || undefined}
+              onClick={() => {
+                if (readActive) setSourceVisible((value) => !value);
+              }}
+            >
+              {sourceVisible ? '图表' : '源码'}
+            </Button>
+          )}
+          <CodeBlockCopyButton value={code} disabled={!canCopy} />
+        </CodeBlockActions>
       </CodeBlockHeader>
       {diagram ? (
         <MarkdownDiagram

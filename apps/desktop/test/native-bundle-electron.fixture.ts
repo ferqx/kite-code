@@ -698,12 +698,12 @@ try {
   assert.equal(await page.locator('.new-conversation-welcome button').count(), 0);
   await page.getByRole('textbox', { name: '新对话草稿' }).fill('manually prepared draft');
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
     'manually prepared draft',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
     'manually prepared draft',
   );
   const beforeFirst = await page.evaluate(
@@ -714,7 +714,7 @@ try {
   assert.equal(beforeFirst.inputSubmissions.length, 0);
   await page.getByRole('textbox', { name: '新对话草稿' }).fill('write one real bundled file');
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
     'write one real bundled file',
   );
   await selectNativeFixtureModel(page, 'fixed');

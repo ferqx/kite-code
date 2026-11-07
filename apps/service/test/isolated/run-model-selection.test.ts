@@ -491,12 +491,16 @@ test('explicit per-Run model chooses its actual provider route and name while de
         path: `/${family}/v1/chat/completions`,
         body: { model: `actual-${family}` },
       });
+      expect(f.requests.at(-1)!.body.reasoning_effort).toBe(
+        family === 'openai' ? 'low' : undefined,
+      );
     }
     await f.submit('default', { kind: 'run.start', content: 'New task: hello' });
     expect(f.requests.at(-1)).toMatchObject({
       path: '/compatible/v1/chat/completions',
       body: { model: 'actual-compatible' },
     });
+    expect(f.requests.at(-1)!.body).not.toHaveProperty('reasoning_effort');
     expect(JSON.parse(readFileSync(f.file, 'utf8'))).toEqual(f.config);
   } finally {
     await f.close();
@@ -658,7 +662,17 @@ test('every provider sends configured and temporary effort regardless of model c
         'max',
         'ultar',
       ]);
-      for (const effort of [undefined, 'max', 'ultar', 'none'] as const) {
+      for (const effort of [
+        undefined,
+        'low',
+        'medium',
+        'high',
+        'xhigh',
+        'max',
+        'ultar',
+        'none',
+        'minimal',
+      ] as const) {
         const commandId = `${model.id}-${effort ?? 'configured'}`;
         const view = await f.submit(commandId, {
           kind: 'run.start',
@@ -667,7 +681,10 @@ test('every provider sends configured and temporary effort regardless of model c
           ...(effort === undefined ? {} : { reasoningEffort: effort }),
         });
         expect(view.commandRun.status).toBe('completed');
-        expect(f.requests.at(-1)!.body.reasoning_effort).toBe(effort ?? 'low');
+        expect(f.requests.at(-1)).toMatchObject({
+          path: `/${model.provider}/v1/chat/completions`,
+          body: { model: model.model, reasoning_effort: effort ?? 'low' },
+        });
         const execution = view.executions.filter((execution) => execution.kind === 'model').at(-1)!;
         const input = await f.store.getModelInputSnapshot({ ...f.base, executionId: execution.id });
         expect(input.metadata).toMatchObject({
@@ -675,15 +692,15 @@ test('every provider sends configured and temporary effort regardless of model c
         });
       }
     }
-    expect(f.requests).toHaveLength(16);
-    expect(f.credentialReads).toBe(16);
+    expect(f.requests).toHaveLength(36);
+    expect(f.credentialReads).toBe(36);
     expect(readFileSync(f.file, 'utf8')).toBe(original);
   } finally {
     await f.close();
   }
 }, 20000);
 
-test('a remote effort rejection remains a failed model request without fallback or a second request', async () => {
+test('a remote effort rejection exhausts reconnects with the same model and effort, without fallback', async () => {
   const f = await fixture(false, false, true);
   try {
     const view = await f.submit('remote-effort-rejection', {
@@ -694,11 +711,12 @@ test('a remote effort rejection remains a failed model request without fallback 
     });
     expect(view.runs[0]!.status).toBe('failed');
     expect(view.executions.find((execution) => execution.kind === 'model')?.status).toBe('failed');
-    expect(f.requests).toHaveLength(1);
-    expect(f.requests[0]).toMatchObject({
-      path: '/deepseek/v1/chat/completions',
-      body: { model: 'actual-deepseek', reasoning_effort: 'high' },
-    });
+    expect(f.requests).toHaveLength(6);
+    for (const request of f.requests)
+      expect(request).toMatchObject({
+        path: '/deepseek/v1/chat/completions',
+        body: { model: 'actual-deepseek', reasoning_effort: 'high' },
+      });
   } finally {
     await f.close();
   }

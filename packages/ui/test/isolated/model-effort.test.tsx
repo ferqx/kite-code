@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, useState } from 'react';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 class TestResizeObserver {
@@ -166,7 +166,7 @@ test('same-name models remain distinct by provider and the popup uses two column
   expect(document.querySelector('.model-effort-panel')).not.toBeNull();
 });
 
-test('configured effort stays visible and absent effort is labeled unspecified without selecting a default', async () => {
+test('configured effort stays visible and a missing configuration resolves to medium immediately', async () => {
   const changes: string[] = [];
   const props = {
     model: { provider: 'OpenAI', name: 'model' },
@@ -181,13 +181,15 @@ test('configured effort stays visible and absent effort is labeled unspecified w
     'legacy-extra',
   );
   await act(() => root!.render(<ModelEffortSelector {...props} reasoningEffort={undefined} />));
-  expect(document.querySelector('.effort-value')?.textContent).toBe('未指定');
-  expect(document.querySelector('.model-effort-summary')?.textContent).toBe('未指定');
+  expect(document.querySelector('.effort-value')?.textContent).toBe('中');
+  expect(document.querySelector('.model-effort-summary')?.textContent).toBe('中');
   expect(document.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toBe(
-    '模型：model，思考程度：未指定',
+    '模型：model，思考程度：中',
   );
   expect(document.body.textContent).not.toContain('默认');
-  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('未指定');
+  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('中');
+  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuenow')).toBe('1');
+  expect(document.body.textContent).not.toContain('未指定');
   expect(changes).toEqual([]);
   await act(() =>
     root!.render(
@@ -233,6 +235,50 @@ test('every selected model offers effort adjustment without capability metadata;
   await openSelector();
   expect(document.querySelector('[role="slider"]')).toBeNull();
   expect(document.querySelector('.model-effort-unavailable')?.textContent).toBe('请先选择模型');
+});
+
+test.each([
+  'Home',
+  'ArrowLeft',
+  'ArrowDown',
+  'PageDown',
+])('the default medium slider moves once with %s and keeps all displayed values aligned', async (key) => {
+  const changes: string[] = [];
+  const model = { provider: 'Gateway', name: 'model' };
+  function Host() {
+    const [effort, setEffort] = useState<string>();
+    return (
+      <ModelEffortSelector
+        model={model}
+        models={[model]}
+        reasoningEffort={effort}
+        onModelChange={() => {}}
+        onReasoningEffortChange={(value) => {
+          changes.push(value);
+          setEffort(value);
+        }}
+      />
+    );
+  }
+  await render(<Host />);
+  await openSelector();
+  const slider = document.querySelector('[role="slider"]')!;
+  expect(changes).toEqual([]);
+  expect(document.querySelector('.gem-slider')?.hasAttribute('data-unselected')).toBe(false);
+  expect(document.querySelectorAll('.gem-ticks [data-passed="true"]')).toHaveLength(2);
+  expect(document.querySelector('.effort-value')?.textContent).toBe('中');
+  await act(() =>
+    slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true })),
+  );
+  expect(changes).toEqual(['low']);
+  expect(document.querySelector('.gem-slider')?.hasAttribute('data-unselected')).toBe(false);
+  expect(document.querySelector('.effort-value')?.textContent).toBe('轻度');
+  expect(document.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
+  expect(slider.getAttribute('aria-valuetext')).toBe('轻度');
+  await act(() =>
+    slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true })),
+  );
+  expect(changes).toEqual(['low']);
 });
 
 test('model availability hints appear only in the model list and preserve selection and effort controls', async () => {

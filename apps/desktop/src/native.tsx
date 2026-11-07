@@ -19,6 +19,7 @@ import {
   DialogTitle,
   MessageContent,
   NAVIGATION_MIN_WIDTH,
+  PromptMarkdown,
   ReadingStateCache,
   RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
   type SessionChildTabRequest,
@@ -90,6 +91,7 @@ import {
   NativeDiagnosticsProvider,
   useNativeDiagnostics,
 } from './native-diagnostics';
+import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges, NativeOutputFile } from './native-file-changes';
@@ -111,11 +113,11 @@ import { readNativeModelOutput } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
 import {
   type NativeModelChoice,
+  type NativeModelDisplay,
   NativeModelPicker,
   NativeModelSnapshots,
   type NativePreparedModels,
   nativeModelScope,
-  prepareNativeModels,
 } from './native-model-picker';
 import {
   desktopConversationMessages,
@@ -234,6 +236,21 @@ export function NativeDesktop({
   );
 }
 
+type CachedComposer = NativeModelDisplay & {
+  sourceId: number;
+  storeId: string;
+  sessionId: string;
+  workspaceId: string;
+  draft: string;
+  permission?: 'auto' | 'accept_edits' | 'full';
+  active: boolean;
+  stopping: boolean;
+  sendLabel: string;
+  queueItems?: NonNullable<NonNullable<SessionPageProps['composer']>['queue']>['items'];
+  cacheMetrics?: NonNullable<SessionPageProps['composer']>['cacheMetrics'];
+  contextUsage?: NonNullable<SessionPageProps['composer']>['contextUsage'];
+};
+
 function NativeDesktopContent({
   bridge,
   nativeWindow,
@@ -285,6 +302,8 @@ function NativeDesktopContent({
     draft: string;
     models?: NativePreparedModels;
     preparation: boolean;
+    pendingSessionId?: string;
+    preview?: CachedComposer;
   }>({ draft: '', preparation: false });
   const { state, draft, models: preparedModels } = frame;
   const grantDirectoryScope = useRef<string | undefined>(undefined);
@@ -297,7 +316,13 @@ function NativeDesktopContent({
   }, [currentGrantScope]);
   function setPreparing(value: boolean) {
     setPreparingIntent(value);
-    if (value) setFrame((previous) => ({ ...previous, preparation: true }));
+    if (value)
+      setFrame((previous) => ({
+        ...previous,
+        preparation: true,
+        pendingSessionId: undefined,
+        preview: undefined,
+      }));
   }
   const setDraft = useCallback((value: string | ((previous: string) => string)) => {
     setFrame((previous) => ({
@@ -430,10 +455,40 @@ function NativeDesktopContent({
   const [, choiceChanged] = useState(0);
   const modelChoices = useRef(new Map<string, NativeModelChoice>());
   const modelSnapshots = useRef(new NativeModelSnapshots());
+  const composerSnapshots = useRef(new NativeDisplayCache<CachedComposer>());
+  const composerSource = useRef<
+    | {
+        bridge: NativeBridge;
+        generation: number;
+        storeId?: string;
+        revision: number;
+        id: number;
+      }
+    | undefined
+  >(undefined);
+  if (
+    composerSource.current?.bridge !== bridge ||
+    composerSource.current.generation !== (state?.generation ?? 0) ||
+    composerSource.current.storeId !== directory?.storeId ||
+    composerSource.current.revision !== settingsRevision
+  ) {
+    composerSnapshots.current.clear();
+    composerSource.current = {
+      bridge,
+      generation: state?.generation ?? 0,
+      storeId: directory?.storeId,
+      revision: settingsRevision,
+      id: (composerSource.current?.id ?? 0) + 1,
+    };
+  }
+  const cachedComposer =
+    frame.preview?.sourceId === composerSource.current.id ? frame.preview : undefined;
   const [resolvedChoice, setResolvedChoice] = useState<{
     identity: string;
     choice?: NativeModelChoice;
     ready: boolean;
+    display?: NativeModelDisplay;
+    settled: boolean;
   }>();
   const planModes = useRef(new Map<string, boolean>());
   const errorSequence = useRef(0);
@@ -453,7 +508,12 @@ function NativeDesktopContent({
   const [failedReads, setFailedReads] = useState<{
     state?: string;
     directory?: string;
-    selection?: { key: string; sessionId: string; preserveHistory?: boolean };
+    selection?: {
+      key: string;
+      sessionId: string;
+      freshPresentation?: boolean;
+      preserveHistory?: boolean;
+    };
   }>({});
   const sessionRecovery = useRef(new NativeSessionRecovery());
   const [, recoveryVisibilityChanged] = useState(0);
@@ -638,6 +698,22 @@ function NativeDesktopContent({
       const selecting = !!selectionRead.current;
       setFrame((previousFrame) => {
         const previous = previousFrame.state;
+        // Main notifications cannot publish a pending navigation's business
+        // selection before its complete prepared frame, including after failure.
+        if (previousFrame.pendingSessionId && !preparedView) {
+          const retained =
+            previous?.generation === value.generation &&
+            (!value.directory || value.directory.storeId === previous.selection?.storeId)
+              ? previous.selection
+              : undefined;
+          return {
+            ...previousFrame,
+            state: {
+              ...value,
+              selection: retained ? { ...retained, viewLoading: true } : undefined,
+            },
+          };
+        }
         if (
           !value.selection &&
           selecting &&
@@ -669,7 +745,12 @@ function NativeDesktopContent({
         return {
           ...previousFrame,
           state: { ...value, selection: observedSelection },
-          ...(preparedView && { ...preparedView, preparation: false }),
+          ...(preparedView && {
+            ...preparedView,
+            preparation: false,
+            pendingSessionId: undefined,
+            preview: undefined,
+          }),
         };
       });
     }
@@ -833,6 +914,34 @@ function NativeDesktopContent({
     setGrantDirectoryOpen(false);
     setAgentBrowserOpen(false);
     if (keepCurrentDraft) rememberDraft();
+    const target = directory?.sessions.find(
+      (session) => session.id === sessionId && !session.deletedAt && !session.parentSessionId,
+    );
+    const retained =
+      directory && composerSnapshots.current.get(imageScope(directory.storeId, sessionId));
+    const preview =
+      retained?.sourceId === composerSource.current?.id &&
+      retained?.workspaceId === target?.workspaceId
+        ? retained
+        : undefined;
+    const freshPresentation =
+      scheduledTasksView ||
+      (!frame.preparation && frame.pendingSessionId !== undefined) ||
+      !!preview;
+    if (!keepTaskPage)
+      setFrame((previous) =>
+        freshPresentation || (!previous.preparation && previous.pendingSessionId !== undefined)
+          ? {
+              ...previous,
+              state: previous.state ? { ...previous.state, selection: undefined } : undefined,
+              draft: '',
+              models: undefined,
+              preparation: false,
+              pendingSessionId: sessionId,
+              preview,
+            }
+          : { ...previous, pendingSessionId: sessionId, preview: undefined },
+      );
     const firstHandoff =
       preparing && !keepCurrentDraft && firstRef.current?.creation.sessionId === sessionId;
     // Keep the submitted preparation visible until its own selected facts arrive.
@@ -846,11 +955,11 @@ function NativeDesktopContent({
       epoch = readLifecycle.current.epoch;
     selected.current = sessionId;
     history.current?.close();
-    // Revoke actions now; retain the current reading until the target facts arrive.
+    // Revoke actions now; any retained target display remains presentation only.
     setHistoryState((previous) => ({ ...previous, phase: 'loading', error: undefined }));
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
-    await readSelection(sessionId, current, nonce, epoch);
+    await readSelection(sessionId, current, nonce, epoch, { freshPresentation });
   }
   async function exitWorktree() {
     if (
@@ -905,7 +1014,10 @@ function NativeDesktopContent({
     current: number,
     nonce: number,
     epoch: number,
-    preserveHistory = false,
+    {
+      freshPresentation = false,
+      preserveHistory = false,
+    }: { freshPresentation?: boolean; preserveHistory?: boolean } = {},
   ) {
     if (!isCurrentRead(current, epoch, nonce)) return;
     const original: NonNullable<typeof selectionRead.current> = {
@@ -944,8 +1056,8 @@ function NativeDesktopContent({
           String(settingsRevision),
         );
         original.latest = undefined;
-        if (!modelSnapshots.current.get(scope)) {
-          const prepared = await prepareNativeModels(
+        if (freshPresentation || !state?.selection || !modelSnapshots.current.get(scope)) {
+          const prepared = await modelSnapshots.current.prepare(
             bridge,
             current,
             targetSelection,
@@ -973,6 +1085,7 @@ function NativeDesktopContent({
           const latestStore = selectionRead.current?.latest?.directory?.storeId;
           if (latestStore && latestStore !== targetSelection.storeId) return;
         }
+        if (preparedDraft && 'error' in preparedDraft) throw preparedDraft.error;
         const latest = selectionRead.current?.latest;
         if (latest) {
           const matching =
@@ -1082,14 +1195,23 @@ function NativeDesktopContent({
           value &&
           'generation' in value &&
           value.selection?.storeId === firstRef.current.creation.expectedStoreId
-        )
+        ) {
+          // The target now owns the latest cached draft, including edits made
+          // after acceptance. Do not leave a copy in the next preparation page.
+          setNewDraft('');
           setPreparing(false);
+        }
       }
     } catch (cause) {
       if (!isCurrentRead(current, epoch, nonce)) return;
       setFailedReads((previous) => ({
         ...previous,
-        selection: { key: JSON.stringify([current, epoch, nonce]), sessionId, preserveHistory },
+        selection: {
+          key: JSON.stringify([current, epoch, nonce]),
+          sessionId,
+          freshPresentation,
+          preserveHistory,
+        },
       }));
       throw cause;
     } finally {
@@ -1281,7 +1403,8 @@ function NativeDesktopContent({
   }, [bridge]);
   // Selection counters govern IO, not the identity of an already observed display label.
   const selectionHandoff =
-    !!selectionRead.current && selected.current !== state?.selection?.session.id;
+    (!!selectionRead.current || !!frame.pendingSessionId) &&
+    selected.current !== state?.selection?.session.id;
   // Select the retained tree on the click, before Main finishes activating its
   // fresh readers. This identity is presentation only; selection still owns IO.
   const pendingSession =
@@ -1377,6 +1500,7 @@ function NativeDesktopContent({
     selection?.storeId,
     selection?.session.id,
     selection?.viewSelection,
+    settingsRevision,
   ]);
   const choiceViewIntent = viewIntent.current;
   const activeInputRun = selection?.runs.find((run) => run.isActive);
@@ -1474,6 +1598,7 @@ function NativeDesktopContent({
     generation: state?.generation ?? generation.current,
     historyEpoch: state?.historyEpoch ?? 0,
     selection: !frame.preparation && !scheduledTasksView ? state?.selection : undefined,
+    preview: cachedComposer,
     revision: state?.selectedEnvironmentRevision ?? state?.environmentRevision ?? 0,
     unavailable:
       state?.environmentReadUnavailable ??
@@ -1644,7 +1769,7 @@ function NativeDesktopContent({
       if (failedSelection) {
         const target = failedSelection.sessionId;
         add(`selection-read:${target}`, () =>
-          readSelection(target, current, nonce, epoch, failedSelection.preserveHistory),
+          readSelection(target, current, nonce, epoch, failedSelection),
         );
       }
       if (readingParent && selection && selection.session.id === sessionId) {
@@ -1659,15 +1784,16 @@ function NativeDesktopContent({
         )
           // Both reasons own the same original selection read and recovery slot.
           add(`selection-read:${selection.session.id}`, () =>
-            readSelection(
-              selection.session.id,
-              current,
-              nonce,
-              epoch,
-              failedSelection?.sessionId === selection.session.id
-                ? failedSelection.preserveHistory
-                : true,
-            ),
+            readSelection(selection.session.id, current, nonce, epoch, {
+              freshPresentation:
+                failedSelection?.sessionId === selection.session.id
+                  ? failedSelection.freshPresentation
+                  : false,
+              preserveHistory:
+                failedSelection?.sessionId === selection.session.id
+                  ? failedSelection.preserveHistory
+                  : true,
+            }),
           );
         if (fileTargets.error || (retrying('files') && fileTargets.loading))
           add('files', () => {
@@ -1701,10 +1827,18 @@ function NativeDesktopContent({
             await refresh();
           }
         });
+      // Holding target presentation revokes actions, not exact original receipt lookups.
+      const receiptStoreId =
+        selection?.storeId ??
+        (directory &&
+        !directory.unavailable &&
+        directory.sessions.some((session) => session.id === sessionId && !session.deletedAt)
+          ? directory.storeId
+          : undefined);
       for (const [id, input] of inputDeliveries)
         if (
           input.sessionId === sessionId &&
-          input.storeId === selection?.storeId &&
+          input.storeId === receiptStoreId &&
           input.phase === 'unknown' &&
           !state?.inputSubmissions.some(
             (row) => row.intent.commandId === id && row.phase !== 'unknown',
@@ -1714,7 +1848,7 @@ function NativeDesktopContent({
       for (const row of state?.inputSubmissions ?? [])
         if (
           row.sessionId === sessionId &&
-          row.intent.expectedStoreId === selection?.storeId &&
+          row.intent.expectedStoreId === receiptStoreId &&
           (row.phase === 'unknown' ||
             (row.phase === 'accepted' && firstSubmission?.commandId !== row.intent.commandId))
         )
@@ -1722,7 +1856,7 @@ function NativeDesktopContent({
       for (const row of state?.callerSubmissions ?? [])
         if (
           row.scope.sessionId === sessionId &&
-          row.scope.storeId === selection?.storeId &&
+          row.scope.storeId === receiptStoreId &&
           (row.phase === 'unknown' ||
             (row.phase === 'accepted' &&
               ['run.start', 'input.follow_up'].includes(row.request.kind) &&
@@ -1734,21 +1868,21 @@ function NativeDesktopContent({
       for (const row of state?.permissionSubmissions ?? [])
         if (
           row.sessionId === sessionId &&
-          row.intent.expectedStoreId === selection?.storeId &&
+          row.intent.expectedStoreId === receiptStoreId &&
           row.phase === 'unknown'
         )
           lookup('lookupPermission', row.intent.commandId);
       for (const row of state?.interactionSubmissions ?? [])
         if (
           row.interaction.sessionId === sessionId &&
-          row.intent.expectedStoreId === selection?.storeId &&
+          row.intent.expectedStoreId === receiptStoreId &&
           row.phase === 'unknown'
         )
           lookup('lookupInteraction', row.intent.commandId);
       for (const row of state?.answerSubmissions ?? [])
         if (
           row.scope.sessionId === sessionId &&
-          row.scope.storeId === selection?.storeId &&
+          row.scope.storeId === receiptStoreId &&
           row.phase === 'unknown'
         )
           lookup('lookupInteraction', row.request.commandId);
@@ -1971,6 +2105,22 @@ function NativeDesktopContent({
   function changeNewDraft(content: string) {
     newDraftRevision.current++;
     setNewDraft(content);
+    const original = firstRef.current;
+    if (
+      preparing &&
+      original &&
+      firstOpenPage.current === pageIntent.current &&
+      original.creation.expectedStoreId === directory?.storeId &&
+      (!original.result ||
+        original.result.phase === 'unknown' ||
+        original.result.phase === 'accepted')
+    )
+      // Edits belong to the first Session until its selection has taken over,
+      // including after acceptance while target reads are still pending.
+      draftCache.current.set(
+        imageScope(original.creation.expectedStoreId, original.creation.sessionId),
+        { content },
+      );
   }
   async function chooseWorkspace(workspaceId: string, observedDirectory = directory) {
     if (!bridge || !observedDirectory?.workspaces.some((workspace) => workspace.id === workspaceId))
@@ -2313,7 +2463,8 @@ function NativeDesktopContent({
         };
         if (firstRef.current?.commandId === original.commandId) {
           setFirstSubmission({ ...original, result: value });
-          setNewDraft((draft) => draft || original.draft.content);
+          if (newDraftRevision.current === original.preparationRevision)
+            setNewDraft((draft) => draft || original.draft.content);
         }
         throw cause;
       }
@@ -2695,7 +2846,77 @@ function NativeDesktopContent({
     !imageDrafts.get(imageScope(selection.storeId, selection.session.id)).length &&
     !imageDrafts.files(imageScope(selection.storeId, selection.session.id)).length &&
     !browserNotes.get(imageScope(selection.storeId, selection.session.id)).length;
+  const currentSendLabel = localWorktreeExit
+    ? '退出工作树'
+    : activeInputRun
+      ? planMode
+        ? '排队新的计划任务'
+        : executionUnconfirmed
+          ? '排队后续输入'
+          : ['context.compress', 'context.compression.reset'].includes(
+                selection?.activeCommand?.kind ?? '',
+              )
+            ? '排队压缩后的输入'
+            : '排队后续输入'
+      : planMode
+        ? '发送计划任务'
+        : '发送明确的新轮次';
+  useLayoutEffect(() => {
+    if (!state || !selection || selected.current !== selection.session.id || frame.pendingSessionId)
+      return;
+    if (!canCompose || permissionFailed || historyState.phase === 'unavailable') {
+      composerSnapshots.current.delete(imageScope(selection.storeId, selection.session.id));
+      return;
+    }
+    if (historyState.phase !== 'complete' || selection.viewLoading) return;
+    const display =
+      resolvedChoice?.identity === choiceIdentity ? resolvedChoice.display : undefined;
+    if (!display) {
+      composerSnapshots.current.delete(imageScope(selection.storeId, selection.session.id));
+      return;
+    }
+    composerSnapshots.current.set(imageScope(selection.storeId, selection.session.id), {
+      sourceId: composerSource.current!.id,
+      storeId: selection.storeId,
+      sessionId: selection.session.id,
+      workspaceId: selection.session.workspaceId,
+      draft,
+      ...display,
+      permission: composerPermission,
+      active: !!activeInputRun && !executionUnconfirmed,
+      stopping: activeInputRun?.status === 'cancelling',
+      sendLabel: currentSendLabel,
+      queueItems: inputQueue.queue?.items,
+      cacheMetrics: cacheMetrics.metrics,
+      contextUsage: contextUsage.metrics,
+    });
+  }, [
+    state,
+    selection,
+    canCompose,
+    composerPermission,
+    permissionFailed,
+    historyState.phase,
+    frame.pendingSessionId,
+    resolvedChoice,
+    choiceIdentity,
+    draft,
+    activeInputRun,
+    executionUnconfirmed,
+    currentSendLabel,
+    inputQueue.queue?.items,
+    cacheMetrics.metrics,
+    contextUsage.metrics,
+  ]);
   const worktreeExitTarget = resolveNativeWorktreeExit(directory, selection);
+  const retainedComposer =
+    selection && composerSnapshots.current.get(imageScope(selection.storeId, selection.session.id));
+  const hasPermissionDisplay = retainedComposer?.sourceId === composerSource.current.id;
+  const displayedPermission =
+    composerPermission ??
+    (!permissionFailed && selection?.viewLoading && hasPermissionDisplay
+      ? retainedComposer?.permission
+      : undefined);
   const cancelCurrentRunBusinessDisabled =
     pending ||
     executionUnconfirmed ||
@@ -3005,6 +3226,29 @@ function NativeDesktopContent({
           },
           toolMessages.pendingMessageIds,
         );
+    // Older saved inputs may identify their command only through the exact
+    // local Run and sourceIds. Keep that proven alias across later refreshes.
+    const inputsByMessage = new Map<string, string>();
+    const inputRuns = new Map(selection?.runs.map((run) => [run.id, run]));
+    for (const message of displayMessages) {
+      const run = message.runId ? inputRuns.get(message.runId) : undefined;
+      if (
+        message.role === 'user' &&
+        !message.originMessage &&
+        message.sessionId === selection?.session.id &&
+        run?.sessionId === selection?.session.id &&
+        run?.originStoreId === selection?.storeId &&
+        run?.originCommandId &&
+        message.sourceIds?.includes(run.originCommandId)
+      )
+        inputsByMessage.set(message.id, run.originCommandId);
+    }
+    for (let index = 0; index < models.length; index++) {
+      const model = models[index]!;
+      const commandId = inputsByMessage.get(model.id);
+      if (!model.presentationKey && commandId)
+        models[index] = { ...model, presentationKey: commandId };
+    }
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
       // Run observation can arrive before persisted user history. Keep the
@@ -3965,32 +4209,61 @@ function NativeDesktopContent({
     );
   };
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
-    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
-      return (
-        <>
-          {model.text && <p className="user-text">{model.text}</p>}
-          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
-            <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已恢复供重试。'}
-            </p>
-          )}
-        </>
-      );
-    if (inputDeliveries.has(model.id) && !messagesById.has(model.id))
-      return (
-        <>
-          {model.text && <p className="user-text">{model.text}</p>}
-          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
-            <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已保留。'}
-            </p>
-          )}
-        </>
-      );
     const message = messagesById.get(model.id);
-    if (!message || !selection || !state) return null;
+    const firstPending = firstVisible && !firstSaved && model.id === firstSubmission.commandId;
     const openable =
-      !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+      !!selection &&
+      !selection.viewLoading &&
+      historyState.phase === 'complete' &&
+      !directory?.unavailable;
+    const openFile = (path: string) => {
+      if (
+        !message ||
+        !selection ||
+        !state ||
+        !openable ||
+        selected.current !== selection.session.id
+      )
+        return;
+      void report(() =>
+        bridge.request({
+          method: 'messageFile.open',
+          generation: state.generation,
+          viewSelection: selection.viewSelection ?? selection.viewGeneration,
+          historyEpoch: state.historyEpoch ?? 0,
+          messageId: message.id,
+          path,
+          editor,
+        }),
+      );
+    };
+    if (
+      model.role === 'user' &&
+      (firstPending ||
+        (!message && inputDeliveries.has(model.id)) ||
+        (message &&
+          !message.agentMessage &&
+          !message.agentResult &&
+          !message.outputBody &&
+          message.contentFormat !== 'unsupported'))
+    )
+      return (
+        <>
+          {model.text && (
+            <PromptMarkdown text={model.text} openFile={message ? openFile : undefined} />
+          )}
+          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
+            <p className="delivery-status" role="alert">
+              {model.delivery === 'unknown'
+                ? '发送结果尚未确认。'
+                : firstPending
+                  ? '发送失败，原文已恢复供重试。'
+                  : '发送失败，原文已保留。'}
+            </p>
+          )}
+        </>
+      );
+    if (!message || !selection || !state) return null;
     if (message.agentMessage)
       return <NativeModelOutputMessage message={message} storeId={selection.storeId} />;
     if (message.agentResult) {
@@ -4047,20 +4320,7 @@ function NativeDesktopContent({
           runMessages.runs,
         )}
         canReadRestoredOrigin
-        openFile={(path) => {
-          if (!openable || selected.current !== selection.session.id) return;
-          void report(() =>
-            bridge.request({
-              method: 'messageFile.open',
-              generation: state.generation,
-              viewSelection: selection.viewSelection ?? selection.viewGeneration,
-              historyEpoch: state.historyEpoch ?? 0,
-              messageId: message.id,
-              path,
-              editor,
-            }),
-          );
-        }}
+        openFile={openFile}
         onContent={(text) => {
           const key = JSON.stringify([replyDisplayScope, message.id]);
           const before = verifiedReplyBodies.current.get(key),
@@ -4518,18 +4778,23 @@ function NativeDesktopContent({
         !(firstVisible && !firstSaved) &&
         !pendingInputModels.length &&
         !!selection &&
-        transcript.messages === freshTranscript.messages &&
         historyState.phase !== 'unavailable' &&
         !state?.callerUnavailable &&
         !state?.backgroundUnavailable &&
         !(state?.selection?.permissionUnavailable && !state.selection.viewLoading) &&
         !runMessages.error &&
         !toolMessages.error &&
+        !fileTargets.error &&
         (historyState.phase === 'loading' ||
+          (canCompose &&
+            (resolvedChoice?.identity !== choiceIdentity || !resolvedChoice.settled)) ||
           !!selection.viewLoading ||
           runMessages.loading ||
-          toolMessages.loading)
+          toolMessages.loading ||
+          fileTargets.loading)
       }
+      synchronizePresentation={!preparing && !frame.preparation && !(firstVisible && !firstSaved)}
+      retainedPresentation={!!cachedComposer}
       renderMessageContent={renderNativeMessage}
       renderMessageAttachments={renderNativeAttachments}
       renderToolActivity={renderNativeTools}
@@ -4817,7 +5082,8 @@ function NativeDesktopContent({
         pageIntent.current++;
         setScheduledTasksView(false);
         setPreparing(false);
-        if (!sameTarget || frame.preparation) void report(() => select(sessionId));
+        if (!sameTarget || frame.preparation || scheduledTasksView)
+          void report(() => select(sessionId));
       }}
       newConversation={
         preparing && !scheduledTasksView
@@ -4986,343 +5252,429 @@ function NativeDesktopContent({
       }
       interactionHidesPrompt={!!hasPendingRootInteraction}
       composer={
-        frame.preparation && state && directory
+        cachedComposer
           ? {
-              draft: newDraft,
-              scopeKey: newImageScope,
-              onFileReferences: imageDrafts.fileReferences,
-              imageLimit: inputImageCount,
-              files: imageDrafts.files(newImageScope),
-              onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
-              onRemoveFile: (id) => imageDrafts.removeIds([id]),
-              images: imageDrafts.get(newImageScope),
-              onImageFiles: (files) => {
-                return imageDrafts.add(newImageScope, files);
-              },
-              onRemoveImage: (id) => imageDrafts.removeIds([id]),
-              onChange: changeNewDraft,
-              onSend: sendFirst,
-              active: false,
-              stopping: false,
-              disabled: pending,
-              readOnly: !preparing,
-              readGate: { send: !newModelReady.ready },
-              sessionLoading: !preparing,
-              sending,
-              sendDisabled:
-                !newWorkspace ||
-                newBranch?.workspaceId !== newWorkspace ||
-                newBranch.storeId !== directory.storeId ||
-                contextBusy ||
-                !newModelReady.choice?.modelId ||
-                firstSubmission?.result?.phase === 'unknown',
-              inputLabel: '新对话草稿',
-              sendLabel: '发送首条消息',
-              permission: preparedPermission,
-              fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
-              confirmFullPermission,
-              onPermissionChange: setNewPermission,
-              permissionDisabled: pending,
-              options: (
-                <>
-                  <NativeModelPicker
-                    key={JSON.stringify([directory.storeId, newModelRevision])}
-                    disabled={!preparing}
-                    snapshots={modelSnapshots.current}
-                    bridge={bridge}
-                    generation={state.generation}
-                    preparing={{ storeId: directory.storeId }}
-                    revision={String(settingsRevision)}
-                    value={newChoice}
-                    onChange={setNewChoice}
-                    onReady={(ready, choice) =>
-                      setNewModelReady((previous) =>
-                        JSON.stringify(previous) === JSON.stringify({ ready, choice })
-                          ? previous
-                          : { ready, choice },
-                      )
-                    }
-                  />
-                  <NativeDiagnostic>
-                    <label>
-                      <input
-                        type="checkbox"
-                        aria-label="先审核计划"
-                        checked={newPlanMode}
-                        onChange={(event) => setNewPlanMode(event.target.checked)}
-                        disabled={pending || !preparing}
-                      />
-                      先审核计划
-                    </label>
-                  </NativeDiagnostic>
-                </>
+              scopeKey: imageScope(cachedComposer.storeId, cachedComposer.sessionId),
+              draft:
+                draftCache.current.get(imageScope(cachedComposer.storeId, cachedComposer.sessionId))
+                  ?.content ?? cachedComposer.draft,
+              onChange: () => {},
+              onSend: () => {},
+              onCancel: () => {},
+              inputLabel: '当前会话私有草稿',
+              onFileReferences: () => [],
+              onFilesSelected: () => {},
+              onImageFiles: () => {},
+              active: cachedComposer.active,
+              sendLabel: cachedComposer.sendLabel,
+              queue: cachedComposer.queueItems
+                ? {
+                    items: cachedComposer.queueItems,
+                    disabled: true,
+                    onEdit: () => {},
+                    onDelete: () => {},
+                    onReorder: () => {},
+                    onSteer: () => {},
+                  }
+                : undefined,
+              contextHasInput:
+                browserNotes.get(imageScope(cachedComposer.storeId, cachedComposer.sessionId))
+                  .length > 0,
+              files: imageDrafts.files(
+                imageScope(cachedComposer.storeId, cachedComposer.sessionId),
               ),
-            }
-          : canCompose && selection && state
-            ? {
-                draft,
-                contextHasInput:
-                  browserNotes.get(imageScope(selection.storeId, selection.session.id)).length > 0,
-                context: (
+              images: imageDrafts.get(imageScope(cachedComposer.storeId, cachedComposer.sessionId)),
+              onRemoveFile: () => {},
+              onRemoveImage: () => {},
+              context: (
+                <div
+                  inert
+                  onClickCapture={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onKeyDownCapture={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                >
                   <BrowserAnnotationCards
                     owner={browserNotes}
-                    scope={imageScope(selection.storeId, selection.session.id)}
+                    scope={imageScope(cachedComposer.storeId, cachedComposer.sessionId)}
                     error={
-                      noteSaveError.key === imageScope(selection.storeId, selection.session.id)
+                      noteSaveError.key ===
+                      imageScope(cachedComposer.storeId, cachedComposer.sessionId)
                         ? noteSaveError.message
                         : undefined
                     }
                   />
-                ),
-                queue: inputQueue.queue,
-                queueFocusKey,
-                scopeKey: imageScope(selection.storeId, selection.session.id),
+                </div>
+              ),
+              cacheMetrics: cachedComposer.cacheMetrics,
+              contextUsage: cachedComposer.contextUsage,
+              metricsLoading: !cachedComposer.cacheMetrics && !cachedComposer.contextUsage,
+              stopping: cachedComposer.stopping,
+              disabled: false,
+              readOnly: true,
+              sessionLoading: true,
+              readGate: { send: true, permission: true, cancel: true },
+              permission: cachedComposer.permission,
+              onPermissionChange: cachedComposer.permission ? () => {} : undefined,
+              options: (
+                <>
+                  <NativeModelPicker
+                    bridge={bridge}
+                    generation={state?.generation ?? 0}
+                    preview={cachedComposer}
+                    value={{}}
+                    onChange={() => {}}
+                    onReady={() => {}}
+                    snapshots={modelSnapshots.current}
+                  />
+                </>
+              ),
+            }
+          : frame.preparation && state && directory
+            ? {
+                draft: newDraft,
+                scopeKey: newImageScope,
                 onFileReferences: imageDrafts.fileReferences,
                 imageLimit: inputImageCount,
-                files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
-                onFilesSelected: (files) =>
-                  imageDrafts.addFiles(imageScope(selection.storeId, selection.session.id), files),
+                files: imageDrafts.files(newImageScope),
+                onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
                 onRemoveFile: (id) => imageDrafts.removeIds([id]),
-                images: imageDrafts.get(imageScope(selection.storeId, selection.session.id)),
+                images: imageDrafts.get(newImageScope),
                 onImageFiles: (files) => {
-                  return imageDrafts.add(
-                    imageScope(selection.storeId, selection.session.id),
-                    files,
-                  );
+                  return imageDrafts.add(newImageScope, files);
                 },
                 onRemoveImage: (id) => imageDrafts.removeIds([id]),
-                onChange: changeDraft,
-                onSend: sendInput,
-                onCancel: () => void write(stopCurrentRun),
-                active: !!activeInputRun && !executionUnconfirmed,
-                cacheMetrics: cacheMetrics.metrics,
-                contextUsage: contextUsage.metrics,
-                metricsLoading:
-                  !state.callerUnavailable &&
-                  !state.backgroundUnavailable &&
-                  !(state.selection?.permissionUnavailable && !state.selection.viewLoading) &&
-                  historyState.phase !== 'unavailable' &&
-                  ((cacheMetrics.pending && !cacheMetrics.metrics) ||
-                    (contextUsage.pending && !contextUsage.metrics)),
-                stopping: activeInputRun?.status === 'cancelling',
-                cancelDisabled: cancelCurrentRunBusinessDisabled,
-                disabled: pending || inputQueue.busy,
-                readOnly: selected.current !== selection.session.id,
-                readGate: {
-                  send:
-                    worktreeExitPending ||
-                    (!nextModelReady && !localWorktreeExit) ||
-                    historyState.phase !== 'complete' ||
-                    !!selection.viewLoading,
-                  permission: historyState.phase !== 'complete' || !!selection.viewLoading,
-                  cancel: historyState.phase !== 'complete' || !!selection.viewLoading,
-                },
-                sessionLoading,
+                onChange: changeNewDraft,
+                onSend: sendFirst,
+                active: false,
+                stopping: false,
+                disabled: pending,
+                readOnly: !preparing,
+                readGate: { send: !newModelReady.ready },
+                sessionLoading: !preparing,
                 sending,
-                // A routine history scan gates actions without removing the observed label.
-                permissionWhenPromptHidden: hasPendingRootBusinessInteraction,
-                permission: composerPermission,
-                fullPermissionScope: JSON.stringify([
-                  state.generation,
-                  selection.storeId,
-                  selection.session.id,
-                  selection.viewSelection,
-                  state.historyEpoch ?? 0,
-                ]),
-                confirmFullPermission,
-                permissionDisabled:
-                  pending ||
-                  !!permissionFailed ||
-                  !composerPermission ||
-                  state.permissionSubmissions.some((value) =>
-                    ['saved', 'submitting', 'unknown'].includes(value.phase),
-                  ),
-                permissionPending: state.permissionSubmissions.some(
-                  (value) =>
-                    value.sessionId === selection.session.id &&
-                    ['saved', 'submitting', 'unknown'].includes(value.phase),
-                ),
-                onPermissionChange: changeCurrentPermission,
-                onPermissionGrants: selection.canReadPermissionGrants
-                  ? () => {
-                      setToolsOpen(false);
-                      setGrantDirectoryOpen(true);
-                      setGrantFacts(undefined);
-                    }
-                  : undefined,
+
                 sendDisabled:
-                  sendContentBlocked ||
-                  (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
-                  historyState.phase === 'unavailable',
-                inputLabel: '当前会话私有草稿',
-                sendLabel: localWorktreeExit
-                  ? '退出工作树'
-                  : activeInputRun
-                    ? planMode
-                      ? '排队新的计划任务'
-                      : executionUnconfirmed
-                        ? '排队后续输入'
-                        : ['context.compress', 'context.compression.reset'].includes(
-                              selection.activeCommand?.kind ?? '',
-                            )
-                          ? '排队压缩后的输入'
-                          : '排队后续输入'
-                    : planMode
-                      ? '发送计划任务'
-                      : '发送明确的新轮次',
+                  !newWorkspace ||
+                  newBranch?.workspaceId !== newWorkspace ||
+                  newBranch.storeId !== directory.storeId ||
+                  contextBusy ||
+                  !newModelReady.choice?.modelId ||
+                  firstSubmission?.result?.phase === 'unknown',
+                inputLabel: '新对话草稿',
+                sendLabel: '发送首条消息',
+                permission: preparedPermission,
+                fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
+                confirmFullPermission,
+                onPermissionChange: setNewPermission,
+                permissionDisabled: pending,
                 options: (
                   <>
                     <NativeModelPicker
+                      key={JSON.stringify([directory.storeId, newModelRevision])}
+                      disabled={!preparing}
                       snapshots={modelSnapshots.current}
-                      prepared={preparedModels}
                       bridge={bridge}
                       generation={state.generation}
-                      selection={selection}
-                      disabled={selected.current !== selection.session.id}
+                      preparing={{ storeId: directory.storeId }}
                       revision={String(settingsRevision)}
-                      value={modelChoices.current.get(choiceKey) ?? {}}
-                      onChange={(choice) => {
-                        modelChoices.current.set(choiceKey, choice);
-                        choiceChanged((value) => value + 1);
-                      }}
-                      onReady={(ready, choice) => {
-                        const isCurrentChoice = () =>
-                          selected.current === selection.session.id &&
-                          generation.current === state.generation &&
-                          viewIntent.current === choiceViewIntent;
-                        if (!isCurrentChoice()) return;
-                        setResolvedChoice((previous) => {
-                          if (!isCurrentChoice()) return previous;
-                          const value = { identity: choiceIdentity, choice, ready };
-                          return JSON.stringify(previous) === JSON.stringify(value)
+                      value={newChoice}
+                      onChange={setNewChoice}
+                      onReady={(ready, choice) =>
+                        setNewModelReady((previous) =>
+                          JSON.stringify(previous) === JSON.stringify({ ready, choice })
                             ? previous
-                            : value;
-                        });
-                      }}
+                            : { ready, choice },
+                        )
+                      }
                     />
                     <NativeDiagnostic>
                       <label>
                         <input
                           type="checkbox"
                           aria-label="先审核计划"
-                          checked={planMode}
-                          disabled={pending}
-                          onChange={(event) => {
-                            setPlanMode(event.target.checked);
-                            planModes.current.set(
-                              JSON.stringify([
-                                selection.storeId,
-                                selection.session.workspaceId,
-                                selection.session.id,
-                              ]),
-                              event.target.checked,
-                            );
-                          }}
+                          checked={newPlanMode}
+                          onChange={(event) => setNewPlanMode(event.target.checked)}
+                          disabled={pending || !preparing}
                         />
                         先审核计划
                       </label>
                     </NativeDiagnostic>
-                    <NativeDiagnostic>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={() =>
-                          void write(async () => {
-                            const original = {
-                              generation: generation.current,
-                              epoch: readLifecycle.current.epoch,
-                              view: viewIntent.current,
-                              sessionId: selection.session.id,
-                              storeId: selection.storeId,
-                              workspaceId: selection.session.workspaceId,
-                              revision: draftRevision.current,
+                  </>
+                ),
+              }
+            : canCompose && selection && state
+              ? {
+                  draft,
+                  contextHasInput:
+                    browserNotes.get(imageScope(selection.storeId, selection.session.id)).length >
+                    0,
+                  context: (
+                    <BrowserAnnotationCards
+                      owner={browserNotes}
+                      scope={imageScope(selection.storeId, selection.session.id)}
+                      error={
+                        noteSaveError.key === imageScope(selection.storeId, selection.session.id)
+                          ? noteSaveError.message
+                          : undefined
+                      }
+                    />
+                  ),
+                  queue: inputQueue.queue,
+                  queueFocusKey,
+                  scopeKey: imageScope(selection.storeId, selection.session.id),
+                  onFileReferences: imageDrafts.fileReferences,
+                  imageLimit: inputImageCount,
+                  files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
+                  onFilesSelected: (files) =>
+                    imageDrafts.addFiles(
+                      imageScope(selection.storeId, selection.session.id),
+                      files,
+                    ),
+                  onRemoveFile: (id) => imageDrafts.removeIds([id]),
+                  images: imageDrafts.get(imageScope(selection.storeId, selection.session.id)),
+                  onImageFiles: (files) => {
+                    return imageDrafts.add(
+                      imageScope(selection.storeId, selection.session.id),
+                      files,
+                    );
+                  },
+                  onRemoveImage: (id) => imageDrafts.removeIds([id]),
+                  onChange: changeDraft,
+                  onSend: sendInput,
+                  onCancel: () => void write(stopCurrentRun),
+                  active: !!activeInputRun && !executionUnconfirmed,
+                  cacheMetrics: cacheMetrics.metrics,
+                  contextUsage: contextUsage.metrics,
+                  metricsLoading:
+                    !state.callerUnavailable &&
+                    !state.backgroundUnavailable &&
+                    !(state.selection?.permissionUnavailable && !state.selection.viewLoading) &&
+                    historyState.phase !== 'unavailable' &&
+                    ((cacheMetrics.pending && !cacheMetrics.metrics) ||
+                      (contextUsage.pending && !contextUsage.metrics)),
+                  stopping: activeInputRun?.status === 'cancelling',
+                  cancelDisabled: cancelCurrentRunBusinessDisabled,
+                  disabled: pending || inputQueue.busy,
+                  readOnly: selected.current !== selection.session.id,
+                  readGate: {
+                    send:
+                      worktreeExitPending ||
+                      (!nextModelReady && !localWorktreeExit) ||
+                      historyState.phase !== 'complete' ||
+                      !!selection.viewLoading,
+                    permission: historyState.phase !== 'complete' || !!selection.viewLoading,
+                    cancel: historyState.phase !== 'complete' || !!selection.viewLoading,
+                  },
+                  sessionLoading,
+                  sending,
+                  // A routine history scan gates actions without removing the observed label.
+                  permissionWhenPromptHidden: hasPendingRootBusinessInteraction,
+                  permission: displayedPermission,
+                  fullPermissionScope: JSON.stringify([
+                    state.generation,
+                    selection.storeId,
+                    selection.session.id,
+                    selection.viewSelection,
+                    state.historyEpoch ?? 0,
+                  ]),
+                  confirmFullPermission,
+                  permissionDisabled:
+                    pending ||
+                    !!permissionFailed ||
+                    !composerPermission ||
+                    state.permissionSubmissions.some((value) =>
+                      ['saved', 'submitting', 'unknown'].includes(value.phase),
+                    ),
+                  permissionPending: state.permissionSubmissions.some(
+                    (value) =>
+                      value.sessionId === selection.session.id &&
+                      ['saved', 'submitting', 'unknown'].includes(value.phase),
+                  ),
+                  onPermissionChange:
+                    displayedPermission || (selection.viewLoading && !hasPermissionDisplay)
+                      ? changeCurrentPermission
+                      : undefined,
+                  onPermissionGrants: selection.canReadPermissionGrants
+                    ? () => {
+                        setToolsOpen(false);
+                        setGrantDirectoryOpen(true);
+                        setGrantFacts(undefined);
+                      }
+                    : undefined,
+                  sendDisabled:
+                    sendContentBlocked ||
+                    (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
+                    historyState.phase === 'unavailable',
+                  inputLabel: '当前会话私有草稿',
+                  sendLabel: currentSendLabel,
+                  options: (
+                    <>
+                      <NativeModelPicker
+                        snapshots={modelSnapshots.current}
+                        prepared={preparedModels}
+                        bridge={bridge}
+                        generation={state.generation}
+                        selection={selection}
+                        disabled={selected.current !== selection.session.id}
+                        revision={String(settingsRevision)}
+                        value={modelChoices.current.get(choiceKey) ?? {}}
+                        onChange={(choice) => {
+                          modelChoices.current.set(choiceKey, choice);
+                          choiceChanged((value) => value + 1);
+                        }}
+                        onReady={(ready, choice, presentation) => {
+                          const isCurrentChoice = () =>
+                            selected.current === selection.session.id &&
+                            generation.current === state.generation &&
+                            viewIntent.current === choiceViewIntent;
+                          if (!isCurrentChoice()) return;
+                          setResolvedChoice((previous) => {
+                            if (!isCurrentChoice()) return previous;
+                            const value = {
+                              identity: choiceIdentity,
+                              choice,
+                              ready,
+                              ...presentation,
+                              settled: presentation?.settled ?? false,
                             };
-                            let revision = original.revision;
-                            const consumed = consumedDraft.current;
-                            if (
-                              consumed?.generation === original.generation &&
-                              consumed.view === original.view &&
-                              consumed.storeId === original.storeId &&
-                              consumed.workspaceId === original.workspaceId &&
-                              consumed.sessionId === original.sessionId &&
-                              consumed.proof.revision === String(revision)
-                            ) {
-                              const ownsRead = () =>
-                                isCurrentRead(original.generation, original.epoch, original.view) &&
-                                selected.current === original.sessionId &&
-                                draftOwner.current ===
-                                  imageScope(original.storeId, original.sessionId) &&
-                                draftRevision.current === original.revision;
-                              let saved: NativeResult;
-                              try {
-                                saved = await bridge.request({
-                                  method: 'draft.read',
-                                  generation: original.generation,
-                                  sessionId: original.sessionId,
-                                });
-                              } catch (cause) {
+                            return JSON.stringify(previous) === JSON.stringify(value)
+                              ? previous
+                              : value;
+                          });
+                        }}
+                      />
+                      <NativeDiagnostic>
+                        <label>
+                          <input
+                            type="checkbox"
+                            aria-label="先审核计划"
+                            checked={planMode}
+                            disabled={pending}
+                            onChange={(event) => {
+                              setPlanMode(event.target.checked);
+                              planModes.current.set(
+                                JSON.stringify([
+                                  selection.storeId,
+                                  selection.session.workspaceId,
+                                  selection.session.id,
+                                ]),
+                                event.target.checked,
+                              );
+                            }}
+                          />
+                          先审核计划
+                        </label>
+                      </NativeDiagnostic>
+                      <NativeDiagnostic>
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() =>
+                            void write(async () => {
+                              const original = {
+                                generation: generation.current,
+                                epoch: readLifecycle.current.epoch,
+                                view: viewIntent.current,
+                                sessionId: selection.session.id,
+                                storeId: selection.storeId,
+                                workspaceId: selection.session.workspaceId,
+                                revision: draftRevision.current,
+                              };
+                              let revision = original.revision;
+                              const consumed = consumedDraft.current;
+                              if (
+                                consumed?.generation === original.generation &&
+                                consumed.view === original.view &&
+                                consumed.storeId === original.storeId &&
+                                consumed.workspaceId === original.workspaceId &&
+                                consumed.sessionId === original.sessionId &&
+                                consumed.proof.revision === String(revision)
+                              ) {
+                                const ownsRead = () =>
+                                  isCurrentRead(
+                                    original.generation,
+                                    original.epoch,
+                                    original.view,
+                                  ) &&
+                                  selected.current === original.sessionId &&
+                                  draftOwner.current ===
+                                    imageScope(original.storeId, original.sessionId) &&
+                                  draftRevision.current === original.revision;
+                                let saved: NativeResult;
+                                try {
+                                  saved = await bridge.request({
+                                    method: 'draft.read',
+                                    generation: original.generation,
+                                    sessionId: original.sessionId,
+                                  });
+                                } catch (cause) {
+                                  if (!ownsRead()) return;
+                                  throw cause;
+                                }
                                 if (!ownsRead()) return;
-                                throw cause;
+                                if (
+                                  saved &&
+                                  'content' in saved &&
+                                  'revision' in saved &&
+                                  saved.id === consumed.proof.id &&
+                                  saved.storeId === original.storeId &&
+                                  saved.workspaceId === original.workspaceId &&
+                                  saved.rootSessionId === original.sessionId &&
+                                  saved.content === '' &&
+                                  saved.revision === revision + 1 &&
+                                  saved.consumedFrom?.commandId === consumed.commandId &&
+                                  saved.consumedFrom.revision === revision
+                                )
+                                  draftRevision.current = revision = saved.revision;
+                                if (consumedDraft.current === consumed)
+                                  consumedDraft.current = undefined;
                               }
-                              if (!ownsRead()) return;
+                              const saved = await bridge.request({
+                                method: 'draft.write',
+                                generation: original.generation,
+                                sessionId: original.sessionId,
+                                revision,
+                                content: draft,
+                                ...(browserNotes.get(
+                                  imageScope(selection.storeId, selection.session.id),
+                                ).length ||
+                                noteDraftStates.current.get(
+                                  imageScope(selection.storeId, selection.session.id),
+                                )?.signature
+                                  ? {
+                                      browserAnnotations: browserNotes.document(
+                                        imageScope(selection.storeId, selection.session.id),
+                                      ),
+                                      annotationImageOffset: imageDrafts.get(
+                                        imageScope(selection.storeId, selection.session.id),
+                                      ).length,
+                                    }
+                                  : {}),
+                              });
                               if (
                                 saved &&
                                 'content' in saved &&
                                 'revision' in saved &&
-                                saved.id === consumed.proof.id &&
-                                saved.storeId === original.storeId &&
-                                saved.workspaceId === original.workspaceId &&
-                                saved.rootSessionId === original.sessionId &&
-                                saved.content === '' &&
-                                saved.revision === revision + 1 &&
-                                saved.consumedFrom?.commandId === consumed.commandId &&
-                                saved.consumedFrom.revision === revision
+                                generation.current === original.generation &&
+                                viewIntent.current === original.view &&
+                                selected.current === original.sessionId
                               )
-                                draftRevision.current = revision = saved.revision;
-                              if (consumedDraft.current === consumed)
-                                consumedDraft.current = undefined;
-                            }
-                            const saved = await bridge.request({
-                              method: 'draft.write',
-                              generation: original.generation,
-                              sessionId: original.sessionId,
-                              revision,
-                              content: draft,
-                              ...(browserNotes.get(
-                                imageScope(selection.storeId, selection.session.id),
-                              ).length ||
-                              noteDraftStates.current.get(
-                                imageScope(selection.storeId, selection.session.id),
-                              )?.signature
-                                ? {
-                                    browserAnnotations: browserNotes.document(
-                                      imageScope(selection.storeId, selection.session.id),
-                                    ),
-                                    annotationImageOffset: imageDrafts.get(
-                                      imageScope(selection.storeId, selection.session.id),
-                                    ).length,
-                                  }
-                                : {}),
-                            });
-                            if (
-                              saved &&
-                              'content' in saved &&
-                              'revision' in saved &&
-                              generation.current === original.generation &&
-                              viewIntent.current === original.view &&
-                              selected.current === original.sessionId
-                            )
-                              draftRevision.current = saved.revision;
-                          }, false)
-                        }
-                      >
-                        保留草稿
-                      </button>
-                    </NativeDiagnostic>
-                  </>
-                ),
-              }
-            : undefined
+                                draftRevision.current = saved.revision;
+                            }, false)
+                          }
+                        >
+                          保留草稿
+                        </button>
+                      </NativeDiagnostic>
+                    </>
+                  ),
+                }
+              : undefined
       }
       readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
       browserTabRequest={

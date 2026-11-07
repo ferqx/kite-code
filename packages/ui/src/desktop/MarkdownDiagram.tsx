@@ -1,7 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useConversationActivity } from '../conversation-activity';
 import { CodeBlockContent } from './components/ui/code-block';
-import { type DiagramColors, diagramRestriction, renderMarkdownDiagram } from './markdown-diagram';
+import {
+  type DiagramColors,
+  diagramRestriction,
+  getMarkdownDiagramImage,
+  renderMarkdownDiagram,
+} from './markdown-diagram';
 
 export function MarkdownDiagram({
   code,
@@ -16,7 +28,13 @@ export function MarkdownDiagram({
   const host = useRef<HTMLDivElement>(null);
   const [colors, setColors] = useState<DiagramColors>();
   const [visible, setVisible] = useState(true);
-  const [result, setResult] = useState<{ code: string; image?: string; error?: string }>();
+  const [result, setResult] = useState<{
+    code: string;
+    image?: string;
+    width?: number;
+    height?: number;
+    error?: string;
+  }>();
   const resource = useRef<{ image: string; unregister: () => void } | undefined>(undefined);
   const clear = useCallback(() => {
     resource.current?.unregister();
@@ -33,7 +51,7 @@ export function MarkdownDiagram({
     document.addEventListener('visibilitychange', update);
     return () => document.removeEventListener('visibilitychange', update);
   }, [clear]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!readActive || !host.current) return;
     const update = () => {
       const style = getComputedStyle(host.current!);
@@ -59,12 +77,18 @@ export function MarkdownDiagram({
       });
     return () => observer.disconnect();
   }, [readActive]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!readActive || !visible || !complete || restriction || !colors) return;
+    const cached = getMarkdownDiagramImage(code, colors);
+    if (cached) {
+      setResult({ code, ...cached });
+      return;
+    }
     const controller = new AbortController();
     void renderMarkdownDiagram(code, colors, controller.signal).then(
       (image) => {
-        if (!controller.signal.aborted) setResult({ code, image });
+        if (!controller.signal.aborted)
+          setResult({ code, image, ...getMarkdownDiagramImage(code, colors) });
       },
       () => {
         if (!controller.signal.aborted) setResult({ code, error: '图表暂时无法解析，请查看源码' });
@@ -96,7 +120,18 @@ export function MarkdownDiagram({
   const error = complete ? (restriction ?? current?.error) : undefined;
   const showImage = complete && !error && current?.image && !sourceVisible;
   return (
-    <div ref={host} className="markdown-diagram">
+    <div
+      ref={host}
+      className="markdown-diagram"
+      data-complete={complete || undefined}
+      style={
+        complete
+          ? ({
+              '--markdown-diagram-height': `${Math.min(520, Math.max(160, code.split('\n').length * 21 + 40))}px`,
+            } as CSSProperties)
+          : undefined
+      }
+    >
       {showImage ? (
         <section
           className="markdown-diagram-scroll"
@@ -106,6 +141,8 @@ export function MarkdownDiagram({
         >
           <img
             src={current.image}
+            width={current.width}
+            height={current.height}
             alt="Mermaid 图表；可切换源码查看图表描述"
             onError={() => setResult({ code, error: '图表暂时无法显示，请查看源码' })}
           />

@@ -1,18 +1,12 @@
-import {
-  $createParagraphNode,
-  $createTextNode,
-  $getRoot,
-  getNearestEditorFromDOMNode,
-} from 'lexical';
-
-/** Input ownership tests use the real editor; keyboard behavior has separate coverage. */
+/** Seed a native textarea through the same value/input path as browser editing. */
 export function setEditorText(element: HTMLElement, value: string) {
-  getNearestEditorFromDOMNode(element)!.update(
-    () => {
-      $getRoot()
-        .clear()
-        .append($createParagraphNode().append($createTextNode(value)));
-    },
-    { discrete: true },
+  const textarea = element as HTMLTextAreaElement;
+  const window = textarea.ownerDocument.defaultView!;
+  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!.call(
+    textarea,
+    value,
   );
+  textarea.dispatchEvent(new window.Event('input', { bubbles: true }));
 }
+export const setEditorMarkdown = setEditorText;
+export const editorSource = (element: Element) => (element as HTMLTextAreaElement).value;

@@ -482,7 +482,7 @@ Model 必须有准确 kind 的允许项，不给同名 Tool 授权。所有非 M
 
 同一早期阶段12:17:57 的 `cancel-probe` 省略 preset，实际绑定 `agent/general@1`；子先发送 `cancel-ready`，父子分别在 `wait_agent_events` 等待时通过普通 UI 停止。父 Run `0c789fc9-c731-4c3d-842c-8414a912a2e3` 与 child Session `5881d8b0-c858-435c-aec1-11acecaa3684` 的原 Run 均为 cancelled／`cancel_requested`，约27秒记录接管，未显示成功回复或重复旧结果。该 child 只有消息和事件等待，没有文件／Shell 效果；停止后输入可用。12:19:25 继续正常输入，约3秒返回 `acceptance-restored`，没有工具调用。这些观察只证明当时具体 Desktop 流程及中间状态，不作为当前无子等待工具或删除历史兼容后的验收，也不取得其他客户端、模型或完整发布资格。
 
-模型选择整文件仍保留一项与本次无关的既有失败：`a remote effort rejection remains a failed model request without fallback or a second request` 断言 HTTP400只发一次，实际沿现行最多五次重连合同共发六次。同环境以只读内存 loader 装载原 `8e350f99…` 测试及本次所改模块的原 HEAD 源码，仍重现 Expected1／Received6；本次没有改该断言、重连策略或扩大其验证结论。定向新增用例通过不冒充该整文件全通过。
+此前`c9ecdd2c7`实施阶段的模型选择整文件保留过一项既有失败：旧`a remote effort rejection remains a failed model request without fallback or a second request`断言HTTP400只发一次，实际沿现行最多五次重连合同共发六次；当时以只读内存loader装载原`8e350f99…`测试及相关HEAD源码也复现Expected1／Received6。2026-11-07核对桌面模型／档位发送时，按现行[重连合同](../../docs/handbook/features/execution.md)更新该测试为首请求加五次重连，并逐次断言仍使用原DeepSeek路由、模型名和high，不降档、不换模型；Runtime策略未变。整文件11项通过，四提供商的36组请求另核六档及旧值、原ModelInput与配置冻结；未验证真实公网模型是否接受这些档位。
 
 `c9ecdd2c7` 实施阶段的既有 Run／Step／child 绑定、协作者续作、普通与执行组冷恢复六文件93项／1561断言通过；Windows 普通沙箱曾导致恢复夹具超时或缺效果，原 HEAD 同环境复现，沿原命令取得必要宿主权限后，两个恢复整文件53项／976断言及清理均通过，没有修改时限或断言。当时最终全仓类型检查6354文件／9项目、8个 workspace 构建、API／Agent 边界、测试归属和文档检查通过，这些不冒充本轮清理后的验证。[source-free 默认委派测试](test/isolated/task-packaged-default.test.ts)仍在 `buildTerminalBundle` 的原 Windows Artifact ACL 准备阶段报 `artifact_scope_denied`，取得宿主权限后仍复现，尚未进入角色／协作执行；该编译发行入口的协作资格未取得，不能由源码客户端样本或普通构建通过替代。
 

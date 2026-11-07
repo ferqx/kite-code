@@ -36,12 +36,12 @@ try {
       state.selection.canReadPermissionGrants
     );
   });
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
-        ?.getAttribute('contenteditable') === 'true',
-  );
+  await page.waitForFunction(() => {
+    const input = document.querySelector<HTMLTextAreaElement>(
+      '[role="textbox"][aria-label="当前会话私有草稿"]',
+    );
+    return !!input && !input.readOnly && !input.disabled;
+  });
   await openSessionTools(page);
   const panel = page.getByRole('region', { name: '当前会话授权目录' });
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
@@ -76,12 +76,12 @@ try {
       !state.selection.viewLoading
     );
   });
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
-        ?.getAttribute('contenteditable') === 'true',
-  );
+  await page.waitForFunction(() => {
+    const input = document.querySelector<HTMLTextAreaElement>(
+      '[role="textbox"][aria-label="当前会话私有草稿"]',
+    );
+    return !!input && !input.readOnly && !input.disabled;
+  });
   await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：other；授权版本：/).waitFor();
@@ -104,12 +104,12 @@ try {
       state.selection.canReadPermissionGrants
     );
   });
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
-        ?.getAttribute('contenteditable') === 'true',
-  );
+  await page.waitForFunction(() => {
+    const input = document.querySelector<HTMLTextAreaElement>(
+      '[role="textbox"][aria-label="当前会话私有草稿"]',
+    );
+    return !!input && !input.readOnly && !input.disabled;
+  });
   await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText('此页没有授权记录。', { exact: true }).waitFor();
@@ -126,12 +126,12 @@ try {
       state.selection.canReadPermissionGrants
     );
   });
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
-        ?.getAttribute('contenteditable') === 'true',
-  );
+  await page.waitForFunction(() => {
+    const input = document.querySelector<HTMLTextAreaElement>(
+      '[role="textbox"][aria-label="当前会话私有草稿"]',
+    );
+    return !!input && !input.readOnly && !input.disabled;
+  });
   await openSessionTools(page);
   await panel.getByRole('button', { name: '读取当前会话授权' }).press('Enter');
   await panel.getByText(/实际会话：other；授权版本：/).waitFor();

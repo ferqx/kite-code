@@ -7,7 +7,7 @@ import type {
   NativeRequest,
   NativeSelection,
 } from '../../src/native-bridge';
-import type { NativeModelChoice } from '../../src/native-model-picker';
+import type { NativeModelChoice, NativeModelPresentation } from '../../src/native-model-picker';
 import {
   readNativeRecommendedModel,
   rememberNativeRecommendedModel,
@@ -186,14 +186,94 @@ test('an unselected picker stays at its placeholder across configuration default
     await f.click('deepseek');
     await f.click('选择模型 b');
     expect(changes).toEqual([{ modelId: 'b' }]);
-    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b', reasoningEffort: 'medium' }]);
     defaultModelId = 'a';
     await act(async () => f.root.render(<Host revision="three" />));
-    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b', reasoningEffort: 'medium' }]);
     expect(changes).toHaveLength(1);
     expect(calls).toEqual(
       Array.from({ length: 3 }, () => ({ method: 'input.models.read', generation: 1 })),
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('settled model presentation distinguishes an unselected display, a valid choice and actual read or route failures', async () => {
+  const f = fixture();
+  let presentation: NativeModelPresentation | undefined,
+    ready = false;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => {
+      throw Error('unexpected_read');
+    },
+  };
+  try {
+    for (const [index, selectedModelId] of [undefined, 'a', 'missing'].entries()) {
+      const selection = selected('s', index + 1);
+      const scope = nativeModelScope(1, selection);
+      await act(async () =>
+        f.root.render(
+          <NativeModelPicker
+            bridge={bridge}
+            generation={1}
+            selection={selection}
+            value={{}}
+            onChange={() => {}}
+            prepared={{ key: scope.readKey, facts: { ...facts, selectedModelId }, error: '' }}
+            onReady={(available, _choice, value) => {
+              ready = available;
+              presentation = value;
+            }}
+          />,
+        ),
+      );
+      expect(presentation?.settled).toBe(true);
+      expect(ready).toBe(selectedModelId === 'a');
+      expect(presentation?.display !== undefined).toBe(selectedModelId !== 'missing');
+      expect(presentation?.display?.model?.id).toBe(selectedModelId === 'a' ? 'a' : undefined);
+    }
+    const selection = selected('s', 4);
+    const scope = nativeModelScope(1, selection);
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={selection}
+          value={{}}
+          onChange={() => {}}
+          prepared={{ key: scope.readKey, error: 'catalogue_failed' }}
+          onReady={(available, _choice, value) => {
+            ready = available;
+            presentation = value;
+          }}
+        />,
+      ),
+    );
+    expect(ready).toBe(false);
+    expect(presentation).toEqual({ settled: true, display: undefined });
+    expect(f.element.textContent).toContain('模型目录不可用：catalogue_failed');
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          preview={{}}
+          value={{}}
+          onChange={() => {}}
+          onReady={(available, _choice, value) => {
+            ready = available;
+            presentation = value;
+          }}
+        />,
+      ),
+    );
+    expect(ready).toBe(false);
+    expect(presentation).toEqual({ settled: false, display: undefined });
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
+    expect(f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(true);
   } finally {
     await f.close();
   }
@@ -243,7 +323,7 @@ test('a prepared new-conversation picker ignores the old Session route and confi
     await f.click('选择模型，当前 未选择');
     await f.click('选择模型 a');
     expect(changes).toEqual([{ modelId: 'a' }]);
-    expect(ready.at(-1)).toEqual([true, { modelId: 'a' }]);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'a', reasoningEffort: 'low' }]);
     expect(calls).toEqual([]);
   } finally {
     await f.close();
@@ -284,7 +364,7 @@ test('saved Session routes remain isolated while old Runs without a saved route 
   };
   try {
     await render('saved', 1);
-    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b', reasoningEffort: 'medium' }]);
     await render('legacy', 2);
     expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
     expect(ready.at(-1)).toEqual([false, undefined]);
@@ -292,8 +372,8 @@ test('saved Session routes remain isolated while old Runs without a saved route 
     expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
     expect(ready.at(-1)).toEqual([false, undefined]);
     await render('saved', 4);
-    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b未指定');
-    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b中');
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b', reasoningEffort: 'medium' }]);
   } finally {
     await f.close();
   }
@@ -451,6 +531,7 @@ test('remembered recommendations update cached new-conversation labels while fre
 
 test.each([
   [undefined, undefined, undefined],
+  [{ modelId: 'b' }, 'b', 'medium'],
   [{ modelId: 'b', reasoningEffort: 'high' }, 'b', 'high'],
   [{ modelId: 'disabled', reasoningEffort: 'high' }, undefined, undefined],
   [{ modelId: 'missing', reasoningEffort: 'high' }, undefined, undefined],
@@ -488,7 +569,7 @@ test.each([
       expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
     expect(calls).toEqual([{ method: 'conversation.models.read', generation: 1 }]);
     expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe(
-      reasoningEffort ? '高' : undefined,
+      reasoningEffort === 'high' ? '高' : reasoningEffort === 'medium' ? '中' : undefined,
     );
   } finally {
     await f.close();
@@ -540,7 +621,7 @@ test('a global recommendation is saved before sending, restored on a new convers
     expect(resolved).toEqual(recommendation);
     expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('Ultar');
     await act(async () => f.root.render(<Host key="existing" fresh={false} identity="existing" />));
-    expect(resolved).toEqual({ modelId: 'a' });
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'low' });
     expect(calls.every((call) => call.method.endsWith('.models.read'))).toBe(true);
   } finally {
     await f.close();
@@ -586,7 +667,7 @@ test('picker filters disabled routes, preserves transient effort through observe
     await act(async () => f.root.render(<Host />));
     expect(ready.at(-1)).toBe(true);
     expect(changes).toHaveLength(0);
-    expect(resolved.at(-1)).toEqual({ modelId: 'a' });
+    expect(resolved.at(-1)).toEqual({ modelId: 'a', reasoningEffort: 'low' });
     await f.click('模型：remote-a，思考程度：轻度');
     const effort = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     expect(effort.getAttribute('aria-valuemin')).toBe('0');
@@ -620,8 +701,11 @@ test('picker filters disabled routes, preserves transient effort through observe
     await f.click('deepseek');
     await f.click('选择模型 b');
     expect(observed).toEqual({ modelId: 'b' });
-    expect(await readNativeRecommendedModel('store')).toEqual({ modelId: 'b' });
-    expect(resolved.at(-1)).toEqual({ modelId: 'b' });
+    expect(await readNativeRecommendedModel('store')).toEqual({
+      modelId: 'b',
+      reasoningEffort: 'medium',
+    });
+    expect(resolved.at(-1)).toEqual({ modelId: 'b', reasoningEffort: 'medium' });
     const deepseekEffort = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     expect(deepseekEffort).not.toBeNull();
     expect(f.button('关闭思考')).toBeUndefined();
@@ -787,6 +871,178 @@ test('explicit missing selection after configuration refresh stays unavailable w
   }
 });
 
+test('pending catalogue preparation shares only exact page, revision and bridge identity and never caches a settled read', async () => {
+  const snapshots = new NativeModelSnapshots();
+  const requests: {
+    resolve: (value: NativeModelSettingsFacts) => void;
+    reject: (cause: Error) => void;
+  }[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => new Promise((resolve, reject) => requests.push({ resolve, reject })),
+  };
+  const selection = selected('s');
+  const first = snapshots.prepare(bridge, 1, selection, undefined, 'one'),
+    duplicate = snapshots.prepare(bridge, 1, selection, undefined, 'one');
+  expect(requests).toHaveLength(1);
+  requests[0]!.resolve(facts);
+  const a = await first,
+    b = await duplicate;
+  expect(a).toEqual(b);
+  a.facts!.models[0]!.enabled = false;
+  expect(b.facts!.models[0]!.enabled).toBe(true);
+
+  const old = snapshots.prepare(bridge, 1, selection, undefined, 'one');
+  const revised = snapshots.prepare(bridge, 1, selection, undefined, 'two');
+  expect(requests).toHaveLength(3);
+  requests[1]!.reject(Error('native_request_failed'));
+  expect((await old).error).toBe('native_request_failed');
+  const revisedDuplicate = snapshots.prepare(bridge, 1, selection, undefined, 'two');
+  expect(requests).toHaveLength(3);
+  requests[2]!.resolve(facts);
+  expect((await revised).error).toBe('');
+  expect(await revisedDuplicate).toEqual(await revised);
+
+  const otherPage = snapshots.prepare(bridge, 1, selected('other'), undefined, 'two'),
+    current = snapshots.prepare(bridge, 1, selection, undefined, 'two'),
+    replacement = snapshots.prepare({ ...bridge }, 1, selection, undefined, 'two');
+  expect(requests).toHaveLength(6);
+  for (const request of requests.slice(3)) request.resolve(facts);
+  await Promise.all([otherPage, current, replacement]);
+});
+
+test('a readonly cached model display never reads, changes preferences or qualifies sending, and preserves the catalogue cache', async () => {
+  const f = fixture(),
+    snapshots = new NativeModelSnapshots(),
+    calls: NativeRequest[] = [],
+    ready: boolean[] = [];
+  const selection = selected('a');
+  const scope = nativeModelScope(1, selection);
+  snapshots.set(scope, { ...facts, selectedModelId: 'a' });
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      calls.push(input);
+      return { ...facts, selectedModelId: 'a' };
+    },
+  };
+  const render = (preview: boolean) =>
+    act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          snapshots={snapshots}
+          selection={preview ? undefined : selection}
+          preview={
+            preview
+              ? {
+                  model: { id: 'b', provider: 'deepseek', name: 'Cached B' },
+                  reasoningEffort: 'high',
+                }
+              : undefined
+          }
+          value={{}}
+          onReady={(value) => ready.push(value)}
+          onChange={() => {
+            throw Error('cached_model_cannot_change');
+          }}
+        />,
+      ),
+    );
+  try {
+    await render(true);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('Cached B');
+    expect(f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(true);
+    expect(ready.at(-1)).toBe(false);
+    expect(calls).toEqual([]);
+    expect(snapshots.get(scope)?.selectedModelId).toBe('a');
+    await act(async () =>
+      f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')!.click(),
+    );
+    expect(f.element.querySelector('[role="dialog"]') === null).toBe(true);
+    await render(false);
+    expect(calls).toHaveLength(1);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
+    expect(ready.at(-1)).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an inactive picker retains display without reading and discards both late failures and late successes', async () => {
+  for (const failed of [true, false]) {
+    const f = fixture(),
+      snapshots = new NativeModelSnapshots(),
+      ready: boolean[] = [];
+    const selection = selected('s');
+    snapshots.set(nativeModelScope(1, selection), { ...facts, selectedModelId: 'a' });
+    let reads = 0,
+      resolve!: (value: NativeModelSettingsFacts) => void,
+      reject!: (cause: Error) => void;
+    const bridge: NativeBridge = {
+      watch: () => () => {},
+      request: async () => {
+        reads++;
+        return new Promise((yes, no) => {
+          resolve = yes;
+          reject = no;
+        });
+      },
+    };
+    const render = (disabled: boolean) =>
+      act(async () =>
+        f.root.render(
+          <NativeModelPicker
+            bridge={bridge}
+            generation={1}
+            selection={selection}
+            snapshots={snapshots}
+            disabled={disabled}
+            value={{}}
+            onChange={() => {}}
+            onReady={(value) => ready.push(value)}
+          />,
+        ),
+      );
+    try {
+      await render(true);
+      expect(reads).toBe(0);
+      expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
+      expect(ready.at(-1)).toBe(false);
+      await render(false);
+      expect(reads).toBe(1);
+      await render(true);
+      await act(async () => {
+        if (failed) reject(Error('native_request_failed'));
+        else resolve({ ...facts, selectedModelId: 'b' });
+      });
+      expect(f.element.textContent).not.toContain('模型目录不可用');
+      expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
+      expect(ready.at(-1)).toBe(false);
+      await render(false);
+      expect(reads).toBe(2);
+      expect(ready.at(-1)).toBe(false);
+      await act(async () => resolve({ ...facts, selectedModelId: 'a' }));
+      expect(ready.at(-1)).toBe(true);
+      await render(true);
+      await render(false);
+      expect(reads).toBe(3);
+      expect(ready.at(-1)).toBe(false);
+      await act(async () => reject(Error('model_catalogue_unavailable')));
+      expect(f.element.textContent).toContain('模型目录不可用：model_catalogue_unavailable');
+      expect(ready.at(-1)).toBe(false);
+      await render(true);
+      await render(false);
+      await act(async () => resolve({ ...facts, selectedModelId: 'a' }));
+      expect(f.element.textContent).not.toContain('模型目录不可用');
+      expect(ready.at(-1)).toBe(true);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test('picker rejects late scope facts and preserves configured none without extra actions', async () => {
   const f = fixture(),
     ready: boolean[] = [],
@@ -924,7 +1180,7 @@ test('same-provider duplicate names retain exact route IDs; sparse effort change
   }
   try {
     await act(async () => f.root.render(<Host />));
-    expect(resolved).toEqual({ modelId: 'second' });
+    expect(resolved).toEqual({ modelId: 'second', reasoningEffort: 'high' });
     await f.click('模型：same-name，思考程度：高');
     await f.click('选择模型，当前 openai / same-name');
     const entries = [...f.element.querySelectorAll('[role="option"]')];
@@ -936,7 +1192,7 @@ test('same-provider duplicate names retain exact route IDs; sparse effort change
     expect(entries[1]!.querySelector('[aria-label="当前模型"]')).not.toBeNull();
     await f.click('选择模型 first');
     expect(observed).toEqual({ modelId: 'first' });
-    expect(resolved).toEqual({ modelId: 'first' });
+    expect(resolved).toEqual({ modelId: 'first', reasoningEffort: 'high' });
     const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     expect(slider.getAttribute('aria-valuemax')).toBe('2');
     const key = async (key: string) =>
@@ -955,7 +1211,7 @@ test('same-provider duplicate names retain exact route IDs; sparse effort change
     await f.click('选择模型，当前 openai / same-name');
     await f.click('选择模型 second');
     expect(observed).toEqual({ modelId: 'second' });
-    expect(resolved).toEqual({ modelId: 'second' });
+    expect(resolved).toEqual({ modelId: 'second', reasoningEffort: 'high' });
     expect(f.element.querySelector('.effort-value')?.textContent).toBe('高');
     expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
   } finally {
@@ -1038,7 +1294,7 @@ test('a prepared catalogue from another Store cannot qualify the current picker'
         />,
       ),
     );
-    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b未指定');
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b中');
     expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
     expect(ready[0]).toBe(false);
     expect(ready.at(-1)).toBe(true);
@@ -1193,7 +1449,7 @@ for (const source of [
     }
     try {
       await act(async () => f.root.render(<Host />));
-      expect(resolved).toEqual({ modelId: 'first' });
+      expect(resolved).toEqual({ modelId: 'first', reasoningEffort: 'low' });
       await f.click('模型：first-model，思考程度：轻度');
       expect(f.element.querySelector('.model-selection-hint')).toBeNull();
       expect(f.element.textContent).not.toContain('切换协议请新建会话');
@@ -1204,7 +1460,7 @@ for (const source of [
       expect(f.element.querySelector('[aria-label="选择模型 opposite"]')).toBeNull();
       expect(f.element.querySelector('[aria-label="选择模型 same"]')).not.toBeNull();
       await f.click('选择模型 same');
-      expect(resolved).toEqual({ modelId: 'same' });
+      expect(resolved).toEqual({ modelId: 'same', reasoningEffort: 'low' });
       const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
       await act(async () =>
         slider.dispatchEvent(
@@ -1429,7 +1685,7 @@ test('an unverified first Run blocks sending and does not infer its protocol fro
 test.each([
   false,
   true,
-])('an unspecified effort stays out of the next input until the slider is moved (preparing: %s)', async (preparing) => {
+])('a model without a configured effort displays and freezes medium before interaction (preparing: %s)', async (preparing) => {
   const f = fixture(),
     selection = { ...selected('s'), runs: [] },
     calls: NativeRequest[] = [],
@@ -1468,18 +1724,20 @@ test.each([
   try {
     const { nativeTextIntent } = await import('../../src/native-input');
     await act(async () => f.root.render(<Host />));
-    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('未指定');
-    expect(resolved).toEqual({ modelId: 'a' });
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('中');
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'medium' });
     expect(
       nativeTextIntent(selection, 'before-drag', 'first input', false, resolved),
-    ).not.toHaveProperty('reasoningEffort');
+    ).toMatchObject({ modelId: 'a', reasoningEffort: 'medium' });
     expect(changes).toEqual([]);
-    await f.click('模型：remote-a，思考程度：未指定');
+    await f.click('模型：remote-a，思考程度：中');
     const label = () => f.element.querySelector('.effort-value')?.textContent,
       slider = f.element.querySelector<HTMLElement>('[role="slider"]')!,
       rail = f.element.querySelector<HTMLElement>('.gem-slider')!;
-    expect(label()).toBe('未指定');
-    expect(slider.getAttribute('aria-valuetext')).toBe('未指定');
+    expect(label()).toBe('中');
+    expect(slider.getAttribute('aria-valuetext')).toBe('中');
+    expect(rail.dataset.unselected).toBeUndefined();
+    expect(rail.querySelectorAll('.gem-ticks [data-passed="true"]')).toHaveLength(2);
     rail.getBoundingClientRect = () => new f.dom.window.DOMRect(0, 0, 120, 32);
     Object.assign(rail, {
       setPointerCapture() {},
@@ -1500,6 +1758,24 @@ test.each([
       rail.dispatchEvent(event);
     };
     await act(async () => pointer('pointerdown', 24));
+    await act(async () => pointer('pointercancel', 24));
+    expect(changes).toEqual([]);
+    expect(label()).toBe('中');
+    await act(async () => pointer('pointerdown', 0));
+    await act(async () => pointer('pointerup', 0));
+    expect(changes).toEqual([{ modelId: 'a', reasoningEffort: 'low' }]);
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'low' });
+    expect(label()).toBe('轻度');
+    expect(rail.dataset.unselected).toBeUndefined();
+    await act(async () => pointer('pointerdown', 24));
+    await act(async () => pointer('pointerup', 24));
+    expect(changes.at(-1)).toEqual({ modelId: 'a', reasoningEffort: 'medium' });
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'medium' });
+    expect(label()).toBe('中');
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('中');
+    expect(slider.getAttribute('aria-valuetext')).toBe('中');
+    expect(changes).toHaveLength(2);
+    await act(async () => pointer('pointerdown', 24));
     await act(async () => pointer('pointermove', 48));
     await act(async () => pointer('pointerup', 48));
     expect(changes.at(-1)).toEqual({ modelId: 'a', reasoningEffort: 'high' });
@@ -1507,6 +1783,7 @@ test.each([
     expect(label()).toBe('高');
     expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('高');
     expect(slider.getAttribute('aria-valuetext')).toBe('高');
+    expect(changes).toHaveLength(3);
     expect(nativeTextIntent(selection, 'after-drag', 'next input', false, resolved)).toMatchObject({
       kind: 'run.start',
       modelId: 'a',
@@ -1601,6 +1878,41 @@ test('the first paint restores the Session effort and hands the same value to th
   }
 });
 
+test('a sparse catalogue resolves a permitted default and includes it in the next input without interaction', async () => {
+  const f = fixture();
+  let resolved: NativeModelChoice | undefined;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => ({
+      ...facts,
+      selectedModelId: 'b',
+      models: [{ ...facts.models[1]!, reasoningEffortChoices: ['high', 'ultar'] }],
+    }),
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={selected('s')}
+          value={{}}
+          onChange={() => {
+            throw Error('unexpected_user_change');
+          }}
+          onReady={(ready, choice) => {
+            if (ready) resolved = choice;
+          }}
+        />,
+      ),
+    );
+    expect(resolved).toEqual({ modelId: 'b', reasoningEffort: 'high' });
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('高');
+  } finally {
+    await f.close();
+  }
+});
+
 test('selected routes use configured effort while foreign, stale and malformed history cannot supply Session effort', async () => {
   const f = fixture(),
     calls: NativeRequest[] = [],
@@ -1666,7 +1978,9 @@ test('selected routes use configured effort while foreign, stale and malformed h
     for (const history of histories) {
       await render(history.runs);
       expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
-      expect(resolved).toEqual(history.available ? { modelId: 'a' } : undefined);
+      expect(resolved).toEqual(
+        history.available ? { modelId: 'a', reasoningEffort: 'low' } : undefined,
+      );
       if (!history.available)
         expect(f.element.querySelector('[role="alert"]')?.textContent).toContain(
           '无法确认此会话首次运行的模型协议',
@@ -1677,7 +1991,7 @@ test('selected routes use configured effort while foreign, stale and malformed h
     expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'max' });
     await render([previousRun('max')], true);
     expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
-    expect(resolved).toEqual({ modelId: 'a' });
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'low' });
     await f.click('模型：remote-a，思考程度：轻度');
     expect(f.element.querySelector('.effort-value')?.textContent).toBe('轻度');
     expect(f.element.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('轻度');

@@ -44,17 +44,60 @@ export interface DiagramColors {
   accent: string;
   secondary: string;
 }
+type DiagramImage = { image: string; width: number; height: number };
+// Reuse prepared pixels across message views. No DOM or host callbacks.
+const images = new Map<string, DiagramImage>();
+let imageBytes = 0;
+const observedDocuments = new WeakSet<Document>();
+const imageKey = (source: string, colors: DiagramColors) =>
+  JSON.stringify([source, colors.foreground, colors.accent, colors.secondary]);
+export function getMarkdownDiagramImage(source: string, colors: DiagramColors) {
+  const key = imageKey(source, colors),
+    image = images.get(key);
+  if (image) {
+    images.delete(key);
+    images.set(key, image);
+  }
+  return image;
+}
+function rememberImage(source: string, colors: DiagramColors, value: DiagramImage) {
+  const key = imageKey(source, colors),
+    bytes = (key.length + value.image.length) * 2;
+  if (document.hidden || bytes > 4 * 1024 * 1024) return;
+  if (!observedDocuments.has(document)) {
+    observedDocuments.add(document);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        images.clear();
+        imageBytes = 0;
+      }
+    });
+  }
+  const previous = images.get(key);
+  if (previous) imageBytes -= (key.length + previous.image.length) * 2;
+  images.delete(key);
+  images.set(key, value);
+  imageBytes += bytes;
+  while (images.size > 16 || imageBytes > 4 * 1024 * 1024) {
+    const oldest = images.keys().next().value!;
+    imageBytes -= (oldest.length + images.get(oldest)!.image.length) * 2;
+    images.delete(oldest);
+  }
+}
 export function renderMarkdownDiagram(
   source: string,
-  { foreground, accent, secondary }: DiagramColors,
+  colors: DiagramColors,
   signal: AbortSignal,
 ): Promise<string> {
+  const { foreground, accent, secondary } = colors;
   const job = queue
     .catch(() => {})
     .then(async () => {
       if (signal.aborted) throw new Error('aborted');
       const restriction = diagramRestriction(source);
       if (restriction) throw new Error(restriction);
+      const cached = getMarkdownDiagramImage(source, colors);
+      if (cached) return cached.image;
       const { default: mermaid } = await import('mermaid');
       if (signal.aborted) throw new Error('aborted');
       const container = document.createElement('div');
@@ -128,7 +171,13 @@ export function renderMarkdownDiagram(
         image.setAttribute('width', String(Math.ceil(width)));
         image.setAttribute('height', String(Math.ceil(height)));
         // Image mode disables SVG scripting/navigation; never mount generated markup in the app DOM.
-        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(image))}`;
+        const data = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(image))}`;
+        rememberImage(source, colors, {
+          image: data,
+          width: Math.ceil(width),
+          height: Math.ceil(height),
+        });
+        return data;
       } finally {
         container.remove();
       }

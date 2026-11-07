@@ -5,6 +5,8 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "shadcn/tailwind.css";
 @import "./native-typeset.css";
+@import "./native-content-theme.css";
+@import "./native-navigation-material.css";
 @import "./native-provider-settings.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist/wght-italic.css";
@@ -25,11 +27,13 @@ html[data-input-modality="pointer"] :focus {
   --font-geist-mono: var(--font-mono);
   --native-content-shadow: 0 1px 6px rgb(0 0 0 / 6%);
   --native-content-border: rgb(0 0 0 / 5%);
+  --native-sidebar-border: rgb(0 0 0 / 4%);
 }
 
 [data-theme="dark"] {
   --native-content-shadow: 0 1px 6px rgb(0 0 0 / 28%);
   --native-content-border: rgb(255 255 255 / 10%);
+  --native-sidebar-border: rgb(255 255 255 / 4%);
 }
 
 html,
@@ -71,7 +75,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   /* Menu focus and open states share the same surface-aware neutral layer. */
   --color-accent: var(--control-hover);
   --color-accent-foreground: var(--foreground);
-  --color-ring: var(--input);
+  --color-ring: var(--ring, var(--input));
   --color-destructive: var(--destructive);
   --color-secondary: var(--accent);
   --color-secondary-foreground: var(--foreground);
@@ -314,7 +318,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-page-heading h2 {
   margin: 0 0 8px;
   font-size: 24px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 500;
   letter-spacing: -0.5px;
 }
 .kite-client .desktop-settings .settings-page-heading p {
@@ -335,7 +339,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .extension-settings .settings-section-heading h2 {
   margin: 0 0 44px;
   font-size: 24px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 500;
 }
 .kite-client .desktop-settings .extension-settings .settings-section-heading {
   align-items: flex-start;
@@ -343,7 +347,10 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-content h3 {
   margin: 0 0 18px;
   font-size: 14px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
+}
+.kite-client .desktop-settings .right-sidebar-heading h2 {
+  font-weight: 500;
 }
 .kite-client .desktop-settings .settings-content .settings-group-heading {
   margin: 0 0 12px;
@@ -383,7 +390,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .settings-row strong {
   font-size: 14px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
 }
 .kite-client .settings-row small,
 .kite-client .settings-hint {
@@ -412,7 +419,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-content legend {
   padding: 0 6px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
 }
 /* Model configuration uses compact horizontal rows, independent of form labels. */
 .kite-client .desktop-settings .settings-models > h2 {
@@ -453,7 +460,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   border: 1px solid var(--border);
   border-radius: var(--button-radius);
   font-size: var(--ui-text-size);
-  font-weight: 500;
+  font-weight: 400;
   flex-shrink: 0;
 }
 .kite-client .desktop-settings .settings-models-title {
@@ -462,7 +469,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-models-title h2 {
   margin: 0;
   font-size: 24px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 500;
   letter-spacing: -0.5px;
 }
 .kite-client .desktop-settings .settings-model-current {
@@ -546,7 +553,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-model-provider-heading strong {
   font-size: 14px;
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
 }
 .kite-client .desktop-settings .settings-model-provider-identity > span {
   color: var(--muted-foreground);
@@ -600,7 +607,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .settings-model-option strong {
-  font-weight: var(--font-weight-semibold);
+  font-weight: 400;
 }
 .kite-client .desktop-settings .settings-model-option[data-enabled="false"] strong {
   color: var(--muted-foreground);
@@ -728,7 +735,8 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 
 html[data-native-window] {
   --native-titlebar-height: 32px;
-  --native-panel-inset: 6px;
+  --native-panel-inset: 0px;
+  --native-shell-inset: 0px;
 }
 
 .native-window-frame {
@@ -782,6 +790,7 @@ html[data-native-window][data-platform="macos"] {
   --native-macos-header-height: 48px;
   --native-window-controls-width: 80px;
   --native-panel-inset: 0px;
+  --native-shell-inset: 0px;
 }
 
 html[data-native-window][data-platform="macos"] .native-window-titlebar {
@@ -857,7 +866,26 @@ html[data-native-window][data-platform="macos"] .kite-client .session-sidebar-to
 }
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"]) {
+  --native-shell-inset: 6px;
   background: transparent;
+}
+
+html[data-native-window][data-platform="macos"][data-window-material="vibrancy"] {
+  --native-shell-inset: 0px;
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .native-window-content {
+  padding: var(--native-shell-inset);
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .native-window-content
+  .kite-client
+  .desktop-settings-dialog {
+  inset: var(--native-shell-inset);
+  width: calc(100% - var(--native-shell-inset) * 2);
+  height: calc(100% - var(--native-shell-inset) * 2);
 }
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"]) #root,
@@ -931,15 +959,24 @@ html[data-native-window]:is(
   margin-top: var(--native-panel-inset);
 }
 
-/* One surface contains the reading pane and its tools; only its outer edge owns the frame. */
+/* Only the exterior shell owns decoration; content and tools fill their allocation. */
 html[data-native-window] .kite-client .client-content-frame {
-  box-shadow: var(--native-content-shadow);
+  box-shadow: none;
 }
 
 /* The right rail owns the single seam; borders must not change the allocated panel width. */
+html[data-native-window] .kite-client #navigation-resize {
+  background: var(--native-sidebar-border);
+}
+
 html[data-native-window] .kite-client .right-sidebar {
   border: 0;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--native-sidebar-border);
+}
+
+/* Overlay mode keeps the rail's seam, without a second border on its panel. */
+html[data-native-window] .kite-client .client-content-panels > #details {
+  border-left: 0;
 }
 
 html[data-native-window] .kite-client #details-resize::before {
@@ -949,15 +986,27 @@ html[data-native-window] .kite-client #details-resize::before {
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
   .client-content-frame {
-  width: calc(100% - var(--native-panel-inset) * 2);
-  height: calc(100% - var(--native-panel-inset) * 2);
-  margin: var(--native-panel-inset);
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* One exterior outline encloses navigation, conversation and tools together. */
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="vibrancy"]
+  ) .kite-client
+  :is(.client-panels, .desktop-settings.settings-layout) {
+  position: relative;
+  overflow: hidden;
   border-radius: var(--radius);
+  box-shadow: var(--native-content-shadow);
 }
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
-  .client-content-frame::after {
+  :is(.client-panels, .desktop-settings.settings-layout)::after {
   position: absolute;
   z-index: 1;
   inset: 0;
@@ -976,18 +1025,6 @@ html[data-native-window] .kite-client .client-content-frame .right-sidebar {
   box-shadow: none;
 }
 
-html[data-native-window][data-platform="windows"][data-window-material="mica"]
-  .kite-client
-  .settings-content-frame,
-html[data-native-window][data-platform="windows"][data-window-material="mica"]
-  .kite-client.shell.sidebar-visible
-  #navigation-resize[aria-valuenow]:not([aria-valuenow="0"])
-  ~ #workspace
-  .client-content-frame {
-  width: calc(100% - var(--native-panel-inset));
-  margin-left: 0;
-}
-
 /* Direct resizing reaches zero before release; button changes keep the shared transition. */
 html[data-native-window][data-platform="windows"][data-window-material="mica"] .kite-client
   .client-panels:not([data-animate-width="true"])
@@ -999,9 +1036,14 @@ html[data-native-window][data-platform="windows"][data-window-material="mica"] .
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
   #navigation-resize {
-  background: transparent;
   outline: none;
   box-shadow: none;
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  .settings-sidebar {
+  border-right: 1px solid var(--native-sidebar-border);
 }
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
@@ -1028,12 +1070,17 @@ html[data-native-window][data-platform="macos"]
   outline: none;
 }
 
-html[data-native-window][data-platform="macos"] .kite-client .client-content-frame {
+html[data-native-window][data-platform="macos"]
+  .kite-client
+  :is(.client-content-frame, .client-panels, .desktop-settings.settings-layout) {
   margin: 0;
   border-radius: 0;
+  box-shadow: none;
 }
 
-html[data-native-window][data-platform="macos"] .kite-client .client-content-frame::after {
+html[data-native-window][data-platform="macos"]
+  .kite-client
+  :is(.client-panels, .desktop-settings.settings-layout)::after {
   border: 0;
 }
 
@@ -1253,7 +1300,7 @@ html[data-native-window][data-platform="macos"] .kite-client .client-content-fra
 .native-browser-error-icon {
   display: block;
   margin-bottom: 24px;
-  color: #009bff;
+  color: var(--info-foreground);
 }
 .native-browser-error-icon :where(svg) {
   width: 36px;

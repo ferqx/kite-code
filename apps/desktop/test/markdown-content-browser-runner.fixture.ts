@@ -151,8 +151,6 @@ async function checkMessageStyles(page: import('playwright').Page) {
       tableHead: read('th'),
       tableCell: read('td'),
       tableGrid: read('th + th'),
-      editorInline: read('.prompt-inline-code', document),
-      editorCode: read('.prompt-code-block', document),
       foreground: getComputedStyle(root).color,
     };
   });
@@ -192,11 +190,11 @@ async function checkMessageStyles(page: import('playwright').Page) {
   assert.equal(styles.tableHead.background, transparent);
   assert.equal(styles.tableCell.padding, '10px 14px');
   assert.equal(styles.tableGrid.leftBorder, '1px');
-  assert.equal(styles.editorInline.border, '0px');
-  assert.equal(styles.editorInline.radius, styles.inline.radius);
-  assert.equal(styles.editorInline.background, styles.inline.background);
-  assert.equal(styles.editorCode.border, '0px');
-  assert.equal(styles.editorCode.background, styles.code.background);
+  assert.equal(await page.locator('textarea.prompt-editor').count(), 1);
+  assert.equal(
+    await page.locator('textarea.prompt-editor table, textarea.prompt-editor code').count(),
+    0,
+  );
   const link = page.getByRole('link', { name: '外部文档', exact: true }).first();
   await page.mouse.move(0, 0);
   assert.equal(await link.evaluate((node) => getComputedStyle(node).textDecorationLine), 'none');

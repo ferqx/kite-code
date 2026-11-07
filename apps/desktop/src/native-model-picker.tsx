@@ -1,5 +1,5 @@
-import { ModelEffortSelector, ReadGate } from '@kite-ai/ui/desktop';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ModelEffortSelector, ReadGate, resolveThinkingEffort } from '@kite-ai/ui/desktop';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   NativeBridge,
   NativeModelSettingsFacts,
@@ -15,6 +15,17 @@ import {
 } from './native-model-preference';
 
 export type NativeModelChoice = { modelId?: string; reasoningEffort?: NativeReasoningEffort };
+/** A cached label only; displaying it never starts a read or qualifies a choice. */
+export type NativeModelDisplay = {
+  model?: {
+    id: string;
+    provider: string;
+    name: string;
+    reasoningEffortChoices?: readonly NativeReasoningEffort[];
+  };
+  reasoningEffort?: NativeReasoningEffort;
+};
+export type NativeModelPresentation = { settled: boolean; display?: NativeModelDisplay };
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -130,12 +141,17 @@ export function nativeModelScope(
 export class NativeModelSnapshots {
   private boundary?: string;
   private entries = new NativeDisplayCache<NativeModelSettingsFacts>();
+  private pending = new Map<
+    string,
+    { bridge: NativeBridge; promise: Promise<NativePreparedModels> }
+  >();
   get(scope: ReturnType<typeof nativeModelScope>) {
     return this.boundary === scope.boundary ? this.entries.get(scope.displayKey) : undefined;
   }
   observe(scope: ReturnType<typeof nativeModelScope>) {
     if (this.boundary !== scope.boundary) {
       this.entries.clear();
+      this.pending.clear();
       this.boundary = scope.boundary;
     }
   }
@@ -148,6 +164,30 @@ export class NativeModelSnapshots {
     const key = JSON.stringify(['preparing', undefined, undefined]);
     const facts = this.entries.get(key);
     if (facts) this.entries.set(key, { ...facts, recommendedModel: choice });
+  }
+  async prepare(
+    bridge: NativeBridge,
+    generation: number,
+    selection?: NativeSelection,
+    preparing?: { storeId: string },
+    revision?: string,
+  ): Promise<NativePreparedModels> {
+    const scope = nativeModelScope(generation, selection, preparing, revision);
+    this.observe(scope);
+    let entry = this.pending.get(scope.readKey);
+    if (entry?.bridge !== bridge) {
+      entry = {
+        bridge,
+        promise: prepareNativeModels(bridge, generation, selection, preparing, revision),
+      };
+      this.pending.set(scope.readKey, entry);
+      const original = entry;
+      const settle = () => {
+        if (this.pending.get(scope.readKey) === original) this.pending.delete(scope.readKey);
+      };
+      void entry.promise.then(settle, settle);
+    }
+    return structuredClone(await entry.promise);
   }
 }
 export type NativePreparedModels = {
@@ -203,6 +243,7 @@ export function NativeModelPicker({
   disabled = false,
   snapshots: sharedSnapshots,
   prepared,
+  preview,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -211,16 +252,21 @@ export function NativeModelPicker({
   revision?: string;
   value: NativeModelChoice;
   onChange: (value: NativeModelChoice) => void;
-  onReady: (ready: boolean, choice?: NativeModelChoice) => void;
+  onReady: (
+    ready: boolean,
+    choice?: NativeModelChoice,
+    presentation?: NativeModelPresentation,
+  ) => void;
   disabled?: boolean;
   snapshots?: NativeModelSnapshots;
   prepared?: NativePreparedModels;
+  preview?: NativeModelDisplay;
 }) {
   const diagnostics = useNativeDiagnostics();
   const localSnapshots = useRef(new NativeModelSnapshots());
   const snapshots = sharedSnapshots ?? localSnapshots.current;
   const scope = nativeModelScope(generation, selection, preparing, revision);
-  snapshots.observe(scope);
+  if (!preview) snapshots.observe(scope);
   const readKey = scope.readKey;
   const [state, setState] = useState<{
     key: string;
@@ -234,9 +280,9 @@ export function NativeModelPicker({
       ? { ...prepared, reading: false }
       : undefined;
   const currentState = preparedState ?? (state?.key === readKey ? state : undefined);
-  const facts = currentState ? currentState.facts : snapshots.get(scope);
-  const reading = !currentState || currentState.reading;
-  const error = currentState?.error ?? '';
+  const facts = preview ? undefined : currentState ? currentState.facts : snapshots.get(scope);
+  const reading = !!preview || disabled || !currentState || currentState.reading;
+  const error = preview || disabled ? '' : (currentState?.error ?? '');
   const current = useRef(readKey);
   current.current = readKey;
   const sequence = useRef(0),
@@ -262,15 +308,35 @@ export function NativeModelPicker({
       ? recommendation?.reasoningEffort
       : undefined;
   const requestEffort = value.reasoningEffort ?? previousEffort ?? recommendedEffort;
-  const effort = requestEffort ?? selected?.reasoningEffort;
+  const modelEffort = selected
+    ? resolveThinkingEffort(selected.reasoningEffort, selected.reasoningEffortChoices)
+    : undefined;
+  const effort = requestEffort ?? modelEffort;
   const allowedEffort =
     requestEffort === undefined ||
+    requestEffort === modelEffort ||
     supported.includes(requestEffort) ||
     (value.reasoningEffort === undefined &&
       (requestEffort === 'none' || requestEffort === 'minimal'));
   const observed = !!selected && allowedEffort && !protocol.unavailable && !error;
   const ready = observed && !reading && !disabled;
   const readyId = observed ? selected?.id : undefined;
+  const display = useMemo<NativeModelDisplay | undefined>(() => {
+    if (reading || error || protocol.unavailable || (requestedId && (!selected || !allowedEffort)))
+      return;
+    // An explicitly unselected model is a complete display, without send eligibility.
+    return {
+      model: selected
+        ? {
+            id: selected.id,
+            provider: selected.provider ?? '其他',
+            name: selected.model ?? selected.id,
+            reasoningEffortChoices: selected.reasoningEffortChoices ?? [],
+          }
+        : undefined,
+      reasoningEffort: effort ?? undefined,
+    };
+  }, [reading, error, protocol.unavailable, requestedId, selected, allowedEffort, effort]);
   useLayoutEffect(() => {
     if (current.current !== readKey) return;
     readyCallback.current(
@@ -278,22 +344,30 @@ export function NativeModelPicker({
       readyId
         ? {
             modelId: readyId,
-            ...(requestEffort === undefined ? {} : { reasoningEffort: requestEffort }),
+            ...(effort === undefined ? {} : { reasoningEffort: effort }),
           }
         : undefined,
+      { settled: !reading, display },
     );
-  }, [readKey, ready, readyId, requestEffort]);
+  }, [readKey, ready, readyId, effort, reading, display]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reads follow exact scope and settings revision; callbacks and temporary effort do not restart IO.
   useEffect(() => {
     const original = readKey,
       request = ++sequence.current;
+    if (preview) return;
+    const retained = snapshots.get(scope);
+    // A retained footer can be mounted before Main has selected its target.
+    // It may display cached facts, but must not start or settle that target's IO.
+    if (disabled) {
+      setState({ key: readKey, facts: retained, error: '', reading: true });
+      return;
+    }
     if (preparedState) {
       if (preparedState.facts) snapshots.set(scope, preparedState.facts);
       return;
     }
-    const retained = snapshots.get(scope);
     setState({ key: readKey, facts: retained, error: '', reading: true });
-    void prepareNativeModels(bridge, generation, selection, preparing, revision).then((result) => {
+    void snapshots.prepare(bridge, generation, selection, preparing, revision).then((result) => {
       if (current.current !== original || sequence.current !== request) return;
       if (result.facts) snapshots.set(scope, result.facts);
       setState({
@@ -306,7 +380,7 @@ export function NativeModelPicker({
     return () => {
       sequence.current++;
     };
-  }, [readKey, bridge, prepared]);
+  }, [readKey, bridge, prepared, disabled, preview]);
   const preferenceSequence = useRef(0);
   async function remember(
     choice: NativeModelChoice,
@@ -331,17 +405,15 @@ export function NativeModelPicker({
     }
   }
   function choose(modelId: string) {
-    if (
-      !reading &&
-      !error &&
-      !disabled &&
-      !protocol.unavailable &&
-      models.some((model) => model.id === modelId)
-    )
+    const model = models.find((entry) => entry.id === modelId);
+    if (!reading && !error && !disabled && !protocol.unavailable && model)
       remember(
         { modelId },
-        (preparing ? undefined : previousSessionEffort(selection, modelId)) ??
-          models.find((model) => model.id === modelId)?.reasoningEffort,
+        resolveThinkingEffort(
+          (preparing ? undefined : previousSessionEffort(selection, modelId)) ??
+            model.reasoningEffort,
+          model.reasoningEffortChoices,
+        ),
       );
   }
   function setEffort(reasoningEffort: NativeReasoningEffort) {
@@ -372,23 +444,31 @@ export function NativeModelPicker({
       <ReadGate blocked={reading || disabled}>
         <ModelEffortSelector
           model={
-            selected
-              ? {
-                  id: selected.id,
-                  provider: selected.provider ?? '其他',
-                  name: selected.model ?? selected.id,
-                }
-              : undefined
+            preview
+              ? preview.model
+              : selected
+                ? {
+                    id: selected.id,
+                    provider: selected.provider ?? '其他',
+                    name: selected.model ?? selected.id,
+                  }
+                : undefined
           }
-          models={models.map((model) => ({
-            id: model.id,
-            provider: model.provider ?? '其他',
-            name: model.model ?? model.id,
-            reasoningEffort: model.reasoningEffort ?? undefined,
-            reasoningEffortChoices: model.reasoningEffortChoices ?? [],
-          }))}
-          disabled={protocol.unavailable}
-          reasoningEffort={effort ?? undefined}
+          models={
+            preview
+              ? preview.model
+                ? [preview.model]
+                : []
+              : models.map((model) => ({
+                  id: model.id,
+                  provider: model.provider ?? '其他',
+                  name: model.model ?? model.id,
+                  reasoningEffort: model.reasoningEffort ?? undefined,
+                  reasoningEffortChoices: model.reasoningEffortChoices ?? [],
+                }))
+          }
+          disabled={!preview && protocol.unavailable}
+          reasoningEffort={preview ? preview.reasoningEffort : (effort ?? undefined)}
           onModelChange={(_provider, _name, id) => {
             if (id !== undefined) choose(id);
           }}
@@ -396,15 +476,21 @@ export function NativeModelPicker({
           modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
         />
       </ReadGate>
-      {protocol.unavailable && <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>}
+      {!preview && protocol.unavailable && (
+        <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>
+      )}
       {error && <p role="alert">模型目录不可用：{error}</p>}
-      {saveError === readKey && <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>}
+      {!preview && saveError === readKey && (
+        <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>
+      )}
       {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">
           {requestedId ? `所选模型 ${requestedId} 当前不可用，请重新选择。` : '请选择模型。'}
         </p>
       )}
-      {selected && !allowedEffort && <p role="alert">原临时思考档位当前不可用，请重新选择。</p>}
+      {!preview && selected && !allowedEffort && (
+        <p role="alert">原临时思考档位当前不可用，请重新选择。</p>
+      )}
     </section>
   );
 }

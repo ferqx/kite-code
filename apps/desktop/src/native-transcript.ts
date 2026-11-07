@@ -388,6 +388,12 @@ export function desktopTranscript({
         !message.originMessage && message.sessionId === sessionId && message.runId
           ? observed.get(message.runId)
           : undefined;
+    // A local submission and its saved user record keep one DOM identity.
+    // Never correlate equal text or borrow an ancestor's input identity.
+    const inputCommandId =
+      message.role === 'user' && !message.originMessage && message.sessionId === sessionId
+        ? (message.humanInput?.publicCommandId ?? message.originCommandId)
+        : undefined;
     const fact = tools.find(
       (entry) =>
         entry.messageId === message.id &&
@@ -481,6 +487,7 @@ export function desktopTranscript({
           }
         : {}),
       ...(run && !model.agentResult ? { turnId: identity(run.id) } : {}),
+      ...(inputCommandId ? { presentationKey: inputCommandId } : {}),
       ...(run && message.role === 'tool' && message.sourceIds?.length === 1
         ? {
             presentationKey: nativeToolPresentationKey(

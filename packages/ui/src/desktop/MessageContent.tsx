@@ -27,6 +27,7 @@ import { useConversationReadActive } from '../conversation-activity';
 import { incrementalMarkdown, incrementalMarkdownComponents } from './incremental-markdown';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 import { desktopMarkdownSemantics } from './markdown-extensions';
+import { desktopKatexOptions, wrapMarkdownMath } from './markdown-math';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
 type MarkdownNode = {
@@ -132,6 +133,7 @@ function MarkdownLink({
         {...props}
         href={href}
         onClick={(event) => {
+          if (event.defaultPrevented) return;
           event.preventDefault();
           if (!readActive) return;
           const root = event.currentTarget.closest('.typeset-chat');
@@ -147,18 +149,18 @@ function MarkdownLink({
     );
   if (/^https?:\/\//i.test(href))
     return (
-      <a href={href} target="_blank" rel="noreferrer">
+      <a {...props} href={href} target="_blank" rel="noreferrer">
         {children}
       </a>
     );
-  if (!openFile || /^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
+  if (/^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
   return (
     <button
       type="button"
       className="file-link"
-      aria-disabled={!readActive || undefined}
+      aria-disabled={!readActive || !openFile || undefined}
       onClick={() => {
-        if (!readActive) return;
+        if (!readActive || !openFile) return;
         let path = href;
         try {
           path = decodeURIComponent(href);
@@ -173,7 +175,7 @@ function MarkdownLink({
   );
 }
 
-function MarkdownTable({ children }: { children?: ReactNode }) {
+function MarkdownTable({ children }: { children?: ReactNode } & ExtraProps) {
   return (
     <section
       className="markdown-table-scroll"
@@ -288,16 +290,8 @@ const MarkdownDocument = memo(
         ]}
         remarkRehypeOptions={{ footnoteLabel: '脚注', footnoteBackLabel: '返回正文' }}
         rehypePlugins={[
-          [
-            rehypeKatex,
-            {
-              trust: false,
-              strict: 'ignore',
-              maxExpand: 100,
-              maxSize: 20,
-              errorColor: 'var(--foreground)',
-            },
-          ],
+          wrapMarkdownMath,
+          [rehypeKatex, desktopKatexOptions],
           [desktopMarkdownSemantics, { prefix }],
           [segmentLongTextNodes, { source: text }],
           [incrementalMarkdown, { source: text, revealAfter }],

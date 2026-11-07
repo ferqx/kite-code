@@ -180,7 +180,7 @@ function fixture(
                 enabled: true,
                 configured: true,
                 diagnostics: [],
-                reasoningEffortChoices: [],
+                reasoningEffortChoices: ['medium'],
               },
             ],
           };
@@ -207,13 +207,23 @@ function fixture(
     click,
     snapshot,
     async chooseModel() {
+      await act(async () => nextDesktopPresentation(dom));
+      await until(() => {
+        const trigger =
+          dom.window.document.querySelector<HTMLButtonElement>('[data-model-trigger]');
+        return !!trigger && !trigger.disabled && trigger.dataset.readGated !== 'true';
+      });
       await click('选择模型');
-      for (const label of ['选择模型，当前 未选择', '选择模型 model']) {
-        await until(() => !!dom.window.document.querySelector(`[aria-label="${label}"]`));
-        await act(async () => {
-          dom.window.document.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.click();
-        });
-      }
+      await until(() => !!dom.window.document.querySelector('[aria-label^="选择模型，当前 "]'));
+      await act(async () =>
+        dom.window.document
+          .querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]')!
+          .click(),
+      );
+      await until(() => !!dom.window.document.querySelector('[aria-label="选择模型 model"]'));
+      await act(async () =>
+        dom.window.document.querySelector<HTMLElement>('[aria-label="选择模型 model"]')!.click(),
+      );
       await act(async () => {
         dom.window.document
           .querySelector('[aria-label="模型与思考程度"]')!
@@ -242,7 +252,9 @@ function fixture(
         ),
       ).toBe(true);
       expect(
-        promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+        promptValue(
+          dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+        ),
       ).toBe('other text');
       expect(dom.window.document.querySelector('[role="alertdialog"]') === null).toBe(true);
       expect(dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
@@ -353,7 +365,9 @@ test('a current event state failure recovers in the background without a dialog 
       () => f.calls.filter((request) => request.method === 'state').length >= priorStateReads + 2,
     );
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('original text');
     expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
   } finally {
@@ -379,7 +393,9 @@ test('a current select rejection retries its exact target without an external er
     expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
     await until(() => f.calls.filter((request) => request.method === 'select').length === 2);
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('original text');
     expect(
       f.calls
@@ -412,7 +428,9 @@ test('a diagnostic directory failure recovers after a same-generation session sw
     f.assertOther();
     expect(f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]')).toBeNull();
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('other text');
   } finally {
     await f.close();
@@ -506,7 +524,9 @@ for (const method of ['state', 'directory'] as const)
       ).toBeNull();
       expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
       expect(
-        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+        promptValue(
+          f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+        ),
       ).toBe('original text');
       await f.notify();
       expect(f.calls.filter((request) => request.method === 'state')).toHaveLength(callsBeforeQuit);
@@ -520,7 +540,9 @@ for (const method of ['state', 'directory'] as const)
       ).toBeNull();
       expect(f.dom.window.document.querySelector('.native-toast [role="status"]')).toBeNull();
       expect(
-        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+        promptValue(
+          f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+        ),
       ).toBe('original text');
       expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
       expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
@@ -579,7 +601,9 @@ for (const method of ['select', 'draft.read'] as const)
       hold = false;
       await f.notify({ kind: 'lifecycle', phase: 'active' });
       expect(
-        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+        promptValue(
+          f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+        ),
       ).toBe('original text');
       expect(
         f.dom.window.document.querySelector('[role="alertdialog"], [role="dialog"]'),
@@ -684,7 +708,9 @@ test('private draft save is test-only and retains its original scope and CAS whi
       '历史已完整读取至固定高水位；当前执行事实仍须核实。',
     );
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe(raw.replaceAll('\r\n', '\n'));
     expect(
       [...f.dom.window.document.querySelectorAll('button')].some(
@@ -703,7 +729,9 @@ test('private draft save is test-only and retains its original scope and CAS whi
     ]);
     await f.click('Other B');
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('other text');
     await act(async () =>
       savedReply.resolve({
@@ -887,7 +915,9 @@ test('actual Native page keeps prompt separate, saves annotation metadata, scope
     await f.click('加入提示词');
     await until(() => !!drafts.get('a')?.browserAnnotations?.length);
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('original text');
     expect(f.dom.window.document.querySelector('.browser-note-context')?.textContent).toContain(
       '1 条网页注释',
@@ -930,7 +960,10 @@ test('actual Native page keeps prompt separate, saves annotation metadata, scope
       '编辑后注释全文',
     );
     await act(async () =>
-      setPromptText(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')!, ''),
+      setPromptText(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')!,
+        '',
+      ),
     );
     await f.click('发送明确的新轮次');
     await until(() => submitted.length === 2);
@@ -1021,7 +1054,7 @@ test('cold unknown annotation keeps missing pixels and locks cards; accepted ori
     expect(f.calls.filter((request) => request.method.startsWith('input.images.'))).toHaveLength(0);
     await act(async () =>
       setPromptText(
-        f.dom.window.document.querySelector('[role="textbox"][contenteditable]')!,
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')!,
         'newer edit',
       ),
     );
@@ -1031,7 +1064,9 @@ test('cold unknown annotation keeps missing pixels and locks cards; accepted ori
     await until(() => writes.some((write) => write.content === 'newer edit'));
     expect(f.dom.window.document.querySelector('.browser-note-card')).toBeNull();
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('newer edit');
     expect(writes.at(-1)!.browserAnnotations).toEqual([]);
     expect(f.calls.filter((request) => request.method === 'submit')).toHaveLength(0);
@@ -1105,7 +1140,7 @@ test('a cached unavailable selection rereads the same activation and retires an 
     await f.click('Original A');
     await act(async () => {
       await setPromptText(
-        f.dom.window.document.querySelector('[role="textbox"][contenteditable]')!,
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')!,
         'newer private 🙂',
       );
     });
@@ -1122,7 +1157,9 @@ test('a cached unavailable selection rereads the same activation and retires an 
     expect(selects).toHaveLength(2);
     expect(selects[1]).toEqual(activation);
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('newer private 🙂');
     expect(
       f.calls.filter((request) =>
@@ -1144,6 +1181,7 @@ test('a cached unavailable selection rereads the same activation and retires an 
 
 test('failed selection and unavailable observation share one read while the original unknown answer can recover', async () => {
   const held = deferred<NativeResult>();
+  const selectionStarted = deferred<void>();
   let failing = false,
     unavailable = false,
     selectionReads = 0,
@@ -1200,14 +1238,17 @@ test('failed selection and unavailable observation share one read while the orig
     }
     if (request.method === 'select' && unavailable) {
       selectionReads++;
+      selectionStarted.resolve(undefined);
       return held.promise;
     }
     if (request.method === 'state' && unavailable) return stale();
     if (request.method === 'lookupInteraction') {
       expect(request.commandId).toBe('original-answer');
-      lookups++;
-      answerPhase = 'accepted';
-      return null;
+      return selectionStarted.promise.then(() => {
+        lookups++;
+        answerPhase = 'accepted';
+        return null;
+      });
     }
     return undefined;
   });
@@ -1235,7 +1276,9 @@ test('failed selection and unavailable observation share one read while the orig
     expect(selectionReads).toBe(1);
     expect(lookups).toBe(1);
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('original text');
     const reads = new Set([
       'attach',
@@ -1371,7 +1414,9 @@ for (const recoveredDependency of ['directory', 'answer'] as const) {
       await act(async () => held.resolve(directory));
       await until(() => approve()?.disabled === false, 1500);
       expect(
-        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+        promptValue(
+          f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+        ),
       ).toBe('original text');
       expect(
         f.calls.filter((request) =>
@@ -1432,7 +1477,9 @@ test('same-scope observation recovery preserves an outstanding complete history 
         .every((request) => JSON.stringify(request) === JSON.stringify(activation)),
     ).toBe(true);
     expect(
-      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      promptValue(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('original text');
     hold = false;
     await act(async () =>

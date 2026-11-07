@@ -10,24 +10,27 @@ export function GemSlider({
   onValueChange,
   allowedValues = allPositions,
 }: {
-  value: number;
-  valueText?: string;
+  value?: number;
+  valueText: string;
   onValueChange: (value: number) => void;
   allowedValues?: readonly number[];
 }) {
   const root = useRef<HTMLSpanElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const target = useRef(value);
+  const hasSelection = value !== undefined && allowedValues.includes(value);
+  const displayValue = hasSelection ? value : allowedValues[0]!;
+  const target = useRef(displayValue);
   const positions = useRef(allowedValues);
   positions.current = allowedValues;
-  const position = Math.max(0, allowedValues.indexOf(value));
+  const position = allowedValues.indexOf(displayValue);
   const redraw = useRef<(() => void) | null>(null);
   const pressedPointer = useRef<number | null>(null);
+  const pointerChanged = useRef(false);
   const [release, setRelease] = useState(0);
   useEffect(() => {
-    target.current = value;
+    target.current = displayValue;
     redraw.current?.();
-  }, [value]);
+  }, [displayValue]);
 
   useEffect(() => {
     const surface = canvas.current!;
@@ -190,21 +193,30 @@ export function GemSlider({
       ref={root}
       className="gem-slider"
       data-maximum={value === 5}
+      data-unselected={!hasSelection || undefined}
       value={[position]}
       onValueChange={([next]) => {
-        if (next !== undefined && allowedValues[next] !== undefined)
+        if (next !== undefined && allowedValues[next] !== undefined) {
+          pointerChanged.current = true;
           onValueChange(allowedValues[next]!);
+        }
       }}
-      onValueCommit={([next]) => {
-        if (next !== undefined && allowedValues[next] !== undefined)
-          onValueChange(allowedValues[next]!);
+      onKeyDown={(event) => {
+        // Radix omits changes that stay at the first position; an explicit choice
+        // must still replace a legacy configured value outside the six positions.
+        if (!hasSelection && ['Home', 'ArrowLeft', 'ArrowDown', 'PageDown'].includes(event.key))
+          onValueChange(displayValue);
       }}
       onPointerDown={(event) => {
-        if (event.button === 0) pressedPointer.current = event.pointerId;
+        if (event.button === 0) {
+          pressedPointer.current = event.pointerId;
+          pointerChanged.current = false;
+        }
       }}
       onPointerUp={(event) => {
         if (pressedPointer.current !== event.pointerId) return;
         pressedPointer.current = null;
+        if (!hasSelection && !pointerChanged.current) onValueChange(displayValue);
         if (!matchMedia('(prefers-reduced-motion: reduce)').matches)
           setRelease((previous) => previous + 1);
       }}
@@ -215,12 +227,12 @@ export function GemSlider({
       max={allowedValues.length - 1}
       step={1}
       aria-label="思考程度"
-      aria-valuetext={valueText ?? effortNames[value]}
+      aria-valuetext={valueText}
       rangeContent={<canvas ref={canvas} tabIndex={-1} aria-hidden="true" />}
       trackContent={
         <span className="gem-ticks" aria-hidden="true">
           {allowedValues.map((value, index) => (
-            <i key={value} data-passed={index <= position} />
+            <i key={value} data-passed={hasSelection && index <= position} />
           ))}
         </span>
       }

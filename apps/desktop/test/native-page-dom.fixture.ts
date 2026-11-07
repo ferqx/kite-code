@@ -1,5 +1,25 @@
 import type { JSDOM } from 'jsdom';
 
+/** Deliver an onChange captured before a write gate, modelling an already queued edit. */
+export function captureQueuedPromptChange(element: HTMLElement): (text: string) => void {
+  type Fiber = {
+    return?: Fiber;
+    memoizedProps?: { scopeKey?: string; onChange?: (text: string) => void };
+  };
+  let host: HTMLElement | null = element;
+  while (host && !Object.keys(host).some((name) => name.startsWith('__reactFiber$')))
+    host = host.parentElement;
+  if (!host) throw Error('prompt_react_host_not_found');
+  const key = Object.keys(host).find((name) => name.startsWith('__reactFiber$'))!;
+  let fiber = (host as unknown as Record<string, Fiber>)[key];
+  while (fiber) {
+    if (fiber.memoizedProps?.scopeKey && fiber.memoizedProps.onChange)
+      return fiber.memoizedProps.onChange;
+    fiber = fiber.return;
+  }
+  throw Error('prompt_change_callback_not_found');
+}
+
 /** Navigation admits Main work in the task following its first rendering opportunity. */
 export function nextDesktopPresentation(dom: JSDOM): Promise<void> {
   return new Promise((resolve) => {
@@ -13,18 +33,8 @@ export async function setPromptText(element: Element, value: string) {
   setEditorText(element as HTMLElement, value);
 }
 export function promptValue(element: Element | null | undefined) {
-  const text = (node: Node): string =>
-    node.nodeName === 'BR'
-      ? '\n'
-      : node.nodeType === 3
-        ? (node.textContent ?? '')
-        : [...node.childNodes].map(text).join('');
-  return element
-    ? [...element.children]
-        .map((child) => (child.textContent ? text(child) : ''))
-        .join('\n')
-        .replace(/\r\n?/g, '\n')
-    : undefined;
+  if (!element) return undefined;
+  return (element as HTMLTextAreaElement).value;
 }
 
 /** Browser APIs used by the retained desktop layout; these do not simulate Native facts or writes. */
@@ -57,6 +67,7 @@ export function prepareDesktopDom(dom: JSDOM) {
   const media = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
   Object.assign(dom.window, { ResizeObserver: ResizeObserverStub, matchMedia: media });
   const globals = {
+    Window: dom.window.Window,
     HTMLElement: dom.window.HTMLElement,
     HTMLFormElement: dom.window.HTMLFormElement,
     HTMLSelectElement: dom.window.HTMLSelectElement,
@@ -68,9 +79,18 @@ export function prepareDesktopDom(dom: JSDOM) {
     NodeFilter: dom.window.NodeFilter,
     MutationObserver: dom.window.MutationObserver,
     Element: dom.window.Element,
+    SVGElement: dom.window.SVGElement,
     DOMRect: dom.window.DOMRect,
     Event: dom.window.Event,
     CustomEvent: dom.window.CustomEvent,
+    addEventListener: dom.window.addEventListener.bind(dom.window),
+    removeEventListener: dom.window.removeEventListener.bind(dom.window),
+    dispatchEvent: dom.window.dispatchEvent.bind(dom.window),
+    IntersectionObserver: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
     FileReader: dom.window.FileReader,
     getComputedStyle: dom.window.getComputedStyle,
     ResizeObserver: ResizeObserverStub,

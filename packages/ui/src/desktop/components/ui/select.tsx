@@ -26,7 +26,7 @@ export function SelectTrigger({
       {children}
       <SelectPrimitive.Icon asChild>
         <HugeiconsIcon
-          className="size-[var(--ui-icon-size,14px)]"
+          className="block size-[var(--ui-icon-size,14px)] shrink-0"
           icon={ArrowDown01Icon}
           aria-hidden="true"
         />
@@ -75,9 +75,9 @@ export function SelectItem({
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
       <span className="absolute right-2 flex items-center justify-center">
-        <SelectPrimitive.ItemIndicator>
+        <SelectPrimitive.ItemIndicator asChild>
           <HugeiconsIcon
-            className="size-[var(--ui-icon-size,14px)]"
+            className="block size-[var(--ui-icon-size,14px)] shrink-0"
             icon={Tick02Icon}
             aria-hidden="true"
           />
