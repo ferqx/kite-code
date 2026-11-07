@@ -163,6 +163,56 @@ test('a new page presents its first message tree and composer together, includin
   }
 });
 
+test('enabling history presentation for an already visible Session does not hide its composer', async () => {
+  const host = document.getElementById('root')!;
+  const root = createRoot(host);
+  const show = (id: string, synchronize: boolean, loading: boolean) =>
+    act(async () =>
+      root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel={id}
+          readingKey={id}
+          conversationCache={{ scope: 'store', revision: '1', readActive: !loading }}
+          messages={[{ id: `user-${id}`, role: 'user', text: '首发正文', settled: true }]}
+          loading={loading}
+          synchronizePresentation={synchronize}
+          connected
+          connectionLabel=""
+          actions={{}}
+          composer={{
+            scopeKey: id,
+            draft: '下一条草稿',
+            onChange: () => {},
+            active: false,
+            stopping: false,
+            disabled: false,
+          }}
+        />,
+      ),
+    );
+  try {
+    await show('a', false, false);
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea.prompt-editor')!;
+    editor.focus();
+    await show('a', true, true);
+    expect(host.querySelector('[data-presentation-pending]')).toBeNull();
+    expect(host.querySelector('.conversation-footer')?.hasAttribute('inert')).toBe(false);
+    expect(host.querySelector<HTMLElement>('.conversation-footer')?.style.visibility).toBe('');
+    expect(document.activeElement).toBe(editor);
+    expect(editor.value).toBe('下一条草稿');
+    await show('a', true, false);
+    expect(host.querySelector('textarea.prompt-editor')).toBe(editor);
+    await show('b', true, true);
+    expect(host.querySelector('[data-presentation-pending]')).not.toBeNull();
+    expect(host.querySelector('.conversation-footer')?.hasAttribute('inert')).toBe(true);
+    await show('b', true, false);
+    expect(host.querySelector('[data-presentation-pending]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 test('tab scope reconciliation preserves the page shell without closing native browser pages', async () => {
   const host = document.getElementById('root')!;
   const root = createRoot(host);

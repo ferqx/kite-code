@@ -466,6 +466,18 @@ export function sessionSwitchBridge(
       revision++;
       send();
     },
+    registerSession(id: string) {
+      if (sessions.some((session) => session.id === id)) return;
+      sessions.push({
+        ...sessions[0]!,
+        id,
+        rootSessionId: id,
+        title: 'First Session',
+        nextSeq: '1',
+      });
+      turns.set(id, { id: `run-${id}`, status: 'running', isActive: false });
+      revision++;
+    },
     setTurn(
       sessionId: string,
       status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted',

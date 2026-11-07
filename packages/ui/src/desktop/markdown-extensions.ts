@@ -8,7 +8,7 @@ type Node = {
   children?: Node[];
 };
 
-const alerts: Record<string, string> = {
+export const markdownAlertLabels: Record<string, string> = {
   NOTE: '说明',
   TIP: '提示',
   IMPORTANT: '重要',
@@ -63,7 +63,7 @@ export function desktopMarkdownSemantics({ prefix }: { prefix: string }) {
           className: ['markdown-alert-title'],
           'data-alert': marker[1]!.toLowerCase(),
         },
-        children: [{ type: 'text', value: alerts[marker[1]!]! }],
+        children: [{ type: 'text', value: markdownAlertLabels[marker[1]!]! }],
       });
       if (paragraph && !textContent(paragraph))
         node.children = node.children!.filter((child) => child !== paragraph);

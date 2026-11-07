@@ -10,6 +10,7 @@ import {
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixture';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
 import { groupNativeToolMessages } from '../../src/native-tool-messages';
@@ -115,6 +116,89 @@ const tool = (id: string): NativeToolMessageFact => ({
   status: 'succeeded',
   resultRevision: '1',
   target: `${id}.txt`,
+});
+
+test('a saved prompt takes over its submission DOM without changing Markdown, selection or independent identical inputs', async () => {
+  const f = fixture();
+  const text = '# 提示词\n\n**说明：**后文\n\n- 列表\n\n```ts\nconst x = 1;\n```';
+  const saved: Message = {
+    ...message('saved-message', 'user', '1', text),
+    originCommandId: 'business-command',
+    humanInput: { inputCommandId: 'business-input', publicCommandId: 'public-command' },
+  };
+  const project = (messages: Message[]) =>
+    desktopTranscript({ messages, runs: [run()], tools: [], storeId: 'store', sessionId: 's' })
+      .messages;
+  const render = async (messages: DesktopMessage[], key = 'hot') =>
+    act(async () =>
+      f.root.render(
+        <Conversation
+          key={key}
+          loading={false}
+          selected
+          connected
+          saveReading={() => {}}
+          messages={messages}
+          lazyHistory
+        />,
+      ),
+    );
+  try {
+    const pending = nativePendingInputMessage(
+      'public-command',
+      { storeId: 'store', sessionId: 's', kind: 'run.start', text },
+      'sending',
+      undefined,
+    );
+    await render([pending]);
+    const article = f.host.querySelector('.message.user')!;
+    const body = article.querySelector('.prompt-markdown')!;
+    const original = markdownMarkup(body);
+    const copy = body.querySelector('[data-slot="code-block-copy-button"]');
+    const range = f.dom.window.document.createRange();
+    range.selectNodeContents(body.querySelector('h1')!);
+    f.dom.window.getSelection()!.removeAllRanges();
+    f.dom.window.getSelection()!.addRange(range);
+    for (const messages of [
+      [{ ...pending, settled: true, delivery: undefined }],
+      project([saved]),
+    ]) {
+      await render(messages);
+      expect(f.host.querySelector('.message.user')).toBe(article);
+      expect(article.querySelector('.prompt-markdown')).toBe(body);
+      expect(markdownMarkup(body)).toBe(original);
+      expect(body.querySelector('[data-slot="code-block-copy-button"]')).toBe(copy);
+      expect(f.dom.window.getSelection()!.toString()).toBe('提示词');
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    }
+    const second = {
+      ...saved,
+      id: 'saved-second',
+      seq: '2',
+      humanInput: { inputCommandId: 'business-second', publicCommandId: 'second-command' },
+    };
+    await render(project([saved, second]));
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+    expect(f.host.querySelector('.prompt-markdown')).toBe(body);
+    await render(project([saved, second]), 'cold');
+    expect(f.host.querySelectorAll('.prompt-markdown')).toHaveLength(2);
+    expect(markdownMarkup(f.host.querySelector('.prompt-markdown')!)).toBe(original);
+    expect(
+      project([
+        {
+          ...saved,
+          originMessage: {
+            storeId: 'old',
+            sessionId: 'ancestor',
+            messageId: saved.id,
+            runId: saved.runId,
+          },
+        },
+      ])[0]!.presentationKey,
+    ).toBeUndefined();
+  } finally {
+    await f.close();
+  }
 });
 
 test('model reconnection stays in its original Turn process across retries, recovery, cancellation and cold reads', async () => {

@@ -18,6 +18,7 @@ const jobs: {
 }[] = [];
 mock.module('../../src/desktop/markdown-diagram', () => ({
   diagramRestriction: () => undefined,
+  getMarkdownDiagramImage: () => undefined,
   renderMarkdownDiagram: (_code: string, colors: DiagramColors, signal: AbortSignal) =>
     new Promise<string>((resolve, reject) => jobs.push({ colors, signal, resolve, reject })),
 }));

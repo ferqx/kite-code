@@ -3,6 +3,7 @@ import { createConfigurationSnapshot } from '@kite-ai/agent/config';
 import type { Execution, Interaction, Message, Run, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixture';
 import type {
   NativeBridge,
   NativeCallerMetadata,
@@ -17,6 +18,7 @@ import type {
 } from '../../src/native-bridge';
 import { desktopConversationMessages } from '../../src/native-presentation';
 import {
+  captureQueuedPromptChange,
   nextDesktopPresentation,
   prepareDesktopDom,
   promptValue,
@@ -537,13 +539,16 @@ function fixture(
     },
     click,
     chooseModel: async () => {
+      await act(async () => nextDesktopPresentation(dom));
       await act(async () => {
         const trigger = host.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
         expect(trigger.disabled).toBe(false);
         trigger.click();
       });
       await act(async () => {
-        host.querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]')!.click();
+        const choice = host.querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]');
+        expect(choice).not.toBeNull();
+        choice!.click();
       });
       await act(async () => {
         const model = host.querySelector<HTMLElement>('[aria-label="选择模型 model"]');
@@ -1005,7 +1010,7 @@ test('a pending worktree exit directory read keeps the draft editable and restor
     f.holdNavigationDirectory();
     await f.click('退出工作树');
     await f.until(f.directoryHeld);
-    expect(f.input('当前会话私有草稿')?.getAttribute('contenteditable')).toBe('true');
+    expect(f.input('当前会话私有草稿')?.hasAttribute('readonly')).toBe(false);
     expect(f.host.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(false);
     expect(
       f.host.querySelector<HTMLButtonElement>('.session-header [aria-label="退出工作树"]')
@@ -1244,8 +1249,9 @@ test('saved draft reconciliation preserves edits queued during acceptance and du
   try {
     await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
     await f.click('Original A');
+    const queuedChange = captureQueuedPromptChange(f.input('当前会话私有草稿')!);
     await f.click('发送明确的新轮次');
-    await f.edit('B typed before acceptance', '当前会话私有草稿');
+    await act(async () => queuedChange('B typed before acceptance'));
     await f.releaseSubmit();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('B typed before acceptance');
     f.setReadOverride(
@@ -1254,10 +1260,11 @@ test('saved draft reconciliation preserves edits queued during acceptance and du
           releaseRead = () => resolve(value);
         }),
     );
+    const duringRead = captureQueuedPromptChange(f.input('当前会话私有草稿')!);
     await f.click('保留草稿');
     expect(releaseRead).toBeDefined();
     expect(f.writes()).toHaveLength(0);
-    await f.edit('C typed while checking revision', '当前会话私有草稿');
+    await act(async () => duringRead('C typed while checking revision'));
     f.setReadOverride();
     await act(async () => releaseRead?.());
     expect(f.writes().map((input) => [input.revision, input.content])).toEqual([
@@ -1558,7 +1565,7 @@ test('late saved prompt reads on a cached Session preserve newer input, includin
       holdRead = true;
       await f.click('Other B');
       expect(release).toBeDefined();
-      expect(f.input('当前会话私有草稿')?.getAttribute('contenteditable')).toBe('true');
+      expect(f.input('当前会话私有草稿')?.hasAttribute('readonly')).toBe(false);
       await f.edit('an intermediate edit', '当前会话私有草稿');
       await f.edit(text, '当前会话私有草稿');
       await act(async () => release?.());
@@ -2120,6 +2127,74 @@ test('a later confirmed original receipt consumes only its submitted draft when 
   }
 });
 
+test('first-send loading preserves editable next drafts through Session handoff without another submission', async () => {
+  for (const later of ['下一条提示词 雪🙂', '']) {
+    const f = fixture(true);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit('已经提交的首条消息');
+      await f.chooseModel();
+      await f.click('发送首条消息');
+      const editor = f.input() as HTMLTextAreaElement;
+      expect(editor.disabled).toBe(false);
+      expect(editor.readOnly).toBe(false);
+      expect(f.host.querySelector('.composer-action')?.getAttribute('aria-busy')).toBe('true');
+      await f.edit('等待期间编辑');
+      await f.edit(later);
+      await act(async () => {
+        editor.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        f.host
+          .querySelector('form.composer')!
+          .dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      });
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      const sent = await f.resolve('accepted');
+      await f.until(() => !!f.input('当前会话私有草稿'));
+      expect(sent.intent.content).toBe('已经提交的首条消息');
+      expect(f.input('当前会话私有草稿')).toBe(editor);
+      expect(promptValue(editor)).toBe(later);
+      await f.click('在 Workspace 中新建对话');
+      expect(promptValue(f.input())).toBe('');
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('a lost first-send response cannot restore text over edits or an explicit clear made while loading', async () => {
+  for (const later of ['等待期间的新提示词', '']) {
+    const f = fixture(true);
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    bridge.request = async (input) => {
+      const result = await request(input);
+      if (input.method === 'conversation.send') throw Error('fixture_response_loss');
+      return result;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit('原首条消息');
+      await f.chooseModel();
+      await f.click('发送首条消息');
+      await f.edit('等待期间的临时内容');
+      await f.edit(later);
+      await f.resolve('unknown', false);
+      expect(promptValue(f.input('当前会话私有草稿') ?? f.input())).toBe(later);
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test('looking up an original first submission cannot overwrite a later prompt in its created Session', async () => {
   for (const text of ['later prompt 雪🙂', '', 'original unknown first prompt']) {
     const f = fixture(true);
@@ -2344,7 +2419,7 @@ test('switching from a Session to global or project preparation retains the inpu
       expect(f.modelsHeld()).toBe(true);
       expect(f.input()).toBe(input);
       expect(input.closest('.composer')).toBe(composer);
-      expect(input.getAttribute('contenteditable')).toBe('true');
+      expect(input.hasAttribute('readonly')).toBe(false);
       const picker = f.host.querySelector('[aria-label="下一轮模型选择"]')!;
       expect(picker.getAttribute('aria-busy')).toBe('true');
       expect(picker.querySelector('[role="status"]')).toBeNull();
@@ -2645,7 +2720,7 @@ test('a held cached Session switch restores the target draft and controls togeth
     await f.click('Other B');
     expect(f.input('当前会话私有草稿') === input).toBe(true);
     expect(promptValue(input)).toBe('B own draft');
-    expect(input?.getAttribute('contenteditable')).toBe('false');
+    expect(input?.hasAttribute('readonly')).toBe(true);
     expect(f.host.querySelector('.breadcrumb strong')?.textContent).toBe('Other B');
     expect(f.host.querySelector('[data-model-trigger]') === model).toBe(true);
     expect((model as HTMLButtonElement).disabled).toBe(true);
@@ -3733,7 +3808,10 @@ test('a completed first send preserves the scheduled page and returning enters i
   }
 });
 
-for (const body of ['original first message 雪🙂', '']) {
+for (const body of [
+  '## original first message 雪🙂\n\n**说明：**保留格式\n\n```ts\nconst original = true;\n```',
+  '',
+]) {
   test(`first submission keeps one readable pending message through delayed selection and history, then hands off without a loading or welcome flash (${body ? 'text and file' : 'file only'})`, async () => {
     const f = fixture(true);
     try {
@@ -3768,12 +3846,28 @@ for (const body of ['original first message 雪🙂', '']) {
         await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
       }
       expect(f.host.querySelector('.composer-attachment-name')?.textContent).toBe('设计说明.pdf');
-      await f.edit(body);
+      await act(async () => {
+        const { setEditorMarkdown } = await import(
+          '../../../../packages/ui/test/prompt-editor.fixture'
+        );
+        setEditorMarkdown(f.input()!, body);
+      });
       await f.chooseModel();
+      expect(f.input()!.querySelector('h2')).toBeNull();
+      expect(promptValue(f.input())).toBe(body);
       await f.click('发送首条消息');
       const viewport = f.host.querySelector('.conversation-viewport'),
         pending = f.host.querySelector('.message.user');
-      expect(pending?.textContent).toContain(body);
+      expect(pending?.textContent).toContain(body ? 'original first message 雪🙂' : '');
+      const markdown = pending?.querySelector('.prompt-markdown');
+      const originalMarkdown = markdown && markdownMarkup(markdown);
+      if (body) {
+        expect(markdown?.querySelector('h2')?.textContent).toBe('original first message 雪🙂');
+        expect(markdown?.querySelector('strong')?.textContent).toBe('说明：');
+        expect(markdown?.querySelector('.markdown-code-block code')?.textContent?.trimEnd()).toBe(
+          'const original = true;',
+        );
+      }
       expect(
         pending?.querySelector('.message-attachments .composer-attachment-name')?.textContent,
       ).toBe('设计说明.pdf');
@@ -3800,13 +3894,20 @@ for (const body of ['original first message 雪🙂', '']) {
       await f.releaseHistory();
       expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
       expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
-      expect(f.host.querySelector('.message.user')!.textContent).toContain(body);
+      expect(f.host.querySelector('.message.user')!.textContent).toContain(
+        body ? 'original first message 雪🙂' : '',
+      );
+      expect(f.host.querySelector('.message.user') === pending).toBe(true);
+      expect(f.host.querySelector('.prompt-markdown') === (markdown ?? null)).toBe(true);
+      expect(markdown && markdownMarkup(markdown)).toBe(originalMarkdown);
       expect(f.host.querySelector('.delivery-status')).toBeNull();
       expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
       expect(
         f.host.querySelectorAll('.message.user .message-attachments .composer-attachment'),
       ).toHaveLength(1);
-      expect(f.host.querySelector('.message.user .user-message-body')?.textContent).toBe(body);
+      expect(f.host.querySelector('.message.user .user-message-body')?.textContent).toContain(
+        body ? 'original first message 雪🙂' : '',
+      );
       if (!body)
         expect(f.host.querySelector('.message.user .user-message-body')?.childElementCount).toBe(0);
     } finally {

@@ -75,7 +75,8 @@ test('remounting the cached Desktop pipeline preserves safety, exact Unicode/cod
     restored = render(() => {});
   expect(allowed).toBe(restored);
   expect(allowed).toContain('class="file-link"');
-  expect(denied).not.toContain('class="file-link"');
+  expect(denied).toContain('class="file-link" aria-disabled="true"');
+  expect(allowed).not.toContain('class="file-link" aria-disabled="true"');
   for (const html of [allowed, denied, restored]) {
     expect(html).not.toContain('<script');
     expect(html).not.toContain('<img');

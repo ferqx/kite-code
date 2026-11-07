@@ -8,7 +8,9 @@ Status: implemented
 
 ## Decision
 
-扩展由[共享桌面 renderer](../../../../packages/ui/src/desktop/MessageContent.tsx)负责，纯固定parser同时加入公式供Native Worker复用。高亮、提示块、公式排版与图表都是派生展示，不改写原正文、完整读取证明或复制来源。独立Web／TUI和输入草稿的可视化范围保持各自契约。
+扩展由[共享桌面 renderer](../../../../packages/ui/src/desktop/MessageContent.tsx)负责，纯固定parser同时加入公式供Native Worker复用。高亮、提示块、公式排版与图表都是派生展示，不改写原正文、完整读取证明或复制来源。独立Web／TUI保持各自契约；桌面用户消息与Agent回复共享此renderer，提示词输入保留原文。
+
+2026-11-07用户先要求三处规则一致并发现表格缺失，后因编辑复杂度明确取消输入框Markdown渲染；当前沿[纯文本输入决定](../bug-fix/2026-11-07-plain-prompt-markdown-messages.md)，输入保留源文，用户消息与Agent回复共用完整renderer。Lexical子集和手写编辑内核已退出，[Milkdown方案](../../rejected/bug-fix/2026-11-07-milkdown-prompt-editor.md)在本轮交付前被取消。[共享编辑决定](../bug-fix/2026-11-07-shared-markdown-editor.md)中的稳定身份、有界图像复用与冷重开稳定区域仍适用，源码坐标和DOM回滚机制不再适用。本决定的安全、流式及生命周期限制继续保持。
 
 2026-10-25用户调整视觉要求：细线过多，各类元素需要自身样式，表格保留原样。初版的通用透明底／细线要求因此只继续约束表格、普通引用与绘图；行内代码和代码块改用轻底色，提示块改用按类型区分的底色、图标和标题，链接默认用颜色、交互时显示下划线。采用已有组件和共享主题变量，不变更解析、源文、复制、权限或图表安全范围；代码和编辑器的具体样式由[UI owner](../../../../packages/ui/README.md#markdown-提示词编辑)维护。
 

@@ -35,6 +35,7 @@ import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
 import { ModelConnection } from './ModelConnection';
 import { formatMessageTime } from './message-time';
+import { PromptMarkdown } from './PromptMarkdown';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
@@ -397,7 +398,7 @@ const MessageItem = memo(function MessageItem({
               message.text && <MessageContent text={message.text} openFile={openFile} />
             ) : (
               <>
-                {message.text && <p className="user-text">{message.text}</p>}
+                {message.text && <PromptMarkdown text={message.text} openFile={openFile} />}
                 {message.delivery && (
                   <small
                     className="delivery-status"
@@ -965,7 +966,8 @@ export function Conversation({
     const seenTurnIds = new Set<string>();
     const unscoped: Message[][] = [];
     const flushUnscoped = () => {
-      for (const group of unscoped) entries.push({ key: group[0]!.id, groups: [group] });
+      for (const group of unscoped)
+        entries.push({ key: group[0]!.presentationKey ?? group[0]!.id, groups: [group] });
       unscoped.length = 0;
     };
     for (const group of groups) {
@@ -974,7 +976,7 @@ export function Conversation({
       // two phases of the same parent Run. Never absorb it into process collapse.
       if (message.systemKind === 'agent_result') {
         flushUnscoped();
-        entries.push({ key: message.id, groups: [group] });
+        entries.push({ key: message.presentationKey ?? message.id, groups: [group] });
         continue;
       }
       const turnId = processTurnId(message);
@@ -992,9 +994,9 @@ export function Conversation({
       entries.push({
         key: turnId
           ? seenTurnIds.has(turnId)
-            ? `turn:${turnId}:after:${message.id}`
+            ? `turn:${turnId}:after:${message.presentationKey ?? message.id}`
             : `turn:${turnId}`
-          : message.id,
+          : (message.presentationKey ?? message.id),
         turnId,
         groups: [group],
       });

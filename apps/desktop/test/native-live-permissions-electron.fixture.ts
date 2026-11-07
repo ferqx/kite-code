@@ -420,14 +420,7 @@ async function verifyQueueWindow() {
     '补充当前任务的 **gamma 说明**，保留原任务上下文。',
   ];
   for (let index = 0; index < texts.length; index++) {
-    await draft.focus();
-    await draft.evaluate((element, text) => {
-      const clipboardData = new DataTransfer();
-      clipboardData.setData('text/plain', text);
-      element.dispatchEvent(
-        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }),
-      );
-    }, texts[index]!);
+    await draft.fill(texts[index]!);
     await submit();
     await until(
       queueFacts,
@@ -533,11 +526,11 @@ async function verifyQueueWindow() {
     'edit withdrew original input',
   );
   await until(
-    async () => draft.innerText(),
+    async () => draft.inputValue(),
     (value) => value.includes('第二项') && value.split('较长的排队消息内容').length === 46,
     'edit places complete Markdown in ordinary composer',
   );
-  assert.equal(await draft.locator('.prompt-bold').innerText(), 'alpha 说明');
+  assert.equal(await draft.inputValue(), texts[0]);
   await row(alpha).waitFor({ state: 'detached' });
   assert.equal(await row(alpha).count(), 0, 'the withdrawn original queue row leaves the DOM');
   assert.equal(

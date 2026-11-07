@@ -615,7 +615,7 @@ export function Composer(props: ComposerProps) {
           value={props.draft}
           scopeKey={props.scopeKey ?? 'composer'}
           label={props.inputLabel ?? '任务输入'}
-          disabled={props.disabled}
+          disabled={props.disabled && !props.sending}
           onChange={props.onChange}
           onSend={() => {
             if (canSubmit) props.onSend?.();

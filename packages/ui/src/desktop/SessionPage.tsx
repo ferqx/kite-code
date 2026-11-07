@@ -1089,10 +1089,16 @@ function SessionPageContent({
   else if (props.detailPanel || props.fileChangesContent) retainedRightSidebarPanel.current = null;
   const historyVisible = !props.scheduledTasks && !props.workbench && !props.diagnosticView;
   const welcoming = !!(props.newConversation && props.composer && !messages.length);
-  const presentationIdentity =
-    props.synchronizePresentation && historyVisible
-      ? JSON.stringify([props.conversationCache?.scope, props.readingKey])
-      : undefined;
+  const visiblePresentationIdentity = historyVisible
+    ? JSON.stringify([props.conversationCache?.scope, props.readingKey])
+    : undefined;
+  const bypassedPresentation = useRef<string | undefined>(undefined);
+  if (!props.synchronizePresentation) bypassedPresentation.current = visiblePresentationIdentity;
+  else if (bypassedPresentation.current !== visiblePresentationIdentity)
+    bypassedPresentation.current = undefined;
+  const presentationIdentity = props.synchronizePresentation
+    ? visiblePresentationIdentity
+    : undefined;
   const [presentation, setPresentation] = useState({
     identity: presentationIdentity,
     ready: !props.synchronizePresentation || welcoming,
@@ -1100,7 +1106,11 @@ function SessionPageContent({
   if (presentation.identity !== presentationIdentity)
     setPresentation({
       identity: presentationIdentity,
-      ready: !props.synchronizePresentation || welcoming,
+      // The first input was already visible before saved history enabled the gate.
+      ready:
+        !props.synchronizePresentation ||
+        welcoming ||
+        bypassedPresentation.current === presentationIdentity,
     });
   const presentationGuard = useRef({ identity: presentationIdentity, ready: false });
   presentationGuard.current = {

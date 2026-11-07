@@ -887,20 +887,19 @@ body {
     border-radius: 0;
   }
   .user-message-body {
+    --user-message-padding-block: 12px;
+    --user-message-background: var(--accent);
     min-width: 0;
     max-width: 100%;
-    padding: 12px 16px;
+    padding: var(--user-message-padding-block) 16px;
     border-radius: var(--radius);
-    background: var(--accent);
+    background: var(--user-message-background);
   }
   .user-message-body:empty {
     display: none;
   }
   .message-attachments + .user-message-body:not(:empty) {
     margin-top: 8px;
-  }
-  .message.user.sending {
-    opacity: 0.78;
   }
   .message.user.failed .user-message-body:not(:empty) {
     border: 1px solid var(--error-border);
@@ -2724,6 +2723,69 @@ body {
   line-height: 1.8;
   overflow-wrap: anywhere;
 }
+.kite-client .prompt-markdown {
+  --prompt-collapsed-height: max(
+    120px,
+    calc(min(360px, 50dvh) - 2 * var(--user-message-padding-block, 12px))
+  );
+  position: relative;
+  min-width: 0;
+}
+.kite-client .prompt-markdown-viewport {
+  max-height: var(--prompt-collapsed-height);
+  overflow: clip;
+}
+.kite-client .prompt-markdown[data-expanded] > .prompt-markdown-viewport {
+  max-height: none;
+}
+.kite-client .prompt-markdown-controls {
+  position: absolute;
+  inset-inline: -16px;
+  bottom: calc(-1 * var(--user-message-padding-block, 12px));
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 64px;
+  max-height: var(--prompt-collapsed-height);
+  padding-bottom: 6px;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: linear-gradient(transparent, var(--user-message-background, var(--accent)) 65%);
+  box-shadow: inset 0 -18px 18px -18px color-mix(in srgb, var(--foreground) 18%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+.kite-client .prompt-markdown-controls[hidden] {
+  display: none;
+}
+.kite-client .prompt-markdown:has(+ .delivery-status) > .prompt-markdown-controls {
+  inset-inline: 0;
+  bottom: 0;
+  border-radius: 0;
+}
+.kite-client .prompt-markdown-controls > .prompt-markdown-toggle {
+  min-height: 28px;
+  height: 28px;
+  gap: 4px;
+  padding: 0 10px;
+  border-radius: var(--button-radius);
+  background: transparent;
+  font-size: 12px;
+  pointer-events: auto;
+}
+.kite-client .prompt-markdown-chevron {
+  width: 14px;
+  height: 14px;
+}
+.kite-client .prompt-markdown[data-expanded] > .prompt-markdown-controls {
+  position: static;
+  height: auto;
+  padding-block: 8px 0;
+  background: none;
+  box-shadow: none;
+}
+.kite-client .prompt-markdown[data-expanded] .prompt-markdown-chevron {
+  transform: rotate(180deg);
+}
 .kite-client .typeset-chat :where(p, ul, ol, li, pre, blockquote, table, hr) {
   margin-block: 0;
 }
@@ -2959,6 +3021,10 @@ body {
 .kite-client .typeset-chat li > p:first-child {
   margin-block-start: 0;
 }
+.kite-client .typeset-chat > :last-child,
+.kite-client .typeset-chat :where(blockquote, th, td, li) > :last-child {
+  margin-block-end: 0;
+}
 
 .kite-client .typeset-chat .markdown-alert {
   --markdown-alert-accent: var(--info-foreground);
@@ -3010,10 +3076,21 @@ body {
   color: var(--muted-foreground);
   font-size: 12px;
 }
+.kite-client .markdown-code-block:has(.markdown-diagram) {
+  contain: inline-size;
+  contain-intrinsic-inline-size: 400px;
+}
+.kite-client .markdown-diagram[data-complete] {
+  height: var(--markdown-diagram-height);
+  overflow: auto;
+}
 .kite-client .markdown-diagram-scroll {
   padding: 20px;
   max-height: 520px;
   overflow: auto;
+}
+.kite-client .markdown-diagram[data-complete] > .markdown-diagram-scroll {
+  height: 100%;
 }
 .kite-client .markdown-diagram-scroll img {
   display: block;
@@ -3027,6 +3104,9 @@ body {
   padding-block: 0.5em;
   overflow-x: auto;
   overflow-y: hidden;
+}
+.kite-client .typeset-chat .markdown-math-display {
+  margin: 0;
 }
 .kite-client .typeset-chat .katex {
   font-size: 1.08em;
@@ -5468,92 +5548,32 @@ body {
   margin: 0 6px 7px;
 }
 .kite-client .prompt-editor {
+  display: block;
+  width: 100%;
+  min-width: 0;
   min-height: 52px;
   max-height: 180px;
   padding: 3px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+  field-sizing: content;
+  font: inherit;
+  font-size: var(--conversation-text-size);
+  line-height: 1.8;
   overflow: auto;
   outline: none;
-  font: inherit;
-  font-size: 14px;
-  line-height: 20px;
-  overflow-wrap: anywhere;
   user-select: text;
-  white-space: pre-wrap;
+}
+.kite-client .prompt-editor::placeholder {
+  color: var(--muted-foreground);
 }
 .kite-client .prompt-editor[data-disabled="true"] {
   opacity: 0.55;
 }
 
-.kite-client .prompt-editor-placeholder {
-  position: absolute;
-  top: 3px;
-  left: 0;
-  color: var(--muted-foreground);
-  font-size: 14px;
-  line-height: 20px;
-  pointer-events: none;
-}
-.kite-client .prompt-paragraph {
-  margin: 0;
-}
-.kite-client .prompt-heading {
-  margin: 4px 0;
-  font-size: 17px;
-  line-height: 24px;
-  font-weight: 600;
-}
-.kite-client .prompt-bold {
-  font-weight: 600;
-}
-.kite-client .prompt-italic {
-  font-style: italic;
-}
-.kite-client .prompt-strike {
-  text-decoration: line-through;
-}
-.kite-client .prompt-quote {
-  margin: 4px 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--border);
-  color: color-mix(in srgb, var(--foreground) 85%, var(--background));
-}
-.kite-client .prompt-code-block {
-  display: block;
-  margin: 4px 0;
-  padding: 6px 8px;
-  border: 0;
-  background: var(--markdown-code-background);
-  border-radius: var(--radius);
-  font: 14px / 20px var(--font-geist-mono, var(--font-mono));
-}
-.kite-client .prompt-inline-code {
-  padding: 1px 4px;
-  border: 0;
-  border-radius: var(--markdown-inline-code-radius);
-  background: var(--markdown-inline-code-background);
-  font: 14px / 20px var(--font-geist-mono, var(--font-mono));
-}
-.kite-client ul.prompt-list {
-  margin: 0;
-  padding-left: 20px;
-  list-style: disc;
-}
-.kite-client ol.prompt-list {
-  margin: 0;
-  padding-left: 20px;
-  list-style: decimal;
-}
-.kite-client .prompt-list-item {
-  margin: 0;
-}
-.kite-client .prompt-file-link {
-  color: var(--markdown-link-color);
-  text-decoration: none;
-  text-underline-offset: 3px;
-}
-.kite-client .prompt-file-link:is(:hover, :focus-visible) {
-  text-decoration: underline;
-}
 .kite-client .composer-attach {
   width: 32px;
   height: 32px;

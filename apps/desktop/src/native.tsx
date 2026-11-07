@@ -19,6 +19,7 @@ import {
   DialogTitle,
   MessageContent,
   NAVIGATION_MIN_WIDTH,
+  PromptMarkdown,
   ReadingStateCache,
   RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH,
   type SessionChildTabRequest,
@@ -2042,6 +2043,19 @@ function NativeDesktopContent({
   function changeNewDraft(content: string) {
     newDraftRevision.current++;
     setNewDraft(content);
+    const original = firstRef.current;
+    if (
+      preparing &&
+      original &&
+      firstOpenPage.current === pageIntent.current &&
+      original.creation.expectedStoreId === directory?.storeId &&
+      (!original.result || original.result.phase === 'unknown')
+    )
+      // Edits made while the first receipt is pending belong to its target Session.
+      draftCache.current.set(
+        imageScope(original.creation.expectedStoreId, original.creation.sessionId),
+        { content },
+      );
   }
   async function chooseWorkspace(workspaceId: string, observedDirectory = directory) {
     if (!bridge || !observedDirectory?.workspaces.some((workspace) => workspace.id === workspaceId))
@@ -2291,9 +2305,17 @@ function NativeDesktopContent({
         (page === pageIntent.current || firstOpenPage.current === pageIntent.current) &&
         (selected.current !== sessionId || preparing)
       ) {
+        const preparationRevision = newDraftRevision.current;
         // The selection records its own read recovery. Its failure cannot
         // invalidate the already acknowledged first-submission receipt.
         await select(sessionId, false).catch(() => {});
+        if (
+          draftOwner.current === key &&
+          selected.current === sessionId &&
+          preparationRevision === newDraftRevision.current
+        )
+          // Clear the preparation copy only after its Session owns the visible draft.
+          setNewDraft('');
       }
     } else if (
       value.phase !== 'accepted' &&
@@ -2384,7 +2406,8 @@ function NativeDesktopContent({
         };
         if (firstRef.current?.commandId === original.commandId) {
           setFirstSubmission({ ...original, result: value });
-          setNewDraft((draft) => draft || original.draft.content);
+          if (newDraftRevision.current === original.preparationRevision)
+            setNewDraft((draft) => draft || original.draft.content);
         }
         throw cause;
       }
@@ -3134,6 +3157,29 @@ function NativeDesktopContent({
           },
           toolMessages.pendingMessageIds,
         );
+    // Older saved inputs may identify their command only through the exact
+    // local Run and sourceIds. Keep that proven alias across later refreshes.
+    const inputsByMessage = new Map<string, string>();
+    const inputRuns = new Map(selection?.runs.map((run) => [run.id, run]));
+    for (const message of displayMessages) {
+      const run = message.runId ? inputRuns.get(message.runId) : undefined;
+      if (
+        message.role === 'user' &&
+        !message.originMessage &&
+        message.sessionId === selection?.session.id &&
+        run?.sessionId === selection?.session.id &&
+        run?.originStoreId === selection?.storeId &&
+        run?.originCommandId &&
+        message.sourceIds?.includes(run.originCommandId)
+      )
+        inputsByMessage.set(message.id, run.originCommandId);
+    }
+    for (let index = 0; index < models.length; index++) {
+      const model = models[index]!;
+      const commandId = inputsByMessage.get(model.id);
+      if (!model.presentationKey && commandId)
+        models[index] = { ...model, presentationKey: commandId };
+    }
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
       // Run observation can arrive before persisted user history. Keep the
@@ -4086,32 +4132,61 @@ function NativeDesktopContent({
     );
   };
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
-    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
-      return (
-        <>
-          {model.text && <p className="user-text">{model.text}</p>}
-          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
-            <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已恢复供重试。'}
-            </p>
-          )}
-        </>
-      );
-    if (inputDeliveries.has(model.id) && !messagesById.has(model.id))
-      return (
-        <>
-          {model.text && <p className="user-text">{model.text}</p>}
-          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
-            <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已保留。'}
-            </p>
-          )}
-        </>
-      );
     const message = messagesById.get(model.id);
-    if (!message || !selection || !state) return null;
+    const firstPending = firstVisible && !firstSaved && model.id === firstSubmission.commandId;
     const openable =
-      !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+      !!selection &&
+      !selection.viewLoading &&
+      historyState.phase === 'complete' &&
+      !directory?.unavailable;
+    const openFile = (path: string) => {
+      if (
+        !message ||
+        !selection ||
+        !state ||
+        !openable ||
+        selected.current !== selection.session.id
+      )
+        return;
+      void report(() =>
+        bridge.request({
+          method: 'messageFile.open',
+          generation: state.generation,
+          viewSelection: selection.viewSelection ?? selection.viewGeneration,
+          historyEpoch: state.historyEpoch ?? 0,
+          messageId: message.id,
+          path,
+          editor,
+        }),
+      );
+    };
+    if (
+      model.role === 'user' &&
+      (firstPending ||
+        (!message && inputDeliveries.has(model.id)) ||
+        (message &&
+          !message.agentMessage &&
+          !message.agentResult &&
+          !message.outputBody &&
+          message.contentFormat !== 'unsupported'))
+    )
+      return (
+        <>
+          {model.text && (
+            <PromptMarkdown text={model.text} openFile={message ? openFile : undefined} />
+          )}
+          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
+            <p className="delivery-status" role="alert">
+              {model.delivery === 'unknown'
+                ? '发送结果尚未确认。'
+                : firstPending
+                  ? '发送失败，原文已恢复供重试。'
+                  : '发送失败，原文已保留。'}
+            </p>
+          )}
+        </>
+      );
+    if (!message || !selection || !state) return null;
     if (message.agentMessage)
       return <NativeModelOutputMessage message={message} storeId={selection.storeId} />;
     if (message.agentResult) {
@@ -4168,20 +4243,7 @@ function NativeDesktopContent({
           runMessages.runs,
         )}
         canReadRestoredOrigin
-        openFile={(path) => {
-          if (!openable || selected.current !== selection.session.id) return;
-          void report(() =>
-            bridge.request({
-              method: 'messageFile.open',
-              generation: state.generation,
-              viewSelection: selection.viewSelection ?? selection.viewGeneration,
-              historyEpoch: state.historyEpoch ?? 0,
-              messageId: message.id,
-              path,
-              editor,
-            }),
-          );
-        }}
+        openFile={openFile}
         onContent={(text) => {
           const key = JSON.stringify([replyDisplayScope, message.id]);
           const before = verifiedReplyBodies.current.get(key),
