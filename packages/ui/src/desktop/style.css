@@ -1997,7 +1997,7 @@ body {
 .kite-client .space-heading:hover {
   background: var(--control-hover);
 }
-.kite-client .space-heading:has(> .button:active:is(:not(:disabled), [data-read-gated="true"])) {
+.kite-client .space-heading:has(.button:active:is(:not(:disabled), [data-read-gated="true"])) {
   background: var(--control-pressed);
 }
 .kite-client .nav-label .space-add,
@@ -2006,15 +2006,12 @@ body {
   .space-add:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]),
 .kite-client
   .space-heading
-  > .button:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]) {
+  .button:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]) {
   background: transparent;
 }
 .kite-client .space-heading .space-row {
   flex: 1;
   min-width: 0;
-}
-.kite-client :where(.space-new-session, .space-more) {
-  flex: none;
 }
 .kite-client .space-heading :is(.space-new-session, .space-more) > svg,
 .kite-client .session-row > .session-worktree-icon,
@@ -2044,22 +2041,21 @@ body {
   ) {
   color: var(--foreground);
 }
-.kite-client .nav-label .space-add,
-.kite-client .space-heading :is(.space-new-session, .space-more) {
+/* Reveal the container; button opacity belongs exclusively to disabled feedback. */
+.kite-client .sidebar-actions {
+  display: inline-flex;
+  flex: none;
   opacity: 0;
   pointer-events: none;
 }
-.kite-client :is(.nav-label:hover, .nav-label:focus-within) .space-add,
-.kite-client .space-heading[data-menu-active] :is(.space-new-session, .space-more),
-.kite-client
-  :is(.space-heading:hover, .space-heading:focus-within)
-  :is(.space-new-session, .space-more) {
+.kite-client :is(.nav-label:hover, .nav-label:focus-within) > .sidebar-actions,
+.kite-client .space-heading[data-menu-active] > .sidebar-actions,
+.kite-client :is(.space-heading:hover, .space-heading:focus-within) > .sidebar-actions {
   opacity: 1;
   pointer-events: auto;
 }
 @media (hover: none) {
-  .kite-client .nav-label .space-add,
-  .kite-client .space-heading :is(.space-new-session, .space-more) {
+  .kite-client .sidebar-actions {
     opacity: 1;
     pointer-events: auto;
   }

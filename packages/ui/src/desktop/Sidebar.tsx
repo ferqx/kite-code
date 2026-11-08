@@ -113,60 +113,62 @@ const WorkspaceHeader = memo(function WorkspaceHeader(props: {
               </strong>
             </span>
           </Button>
-          {props.onNewSession && props.state !== 'unavailable' && (
-            <Button
-              className="ghost space-new-session"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={`在 ${props.label} 中新建对话`}
-              title="新对话"
-              disabled={props.mutationBusy}
-              onClick={() => props.onNewSession?.(props.id)}
-            >
-              <HugeiconsIcon icon={PencilEdit02Icon} />
-            </Button>
-          )}
-          {props.onRemove && (
-            <DropdownMenu
-              open={moreOpen}
-              onOpenChange={(open) => {
-                setMoreOpen(open);
-                setTooltipOpen(false);
-                setTooltipNeedsHover(true);
-              }}
-            >
-              <DropdownMenuTrigger asChild>
-                <Button
-                  className="ghost space-more"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`${props.label} 更多操作`}
-                  title="更多操作"
-                  disabled={props.busy || props.mutationBusy}
-                >
-                  <HugeiconsIcon icon={MoreHorizontalIcon} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="sidebar-menu"
-                aria-label={`${props.label} 更多操作`}
-                onCloseAutoFocus={(event) => {
-                  if (!heading.current?.matches(':hover')) event.preventDefault();
+          <span className="sidebar-actions">
+            {props.onNewSession && props.state !== 'unavailable' && (
+              <Button
+                className="ghost space-new-session"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`在 ${props.label} 中新建对话`}
+                title="新对话"
+                disabled={props.mutationBusy}
+                onClick={() => props.onNewSession?.(props.id)}
+              >
+                <HugeiconsIcon icon={PencilEdit02Icon} />
+              </Button>
+            )}
+            {props.onRemove && (
+              <DropdownMenu
+                open={moreOpen}
+                onOpenChange={(open) => {
+                  setMoreOpen(open);
+                  setTooltipOpen(false);
+                  setTooltipNeedsHover(true);
                 }}
               >
-                <DropdownMenuItem
-                  className="space-remove"
-                  aria-label={`移除 ${props.label}`}
-                  disabled={props.busy || props.mutationBusy}
-                  onSelect={() => props.onRemove?.(props.id)}
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="ghost space-more"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`${props.label} 更多操作`}
+                    title="更多操作"
+                    disabled={props.busy || props.mutationBusy}
+                  >
+                    <HugeiconsIcon icon={MoreHorizontalIcon} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="sidebar-menu"
+                  aria-label={`${props.label} 更多操作`}
+                  onCloseAutoFocus={(event) => {
+                    if (!heading.current?.matches(':hover')) event.preventDefault();
+                  }}
                 >
-                  <HugeiconsIcon icon={Delete02Icon} />
-                  移除空间
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+                  <DropdownMenuItem
+                    className="space-remove"
+                    aria-label={`移除 ${props.label}`}
+                    disabled={props.busy || props.mutationBusy}
+                    onSelect={() => props.onRemove?.(props.id)}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} />
+                    移除空间
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </span>
         </div>
       </TooltipTrigger>
       {!moreOpen && !tooltipNeedsHover && (
@@ -426,17 +428,19 @@ export function Sidebar({
       <div className="nav-label">
         <span>空间</span>
         {actions.addWorkspace && (
-          <Button
-            className="ghost space-add"
-            variant="ghost"
-            size="icon-sm"
-            aria-label="添加空间"
-            title="添加空间"
-            disabled={props.mutationBusy}
-            onClick={actions.addWorkspace}
-          >
-            <HugeiconsIcon icon={Add01Icon} />
-          </Button>
+          <span className="sidebar-actions">
+            <Button
+              className="ghost space-add"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="添加空间"
+              title="添加空间"
+              disabled={props.mutationBusy}
+              onClick={actions.addWorkspace}
+            >
+              <HugeiconsIcon icon={Add01Icon} />
+            </Button>
+          </span>
         )}
       </div>
       <TooltipProvider delayDuration={500} skipDelayDuration={300}>

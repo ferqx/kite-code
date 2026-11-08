@@ -20,6 +20,7 @@ import {
   verifyWorktreeIndicator,
   verifyWorktreeNavigation,
 } from './session-shell-geometry.fixture';
+import { verifySidebarActions } from './sidebar-actions-browser.fixture';
 
 // Explicit standalone fixture; it never loads Service, user data or the production diagnostics.
 const directory = import.meta.dir;
@@ -63,7 +64,11 @@ const server = Bun.serve({
     return new Response(Bun.file(file));
   },
 });
-const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel: 'chrome' });
+const browser = await chromium.launch({
+  headless: true,
+  chromiumSandbox: true,
+  ...(process.argv.includes('--bundled-chromium') ? {} : { channel: 'chrome' }),
+});
 
 type Control =
   | 'title'
@@ -116,7 +121,11 @@ try {
   const modelsOnly = process.argv.includes('--model-navigation');
   const composerOnly = process.argv.includes('--composer-handoff');
   const auditOnly = process.argv.includes('--session-audit');
-  const focused = worktreeOnly || navigationOnly || modelsOnly || composerOnly || auditOnly;
+  const sidebarOnly = process.argv.includes('--sidebar-actions');
+  const focused =
+    worktreeOnly || navigationOnly || modelsOnly || composerOnly || auditOnly || sidebarOnly;
+  if (sidebarOnly || !focused)
+    report.cases.push(...(await verifySidebarActions(browser, server.url.toString(), artifact)));
   if (auditOnly) {
     report.cases.push(
       ...(await verifyModelCatalogueNavigation(browser, server.url.toString(), artifact)),
@@ -608,15 +617,17 @@ try {
     JSON.stringify({
       browser: report.browser,
       themes: 2,
-      ...(auditOnly
-        ? { sessionAuditCases: report.cases.length }
-        : composerOnly
-          ? { composerHandoffCases: report.cases.length }
-          : modelsOnly
-            ? { modelNavigationCases: report.cases.length }
-            : focused
-              ? { worktreeCases: report.cases.length }
-              : { switches: 200, heldFrames: 192 }),
+      ...(sidebarOnly
+        ? { sidebarActionCases: report.cases.length }
+        : auditOnly
+          ? { sessionAuditCases: report.cases.length }
+          : composerOnly
+            ? { composerHandoffCases: report.cases.length }
+            : modelsOnly
+              ? { modelNavigationCases: report.cases.length }
+              : focused
+                ? { worktreeCases: report.cases.length }
+                : { switches: 200, heldFrames: 192 }),
       artifact,
     }),
   );
