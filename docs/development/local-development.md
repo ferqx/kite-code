@@ -47,7 +47,7 @@ npm run desktop:dev
 
 四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
-Desktop 在准备 Electron／Vite 前先只读预检这个实际 development Profile。不匹配的 Store major／schema 会明确返回 `store_incompatible` 和当前结构说明，原数据保持原样，不能靠重跑构建解决。入口不自动重建或迁移已有不兼容数据；其保留方式须由用户决定。全新 Profile 仍由 Service 按原流程初始化。具体实现与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Desktop 在准备 Electron／Vite 前先只读预检这个实际 development Profile。遇到 `store_incompatible` 时取得该 Profile 的独占使用锁并重新核对，在交互终端展示备份位置、历史隔离和全局模型配置保留说明，询问是否备份后新建。只有明确输入 `y`／`yes`（不区分大小写）才将旧目录整体改名保留在同一数据根的 `development-backup-<时间戳>-<随机标识>`，然后继续启动；Service 按原流程创建干净的 development 数据。回车、其他回答、Ctrl+C 或关闭输入均取消；非交互环境返回 `development_profile_confirmation_required`，不自动接受。旧会话、附件和 Profile 内配置保留在备份中，不会出现在新环境；数据根中的全局模型配置保持原位。兼容数据直接复用，不询问或反复备份。其他客户端仍在使用、恢复日志待处理、访问／I/O 失败或无法完整改名备份时停止，不清库、不强杀其他进程；占用时关闭使用同一 Profile 的客户端再重试。此确认后自动处置仅限 `desktop:dev`，不是旧数据迁移能力，正式客户端和其他开发入口的格式检查保持。具体实现与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
 Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预热页面模块，不另做这两页的生产构建。终端会分项输出准备／构建耗时，并在真实 Service 就绪后输出总耗时；初次依赖优化与本机文件系统状态仍会影响耗时。具体构建边界及本机前后对照归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 

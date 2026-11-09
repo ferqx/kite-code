@@ -15,13 +15,19 @@ import {
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { openSqliteStore, preflightSqliteStore } from '@kite-ai/agent/sqlite';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
-import { createDevelopmentDesktopDirectory } from '../../../scripts/development/unified-desktop';
+import {
+  createDevelopmentDesktopDirectory,
+  prepareDevelopmentDesktopProfile,
+} from '../../../scripts/development/unified-desktop';
 import {
   initializeDesktopBuildEnvironment,
   type WindowsDesktopBuildTools,
 } from '../../../scripts/development/windows-desktop-environment';
+import { fixturePermissions, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const visualStudio = 'C:\\Program Files\\开发工具\\Visual Studio',
   compilerEnvironment = {
@@ -268,7 +274,7 @@ for (const { formatMajor, currentChecksum, label } of [
   { formatMajor: 1, currentChecksum: true, label: 'old schema behind a forged current header' },
   { formatMajor: 2, currentChecksum: false, label: 'unsupported major 2' },
 ])
-  test(`desktop development rejects ${label} before Electron, cache creation or launch without touching its data`, async () => {
+  test(`desktop development requires confirmation for ${label} before preparing Electron or changing data`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-old-profile-')));
     const home = join(root, 'home');
     const userConfiguration = ownedUserConfiguration(home);
@@ -332,11 +338,15 @@ for (const { formatMajor, currentChecksum, label } of [
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]);
-      expect({ code, stdout, stderr }).toEqual({
+      expect({ code, stderr, stdout }).toEqual({
         code: 1,
+        stderr: 'development_profile_confirmation_required\n',
         stdout: '',
-        stderr: 'store_incompatible\n',
       });
+      const backups = readdirSync(join(home, '.kite-code')).filter((name) =>
+        name.startsWith('development-backup-'),
+      );
+      expect(backups).toHaveLength(0);
       expect(existsSync(join(root, 'apps', 'desktop'))).toBe(false);
       expect(existsSync(join(root, '.cache'))).toBe(false);
       expect(existsSync(launchMarker)).toBe(false);
@@ -366,6 +376,132 @@ for (const { formatMajor, currentChecksum, label } of [
       rmSync(root, { recursive: true, force: true });
     }
   }, 10000);
+
+test('development recovery preserves the whole old directory and global configuration; fresh and compatible profiles are reused', async () => {
+  const dataRoot = temporaryDirectory('kite-development-profile-recovery-');
+  const options = { dataRoot, profile: 'development' };
+  const profile = join(dataRoot, options.profile);
+  const security = defaultWindowsPathSecurity();
+  const writePrivate = (path: string, value: string) => {
+    if (security) security.writePrivateFile(path, Buffer.from(value));
+    else writeFileSync(path, value, { mode: 0o600 });
+  };
+  try {
+    expect(await prepareDevelopmentDesktopProfile(dataRoot)).toBeUndefined();
+    expect(existsSync(profile)).toBe(false);
+    privateDirectory(join(profile, 'blobs'));
+    writePrivate(join(profile, 'profile.json'), '{"formatMajor":1}');
+    writePrivate(join(profile, 'core.db'), 'old database bytes');
+    writePrivate(join(profile, 'core.db-wal'), 'old WAL bytes');
+    writePrivate(join(profile, 'core.db-shm'), 'old SHM bytes');
+    writePrivate(join(profile, 'blobs', 'original'), 'original attachment');
+    writePrivate(join(dataRoot, 'kite-code.jsonc'), 'original model configuration');
+    const snapshot = [
+      'profile.json',
+      'core.db',
+      'core.db-wal',
+      'core.db-shm',
+      'blobs/original',
+    ].map((name) => [name, readFileSync(join(profile, name))] as const);
+    let confirmations = 0;
+    await expect(
+      prepareDevelopmentDesktopProfile(dataRoot, async (backup) => {
+        confirmations++;
+        expect(backup.startsWith(join(dataRoot, 'development-backup-'))).toBe(true);
+        for (const [name, bytes] of snapshot)
+          expect(readFileSync(join(profile, name))).toEqual(bytes);
+        expect(existsSync(backup)).toBe(false);
+        return false;
+      }),
+    ).rejects.toThrow('development_profile_reset_cancelled');
+    expect(confirmations).toBe(1);
+    expect(readdirSync(dataRoot).filter((name) => name.startsWith('development-backup-'))).toEqual(
+      [],
+    );
+    const backup = await prepareDevelopmentDesktopProfile(dataRoot, async () => {
+      confirmations++;
+      return true;
+    });
+    expect(confirmations).toBe(2);
+    expect(backup).toBeDefined();
+    expect(existsSync(profile)).toBe(false);
+    for (const [name, bytes] of snapshot) expect(readFileSync(join(backup!, name))).toEqual(bytes);
+    expect(readFileSync(join(dataRoot, 'kite-code.jsonc'), 'utf8')).toBe(
+      'original model configuration',
+    );
+    expect(await prepareDevelopmentDesktopProfile(dataRoot)).toBeUndefined();
+    const store = await openSqliteStore(options);
+    const metadata = await store.getMetadata();
+    await store.close();
+    const database = readFileSync(join(profile, 'core.db'));
+    const header = readFileSync(join(profile, 'profile.json'));
+    expect(await prepareDevelopmentDesktopProfile(dataRoot)).toBeUndefined();
+    expect(await preflightSqliteStore(options)).toMatchObject({
+      status: 'compatible',
+      storeId: metadata.storeId,
+    });
+    expect(readFileSync(join(profile, 'core.db'))).toEqual(database);
+    expect(readFileSync(join(profile, 'profile.json'))).toEqual(header);
+    fixturePermissions(join(profile, 'core.db'), 0o644);
+    try {
+      await expect(
+        prepareDevelopmentDesktopProfile(dataRoot, async () => {
+          throw Error('access_denial_must_not_request_profile_reset');
+        }),
+      ).rejects.toMatchObject({ code: 'store_access_denied' });
+      expect(readFileSync(join(profile, 'core.db'))).toEqual(database);
+    } finally {
+      fixturePermissions(join(profile, 'core.db'), 0o600);
+    }
+    expect(await prepareDevelopmentDesktopProfile(dataRoot)).toBeUndefined();
+    expect(
+      readdirSync(dataRoot).filter((name) => name.startsWith('development-backup-')),
+    ).toHaveLength(1);
+  } finally {
+    expect(realpathSync(dataRoot)).toBe(dataRoot);
+    rmSync(dataRoot, { recursive: true });
+  }
+});
+
+test('development recovery refuses active profile use and pending restore without moving old data', async () => {
+  const dataRoot = temporaryDirectory('kite-development-profile-busy-');
+  const options = { dataRoot, profile: 'development' };
+  const profile = join(dataRoot, options.profile);
+  try {
+    privateDirectory(profile);
+    const header = join(profile, 'profile.json');
+    const security = defaultWindowsPathSecurity();
+    if (security) security.writePrivateFile(header, Buffer.from('{"formatMajor":1}'));
+    else writeFileSync(header, '{"formatMajor":1}', { mode: 0o600 });
+    const original = readFileSync(header);
+    const access = acquireProfileAccess(options);
+    try {
+      await expect(prepareDevelopmentDesktopProfile(dataRoot)).rejects.toMatchObject({
+        code: 'owner_busy',
+      });
+    } finally {
+      access.lock.release();
+    }
+    expect(readFileSync(header)).toEqual(original);
+    expect(readdirSync(dataRoot).filter((name) => name.startsWith('development-backup-'))).toEqual(
+      [],
+    );
+    const journal = join(access.coordinationPath, 'restore-journal.json');
+    if (security) security.writePrivateFile(journal, Buffer.from('{}'));
+    else writeFileSync(journal, '{}', { mode: 0o600 });
+    await expect(prepareDevelopmentDesktopProfile(dataRoot)).rejects.toMatchObject({
+      code: 'restore_reconciliation_required',
+    });
+    expect(readFileSync(header)).toEqual(original);
+    expect(readFileSync(journal, 'utf8')).toBe('{}');
+    expect(readdirSync(dataRoot).filter((name) => name.startsWith('development-backup-'))).toEqual(
+      [],
+    );
+  } finally {
+    expect(realpathSync(dataRoot)).toBe(dataRoot);
+    rmSync(dataRoot, { recursive: true });
+  }
+});
 
 test.skipIf(process.platform !== 'darwin')(
   'real development Main reports Service admission failure, waits for readiness and drains its owned process',

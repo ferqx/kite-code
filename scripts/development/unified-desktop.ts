@@ -1,8 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { releaseErrorCode } from '../release/release-arguments';
 import { selectDevelopmentServiceArtifact } from './unified-cli';
@@ -16,7 +25,78 @@ const help = `Kite desktop development
 Uses local Service sources, built workspace assets, and installed Electron.
 UI changes use Vite HMR; Service source changes rebuild and restart the paired Service.
 Development data stays in ~/.kite-code/development.
+Incompatible development data can be backed up and replaced after interactive confirmation (default: No).
 `;
+
+async function confirmDevelopmentProfileBackup(backup: string): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY)
+    throw Error('development_profile_confirmation_required');
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<boolean>((resolve) => {
+    const finish = (accepted: boolean) => {
+      resolve(accepted);
+      terminal.close();
+    };
+    terminal.once('close', () => finish(false));
+    terminal.once('SIGINT', () => finish(false));
+    terminal.question(
+      `[desktop:dev] The development Store is incompatible. Old history and attachments will stay in:\n${backup}\nGlobal model configuration is kept.\nBack up the old directory and start a fresh development profile? [y/N] `,
+      (answer) => finish(['y', 'yes'].includes(answer.trim().toLowerCase())),
+    );
+  });
+}
+
+/** Development-only recovery; never migrate old authorization facts or delete user data. */
+export async function prepareDevelopmentDesktopProfile(
+  dataRoot: string,
+  confirmBackup: (backup: string) => Promise<boolean> = confirmDevelopmentProfileBackup,
+): Promise<string | undefined> {
+  const options = { dataRoot, profile: 'development' };
+  const { preflightSqliteStore, sqliteStorageAssets } = await import('@kite-ai/agent/sqlite');
+  try {
+    await preflightSqliteStore(options);
+    return undefined;
+  } catch (error) {
+    if (releaseErrorCode(error) !== 'store_incompatible') throw error;
+  }
+  // This repository-only host uses the original profile authority. Another client
+  // must not be reading/writing the directory while it is moved out of service.
+  const { acquireProfileAccess } = await import('../../packages/agent/src/platform/profile');
+  const { preflightDatabase } = await import('../../packages/agent/src/storage/sqlite/connection');
+  const access = acquireProfileAccess(options, 'exclusive');
+  try {
+    // A peer may have repaired/replaced the profile after the first check.
+    try {
+      preflightDatabase(access, sqliteStorageAssets().baseline);
+      return undefined;
+    } catch (error) {
+      // Missing legacy columns and malformed SQLite bytes also identify an
+      // incompatible Store. Access/I/O, lock and cleanup failures must stop.
+      if (
+        releaseErrorCode(error) !== 'store_incompatible' &&
+        !(
+          error instanceof Error &&
+          'code' in error &&
+          ['SQLITE_ERROR', 'SQLITE_CORRUPT', 'SQLITE_NOTADB'].includes(String(error.code))
+        )
+      )
+        throw error;
+    }
+    const backup = join(access.dataRoot, `development-backup-${Date.now()}-${randomUUID()}`);
+    if (!(await confirmBackup(backup))) throw Error('development_profile_reset_cancelled');
+    try {
+      if (existsSync(backup)) throw Error('development_profile_backup_exists');
+      // Same-parent rename preserves the complete directory, sidecars and ACLs;
+      // failure leaves the original profile in place and stops startup.
+      renameSync(access.profilePath, backup);
+    } catch (cause) {
+      throw Error('development_profile_backup_failed', { cause });
+    }
+    return backup;
+  } finally {
+    access.lock.release();
+  }
+}
 
 /** Create each application's private directory before Native verifies its permissions. */
 export function createDevelopmentDesktopDirectory(root: string): string {
@@ -57,8 +137,11 @@ export async function runDevelopmentDesktop(
     dataRoot: join(homedir(), '.kite-code'),
     profile: 'development',
   };
-  const { preflightSqliteStore } = await import('@kite-ai/agent/sqlite');
-  await preflightSqliteStore(profile);
+  const backup = await prepareDevelopmentDesktopProfile(profile.dataRoot);
+  if (backup)
+    process.stdout.write(
+      `[desktop:dev] Incompatible development data preserved at ${backup}; starting a fresh development profile.\n`,
+    );
   let electron: string, electronPackageDirectory: string;
   try {
     const require = createRequire(join(root, 'apps/desktop/package.json'));
@@ -247,7 +330,19 @@ if (import.meta.main) {
       process.stderr.write('Build the local workspaces first: npm run build\n');
     if (code === 'store_incompatible')
       process.stderr.write(
-        'The existing development profile does not match the current Store schema (format 1). Its data was preserved; no migration or reset was performed.\n',
+        'The development Store is incompatible and could not be prepared automatically. Its data was preserved.\n',
+      );
+    if (code === 'owner_busy')
+      process.stderr.write('Close other clients using the development profile, then retry.\n');
+    if (code === 'development_profile_confirmation_required')
+      process.stderr.write(
+        'Run npm run desktop:dev in an interactive terminal to confirm backing up the incompatible data and starting fresh. No data was changed.\n',
+      );
+    if (code === 'development_profile_reset_cancelled')
+      process.stderr.write('Development profile recovery cancelled. No data was changed.\n');
+    if (code === 'development_profile_backup_failed')
+      process.stderr.write(
+        'Could not preserve the incompatible development profile; startup stopped without resetting it.\n',
       );
     if (code === 'development_electron_runtime_scope_invalid')
       process.stderr.write(

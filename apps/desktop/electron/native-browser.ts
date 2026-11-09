@@ -87,7 +87,7 @@ type BrowserTab = {
   };
 };
 /** Only coherent current two-Panel Groups may establish a resize anchor.
- * Nested content frames retain their measured platform-specific margins.
+ * Both the outer shell and nested content retain their measured CSS gutters.
  * CSS handles occupy 0..1px; one CSS pixel covers measurement rounding, not gutters. */
 function currentPanelMeasurement(
   layout: NativeBrowserLayout,
@@ -99,7 +99,6 @@ function currentPanelMeasurement(
   let parentWidth = layout.windowWidth;
   for (const group of layout.groups) {
     if (
-      (group === layout.groups[0] && (group.left > 1 || group.right > 1)) ||
       group.gap > 2 ||
       Math.abs(
         group.left +

@@ -34,6 +34,8 @@ Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁
 
 显式 `desktop:dev` 可由 builder 固定开发 loopback renderer／nonce 和独立认证父控制连接，用于 UI Fast Refresh 与 Service 新字节重载；只允许明确 development 资产，正式 candidate 拒绝开发配置。重载在原配套服务退出0后使用新 SHA／build 身份准入，保留原 Profile／Store／申请并保持零自动重放，未知关闭或回执不启动后续替代。Vite 不服务 Profile 或私有应用资源，父认证 token 不进入 renderer／argv／日志。当前实现及仅开发模式的 Windows 实际证据归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)，不扩展正式 Runtime protection、installed Main 加载政策或三平台资格。
 
+显式 `desktop:dev` 的启动准备可在原 Profile EX 使用锁内，经交互终端明确确认后，把不兼容的 development 目录完整改名备份，再由 Service 初始化新开发数据；默认拒绝，取消和非交互环境不处理原数据，占用、恢复日志、访问失败或备份失败仍拒绝。此处置不迁移授权事实、不改 Store 格式版本、不放宽最终准入，也不适用于正式候选或 Service 热重载，具体行为归上述 Desktop owner。
+
 Windows `desktop:dev` 在构建前可向当前 npm Electron 的独立物理 `dist` 追加受限应用包读取／执行权限；完整预检拒绝链接、硬链接和适用的拒绝 ACE，权限已满足时不写入。该准备只属于显式开发入口，不覆盖项目、私有应用目录、Profile 或正式候选，也不关闭浏览器沙箱。范围、实现与重装后实际沙箱验证归 [Desktop owner](../../apps/desktop/README.md)；正式 Runtime protection、installed Main 和发布安装 ACL 契约保持。
 
 Windows Native 的正常启动继续拒绝不安全数据对象。正式候选完成原可信制品准入后，Main 在 Service／SQLite 之前检查所选 Profile 的固定目录与数据库元数据，提供本地默认退出和明确重查。只有 current SID 私有对象仅多出读取授权时，用户主动选择的独立维护才可先持久化私有 ACL 备份、取得数据根排他 pin 并重核原 root/target FileID／ACL 后定点改 DACL；不递归传播、接收 renderer 授权、提权、修复可写暴露或自动恢复旧授权。busy、漂移、备份失败及结果／关闭未知保持拒绝，成功后仍走原全部准入。操作及有限验证归 [Desktop 权限恢复 owner](../../apps/desktop/README.md#windows-数据权限预检与恢复)，不据此授完整 Windows 安装或发布资格。

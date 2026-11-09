@@ -2,7 +2,6 @@ import { Database } from 'bun:sqlite';
 import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   linkSync,
@@ -11,12 +10,16 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  expectPrivateMode,
+  fixturePermissions,
+  recordReparseEntry,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { acquireProfileAccess } from '../../../src/platform/profile';
 import {
   defaultWindowsPathSecurity,
@@ -198,7 +201,7 @@ test('future, unknown, broken schema and migration checksum reject without write
   const unknownDb = new Database(unknown.databasePath, { create: true });
   unknownDb.exec('CREATE VIEW unknown_view AS SELECT 1');
   unknownDb.close(true);
-  chmodSync(unknown.databasePath, 0o600);
+  fixturePermissions(unknown.databasePath, 0o600);
   const unknownBytes = bytes(unknown.databasePath);
   await rejected(unknown.options, 'store_incompatible');
   expect(bytes(unknown.databasePath)).toBe(unknownBytes);
@@ -217,22 +220,27 @@ test('rollback journal, hard/soft links, private permissions and restore journal
   expect(bytes(value.databasePath)).toBe(before);
   expect(readFileSync(`${value.databasePath}-journal`, 'utf8')).toBe('preserved journal');
   rmSync(`${value.databasePath}-journal`);
-  chmodSync(value.databasePath, 0o644);
+  expectPrivateMode(value.databasePath, 0o600);
+  fixturePermissions(value.databasePath, 0o644);
+  expect(() => expectPrivateMode(value.databasePath, 0o600)).toThrow();
   await rejected(value.options, 'store_access_denied');
-  chmodSync(value.databasePath, 0o600);
+  expect(bytes(value.databasePath)).toBe(before);
+  fixturePermissions(value.databasePath, 0o600);
+  expectPrivateMode(value.databasePath, 0o600);
+  expect((await preflightSqliteStore(value.options)).status).toBe('compatible');
   linkSync(value.databasePath, `${value.databasePath}.link`);
   await rejected(value.options, 'store_access_denied');
   rmSync(`${value.databasePath}.link`);
   const original = `${value.databasePath}.original`;
   copyFileSync(value.databasePath, original);
   rmSync(value.databasePath);
-  symlinkSync(original, value.databasePath);
+  recordReparseEntry(original, value.databasePath);
   await expect(preflightSqliteStore(value.options)).rejects.toMatchObject({
     code: 'store_access_denied',
   });
   rmSync(value.databasePath);
   copyFileSync(original, value.databasePath);
-  chmodSync(value.databasePath, 0o600);
+  fixturePermissions(value.databasePath, 0o600);
   writeFileSync(join(value.coordinationPath, 'restore-journal.json'), '{}', { mode: 0o600 });
   await expect(preflightSqliteStore(value.options)).rejects.toMatchObject({
     code: 'restore_reconciliation_required',

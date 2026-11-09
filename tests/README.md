@@ -58,6 +58,8 @@ FetchSession 接线后的[代理](../apps/service/test/isolated/model-transport.
 
 ## 当前测试范围
 
+2026-11-09，Windows x64／Bun1.4.4，修复 Store 预检权限反例并重新验证：真实 ACL 的拒绝／恢复、数据库字节保持及零开发数据重建确认由 [Store owner](../packages/agent/src/storage/README.md)记录。最初扩跑[平台夹具整文件](isolated/unified-agent/test-filesystem.test.ts)，四项实际文件系统测试通过，源码扫描因两处既有写法失败。随后按用户要求修复：[Native 根窗口夹具](../apps/desktop/test/isolated/native-root-window.test.ts)用 `pathToFileURL` 生成文件URL，原加载接管用例以含中文／空格／`#`／`%`的实际平台绝对路径核完整往返；[Darwin 浏览器存储夹具](../packages/agent/test/isolated/browser/darwin-storage.test.ts)的主进程和关闭失败子进程均复用 `temporaryDirectory`，子进程以准确文件URL导入同一夹具。平台夹具整文件5项／19断言、Native根窗口整文件11项／92断言全部通过；原Darwin专属两项在Windows跳过，未取得新的macOS实际执行证据。原安全／容量／关闭未知及加载时序断言保持，未改生产代码、放宽扫描规则或新增skip，不据此证明全仓或其他平台通过。
+
 图片读取的严格格式／进程取消／退出证明、源码树外闭包、实际 Service／冷历史／Fork 和两协议回归分别位于 [Agent Files](../packages/agent/test/isolated/files/images.test.ts)、[退出未知](../packages/agent/test/isolated/files/image-process-unknown.test.ts)、[闭包](../packages/agent/test/isolated/files/images-packaged.test.ts)和[Service](../apps/service/test/isolated/image-reading.test.ts)。[显式性能程序](e2e/live/model/image-reading.benchmark.ts)仅合成图片／固定模型，测真实持久化与下一次输入；[真实视觉程序](e2e/live/model/image-vision.live.ts)另需 opt-in，边界和命令见[live说明](e2e/live/model/README.md#本地图片读取)。Native 工具摘要沿[真实页面回归](../apps/desktop/test/isolated/native-tool-receipt-render-dom.test.tsx)和[明确浏览器制品](../apps/desktop/test/tool-image-preview-browser-runner.fixture.ts)观察全过程；这些入口不启用普通客户端诊断或扩展发版权限。
 
 Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP，源码外制品沿实际私有父目录准入，不读取用户应用配置或改变系统临时目录 ACL。仅成功作业清理隔离根，失败／中断保留准确路径和证据。清理仅接受当前运行器创建的规范根，在同一 PowerShell 内逐项核边界，遇 reparse 目录只解除入口，不遍历外部目标；私有只读 Artifact 通过父目录已有删除权清理，不放宽其 ACL。[运行器回归](isolated/scripts/test-suite-runner.test.ts)覆盖真实制品准入、只读文件和外部 junction 目标保全。

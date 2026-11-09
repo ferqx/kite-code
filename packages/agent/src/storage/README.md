@@ -190,6 +190,10 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 [启动预检测试](../../test/isolated/storage/preflight.test.ts) 验证真实空库/缺库、合法 Store 和 live WAL 的原字节与 Core 事实、未来/未知/破坏 schema/checksum、链接/权限/journal、第二进程锁，以及源码树外公开 leaf 的实际包内资产读取。当前本机证据不能代表其他平台或发布引擎资格。
 
+Windows 原生私有 ACL 拒绝 `windows_path_security_denied` 在公开预检边界映射为 `store_access_denied`，不能归为格式不兼容或进入开发数据备份／重建确认。权限反例复用[平台夹具](../../../../tests/fixtures/test-filesystem.ts)：Windows 实际加入并移除外部读取 ACE，POSIX 沿用 mode；分别核真实私有验证失败、公开预检拒绝、数据库字节保持，以及恢复权限后重新兼容。重解析反例在 Windows 使用真实目录 junction，在 POSIX 使用文件符号链接，保留硬链接、journal 与锁释放断言，不依赖 Windows 符号链接特权。
+
+2026-11-09，Windows x64／Bun1.4.4：上述预检整文件12项／77断言全部通过，覆盖真实ACL拒绝与恢复、链接、两类journal及拒绝后的EX使用锁释放。[开发入口整文件](../../../../tests/isolated/unified-agent/development-desktop.test.ts)11项／185断言通过，另1项macOS专属跳过；新增实际公开ACL下零确认／零备份及原库字节保持断言。Store schema、数据格式版本和底层ACL准入政策均未改变，不据此授予其他平台或完整发布资格。
+
 `sqliteStorageAssets()` 是同一公开 leaf 的纯 metadata getter，返回实际 `module`、`worker`、`baseline` 及完整 `migrations` URL 清单。`openSqliteStore` 的 Worker 与 preflight 共用这些实际选择，source/built 分别选择 main.ts/main.js，不由 Service 猜私有路径，也不把 module 的任意父目录当专用 runtime root。它不打开库、读取文件或证明候选目录身份；完整安装 candidate 的 host-only closure 证明归[Service 资产 owner](../../../../apps/service/src/runtime-assets.ts)。
 
 

@@ -92,7 +92,13 @@ export async function preflightSqliteStore(options: ProfileOptions): Promise<Sql
     ];
     const code = codes.includes(reported)
       ? reported
-      : !access || ['EACCES', 'EPERM', 'Symlink paths are unsupported.'].includes(reported)
+      : !access ||
+          [
+            'EACCES',
+            'EPERM',
+            'windows_path_security_denied',
+            'Symlink paths are unsupported.',
+          ].includes(reported)
         ? 'store_access_denied'
         : 'store_incompatible';
     if (code === 'store_preflight_cleanup_failed') closeConfirmed = false;

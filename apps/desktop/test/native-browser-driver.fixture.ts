@@ -262,7 +262,7 @@ try {
   await electron.evaluate((_, bounds) => {
     globalThis.browserTabsHostFixture.rootView.setBounds(bounds);
   }, rootBounds);
-  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  await page.locator('.native-browser-start:visible').waitFor({ state: 'hidden' });
   assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
   assert.equal(
     await electron.evaluate(
@@ -281,7 +281,7 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 20));
   });
   await rail.getByRole('button', { name: '停止加载', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  await page.locator('.native-browser-start:visible').waitFor({ state: 'hidden' });
   assert.equal(await rail.getByRole('alert').count(), 0);
   assert.equal((await inspect()).find((v) => v.id === slow.id)!.visible, true);
   assert.equal(
@@ -303,7 +303,7 @@ try {
   assert.equal(await rail.getByRole('tab', { name: 'Page One', exact: true }).count(), 2);
   assert.equal(await slowTab.getAttribute('aria-selected'), 'true');
   assert.equal(await firstTab.getAttribute('aria-selected'), 'false');
-  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  await page.locator('.native-browser-start:visible').waitFor({ state: 'hidden' });
   await slowTab
     .locator('..')
     .getByRole('button', { name: '关闭标签页：Page One', exact: true })
@@ -505,7 +505,7 @@ try {
         )
     );
   });
-  await page.waitForFunction(() => !document.querySelector('.native-browser-start'));
+  await page.locator('.native-browser-start:visible').waitFor({ state: 'hidden' });
   const retainedInventory = await page.evaluate(async () => {
     const draft = window.browserTabsFixture.draft();
     return window.kiteNative!.restoreBrowserDraft!(draft);

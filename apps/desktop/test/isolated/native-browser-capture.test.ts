@@ -3241,43 +3241,54 @@ test('live sidebar animation accepts measured intermediate widths while rejectin
   }
 });
 
-test('a Windows content-frame inset remains inside the same panel through native resize without another first-frame read', async () => {
-  const f = fixture();
-  const panel = (size: number, preserve: 'relative' | 'pixel' = 'relative') => ({
-    size,
-    min: 0,
-    minUnit: 'px' as const,
-    max: 100,
-    maxUnit: '%' as const,
-    preserve,
-    collapsible: false,
+for (const inset of ['content-frame', 'outer-shell'] as const)
+  test(`a Windows ${inset} inset remains inside the same panel through native resize without another first-frame read`, async () => {
+    const f = fixture();
+    const panel = (size: number, preserve: 'relative' | 'pixel' = 'relative') => ({
+      size,
+      min: 0,
+      minUnit: 'px' as const,
+      max: 100,
+      maxUnit: '%' as const,
+      preserve,
+      collapsible: false,
+    });
+    const layout: NativeBrowserLayout = {
+      windowWidth: 1600,
+      windowHeight: 1200,
+      insetLeft: 0,
+      insetRight: 0,
+      groups: [
+        {
+          left: inset === 'outer-shell' ? 6 : 0,
+          right: inset === 'outer-shell' ? 6 : 0,
+          gap: 1,
+          panels: [panel(200, 'pixel'), panel(inset === 'outer-shell' ? 1387 : 1399)],
+        },
+        {
+          left: inset === 'content-frame' ? 6 : 0,
+          right: inset === 'content-frame' ? 6 : 0,
+          gap: 1,
+          panels: [panel(600), panel(786)],
+        },
+      ],
+    };
+    try {
+      await f.show({ x: 808, y: 132, width: 786, height: 1061, radius: 8 }, layout);
+      expect(f.view.visible).toBe(true);
+      const frames = f.contents.frameCallbacks.length,
+        loads = f.contents.loads;
+      f.contentSize.splice(0, 2, 1700, 1300);
+      f.window.emit('resize');
+      expect(f.view.bounds.x + f.view.bounds.width).toBe(1694);
+      expect(f.view.bounds.y + f.view.bounds.height).toBe(1293);
+      expect(f.view.visible).toBe(true);
+      expect(f.contents.frameCallbacks).toHaveLength(frames);
+      expect(f.contents.loads).toBe(loads);
+    } finally {
+      f.close();
+    }
   });
-  const layout: NativeBrowserLayout = {
-    windowWidth: 1600,
-    windowHeight: 1200,
-    insetLeft: 0,
-    insetRight: 0,
-    groups: [
-      { left: 0, right: 0, gap: 1, panels: [panel(200, 'pixel'), panel(1399)] },
-      { left: 6, right: 6, gap: 1, panels: [panel(600), panel(786)] },
-    ],
-  };
-  try {
-    await f.show({ x: 808, y: 132, width: 786, height: 1061, radius: 8 }, layout);
-    expect(f.view.visible).toBe(true);
-    const frames = f.contents.frameCallbacks.length,
-      loads = f.contents.loads;
-    f.contentSize.splice(0, 2, 1700, 1300);
-    f.window.emit('resize');
-    expect(f.view.bounds.x + f.view.bounds.width).toBe(1694);
-    expect(f.view.bounds.y + f.view.bounds.height).toBe(1293);
-    expect(f.view.visible).toBe(true);
-    expect(f.contents.frameCallbacks).toHaveLength(frames);
-    expect(f.contents.loads).toBe(loads);
-  } finally {
-    f.close();
-  }
-});
 
 test('rejected stale and mixed panel measurements cannot replace the current native projection or invalidate a valid page-coordinate proof', async () => {
   const f = fixture();

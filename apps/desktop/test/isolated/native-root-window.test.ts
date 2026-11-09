@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { MenuItemConstructorOptions } from 'electron';
 
 function deferred<T>() {
@@ -33,7 +35,7 @@ class Contents extends EventEmitter {
     this.emit('did-finish-load');
   }
   async loadFile(path: string) {
-    return this.loadURL(`file://${path}`);
+    return this.loadURL(pathToFileURL(path).href);
   }
   capturePage() {
     this.captures++;
@@ -238,9 +240,10 @@ test('a superseded load cannot claim readiness and loadFile uses the same curren
   onNativeRootReady(value, () => ready++);
   const prior = value.loadURL('http://localhost/old');
   root.webContents.load = async () => {};
-  await value.loadFile('/owned/index.html');
+  const entry = resolve('owned', 'index 雪 #%.html');
+  await value.loadFile(entry);
   expect(ready).toBe(1);
-  expect(root.webContents.url).toBe('file:///owned/index.html');
+  expect(fileURLToPath(root.webContents.url)).toBe(entry);
   expect(root.webContents.captures).toBe(0);
   gate.resolve();
   await expect(prior).rejects.toThrow('native_root_load_superseded');
