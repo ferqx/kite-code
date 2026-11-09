@@ -100,7 +100,9 @@ export async function preflightSqliteStore(options: ProfileOptions): Promise<Sql
             'Symlink paths are unsupported.',
           ].includes(reported)
         ? 'store_access_denied'
-        : 'store_incompatible';
+        : ['SQLITE_ERROR', 'SQLITE_CORRUPT', 'SQLITE_NOTADB'].includes(reported)
+          ? 'store_incompatible'
+          : 'store_preflight_failed';
     if (code === 'store_preflight_cleanup_failed') closeConfirmed = false;
     throw new AgentError(code, 'SQLite startup preflight failed.');
   } finally {

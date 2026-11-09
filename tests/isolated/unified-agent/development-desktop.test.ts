@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
 import {
   existsSync,
   mkdirSync,
@@ -14,9 +15,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
-import { openSqliteStore, preflightSqliteStore } from '@kite-ai/agent/sqlite';
+import { openSqliteStore, preflightSqliteStore, sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
@@ -462,6 +463,70 @@ test('development recovery preserves the whole old directory and global configur
     rmSync(dataRoot, { recursive: true });
   }
 });
+
+for (const target of ['manifest', 'baseline'] as const)
+  for (const code of ['EACCES', 'EIO'] as const)
+    for (const failureAt of [1, 2])
+      test(`development recovery stops on ${target} ${code} at preflight ${failureAt} without prompting or moving healthy data`, async () => {
+        const dataRoot = temporaryDirectory('kite-development-profile-read-failure-');
+        const options = { dataRoot, profile: 'development' };
+        const profile = join(dataRoot, options.profile);
+        try {
+          const store = await openSqliteStore(options);
+          const metadata = await store.getMetadata();
+          await store.close();
+          const manifest = join(profile, 'profile.json');
+          const database = readFileSync(join(profile, 'core.db'));
+          const header = readFileSync(manifest);
+          const failedPath =
+            target === 'manifest' ? manifest : fileURLToPath(sqliteStorageAssets().baseline);
+          const originalRead = fs.readFileSync;
+          let reads = 0;
+          let confirmations = 0;
+          const read = spyOn(fs, 'readFileSync').mockImplementation(((path, ...args) => {
+            const name = path instanceof URL ? fileURLToPath(path) : String(path);
+            if (name === failedPath) {
+              if (++reads >= failureAt)
+                throw Object.assign(new Error('fixture_read_failed'), { code });
+              // The first observation can be incompatible while a peer repairs
+              // the profile before EX admission. Only the second read then fails.
+              return target === 'manifest' ? '{"formatMajor":2}' : Buffer.from('old baseline');
+            }
+            return (originalRead as (...args: unknown[]) => unknown)(path, ...args);
+          }) as typeof fs.readFileSync);
+          try {
+            await expect(
+              prepareDevelopmentDesktopProfile(dataRoot, async () => {
+                confirmations++;
+                return true;
+              }),
+            ).rejects.toMatchObject({
+              code:
+                failureAt === 2
+                  ? code
+                  : code === 'EACCES'
+                    ? 'store_access_denied'
+                    : 'store_preflight_failed',
+            });
+          } finally {
+            read.mockRestore();
+          }
+          expect(reads).toBe(failureAt);
+          expect(confirmations).toBe(0);
+          expect(
+            readdirSync(dataRoot).filter((name) => name.startsWith('development-backup-')),
+          ).toEqual([]);
+          expect(readFileSync(join(profile, 'core.db'))).toEqual(database);
+          expect(readFileSync(manifest)).toEqual(header);
+          expect(await preflightSqliteStore(options)).toMatchObject({
+            status: 'compatible',
+            storeId: metadata.storeId,
+          });
+        } finally {
+          expect(realpathSync(dataRoot)).toBe(dataRoot);
+          rmSync(dataRoot, { recursive: true });
+        }
+      });
 
 test('development recovery refuses active profile use and pending restore without moving old data', async () => {
   const dataRoot = temporaryDirectory('kite-development-profile-busy-');

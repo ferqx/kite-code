@@ -93,6 +93,18 @@ test('current Store identity and exact database/profile bytes survive readonly p
   access.lock.release();
 });
 
+test('invalid profile manifests remain incompatible without changing the database or manifest', async () => {
+  const value = await current();
+  const database = bytes(value.databasePath);
+  const manifest = join(value.profilePath, 'profile.json');
+  for (const contents of ['{', 'null', '[]', '{}', '{"formatMajor":2}', ' '.repeat(1025)]) {
+    writeFileSync(manifest, contents);
+    await rejected(value.options, 'store_incompatible');
+    expect(bytes(value.databasePath)).toBe(database);
+    expect(readFileSync(manifest, 'utf8')).toBe(contents);
+  }
+});
+
 test('a forged current profile fingerprint cannot admit a same-major legacy database schema', async () => {
   const value = await current();
   const header = bytes(join(value.profilePath, 'profile.json'));
@@ -283,6 +295,8 @@ test('real second process shared coexistence, exclusive maintenance busy and unr
 
 test('public bundled sqlite leaf outside source tree reads its packaged migration asset', async () => {
   const value = await current();
+  const database = bytes(value.databasePath);
+  const profile = bytes(join(value.profilePath, 'profile.json'));
   const packageRoot = mkdtempSync(join(tmpdir(), 'kite-preflight-package-'));
   roots.push(packageRoot);
   const entry = fileURLToPath(new URL('../../../src/sqlite.ts', import.meta.url));
@@ -324,7 +338,9 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
   rmSync(migration);
   const missing = run();
   expect(await missing.exited).not.toBe(0);
-  expect(await new Response(missing.stderr).text()).toContain('store_incompatible');
+  expect(await new Response(missing.stderr).text()).toContain('store_preflight_failed');
+  expect(bytes(value.databasePath)).toBe(database);
+  expect(bytes(join(value.profilePath, 'profile.json'))).toBe(profile);
 });
 
 test('unsupported format 2 rejection preserves original database and profile before writer admission; readonly WAL discovery adds no frames', async () => {

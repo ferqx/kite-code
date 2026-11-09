@@ -45,22 +45,27 @@ function validateProfileFormat(access: ProfileAccess, baseline?: URL): void {
   assertNoSymlinkPath(path);
   if (!existsSync(path)) return;
   privateRegular(path);
+  if (lstatSync(path).size > 1024)
+    throw new StoreOpenError('store_incompatible', 'Unsupported profile format.');
+  // Read failures describe access/assets, not the profile's format. Keep them
+  // outside the parser catch so development recovery cannot offer a reset.
+  const contents = readFileSync(path, 'utf8');
+  let value: unknown;
   try {
-    if (lstatSync(path).size > 1024) throw new Error('profile_format_invalid');
-    const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    if (
-      !value ||
-      typeof value !== 'object' ||
-      Array.isArray(value) ||
-      !('formatMajor' in value) ||
-      value.formatMajor !== FORMAT_MAJOR ||
-      !('schemaChecksum' in value) ||
-      value.schemaChecksum !== baselineChecksum(baseline)
-    )
-      throw new Error('profile_format_unsupported');
+    value = JSON.parse(contents);
   } catch {
     throw new StoreOpenError('store_incompatible', 'Unsupported profile format.');
   }
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    !('formatMajor' in value) ||
+    value.formatMajor !== FORMAT_MAJOR ||
+    !('schemaChecksum' in value) ||
+    value.schemaChecksum !== baselineChecksum(baseline)
+  )
+    throw new StoreOpenError('store_incompatible', 'Unsupported profile format.');
 }
 export function openDatabase(
   access: ProfileAccess,

@@ -188,6 +188,8 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 未完成 restore journal、exclusive 维护占用、rollback journal、链接/非私有文件和未知/损坏格式明确拒绝。只读连接使用 strict close 后才释放 lease；若数据库关闭未获确认，返回 `store_preflight_cleanup_failed` 并保留该进程的 profile-use 锁，不能冒充已释放。`compatible` 仅证明该次观察的格式与身份，未来 launch 仍须重新执行正式格式和身份准入，也不是完整业务历史的健康证明。源码与发布 SQLite leaf 分别使用各自真实包内 migration SQL，不回退到源码树。
 
+`profile.json` 的读取、文件元数据和 baseline SQL 读取错误不属于格式不兼容；只有解析失败、格式／指纹不匹配或明确的 SQLite 格式错误才进入 `store_incompatible`。公开预检将权限拒绝归为 `store_access_denied`，其他未分类故障（含缺少打包 baseline 和 I/O 错误）返回 `store_preflight_failed`。开发入口的第一次预检与 EX 锁下复查均须在读取故障时停止，不提示重建或移动健康 Profile。[开发入口回归](../../../../tests/isolated/unified-agent/development-desktop.test.ts)对两次预检分别注入 manifest／baseline 的权限和 I/O 错误，核零确认、零备份、原库与清单字节及恢复后的原 Store 身份；该夹具不代表真实平台 I/O 故障或完整启动验收。
+
 [启动预检测试](../../test/isolated/storage/preflight.test.ts) 验证真实空库/缺库、合法 Store 和 live WAL 的原字节与 Core 事实、未来/未知/破坏 schema/checksum、链接/权限/journal、第二进程锁，以及源码树外公开 leaf 的实际包内资产读取。当前本机证据不能代表其他平台或发布引擎资格。
 
 Windows 原生私有 ACL 拒绝 `windows_path_security_denied` 在公开预检边界映射为 `store_access_denied`，不能归为格式不兼容或进入开发数据备份／重建确认。权限反例复用[平台夹具](../../../../tests/fixtures/test-filesystem.ts)：Windows 实际加入并移除外部读取 ACE，POSIX 沿用 mode；分别核真实私有验证失败、公开预检拒绝、数据库字节保持，以及恢复权限后重新兼容。重解析反例在 Windows 使用真实目录 junction，在 POSIX 使用文件符号链接，保留硬链接、journal 与锁释放断言，不依赖 Windows 符号链接特权。
