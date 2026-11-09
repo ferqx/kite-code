@@ -3,7 +3,7 @@ import {
   ArrowUp02Icon,
   Attachment01Icon,
   Cancel01Icon,
-  HandIcon,
+  FolderEditIcon,
   Loading03Icon,
   Shield01Icon,
   ShieldAlertIcon,
@@ -68,7 +68,7 @@ const ShieldTerminalIcon: ComponentProps<typeof HugeiconsIcon>['icon'] = [
 ];
 
 const permissionModes = [
-  { value: 'accept_edits', icon: HandIcon },
+  { value: 'accept_edits', icon: FolderEditIcon },
   { value: 'auto', icon: ShieldTerminalIcon },
   { value: 'full', icon: ShieldAlertIcon },
 ] as const;
@@ -80,8 +80,8 @@ const permissionCopy = {
     heading: '如何处理操作请求？',
     helper: '为当前对话选择审批方式',
     accept_edits: {
-      label: '请求批准',
-      menuLabel: '请求批准',
+      label: '工作区内修改',
+      menuLabel: '工作区内修改',
       detail: '允许工作区写入；外部写入和联网须批准',
     },
     auto: {
@@ -189,6 +189,8 @@ export interface ComposerProps {
     readonly cacheMissTokens: number;
   };
   metricsLoading?: boolean;
+  /** New-conversation preparation has no request usage to display yet. */
+  hideContextWhenUnavailable?: boolean;
   submitStatus?: string;
   sending?: boolean;
   promptHidden?: boolean;
@@ -263,12 +265,7 @@ export function Composer(props: ComposerProps) {
       setPreparingFiles(false);
       setFileError(undefined);
     }
-    if (
-      current.current.scopeKey !== props.scopeKey ||
-      props.disabled ||
-      props.readOnly ||
-      props.promptHidden
-    )
+    if (current.current.scopeKey !== props.scopeKey || props.promptHidden)
       setAttachmentMenuOpen(false);
     if (!canConfirmFull(props) || !samePermissionContext(current.current, props)) {
       const wasConfirming = !!fullConfirmation.current || confirmingFullScope !== null;
@@ -281,10 +278,6 @@ export function Composer(props: ComposerProps) {
     }
     if (
       current.current.scopeKey !== props.scopeKey ||
-      current.current.fullPermissionScope !== props.fullPermissionScope ||
-      props.permissionDisabled ||
-      props.readOnly ||
-      props.readGate?.permission ||
       (props.promptHidden && !props.permissionWhenPromptHidden)
     )
       setPermissionMenuOpen(false);
@@ -590,6 +583,12 @@ export function Composer(props: ComposerProps) {
                   )}
                   <DropdownMenuRadioItem
                     value={mode.value}
+                    disabled={
+                      props.permissionDisabled ||
+                      props.readOnly ||
+                      props.readGate?.permission ||
+                      !props.permission
+                    }
                     indicatorPosition="end"
                     className={cn(
                       'permission-menu-item',
@@ -850,9 +849,103 @@ export function Composer(props: ComposerProps) {
             {permissionControl}
           </div>
           <div className="composer-trailing">
+            {(!props.hideContextWhenUnavailable || props.contextUsage !== undefined) && (
+              <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <svg
+                        className="composer-context-usage"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        role="img"
+                        tabIndex={props.metricsLoading ? undefined : 0}
+                        aria-label={
+                          props.metricsLoading
+                            ? '正在读取上下文占用'
+                            : contextPercentage === undefined
+                              ? '上下文占用未知'
+                              : `上下文占用约 ${contextPercentage}%`
+                        }
+                        aria-description={
+                          props.metricsLoading
+                            ? undefined
+                            : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens；${cacheDescription}`
+                        }
+                      >
+                        <circle className="composer-context-track" cx="8" cy="8" r="6" />
+                        {!props.metricsLoading &&
+                          contextPercentage !== undefined &&
+                          contextPercentage > 0 && (
+                            <circle
+                              cx="8"
+                              cy="8"
+                              r="6"
+                              pathLength="100"
+                              strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
+                              transform="rotate(-90 8 8)"
+                            />
+                          )}
+                      </svg>
+                    </TooltipTrigger>
+                    {!props.metricsLoading && (
+                      <TooltipContent
+                        className="kite-client composer-context-tooltip"
+                        side="top"
+                        sideOffset={8}
+                        collisionPadding={12}
+                      >
+                        <div className="composer-context-section">
+                          <div className="composer-context-heading">
+                            <span>上下文占用</span>
+                            <strong>
+                              {contextPercentage === undefined
+                                ? '未知'
+                                : `约 ${contextPercentage}%`}
+                            </strong>
+                          </div>
+                          {contextPercentage !== undefined && (
+                            <div className="composer-context-meter" aria-hidden="true">
+                              <span style={{ width: `${Math.min(contextPercentage, 100)}%` }} />
+                            </div>
+                          )}
+                          <div className="composer-context-detail">
+                            估算{' '}
+                            {contextTokens === undefined
+                              ? '未知'
+                              : formatTokenQuantity(contextTokens)}
+                            {' / 总量 '}
+                            {contextWindowTokens === undefined
+                              ? '未知'
+                              : formatTokenQuantity(contextWindowTokens)}
+                            {' tokens'}
+                          </div>
+                        </div>
+                        <div className="composer-context-section">
+                          <div className="composer-context-heading">
+                            <span>缓存命中率</span>
+                            <strong>
+                              {cacheHitPercentage === undefined
+                                ? '暂无数据'
+                                : `${cacheHitPercentage}%`}
+                            </strong>
+                          </div>
+                          <div className="composer-context-detail">
+                            {cacheHitPercentage === undefined
+                              ? '暂无缓存用量数据'
+                              : `累计命中 ${formatTokenQuantity(props.cacheMetrics!.cacheHitTokens)} / 输入 ${formatTokenQuantity(cacheTokenTotal)} tokens`}
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
             {props.options}
             {props.onModelChange && props.models?.length ? (
               <ModelEffortSelector
+                scopeKey={props.scopeKey}
                 model={props.model}
                 models={props.models}
                 onModelChange={props.onModelChange}
@@ -867,95 +960,6 @@ export function Composer(props: ComposerProps) {
             ) : props.model?.name ? (
               <span>{props.model.name}</span>
             ) : null}
-            <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <svg
-                      className="composer-context-usage"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      role="img"
-                      tabIndex={props.metricsLoading ? undefined : 0}
-                      aria-label={
-                        props.metricsLoading
-                          ? '正在读取上下文占用'
-                          : contextPercentage === undefined
-                            ? '上下文占用未知'
-                            : `上下文占用约 ${contextPercentage}%`
-                      }
-                      aria-description={
-                        props.metricsLoading
-                          ? undefined
-                          : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens；${cacheDescription}`
-                      }
-                    >
-                      <circle className="composer-context-track" cx="8" cy="8" r="6" />
-                      {!props.metricsLoading &&
-                        contextPercentage !== undefined &&
-                        contextPercentage > 0 && (
-                          <circle
-                            cx="8"
-                            cy="8"
-                            r="6"
-                            pathLength="100"
-                            strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
-                            transform="rotate(-90 8 8)"
-                          />
-                        )}
-                    </svg>
-                  </TooltipTrigger>
-                  {!props.metricsLoading && (
-                    <TooltipContent
-                      className="kite-client composer-context-tooltip"
-                      side="top"
-                      sideOffset={8}
-                      collisionPadding={12}
-                    >
-                      <div className="composer-context-section">
-                        <div className="composer-context-heading">
-                          <span>上下文占用</span>
-                          <strong>
-                            {contextPercentage === undefined ? '未知' : `约 ${contextPercentage}%`}
-                          </strong>
-                        </div>
-                        {contextPercentage !== undefined && (
-                          <div className="composer-context-meter" aria-hidden="true">
-                            <span style={{ width: `${Math.min(contextPercentage, 100)}%` }} />
-                          </div>
-                        )}
-                        <div className="composer-context-detail">
-                          估算{' '}
-                          {contextTokens === undefined
-                            ? '未知'
-                            : formatTokenQuantity(contextTokens)}
-                          {' / 总量 '}
-                          {contextWindowTokens === undefined
-                            ? '未知'
-                            : formatTokenQuantity(contextWindowTokens)}
-                          {' tokens'}
-                        </div>
-                      </div>
-                      <div className="composer-context-section">
-                        <div className="composer-context-heading">
-                          <span>缓存命中率</span>
-                          <strong>
-                            {cacheHitPercentage === undefined
-                              ? '暂无数据'
-                              : `${cacheHitPercentage}%`}
-                          </strong>
-                        </div>
-                        <div className="composer-context-detail">
-                          {cacheHitPercentage === undefined
-                            ? '暂无缓存用量数据'
-                            : `累计命中 ${formatTokenQuantity(props.cacheMetrics!.cacheHitTokens)} / 输入 ${formatTokenQuantity(cacheTokenTotal)} tokens`}
-                        </div>
-                      </div>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
-            </div>
             <div className="composer-actions">
               {showStop ? (
                 <Button

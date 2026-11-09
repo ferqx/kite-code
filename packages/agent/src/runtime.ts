@@ -3639,6 +3639,16 @@ export class AgentRuntime {
       }
       definitions.set(tool.id, definition);
     }
+    // The sealed input is the actual historical Model presentation. Terminal Tool
+    // results are immutable Store facts; validate their existing message linkage below
+    // instead of reinterpreting them through today's formatter or adding new metadata.
+    const recordedTools = new Map<string, ModelMessage>();
+    for (const message of saved.request.messages) {
+      if (message.role !== 'tool' || message.sourceIds?.length !== 1) continue;
+      const id = message.sourceIds[0]!;
+      if (recordedTools.has(id)) throw new AgentError('context_estimate_unavailable');
+      recordedTools.set(id, message);
+    }
     const history = await this.modelMessages(
       input.sessionId,
       input.expectedStoreId,
@@ -3653,6 +3663,7 @@ export class AgentRuntime {
       undefined,
       undefined,
       definitions,
+      recordedTools,
     );
     // Step-selected capabilities may add presentation beyond the initial Run
     // catalogue. Original sealed requests are the comparison evidence, not a
@@ -3676,6 +3687,7 @@ export class AgentRuntime {
         for (const id of message.sourceIds) {
           const receipt = await this.options.store.getExecution(id);
           if (receipt?.kind !== 'tool') continue;
+          if (recordedTools.has(id)) continue;
           const captured = configured?.tools?.find(
             (tool) =>
               tool.id === receipt.definitionId && tool.version === receipt.definitionVersion,
@@ -10319,6 +10331,7 @@ export class AgentRuntime {
     retainedInputMessages?: ModelMessage[],
     compressionSummaryMessages?: ModelMessage[],
     definitions: ReadonlyMap<string, ToolDefinition> = this.tools,
+    recordedTools?: ReadonlyMap<string, ModelMessage>,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage; summary?: true }>();
@@ -10557,6 +10570,27 @@ export class AgentRuntime {
           for (const id of message.sourceIds ?? []) {
             const execution = await this.options.store.getExecution(id);
             const value = execution?.result;
+            const sealed = recordedTools?.get(id);
+            if (
+              sealed &&
+              (!execution ||
+                execution.id !== id ||
+                execution.kind !== 'tool' ||
+                !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+                  execution.status,
+                ) ||
+                execution.originStoreId !== storeId ||
+                execution.sessionId !== message.sessionId ||
+                execution.runId !== message.runId ||
+                execution.callId !== message.toolCallId ||
+                message.sourceIds?.length !== 1 ||
+                sealed.toolCallId !== message.toolCallId ||
+                !value ||
+                typeof value !== 'object' ||
+                Array.isArray(value) ||
+                value.content !== message.content)
+            )
+              throw new AgentError('context_estimate_unavailable');
             if (
               value &&
               typeof value === 'object' &&
@@ -10628,18 +10662,23 @@ export class AgentRuntime {
                 execution.runId === message.runId &&
                 execution.callId === message.toolCallId &&
                 value.content === message.content
-              )
-                content =
-                  (await this.modelResultPresentation(
-                    {
-                      kind: 'tool',
-                      execution,
-                      definition: definitions.get(execution.definitionId),
-                      result: value,
-                      ...(body === undefined ? {} : { body }),
-                    },
-                    signal,
-                  )) ?? content;
+              ) {
+                const recorded = recordedTools?.get(execution.id);
+                if (recorded) {
+                  content = recorded.content;
+                } else
+                  content =
+                    (await this.modelResultPresentation(
+                      {
+                        kind: 'tool',
+                        execution,
+                        definition: definitions.get(execution.definitionId),
+                        result: value,
+                        ...(body === undefined ? {} : { body }),
+                      },
+                      signal,
+                    )) ?? content;
+              }
             }
           }
         }

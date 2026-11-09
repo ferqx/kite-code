@@ -121,7 +121,8 @@ try {
   const modelsOnly = process.argv.includes('--model-navigation');
   const composerOnly = process.argv.includes('--composer-handoff');
   const layoutOnly = process.argv.includes('--composer-layout');
-  const menuOnly = process.argv.includes('--composer-menu');
+  const permissionOnly = process.argv.includes('--permission-stability');
+  const menuOnly = permissionOnly || process.argv.includes('--composer-menu');
   const auditOnly = process.argv.includes('--session-audit');
   const sidebarOnly = process.argv.includes('--sidebar-actions');
   const focused =
@@ -133,6 +134,10 @@ try {
     menuOnly ||
     auditOnly ||
     sidebarOnly;
+  if (permissionOnly) {
+    report.cases.push(...(await verifyFormControlStyles(browser, server.url.toString(), artifact)));
+    report.cases.push(...(await verifySwitchGeometry(browser, server.url.toString(), artifact)));
+  }
   if (sidebarOnly || !focused)
     report.cases.push(...(await verifySidebarActions(browser, server.url.toString(), artifact)));
   if (auditOnly) {
@@ -180,40 +185,44 @@ try {
         const spacing = await page.evaluate(() => {
           const model = document.querySelector('[data-model-trigger]')!.getBoundingClientRect();
           const ring = document.querySelector('.composer-context-usage')!.getBoundingClientRect();
-          return ring.left - model.right;
+          return model.left - ring.right;
         });
-        assert(Math.abs(spacing - 8) < 0.5, 'model-to-context gap is 8px');
-        await model.click();
-        const popover = page.locator('.model-effort-popover');
-        await popover.waitFor();
-        assert.equal(await popover.getAttribute('data-side'), 'top');
-        assert.equal(await popover.getAttribute('data-align'), 'center');
-        await page.waitForFunction(() => {
-          const trigger = document.querySelector('[data-model-trigger]')!.getBoundingClientRect();
-          const panel = document.querySelector('.model-effort-popover')!.getBoundingClientRect();
-          const desired = trigger.x + trigger.width / 2 - panel.width / 2;
-          return (
-            panel.x >= 11 &&
-            panel.right <= innerWidth - 11 &&
-            (desired < 12 ||
-              desired + panel.width > innerWidth - 12 ||
-              Math.abs(desired - panel.x) < 1)
-          );
-        });
-        await page.evaluate(async () => {
-          const panel = document.querySelector('.model-effort-popover')!;
-          await Promise.all(
-            panel
-              .getAnimations({ subtree: true })
-              .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime))
-              .map((animation) => animation.finished.catch(() => {})),
-          );
-        });
-        await page.screenshot({
-          path: path.join(artifact, `${theme}-${width}-model-top-center.png`),
-        });
-        await page.keyboard.press('Escape');
-        await popover.waitFor({ state: 'hidden' });
+        assert(Math.abs(spacing - 8) < 0.5, 'context-to-model gap is 8px');
+        if (!permissionOnly) {
+          await model.click();
+          const popover = page.locator('.model-effort-popover');
+          await popover.waitFor();
+          assert.equal(await popover.getAttribute('data-side'), 'top');
+          assert.equal(await popover.getAttribute('data-align'), 'center');
+          await page.waitForFunction(() => {
+            const trigger = document.querySelector('[data-model-trigger]')!.getBoundingClientRect();
+            const panel = document.querySelector('.model-effort-popover')!.getBoundingClientRect();
+            const desired = trigger.x + trigger.width / 2 - panel.width / 2;
+            return (
+              panel.x >= 11 &&
+              panel.right <= innerWidth - 11 &&
+              (desired < 12 ||
+                desired + panel.width > innerWidth - 12 ||
+                Math.abs(desired - panel.x) < 1)
+            );
+          });
+          await page.evaluate(async () => {
+            const panel = document.querySelector('.model-effort-popover')!;
+            await Promise.all(
+              panel
+                .getAnimations({ subtree: true })
+                .filter((animation) =>
+                  Number.isFinite(animation.effect?.getComputedTiming().endTime),
+                )
+                .map((animation) => animation.finished.catch(() => {})),
+            );
+          });
+          await page.screenshot({
+            path: path.join(artifact, `${theme}-${width}-model-top-center.png`),
+          });
+          await page.keyboard.press('Escape');
+          await popover.waitFor({ state: 'hidden' });
+        }
         await permission.click();
         await page.getByRole('menu').waitFor();
         assert.equal(await page.getByRole('menuitemradio').count(), 3);
@@ -226,6 +235,134 @@ try {
         });
         await page.keyboard.press('Escape');
         await page.getByRole('menu').waitFor({ state: 'hidden' });
+        const popoverRefreshFrames = [];
+        for (const overlay of ['permission', 'model', 'attachment']) {
+          const trigger =
+            overlay === 'permission'
+              ? '[data-permission-trigger]'
+              : overlay === 'model'
+                ? '[data-model-trigger]'
+                : '.composer-attach';
+          const selector =
+            overlay === 'permission'
+              ? '.permission-menu'
+              : overlay === 'model'
+                ? '.model-effort-popover'
+                : '.composer-attach-menu';
+          await page.locator(trigger).click();
+          await page.locator(selector).waitFor({ state: 'visible' });
+          await page.evaluate(
+            (selector) => Reflect.set(window, 'retainedOverlay', document.querySelector(selector)),
+            selector,
+          );
+          for (let cycle = 0; cycle < 3; cycle++) {
+            for (const pending of [true, false]) {
+              await page.evaluate(
+                (pending) => window.sessionShellFixture.refresh(pending),
+                pending,
+              );
+              const frames = await page.evaluate(async (selector) => {
+                const frames = [];
+                for (let frame = 0; frame < 6; frame++) {
+                  await new Promise(requestAnimationFrame);
+                  const panel = document.querySelector(selector);
+                  frames.push({
+                    same: panel === Reflect.get(window, 'retainedOverlay'),
+                    visible: !!panel && getComputedStyle(panel).visibility === 'visible',
+                  });
+                }
+                return frames;
+              }, selector);
+              assert(
+                frames.every((frame) => frame.same && frame.visible),
+                `${overlay}: read refresh retains open panel`,
+              );
+              popoverRefreshFrames.push({ overlay, cycle, pending, frames });
+            }
+          }
+          await page.screenshot({
+            path: path.join(artifact, `${theme}-${width}-${overlay}-refresh-retained.png`),
+          });
+          await page.keyboard.press('Escape');
+          await page.locator(selector).waitFor({ state: 'hidden' });
+        }
+        const editor = page.locator('.prompt-editor');
+        await editor.fill('权限切换草稿 雪🙂');
+        const beforePermission = await editor.evaluate((node) => {
+          const style = getComputedStyle(node);
+          const original = node;
+          const request = window.sessionShellFixture.bridge.request;
+          let release!: () => void;
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          window.sessionShellFixture.bridge.request = async (input) => {
+            if (input.method === 'permission.mode') await held;
+            return request(input);
+          };
+          Object.assign(window, {
+            releasePermission: release,
+            samplePermissionEditor: () => {
+              const current = document.querySelector<HTMLTextAreaElement>('.prompt-editor')!;
+              const style = getComputedStyle(current);
+              return {
+                same: current === original,
+                opacity: style.opacity,
+                color: style.color,
+                visible: style.visibility,
+                disabled: current.disabled,
+                value: current.value,
+                buttonOpacities: [...document.querySelectorAll('.composer button')].map(
+                  (button) => getComputedStyle(button).opacity,
+                ),
+              };
+            },
+          });
+          return { opacity: style.opacity, color: style.color };
+        });
+        await permission.click();
+        await page.getByRole('menuitemradio', { name: /工作区内修改/ }).click();
+        await page.waitForFunction(
+          () => document.querySelector<HTMLTextAreaElement>('.prompt-editor')?.disabled,
+        );
+        const permissionFrames = await page.evaluate(async () => {
+          const scope = window as typeof window & {
+            samplePermissionEditor(): { buttonOpacities: string[] };
+          };
+          const frames = [];
+          for (let index = 0; index < 18; index++) {
+            await new Promise(requestAnimationFrame);
+            frames.push(scope.samplePermissionEditor());
+          }
+          return frames;
+        });
+        for (const frame of permissionFrames) {
+          const { buttonOpacities, ...editorFrame } = frame;
+          assert(buttonOpacities.length > 0);
+          assert(buttonOpacities.every((opacity) => opacity === '1'));
+          assert.deepEqual(editorFrame, {
+            same: true,
+            ...beforePermission,
+            visible: 'visible',
+            disabled: true,
+            value: '权限切换草稿 雪🙂',
+          });
+        }
+        await page.screenshot({
+          path: path.join(artifact, `${theme}-${width}-permission-pending.png`),
+        });
+        await page.evaluate(() =>
+          (window as typeof window & { releasePermission(): void }).releasePermission(),
+        );
+        await page.waitForFunction(
+          () => !document.querySelector<HTMLTextAreaElement>('.prompt-editor')?.disabled,
+        );
+        assert.equal(await editor.inputValue(), '权限切换草稿 雪🙂');
+        assert.equal(
+          await editor.evaluate((node) => getComputedStyle(node).opacity),
+          beforePermission.opacity,
+        );
+        await editor.fill('');
         await page.locator('.composer-context-usage').hover();
         await page.getByRole('tooltip').waitFor();
         assert.equal(
@@ -249,6 +386,8 @@ try {
           menu: 'three modes only',
           modelGap: spacing,
           modelAlign: 'top-center',
+          permissionFrames,
+          popoverRefreshFrames,
           errors,
         });
         await page.close();
@@ -681,7 +820,7 @@ try {
     await ready('a');
     await settle();
     const emptySend = await take();
-    assert.equal(emptySend.action.opacity, '0.45');
+    assert.equal(emptySend.action.opacity, '1');
     await page.evaluate(() => window.sessionShellFixture.hold());
     await select('b');
     await page.waitForFunction(() => window.sessionShellFixture.pending('selection') > 0);

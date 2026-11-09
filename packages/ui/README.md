@@ -614,8 +614,8 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 
 统一审批展示由冻结 `options/optionId` 驱动；`Approval` 保留仅此次主按钮与范围菜单，菜单原文换行显示完整资源和限制。共享普通卡和 TUI 复用 Client 只读选项投影，不按工具名产生后续范围。TUI 默认选择原 once，选中的长说明完整换行；授权目录组件可查看原范围、真实 bindings 与审批出处；普通 Native 权限菜单不再提供该目录入口。历史工具状态使用后端保存的 `optionKind/presentation` 显示批准范围，不从 opaque optionId 推断。
 
-输入框底栏左侧为附件和权限入口（图标与名称，不带展开箭头），右侧同一行排列模型选择器、上下文圆环及发送／停止按钮；权限点击与确认门禁保持。会话正文与工具消息沿 `--conversation-text-size: 14px` 统一字号。`Composer.inputPlaceholder` 独立提供占位提示，未提供时沿 `inputLabel`；Native 会话使用“输入新的想法”。
+输入框底栏左侧为附件和权限入口（图标与名称，不带展开箭头），其中 accept_edits 显示“工作区内修改”，右侧同一行排列上下文圆环、模型选择器及发送／停止按钮；同会话刷新只撤销操作资格，权限、模型与附件弹层保留打开状态和原节点；切换会话或输入区被交互接管时关闭。权限Full确认仍绑定准确原范围，过期确认不能继续。权限点击与确认门禁保持。桌面公共按钮、表单、下拉选项、开关、滑块和Tab，以及模型／权限入口、问答选项和定时任务星期选择不再按禁用状态降低透明度或显示禁用光标；权限提交期间输入节点、草稿与工具栏透明度保持。原JS请求锁、pending检查、原生禁用语义及权限／读取门禁继续阻止重复操作，不引入延时防抖。 [隔离浏览器验证](../../apps/desktop/test/session-shell-browser-runner.fixture.ts)的 `--permission-stability` 覆盖深浅主题和500／1440px窗口，挂起真实Native组件的权限提交后逐帧核对输入节点、草稿、可见性、文字颜色与透明度，释放后核恢复。2026-11-09 Windows／Chrome156在公共禁用样式清理后，深浅主题表单、开关及500／1440px权限等待共10组通过；权限过程72帧同时核输入和整排按钮透明度，截图与报告归本机 `.cache/session-shell-browser-Fy2PbG` 和 `.cache/disabled-visual-stability-20261109.json`。Native定向等待／未知恢复2项及UI权限23项通过；桥接回执为隔离替身，不代证真实Service权限写入。`SessionPage` 在新对话准备时通过 `Composer.hideContextWhenUnavailable` 隐藏没有 `contextUsage` 的圆环与浮层；实际用量（包括0）出现后恢复，已有会话的加载和未知状态保持。会话正文与工具消息沿 `--conversation-text-size: 14px` 统一字号。`Composer.inputPlaceholder` 独立提供占位提示，未提供时沿 `inputLabel`；Native 会话使用“输入新的想法”。
 
-提示词文字区域左右内边距为12px、上方为8px，底部工具栏沿原内边距排列。
+提示词文字区域左右内边距为16px、上方为8px，底部工具栏沿原内边距排列。
 
 上下文总量按1024换算为大写K／M显示，例如262144 tokens显示为256K；上下文估算数量也采用相同换算，比例计算和无障碍描述保留原始token数。

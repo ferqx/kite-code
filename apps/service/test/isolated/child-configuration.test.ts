@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
+import { type ContextCompressor, createRuntime, estimateModelContext } from '@kite-ai/agent';
 import type { Extension, OperationRef, Permissions } from '@kite-ai/agent/extensions';
 import type { PermissionPolicyOptions } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -114,6 +114,7 @@ async function fixture(
     extra?: Extension;
     permissionMode?: 'auto' | 'accept_edits' | 'full';
     permissionPolicy?: Pick<PermissionPolicyOptions, 'readPolicy'>;
+    compressor?: ContextCompressor;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-service-child-'));
@@ -153,6 +154,7 @@ async function fixture(
     knownToolIds: ['fixture.delegate', ...(options.extra?.tools?.map((tool) => tool.id) ?? [])],
     permissions,
     permissionPolicy: options.permissionPolicy,
+    compressor: options.compressor,
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -406,6 +408,75 @@ test('one Model slot uses fresh SDK child binding and Workspace sources; a detac
     ).toHaveLength(1);
   } finally {
     release.resolve();
+    await f.close();
+  }
+}, 20000);
+
+test('each child Loop budgets its own actual tools and forecasts from unchanged saved model input', async () => {
+  const observations: {
+    sessionId: string;
+    runSessionId: string;
+    tools: string[];
+    tokens: number;
+  }[] = [];
+  const f = await fixture({
+    compressor: {
+      id: 'fixture.child-budget',
+      version: '1',
+      shouldCompress: async (input) => {
+        observations.push({
+          sessionId: input.session.id,
+          runSessionId: input.run.sessionId,
+          tools: (input.tools ?? []).map((tool) => tool.id),
+          tokens: estimateModelContext({ messages: input.messages, tools: input.tools ?? [] })
+            .estimate.totalInputTokens,
+        });
+        return false;
+      },
+      prepare: async () => {
+        throw Error('no compression requested');
+      },
+    },
+  });
+  try {
+    await f.submit();
+    const child = await f.child();
+    expect((await f.childDone(child.id)).status).toBe('succeeded');
+    const childObservations = observations.filter(
+      (item) => item.sessionId === child.childSessionId,
+    );
+    expect(childObservations.length).toBeGreaterThanOrEqual(2);
+    expect(
+      childObservations.every(
+        (item) =>
+          item.runSessionId === item.sessionId &&
+          item.tokens > 0 &&
+          item.tools.includes('read_file'),
+      ),
+    ).toBe(true);
+    const executions = await f.store.listExecutions(child.childSessionId!);
+    let latest: (typeof executions)[number] | undefined;
+    for (const execution of executions.filter((execution) => execution.kind === 'model')) {
+      const snapshot = await f.runtime.readModelInput({
+        expectedStoreId: f.base.expectedStoreId,
+        sessionId: child.childSessionId!,
+        subjectId: 'user',
+        executionId: execution.id,
+      });
+      if (snapshot.request.messages.some((message) => message.role === 'tool')) latest = execution;
+    }
+    expect(latest).toBeDefined();
+    const before = f.a.requests.length;
+    const estimate = await f.runtime.readContextEstimate({
+      expectedStoreId: f.base.expectedStoreId,
+      sessionId: child.childSessionId!,
+      subjectId: 'user',
+      executionId: latest!.id,
+    });
+    expect(estimate.sessionId).toBe(child.childSessionId!);
+    expect(estimate.totalInputTokens).toBeGreaterThan(0);
+    expect(f.a.requests.length).toBe(before);
+  } finally {
     await f.close();
   }
 }, 20000);

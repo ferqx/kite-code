@@ -1243,7 +1243,7 @@ export async function verifyFormControlStyles(browser: Browser, url: string, art
       }
       assert.notEqual(states[0]!.controls[0]!.background, 'rgba(0, 0, 0, 0)');
       assert.notEqual(states[0]!.controls[0]!.border, states[1]!.controls[0]!.border);
-      assert.equal(states[2]!.controls[0]!.opacity, '0.5');
+      assert.equal(states[2]!.controls[0]!.opacity, states[0]!.controls[0]!.opacity);
       for (const type of ['input', 'select', 'textarea'])
         assert.equal(await page.getByLabel(`disabled-${type}`).isDisabled(), true);
       await page.keyboard.press('Tab');

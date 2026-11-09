@@ -42,6 +42,7 @@ export interface ModelEffortSelectorProps {
   onReasoningEffortChange?: (effort: ThinkingEffort) => void;
   modelSelectionHint?: string;
   disabled?: boolean;
+  scopeKey?: string;
 }
 
 function popoverSize(element: HTMLElement) {
@@ -66,6 +67,11 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
   const readGate = useReadGate();
   const mode = props.mode ?? 'combined';
   const [open, setOpen] = useState(false);
+  const scope = useRef(props.scopeKey);
+  useLayoutEffect(() => {
+    if (scope.current !== props.scopeKey) setOpen(false);
+    scope.current = props.scopeKey;
+  }, [props.scopeKey]);
   const [view, setView] = useState<'effort' | 'models'>(mode === 'model' ? 'models' : 'effort');
   const [activeProvider, setActiveProvider] = useState('');
   const modelSwitch = useRef<HTMLButtonElement>(null);
@@ -146,8 +152,8 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
     focusProviderTab(modelView.current);
   }, [view]);
   useEffect(() => {
-    if (disabled || readGate) setOpen(false);
-  }, [disabled, readGate]);
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   function focusModelSwitch() {
     requestAnimationFrame(() => modelSwitch.current?.focus({ preventScroll: true }));
@@ -241,12 +247,17 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                     value={allowedPositions.includes(effortIndex) ? effortIndex : undefined}
                     valueText={effortLabel}
                     allowedValues={allowedPositions}
-                    onValueChange={(value) => props.onReasoningEffortChange?.(effortValues[value]!)}
+                    onValueChange={(value) => {
+                      if (!disabled && !readGate)
+                        props.onReasoningEffortChange?.(effortValues[value]!);
+                    }}
                   />
                 ) : choices.length === 1 ? (
                   <Button
                     variant="ghost"
-                    onClick={() => props.onReasoningEffortChange?.(choices[0]!)}
+                    onClick={() => {
+                      if (!disabled && !readGate) props.onReasoningEffortChange?.(choices[0]!);
+                    }}
                   >
                     {effortNames[allowedPositions[0]!]}
                   </Button>
@@ -304,6 +315,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                                 value={model.id ?? model.name}
                                 aria-label={model.id ? `选择模型 ${model.id}` : undefined}
                                 onSelect={() => {
+                                  if (disabled || readGate) return;
                                   props.onModelChange(model.provider, model.name, model.id);
                                   if (mode === 'model') setOpen(false);
                                   else {

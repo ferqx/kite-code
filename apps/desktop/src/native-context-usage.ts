@@ -83,6 +83,8 @@ export function useNativeContextUsage({
     messageKey = candidate && modelUsageMessageKey(candidate),
     content = candidate?.content;
   const [state, setState] = useState<{ scope: string; receipt?: Receipt; failed?: boolean }>();
+  const [retryRevision, setRetryRevision] = useState(0);
+  const retry = useRef({ key: '', attempts: 0 });
   const available =
     !suspended &&
     historyComplete &&
@@ -91,6 +93,15 @@ export function useNativeContextUsage({
     !selection.permissionUnavailable &&
     selection.canReadContext !== false &&
     selection.canReadModelInput !== false;
+  useEffect(() => {
+    const key = JSON.stringify([scope, modelId]);
+    if (retry.current.key !== key) retry.current = { key, attempts: 0 };
+    if (!available || state?.scope !== scope || !state.failed) return;
+    const delay = Math.min(500 * 2 ** Math.min(retry.current.attempts++, 6), 30000);
+    const timer = setTimeout(() => setRetryRevision((value) => value + 1), delay);
+    return () => clearTimeout(timer);
+  }, [available, state, scope, modelId]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryRevision deliberately repeats the same scoped read after backoff.
   useEffect(() => {
     if (
       !bridge ||
@@ -152,7 +163,8 @@ export function useNativeContextUsage({
           context: context && (!modelId || context.modelId === modelId) ? context : undefined,
         };
         snapshots.current.cache.set(displayKey, receipt);
-        setState({ scope, receipt });
+        if (context) retry.current.attempts = 0;
+        setState({ scope, receipt, failed: !context });
       })
       .catch(() => {
         if (active) {
@@ -181,6 +193,7 @@ export function useNativeContextUsage({
     content,
     displayKey,
     modelId,
+    retryRevision,
   ]);
   const displayed =
     state?.scope === scope ? state.receipt : snapshots.current.cache.get(displayKey);

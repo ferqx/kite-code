@@ -443,6 +443,7 @@ export function NativeModelPicker({
     >
       <ReadGate blocked={reading || disabled}>
         <ModelEffortSelector
+          scopeKey={JSON.stringify([scope.boundary, scope.displayKey])}
           model={
             preview
               ? preview.model

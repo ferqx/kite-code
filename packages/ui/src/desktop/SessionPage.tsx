@@ -1481,6 +1481,7 @@ function SessionPageContent({
                               {props.composer ? (
                                 <Composer
                                   {...props.composer}
+                                  hideContextWhenUnavailable={!!props.newConversation}
                                   scopeKey={props.composer.scopeKey ?? props.readingKey}
                                   promptHidden={
                                     !!props.interaction && props.interactionHidesPrompt !== false

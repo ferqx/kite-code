@@ -123,55 +123,74 @@ for (const mode of ['run', 'step'] as const)
             (error: { code: string }) => error.code,
           ),
         ).toBe('context_estimate_unavailable');
+      const expected = await runtime.readContextEstimate(input);
       await runtime.close();
       store = await openSqliteStore(profile);
       runtime = createRuntime({ store, model, modelId: 'fixed', permissions });
       const before = { resolutions, capabilityReads, calls, models: requests.length };
-      expect(
-        await runtime.readContextEstimate(input).then(
-          () => null,
-          (error: { code: string }) => error.code,
-        ),
-      ).toBe('context_estimate_unavailable');
+      expect((await runtime.readContextEstimate(input)).totalInputTokens).toBe(
+        expected.totalInputTokens,
+      );
       expect((await runtime.readModelInput(input)).request).toEqual(requests[1]!);
+      const unchangedSnapshot = await store.getModelInputSnapshot(input);
+      expect(Object.keys(unchangedSnapshot.metadata as object).sort()).toEqual([
+        'adapter',
+        'assembly',
+        'context',
+        'version',
+      ]);
       expect({ resolutions, capabilityReads, calls, models: requests.length }).toEqual(before);
-      await runtime.close();
-      store = await openSqliteStore(profile);
-      // Matching retained definitions permit a cold forecast of the original Run
-      // contract. Step-only registrations remain unprovable without their binding.
-      runtime = createRuntime({
-        store,
-        model,
-        modelId: 'fixed',
-        permissions,
-        extensions: [extension],
-      });
-      if (mode === 'run')
-        expect((await runtime.readContextEstimate(input)).totalInputTokens).toBeLessThan(1000);
-      else
+      const toolId = requests[1]!.messages.find((message) => message.role === 'tool')!
+        .sourceIds![0]!;
+      const readExecution = store.getExecution.bind(store);
+      for (const fault of ['result', 'running', 'scope'] as const) {
+        store.getExecution = async (id) => {
+          const value = await readExecution(id);
+          if (value?.id !== toolId) return value;
+          return fault === 'result'
+            ? {
+                ...value,
+                result: { ...(value.result as object), content: 'changed original result' },
+              }
+            : fault === 'running'
+              ? { ...value, status: 'running' }
+              : { ...value, sessionId: 'foreign' };
+        };
         expect(
           await runtime.readContextEstimate(input).then(
             () => null,
             (error: { code: string }) => error.code,
           ),
         ).toBe('context_estimate_unavailable');
+      }
+      store.getExecution = readExecution;
       await runtime.close();
       store = await openSqliteStore(profile);
+      // New formatter code must not reinterpret a sealed historical presentation.
       runtime = createRuntime({
         store,
         model,
         modelId: 'fixed',
         permissions,
         extensions: [
-          { ...extension, tools: [{ ...tool, model: { ...tool.model!, resultVersion: '2' } }] },
+          {
+            ...extension,
+            tools: [
+              {
+                ...tool,
+                model: { ...tool.model!, resultVersion: '2' },
+                formatModelResult: () => {
+                  throw Error('historical formatter must not run');
+                },
+              },
+            ],
+          },
         ],
       });
-      expect(
-        await runtime.readContextEstimate(input).then(
-          () => null,
-          (error: { code: string }) => error.code,
-        ),
-      ).toBe('context_estimate_unavailable');
+      expect((await runtime.readContextEstimate(input)).totalInputTokens).toBe(
+        expected.totalInputTokens,
+      );
+      expect({ resolutions, capabilityReads, calls, models: requests.length }).toEqual(before);
     } finally {
       releaseModel();
       await runtime.close();

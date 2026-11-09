@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 import { useReadGate } from '../../ReadGate';
 
 const buttonVariants = cva(
-  "box-border inline-flex shrink-0 items-center justify-center gap-2 rounded-[var(--button-radius,8px)] border-0 text-sm font-medium whitespace-nowrap text-foreground transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/75 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-[var(--ui-icon-size,14px)]",
+  "box-border inline-flex shrink-0 items-center justify-center gap-2 rounded-[var(--button-radius,8px)] border-0 text-sm font-medium whitespace-nowrap text-foreground transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[disabled=true]:pointer-events-none aria-invalid:border-destructive aria-invalid:ring-destructive/75 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-[var(--ui-icon-size,14px)]",
   {
     variants: {
       variant: {

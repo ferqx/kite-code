@@ -392,6 +392,6 @@ Store 的锁与事务见[存储 owner](src/storage/README.md)。[Runtime 实测]
 
 [执行器](src/execution/index.ts)在原 100ms／32KiB 前缀保存节奏同时保存 small reasoning 和 content；失败保留实际前缀，未完整 Tool 参数仍不派发。optional reasoning 使用原 JSON message bytes，不改 DDL／format／备份合同，完整 reader 仍核原 scope／hash。Runtime 仅对实际压缩 Session 临时保存 preparing／summarizing／validating，公开 View 按原 active Run／Store投影，finally 清除；冷状态不造阶段。[真实 reasoning](test/isolated/model-output/live-reasoning.test.ts)及[压缩进度](test/isolated/context/compression-progress.test.ts)覆盖这两项来源。
 
-上下文的累计实际用量、最近请求实际输入与下一请求预算分别核对；Core 基线、完整累计 SQL、只读预测 API 与压缩交接归[上下文统计与预算](src/context-estimate.README.md)。
+上下文的累计实际用量、最近请求实际输入与下一请求预算分别核对；只读估算复用既有封存输入的工具正文，核对原执行、不可变终态和消息来源。主／子Loop和step工具共用，无需逐工具登记，不新增metadata字段或改变统计结构。Core 基线、完整累计 SQL、只读预测 API 与压缩交接归[上下文统计与预算](src/context-estimate.README.md)。
 
 活动Run的有限可信控制Action与只读work资格候选见[生命周期](src/lifecycle.README.md#活动run的有限控制响应候选)。它保留原owner和正常鉴权，禁止新工作，普通Action仍串行；不是新的Browser业务内核或通用并发入口。异步人工请求的耐久记录/响应Job/result.include来源和失效政策归[Browser owner](src/tools/browser/README.md#异步人工交接候选未发布)。

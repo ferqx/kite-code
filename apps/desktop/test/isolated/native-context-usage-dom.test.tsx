@@ -278,3 +278,63 @@ test('unknown capacity stays unknown, real zero stays zero and over-capacity lab
     await f.close();
   }
 });
+
+for (const failure of ['error', 'empty'] as const)
+  test(`a transient context estimate ${failure} recovers without a new message or selection`, async () => {
+    const f = fixture();
+    let attempts = 0;
+    const bridge = {
+      request: async (request: NativeRequest) => {
+        if (request.method !== 'toolMessages.contextUsage') return null;
+        if (++attempts === 1) {
+          if (failure === 'error') throw Error('context_estimate_changed');
+          const initial = page(request, 's');
+          delete initial.context;
+          return initial;
+        }
+        return page(request, 's');
+      },
+    } as NativeBridge;
+    try {
+      await act(async () => f.root.render(<Harness bridge={bridge} />));
+      expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
+        '上下文占用未知',
+      );
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 650)));
+      expect(attempts).toBe(2);
+      expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
+        '上下文占用约 68%',
+      );
+    } finally {
+      await f.close();
+    }
+  });
+
+test('leaving a failed context scope cancels its scheduled retry without replacing the target metrics', async () => {
+  const f = fixture();
+  const reads: string[] = [];
+  const bridge = {
+    request: async (request: NativeRequest) => {
+      if (request.method !== 'toolMessages.contextUsage') return null;
+      const id = request.messageIds[0]!.slice('message-'.length);
+      reads.push(id);
+      if (id === 's') throw Error('context_estimate_changed');
+      return page(request, id, 100);
+    },
+  } as NativeBridge;
+  try {
+    await act(async () => f.root.render(<Harness bridge={bridge} />));
+    await act(async () =>
+      f.root.render(
+        <Harness bridge={bridge} selection={selected('b', 3)} messages={[message('b')]} />,
+      ),
+    );
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 650)));
+    expect(reads).toEqual(['s', 'b']);
+    expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
+      '上下文占用约 20%',
+    );
+  } finally {
+    await f.close();
+  }
+});

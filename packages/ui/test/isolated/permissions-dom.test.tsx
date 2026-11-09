@@ -213,6 +213,11 @@ async function composerPermissionFixture(language = 'zh-CN') {
     NodeFilter: dom.window.NodeFilter,
     DocumentFragment: dom.window.DocumentFragment,
     MutationObserver: dom.window.MutationObserver,
+    ResizeObserver: class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
     Event: dom.window.Event,
     CustomEvent: dom.window.CustomEvent,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
@@ -260,7 +265,7 @@ async function composerPermissionFixture(language = 'zh-CN') {
   const choosePermission = async (mode: NonNullable<ComposerProps['permission']>) => {
     await openMenu();
     const labels = language.startsWith('zh')
-      ? { full: '完全访问', auto: '自动审核', accept_edits: '请求批准' }
+      ? { full: '完全访问', auto: '自动审核', accept_edits: '工作区内修改' }
       : { full: 'Full permission', auto: 'Automatic check', accept_edits: 'Request Approval' };
     const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(
       (item) => item.querySelector('.permission-menu-copy > span')?.textContent === labels[mode],
@@ -296,6 +301,109 @@ async function composerPermissionFixture(language = 'zh-CN') {
     },
   };
 }
+
+test('Composer puts context before the Native model picker options slot', async () => {
+  const f = await composerPermissionFixture();
+  try {
+    await f.show({
+      permission: 'accept_edits',
+      options: (
+        <button type="button" data-native-model-picker>
+          Model
+        </button>
+      ),
+    });
+    const trailing = f.host.querySelector('.composer-trailing')!;
+    expect(trailing.children[0]?.classList.contains('composer-metrics')).toBe(true);
+    expect(trailing.children[1]?.hasAttribute('data-native-model-picker')).toBe(true);
+    expect(f.trigger().textContent).toContain('工作区内修改');
+  } finally {
+    await f.close();
+  }
+});
+
+test('permission menu survives a same-session read gate but cannot apply a choice until fresh', async () => {
+  const f = await composerPermissionFixture();
+  try {
+    await f.show();
+    await f.openMenu();
+    const menu = document.querySelector('[role="menu"]');
+    expect(menu).not.toBeNull();
+    await f.show({ readGate: { permission: true } });
+    expect(document.querySelector('[role="menu"]') === menu).toBe(true);
+    await act(async () => document.querySelector<HTMLElement>('[role="menuitemradio"]')!.click());
+    expect(f.changes).toEqual([]);
+    await f.show();
+    await f.show({ fullPermissionScope: 'new-observation' });
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    await f.show({ scopeKey: 'another-session' });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('model popover retains its node through read refresh and rejects gated selection', async () => {
+  const f = await composerPermissionFixture();
+  const { ModelEffortSelector } = await import('../../src/desktop/ModelEffortSelector');
+  const { ReadGate } = await import('../../src/desktop/ReadGate');
+  const changes: string[] = [];
+  const show = (blocked = false, scopeKey = 's') =>
+    f.show({
+      options: (
+        <ReadGate blocked={blocked}>
+          <ModelEffortSelector
+            mode="model"
+            scopeKey={scopeKey}
+            model={{ provider: 'test', name: 'Model' }}
+            models={[{ provider: 'test', name: 'Model' }]}
+            onModelChange={(_provider, name) => changes.push(name)}
+          />
+        </ReadGate>
+      ),
+    });
+  try {
+    await show();
+    await act(async () => f.host.querySelector<HTMLButtonElement>('[data-model-trigger]')!.click());
+    const panel = document.querySelector('.model-effort-popover');
+    expect(panel).not.toBeNull();
+    await show(true);
+    expect(document.querySelector('.model-effort-popover') === panel).toBe(true);
+    await act(async () =>
+      document.querySelector<HTMLElement>('[data-slot="command-item"]')!.click(),
+    );
+    expect(changes).toEqual([]);
+    await show();
+    expect(document.querySelector('.model-effort-popover') === panel).toBe(true);
+    await show(false, 'another-session');
+    expect(document.querySelector('.model-effort-popover')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('new conversation hides missing context and restores actual zero usage; existing unknown stays visible', async () => {
+  const f = await composerPermissionFixture();
+  try {
+    await f.show({ hideContextWhenUnavailable: true, metricsLoading: true });
+    expect(f.host.querySelector('.composer-metrics')).toBeNull();
+    await f.show({ hideContextWhenUnavailable: true });
+    expect(f.host.querySelector('.composer-context-usage')).toBeNull();
+    await f.show({
+      hideContextWhenUnavailable: true,
+      contextUsage: { totalInputTokens: 0, contextWindowTokens: 1000 },
+    });
+    expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
+      '上下文占用约 0%',
+    );
+    await f.show({ hideContextWhenUnavailable: false });
+    expect(f.host.querySelector('.composer-context-usage')?.getAttribute('aria-label')).toBe(
+      '上下文占用未知',
+    );
+  } finally {
+    await f.close();
+  }
+});
 
 test('Composer uses one exact asynchronous host confirmation without mounting its DOM warning', async () => {
   const f = await composerPermissionFixture();

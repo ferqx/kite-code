@@ -8,8 +8,8 @@
   textarea {
     font: inherit;
   }
-  button:is(:not(:disabled), [data-read-gated="true"]),
-  [role="button"]:is(:not(:disabled), [data-read-gated="true"]):not([aria-disabled="true"]) {
+  button,
+  [role="button"] {
     cursor: pointer;
   }
 }
@@ -235,13 +235,6 @@ body {
   }
   .button[data-variant="destructive"]:active:is(:not(:disabled), [data-read-gated="true"]) {
     background: var(--destructive-fill-pressed);
-  }
-  .button:disabled:not([data-read-gated="true"]),
-  :where(.interaction-area) button:where(:not([data-slot])):disabled:not([data-read-gated="true"]),
-  :where(.settings) button:where(:not([data-slot])):disabled:not([data-read-gated="true"]),
-  :where(.results) button:where(:not([data-slot])):disabled:not([data-read-gated="true"]) {
-    opacity: 0.45;
-    cursor: default;
   }
   :where(button, input, select, textarea, summary, a):where(
       :not(.ui-form-control, [data-slot="tabs-trigger"], [data-slot="button"])
@@ -1339,9 +1332,6 @@ body {
     background-color: var(--control-hover);
     color: var(--foreground);
   }
-  .model-trigger:disabled:not([data-read-gated="true"]) {
-    opacity: 0.55;
-  }
   .permission-menu {
     border-color: var(--border);
     background: var(--card);
@@ -1359,9 +1349,6 @@ body {
   .permission-trigger-full:hover:is(:not(:disabled), [data-read-gated="true"]),
   .permission-trigger-full:focus-visible {
     color: var(--permission-full-foreground);
-  }
-  .permission-trigger:disabled:not([data-read-gated="true"]) {
-    opacity: 0.55;
   }
   .composer-context-usage {
     width: 14px;
@@ -1794,12 +1781,6 @@ body {
     margin: 0;
   }
 
-  .questionnaire fieldset:disabled:not([data-read-gated="true"]) {
-    cursor: default;
-  }
-  .questionnaire fieldset:disabled:not([data-read-gated="true"]) .questionnaire-choice {
-    opacity: 0.5;
-  }
   .questionnaire-error,
   .question-submission[data-phase="failed"],
   .question-submission[data-phase="unknown"] {
@@ -2665,9 +2646,6 @@ body {
 .kite-client .scheduled-weekdays input:focus-visible + span {
   outline: 2px solid var(--input);
   outline-offset: 2px;
-}
-.kite-client .scheduled-weekdays:disabled:not([data-read-gated="true"]) {
-  opacity: 0.5;
 }
 .kite-client .scheduled-weekdays + .scheduled-setting-row {
   border-top: 1px solid var(--border);
@@ -5578,7 +5556,7 @@ body {
   min-width: 0;
   min-height: 52px;
   max-height: 180px;
-  padding: 0 0 7px;
+  padding: 0 4px 7px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -5594,9 +5572,6 @@ body {
 }
 .kite-client .prompt-editor::placeholder {
   color: var(--muted-foreground);
-}
-.kite-client .prompt-editor[data-disabled="true"] {
-  opacity: 0.55;
 }
 
 .kite-client .composer-attach {

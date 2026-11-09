@@ -465,7 +465,7 @@ Native MCP 的 renderer通过固定IPC提交有限参数，Main固定真实观�
 
 ## 三项 token 口径
 
-Core 分离累计实际用量、最近请求实际输入与下一请求上下文预测。新增只读 Store usage 聚合只取本 Store／Session 原 Model 终态，覆盖缺失保留未知，读取不写入；不受有限 View 截断。跨包 `CompressionInput` 传实际工具及经 scope／路由核验的测量基线；纯投影在原输入被改写、移除或换工具时全量回退。已测输入与新增估算不会伪装成新的 Provider 统计或派发资格。Service、Client 与 TUI 的只读预测保准确原请求和 selection/upper，不捕获新来源、不初始化模型。完整接口与验证归[Core owner](../../packages/agent/src/context-estimate.README.md)。
+Core 分离累计实际用量、最近请求实际输入与下一请求上下文预测。新增只读 Store usage 聚合只取本 Store／Session 原 Model 终态，覆盖缺失保留未知，读取不写入；不受有限 View 截断。跨包 `CompressionInput` 传实际工具及经 scope／路由核验的测量基线；纯投影在原输入被改写、移除或换工具时全量回退。已测输入与新增估算不会伪装成新的 Provider 统计或派发资格。Service、Client 与 TUI 的只读预测保准确原请求和 selection/upper，不捕获新来源、不初始化模型。完整接口与验证归[Core owner](../../packages/agent/src/context-estimate.README.md)。Core复用原模型请求中已经封存的工具正文，并核对既有Store／Session／Run、调用、消息来源及不可变终态结果；不新增metadata字段，不改变统计数据结构，不重新执行工具或调用现在的格式器。主／子Agent及Run／step工具共用该通用路径，新增工具无需登记。相同事实在运行中、结束后和重启后保持同一统计口径；确实缺少原请求或来源冲突时才不可估算。
 
 Native普通输入区可经已有Tool Message read lease读取该预测的有限数值，入口为 toolMessages.contextUsage：只接一个当前已观察的完整原助手Message ID，核Store／Session／Run／Model、正文和当前context selection，响应只含模型及输入／窗口数字；切换、历史重置或退出取消所属读取，不开放测试Context正文面板或任何写权限。圆环按当前输入估算除以完整窗口绘制，不使用缓存命中率、累计输入或API的可用输入预算比例；模型切换和未知容量不能继承旧窗口。Main与Renderer边界及验证归[Native owner](../../apps/desktop/README.md#输入区上下文占用)。
 
