@@ -266,6 +266,9 @@ const Workspace = memo(function Workspace({
       [...workspace.sessions].sort(
         (a, b) =>
           Number(!!b.awaitingFirstMessage) - Number(!!a.awaitingFirstMessage) ||
+          (a.awaitingFirstMessage && b.awaitingFirstMessage
+            ? (b.awaitingFirstMessageOrder ?? 0) - (a.awaitingFirstMessageOrder ?? 0)
+            : 0) ||
           updatedTime(b.updatedAt) - updatedTime(a.updatedAt),
       ),
     [workspace.sessions],

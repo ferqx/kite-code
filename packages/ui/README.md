@@ -4,7 +4,7 @@ Shell 活动摘要采用原调用的可选 description，省略时沿用命令�
 
 # UI
 
-`Sidebar` 接受宿主的窗口内 `SessionSummary.awaitingFirstMessage` 展示标记，优先排列新出现且尚无首条消息时间的会话；标记撤下后继续按 `updatedAt` 排序，不改变悬浮提示中的消息时间。Native 的新增识别与冷读隔离归 [Desktop owner](../../apps/desktop/README.md)。
+`Sidebar` 接受宿主的窗口内 `SessionSummary.awaitingFirstMessage` 展示标记，优先排列新出现且尚无首条消息时间的会话；这些会话之间按可选 `awaitingFirstMessageOrder` 从大到小排列，只传原布尔标记时保留原排序。标记撤下后忽略次序，继续按 `updatedAt` 排序，不改变悬浮提示中的消息时间。Native 的新增识别与冷读隔离归 [Desktop owner](../../apps/desktop/README.md)。
 
 全局原生滚动条在[共享样式](src/desktop/style.css)中使用当前主题前景色与透明色混合：普通滑块不透明度为10%，悬停／拖动为18%，轨道透明。深浅主题使用相同比例，覆盖会话、嵌套详情、侧栏、附件列表及Portal原生viewport。支持`::-webkit-scrollbar`且未开启强制颜色时，将标准滚动条属性恢复为`auto`，让滑块悬停／按下样式实际生效；当前Windows Chromium的轨道显式保留10px占位。其他浏览器沿标准细滚动条，悬停由浏览器处理；强制颜色模式保留标准原生绘制，不覆盖系统配色。原生滚动交接仍交给浏览器，不增加wheel接管。
 

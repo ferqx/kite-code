@@ -176,7 +176,7 @@ async function close() {
   normalShutdown = true;
 }
 async function visibleMode(mode: LivePermissionFacts['mode']['mode']) {
-  const label = { accept_edits: '请求批准', auto: '自动审核', full: '完全访问' }[mode];
+  const label = { accept_edits: '工作区内修改', auto: '自动审核', full: '完全访问' }[mode];
   const trigger = page!.locator('[data-permission-trigger]');
   await until(
     async () => ({

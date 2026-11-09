@@ -106,6 +106,7 @@ function sameSessionSummary(left: SessionSummary | undefined, right: SessionSumm
       left.status === right.status &&
       left.updatedAt === right.updatedAt &&
       left.awaitingFirstMessage === right.awaitingFirstMessage &&
+      left.awaitingFirstMessageOrder === right.awaitingFirstMessageOrder &&
       left.hasCreatedWorktree === right.hasCreatedWorktree &&
       left.pendingInteractions === right.pendingInteractions)
   );
@@ -122,6 +123,7 @@ export class NativeDirectoryProjection {
   private summaries = new Map<string, SessionSummary>();
   private workspaces: WorkspaceSummary[] = [];
   private observed?: SessionSummary;
+  private nextPendingOrder = 0;
 
   private selectionSummary(directory: NativeDirectory, selection?: NativeSelection) {
     const source =
@@ -135,6 +137,7 @@ export class NativeDirectoryProjection {
     if (directory !== this.directory) {
       if (directory.storeId !== this.directory?.storeId) {
         this.summaries.clear();
+        this.nextPendingOrder = 0;
         this.workspaces = [];
       }
       const summaries = new Map<string, SessionSummary>();
@@ -152,7 +155,12 @@ export class NativeDirectoryProjection {
             !summary.updatedAt &&
             (!this.sources.has(summary.sessionId) || retained?.awaitingFirstMessage)
           )
-            summary = { ...summary, awaitingFirstMessage: true };
+            summary = {
+              ...summary,
+              awaitingFirstMessage: true,
+              awaitingFirstMessageOrder:
+                retained?.awaitingFirstMessageOrder ?? ++this.nextPendingOrder,
+            };
           const value = sameSessionSummary(retained, summary) ? retained! : summary;
           summaries.set(value.sessionId, value);
           return value;
@@ -185,8 +193,13 @@ export class NativeDirectoryProjection {
       const source = id ? this.sources.get(id) : undefined;
       if (!source || source.activity) continue;
       let summary = desktopSessionSummary(directory, source, selection);
-      if (this.summaries.get(source.id)?.awaitingFirstMessage)
-        summary = { ...summary, awaitingFirstMessage: true };
+      const retained = this.summaries.get(source.id);
+      if (retained?.awaitingFirstMessage)
+        summary = {
+          ...summary,
+          awaitingFirstMessage: true,
+          awaitingFirstMessageOrder: retained.awaitingFirstMessageOrder,
+        };
       if (sameSessionSummary(this.summaries.get(source.id), summary)) continue;
       this.summaries.set(source.id, summary);
       changedWorkspaces.add(source.workspaceId);

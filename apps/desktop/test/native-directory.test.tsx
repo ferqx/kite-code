@@ -498,6 +498,110 @@ test('new empty directory rows stay first through refresh and first saved messag
   expect(switched.flatMap((w) => w.sessions).every((s) => !s.awaitingFirstMessage)).toBe(true);
 });
 
+test('multiple pending rows keep newest observation first until real times take over, without retaining removed or other Store rows', () => {
+  const { directory, selection } = projectionFixture();
+  const activity = (updatedAt: number | null) => ({
+    updatedAt,
+    queued: false,
+    pendingInteractions: 0,
+    run: null,
+  });
+  const old = { ...directory.sessions[0]!, activity: activity(2000) };
+  const base = { ...directory, sessions: [old] };
+  const first = { ...old, id: 'first', title: 'First', activity: activity(null) };
+  // No activity exercises the same-directory selection projection branch too.
+  const second = { ...old, id: 'second', title: 'Second', activity: undefined };
+  const projection = new NativeDirectoryProjection();
+  const rows = (workspaces: ReturnType<typeof desktopDirectory>) => {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <Sidebar workspaces={workspaces} actions={{}} connectionLabel="" onOpen={() => {}} />,
+      ),
+    );
+    try {
+      return [...dom.window.document.querySelectorAll('.session-row')].map((row) =>
+        row.getAttribute('aria-label'),
+      );
+    } finally {
+      dom.window.close();
+    }
+  };
+  const summary = (workspaces: ReturnType<typeof desktopDirectory>, id: string) =>
+    workspaces
+      .flatMap((workspace) => workspace.sessions)
+      .find((session) => session.sessionId === id)!;
+  projection.project(base);
+  projection.project({ ...base, sessions: [old, first] });
+  const published = { ...base, sessions: [old, first, second] };
+  const pending = projection.project(published);
+  expect(rows(pending)).toEqual(['Second', 'First', 'Session a']);
+  const firstOrder = summary(pending, 'first').awaitingFirstMessageOrder!;
+  const secondOrder = summary(pending, 'second').awaitingFirstMessageOrder!;
+  expect(secondOrder).toBeGreaterThan(firstOrder);
+  expect(summary(pending, 'first').updatedAt).toBeUndefined();
+  expect(summary(pending, 'second').updatedAt).toBeUndefined();
+  const refreshed = structuredClone(published);
+  expect(projection.project(refreshed)).toBe(pending);
+  const selected = projection.project(refreshed, { ...selection('a'), session: second });
+  expect(rows(selected)).toEqual(['Second', 'First', 'Session a']);
+  expect(summary(selected, 'second').awaitingFirstMessageOrder).toBe(secondOrder);
+  expect(summary(selected, 'first')).toBe(summary(pending, 'first'));
+  expect(projection.project(refreshed)).toEqual(pending);
+  const reordered = { ...published, sessions: [second, first, old] };
+  expect(rows(projection.project(reordered))).toEqual(['Second', 'First', 'Session a']);
+  expect(summary(projection.project(reordered), 'second').awaitingFirstMessageOrder).toBe(
+    secondOrder,
+  );
+
+  const saved = { ...published, sessions: [old, first, { ...second, activity: activity(1000) }] };
+  const handoff = projection.project(saved);
+  expect(rows(handoff)).toEqual(['First', 'Session a', 'Second']);
+  expect(summary(handoff, 'second')).not.toHaveProperty('awaitingFirstMessage');
+  expect(summary(handoff, 'second')).not.toHaveProperty('awaitingFirstMessageOrder');
+  expect(summary(handoff, 'second').updatedAt).toBe(new Date(1000).toISOString());
+  const bothSaved = {
+    ...saved,
+    sessions: [old, { ...first, activity: activity(3000) }, saved.sessions[2]!],
+  };
+  expect(rows(projection.project(bothSaved))).toEqual(['First', 'Session a', 'Second']);
+  expect(summary(projection.project(bothSaved), 'first')).not.toHaveProperty(
+    'awaitingFirstMessageOrder',
+  );
+
+  for (const cold of [
+    new NativeDirectoryProjection().project(published),
+    projection.project({ ...published, storeId: 'other' }),
+    projection.project(published),
+  ]) {
+    expect(rows(cold)).toEqual(['Session a', 'First', 'Second']);
+    for (const session of cold.flatMap((workspace) => workspace.sessions)) {
+      expect(session).not.toHaveProperty('awaitingFirstMessage');
+      expect(session).not.toHaveProperty('awaitingFirstMessageOrder');
+    }
+  }
+  // Both new entries in one complete read get deterministic observation order.
+  projection.project(base);
+  const batch = projection.project(published);
+  expect(rows(batch)).toEqual(['Second', 'First', 'Session a']);
+  const removedOrder = summary(batch, 'second').awaitingFirstMessageOrder!;
+  projection.project({ ...published, sessions: [old, first, { ...second, deletedAt: 1 }] });
+  const restored = projection.project(published);
+  expect(summary(restored, 'second').awaitingFirstMessageOrder).toBeGreaterThan(removedOrder);
+  expect(summary(restored, 'first')).toBe(summary(batch, 'first'));
+  expect(rows(restored)).toEqual(['Second', 'First', 'Session a']);
+  projection.project({ ...published, sessions: [old, second] });
+  expect(rows(projection.project(published))).toEqual(['First', 'Second', 'Session a']);
+
+  // Older hosts supplying only the boolean keep their original stable ordering.
+  const legacy = batch.map((workspace) => ({
+    ...workspace,
+    sessions: workspace.sessions.map(
+      ({ awaitingFirstMessageOrder: _order, ...session }) => session,
+    ),
+  }));
+  expect(rows(legacy)).toEqual(['First', 'Second', 'Session a']);
+});
+
 test('window directory projection reuses untouched workspaces and ignores non-display selection revisions', () => {
   const { directory, selection } = projectionFixture();
   const projection = new NativeDirectoryProjection();

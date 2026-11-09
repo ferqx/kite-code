@@ -1,6 +1,6 @@
 # Desktop 与 Native 制品
 
-新会话目录位置由 [NativeDirectoryProjection](src/native-presentation.ts)在同 Store 的连续完整目录间识别新增项；缺少首条消息时间时投影 `awaitingFirstMessage`，由 Sidebar 优先展示，时间到齐后移交原最近消息排序。该窗口内标记不写数据库、不伪造 `updatedAt`，冷读和 Store 切换不将旧空历史置顶。[目录回归](test/native-directory.test.tsx)覆盖首次发布、刷新、消息时间接管、单行和冷读隔离。
+新会话目录位置由 [NativeDirectoryProjection](src/native-presentation.ts)在同 Store 的连续完整目录间识别新增项；缺少首条消息时间时投影 `awaitingFirstMessage` 和递增的窗口内 `awaitingFirstMessageOrder`，由 Sidebar 优先展示，多个待消息项按观察顺序后者在前（同批按目录遍历顺序登记）。刷新与选择不推进次序，时间到齐后移交原最近消息排序并移除次序；移除的项不保留标记，Store 切换重置计数。该窗口内标记不写数据库、不伪造 `updatedAt`，冷读和 Store 切换不将旧空历史置顶。[目录回归](test/native-directory.test.tsx)覆盖首次发布、多个待消息项、刷新／选择稳定、消息时间接管、移除、单行和冷读／Store 隔离。
 
 2026-11-09，Windows／Bun1.4.4：目录与两份隔离 Sidebar 回归分别运行，共24项537断言通过；Desktop／UI 类型、四文件 Biome、文档结构与影响检查通过。Chrome156 的实际投影／Sidebar 生产样式隔离夹具按空项发布、刷新、消息时间接管逐步观察，145个连续动画帧中新增行始终第一、单份且保留原节点；阶段截图已核对，页面错误为0。材料在本机 `.cache/session-order/`；不以该受控目录过程代替真实 Service／Electron 端到端或其他平台验收。
 
