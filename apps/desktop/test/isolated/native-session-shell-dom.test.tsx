@@ -404,7 +404,9 @@ test('a cached Session restores its own model, permission and draft before Main 
     expect(promptValue(editor)).toBe('Draft B');
     expect(model.textContent).toContain('Model B');
     expect(model.disabled).toBe(true);
-    expect(f.query('.composer-cache-rate').textContent).toBe('缓存 30%');
+    expect(f.query('.composer-context-usage').getAttribute('aria-description')).toContain(
+      '缓存命中率 30%',
+    );
     expect(f.query<HTMLButtonElement>('.composer-actions button').dataset.readGated).toBe('true');
     await f.release('models');
     await f.until(() => f.pending('history') > 0);
@@ -622,7 +624,7 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
   const record = () =>
     changes.push(
       JSON.stringify([
-        f.query('.composer-cache-rate')?.textContent,
+        f.query('.composer-context-usage')?.getAttribute('aria-description'),
         f.query('.composer-context-usage')?.getAttribute('aria-label'),
       ]),
     );
@@ -630,7 +632,7 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
   try {
     await f.render();
     await f.until(() => !!f.query('.composer-context-usage'));
-    const rate = f.query('.composer-cache-rate');
+    const metrics = f.query('.composer-metrics');
     const ring = f.query('.composer-context-usage');
     const editor = f.query('.composer [role="textbox"]');
     observer.observe(f.host, {
@@ -647,10 +649,11 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
     await f.until(() => f.pending('models') > 0);
     await f.release('models');
     await f.until(() => f.pending('history') > 0);
-    expect(f.query('.composer-cache-rate')).toBe(rate);
+    expect(f.query('.composer-metrics')).toBe(metrics);
+    expect(f.query('.composer-cache-rate')).toBeNull();
     expect(f.query('.composer-context-usage')).toBe(ring);
-    expect(rate.textContent).toBe('缓存 0%');
-    expect(rate.getAttribute('title')).toBe('正在读取缓存用量');
+    expect(metrics.getAttribute('aria-busy')).toBe('true');
+    expect(ring.getAttribute('aria-description')).toBeNull();
     expect(ring.getAttribute('aria-label')).toBe('正在读取上下文占用');
     expect(promptValue(editor)).toBe('Draft B');
     expect((editor as HTMLTextAreaElement).readOnly).toBe(false);
@@ -662,21 +665,32 @@ test('a cold Session keeps metric nodes mounted through a single loading state a
     await f.ready('b');
     expect((editor as HTMLTextAreaElement).readOnly).toBe(false);
     await f.release('usage');
-    expect(rate.textContent).toBe('缓存 0%');
+    expect(metrics.getAttribute('aria-busy')).toBe('true');
+    expect(ring.getAttribute('aria-description')).toBeNull();
     expect(ring.getAttribute('aria-label')).toBe('正在读取上下文占用');
     await f.release('context');
     await f.resume();
     await f.ready('b');
-    expect(f.query('.composer-cache-rate')).toBe(rate);
+    expect(f.query('.composer-metrics')).toBe(metrics);
+    expect(f.query('.composer-cache-rate')).toBeNull();
     expect(f.query('.composer-context-usage')).toBe(ring);
-    expect(rate.textContent).toBe('缓存 30%');
+    expect(metrics.getAttribute('aria-busy')).toBeNull();
+    expect(ring.getAttribute('aria-description')).toBe(
+      '上下文估算 12000 / 272000 tokens；缓存命中率 30%，缓存命中 30 / 100 tokens',
+    );
     expect(ring.getAttribute('aria-label')).toBe('上下文占用约 4%');
     expect(promptValue(editor)).toBe('Draft B');
     expect(new Set(changes)).toEqual(
       new Set([
-        JSON.stringify(['缓存 70%', '上下文占用约 2%']),
-        JSON.stringify(['缓存 0%', '正在读取上下文占用']),
-        JSON.stringify(['缓存 30%', '上下文占用约 4%']),
+        JSON.stringify([
+          '上下文估算 5700 / 272000 tokens；缓存命中率 70%，缓存命中 70 / 100 tokens',
+          '上下文占用约 2%',
+        ]),
+        JSON.stringify([null, '正在读取上下文占用']),
+        JSON.stringify([
+          '上下文估算 12000 / 272000 tokens；缓存命中率 30%，缓存命中 30 / 100 tokens',
+          '上下文占用约 4%',
+        ]),
       ]),
     );
   } finally {
@@ -702,19 +716,27 @@ test('failed cold usage reads end the loading state without borrowing another Se
     await f.click('b');
     await f.ready('b');
     await f.until(() => !f.query('.composer-metrics[aria-busy="true"]'));
-    expect(f.query('.composer-metrics').children).toHaveLength(2);
-    expect(f.query('.composer-cache-rate').textContent).toBe('缓存 0%');
-    expect(f.query('.composer-cache-rate').getAttribute('title')).toBe('暂无缓存用量数据');
+    expect(f.query('.composer-metrics').children).toHaveLength(1);
+    expect(f.query('.composer-cache-rate')).toBeNull();
+    expect(ring.getAttribute('aria-description')).toBe(
+      '上下文估算 未知 / 未知 tokens；暂无缓存用量数据',
+    );
     expect(f.query('.composer-context-usage')).toBe(ring);
     expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
     expect(f.query<HTMLTextAreaElement>('.composer [role="textbox"]').readOnly).toBe(false);
     failed = false;
     await f.click('a');
     await f.ready('a');
-    expect(f.query('.composer-cache-rate').textContent).toBe('缓存 70%');
+    expect(ring.getAttribute('aria-description')).toContain('缓存命中率 70%');
     await f.click('b');
     await f.ready('b');
-    await f.until(() => f.query('.composer-cache-rate')?.textContent === '缓存 30%');
+    await f.until(
+      () =>
+        !!f
+          .query('.composer-context-usage')
+          ?.getAttribute('aria-description')
+          ?.includes('缓存命中率 30%'),
+    );
     expect(f.query('.composer-context-usage').getAttribute('aria-label')).toBe('上下文占用约 4%');
     expect(f.requests.filter((input) => businessMethods.has(input.method))).toHaveLength(0);
   } finally {

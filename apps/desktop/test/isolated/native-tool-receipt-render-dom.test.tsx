@@ -37,6 +37,11 @@ const original = JSON.stringify({
   nested: { preserved: true },
 });
 type Mode =
+  | 'write-diff'
+  | 'edit-diff'
+  | 'group-diff'
+  | 'failed-diff'
+  | 'unknown-diff'
   | 'known'
   | 'empty'
   | 'failed'
@@ -51,6 +56,10 @@ type Mode =
   | 'mail-failed'
   | 'mail-unknown';
 function fixture(mode: Mode, testDiagnostics = false) {
+  const isDiff = mode.endsWith('-diff');
+  const groupedDiff = mode === 'group-diff';
+  const diffIds = groupedDiff ? ['receipt', 'receipt-edit'] : ['receipt'];
+  const confirmedDiff = isDiff && !['failed-diff', 'unknown-diff'].includes(mode);
   const isMail = mode.startsWith('mail');
   const receiptContent = isMail ? '{"accepted":true,"delivery":"queued"}' : original;
   const isImage = mode === 'image' || mode === 'image-batch';
@@ -76,7 +85,10 @@ function fixture(mode: Mode, testDiagnostics = false) {
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
-  const session = { ...backgroundItem().rootSession, nextSeq: mode === 'mixed' ? '5' : '3' };
+  const session = {
+    ...backgroundItem().rootSession,
+    nextSeq: mode === 'mixed' ? '5' : groupedDiff ? '4' : '3',
+  };
   let selected = 'root',
     revision = 1,
     published = false;
@@ -84,6 +96,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
   const requests: NativeRequest[] = [];
   const pending: (() => void)[] = [];
   const pendingTargets: (() => void)[] = [];
+  const pendingBodies: (() => void)[] = [];
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -150,6 +163,20 @@ function fixture(mode: Mode, testDiagnostics = false) {
             content: receiptContent,
             ...(mode === 'unsupported' ? { contentFormat: 'unsupported' as const } : {}),
           },
+          ...(groupedDiff
+            ? [
+                {
+                  id: 'receipt-edit',
+                  sessionId: 'root',
+                  seq: '3',
+                  role: 'tool' as const,
+                  status: 'complete' as const,
+                  runId: null,
+                  sourceIds: ['execution-edit'],
+                  content: original,
+                },
+              ]
+            : []),
           ...(mode === 'mixed'
             ? ([
                 {
@@ -249,8 +276,35 @@ function fixture(mode: Mode, testDiagnostics = false) {
                 reject(Error('tool_metadata_unavailable'));
                 return;
               }
-              const entries =
-                mode === 'mixed'
+              const entries = isDiff
+                ? request.method === 'toolMessages.list'
+                  ? diffIds.map((messageId, index) => ({
+                      messageId,
+                      executionId: index ? 'execution-edit' : 'execution',
+                      definitionId: index || mode === 'edit-diff' ? 'files.edit' : 'files.write',
+                      definitionVersion: '2',
+                      status:
+                        mode === 'failed-diff'
+                          ? 'failed'
+                          : mode === 'unknown-diff'
+                            ? 'outcome_unknown'
+                            : 'succeeded',
+                      resultRevision: '1',
+                      target: 'same.txt',
+                    }))
+                  : request.method === 'fileTargets.list' && confirmedDiff
+                    ? diffIds.map((messageId, index) => ({
+                        messageId,
+                        changeId: `change-${messageId}`,
+                        path: 'same.txt',
+                        preview: 'available',
+                        openable: true,
+                        operation: index || mode === 'edit-diff' ? 'edit' : 'write',
+                        snapshot: true,
+                        diff: true,
+                      }))
+                    : []
+                : mode === 'mixed'
                   ? request.method === 'fileTargets.list'
                     ? [
                         {
@@ -365,6 +419,21 @@ function fixture(mode: Mode, testDiagnostics = false) {
             done: true,
           };
         case 'fileChanges.detail':
+          if (isDiff)
+            return new Promise<NativeResult>((resolve) =>
+              pendingBodies.push(() =>
+                resolve({
+                  kind: 'fileChanges.detail',
+                  changeId: request.changeId,
+                  text:
+                    request.view === 'diff'
+                      ? `--- a/same.txt\n+++ b/same.txt\n@@ -1 +1 @@\n-old-${request.changeId}\n+new-${request.changeId}\n`
+                      : `SNAPSHOT_${request.changeId}`,
+                  snapshot: request.view === 'snapshot',
+                  nextOffset: null,
+                }),
+              ),
+            );
           return {
             kind: 'fileChanges.detail',
             changeId: request.changeId,
@@ -420,13 +489,19 @@ function fixture(mode: Mode, testDiagnostics = false) {
       act(async () => {
         for (const release of [...pending.splice(0), ...pendingTargets.splice(0)]) release();
       }),
+    flushBodies: () =>
+      act(async () => {
+        for (const release of pendingBodies.splice(0)) release();
+      }),
     flushTargets: () =>
       act(async () => {
         for (const release of pendingTargets.splice(0)) release();
       }),
     toggle: () =>
       act(async () => {
-        const button = host.querySelector<HTMLButtonElement>('.tool-activity-summary');
+        const button = host.querySelector<HTMLButtonElement>(
+          'button.tool-activity-summary, .tool-diff-toggle',
+        );
         expect(!!button).toBe(true);
         button!.click();
       }),
@@ -454,7 +529,12 @@ function fixture(mode: Mode, testDiagnostics = false) {
       await until(() => !!host.querySelector('.conversation .tool-activity'));
     },
     async close() {
-      for (const release of [...pending.splice(0), ...pendingTargets.splice(0)]) release();
+      for (const release of [
+        ...pending.splice(0),
+        ...pendingTargets.splice(0),
+        ...pendingBodies.splice(0),
+      ])
+        release();
       await act(async () => root.unmount());
       await new Promise((resolve) => setTimeout(resolve, 0));
       dom.window.close();
@@ -735,6 +815,129 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
     expect(f.requests.filter((request) => request.method === 'fileChanges.open')).toEqual([
       { method: 'fileChanges.open', generation: 1, changeId: 'verified-output', editor: 'vscode' },
     ]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const mode of ['write-diff', 'edit-diff'] as const) {
+  test(`actual NativeDesktop ${mode} lazily reads operation diff independently of delivery snapshot`, async () => {
+    const f = fixture(mode);
+    const bodies = () => f.requests.filter((request) => request.method === 'fileChanges.detail');
+    try {
+      await f.render();
+      expect(bodies()).toHaveLength(0);
+      await f.flush();
+      expect(f.host.textContent).toContain('same.txt');
+      expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
+      expect(bodies()).toHaveLength(0);
+      await f.toggle();
+      expect(bodies()).toHaveLength(1);
+      expect(bodies()[0]).toMatchObject({ changeId: 'change-receipt', view: 'diff' });
+      expect(f.host.textContent).toContain('正在读取本次差异');
+      await f.flushBodies();
+      expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
+      expect(f.host.textContent).not.toContain('SNAPSHOT_');
+      const disclosure = [...f.host.querySelectorAll('details')].find(
+        (node) => node.querySelector('summary')?.textContent === '查看本次交付的文件',
+      );
+      expect(disclosure).toBeDefined();
+      await act(async () => {
+        disclosure!.open = true;
+        disclosure!.dispatchEvent(new f.host.ownerDocument.defaultView!.Event('toggle'));
+      });
+      expect(bodies()).toHaveLength(2);
+      expect(bodies()[1]).toMatchObject({ changeId: 'change-receipt', view: 'snapshot' });
+      await f.flushBodies();
+      expect(disclosure!.textContent).toContain('SNAPSHOT_change-receipt');
+      expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
+      for (let round = 0; round < 3; round++) {
+        await f.toggle();
+        expect(f.host.querySelector('.tool-diff-toggle')?.getAttribute('aria-expanded')).toBe(
+          'false',
+        );
+        await f.toggle();
+        expect(f.host.querySelector('.tool-diff-toggle')?.getAttribute('aria-expanded')).toBe(
+          'true',
+        );
+        await f.flushBodies();
+        expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
+        expect(disclosure!.textContent).toContain('SNAPSHOT_change-receipt');
+      }
+      expect(bodies().filter((request) => request.view === 'snapshot')).toHaveLength(1);
+      expect(f.requests.some((request) => request.method === 'fileChanges.open')).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('actual NativeDesktop grouped operations on the same path read distinct receipt diffs only when each item opens', async () => {
+  const f = fixture('group-diff');
+  const bodies = () => f.requests.filter((request) => request.method === 'fileChanges.detail');
+  try {
+    await f.render();
+    await f.flush();
+    expect(bodies()).toHaveLength(0);
+    await f.toggle();
+    expect(bodies()).toHaveLength(0);
+    const items = [
+      ...f.host.querySelectorAll<HTMLButtonElement>('.tool-activity-steps .tool-diff-toggle'),
+    ];
+    expect(items).toHaveLength(2);
+    await act(async () => items[0]!.click());
+    expect(bodies()).toHaveLength(1);
+    expect(bodies()[0]).toMatchObject({ changeId: 'change-receipt', view: 'diff' });
+    await f.flushBodies();
+    expect(f.host.textContent).toContain('new-change-receipt');
+    expect(f.host.textContent).not.toContain('new-change-receipt-edit');
+    await act(async () => items[1]!.click());
+    expect(bodies()).toHaveLength(2);
+    expect(bodies()[1]).toMatchObject({ changeId: 'change-receipt-edit', view: 'diff' });
+    await f.flushBodies();
+    expect(items[0]!.closest('.tool-activity')?.textContent).toContain('new-change-receipt');
+    expect(items[1]!.closest('.tool-activity')?.textContent).toContain('new-change-receipt-edit');
+  } finally {
+    await f.close();
+  }
+});
+
+for (const mode of ['failed-diff', 'unknown-diff'] as const) {
+  test(`actual NativeDesktop ${mode} does not infer confirmed changes from tool arguments or raw receipt`, async () => {
+    const f = fixture(mode);
+    try {
+      await f.render();
+      await f.flush();
+      await f.toggle();
+      expect(f.requests.filter((request) => request.method === 'fileChanges.detail')).toHaveLength(
+        0,
+      );
+      expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toContain(
+        mode === 'failed-diff' ? '失败' : '结果未知',
+      );
+      expect(f.host.textContent).not.toContain('查看本次交付的文件');
+      expect(f.host.textContent).not.toContain('正在读取本次差异');
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('actual NativeDesktop ignores a late operation diff body after switching sessions', async () => {
+  const f = fixture('write-diff');
+  try {
+    await f.render();
+    await f.flush();
+    await f.toggle();
+    const request = f.requests.find((request) => request.method === 'fileChanges.detail');
+    expect(request).toMatchObject({ changeId: 'change-receipt', view: 'diff' });
+    await f.selectOther();
+    await f.flushBodies();
+    expect(f.host.querySelector('.conversation-viewport')?.textContent).toContain('Other session');
+    expect(f.host.querySelector('.conversation-viewport')?.textContent).not.toContain(
+      'new-change-receipt',
+    );
+    expect(f.host.querySelector('.conversation-viewport')?.textContent).not.toContain('SNAPSHOT_');
   } finally {
     await f.close();
   }

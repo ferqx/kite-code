@@ -20,11 +20,13 @@ function ChangeDetail({
   generation,
   entry,
   editor,
+  view = 'diff',
 }: {
   bridge: NativeBridge;
   generation: number;
   entry: NativeFileChange;
   editor: DesktopEditor;
+  view?: 'diff' | 'snapshot';
 }) {
   const [body, setBody] = useState<NativeFileChangeDetail>();
   const [error, setError] = useState('');
@@ -44,6 +46,7 @@ function ChangeDetail({
         changeId: entry.changeId,
         readId,
         offset,
+        view,
       })
       .then((value) => {
         if (!active) return;
@@ -64,7 +67,7 @@ function ChangeDetail({
       active = false;
       void bridge.request({ method: 'fileChanges.close', generation, readId }).catch(() => {});
     };
-  }, [bridge, generation, entry.changeId, entry.preview, revision, offset]);
+  }, [bridge, generation, entry.changeId, entry.preview, revision, offset, view]);
   async function open() {
     setOpening(true);
     setError('');
@@ -106,11 +109,17 @@ function ChangeDetail({
       {error && entry.preview === 'available' && (
         <Button onClick={() => setRevision((value) => value + 1)}>重新读取历史内容</Button>
       )}
-      {entry.preview === 'unavailable' || (body && body.text === undefined) ? (
+      {body?.unavailableReason === 'snapshot_too_large' ? (
+        <p role="status">
+          本次历史全文超过 1 MiB，未加载。可阅读有界差异；编辑器打开的是当前文件，不是本次历史版本。
+        </p>
+      ) : entry.preview === 'unavailable' || (body && body.text === undefined) ? (
         <p>历史记录未保存可读差异，不会从当前文件内容重建。</p>
       ) : body?.text !== undefined ? (
         <>
-          {body.truncated && <p role="status">差异预览已截断；编辑器打开文件的当前内容。</p>}
+          {body.truncated && (
+            <p role="status">差异预览已截断或省略部分内容；编辑器打开文件的当前内容。</p>
+          )}
           {body.snapshot ? (
             <>
               <p>本次交付的历史版本；后续编辑不会改变此内容。</p>
@@ -133,10 +142,12 @@ function ChangeDetail({
               )}
             </>
           ) : (
-            <FileDiff message={message} />
+            <FileDiff message={message} path={entry.path} scope="operation" />
           )}
         </>
-      ) : null}
+      ) : (
+        <p role="status">正在读取本次{view === 'diff' ? '差异' : '历史版本'}…</p>
+      )}
     </>
   );
 }
@@ -152,9 +163,19 @@ export function NativeOutputFile(props: {
   return (
     <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>查看本次交付的文件</summary>
-      {open && <ChangeDetail {...props} />}
+      {open && <ChangeDetail {...props} view="snapshot" />}
     </details>
   );
+}
+
+/** Mounted only by the confirmed tool's expanded disclosure. */
+export function NativeOperationDiff(props: {
+  bridge: NativeBridge;
+  generation: number;
+  entry: NativeFileChange;
+  editor: DesktopEditor;
+}) {
+  return <ChangeDetail {...props} view="diff" />;
 }
 
 /** Original FileChanges presentation; metadata scans and expanded bodies own only GETs. */

@@ -201,8 +201,11 @@ try {
     await start();
     await select('a');
     await ready('a', 'TAIL-A-0');
-    await page.waitForFunction(
-      () => document.querySelector('.composer-cache-rate')?.textContent === '缓存 70%',
+    await page.waitForFunction(() =>
+      document
+        .querySelector('.composer-context-usage')
+        ?.getAttribute('aria-description')
+        ?.includes('缓存命中率 70%'),
     );
     await page.waitForTimeout(350);
     const initial = await finish();

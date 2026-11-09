@@ -1,4 +1,5 @@
 @import "katex/dist/katex.min.css";
+@import "./file-diff.css";
 @reference "shadcn/tailwind.css";
 
 @layer base {

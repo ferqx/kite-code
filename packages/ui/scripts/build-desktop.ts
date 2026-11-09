@@ -88,7 +88,8 @@ const result = await Bun.build({
   outdir,
 });
 if (!result.success) throw new AggregateError(result.logs, 'desktop_ui_build_failed');
-await copyFile(join(source, 'style.css'), join(outdir, 'style.css'));
+for (const name of ['style.css', 'file-diff.css'])
+  await copyFile(join(source, name), join(outdir, name));
 for (const license of licenses) {
   await mkdir(dirname(license.destination), { recursive: true });
   await copyFile(license.source, license.destination);

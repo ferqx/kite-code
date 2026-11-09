@@ -225,14 +225,16 @@ test('tool diff keeps complete lines in a named focusable shared viewport with v
     });
     viewport.dispatchEvent(key);
     expect(key.defaultPrevented).toBe(false);
-    const pre = viewport.querySelector('pre.diff-output')!;
-    expect(pre.textContent).toBe(`${diff}\n`);
+    const pre = viewport.querySelector('.diff-output')!;
+    expect([...pre.children].map((row) => row.textContent).join('\n')).toBe(diff);
     expect(pre.getAttribute('role')).toBeNull();
     expect(pre.getAttribute('tabindex')).toBeNull();
-    expect(pre.querySelector('.diff-added')?.textContent).toBe('+new 漢字🙂\n');
-    expect(pre.querySelector('.diff-removed')?.textContent).toBe('-old 漢字🙂\n');
+    // A headerless legacy body is readable plain text, never an invented Git hunk.
+    expect(pre.querySelector('.diff-added')).toBeNull();
+    expect(pre.querySelector('.diff-removed')).toBeNull();
+    expect(host.querySelector('[data-format="plain"]')).not.toBeNull();
     expect(host.querySelectorAll('[role="region"]')).toHaveLength(1);
-    expect(host.querySelectorAll('pre')).toHaveLength(1);
+    expect(host.querySelectorAll('.diff-output')).toHaveLength(1);
     expect(host.querySelector('.tool-diff-scroll')?.contains(viewport)).toBe(true);
   });
 });
@@ -362,7 +364,7 @@ test('file changes retain exact open actions and lazy original detail mounting',
     expect(rendered.length).toBeGreaterThan(0);
     expect(rendered.every((id) => id === 'first')).toBe(true);
     expect(host.querySelectorAll('[aria-label="文件差异"]')).toHaveLength(1);
-    expect(details.querySelector('pre')?.textContent).toBe('+first complete diff\n');
+    expect(details.querySelector('.diff-output')?.textContent).toBe('+first complete diff');
     await click(details.querySelector<HTMLButtonElement>('button.file-link')!);
     expect(opened).toEqual(['src/first.ts']);
     await act(async () => {
@@ -370,5 +372,197 @@ test('file changes retain exact open actions and lazy original detail mounting',
       details.dispatchEvent(new details.ownerDocument.defaultView!.Event('toggle'));
     });
     expect(host.querySelector('[aria-label="文件差异"]')).toBeNull();
+  });
+});
+
+test('legacy or oversized diff bodies keep a bounded DOM and explicitly report omitted rows and long lines', async () => {
+  await withDom(async ({ host, render }) => {
+    await render(
+      <FileDiff
+        message={message('huge', `1 +${'🙂'.repeat(10000)}\n${'2 -line\n'.repeat(100000)}`)}
+      />,
+    );
+    expect(host.querySelector('.diff-output')!.children.length).toBeLessThanOrEqual(400);
+    expect(host.querySelector('[role="status"]')?.textContent).toContain('400 行');
+    expect(host.querySelector('.diff-added')!.textContent!.length).toBeLessThan(2060);
+    expect(host.querySelector('.diff-added')!.textContent).not.toContain('\uFFFD');
+    expect(host.querySelector('.diff-removed')).not.toBeNull();
+    await render(<FileDiff message={message('small', '1 -before\n1 +after')} />);
+    expect(host.querySelector('[role="status"]')).toBeNull();
+    expect(host.querySelector('.diff-removed')!.textContent).toContain('before');
+    expect(host.querySelector('.diff-added')!.textContent).toContain('after');
+  });
+});
+
+test('split diff aligns replacements, preserves plain markup and switches to genuine unified line numbers', async () => {
+  await withDom(async ({ host, render, click }) => {
+    await render(
+      <FileDiff
+        scope="workspace"
+        path="src/renamed file.ts"
+        message={message(
+          'split',
+          [
+            'diff --git a/old.ts b/renamed file.ts',
+            'rename from old.ts',
+            'rename to renamed file.ts',
+            '--- a/old.ts',
+            '+++ b/renamed file.ts',
+            '@@ -3,2 +7,3 @@',
+            ' const same = true;',
+            '-const old = "<script>alert(1)</script>";',
+            '+const next = "<img src=x onerror=alert(1)>";',
+            '+const extra = 42;',
+          ].join('\n'),
+        )}
+      />,
+    );
+    expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('split');
+    expect(host.querySelector('.file-diff-path')?.textContent).toBe('src/renamed file.ts');
+    expect(host.querySelector('.file-diff-counts')?.textContent).toBe('预览 +2 -1');
+    expect(host.querySelectorAll('script, img')).toHaveLength(0);
+    expect(host.querySelectorAll('.file-diff-empty')).toHaveLength(1);
+    const replacement = host.querySelector('.file-diff-split-row:has(.diff-removed)')!;
+    expect(replacement.querySelector('.diff-removed .file-diff-number')?.textContent).toBe('4');
+    expect(replacement.querySelector('.diff-added .file-diff-number')?.textContent).toBe('8');
+    expect(replacement.querySelector('.diff-added')?.textContent).toContain(
+      '<img src=x onerror=alert(1)>',
+    );
+    expect(host.querySelectorAll('.file-diff-token-keyword').length).toBeGreaterThan(0);
+    const viewport = host.querySelector<HTMLElement>('.tool-diff-viewport')!;
+    const unified = [...host.querySelectorAll<HTMLButtonElement>('.file-diff-layout button')].find(
+      (button) => button.textContent === '统一',
+    )!;
+    await click(unified);
+    expect(unified.getAttribute('aria-pressed')).toBe('true');
+    expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
+    expect(host.querySelector('.tool-diff-viewport')).toBe(viewport);
+    expect(host.querySelectorAll('.file-diff-unified-row')).toHaveLength(4);
+    expect(host.querySelectorAll('.file-diff-empty')).toHaveLength(0);
+    const removed = host.querySelector('.file-diff-unified-row:has(.diff-removed)')!;
+    expect(removed.querySelector('.file-diff-old-number')?.textContent).toBe('4');
+    expect(removed.querySelector('.file-diff-number')?.textContent).toBe('');
+    const added = host.querySelector('.file-diff-unified-row:has(.diff-added)')!;
+    expect(added.querySelector('.file-diff-old-number')?.textContent).toBe('');
+    expect(added.querySelector('.file-diff-number')?.textContent).toBe('8');
+    expect(host.querySelectorAll('[role="region"]')).toHaveLength(1);
+  });
+});
+
+test('fold controls expand only retained context, keep the 400 row bound, and clear on body or identity change', async () => {
+  await withDom(async ({ host, render, click }) => {
+    const body = [
+      '@@ -1,399 +1,399 @@',
+      ...Array.from({ length: 399 }, (_, i) => ` context_${i}`),
+    ].join('\n');
+    const tree = (id: string, stdout = body) => <FileDiff message={message(id, stdout)} />;
+    await render(tree('first'));
+    const fold = host.querySelector<HTMLButtonElement>('.file-diff-fold')!;
+    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    expect(fold.textContent).toContain('393 行未变更');
+    await click(fold);
+    expect(host.querySelector('.file-diff-fold')).toBeNull();
+    expect(host.querySelector('.diff-output')!.children.length).toBe(400);
+    await click(
+      host.querySelector<HTMLButtonElement>('.file-diff-layout button[aria-pressed="true"]')!,
+    );
+    expect(host.querySelector('.file-diff-fold')).toBeNull();
+    // Repeated clicks on the active layout must not discard expanded reading context.
+    host.querySelector<HTMLElement>('.tool-diff-viewport')!.focus();
+    expect(host.ownerDocument.activeElement).toBe(host.querySelector('.tool-diff-viewport'));
+    await click(host.querySelector<HTMLButtonElement>('.file-diff-collapse')!);
+    expect(host.querySelector('.file-diff-fold')).not.toBeNull();
+    await click(host.querySelector<HTMLButtonElement>('.file-diff-fold')!);
+    await render(tree('first', body.replaceAll('context_', 'refreshed_')));
+    expect(host.querySelector('.file-diff-fold')).not.toBeNull();
+    expect(host.textContent).not.toContain('context_');
+    await click(host.querySelector<HTMLButtonElement>('.file-diff-fold')!);
+    await render(tree('second'));
+    expect(host.querySelector('.file-diff-fold')).not.toBeNull();
+    expect(host.textContent).not.toContain('refreshed_');
+    await render(
+      tree(
+        'omitted',
+        'Line diff (bounded alignment; unchanged gaps omitted)\n... unchanged lines omitted ...\n9 -old\n9 +new',
+      ),
+    );
+    expect(host.querySelector('.file-diff-fold')).toBeNull();
+    expect(host.querySelector('.file-diff-omitted')?.textContent).toContain('无法展开');
+    await render(null);
+    expect(host.querySelector('.file-diff')).toBeNull();
+    await render(tree('first'));
+    expect(host.querySelector('.file-diff-fold')).not.toBeNull();
+  });
+});
+
+test('both layouts stay at most 400 rows for replacements and syntax spans have a global cap', async () => {
+  await withDom(async ({ host, render, click }) => {
+    const body = Array.from(
+      { length: 200 },
+      (_, i) => `${i + 1} -const Old = "x";\n${i + 1} +const New = "y";`,
+    ).join('\n');
+    await render(<FileDiff path="a.ts" message={message('large', body)} />);
+    expect(host.querySelector('.diff-output')!.children.length).toBe(200);
+    const unified = [...host.querySelectorAll<HTMLButtonElement>('.file-diff-layout button')].find(
+      (button) => button.textContent === '统一',
+    )!;
+    await click(unified);
+    expect(host.querySelector('.diff-output')!.children.length).toBe(400);
+    expect(host.querySelectorAll('.file-diff-code > span').length).toBeLessThanOrEqual(2048);
+    expect(host.querySelectorAll('.tool-diff-viewport')).toHaveLength(1);
+    expect(host.querySelectorAll('.file-diff-row [data-slot="scroll-area-viewport"]')).toHaveLength(
+      0,
+    );
+  });
+});
+
+test('controlled layout remains the workspace choice across files and narrow controls remain named', async () => {
+  await withDom(async ({ host, render, click }) => {
+    const choices: string[] = [];
+    const tree = (id: string, layout: 'split' | 'unified') => (
+      <div style={{ width: 280 }}>
+        <FileDiff
+          message={message(id, '1 -before\n1 +after')}
+          path={`src/${id}.ts`}
+          scope="workspace"
+          layout={layout}
+          onLayoutChange={(next) => choices.push(next)}
+        />
+      </div>
+    );
+    await render(tree('first', 'unified'));
+    expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
+    const split = [...host.querySelectorAll<HTMLButtonElement>('.file-diff-layout button')].find(
+      (button) => button.textContent === '双栏',
+    )!;
+    await click(split);
+    expect(choices).toEqual(['split']);
+    expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
+    await render(tree('second', 'unified'));
+    expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('unified');
+    expect(host.querySelector('fieldset')?.getAttribute('aria-label')).toBe('差异布局');
+    expect(host.querySelector('.tool-diff-viewport')?.getAttribute('tabindex')).toBe('0');
+    expect(host.querySelector('.tool-diff-viewport')?.getAttribute('aria-label')).toBe('文件差异');
+    await render(tree('second', 'split'));
+    expect(host.querySelector('.file-diff')?.getAttribute('data-layout')).toBe('split');
+  });
+});
+
+test('wide CJK, emoji and tabs reserve shared scroll width without crossing the other side', async () => {
+  await withDom(async ({ host, render }) => {
+    for (const [text, minimumColumns] of [
+      ['中'.repeat(200), 820],
+      ['漢🙂\t'.repeat(100), 1620],
+    ] as const) {
+      await render(<FileDiff message={message('wide', `1 -${text}\n1 +short`)} />);
+      const surface = host.querySelector<HTMLElement>('.diff-output')!;
+      expect(Number(surface.style.getPropertyValue('--file-diff-columns'))).toBeGreaterThanOrEqual(
+        minimumColumns,
+      );
+      expect(host.querySelector('.diff-removed .file-diff-code')?.textContent).toBe(text);
+      expect(host.querySelector('.diff-added .file-diff-code')?.textContent).toBe('short');
+      expect(host.querySelectorAll('.tool-diff-viewport')).toHaveLength(1);
+      expect(host.querySelectorAll('.file-diff-cell [data-slot="scroll-area"]')).toHaveLength(0);
+    }
   });
 });

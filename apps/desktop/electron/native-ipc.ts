@@ -100,7 +100,10 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'interactionHistory.attachment.close': ['readId'],
   'fileChanges.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileTargets.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
-  'fileChanges.detail': ['readId', 'changeId', 'offset'],
+  'workspaceChanges.list': ['readId', 'viewSelection'],
+  'workspaceChanges.detail': ['readId', 'changeId'],
+  'workspaceChanges.close': ['readId'],
+  'fileChanges.detail': ['readId', 'changeId', 'offset', 'view'],
   'fileChanges.close': ['readId'],
   'fileChanges.open': ['changeId', 'editor'],
   'messageFile.open': ['viewSelection', 'historyEpoch', 'messageId', 'path', 'editor'],
@@ -745,6 +748,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   }
   if (method === 'draft.write' && typeof input.content !== 'string')
     throw Error('invalid_native_request');
+  if (
+    method === 'workspaceChanges.list' &&
+    (!Number.isSafeInteger(input.viewSelection) || Number(input.viewSelection) < 1)
+  )
+    throw Error('invalid_native_request');
+  if (
+    method === 'fileChanges.detail' &&
+    input.view !== undefined &&
+    !['diff', 'snapshot'].includes(String(input.view))
+  )
+    throw Error('invalid_native_request');
   const resourceId = (value: unknown) =>
     typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
   if (
@@ -796,7 +810,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
   }
   if (
-    (method === 'fileChanges.detail' || method === 'fileChanges.open') &&
+    (method === 'workspaceChanges.detail' ||
+      method === 'fileChanges.detail' ||
+      method === 'fileChanges.open') &&
     !resourceId(input.changeId)
   )
     throw Error('invalid_native_request');

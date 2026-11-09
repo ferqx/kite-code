@@ -1,0 +1,427 @@
+/* This view lives in SessionPage's existing resizable changes tab. */
+.kite-client .session-tab-changes:has(> .workspace-changes) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.workspace-changes {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-changes-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-changes-toolbar strong {
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.workspace-changes-baseline,
+.workspace-changes-scope {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.workspace-changes-refresh {
+  margin-left: auto;
+  flex: none;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.workspace-changes-scope {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-changes-scope details {
+  flex: 1;
+  min-width: 60px;
+  text-align: right;
+}
+
+.workspace-changes-scope summary {
+  cursor: pointer;
+}
+
+.workspace-changes-scope p {
+  max-width: 600px;
+  margin: 8px 0 2px auto;
+  text-align: left;
+}
+
+.workspace-changes-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 29%);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-change-editor,
+.workspace-change-files {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-change-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.workspace-change-rename {
+  flex: 1;
+  overflow: hidden;
+  min-width: 80px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-change-clear {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.workspace-change-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-change-path {
+  flex: none;
+  padding: 9px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.workspace-change-files {
+  border-left: 1px solid var(--border);
+  background: color-mix(in srgb, var(--foreground) 1.5%, var(--background));
+}
+
+.workspace-change-files-header {
+  padding: 10px 10px 4px;
+  flex: none;
+}
+
+.workspace-change-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  height: 30px;
+  padding: 0 10px;
+  color: var(--muted-foreground);
+}
+
+.workspace-change-filter input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  outline: none;
+}
+
+.workspace-change-filter:focus-within {
+  outline: 2px solid var(--ring, #5687b4);
+  outline-offset: 1px;
+}
+
+.workspace-change-files-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 2px 3px;
+  font-size: 11px;
+}
+
+.workspace-change-files-title strong {
+  font-weight: 500;
+}
+
+.workspace-change-files-title > span {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.workspace-change-tree {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 3px 5px 9px;
+  scrollbar-width: thin;
+}
+
+.workspace-change-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 29px;
+  padding: 0 7px 0 calc(7px + var(--tree-level, 0) * 10px);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.workspace-change-tree-glyph {
+  width: 12px;
+  flex: none;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.workspace-change-tree-file {
+  color: light-dark(#28639b, #77ace1);
+}
+
+.workspace-change-tree-file .workspace-change-tree-glyph {
+  color: inherit;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 10px;
+}
+
+.workspace-change-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.workspace-change-tree-status {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font: 10px / 1.2 var(--font-mono, monospace);
+}
+
+.workspace-change-tree-row:hover,
+.workspace-change-clear:hover {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+
+.workspace-change-tree-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+
+.workspace-change-tree-row:focus-visible,
+.workspace-change-clear:focus-visible,
+.workspace-change-pagination button:focus-visible,
+.workspace-changes-scope summary:focus-visible {
+  outline: 2px solid var(--ring, #5687b4);
+  outline-offset: -2px;
+}
+
+.workspace-change-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.workspace-change-pagination button {
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace-change-pagination button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.workspace-change-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  min-height: 90px;
+  padding: 20px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+.workspace-change-empty p {
+  margin: 0;
+}
+
+.workspace-change-empty > span:not(.workspace-change-empty-icon) {
+  font-size: 10px;
+}
+
+.workspace-change-empty-icon {
+  font: 30px / 1 var(--font-mono, monospace);
+  opacity: 0.65;
+}
+
+.workspace-change-notice,
+.workspace-change-tree-notice,
+.workspace-change-no-match {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.workspace-change-tree-notice {
+  flex: none;
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+}
+
+.workspace-change-notice[role="alert"] {
+  color: var(--destructive, #c65353);
+}
+
+.workspace-change-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--muted-foreground);
+  border-radius: 50%;
+  animation: workspace-change-spin 1s linear infinite;
+}
+
+@keyframes workspace-change-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Narrow existing sidebars retain file access rather than hiding the tree. */
+@container (max-width: 620px) {
+  .workspace-changes-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 1fr) minmax(150px, 36%);
+    overflow: auto;
+  }
+
+  .workspace-change-files {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .workspace-change-files-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 10px;
+  }
+
+  .workspace-change-filter {
+    flex: 1;
+  }
+
+  .workspace-change-files-title {
+    flex: none;
+    padding: 0;
+  }
+
+  .workspace-change-files-title strong {
+    display: none;
+  }
+}
+
+@container (max-width: 340px) {
+  .workspace-changes-baseline {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .workspace-changes-toolbar {
+    flex-wrap: wrap;
+    gap: 3px 6px;
+    padding-inline: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-change-spinner {
+    animation: none;
+  }
+}
+
+.workspace-change-live-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}

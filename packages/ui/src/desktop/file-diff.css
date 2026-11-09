@@ -1,0 +1,289 @@
+/* One bounded editor surface and one scroll owner for both sides. */
+.kite-client .file-diff {
+  --file-diff-add: #327d46;
+  --file-diff-remove: #b34d46;
+  --file-diff-keyword: #7c439c;
+  --file-diff-string: #83601f;
+  --file-diff-type: #326d9a;
+  --file-diff-comment: #647660;
+  container-type: inline-size;
+  container-name: file-diff;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  color: var(--foreground);
+  background: var(--background);
+  border-block: 1px solid var(--border);
+  font-size: 12px;
+}
+[data-theme="dark"] .kite-client .file-diff,
+.kite-client.dark .file-diff,
+.dark .kite-client .file-diff,
+.kite-client[data-theme="dark"] .file-diff {
+  --file-diff-add: #69bd85;
+  --file-diff-remove: #e28c83;
+  --file-diff-keyword: #c4a0e7;
+  --file-diff-string: #cfad79;
+  --file-diff-type: #84b9df;
+  --file-diff-comment: #94a68e;
+}
+.kite-client .file-diff .file-diff-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .file-diff .file-diff-path {
+  flex: 1;
+  min-width: 24px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kite-client .file-diff .file-diff-counts {
+  flex: none;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kite-client .file-diff .file-diff-added-count {
+  color: var(--file-diff-add);
+}
+.kite-client .file-diff .file-diff-removed-count {
+  color: var(--file-diff-remove);
+}
+.kite-client .file-diff .file-diff-layout {
+  display: flex;
+  flex: none;
+  gap: 1px;
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px;
+}
+.kite-client .file-diff .file-diff-layout button,
+.kite-client .file-diff .file-diff-collapse {
+  min-height: 26px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 20px;
+}
+.kite-client .file-diff .file-diff-layout button[aria-pressed="true"] {
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--foreground) 9%, transparent);
+}
+.kite-client .file-diff .file-diff-collapse:disabled {
+  opacity: 0.4;
+}
+.kite-client .file-diff button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.kite-client .file-diff .file-diff-notice {
+  flex: none;
+  margin: 0;
+  padding: 4px 9px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .file-diff .file-diff-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: none;
+  font-size: 11px;
+  line-height: 24px;
+  color: var(--muted-foreground);
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .file-diff .file-diff-sides span {
+  padding-inline: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .file-diff .file-diff-sides span + span {
+  border-left: 1px solid var(--border);
+}
+.kite-client .file-diff[data-layout="unified"] .file-diff-sides {
+  grid-template-columns: 1fr;
+}
+.kite-client .file-diff .tool-diff-scroll {
+  min-height: 0;
+  margin: 0;
+}
+.kite-client .file-diff[data-scope="workspace"] {
+  height: 100%;
+  border-top: 0;
+}
+.kite-client .file-diff[data-scope="workspace"] .tool-diff-scroll {
+  flex: 1;
+  max-height: none;
+}
+.kite-client .file-diff[data-scope="workspace"] .tool-diff-viewport {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+}
+.kite-client .file-diff .tool-diff-scroll .diff-output {
+  width: max(100%, calc(var(--file-diff-columns) * 1ch));
+  min-width: 100%;
+  max-height: none;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 22px;
+  white-space: pre;
+  tab-size: 4;
+  mask-image: none;
+  animation: none;
+  user-select: text;
+}
+.kite-client .file-diff .file-diff-split-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.kite-client .file-diff .file-diff-cell {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  min-height: 22px;
+  overflow: hidden;
+  border-left: 3px solid transparent;
+}
+.kite-client .file-diff .file-diff-split-row > .file-diff-cell + .file-diff-cell {
+  box-shadow: -1px 0 var(--border);
+}
+.kite-client .file-diff .file-diff-number,
+.kite-client .file-diff .file-diff-old-number {
+  width: calc(var(--file-diff-gutter, 6) * 1ch);
+  flex: none;
+  padding-inline: 3px;
+  text-align: right;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.kite-client .file-diff .file-diff-sign {
+  width: 2ch;
+  flex: none;
+  text-align: center;
+  user-select: none;
+}
+.kite-client .file-diff .file-diff-code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 8px;
+}
+.kite-client .file-diff .diff-added {
+  background: color-mix(in oklch, var(--file-diff-add) 12%, var(--background));
+  border-left-color: var(--file-diff-add);
+  color: var(--foreground);
+}
+.kite-client .file-diff .diff-removed {
+  background: color-mix(in oklch, var(--file-diff-remove) 12%, var(--background));
+  border-left-color: var(--file-diff-remove);
+  color: var(--foreground);
+}
+.kite-client .file-diff .diff-added .file-diff-number,
+.kite-client .file-diff .diff-added .file-diff-sign {
+  color: var(--file-diff-add);
+}
+.kite-client .file-diff .diff-removed .file-diff-number,
+.kite-client .file-diff .diff-removed .file-diff-sign {
+  color: var(--file-diff-remove);
+}
+.kite-client .file-diff .file-diff-empty {
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 4px,
+    color-mix(in oklch, var(--foreground) 4%, transparent) 4px 5px
+  );
+}
+.kite-client .file-diff .file-diff-unified-row {
+  display: flex;
+}
+.kite-client .file-diff .file-diff-unified-row > .file-diff-cell {
+  flex: 1;
+}
+.kite-client .file-diff .file-diff-meta,
+.kite-client .file-diff .file-diff-omitted,
+.kite-client .file-diff .file-diff-raw {
+  padding-inline: 10px;
+}
+.kite-client .file-diff .file-diff-meta {
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--foreground) 3%, var(--background));
+  font-size: 11px;
+}
+.kite-client .file-diff .file-diff-omitted {
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+.kite-client .file-diff .file-diff-fold {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--foreground) 8%, var(--background));
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 22px;
+}
+.kite-client .file-diff .file-diff-fold:hover {
+  color: var(--foreground);
+}
+.kite-client .file-diff .file-diff-token-keyword {
+  color: var(--file-diff-keyword);
+}
+.kite-client .file-diff .file-diff-token-string,
+.kite-client .file-diff .file-diff-token-number {
+  color: var(--file-diff-string);
+}
+.kite-client .file-diff .file-diff-token-type {
+  color: var(--file-diff-type);
+}
+.kite-client .file-diff .file-diff-token-comment {
+  color: var(--file-diff-comment);
+}
+@container file-diff (max-width: 380px) {
+  .kite-client .file-diff .file-diff-toolbar {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .kite-client .file-diff .file-diff-path {
+    flex-basis: 100%;
+  }
+  .kite-client .file-diff .file-diff-counts {
+    margin-right: auto;
+  }
+}
+@media (forced-colors: active) {
+  .kite-client .file-diff .diff-added,
+  .kite-client .file-diff .diff-removed {
+    border-left-color: CanvasText;
+  }
+  .kite-client .file-diff .file-diff-empty {
+    background: Canvas;
+  }
+}

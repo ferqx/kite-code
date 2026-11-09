@@ -71,6 +71,12 @@ import type {
   NativeToolMessageRequest,
   NativeToolRunPage,
 } from './tool-messages-bridge';
+import type {
+  NativeWorkspaceChangeDetail,
+  NativeWorkspaceChangeEvent,
+  NativeWorkspaceChangePage,
+  NativeWorkspaceChangeRequest,
+} from './workspace-changes-bridge';
 
 export type * from './background-bridge';
 export type * from './file-changes-bridge';
@@ -79,6 +85,7 @@ export type * from './interaction-history-bridge';
 export type * from './job-output-bridge';
 export type * from './mcp-bridge';
 export type * from './skills-bridge';
+export type * from './workspace-changes-bridge';
 
 export type NativeAnswerMetadata = {
   scope: { storeId: string; sessionId: string; workspaceId: string; contextSelectionId: string };
@@ -485,11 +492,48 @@ export type NativeState = {
   readonly answerUnavailable?: boolean;
 };
 export type NativeEvent =
+  | NativeWorkspaceChangeEvent
   | { readonly generation: number; readonly kind: 'changed' }
   | { readonly kind: 'lifecycle'; readonly phase: 'quitting' | 'active' };
 
 export function decodeNativeEvent(value: unknown): NativeEvent | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  if ('kind' in value && value.kind === 'workspaceChanges.changed') {
+    const event = value as Partial<NativeWorkspaceChangeEvent>;
+    const scope = event.scope;
+    if (
+      !scope ||
+      typeof scope !== 'object' ||
+      Array.isArray(scope) ||
+      !Number.isSafeInteger(event.generation) ||
+      event.generation! < 0 ||
+      scope.generation !== event.generation ||
+      !Number.isSafeInteger(scope.viewSelection) ||
+      scope.viewSelection < 1 ||
+      typeof event.readId !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(event.readId) ||
+      !['storeId', 'sessionId', 'workspaceId'].every(
+        (key) =>
+          typeof scope[key as keyof typeof scope] === 'string' &&
+          (scope[key as keyof typeof scope] as string).length > 0,
+      ) ||
+      Object.keys(event).length !== 4 ||
+      Object.keys(scope).length !== 5
+    )
+      return;
+    return {
+      kind: 'workspaceChanges.changed',
+      generation: event.generation!,
+      readId: event.readId,
+      scope: {
+        generation: scope.generation,
+        viewSelection: scope.viewSelection,
+        storeId: scope.storeId,
+        sessionId: scope.sessionId,
+        workspaceId: scope.workspaceId,
+      },
+    };
+  }
   if (
     'kind' in value &&
     value.kind === 'changed' &&
@@ -565,6 +609,7 @@ export type NativeRequest =
   | NativeExtensionsRequest
   | NativeInteractionHistoryRequest
   | NativeToolMessageRequest
+  | NativeWorkspaceChangeRequest
   | NativeFileChangeRequest
   | NativeBackgroundRequest
   | NativeSkillsRequest
@@ -856,6 +901,8 @@ export type NativeResult =
   | NativeModelUsagePage
   | NativeContextUsagePage
   | NativeFileTargetPage
+  | NativeWorkspaceChangePage
+  | NativeWorkspaceChangeDetail
   | NativeFileChangePage
   | NativeFileChangeDetail
   | NativeWorkspaceRemoval

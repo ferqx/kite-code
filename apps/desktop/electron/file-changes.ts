@@ -86,7 +86,11 @@ function resultFacts(execution: Execution) {
     after &&
     expected &&
     ['hash', 'size', 'device', 'inode'].every((key) => after[key] === expected[key])
-      ? { text: change.text as string, truncated: change.truncated as boolean }
+      ? {
+          text: change.text as string,
+          truncated: change.truncated as boolean,
+          format: change.format as 'line_diff' | 'file_content',
+        }
       : undefined;
   const output = object(object(result?.details)?.fileOutput);
   const candidate = object(output?.snapshot),
@@ -375,6 +379,7 @@ export class NativeFileChanges {
             ...(facts.path ? { path: facts.path } : {}),
             preview: facts.preview || facts.snapshot ? 'available' : 'unavailable',
             ...(facts.snapshot ? { snapshot: true } : {}),
+            ...(facts.preview ? { diff: true } : {}),
             // Reading Fork provenance does not bind another physical Workspace.
             openable:
               !!managed ||
@@ -462,13 +467,22 @@ export class NativeFileChanges {
       throw new ClientError('file_change_observation_unavailable');
     return resultFacts(execution);
   }
-  async detail(changeId: string, readId: string, offset = 0): Promise<NativeFileChangeDetail> {
+  async detail(
+    changeId: string,
+    readId: string,
+    offset = 0,
+    view?: 'diff' | 'snapshot',
+  ): Promise<NativeFileChangeDetail> {
     const entry = this.entry(changeId),
       lease = this.begin(readId, entry.scope);
     try {
       const facts = await this.original(lease, entry);
-      if (facts.snapshot) {
+      if (facts.snapshot && view !== 'diff') {
         const ref = facts.snapshot;
+        // Artifact reads currently materialize a whole body. Do not fetch an unbounded
+        // historical file merely to display its first page. The saved artifact is unchanged.
+        if (BigInt(ref.size) > 1024n * 1024n)
+          return { kind: 'fileChanges.detail', changeId, unavailableReason: 'snapshot_too_large' };
         const result = await this.client.readArtifact(
           ref.sessionId,
           {
@@ -506,7 +520,11 @@ export class NativeFileChanges {
       }
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
-      return { kind: 'fileChanges.detail', changeId, ...facts.preview };
+      return {
+        kind: 'fileChanges.detail',
+        changeId,
+        ...(view === 'snapshot' ? {} : facts.preview),
+      };
     } finally {
       this.close(readId);
     }

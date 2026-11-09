@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { AgentClient, Execution, Message } from '@kite-ai/client';
+import type { AgentClient, Execution, Json, Message } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { directoryLink } from '../../../tests/fixtures/test-filesystem';
 import { editorFileTarget } from '../electron/editor';
@@ -781,6 +781,80 @@ test.each([
     }
     expect(rejected).toBeDefined();
     expect(opened).toHaveLength(1);
+  } finally {
+    f.close();
+  }
+});
+
+test('explicit per-operation diff wins over simultaneous snapshot, while historical content stays separately readable and bounded', async () => {
+  const f = fixture();
+  try {
+    const execution = f.executions.get('execution-first')!;
+    const original = execution.result as { content: string; details: { fileChange: Json } };
+    const baseline = JSON.parse(original.content).baseline;
+    const ref = {
+      id: 'exact-snapshot',
+      size: String(baseline.size),
+      mediaType: 'text/plain',
+      scope: { kind: 'execution', id: execution.id },
+    };
+    execution.result = {
+      outcome: 'succeeded',
+      content: original.content,
+      artifactRefs: [ref],
+      details: { ...original.details, fileOutput: { path: f.path, snapshot: ref } },
+    };
+    let reads = 0;
+    f.client.readArtifact = async () => {
+      reads++;
+      return {
+        content: Buffer.from('snapshot body'),
+        reference: {
+          ...ref,
+          storeId: 'store',
+          hash: baseline.hash,
+          scope: { kind: 'execution', id: execution.id },
+        },
+      };
+    };
+    let page = await f.list(['first']);
+    expect(page.entries[0]).toMatchObject({ diff: true, snapshot: true });
+    const diff = await f.manager.detail(page.entries[0]!.changeId, 'only-diff', 0, 'diff');
+    expect(diff).toMatchObject({ text: 'SAVED_ORIGINAL_TOOL_PREVIEW', format: 'file_content' });
+    expect(diff.snapshot).toBeUndefined();
+    expect(reads).toBe(0);
+    const snapshot = await f.manager.detail(
+      page.entries[0]!.changeId,
+      'only-snapshot',
+      0,
+      'snapshot',
+    );
+    expect(snapshot).toMatchObject({ text: 'snapshot body', snapshot: true });
+    expect(reads).toBe(1);
+    // Large Artifact metadata must prevent any full-body read, not fetch then slice.
+    const huge = { ...baseline, size: 1024 * 1024 + 1 };
+    const content = JSON.stringify({ path: f.path, baseline: huge });
+    const hugeRef = { ...ref, size: String(huge.size) };
+    execution.result = {
+      outcome: 'succeeded',
+      content,
+      artifactRefs: [hugeRef],
+      details: { fileOutput: { path: f.path, snapshot: hugeRef } },
+    };
+    f.messages.get('first')!.content = content;
+    page = await f.list(['first']);
+    const omitted = await f.manager.detail(
+      page.entries[0]!.changeId,
+      'large-snapshot',
+      0,
+      'snapshot',
+    );
+    expect(omitted.unavailableReason).toBe('snapshot_too_large');
+    expect(omitted.text).toBeUndefined();
+    expect(reads).toBe(1);
+    const absent = await f.manager.detail(page.entries[0]!.changeId, 'no-diff', 0, 'diff');
+    expect(absent.text).toBeUndefined();
+    expect(reads).toBe(1);
   } finally {
     f.close();
   }

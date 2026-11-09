@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+2026-11-09 的[操作与工作区分离决定](2026-11-09-native-operation-and-workspace-diffs.md)部分取代本决定的右侧面板用途与共同前后缀预览算法；以下准确回执、历史来源、恢复和编辑器边界仍保持。
+
 迁入原共同前后缀行差异与 macOS editor leaf，继续使用原 FileChanges/FileDiff、SessionPage 与 RightSidebar。Files 在最后基线核对保存真实 preimage，确认发布内容和 FD inode 后保存中立 version1 预览；Tool 版本2与原 Model content 保持，预览仅进入通用 result.details。65536 UTF-8 byte 展示预算不变成文件 IO、Model 或 Artifact 正文上限。未知发布/捕获状态不发布成功预览，旧 receipt 缺差异明确不可读。
 
 Native Main 沿已读 Message 的唯一 source Execution，核原 Store/Session/Run、定义、succeeded 状态、resultRevision 与准确内容；Fork 只沿封存来源读取。renderer 只取得有限观察 ID，展开才读正文，文件按钮只传观察 ID 和封闭 editor 枚举。打开前再次核当前登记 Workspace、原物理根 dev/inode、普通文件、受保护范围与原 renderer frame。原来源项目不同或不能确认时保阅读，不取得当前项目打开入口。固定 `/usr/bin/open` 和独立 argv 保原宿主语义，不引入通用 shell/任意应用 bridge。

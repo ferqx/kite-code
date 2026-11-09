@@ -15,6 +15,7 @@ export type NativeFileChange = {
   openable: boolean;
   operation?: 'read' | 'write' | 'edit';
   snapshot?: boolean;
+  diff?: boolean;
 };
 export type NativeFileChangePage = {
   kind: 'fileChanges.page';
@@ -24,6 +25,8 @@ export type NativeFileChangePage = {
 };
 export type NativeFileChangeDetail = {
   kind: 'fileChanges.detail';
+  format?: 'line_diff' | 'file_content';
+  unavailableReason?: 'snapshot_too_large';
   changeId: string;
   text?: string;
   truncated?: boolean;
@@ -57,6 +60,7 @@ export type NativeFileChangeRequest =
       changeId: string;
       readId: string;
       offset?: number;
+      view?: 'diff' | 'snapshot';
     }
   | { method: 'fileChanges.close'; generation: number; readId: string }
   | { method: 'fileChanges.open'; generation: number; changeId: string; editor: DesktopEditor }

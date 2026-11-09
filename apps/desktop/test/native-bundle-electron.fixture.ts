@@ -31,14 +31,10 @@ async function openSessionTools(page: import('playwright').Page) {
 }
 
 async function readOriginalCacheMetrics(page: import('playwright').Page) {
-  await page
-    .locator('.composer-cache-rate')
-    .filter({ hasText: /^缓存 40%$/ })
-    .waitFor();
-  assert.equal(
-    await page.locator('.composer-cache-rate').getAttribute('title'),
-    '缓存命中 200 / 500 tokens',
-  );
+  const ring = page.locator('.composer-context-usage');
+  await page.locator('.composer-context-usage[aria-description*="缓存命中率 40%"]').waitFor();
+  assert((await ring.getAttribute('aria-description'))?.includes('缓存命中 200 / 500 tokens'));
+  assert.equal(await page.locator('.composer-cache-rate').count(), 0);
   const state = await page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
@@ -927,8 +923,8 @@ try {
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();
-  await page.locator('.composer-cache-rate[title="暂无缓存用量数据"]').waitFor();
-  assert.equal(await page.locator('.composer-cache-rate').innerText(), '缓存 0%');
+  await page.locator('.composer-context-usage[aria-description*="暂无缓存用量数据"]').waitFor();
+  assert.equal(await page.locator('.composer-cache-rate').count(), 0);
   const empty = await page.evaluate(
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,

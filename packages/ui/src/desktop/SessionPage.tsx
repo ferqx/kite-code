@@ -384,7 +384,7 @@ function SessionPageContent({
   }, [hostDetailsOpen, setTabsKey]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
-  const workspaceDetails = !!props.workspaceTab;
+  const workspaceDetails = !!props.workspaceTab || !!props.fileChangesContent;
   // Native child views use the same actual Panel constraints during window resize.
   const navigationSizing = {
     minSize: sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px',
@@ -777,6 +777,54 @@ function SessionPageContent({
     tabsScopeKey,
     props.loading,
     changeTabsOpen,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+  ]);
+  const changesLayout = useRef({ scope: tabsScopeKey, prepared: false });
+  if (changesLayout.current.scope !== tabsScopeKey)
+    changesLayout.current = { scope: tabsScopeKey, prepared: false };
+  const activeChanges = tabModel.tabs.some(
+    (tab) => tab.id === tabModel.active && tab.kind === 'changes',
+  );
+  const hasChangesWorkspace = !!props.fileChangesContent;
+  useEffect(() => {
+    if (
+      !hasChangesWorkspace ||
+      !activeChanges ||
+      !tabsOpen ||
+      detailsCollapsed === true ||
+      !tabsScopeKey ||
+      props.loading ||
+      props.covered ||
+      hostDetailsOpen ||
+      tabModel.restoring ||
+      tabModel.restoreIssue ||
+      changesLayout.current.prepared
+    )
+      return;
+    const frame = requestAnimationFrame(() => {
+      const panel = detailsPanel.current;
+      if (
+        !panel ||
+        panel.isCollapsed() ||
+        changesLayout.current.scope !== tabsScopeKey ||
+        changesLayout.current.prepared
+      )
+        return;
+      // Prepare the first review only. Later selection and refresh retain user sizing.
+      panel.resize('62%');
+      changesLayout.current = { scope: tabsScopeKey, prepared: true };
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    hasChangesWorkspace,
+    activeChanges,
+    tabsOpen,
+    detailsCollapsed,
+    tabsScopeKey,
+    props.loading,
+    props.covered,
+    hostDetailsOpen,
     tabModel.restoring,
     tabModel.restoreIssue,
   ]);
@@ -1301,6 +1349,8 @@ function SessionPageContent({
                   setDetailsCollapsed(collapsed);
               }}
               onLayoutChanged={(layout, meta) => {
+                if (meta.isUserInteraction && hasChangesWorkspace && activeChanges && tabsOpen)
+                  changesLayout.current = { scope: tabsScopeKey, prepared: true };
                 if (meta.isUserInteraction && rightSidebarOpen && (layout.details ?? 0) === 0)
                   closeRightSidebar();
               }}

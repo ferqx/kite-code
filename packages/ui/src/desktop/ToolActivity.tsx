@@ -959,6 +959,7 @@ export function ToolActivity({
   renderChildren,
   renderItem,
   renderImages,
+  renderFileChange,
   expandedItems,
   onToggleItem,
   childProcess = false,
@@ -985,6 +986,8 @@ export function ToolActivity({
   renderItem?: (message: Message) => ReactNode | undefined;
   /** Verified image receipts use the host's existing scoped image reader. */
   renderImages?: (message: Message) => ReactNode;
+  /** A confirmed receipt can disclose a scoped, lazy diff without preloading its body. */
+  renderFileChange?: (message: Message) => ReactNode;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
   activityId?: string;
@@ -1088,7 +1091,8 @@ export function ToolActivity({
         : messages.some((item) => traceStatus(item) === 'pending')
           ? 'pending'
           : undefined;
-  const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
+  const hasDiff =
+    edit && message.changeConfirmed && !itemIssue && (!!renderFileChange || !!message.toolResult);
   const canExpand =
     !agent &&
     !summaryOnly &&
@@ -1379,6 +1383,7 @@ export function ToolActivity({
                                   childDetail={childDetailForMessage?.(item)}
                                   renderChildren={renderChildren}
                                   renderImages={imageOnly ? undefined : renderImages}
+                                  renderFileChange={renderFileChange}
                                 />
                               ))}
                           </Fragment>
@@ -1393,7 +1398,8 @@ export function ToolActivity({
                       originalContent={unverified && children.some(Boolean) ? children : undefined}
                     />
                   )}
-                  {hasDiff && <FileDiff message={message} />}
+                  {hasDiff &&
+                    (renderFileChange ? renderFileChange(message) : <FileDiff message={message} />)}
                   {ask && (
                     <div className="tool-ask-answers">
                       {ask.cancelled || message.status === 'cancelled' ? (

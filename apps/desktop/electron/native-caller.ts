@@ -62,6 +62,7 @@ import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
 import { NativeToolMessages } from './tool-messages';
 import { NativeUserMcpSettings } from './user-mcp-settings';
+import { NativeWorkspaceChanges } from './workspace-changes';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
 
 /** Share this allocator across replacement Callers owned by the same Main. */
@@ -129,6 +130,7 @@ export class NativeCaller {
   private readonly skills: NativeSkillCatalogueReads;
   private readonly extensions: NativeExtensions;
   private readonly jobOutput: NativeJobOutputReads;
+  private readonly workspaceChanges: NativeWorkspaceChanges;
   private readonly fileChanges: NativeFileChanges;
   private readonly toolMessages: NativeToolMessages;
   private readonly interactionHistory: NativeInteractionHistoryReads;
@@ -457,6 +459,22 @@ export class NativeCaller {
         releaseFirst: (commandId) => this.requireCaller().releaseFirst(commandId),
       },
     );
+    this.workspaceChanges = new NativeWorkspaceChanges(
+      () => (this.controller.snapshot?.workspaceUnavailable ? undefined : messageScope()),
+      (id) => {
+        const observed = this.workspaceObservation;
+        return !this.observationUnavailable &&
+          observed?.generation === this.generation &&
+          observed.storeId === this.client.serverInfo?.storeId
+          ? observed.workspaces.find((workspace) => workspace.id === id)
+          : undefined;
+      },
+      protectedRoots,
+      this.processes,
+      (event) => {
+        if (!this.closed) this.emit(event);
+      },
+    );
     this.fileChanges = new NativeFileChanges(
       client,
       messageScope,
@@ -692,6 +710,7 @@ export class NativeCaller {
     this.extensions.release();
     this.jobOutput.release();
     this.fileChanges.release();
+    this.workspaceChanges.release();
     this.toolMessages.release();
     this.imageReads.release();
     this.interactionHistory.release();
@@ -887,6 +906,7 @@ export class NativeCaller {
       this.extensions.release();
       this.jobOutput.release();
       this.fileChanges.release();
+      this.workspaceChanges.release();
       this.toolMessages.release();
       this.interactionHistory.release();
       this.attachmentReads.release();
@@ -1413,6 +1433,9 @@ export class NativeCaller {
         'jobOutput.open',
         'jobOutput.next',
         'jobOutput.close',
+        'workspaceChanges.list',
+        'workspaceChanges.detail',
+        'workspaceChanges.close',
         'fileChanges.list',
         'fileTargets.list',
         'toolMessages.list',
@@ -1663,6 +1686,16 @@ export class NativeCaller {
         this.toolMessages.close(request.readId);
         result = null;
         break;
+      case 'workspaceChanges.list':
+        result = await this.workspaceChanges.list(request);
+        break;
+      case 'workspaceChanges.detail':
+        result = await this.workspaceChanges.detail(request.readId, request.changeId);
+        break;
+      case 'workspaceChanges.close':
+        this.workspaceChanges.close(request.readId);
+        result = null;
+        break;
       case 'fileChanges.list':
         result = await this.fileChanges.list(request);
         break;
@@ -1670,7 +1703,12 @@ export class NativeCaller {
         result = await this.fileChanges.list(request, true);
         break;
       case 'fileChanges.detail':
-        result = await this.fileChanges.detail(request.changeId, request.readId, request.offset);
+        result = await this.fileChanges.detail(
+          request.changeId,
+          request.readId,
+          request.offset,
+          request.view,
+        );
         break;
       case 'fileChanges.close':
         this.fileChanges.close(request.readId);

@@ -94,7 +94,7 @@ import {
 import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
-import { NativeFileChanges, NativeOutputFile } from './native-file-changes';
+import { NativeOperationDiff, NativeOutputFile } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { useNativeFileTargets } from './native-file-targets';
 import { confirmNativeFullPermission } from './native-full-permission-confirmation';
@@ -151,6 +151,7 @@ import { NativeTranscriptDisplay } from './native-transcript-display';
 import { useNativeTurnNotifications } from './native-turn-notifications';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
+import { NativeWorkspaceChanges } from './native-workspace-changes';
 import {
   isNativeWorktreeExitCommand,
   resolveNativeWorktreeExit,
@@ -1230,6 +1231,7 @@ function NativeDesktopContent({
     let alive = true;
     const startupEpoch = readLifecycle.current.epoch;
     const unwatch = bridge.watch((event) => {
+      if (event.kind === 'workspaceChanges.changed') return;
       if (!alive) return;
       if (event.kind === 'lifecycle') {
         const quitting = event.phase === 'quitting';
@@ -4581,6 +4583,7 @@ function NativeDesktopContent({
             arguments: { path: target.path },
             status: 'completed' as const,
             settled: true,
+            changeConfirmed: target.operation !== 'read',
           }
         : model;
     });
@@ -4603,6 +4606,18 @@ function NativeDesktopContent({
           }
           renderChildren={() => null}
           renderImages={renderToolImages}
+          renderFileChange={(model) => {
+            const entry = displayTargets.find((entry) => entry.messageId === model.id);
+            return entry && state ? (
+              <NativeOperationDiff
+                key={entry.changeId}
+                bridge={bridge}
+                generation={state.generation}
+                entry={entry}
+                editor={editor}
+              />
+            ) : null;
+          }}
           openFileForMessage={(model) => {
             const target = displayTargets.find((entry) => entry.messageId === model.id);
             if (
@@ -5044,14 +5059,11 @@ function NativeDesktopContent({
       )}
       fileChangesContent={
         !preparing && !scheduledTasksView && selection ? (
-          <NativeFileChanges
+          <NativeWorkspaceChanges
+            refreshKey={`${state?.historyEpoch ?? 0}:${messages.at(-1)?.id ?? ''}:${messages.at(-1)?.status ?? ''}`}
             bridge={bridge}
             generation={state?.generation ?? generation.current}
             selection={selection}
-            historyEpoch={state?.historyEpoch ?? 0}
-            messages={messages}
-            historyComplete={historyState.phase === 'complete'}
-            editor={editor}
           />
         ) : undefined
       }

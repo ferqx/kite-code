@@ -621,3 +621,11 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 提示词文字区域左右内边距为16px、上方为8px，底部工具栏沿原内边距排列。
 
 上下文总量按1024换算为大写K／M显示，例如262144 tokens显示为256K；上下文估算数量也采用相同换算，比例计算和无障碍描述保留原始token数。
+
+### 文件差异的按需与有界显示
+
+共享 [ToolActivity](src/desktop/ToolActivity.tsx)允许宿主对已确认的文件变更提供 `renderFileChange`，只在该工具展开时挂载，聚合内沿同一槽传递；不为失败／未知工具建立成功diff。[FileDiff](src/desktop/FileChanges.tsx)默认双栏，可切换统一视图，使用真实行号、轻量语法色、低饱和增删底色与空侧纹理；[模型](src/desktop/file-diff-model.ts)只解析原操作预览或标准Git patch，不读磁盘、不重建缺失内容。操作上下文未提供旧侧行号时留空，未知格式保留原文。计数明确为预览增删，不能当作整个文件或仓库统计；已保留的连续上下文可折叠／展开，后端省略的行明确不可展开。
+
+解析最多64 KiB／400行，每行最多2048个UTF-16单元，裁剪保持代理对。轻量词法着色每行最多48个着色token、整份最多1024个着色token，另有每行纯文本回退；双栏复用模型且最多生成2048个着色span；长行或预算用尽时回退纯文本，不加载异步语言包。切换布局和折叠不重读正文，一个ScrollArea同时滚动两侧，保留Home／End交接；不为每行建立滚动器。`layout/onLayoutChange`可由宿主管理，文件切换清除旧折叠，宿主可保留当前视图布局选择。[独立样式](src/desktop/file-diff.css)由style.css导入，正式UI构建同时复制该文件。
+
+原SessionPage中的宿主变更工作区允许右栏扩至85%，首次可见变更页按62%准备阅读宽度；同scope后续选择、刷新和重开保留用户宽度，用户先自行调整时不再覆盖，关闭／切scope／覆盖会取消未执行的尺寸操作。这些最小／最大尺寸属于共享右栏，因此同宿主中的浏览器和子页沿用该范围；62%的首次尺寸准备只针对变更页，不主动调整其他页。没有宿主变更内容的浏览器右栏仍为300px／640px约束。[布局回归](test/isolated/desktop-changes-layout.test.tsx)、[解析回归](test/desktop-file-diff-model.test.ts)和[差异滚动回归](test/isolated/desktop-file-diff-scroll.test.tsx)分别负责宿主布局、有限模型与阅读交接。历史来源、Git状态、取消及实际窗口资格归[Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。
