@@ -588,7 +588,8 @@ body {
     width: 100%;
     text-align: left;
     margin-bottom: 2px;
-    padding: 4px 10px 4px 26px;
+    /* Match the workspace label: 10px inset, icon width, then a 10px gap. */
+    padding: 4px 10px 4px calc(20px + var(--ui-icon-size));
     border: 0;
     background: transparent;
     border-radius: var(--button-radius);

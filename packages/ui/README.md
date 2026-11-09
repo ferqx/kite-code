@@ -16,7 +16,9 @@ Shell 活动摘要采用原调用的可选 description，省略时沿用命令�
 
 同一会话行接受宿主确认的 `SessionSummary.hasCreatedWorktree`，在右侧显示14px Git 分支图标，并在无障碍描述与原悬浮提示中说明“已创建 Git 工作树”；它与运行中、待输入及未读标记并存。UI 不自行检查目录或读取工具正文，字段缺失时不显示；[Sidebar 回归](test/isolated/desktop-sidebar-render.test.tsx)核对标记接管、原节点保留与状态共存。历史事实及持久读取由[Native owner](../../apps/desktop/README.md#native-项目会话目录)和其上游负责。
 
-会话行的运行中与等待执行 Spinner 和空间操作图标在[共享样式](src/desktop/style.css)中统一消费 `--ui-icon-size`（14px）；会话 Spinner 单独使用2.4秒一圈的匀速动画，其他加载位置沿用原速度。
+会话行的运行中与等待执行 Spinner 和空间操作图标在[共享样式](src/desktop/style.css)中统一消费 `--ui-icon-size`（14px）；会话 Spinner 单独使用2.4秒一圈的匀速动画，其他加载位置沿用原速度。会话标题的左缩进按空间行的10px内边距、图标宽度与10px间距计算，与空间名称左缘对齐；选中背景仍覆盖整行。
+
+2026-11-09，Windows x64／Bun1.4.4，`e8a483d65`加会话缩进修复：两份侧栏完整回归14项／393断言、定向Biome、隔离Native生产样式编译及文档检查通过。用户截图中的旧26px缩进改为34px，与空间行文字起点一致。IAB连接本机服务超时，本机Chrome观察因工具无法可靠识别当前URL而中止，修后实际外观及折叠／切换全过程尚未验收；不以DOM回归或编译结果代替实机结论。
 
 应用确认框另有公开的 `@kite-ai/ui/desktop/confirmation` [专用入口](src/desktop/confirmation.ts)，只重新导出原 `ApplicationConfirmationDialog` 与 Full 确认组件；[Desktop 构建](scripts/build-desktop.ts)同步产出 `confirmation.js`。固定确认页面无需通过桌面总出口加载会话 Markdown／公式／高亮初始化，确认文案、样式、焦点与决定准入仍由原组件和宿主负责。共享加载动画 `conversation-loading-shimmer` 的关键帧位于顶层，保留原动画参数与减少动态效果覆盖，避免生产 CSS 优化器拒绝嵌套关键帧。
 
