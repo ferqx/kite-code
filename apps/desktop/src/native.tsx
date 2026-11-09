@@ -301,7 +301,6 @@ function NativeDesktopContent({
   const [settingsToastHost, setSettingsToastHost] = useState<HTMLDivElement | null>(null);
   const settingsEditorControl = useRef<{ close: () => void } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [grantDirectoryOpen, setGrantDirectoryOpen] = useState(false);
   const [agentBrowserOpen, setAgentBrowserOpen] = useState(false);
   const [agentBrowserRequest, setAgentBrowserRequest] = useState(0);
   const [browserLeaseRestore, setBrowserLeaseRestore] = useState(0);
@@ -320,14 +319,6 @@ function NativeDesktopContent({
     preview?: CachedComposer;
   }>({ draft: '', preparation: false });
   const { state, draft, models: preparedModels } = frame;
-  const grantDirectoryScope = useRef<string | undefined>(undefined);
-  const currentGrantScope = state?.selection
-    ? `${state.selection.storeId}/${state.selection.session.id}`
-    : undefined;
-  useEffect(() => {
-    if (grantDirectoryScope.current !== currentGrantScope) setGrantDirectoryOpen(false);
-    grantDirectoryScope.current = currentGrantScope;
-  }, [currentGrantScope]);
   function setPreparing(value: boolean) {
     setPreparingIntent(value);
     if (value)
@@ -926,7 +917,6 @@ function NativeDesktopContent({
   }
   async function select(sessionId: string, keepCurrentDraft = true, keepTaskPage = false) {
     if (!bridge || readLifecycle.current.quitting) return;
-    setGrantDirectoryOpen(false);
     setAgentBrowserOpen(false);
     if (keepCurrentDraft) rememberDraft();
     const target = directory?.sessions.find(
@@ -5289,6 +5279,7 @@ function NativeDesktopContent({
               onSend: () => {},
               onCancel: () => {},
               inputLabel: '当前会话私有草稿',
+              inputPlaceholder: '输入新的想法',
               onFileReferences: () => [],
               onFilesSelected: () => {},
               onImageFiles: () => {},
@@ -5526,18 +5517,12 @@ function NativeDesktopContent({
                     displayedPermission || (selection.viewLoading && !hasPermissionDisplay)
                       ? changeCurrentPermission
                       : undefined,
-                  onPermissionGrants: selection.canReadPermissionGrants
-                    ? () => {
-                        setToolsOpen(false);
-                        setGrantDirectoryOpen(true);
-                        setGrantFacts(undefined);
-                      }
-                    : undefined,
                   sendDisabled:
                     sendContentBlocked ||
                     (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
                     historyState.phase === 'unavailable',
                   inputLabel: '当前会话私有草稿',
+                  inputPlaceholder: '输入新的想法',
                   sendLabel: currentSendLabel,
                   options: (
                     <>
@@ -5751,164 +5736,147 @@ function NativeDesktopContent({
           : undefined
       }
       overlays={
-        <>
-          <Dialog open={grantDirectoryOpen} onOpenChange={setGrantDirectoryOpen}>
-            <DialogContent className="max-h-[80dvh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>当前会话授权</DialogTitle>
-                <DialogDescription>
-                  读取当前会话的授权范围，核对来源与版本后清除。
-                </DialogDescription>
-              </DialogHeader>
-              <div className="min-w-0 [overflow-wrap:anywhere] [&_pre]:whitespace-pre-wrap">
-                {renderPermissionGrants()}
-              </div>
-            </DialogContent>
-          </Dialog>
-          <Dialog
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
-          >
-            <DialogContent
-              ref={setSettingsToastHost}
-              portalled={false}
-              className="desktop-settings-dialog translate-x-0 translate-y-0"
-              style={
-                {
-                  '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
-                  '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
-                } as CSSProperties
-              }
-              showCloseButton={false}
-              showOverlay={false}
-              onEscapeKeyDown={(event) => {
-                if (settingsEditorControl.current) {
-                  event.preventDefault();
-                  settingsEditorControl.current.close();
-                }
-              }}
-              onInteractOutside={(event) => {
-                // Full-page settings closes through navigation or Escape. A nested
-                // Select can temporarily retarget a double-click or focus to the document.
+        <Dialog
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          modal={!(nativeWindow && document.documentElement.dataset.platform === 'windows')}
+        >
+          <DialogContent
+            ref={setSettingsToastHost}
+            portalled={false}
+            className="desktop-settings-dialog translate-x-0 translate-y-0"
+            style={
+              {
+                '--navigation-min-width': `${NAVIGATION_MIN_WIDTH}px`,
+                '--right-sidebar-form-width': `${RIGHT_SIDEBAR_FORM_DEFAULT_WIDTH}px`,
+              } as CSSProperties
+            }
+            showCloseButton={false}
+            showOverlay={false}
+            onEscapeKeyDown={(event) => {
+              if (settingsEditorControl.current) {
                 event.preventDefault();
-                if (event.detail.originalEvent.type === 'pointerdown')
-                  event.detail.originalEvent.preventDefault();
-              }}
-            >
-              <DialogHeader className="desktop-settings-header">
-                <DialogTitle>设置</DialogTitle>
-                <DialogDescription className="sr-only">
-                  配置模型、提供商与扩展能力
-                </DialogDescription>
-              </DialogHeader>
-              <div className="settings settings-layout desktop-settings">
-                <aside className="settings-sidebar">
-                  <nav aria-label="设置分类">
-                    <DesktopButton
-                      type="button"
-                      variant="ghost"
-                      className="settings-back"
-                      onClick={() => setSettingsOpen(false)}
-                    >
-                      <SettingsNavigationIcon name="back" />
-                      <span>返回应用</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'general'}
-                      onClick={() => setSettingsPage('general')}
-                    >
-                      <SettingsNavigationIcon name="general" />
-                      <span>常规</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'providers'}
-                      onClick={() => setSettingsPage('providers')}
-                    >
-                      <SettingsNavigationIcon name="providers" />
-                      <span>提供商与模型</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'mcp'}
-                      onClick={() => setSettingsPage('mcp')}
-                    >
-                      <SettingsNavigationIcon name="mcp" />
-                      <span>MCP</span>
-                    </DesktopButton>
-                    <DesktopButton
-                      variant="ghost"
-                      type="button"
-                      aria-pressed={settingsPage === 'skills'}
-                      onClick={() => setSettingsPage('skills')}
-                    >
-                      <SettingsNavigationIcon name="skills" />
-                      <span>Skills</span>
-                    </DesktopButton>
-                  </nav>{' '}
-                </aside>
-                <div className="client-content-frame settings-content-frame">
-                  <div className="settings-content-panels">
-                    <div className="settings-content">
-                      {settingsPage === 'general' ? (
-                        <NativeGeneralSettings
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory?.storeId}
-                          selection={!preparing ? selection : undefined}
-                          revision={settingsRevision}
-                          editor={editor}
-                          onEditorChange={setEditor}
-                        />
-                      ) : settingsPage === 'skills' ? (
-                        <NativeSkillsSettings
-                          panelHost={settingsEditorHost}
-                          editorControl={settingsEditorControl}
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory?.storeId}
-                        />
-                      ) : settingsPage === 'mcp' ? (
-                        <NativeMcpSettings
-                          panelHost={settingsEditorHost}
-                          editorControl={settingsEditorControl}
-                          bridge={bridge}
-                          generation={generation.current}
-                          storeId={directory?.storeId}
-                          submissions={state?.userMcpSubmissions ?? []}
-                        />
-                      ) : (
-                        <NativeProviderModelSettings
-                          key={JSON.stringify([
-                            generation.current,
-                            directory?.storeId,
-                            selection?.session.id,
-                            selection?.viewSelection,
-                          ])}
-                          panelHost={settingsEditorHost}
-                          editorControl={settingsEditorControl}
-                          bridge={bridge}
-                          generation={generation.current}
-                          selection={selection}
-                          storeId={directory?.storeId}
-                          providerSubmissions={state?.providerSettingsSubmissions ?? []}
-                          modelSubmissions={state?.modelSettingsSubmissions ?? []}
-                          onSaved={() => setSettingsRevision((value) => value + 1)}
-                        />
-                      )}
-                    </div>
-                    <div className="settings-editor-panel" ref={setSettingsEditorHost} />
+                settingsEditorControl.current.close();
+              }
+            }}
+            onInteractOutside={(event) => {
+              // Full-page settings closes through navigation or Escape. A nested
+              // Select can temporarily retarget a double-click or focus to the document.
+              event.preventDefault();
+              if (event.detail.originalEvent.type === 'pointerdown')
+                event.detail.originalEvent.preventDefault();
+            }}
+          >
+            <DialogHeader className="desktop-settings-header">
+              <DialogTitle>设置</DialogTitle>
+              <DialogDescription className="sr-only">配置模型、提供商与扩展能力</DialogDescription>
+            </DialogHeader>
+            <div className="settings settings-layout desktop-settings">
+              <aside className="settings-sidebar">
+                <nav aria-label="设置分类">
+                  <DesktopButton
+                    type="button"
+                    variant="ghost"
+                    className="settings-back"
+                    onClick={() => setSettingsOpen(false)}
+                  >
+                    <SettingsNavigationIcon name="back" />
+                    <span>返回应用</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'general'}
+                    onClick={() => setSettingsPage('general')}
+                  >
+                    <SettingsNavigationIcon name="general" />
+                    <span>常规</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'providers'}
+                    onClick={() => setSettingsPage('providers')}
+                  >
+                    <SettingsNavigationIcon name="providers" />
+                    <span>提供商与模型</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'mcp'}
+                    onClick={() => setSettingsPage('mcp')}
+                  >
+                    <SettingsNavigationIcon name="mcp" />
+                    <span>MCP</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
+                    aria-pressed={settingsPage === 'skills'}
+                    onClick={() => setSettingsPage('skills')}
+                  >
+                    <SettingsNavigationIcon name="skills" />
+                    <span>Skills</span>
+                  </DesktopButton>
+                </nav>{' '}
+              </aside>
+              <div className="client-content-frame settings-content-frame">
+                <div className="settings-content-panels">
+                  <div className="settings-content">
+                    {settingsPage === 'general' ? (
+                      <NativeGeneralSettings
+                        bridge={bridge}
+                        generation={generation.current}
+                        storeId={directory?.storeId}
+                        selection={!preparing ? selection : undefined}
+                        revision={settingsRevision}
+                        editor={editor}
+                        onEditorChange={setEditor}
+                      />
+                    ) : settingsPage === 'skills' ? (
+                      <NativeSkillsSettings
+                        panelHost={settingsEditorHost}
+                        editorControl={settingsEditorControl}
+                        bridge={bridge}
+                        generation={generation.current}
+                        storeId={directory?.storeId}
+                      />
+                    ) : settingsPage === 'mcp' ? (
+                      <NativeMcpSettings
+                        panelHost={settingsEditorHost}
+                        editorControl={settingsEditorControl}
+                        bridge={bridge}
+                        generation={generation.current}
+                        storeId={directory?.storeId}
+                        submissions={state?.userMcpSubmissions ?? []}
+                      />
+                    ) : (
+                      <NativeProviderModelSettings
+                        key={JSON.stringify([
+                          generation.current,
+                          directory?.storeId,
+                          selection?.session.id,
+                          selection?.viewSelection,
+                        ])}
+                        panelHost={settingsEditorHost}
+                        editorControl={settingsEditorControl}
+                        bridge={bridge}
+                        generation={generation.current}
+                        selection={selection}
+                        storeId={directory?.storeId}
+                        providerSubmissions={state?.providerSettingsSubmissions ?? []}
+                        modelSubmissions={state?.modelSettingsSubmissions ?? []}
+                        onSaved={() => setSettingsRevision((value) => value + 1)}
+                      />
+                    )}
                   </div>
+                  <div className="settings-editor-panel" ref={setSettingsEditorHost} />
                 </div>
               </div>
-            </DialogContent>
-          </Dialog>
-        </>
+            </div>
+          </DialogContent>
+        </Dialog>
       }
     />,
   );

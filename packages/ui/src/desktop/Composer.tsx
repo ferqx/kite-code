@@ -1,6 +1,5 @@
 import {
   Add01Icon,
-  ArrowDown01Icon,
   ArrowUp02Icon,
   Attachment01Icon,
   Cancel01Icon,
@@ -46,10 +45,12 @@ import { QueuedMessages, type QueuedMessagesProps } from './QueuedMessages';
 import { ReadGate } from './ReadGate';
 import { Button } from './ui';
 
-const contextTokenFormat = new Intl.NumberFormat('en-US', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
+const capacityNumberFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+function formatTokenQuantity(tokens: number): string {
+  if (tokens >= 1024 * 1024) return `${capacityNumberFormat.format(tokens / (1024 * 1024))}M`;
+  if (tokens >= 1024) return `${capacityNumberFormat.format(tokens / 1024)}K`;
+  return capacityNumberFormat.format(tokens);
+}
 
 const ShieldTerminalIcon: ComponentProps<typeof HugeiconsIcon>['icon'] = [
   ...Shield01Icon,
@@ -78,7 +79,6 @@ const permissionCopy = {
     placeholder: '审核方式',
     heading: '如何处理操作请求？',
     helper: '为当前对话选择审批方式',
-    grants: '当前会话授权',
     accept_edits: {
       label: '请求批准',
       menuLabel: '请求批准',
@@ -100,7 +100,6 @@ const permissionCopy = {
     placeholder: 'Approval mode',
     heading: 'How should actions be approved?',
     helper: 'Choose an approval mode for this conversation',
-    grants: 'Current session grants',
     accept_edits: {
       label: 'Request Approval',
       menuLabel: 'Request Approval',
@@ -150,6 +149,7 @@ export interface ComposerProps {
   contextHasInput?: boolean;
   options?: ReactNode;
   inputLabel?: string;
+  inputPlaceholder?: string;
   sendLabel?: string;
   sendDisabled?: boolean;
   /** Scope handoff and read freshness are independent of business availability. */
@@ -177,7 +177,6 @@ export interface ComposerProps {
     language: 'zh' | 'en';
     signal: AbortSignal;
   }) => Promise<boolean>;
-  onPermissionGrants?: () => void;
   permissionDisabled?: boolean;
   permissionPending?: boolean;
   sessionLoading?: boolean;
@@ -501,6 +500,12 @@ export function Composer(props: ComposerProps) {
       !props.files?.length &&
       !props.contextHasInput) ||
       props.stopping);
+  const cacheDescription =
+    cacheHitPercentage === undefined
+      ? props.metricsLoading
+        ? '正在读取缓存用量'
+        : '暂无缓存用量数据'
+      : `缓存命中率 ${cacheHitPercentage}%，缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`;
   const permissionControl = (props.permission || props.sessionLoading) &&
     props.onPermissionChange && (
       <DropdownMenu
@@ -541,7 +546,6 @@ export function Composer(props: ComposerProps) {
               }
             />
             <span>{permissionLabel}</span>
-            <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
           </ShadcnButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -602,14 +606,6 @@ export function Composer(props: ComposerProps) {
               ))}
             </DropdownMenuGroup>
           </DropdownMenuRadioGroup>
-          {props.onPermissionGrants && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => current.current.onPermissionGrants?.()}>
-                {permissionText.grants}
-              </DropdownMenuItem>
-            </>
-          )}
         </DropdownMenuContent>
       </DropdownMenu>
     );
@@ -763,6 +759,7 @@ export function Composer(props: ComposerProps) {
           value={props.draft}
           scopeKey={props.scopeKey ?? 'composer'}
           label={props.inputLabel ?? '任务输入'}
+          placeholder={props.inputPlaceholder}
           disabled={props.disabled && !props.sending}
           onChange={props.onChange}
           onSend={() => {
@@ -850,6 +847,9 @@ export function Composer(props: ComposerProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {permissionControl}
+          </div>
+          <div className="composer-trailing">
             {props.options}
             {props.onModelChange && props.models?.length ? (
               <ModelEffortSelector
@@ -864,25 +864,10 @@ export function Composer(props: ComposerProps) {
               <Button className="ghost model-button" onClick={props.onSettings}>
                 {props.model?.name || '配置模型'}
               </Button>
-            ) : (
-              <span>{props.model?.name}</span>
-            )}
-            {permissionControl}
-          </div>
-          <div className="composer-trailing">
+            ) : props.model?.name ? (
+              <span>{props.model.name}</span>
+            ) : null}
             <div className="composer-metrics" aria-busy={props.metricsLoading || undefined}>
-              <span
-                className="composer-cache-rate"
-                title={
-                  cacheHitPercentage === undefined
-                    ? props.metricsLoading
-                      ? '正在读取缓存用量'
-                      : '暂无缓存用量数据'
-                    : `缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`
-                }
-              >
-                {`缓存 ${cacheHitPercentage ?? 0}%`}
-              </span>
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -902,7 +887,7 @@ export function Composer(props: ComposerProps) {
                       aria-description={
                         props.metricsLoading
                           ? undefined
-                          : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens`
+                          : `上下文估算 ${contextTokens ?? '未知'} / ${contextWindowTokens ?? '未知'} tokens；${cacheDescription}`
                       }
                     >
                       <circle className="composer-context-track" cx="8" cy="8" r="6" />
@@ -927,20 +912,45 @@ export function Composer(props: ComposerProps) {
                       sideOffset={8}
                       collisionPadding={12}
                     >
-                      <span>上下文窗口</span>
-                      <span>
-                        {contextPercentage === undefined
-                          ? '占用比例未知'
-                          : `约 ${contextPercentage}% 已用`}
-                      </span>
-                      <span>
-                        {contextTokens === undefined
-                          ? '已用未知，'
-                          : `已用 ${contextTokenFormat.format(contextTokens).toLowerCase()} 标记，`}
-                        {contextWindowTokens === undefined
-                          ? '总量未知'
-                          : `共 ${contextTokenFormat.format(contextWindowTokens).toLowerCase()}`}
-                      </span>
+                      <div className="composer-context-section">
+                        <div className="composer-context-heading">
+                          <span>上下文占用</span>
+                          <strong>
+                            {contextPercentage === undefined ? '未知' : `约 ${contextPercentage}%`}
+                          </strong>
+                        </div>
+                        {contextPercentage !== undefined && (
+                          <div className="composer-context-meter" aria-hidden="true">
+                            <span style={{ width: `${Math.min(contextPercentage, 100)}%` }} />
+                          </div>
+                        )}
+                        <div className="composer-context-detail">
+                          估算{' '}
+                          {contextTokens === undefined
+                            ? '未知'
+                            : formatTokenQuantity(contextTokens)}
+                          {' / 总量 '}
+                          {contextWindowTokens === undefined
+                            ? '未知'
+                            : formatTokenQuantity(contextWindowTokens)}
+                          {' tokens'}
+                        </div>
+                      </div>
+                      <div className="composer-context-section">
+                        <div className="composer-context-heading">
+                          <span>缓存命中率</span>
+                          <strong>
+                            {cacheHitPercentage === undefined
+                              ? '暂无数据'
+                              : `${cacheHitPercentage}%`}
+                          </strong>
+                        </div>
+                        <div className="composer-context-detail">
+                          {cacheHitPercentage === undefined
+                            ? '暂无缓存用量数据'
+                            : `累计命中 ${formatTokenQuantity(props.cacheMetrics!.cacheHitTokens)} / 输入 ${formatTokenQuantity(cacheTokenTotal)} tokens`}
+                        </div>
+                      </div>
                     </TooltipContent>
                   )}
                 </Tooltip>

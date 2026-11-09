@@ -120,10 +120,19 @@ try {
   const navigationOnly = process.argv.includes('--worktree-navigation');
   const modelsOnly = process.argv.includes('--model-navigation');
   const composerOnly = process.argv.includes('--composer-handoff');
+  const layoutOnly = process.argv.includes('--composer-layout');
+  const menuOnly = process.argv.includes('--composer-menu');
   const auditOnly = process.argv.includes('--session-audit');
   const sidebarOnly = process.argv.includes('--sidebar-actions');
   const focused =
-    worktreeOnly || navigationOnly || modelsOnly || composerOnly || auditOnly || sidebarOnly;
+    worktreeOnly ||
+    navigationOnly ||
+    modelsOnly ||
+    composerOnly ||
+    layoutOnly ||
+    menuOnly ||
+    auditOnly ||
+    sidebarOnly;
   if (sidebarOnly || !focused)
     report.cases.push(...(await verifySidebarActions(browser, server.url.toString(), artifact)));
   if (auditOnly) {
@@ -143,6 +152,113 @@ try {
       )),
     );
     report.cases.push(...(await verifyComposerHandoff(browser, server.url.toString(), artifact)));
+  }
+  if (menuOnly) {
+    for (const theme of ['light', 'dark'] as const) {
+      for (const width of [500, 1440]) {
+        const page = await browser.newPage({
+          viewport: { width, height: 900 },
+          colorScheme: theme,
+          locale: 'zh-CN',
+        });
+        const errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        await page.goto(`${server.url.toString()}?metrics=${width === 500 ? 'cache' : 'both'}`);
+        const permission = page.locator('[data-permission-trigger]');
+        await page.waitForFunction(
+          () =>
+            !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled &&
+            !!document.querySelector('[data-permission-trigger]'),
+        );
+        await page.locator('.prompt-editor').fill('');
+        assert.equal(
+          await page.locator('.prompt-editor').getAttribute('placeholder'),
+          '输入新的想法',
+        );
+        await page.screenshot({ path: path.join(artifact, `${theme}-${width}-input.png`) });
+        const model = page.locator('[data-model-trigger]');
+        const spacing = await page.evaluate(() => {
+          const model = document.querySelector('[data-model-trigger]')!.getBoundingClientRect();
+          const ring = document.querySelector('.composer-context-usage')!.getBoundingClientRect();
+          return ring.left - model.right;
+        });
+        assert(Math.abs(spacing - 8) < 0.5, 'model-to-context gap is 8px');
+        await model.click();
+        const popover = page.locator('.model-effort-popover');
+        await popover.waitFor();
+        assert.equal(await popover.getAttribute('data-side'), 'top');
+        assert.equal(await popover.getAttribute('data-align'), 'center');
+        await page.waitForFunction(() => {
+          const trigger = document.querySelector('[data-model-trigger]')!.getBoundingClientRect();
+          const panel = document.querySelector('.model-effort-popover')!.getBoundingClientRect();
+          const desired = trigger.x + trigger.width / 2 - panel.width / 2;
+          return (
+            panel.x >= 11 &&
+            panel.right <= innerWidth - 11 &&
+            (desired < 12 ||
+              desired + panel.width > innerWidth - 12 ||
+              Math.abs(desired - panel.x) < 1)
+          );
+        });
+        await page.evaluate(async () => {
+          const panel = document.querySelector('.model-effort-popover')!;
+          await Promise.all(
+            panel
+              .getAnimations({ subtree: true })
+              .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+              .map((animation) => animation.finished.catch(() => {})),
+          );
+        });
+        await page.screenshot({
+          path: path.join(artifact, `${theme}-${width}-model-top-center.png`),
+        });
+        await page.keyboard.press('Escape');
+        await popover.waitFor({ state: 'hidden' });
+        await permission.click();
+        await page.getByRole('menu').waitFor();
+        assert.equal(await page.getByRole('menuitemradio').count(), 3);
+        assert.equal(
+          await page.getByRole('menuitem', { name: /当前会话授权|Current session grants/ }).count(),
+          0,
+        );
+        await page.screenshot({
+          path: path.join(artifact, `${theme}-${width}-permission-open.png`),
+        });
+        await page.keyboard.press('Escape');
+        await page.getByRole('menu').waitFor({ state: 'hidden' });
+        await page.locator('.composer-context-usage').hover();
+        await page.getByRole('tooltip').waitFor();
+        assert.equal(
+          await page.getByRole('tooltip').locator('.composer-context-section').count(),
+          2,
+        );
+        assert((await page.getByRole('tooltip').textContent())?.includes('缓存命中率'));
+        assert((await page.getByRole('tooltip').textContent())?.includes('上下文占用'));
+        assert.equal(
+          await page.getByRole('tooltip').locator('.composer-context-meter').count(),
+          width === 500 ? 0 : 1,
+        );
+        await page.screenshot({ path: path.join(artifact, `${theme}-${width}-context-hover.png`) });
+        await page.mouse.move(Math.floor(width / 2), 400, { steps: 10 });
+        await page.getByRole('tooltip').waitFor({ state: 'hidden' });
+        assert.equal(await page.locator('.prompt-editor').inputValue(), '');
+        assert.deepEqual(errors, []);
+        report.cases.push({
+          theme,
+          width,
+          menu: 'three modes only',
+          modelGap: spacing,
+          modelAlign: 'top-center',
+          errors,
+        });
+        await page.close();
+      }
+    }
+  }
+  if (layoutOnly) {
+    report.cases.push(
+      ...(await verifyColdSessionToolbarWidth(browser, server.url.toString(), artifact)),
+    );
   }
   if (composerOnly) {
     report.cases.push(...(await verifyComposerHandoff(browser, server.url.toString(), artifact)));
@@ -212,7 +328,7 @@ try {
         editor: '.composer [role="textbox"]',
         permission: '[data-permission-trigger]',
         model: '[data-model-trigger]',
-        rate: '.composer-cache-rate',
+        rate: '.composer-context-usage',
         action: '.composer-actions button',
         attach: '.composer-attach',
         environment: '.environment-information',
@@ -619,15 +735,19 @@ try {
       themes: 2,
       ...(sidebarOnly
         ? { sidebarActionCases: report.cases.length }
-        : auditOnly
-          ? { sessionAuditCases: report.cases.length }
-          : composerOnly
-            ? { composerHandoffCases: report.cases.length }
-            : modelsOnly
-              ? { modelNavigationCases: report.cases.length }
-              : focused
-                ? { worktreeCases: report.cases.length }
-                : { switches: 200, heldFrames: 192 }),
+        : layoutOnly
+          ? { composerLayoutCases: report.cases.length }
+          : menuOnly
+            ? { permissionMenuCases: report.cases.length }
+            : auditOnly
+              ? { sessionAuditCases: report.cases.length }
+              : composerOnly
+                ? { composerHandoffCases: report.cases.length }
+                : modelsOnly
+                  ? { modelNavigationCases: report.cases.length }
+                  : focused
+                    ? { worktreeCases: report.cases.length }
+                    : { switches: 200, heldFrames: 192 }),
       artifact,
     }),
   );

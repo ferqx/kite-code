@@ -17,7 +17,7 @@ const finish = {
 for (const mode of ['run', 'step'] as const)
   test(`context forecast uses the captured ${mode} result presentation or explicitly declines, including cold reads`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-presentation-estimate-')));
-    const profile = { dataRoot: root, profile: 'test' };
+    const profile = { dataRoot: join(root, 'data'), profile: 'test' };
     let store = await openSqliteStore(profile);
     const scope = {
       expectedStoreId: (await store.getMetadata()).storeId,
@@ -178,3 +178,89 @@ for (const mode of ['run', 'step'] as const)
       rmSync(root, { recursive: true, force: true });
     }
   }, 20000);
+
+test('a completed plain reply remains estimable when an unused captured formatter is no longer registered', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-unused-presentation-estimate-')));
+  const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+  let store = await openSqliteStore(profile);
+  const scope = {
+    expectedStoreId: (await store.getMetadata()).storeId,
+    sessionId: 's',
+    subjectId: 'owner',
+  };
+  let modelCalls = 0,
+    toolCalls = 0,
+    resolutions = 0;
+  let requestId = '';
+  const model: ModelAdapter = {
+    async *stream(request) {
+      modelCalls++;
+      requestId = request.requestId;
+      yield { type: 'text_delta', text: 'Hello.' };
+      yield finish;
+    },
+  };
+  const tool: ToolDefinition = {
+    id: 'unused',
+    version: '1',
+    description: 'unused',
+    inputSchema: { type: 'object' },
+    model: { name: 'unused', resultVersion: '1' },
+    formatModelResult: () => 'SHORT',
+    async execute() {
+      toolCalls++;
+      return { outcome: 'succeeded', content: 'unused' };
+    },
+  };
+  const permissions = { authorize: async () => ({ allowed: true, revision: 'owned' }) };
+  let runtime = createRuntime({
+    store,
+    model,
+    modelId: 'fixed',
+    permissions,
+    resolveRunConfiguration: async () => {
+      resolutions++;
+      return {
+        model,
+        modelId: 'fixed',
+        snapshot: {},
+        extensions: [{ id: 'owned', version: '1', apiMajor: 1, tools: [tool] }],
+      };
+    },
+  });
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId: scope.expectedStoreId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
+    await runtime.createSession({
+      ...scope,
+      commandId: 'create',
+      workspaceId: 'w',
+      title: 'greeting',
+    });
+    await runtime.submitCommand({
+      ...scope,
+      commandId: 'start',
+      request: { kind: 'run.start', content: 'Hello.' },
+    });
+    await runtime.waitForCommand('start', { timeoutMs: 10000 });
+    const before = { modelCalls, toolCalls, resolutions };
+    expect(
+      (await runtime.readContextEstimate({ ...scope, executionId: requestId })).totalInputTokens,
+    ).toBeGreaterThan(0);
+    expect({ modelCalls, toolCalls, resolutions }).toEqual(before);
+    await runtime.close();
+    store = await openSqliteStore(profile);
+    runtime = createRuntime({ store, model, modelId: 'fixed', permissions });
+    expect(
+      (await runtime.readContextEstimate({ ...scope, executionId: requestId })).totalInputTokens,
+    ).toBeGreaterThan(0);
+    expect({ modelCalls, toolCalls, resolutions }).toEqual(before);
+  } finally {
+    await runtime.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -18,6 +18,7 @@ export interface PromptEditorProps {
   value: string;
   scopeKey: string;
   label: string;
+  placeholder?: string;
   disabled: boolean;
   inputRef?: Ref<PromptEditorHandle>;
   onChange(value: string): void;
@@ -118,7 +119,7 @@ export function PromptEditor(props: PromptEditorProps) {
         aria-multiline="true"
         aria-disabled={unavailable || undefined}
         data-disabled={props.disabled || undefined}
-        placeholder={props.label}
+        placeholder={props.placeholder ?? props.label}
         value={text}
         disabled={props.disabled}
         readOnly={unavailable}

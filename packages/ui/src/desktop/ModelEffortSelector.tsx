@@ -192,7 +192,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       <PopoverContent
         ref={popover}
         side="top"
-        align="start"
+        align="center"
         sideOffset={6}
         className={cn('model-effort-popover', view === 'models' && 'model-effort-popover-models')}
         aria-label={mode === 'combined' ? '模型与思考程度' : mode === 'model' ? '模型' : '思考程度'}

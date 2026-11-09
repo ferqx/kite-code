@@ -18,7 +18,7 @@
 
 呈现在 [Runtime.modelMessages](runtime.ts) 中完成，早于输入封存、预算估算、续写／重试及压缩；只读 Inspector 读取当时封存的真实输入，不用今天的 formatter 改写旧快照。原 Message、ToolResult、Source、Artifact、邮件携带判断及结果接纳保持原内容和身份。没有生产配置开关或按搜索次数注入的提醒。回归见[真实 Runtime 呈现](../test/isolated/execution/model-result-presentation.test.ts)及[子取证](../test/isolated/business/task/child-tool-evidence.test.ts)。
 
-只读上下文预测须核原 Run 捕获的呈现版本。无法取得准确动态定义，或重建工具正文与已封存输入不一致时，沿原 `context_estimate_unavailable` 返回，不能把原始长 JSON 误报为模型正在使用的短正文；也不为估算重新解析配置或调用模型。[预测回归](../test/isolated/context/result-presentation-estimate.test.ts)覆盖这条边界。
+只读上下文预测对实际进入所选历史的工具结果核原 Run 捕获的呈现版本。目录中未使用工具的动态定义已释放，不阻断普通无工具回复的预测；实际工具结果无法取得准确动态定义，或重建工具正文与已封存输入不一致时，沿原 `context_estimate_unavailable` 返回，不能把原始长 JSON 误报为模型正在使用的短正文；也不为估算重新解析配置或调用模型。[预测回归](../test/isolated/context/result-presentation-estimate.test.ts)覆盖这条边界。
 
 ## 请求、派发与历史
 

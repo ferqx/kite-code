@@ -1546,7 +1546,7 @@ test('a history epoch change revokes a held same-session recovery scan', async (
   }
 });
 
-test('ordinary Native permission menu owns the complete grant directory and original unknown clear without exposing diagnostics', async () => {
+test('ordinary permission menu omits the grant directory; the isolated diagnostic panel retains original read and clear ownership', async () => {
   let target = 'a',
     unknown = false;
   let f!: ReturnType<typeof fixture>;
@@ -1669,17 +1669,16 @@ test('ordinary Native permission menu owns the complete grant directory and orig
         }),
       ),
     );
-    await until(() =>
+    expect(
       [...f.dom.window.document.querySelectorAll('[role="menuitem"]')].some((e) =>
         ['当前会话授权', 'Current session grants'].includes(e.textContent ?? ''),
       ),
-    );
+    ).toBe(false);
     await act(async () =>
-      [...f.dom.window.document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
-        .find((e) => ['当前会话授权', 'Current session grants'].includes(e.textContent ?? ''))!
-        .click(),
+      f.dom.window.document
+        .querySelector('[role="menu"]')!
+        .dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
     );
-    await until(() => !!f.dom.window.document.querySelector('[aria-label="当前会话授权目录"]'));
   }
   try {
     await f.render(false);
@@ -1687,6 +1686,8 @@ test('ordinary Native permission menu owns the complete grant directory and orig
     await open();
     expect(f.dom.window.document.body.textContent).not.toContain('会话工具');
     expect(f.dom.window.document.body.textContent).not.toContain('公开扩展能力');
+    await f.render(true);
+    await f.click('会话工具');
     await f.click('读取当前会话授权');
     const body = f.dom.window.document.body.textContent!;
     for (const detail of [
@@ -1728,16 +1729,12 @@ test('ordinary Native permission menu owns the complete grant directory and orig
     expect(f.calls.filter((r) => r.method === 'grants.clear')).toHaveLength(1);
     holdRead = true;
     await f.click('读取当前会话授权');
-    await act(async () =>
-      f.dom.window.document
-        .querySelector<HTMLElement>('[role="dialog"]')!
-        .dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
-    );
     await f.click('Other B');
     await act(async () => held.resolve(facts('a')));
-    expect(f.dom.window.document.querySelector('[aria-label="当前会话授权目录"]')).toBeNull();
+    expect(f.dom.window.document.body.textContent).not.toContain('original-approval');
     holdRead = false;
-    await open();
+    if (!f.dom.window.document.querySelector('[aria-label="当前会话授权目录"]'))
+      await f.click('会话工具');
     expect(f.dom.window.document.body.textContent).not.toContain('original-approval');
     await f.click('读取当前会话授权');
     expect(f.dom.window.document.body.textContent).toContain('实际会话：b');

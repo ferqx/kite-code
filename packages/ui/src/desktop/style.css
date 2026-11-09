@@ -103,7 +103,7 @@ body {
   --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
   --important-foreground: #765299;
   --identity-secondary: #236f78;
-  --conversation-text-size: var(--ui-text-size);
+  --conversation-text-size: 14px;
   --markdown-code-background: color-mix(in srgb, var(--foreground) 5%, transparent);
   --markdown-inline-code-background: color-mix(in srgb, var(--foreground) 7%, transparent);
   --markdown-inline-code-radius: 4px;
@@ -1120,7 +1120,7 @@ body {
     border-radius: var(--input-radius);
     background: var(--composer-background);
     min-height: 112px;
-    padding: 10px 12px 4px;
+    padding: 8px 12px 4px;
     box-shadow: 0 1px 2px var(--composer-shadow-color);
     transition:
       border-color 120ms,
@@ -1140,7 +1140,7 @@ body {
     background: transparent;
     min-height: 52px;
     max-height: 180px;
-    padding: 3px 6px 7px;
+    padding: 0 0 7px;
     resize: none;
     font-family: inherit;
     font-size: 14px;
@@ -1273,17 +1273,17 @@ body {
   }
   .composer-trailing {
     display: flex;
-    flex: none;
+    min-width: 0;
     align-items: center;
     margin-inline-start: auto;
-    gap: 16px;
+    gap: 8px;
   }
   .composer-metrics {
     display: flex;
     align-items: center;
     gap: 4px;
   }
-  .composer-options :where(.model-trigger) {
+  .composer-trailing :where(.model-trigger) {
     flex-shrink: 1;
   }
   .composer [data-model-picker] {
@@ -1292,8 +1292,7 @@ body {
     max-width: 100%;
   }
   .model-trigger,
-  .permission-trigger,
-  .composer-cache-rate {
+  .permission-trigger {
     font-family: inherit;
     font-weight: 400;
     line-height: 20px;
@@ -1363,18 +1362,6 @@ body {
   }
   .permission-trigger:disabled:not([data-read-gated="true"]) {
     opacity: 0.55;
-  }
-  .composer-cache-rate {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 32px;
-    flex: none;
-    font-size: 13px;
-    min-width: 70px;
-    font-variant-numeric: tabular-nums;
-    color: var(--muted-foreground);
-    white-space: nowrap;
   }
   .composer-context-usage {
     width: 14px;
@@ -1941,11 +1928,13 @@ body {
   padding-right: var(--sidebar-inline-padding);
 }
 .kite-client.composer-context-tooltip {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  width: 260px;
+  gap: 10px;
   max-width: min(calc(100vw - 24px), var(--radix-tooltip-content-available-width));
-  padding: 8px 14px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--card);
@@ -1953,12 +1942,48 @@ body {
   font-size: 13px;
   font-weight: 400;
   line-height: 20px;
-  text-align: center;
+  text-align: left;
   text-wrap: wrap;
   box-shadow: 0 4px 12px #0002;
+  font-variant-numeric: tabular-nums;
 }
-.kite-client.composer-context-tooltip > span:not(:last-child) {
+.kite-client .composer-context-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.kite-client .composer-context-section + .composer-context-section {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.kite-client .composer-context-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.kite-client .composer-context-heading > strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.kite-client .composer-context-detail {
   color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.kite-client .composer-context-meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+.kite-client .composer-context-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--muted-foreground);
 }
 .kite-client.directory-tooltip {
   display: flex;
@@ -5545,7 +5570,7 @@ body {
 .kite-client .prompt-editor-shell {
   position: relative;
   min-height: 52px;
-  margin: 0 6px 7px;
+  margin: 0 0 7px;
 }
 .kite-client .prompt-editor {
   display: block;
@@ -5553,7 +5578,7 @@ body {
   min-width: 0;
   min-height: 52px;
   max-height: 180px;
-  padding: 3px 0;
+  padding: 0 0 7px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -5992,7 +6017,7 @@ body {
 .kite-client .child-agent-activity .tool-activity-summary {
   width: 100%;
   min-width: 0;
-  font-size: var(--ui-text-size, 14px);
+  font-size: var(--conversation-text-size);
   color: var(--muted-foreground);
 }
 .kite-client .tool-agent-name {

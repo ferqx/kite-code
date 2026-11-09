@@ -134,15 +134,19 @@ test('the context ring uses current input over the full window, independently of
   try {
     await render();
     const ring = f.host.querySelector('.composer-context-usage')!;
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 99%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 99%');
     expect(ring.getAttribute('aria-label')).toBe('上下文占用约 68%');
     expect(ring.querySelector('[stroke-dasharray]')?.getAttribute('stroke-dasharray')).toBe(
       '68 100',
     );
-    expect(ring.getAttribute('aria-description')).toBe('上下文估算 340 / 500 tokens');
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 340 / 500 tokens');
     await render(10, [{ ...message() }]);
     expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 10%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 10%');
     expect(ring.querySelector('[stroke-dasharray]')?.getAttribute('stroke-dasharray')).toBe(
       '68 100',
     );
@@ -223,7 +227,7 @@ test('context reads and retained ratios remain bound to their Session, model, ep
     expect(ring.getAttribute('aria-label')).toBe('上下文占用未知');
     await render('b', 5, false, undefined, 1, []);
     expect(f.host.querySelector('.composer-context-usage')).toBe(ring);
-    expect(ring.getAttribute('aria-description')).toBe('上下文估算 未知 / 未知 tokens');
+    expect(ring.getAttribute('aria-description')).toContain('上下文估算 未知 / 未知 tokens');
   } finally {
     await f.close();
   }

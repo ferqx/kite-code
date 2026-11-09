@@ -37,9 +37,9 @@ function fixture() {
   };
 }
 function expectDefaultRate(host: HTMLElement) {
-  const rate = host.querySelector('.composer-cache-rate');
-  expect(rate?.textContent).toBe('缓存 0%');
-  expect(rate?.getAttribute('title')).toBe('暂无缓存用量数据');
+  const rate = host.querySelector('.composer-context-usage');
+  expect(host.querySelector('.composer-cache-rate')).toBeNull();
+  expect(rate?.getAttribute('aria-description')).toContain('暂无缓存用量数据');
 }
 const selection = (id = 's', viewSelection = 2) =>
   ({
@@ -187,27 +187,35 @@ test('the original Composer displays cumulative observed usage once per Model, r
     );
   try {
     await render();
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 50%');
-    expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
-      '缓存命中 200 / 400 tokens',
-    );
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 50%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中 200 / 400 tokens');
     expect(
       requests
         .filter((request) => request.method === 'toolMessages.usage')
         .map((request) => request.messageIds.length),
     ).toEqual([32, 4]);
     await render([...values], selection(), false);
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 50%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 50%');
     await render([...values]);
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 50%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 50%');
     expect(requests.filter((request) => request.method === 'toolMessages.usage').length).toBe(2);
     await render([message('no-sample', 'empty')], selection('empty', 3));
     expectDefaultRate(f.host);
     await render([message('zero', 'zero')], selection('zero', 4));
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 0%');
-    expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
-      '缓存命中 0 / 100 tokens',
-    );
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 0%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中 0 / 100 tokens');
     expect(
       requests.every((request) =>
         ['toolMessages.usage', 'toolMessages.close'].includes(request.method),
@@ -259,32 +267,32 @@ test('confirmed cache text and input nodes survive repeated calibration and the 
     );
   try {
     await render();
-    const rate = f.host.querySelector('.composer-cache-rate')!,
+    const rate = f.host.querySelector('.composer-context-usage')!,
       input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
-    expect(rate.textContent).toBe('缓存 40%');
+    expect(rate.getAttribute('aria-description')).toContain('缓存命中率 40%');
     for (let revision = 1; revision <= 8; revision++) {
       await render([{ ...original }], false, revision);
-      expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
-      expect(rate.getAttribute('title')).toBe('缓存命中 40 / 100 tokens');
+      expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
+      expect(rate.getAttribute('aria-description')).toContain('缓存命中 40 / 100 tokens');
       expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
       await render([{ ...original }], true, revision);
-      expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+      expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
     }
     expect(requests.filter((request) => request.method === 'toolMessages.usage').length).toBe(1);
     const next = message('next');
     await render([original, { ...next, status: 'incomplete' }], true, 9);
-    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
+    expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
     await render([original, next], true, 10);
     expect(release).toBeDefined();
-    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
-    expect(rate.getAttribute('title')).toBe('缓存命中 40 / 100 tokens');
+    expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
+    expect(rate.getAttribute('aria-description')).toContain('缓存命中 40 / 100 tokens');
     await act(async () => release!());
-    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
-    expect(rate.textContent).toBe('缓存 67%');
-    expect(rate.getAttribute('title')).toBe('缓存命中 200 / 300 tokens');
+    expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
+    expect(rate.getAttribute('aria-description')).toContain('缓存命中率 67%');
+    expect(rate.getAttribute('aria-description')).toContain('缓存命中 200 / 300 tokens');
     await render([original, next, message('failed')], true, 11);
-    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
-    expect(rate.getAttribute('title')).toBe('缓存命中 200 / 300 tokens');
+    expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
+    expect(rate.getAttribute('aria-description')).toContain('缓存命中 200 / 300 tokens');
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('缓存指标未更新');
     expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
   } finally {
@@ -319,7 +327,9 @@ test('retained samples still require the original body and source, and never cro
     );
   try {
     await render();
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 40%');
     for (const messages of [
       [],
       [{ ...original, content: 'replaced body' }],
@@ -330,7 +340,9 @@ test('retained samples still require the original body and source, and never cro
       expectDefaultRate(f.host);
     }
     await render({ complete: false });
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 40%');
     for (const scope of [
       { generation: 2 },
       { historyEpoch: 1 },
@@ -393,22 +405,24 @@ test('returning to cached Sessions displays their own verified rate while fresh 
     );
   try {
     await render('a', 2);
-    expect(f.host.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 40%');
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中率 40%');
     await render('b', 3);
-    const rate = f.host.querySelector('.composer-cache-rate');
-    expect(rate?.textContent).toBe('缓存 90%');
+    const rate = f.host.querySelector('.composer-context-usage');
+    expect(rate?.getAttribute('aria-description')).toContain('缓存命中率 90%');
     await render('a', 4, false);
-    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
-    expect(rate?.textContent).toBe('缓存 40%');
+    expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
+    expect(rate?.getAttribute('aria-description')).toContain('缓存命中率 40%');
     hold = true;
     await render('a', 4);
     expect(release).toBeDefined();
-    expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
-    expect(rate?.textContent).toBe('缓存 40%');
+    expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
+    expect(rate?.getAttribute('aria-description')).toContain('缓存命中率 40%');
     await render('b', 5, false);
-    expect(rate?.textContent).toBe('缓存 90%');
+    expect(rate?.getAttribute('aria-description')).toContain('缓存命中率 90%');
     await act(async () => release!());
-    expect(rate?.textContent).toBe('缓存 90%');
+    expect(rate?.getAttribute('aria-description')).toContain('缓存命中率 90%');
     await render('b', 3, false, 1);
     expectDefaultRate(f.host);
     await render('b', 3, false, 0);
@@ -477,9 +491,9 @@ test('late cache reads cannot enter another Session; changed Message samples do 
     await render(selection(), [message('old')]);
     expectDefaultRate(f.host);
     await render();
-    expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
-      '缓存命中 5 / 10 tokens',
-    );
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中 5 / 10 tokens');
     await act(async () =>
       release(
         pageFor(heldRequest, 's', [
@@ -493,9 +507,9 @@ test('late cache reads cannot enter another Session; changed Message samples do 
         ]),
       ),
     );
-    expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
-      '缓存命中 5 / 10 tokens',
-    );
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中 5 / 10 tokens');
     const changed = { ...original, content: 'changed original body' };
     fail = true;
     await render(selection('b', 3), [changed]);
@@ -509,9 +523,9 @@ test('late cache reads cannot enter another Session; changed Message samples do 
         .find((button) => button.textContent === '重新读取缓存指标')!
         .click(),
     );
-    expect(f.host.querySelector('.composer-cache-rate')?.getAttribute('title')).toBe(
-      '缓存命中 5 / 10 tokens',
-    );
+    expect(
+      f.host.querySelector('.composer-context-usage')?.getAttribute('aria-description'),
+    ).toContain('缓存命中 5 / 10 tokens');
     expect(f.host.querySelector('[role="alert"]')).toBeNull();
     expect(
       requests.every((request) =>

@@ -3625,6 +3625,7 @@ export class AgentRuntime {
     } | null;
     const available = this.runBindingLeases.get(run.id)?.binding.definitions ?? this.tools;
     const definitions = new Map<string, ToolDefinition>();
+    const unavailablePresentations = new Set<string>();
     for (const tool of configured?.tools ?? []) {
       if (!tool.resultPresentationVersion) continue;
       const definition = available.get(tool.id);
@@ -3632,8 +3633,10 @@ export class AgentRuntime {
         definition?.version !== tool.version ||
         definition.model?.resultVersion !== tool.resultPresentationVersion ||
         !definition.formatModelResult
-      )
-        throw new AgentError('context_estimate_unavailable');
+      ) {
+        unavailablePresentations.add(tool.id);
+        continue;
+      }
       definitions.set(tool.id, definition);
     }
     const history = await this.modelMessages(
@@ -3669,15 +3672,17 @@ export class AgentRuntime {
       );
       if (original !== undefined && original !== message.content)
         throw new AgentError('context_estimate_unavailable');
-      if (original === undefined) {
+      if (original === undefined || unavailablePresentations.size > 0) {
         for (const id of message.sourceIds) {
           const receipt = await this.options.store.getExecution(id);
+          if (receipt?.kind !== 'tool') continue;
+          const captured = configured?.tools?.find(
+            (tool) =>
+              tool.id === receipt.definitionId && tool.version === receipt.definitionVersion,
+          );
           if (
-            receipt?.kind === 'tool' &&
-            !(configured?.tools ?? []).some(
-              (tool) =>
-                tool.id === receipt.definitionId && tool.version === receipt.definitionVersion,
-            )
+            (original === undefined && !captured) ||
+            unavailablePresentations.has(receipt.definitionId)
           )
             throw new AgentError('context_estimate_unavailable');
         }

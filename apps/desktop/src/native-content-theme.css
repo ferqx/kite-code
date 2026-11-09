@@ -24,7 +24,7 @@
   --font-geist: var(--font-ui);
   --font-geist-mono: var(--font-mono);
   --ui-text-size: 13px;
-  --conversation-text-size: 13px;
+  --conversation-text-size: 14px;
   --markdown-inline-code-radius: 3px;
   font-family: var(--font-ui);
   font-size: var(--ui-text-size);
@@ -228,7 +228,7 @@ html[data-platform="macos"] .kite-client .client-main-panel {
 }
 .kite-client .client-main-panel .prompt-editor {
   font-family: var(--font-ui);
-  font-size: var(--conversation-text-size);
+  font-size: var(--ui-text-size);
   line-height: 30px;
 }
 
