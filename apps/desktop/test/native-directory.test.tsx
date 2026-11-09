@@ -454,6 +454,50 @@ function projectionFixture() {
   return { directory, selection };
 }
 
+test('new empty directory rows stay first through refresh and first saved message without inventing a time', () => {
+  const { directory, selection } = projectionFixture();
+  const projection = new NativeDirectoryProjection();
+  projection.project(directory);
+  const session = { ...directory.sessions[0]!, id: 'new', title: '新对话' };
+  const published = { ...directory, sessions: [...directory.sessions, session] };
+  const render = (value: NativeDirectory) => {
+    const workspaces = projection.project(value);
+    const summary = workspaces.flatMap((w) => w.sessions).find((s) => s.sessionId === 'new')!;
+    const html = renderToStaticMarkup(
+      <Sidebar workspaces={workspaces} actions={{}} connectionLabel="" onOpen={() => {}} />,
+    );
+    const dom = new JSDOM(html);
+    const rows = [
+      ...dom.window.document.querySelectorAll('.workspace-group:first-child .session-row'),
+    ];
+    expect(rows[0]?.getAttribute('aria-label')).toBe('新对话');
+    expect(rows.filter((row) => row.getAttribute('aria-label') === '新对话')).toHaveLength(1);
+    dom.window.close();
+    return summary;
+  };
+  expect(render(published).updatedAt).toBeUndefined();
+  const selected = projection.project(published, { ...selection('a'), session });
+  expect(selected[0]!.sessions.find((s) => s.sessionId === 'new')!.awaitingFirstMessage).toBe(true);
+  projection.project(published, selection('a'));
+  expect(render({ ...published }).awaitingFirstMessage).toBe(true);
+  const saved = {
+    ...published,
+    sessions: published.sessions.map((s) =>
+      s.id === 'new'
+        ? {
+            ...s,
+            activity: { updatedAt: Date.now(), queued: false, pendingInteractions: 0, run: null },
+          }
+        : s,
+    ),
+  };
+  expect(render(saved).awaitingFirstMessage).toBeUndefined();
+  const cold = new NativeDirectoryProjection().project(published);
+  expect(cold.flatMap((w) => w.sessions).every((s) => !s.awaitingFirstMessage)).toBe(true);
+  const switched = projection.project({ ...published, storeId: 'other' });
+  expect(switched.flatMap((w) => w.sessions).every((s) => !s.awaitingFirstMessage)).toBe(true);
+});
+
 test('window directory projection reuses untouched workspaces and ignores non-display selection revisions', () => {
   const { directory, selection } = projectionFixture();
   const projection = new NativeDirectoryProjection();

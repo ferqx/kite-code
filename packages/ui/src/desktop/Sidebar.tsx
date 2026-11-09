@@ -263,7 +263,11 @@ const Workspace = memo(function Workspace({
   const id = useId();
   const sortedSessions = useMemo(
     () =>
-      [...workspace.sessions].sort((a, b) => updatedTime(b.updatedAt) - updatedTime(a.updatedAt)),
+      [...workspace.sessions].sort(
+        (a, b) =>
+          Number(!!b.awaitingFirstMessage) - Number(!!a.awaitingFirstMessage) ||
+          updatedTime(b.updatedAt) - updatedTime(a.updatedAt),
+      ),
     [workspace.sessions],
   );
   const sessions = useMemo(

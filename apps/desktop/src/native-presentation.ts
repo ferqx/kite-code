@@ -105,6 +105,7 @@ function sameSessionSummary(left: SessionSummary | undefined, right: SessionSumm
       left.displayName === right.displayName &&
       left.status === right.status &&
       left.updatedAt === right.updatedAt &&
+      left.awaitingFirstMessage === right.awaitingFirstMessage &&
       left.hasCreatedWorktree === right.hasCreatedWorktree &&
       left.pendingInteractions === right.pendingInteractions)
   );
@@ -144,6 +145,14 @@ export class NativeDirectoryProjection {
         const previous = previousWorkspaces.get(workspace.id);
         const items = workspace.sessions.map((summary) => {
           const retained = this.summaries.get(summary.sessionId);
+          // A newly published empty session must not visit the bottom before its
+          // first message is committed. Cold history keeps its unknown time.
+          if (
+            this.directory?.storeId === directory.storeId &&
+            !summary.updatedAt &&
+            (!this.sources.has(summary.sessionId) || retained?.awaitingFirstMessage)
+          )
+            summary = { ...summary, awaitingFirstMessage: true };
           const value = sameSessionSummary(retained, summary) ? retained! : summary;
           summaries.set(value.sessionId, value);
           return value;
@@ -175,7 +184,9 @@ export class NativeDirectoryProjection {
     for (const id of new Set([this.observed?.sessionId, observed?.sessionId])) {
       const source = id ? this.sources.get(id) : undefined;
       if (!source || source.activity) continue;
-      const summary = desktopSessionSummary(directory, source, selection);
+      let summary = desktopSessionSummary(directory, source, selection);
+      if (this.summaries.get(source.id)?.awaitingFirstMessage)
+        summary = { ...summary, awaitingFirstMessage: true };
       if (sameSessionSummary(this.summaries.get(source.id), summary)) continue;
       this.summaries.set(source.id, summary);
       changedWorkspaces.add(source.workspaceId);

@@ -1,5 +1,9 @@
 # Desktop 与 Native 制品
 
+新会话目录位置由 [NativeDirectoryProjection](src/native-presentation.ts)在同 Store 的连续完整目录间识别新增项；缺少首条消息时间时投影 `awaitingFirstMessage`，由 Sidebar 优先展示，时间到齐后移交原最近消息排序。该窗口内标记不写数据库、不伪造 `updatedAt`，冷读和 Store 切换不将旧空历史置顶。[目录回归](test/native-directory.test.tsx)覆盖首次发布、刷新、消息时间接管、单行和冷读隔离。
+
+2026-11-09，Windows／Bun1.4.4：目录与两份隔离 Sidebar 回归分别运行，共24项537断言通过；Desktop／UI 类型、四文件 Biome、文档结构与影响检查通过。Chrome156 的实际投影／Sidebar 生产样式隔离夹具按空项发布、刷新、消息时间接管逐步观察，145个连续动画帧中新增行始终第一、单份且保留原节点；阶段截图已核对，页面错误为0。材料在本机 `.cache/session-order/`；不以该受控目录过程代替真实 Service／Electron 端到端或其他平台验收。
+
 [Native transcript](src/native-transcript.ts)对原 Run 的 `necessary_condition_unsatisfied` 使用已知完成条件失败说明，保留已保存的正文与工具结果；不把该事实误写成模型连接失败或没有最终回复。异常摘要和正文沿同一处选择，原上下文失败、中断及未知原因的说明保持。该展示不修改完成条件、审批、版本、工具回执或重试资格。[真实 DOM 整文件](test/isolated/native-transcript-dom.test.tsx)25项／483断言通过，包含已有输出后的失败与冷重建、零重复和无运行中状态；Desktop类型检查1291文件、全仓6558文件／9 projects及定向Biome通过。
 
 2026-11-07普通 `testDiagnostics:false` Native 的真实 Luna／medium 自然任务覆盖三模式中文方案保存、四次计划人答、拒绝后三模式新问题及原计划待答时Full→Auto→Full。40份完整Model输出、80条Execution与10个Run保存；三个计划拒绝均由原Tool返回简短说明并直接结束原轮，零后继Model／实施效果。Full原计划写入与读回成功，模型三次抄错进度Run ID的原失败保留；正是该样本暴露上述错误展示。修复后重建普通制品，沿同Profile冷开逐段观察正确说明、原拒绝历史与新回复，原Run／Execution／Command／Interaction／Message完整摘要和文件字节均保持，零重放，Main正常exit0且三个Session owner释放。报告与原失败边界归[模型验证](../../tests/e2e/live/model/README.md#当前-v1-扩展验证8秒默认)，不以这次冷读追加真实模型样本或授予其他平台／完整发布资格。
