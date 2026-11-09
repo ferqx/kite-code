@@ -575,6 +575,67 @@ export async function createShellConfiguration(input: {
       if (!stat.isDirectory()) throw new AgentError('shell_workdir_unavailable');
       return { path, dev: String(stat.dev), ino: String(stat.ino) };
     };
+    async function commandDigest(
+      request: AuthorizationRequest,
+      capturedDirectory?: Awaited<ReturnType<typeof executionDirectory>>,
+    ): Promise<string | undefined> {
+      const worktreeCall = worktreeRequest(request);
+      if (worktreeCall && worktree?.profile)
+        return createHash('sha256')
+          .update(
+            JSON.stringify({
+              namespace: 'builtin.shell.git-worktree-permission',
+              version: 1,
+              kind: request.kind,
+              definitionId: request.definitionId,
+              definitionVersion: request.definitionVersion,
+              input: request.input,
+              configuration: worktree.configuration,
+              assets: worktree.assets,
+              launchProfile: worktree.profile,
+              host: options.host ?? null,
+            }),
+          )
+          .digest('hex');
+      const value = commandRequest(request, !!host);
+      if (!value) return undefined;
+      let directory: Awaited<ReturnType<typeof executionDirectory>>;
+      try {
+        directory = capturedDirectory ?? (await executionDirectory(value.workdir));
+      } catch {
+        request.signal.throwIfAborted();
+        return undefined;
+      }
+      // A logical ensure key selects a new operation; it does not change this command's
+      // authority. All execution semantics and private environment values remain hashed.
+      return createHash('sha256')
+        .update(
+          JSON.stringify({
+            namespace: 'builtin.shell.command-permission',
+            version: 1,
+            kind: request.kind,
+            definitionId: request.definitionId,
+            definitionVersion: request.definitionVersion,
+            configurationId: options.configurationId,
+            command: value.command,
+            workdir: value.workdir ?? null,
+            cancellation: value.cancellation,
+            timeoutMs: value.timeoutMs,
+            ...(request.definitionId === 'shell.execute' && value.background
+              ? { background: true }
+              : {}),
+            executionScope: host ? value.executionScope : null,
+            cwd: directory,
+            env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
+            assets,
+            parserAssets: commandPolicy.assets,
+            ...(options.host ? { host: options.host } : {}),
+            graceMs: options.graceMs ?? 200,
+            maxQueuedBytes: options.maxQueuedBytes ?? 256 * 1024,
+          }),
+        )
+        .digest('hex');
+    }
     const riskSnapshots = new Map<string, readonly ShellRiskSnapshot[]>();
     const workerScopes = new Map<
       string,
@@ -747,6 +808,56 @@ export async function createShellConfiguration(input: {
             if (!parsed) throw new AgentError('invalid_shell_arguments');
             const directory = await executionDirectory(parsed.workdir);
             const selectedJob = parsed.workdir === undefined ? job : await makeJob(directory.path);
+            // Compare with the final Store-accepted authorization, not a later policy read.
+            // This detects observed directory changes; it does not pin an OS directory handle.
+            if (host || context.dispatchAuthorization) {
+              const currentDirectory = await executionDirectory(parsed.workdir);
+              if (
+                currentDirectory.path !== directory.path ||
+                currentDirectory.dev !== directory.dev ||
+                currentDirectory.ino !== directory.ino
+              )
+                throw new AgentError('shell_workdir_changed');
+              const digest = await commandDigest(
+                {
+                  kind: 'job',
+                  sessionId: context.sessionId,
+                  runId: null,
+                  executionId: context.executionId,
+                  definitionId: 'shell.command',
+                  definitionVersion: '1',
+                  input: value,
+                  signal: context.signal,
+                },
+                directory,
+              );
+              const leaves = [
+                ...dispatchScopeLeaves(
+                  context.dispatchAuthorization?.snapshot,
+                  'shell_dispatch_scope_unavailable',
+                ),
+              ];
+              if (
+                !context.dispatchAuthorization?.revision ||
+                !digest ||
+                !leaves.length ||
+                leaves.some(({ namespace, data }) => {
+                  const capability = data.capability;
+                  return (
+                    namespace !== 'builtin.permissions' ||
+                    !capability ||
+                    typeof capability !== 'object' ||
+                    Array.isArray(capability) ||
+                    capability.kind !== 'job' ||
+                    capability.definitionId !== 'shell.command' ||
+                    capability.definitionVersion !== '1' ||
+                    capability.commandDigest !== digest
+                  );
+                })
+              )
+                throw new AgentError('shell_workdir_changed');
+            }
+
             context.signal.throwIfAborted();
             dispatched = true;
             try {
@@ -983,57 +1094,7 @@ export async function createShellConfiguration(input: {
           ...(classified.hardDenied ? { denialReason: 'shell_command_hard_denied' } : {}),
         };
       },
-      commandDigest(request: AuthorizationRequest): string | undefined {
-        const worktreeCall = worktreeRequest(request);
-        if (worktreeCall && worktree?.profile)
-          return createHash('sha256')
-            .update(
-              JSON.stringify({
-                namespace: 'builtin.shell.git-worktree-permission',
-                version: 1,
-                kind: request.kind,
-                definitionId: request.definitionId,
-                definitionVersion: request.definitionVersion,
-                input: request.input,
-                configuration: worktree.configuration,
-                assets: worktree.assets,
-                launchProfile: worktree.profile,
-                host: options.host ?? null,
-              }),
-            )
-            .digest('hex');
-        const value = commandRequest(request, !!host);
-        if (!value) return undefined;
-        // A logical ensure key selects a new operation; it does not change this command's
-        // authority. All execution semantics and private environment values remain hashed.
-        return createHash('sha256')
-          .update(
-            JSON.stringify({
-              namespace: 'builtin.shell.command-permission',
-              version: 1,
-              kind: request.kind,
-              definitionId: request.definitionId,
-              definitionVersion: request.definitionVersion,
-              configurationId: options.configurationId,
-              command: value.command,
-              workdir: value.workdir ?? null,
-              cancellation: value.cancellation,
-              timeoutMs: value.timeoutMs,
-              ...(request.definitionId === 'shell.execute' && value.background
-                ? { background: true }
-                : {}),
-              executionScope: host ? value.executionScope : null,
-              cwd,
-              env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
-              assets,
-              parserAssets: commandPolicy.assets,
-              ...(options.host ? { host: options.host } : {}),
-              graceMs: options.graceMs ?? 200,
-              maxQueuedBytes: options.maxQueuedBytes ?? 256 * 1024,
-            }),
-          )
-          .digest('hex');
-      },
+      commandDigest: (request: AuthorizationRequest) => commandDigest(request),
     };
   } catch (error) {
     input.signal?.throwIfAborted();

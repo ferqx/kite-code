@@ -1648,6 +1648,8 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 
 当前原窗口首次选择准确会话后，先核原标题并打开私有诊断制品的“会话工具”，再读取授权；后续选择已有的侧栏步骤保持。只补该首次导航，全部原driver字节、13Node断言及预算保留。同一完整文件1pass／10Bun断言通过，Desktop types／Biome通过；本轮默认真实失败与阶段范围归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不把私有制品窗口资格提升为完整安装或整体退出。
 
+同一会话观察恢复期间，后台 `select` 等待中的 state 通知只暂停操作，不关闭同 generation／Store／Session／viewSelection／historyEpoch 的原历史扫描；任一读取身份变化或离开父会话仍撤销原扫描。`preserveHistory` 同时约束准备阶段与完成接管，避免通知使慢速历史反复重读。[读取归属 DOM 回归](test/isolated/native-read-ownership-dom.test.tsx)用挂起的选择回执与历史读取覆盖中途通知保持扫描、historyEpoch 变化撤销；这是隔离 React DOM／受控桥接证据，不代证完整 Electron 或真实模型旅程。
+
 [普通 Native DOM 回归](test/isolated/native-read-ownership-dom.test.tsx)以 `testDiagnostics:false` 从审批方式菜单打开目录，核完整 presentation／scope／bindings／审批与执行来源，清除前确认、双击只提交一次、unknown 原 command 查询，以及切会话拒绝迟到目录，其他诊断入口保持关闭。该测试与实际普通 renderer 逐步观察分别记录资格，DOM 不代证真实窗口完整旅程。
 
 2026-11-06 至 11-07 在 macOS、Bun 1.4.4、Electron 44.3 的隔离真实 Service／SQLite／Shell 窗口中，普通构建关闭诊断入口，逐步观察到权限菜单可达授权目录、完整范围与来源换行可读、明确确认清除后 revision 1→2 且重读为空。原会话新审批默认仅此次，双击只新增一次回答；模拟回答回执丢失后原卡显示 unknown 且禁用，外部效果只增加一次。同一 renderer 的恢复过程中，新的私人草稿🙂与阅读位置 600 不变；重连后自动核对原意图，原卡退役、权限与输入恢复，稳定等待不增加调用或效果。随后明确选择新的会话范围授权，普通退出／冷重开并显式选择原会话后，调用与效果保持；下一轮复用原范围只增加两次业务调用及一次 Shell 效果，reviewer 次数保持 4、无新审批。原已清除授权保持 revoked，新授权保持 active，同 Store 未被替换。上述连续旅程包含投递、待批、unknown、终态接管、完整目录与冷后复用，最终调用计数 17、外部效果 6；使用固定高风险 reviewer 和受控业务 Provider，不证明真实模型分类质量、完整安装或其他平台资格。整页重载不保未显式保存的普通草稿与 DOM 阅读缓存，沿原产品限制，不把旧现场重载恢复计为同 renderer 草稿保持。现行 private schema 11／12 的备份维护限制仍按原范围保留，不将普通冷重开称为备份恢复通过。

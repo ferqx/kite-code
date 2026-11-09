@@ -1,6 +1,16 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AuthorizationRequest } from '../../../src/extensions';
@@ -11,6 +21,7 @@ import {
   type ShellConfigurationOptions,
 } from '../../../src/permissions/shell';
 import type { Json } from '../../../src/storage/types';
+import { createShellToolBehaviors } from '../../../src/tools/shell-approval';
 
 async function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell-flat-policy-')));
@@ -21,10 +32,11 @@ async function fixture() {
   const supervisor = join(root, 'supervisor.js');
   writeFileSync(supervisor, '// metadata only; never launched');
   const options: ShellConfigurationOptions = {
-    platform: 'darwin',
+    platform: process.platform === 'linux' ? 'linux' : 'darwin',
+    ...(process.platform === 'linux' ? { linux: { bubblewrapPath: '/usr/bin/bwrap' } } : {}),
     configurationId: 'flat-input-policy',
     env: { PATH: '/usr/bin:/bin', FIXED: 'original' },
-    supervisorPath: supervisor,
+    supervisorPath: process.platform === 'linux' ? '/bin/true' : supervisor,
     bunExecutable: process.execPath,
     shellExecutable: '/bin/sh',
     host: {
@@ -94,7 +106,7 @@ test.skipIf(process.platform !== 'darwin')(
             revision: 'auto-chain',
             allowed: [{ kind: 'tool', definitionId: 'shell.execute', definitionVersion: '1' }],
           }),
-          describeCapability: () => ({
+          describeCapability: async () => ({
             ...f.configuration.describe('shell.execute'),
             ...described,
             kind: 'tool',
@@ -148,7 +160,7 @@ test.skipIf(process.platform !== 'darwin')(
           };
           const permissions = createPermissionPolicy({
             readPolicy: () => snapshot,
-            describeCapability: () => ({
+            describeCapability: async () => ({
               ...f.configuration.describe('shell.execute'),
               ...described,
               kind: 'tool',
@@ -156,7 +168,7 @@ test.skipIf(process.platform !== 'darwin')(
               definitionVersion: '1',
               revision: 'shell-1',
               hardAllowed: described?.hardAllowed === true,
-              commandDigest: f.configuration.commandDigest(request),
+              commandDigest: await f.configuration.commandDigest(request),
             }),
           });
           const decision = await permissions.authorize(request);
@@ -182,7 +194,7 @@ test.skipIf(process.platform !== 'darwin')(
   },
 );
 
-test.skipIf(process.platform !== 'darwin')(
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'Shell command digest binds workdir, scope and execution semantics while excluding display and operation keys',
   async () => {
     const f = await fixture();
@@ -204,7 +216,11 @@ test.skipIf(process.platform !== 'darwin')(
               cancellation: 'attached',
               timeoutMs: null,
               executionScope: { filesystem: 'workspace_write', network: 'none' },
-              cwd: f.workspace,
+              cwd: {
+                path: f.workspace,
+                dev: String(lstatSync(f.workspace).dev),
+                ino: String(lstatSync(f.workspace).ino),
+              },
               env: Object.entries(f.options.env).sort(([a], [b]) => a.localeCompare(b)),
               assets,
               parserAssets: f.parserAssets,
@@ -214,10 +230,10 @@ test.skipIf(process.platform !== 'darwin')(
             }),
           )
           .digest('hex');
-        expect(f.configuration.commandDigest(original)).toBe(expectedDigest);
+        expect(await f.configuration.commandDigest(original)).toBe(expectedDigest);
       }
       const baseline = f.request({ key: 'one', command: 'printf original' });
-      const digest = f.configuration.commandDigest(baseline);
+      const digest = await f.configuration.commandDigest(baseline);
       const originalDescription = await f.configuration.describeRequest(baseline);
       const originalReview = await f.configuration.prepareRiskReview(baseline);
       for (const input of [
@@ -237,7 +253,7 @@ test.skipIf(process.platform !== 'darwin')(
         },
       ]) {
         const changed = f.request(input);
-        expect(f.configuration.commandDigest(changed)).toBe(digest);
+        expect(await f.configuration.commandDigest(changed)).toBe(digest);
         expect((await f.configuration.describeRequest(changed))?.autoReviewKey).toBe(
           originalDescription?.autoReviewKey,
         );
@@ -245,6 +261,7 @@ test.skipIf(process.platform !== 'darwin')(
         expect(review?.fingerprint).toBe(originalReview?.fingerprint);
         expect(review?.material).toEqual(originalReview?.material);
       }
+      mkdirSync(join(f.workspace, 'another-directory'));
       for (const fields of [
         { background: true },
         { timeoutMs: 1000 },
@@ -255,16 +272,16 @@ test.skipIf(process.platform !== 'darwin')(
         { workdir: 'another-directory' },
       ])
         expect(
-          f.configuration.commandDigest(
+          await f.configuration.commandDigest(
             f.request({ key: 'one', command: 'printf original', ...fields }),
           ),
         ).not.toBe(digest);
       expect(
-        f.configuration.commandDigest(
+        await f.configuration.commandDigest(
           f.request({ command: 'printf original', execution_timeout_ms: 1000 }),
         ),
       ).toBe(
-        f.configuration.commandDigest(
+        await f.configuration.commandDigest(
           f.request({ key: 'legacy', command: 'printf original', timeoutMs: 1000 }),
         ),
       );
@@ -309,13 +326,122 @@ test.skipIf(process.platform !== 'darwin')(
         },
       ]) {
         const request = f.request({ key: 'one', command: 'printf original', ...fields });
-        expect(f.configuration.commandDigest(request)).toBeUndefined();
+        expect(await f.configuration.commandDigest(request)).toBeUndefined();
         expect(await f.configuration.prepareRiskReview(request)).toBeNull();
         expect(await f.configuration.describeRequest(request)).toEqual({
           hardAllowed: false,
           denialReason: 'invalid_shell_arguments',
         });
       }
+    } finally {
+      f.close();
+    }
+  },
+);
+
+// Metadata-only fixture: no native Job or command is launched.
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
+  'Shell session grant scope changes when the same workdir resolves to a new directory',
+  async () => {
+    const f = await fixture();
+    try {
+      const first = join(f.workspace, 'first');
+      const second = join(f.workspace, 'second');
+      const link = join(f.workspace, 'current');
+      mkdirSync(first);
+      mkdirSync(second);
+      symlinkSync(first, link);
+      const behavior = createShellToolBehaviors(f.configuration).find(
+        (entry) => entry.capability.definitionId === 'shell.execute',
+      )!;
+      const request = f.request({ command: 'printf effect > effect', workdir: 'current' });
+      const offers = () => behavior.grantOffers!(request);
+      const originalReviewKey = (await f.configuration.describeRequest(request))!.autoReviewKey;
+      expect(
+        (await f.configuration.describeRequest({
+          ...request,
+          kind: 'job',
+          definitionId: 'shell.command',
+        }))!.autoReviewKey,
+      ).toBe(originalReviewKey);
+      const original = await offers();
+      expect(original).toHaveLength(1);
+      expect((await offers())[0]!.scopeDigest).toBe(original[0]!.scopeDigest);
+      unlinkSync(link);
+      symlinkSync(second, link);
+      const redirected = await offers();
+      expect((await f.configuration.describeRequest(request))!.autoReviewKey).not.toBe(
+        originalReviewKey,
+      );
+      expect(redirected[0]!.scopeDigest).not.toBe(original[0]!.scopeDigest);
+      renameSync(second, `${second}-old`);
+      mkdirSync(second);
+      expect((await offers())[0]!.scopeDigest).not.toBe(redirected[0]!.scopeDigest);
+      unlinkSync(link);
+      expect(await offers()).toEqual([]);
+    } finally {
+      f.close();
+    }
+  },
+);
+
+// Pause between final policy acceptance and the configured Job's real start method.
+// No process starts: the changed directory must be rejected before native launch.
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
+  'Shell Job rejects workdir changes after the accepted dispatch snapshot',
+  async () => {
+    const f = await fixture();
+    try {
+      const first = join(f.workspace, 'approved');
+      const second = join(f.workspace, 'unapproved');
+      const link = join(f.workspace, 'current');
+      mkdirSync(first);
+      mkdirSync(second);
+      symlinkSync(first, link);
+      const job = f.configuration.extensions
+        .flatMap((extension) => extension.jobs ?? [])
+        .find((definition) => definition.id === 'shell.command')!;
+      const input = { command: 'printf forbidden > effect', workdir: 'current' };
+      const request: AuthorizationRequest = {
+        ...f.request(input),
+        kind: 'job',
+        definitionId: 'shell.command',
+      };
+      const policy = createPermissionPolicy({
+        readPolicy: () => ({
+          mode: 'full',
+          workspaceTrust: true,
+          revision: 'fixture',
+          allowed: [{ kind: 'job', definitionId: 'shell.command', definitionVersion: '1' }],
+        }),
+        describeCapability: async () => ({
+          ...f.configuration.describe('shell.command'),
+          ...(await f.configuration.describeRequest(request)),
+          kind: 'job',
+          definitionId: 'shell.command',
+          definitionVersion: '1',
+          revision: 'fixture',
+          effects: ['process'],
+          hardAllowed: true,
+          commandDigest: await f.configuration.commandDigest(request),
+        }),
+      });
+      const accepted = await policy.authorize(request);
+      expect(accepted.allowed).toBe(true);
+      const context = {
+        sessionId: request.sessionId,
+        executionId: request.executionId,
+        signal: request.signal,
+        dispatchAuthorization: accepted,
+      };
+      unlinkSync(link);
+      symlinkSync(second, link);
+      await expect(job.start(input, context)).rejects.toThrow('shell_workdir_changed');
+      unlinkSync(link);
+      symlinkSync(first, link);
+      renameSync(first, `${first}-old`);
+      mkdirSync(first);
+      await expect(job.start(input, context)).rejects.toThrow('shell_workdir_changed');
     } finally {
       f.close();
     }

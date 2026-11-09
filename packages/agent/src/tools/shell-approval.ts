@@ -17,7 +17,9 @@ export function createShellToolBehaviors(options: {
   readonly extensions: readonly Extension[];
   readonly snapshot: unknown;
   readonly enableReview?: boolean;
-  readonly commandDigest: (request: AuthorizationRequest) => string | undefined;
+  readonly commandDigest: (
+    request: AuthorizationRequest,
+  ) => string | undefined | Promise<string | undefined>;
   readonly prepareRiskReview: (
     request: AuthorizationRequest,
   ) => Promise<ShellRiskPreparation | null>;
@@ -158,7 +160,7 @@ export function createShellToolBehaviors(options: {
                 }
               : {}),
             async grantOffers(request): Promise<GrantCandidate[]> {
-              const commandDigest = options.commandDigest(request);
+              const commandDigest = await options.commandDigest(request);
               if (!commandDigest) return [];
               const input =
                 request.input && typeof request.input === 'object' && !Array.isArray(request.input)

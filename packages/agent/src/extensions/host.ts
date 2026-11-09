@@ -2635,13 +2635,24 @@ export class ExtensionHost {
               )
                 return { reason: 'completed' as const, events: [], nextSeq: page.nextSeq };
             } else if (duration !== 0) {
-              const directory = await this.options.store.listStableAgents({
-                expectedStoreId: scope.command.originStoreId,
-                sessionId: scope.command.sessionId,
-                extensionId: extension.id,
-                subjectId: scope.command.subjectId,
-              });
-              if (!directory.items.some((item) => item.state !== 'idle'))
+              let directoryAfter: string | undefined;
+              let directoryUpper: string | undefined;
+              let active = false;
+              do {
+                scope.signal.throwIfAborted();
+                const directory = await this.options.store.listStableAgents({
+                  expectedStoreId: scope.command.originStoreId,
+                  sessionId: scope.command.sessionId,
+                  extensionId: extension.id,
+                  subjectId: scope.command.subjectId,
+                  ...(directoryAfter === undefined ? {} : { afterSeq: directoryAfter }),
+                  ...(directoryUpper === undefined ? {} : { upperSeq: directoryUpper }),
+                });
+                directoryUpper = directory.upperSeq;
+                active = directory.items.some((item) => item.state !== 'idle');
+                directoryAfter = directory.nextAfterSeq ?? undefined;
+              } while (!active && directoryAfter !== undefined);
+              if (!active)
                 return { reason: 'completed' as const, events: [], nextSeq: page.nextSeq };
             }
             if (run) {

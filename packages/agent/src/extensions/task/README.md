@@ -55,7 +55,7 @@ child Run 结束后，carrier 仍须等待该 child 范围的 Model、Tool 和 a
 
 spawn 和 idle follow-up 封存 agent_completion 订阅，不建立旧 required-result 义务。父活动时结果沿当前邮箱接纳；父 idle 时只有可信 AfterTurnPolicy 允许，才可从原配置启动通知轮。通知资格与自动执行授权分开，未知结果、停止、选择变化和当前权限仍检查。没有显式 after_turn 意图或旧报告回退执行。
 
-accepted/state/mode 是受理时事实，不是完成证明。`wait_agent_events({work_refs?,cursor?,wait_ms?})` 返回 `next_cursor`；游标只封装原邮箱位置，过滤无关事件也继续推进。没有目标且未显式等待时立即取快照；准确活动目标默认最多观察30000ms，目标已结束或没有活动工作时立即返回，显式0始终只取快照。timeout 保位置且不停止 child，游标缺口返回 cursor_expired 和恢复边界。事件附原工作的 work_ref，观察不消费结果或标记已读。
+accepted/state/mode 是受理时事实，不是完成证明。`wait_agent_events({work_refs?,cursor?,wait_ms?})` 返回 `next_cursor`；游标只封装原邮箱位置，过滤无关事件也继续推进。没有目标且未显式等待时立即取快照；准确活动目标默认最多观察30000ms，目标已结束或没有活动工作时立即返回，显式0始终只取快照。timeout 保位置且不停止 child，游标缺口返回 cursor_expired 和恢复边界。事件附原工作的 work_ref，观察不消费结果或标记已读。 无目标的显式等待沿固定目录上界分页检查全部协作者，发现活动工作即停止扫描，不能把前100项均 idle 当作全体完成。[Host 分页回归](../../../test/isolated/extensions/agent-events-pagination.test.ts)覆盖第101项仍运行及全体 idle 的分支。
 
 list_agents 按首次创建 Command 的不可变 seq 每个 Session 只列一次；follow-up 不移动锚点。过滤先整体核归属，Decimal64 上界固定分页；完整职责、最近引导和结果通过受验证正文或当前 Tool scope Artifact 交付。当前工作状态的 `work_ref` 与最近终态结果的 `last_result_work_ref` 分别展示，不能把上一轮结果当作当前轮完成。公开目录使用 cursor，内部固定上界和 Decimal64 顺序保持。游标以完整规范 scope 的 SHA-256 摘要绑定原 Store／Session、查询与过滤条件，不再把整组过滤 ID 重复编码到游标；最大200项过滤的回归游标为108字符，生产与读取均拒绝超过4096字符的游标。它不授予权限，原读者仍核实际范围与位置。
 

@@ -4,7 +4,7 @@
 
 新模型不填写 `key` 或 `cancellation`。内部 key 从已持久化的 Tool execution ID 无损派生为 `sh_` 短句柄，当前 UUID 对应26字符，不建别名表或旧摘要读取分支；同一逻辑 Tool 重入仍走原 `operations.ensure`，新 Tool 即使命令相同也有独立 Job。返回的 `shell_id` 用于原操作的读取、等待和停止；`execution_id` 是原启动 Tool 的执行记录 ID，用于查询执行证据或引用计划进度，后台受理不因此证明执行成功。模型要等待已受理的后台命令时沿原 `shell_id` 调用 `shell_wait/read`；即使首次选择后台不符合任务要求，也不能为了改成前台再执行原命令。前台、后台和内部 `shell.launch` 一致提供两种身份；后续 read/wait/stop 的可信模型反馈仍显示原启动 Tool 的 `execution_id`，不把查询 Tool 或内部 Job 身份冒充原调用。模型呈现先核原 owner、引用和身份，不改写 stdout／stderr。结果未知时先核原执行，不能通过新调用找回结果。普通模型前后台均使用 attached 取消关系，原父 Command 取消传播保持。旧 `shell.launch` 内部注册、显式 key、nested permissions、timeoutMs 和 detached 契约保留，新模型目录隐藏这些旧参数；历史模型参数的投影使用原封存 descriptor，不按今日目录重写。恢复仍核原配置与执行来源，不为兼容重新派发未知效果。
 
-`workdir` 只改变本次命令的真实工作目录，省略使用固定 Session cwd。相对值以该 cwd 解析；目录必须真实存在。风险材料、目录身份、命令语义指纹、父 Tool→Job 证明及最终原生执行均绑定该目录；后续调用和 Files 路径不会因此改变。每个动态目录 Job 的 handle 仍交回创建它的原执行器观察、停止和释放。
+`workdir` 只改变本次命令的真实工作目录，省略使用固定 Session cwd。相对值以该 cwd 解析；目录必须真实存在。风险材料、目录身份、命令语义指纹、父 Tool→Job 证明及最终原生执行均绑定该目录；后续调用和 Files 路径不会因此改变。每个动态目录 Job 的 handle 仍交回创建它的原执行器观察、停止和释放。 会话命令 grant 绑定解析后的目录路径与设备/inode 身份；Tool→Job 父授权继承还比较包含目录身份的语义 review key；Job 启动前将当前身份对应的命令摘要与最终 Store 授权快照逐叶核对，已变化则拒绝启动。此核对不持有 OS 目录句柄，不保证最后一次核对到原生进程打开 cwd 之间的原子性。
 
 模型结果中的 `execution_id/cancellation_execution_id` 使用原 ID 的无损短表示，计划进度与执行证据入口准确解码。原 Store 回执仍保存原 ID；不做前缀搜索、近似纠错或选择最近调用，也不改变 Shell 身份与派发次数。
 

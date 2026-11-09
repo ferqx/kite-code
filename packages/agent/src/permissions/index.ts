@@ -342,6 +342,12 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                   effects: [...description.effects],
                   hardAllowed: description.hardAllowed,
                   safeRead: description.safeRead,
+                  ...(description.autoReviewKey
+                    ? { autoReviewKey: description.autoReviewKey }
+                    : {}),
+                  ...(description.commandDigest
+                    ? { commandDigest: description.commandDigest }
+                    : {}),
                   ...(description.worktreeAuthorization
                     ? { worktreeAuthorization: description.worktreeAuthorization }
                     : {}),

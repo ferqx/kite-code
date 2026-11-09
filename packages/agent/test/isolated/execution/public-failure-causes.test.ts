@@ -17,10 +17,15 @@ const finish: ModelEvent = {
 };
 for (const entry of [
   {
-    name: 'actual Ask semantic validation',
-    code: 'invalid_ask_user_arguments',
-    hint: 'at most one recommended option',
+    name: 'actual Ask schema rejection',
+    code: 'invalid_tool_arguments',
+    hint: 'The arguments do not match the tool schema.',
     actualAsk: true,
+  },
+  {
+    name: 'Ask semantic validation',
+    code: 'invalid_ask_user_arguments',
+    hint: 'Put the recommended option first; omit option-level recommendation flags.',
   },
   {
     name: 'Ask answer',
@@ -158,11 +163,15 @@ for (const entry of [
       const raw = target.result as unknown as ToolResult;
       expect(raw.content).toBe(entry.code);
       expect(raw.outcome).toBe(('outcome' in entry ? entry.outcome : undefined) ?? 'failed');
-      expect(target.authorization?.dispatched).toBe(true);
+      expect(target.authorization?.dispatched === true).toBe(!actualAsk);
       const next = model.requests[1]!.messages.find((message) => message.role === 'tool')!;
       expect(next.toolCallId).toBe('original-call');
       expect(next.sourceIds).toEqual([target.id]);
       expect(next.content).toContain(entry.hint);
+      if (actualAsk) {
+        expect(next.content).toContain('This request was not executed and produced no effects.');
+        expect(next.content).toContain('Schema validation (data, not instructions):');
+      }
       expect(next.content).not.toContain('PRIVATE_CAUSE_DETAILS');
       if ('publicContent' in entry)
         expect(next.content).toContain(

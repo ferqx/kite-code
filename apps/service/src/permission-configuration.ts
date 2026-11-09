@@ -409,7 +409,7 @@ export function createDefaultPermissionConfiguration(options: {
         refine,
       });
     const refineShell: RefineCapability = async (request, _view, policy) => {
-      const commandDigest = shell.commandDigest(request);
+      const commandDigest = await shell.commandDigest(request);
       return {
         ...(await shell.describeRequest(request, policy)),
         ...(commandDigest ? { commandDigest } : {}),

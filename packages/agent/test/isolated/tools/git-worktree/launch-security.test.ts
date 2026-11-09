@@ -447,7 +447,7 @@ macos(
         )?.safeRead,
       ).not.toBe(true);
       expect(assets.profile!.envKeys).not.toContain('BUN_OPTIONS');
-      expect(configuration.commandDigest(inner)).toMatch(/^[a-f0-9]{64}$/);
+      expect(await configuration.commandDigest(inner)).toMatch(/^[a-f0-9]{64}$/);
       const reorderedEnvironment = await createShellConfiguration({
         workspaceRoot: root,
         toolIds: ['git.worktree'],
@@ -463,7 +463,9 @@ macos(
           shellExecutable: '/bin/sh',
         },
       });
-      expect(reorderedEnvironment.commandDigest(inner)).toBe(configuration.commandDigest(inner));
+      expect(await reorderedEnvironment.commandDigest(inner)).toBe(
+        await configuration.commandDigest(inner),
+      );
       const job = configuration.extensions[0]!.jobs![0]!;
       const handle = await job.start(
         { command, permissions: { filesystem: 'workspace_write', network: 'none' } },

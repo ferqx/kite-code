@@ -1199,47 +1199,50 @@ nativeTest(
         signal: new AbortController().signal,
         input: { key: 'first', command: 'printf original' },
       };
-      const digest = first.commandDigest(original);
+      const digest = await first.commandDigest(original);
       expect(digest).toMatch(/^[a-f0-9]{64}$/);
       expect(
-        first.commandDigest({
+        await first.commandDigest({
           ...original,
           executionId: 'other',
           input: { key: 'second', command: 'printf original', cancellation: 'attached' },
         }),
       ).toBe(digest);
       expect(
-        first.commandDigest({ ...original, input: { key: 'second', command: 'printf changed' } }),
+        await first.commandDigest({
+          ...original,
+          input: { key: 'second', command: 'printf changed' },
+        }),
       ).not.toBe(digest);
       expect(
-        first.commandDigest({
+        await first.commandDigest({
           ...original,
           input: { key: 'second', command: 'printf original', cancellation: 'detached' },
         }),
       ).not.toBe(digest);
       const foreground: AuthorizationRequest = { ...original, definitionId: 'shell.execute' };
-      const withoutDeadline = first.commandDigest(foreground);
+      const withoutDeadline = await first.commandDigest(foreground);
       expect(withoutDeadline).toMatch(/^[a-f0-9]{64}$/);
       expect(
-        first.commandDigest({
+        await first.commandDigest({
           ...foreground,
           input: { key: 'second', command: 'printf original', cancellation: 'attached' },
         }),
       ).toBe(withoutDeadline);
-      const tenMinutes = first.commandDigest({
+      const tenMinutes = await first.commandDigest({
         ...foreground,
         input: { key: 'first', command: 'printf original', timeoutMs: 600000 },
       });
       expect(tenMinutes).toMatch(/^[a-f0-9]{64}$/);
       expect(tenMinutes).not.toBe(withoutDeadline);
       expect(
-        first.commandDigest({
+        await first.commandDigest({
           ...foreground,
           input: { key: 'second', command: 'printf original', timeoutMs: 600000 },
         }),
       ).toBe(tenMinutes);
       expect(
-        first.commandDigest({
+        await first.commandDigest({
           ...foreground,
           input: { key: 'second', command: 'printf original', timeoutMs: 1000 },
         }),
@@ -1265,21 +1268,23 @@ nativeTest(
           maxQueuedBytes: 256 * 1024,
         },
       });
-      expect(explicitDefaults.commandDigest(original)).toBe(digest);
+      expect(await explicitDefaults.commandDigest(original)).toBe(digest);
       options.env.FIXED = 'changed';
-      expect(first.commandDigest(original)).toBe(digest);
+      expect(await first.commandDigest(original)).toBe(digest);
       const changedEnv = await createShellConfiguration(configuration);
-      expect(changedEnv.commandDigest(original)).not.toBe(digest);
+      expect(await changedEnv.commandDigest(original)).not.toBe(digest);
       const otherWorkspace = join(f.root, 'other');
       mkdirSync(otherWorkspace);
       const changedWorkspace = await createShellConfiguration({
         ...configuration,
         workspaceRoot: otherWorkspace,
       });
-      expect(changedWorkspace.commandDigest(original)).not.toBe(changedEnv.commandDigest(original));
-      expect(first.commandDigest({ ...original, definitionVersion: '2' })).toBeUndefined();
+      expect(await changedWorkspace.commandDigest(original)).not.toBe(
+        await changedEnv.commandDigest(original),
+      );
+      expect(await first.commandDigest({ ...original, definitionVersion: '2' })).toBeUndefined();
       expect(
-        first.commandDigest({
+        await first.commandDigest({
           ...original,
           kind: 'job',
           definitionId: 'shell.command',

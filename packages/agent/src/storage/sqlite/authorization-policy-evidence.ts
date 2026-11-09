@@ -280,6 +280,7 @@ function bridgePolicy(snapshot: Json): Json {
         ? capability.effects.filter((e) => e !== 'record_write').sort()
         : capability.effects!,
     executionScope: capability.executionScope ?? null,
+    autoReviewKey: capability.autoReviewKey ?? null,
   };
 }
 

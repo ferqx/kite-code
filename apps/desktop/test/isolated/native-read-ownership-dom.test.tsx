@@ -1434,6 +1434,7 @@ for (const recoveredDependency of ['directory', 'answer'] as const) {
 
 test('same-scope observation recovery preserves an outstanding complete history scan across retries', async () => {
   const messages = deferred<NativeResult>();
+  const heldSelection = deferred<NativeResult>();
   let unavailable = false,
     recovered = false,
     hold = true,
@@ -1450,7 +1451,7 @@ test('same-scope observation recovery preserves an outstanding complete history 
     }
     if (request.method === 'select' && unavailable) {
       recovered = true;
-      return originalState();
+      return heldSelection.promise;
     }
     return undefined;
   });
@@ -1463,6 +1464,12 @@ test('same-scope observation recovery preserves an outstanding complete history 
     unavailable = true;
     await f.notify();
     await until(() => recovered);
+    // Main can publish state while the same activation's retry is still pending.
+    // That notification must gate actions without canceling the ongoing history scan.
+    const closed = f.calls.filter((request) => request.method === 'messages.close').length;
+    await f.notify();
+    expect(f.calls.filter((request) => request.method === 'messages.close')).toHaveLength(closed);
+    await act(async () => heldSelection.resolve(originalState()));
     // A second scheduled observation must reuse the original scan while its read is slow.
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1300));
@@ -1492,6 +1499,49 @@ test('same-scope observation recovery preserves an outstanding complete history 
       ),
     ).toHaveLength(0);
   } finally {
+    heldSelection.resolve(originalState());
+    await f.close();
+  }
+});
+
+test('a history epoch change revokes a held same-session recovery scan', async () => {
+  const messages = deferred<NativeResult>();
+  const heldSelection = deferred<NativeResult>();
+  let recovering = false,
+    started = false,
+    epoch = 0;
+  let f!: ReturnType<typeof fixture>;
+  const snapshot = (): NativeState => ({ ...f.snapshot(), historyEpoch: epoch });
+  f = fixture((request) => {
+    if (request.method === 'messages') return messages.promise;
+    if (request.method === 'state' && recovering) {
+      const value = snapshot();
+      return { ...value, selection: { ...value.selection!, permissionUnavailable: true } };
+    }
+    if (request.method === 'select' && recovering) {
+      started = true;
+      return heldSelection.promise;
+    }
+    return undefined;
+  });
+  try {
+    await f.render();
+    await f.click('Original A');
+    await until(() => f.calls.some((request) => request.method === 'messages'));
+    recovering = true;
+    await f.notify();
+    await until(() => started);
+    const closed = f.calls.filter((request) => request.method === 'messages.close').length;
+    epoch++;
+    await f.notify();
+    expect(f.calls.filter((request) => request.method === 'messages.close')).toHaveLength(
+      closed + 1,
+    );
+    recovering = false;
+    await act(async () => heldSelection.resolve(snapshot()));
+  } finally {
+    heldSelection.resolve(snapshot());
+    messages.resolve({ messages: [], nextAfterSeq: null, highWaterSeq: '0' });
     await f.close();
   }
 });

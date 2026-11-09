@@ -66,6 +66,7 @@ function decision(kind: 'tool' | 'job' = 'tool'): PermissionDecision {
           definitionId: kind === 'tool' ? 'shell.execute' : 'shell.command',
           definitionVersion: '1',
           hardAllowed: true,
+          autoReviewKey: operationKey,
           effects:
             kind === 'tool' ? ['process', 'unknown', 'record_write'] : ['process', 'unknown'],
           executionScope: { filesystem: 'full_access', network: 'internet' },
@@ -664,6 +665,18 @@ test('current Auto command grant reaches only its dispatched builtin Tool own Jo
         targetExecutionId: unbound.id,
         decision: f.currentDecision('job'),
         parentProof: null,
+      }),
+    ).toBeNull();
+    // The literal command is unchanged, but its resolved directory changed after
+    // the Tool was authorized. A fresh Job snapshot must not inherit that grant.
+    const changedDirectory = await f.plan('grant-directory-changed', 'job', parent.id);
+    const directorySnapshot = JSON.parse(JSON.stringify(f.currentDecision('job').snapshot));
+    directorySnapshot.data.capability.autoReviewKey = 'd'.repeat(64);
+    expect(
+      await resolveFixtureAutoAuthorization(f.store, {
+        ...current,
+        targetExecutionId: changedDirectory.id,
+        decision: { ...f.currentDecision('job'), snapshot: directorySnapshot },
       }),
     ).toBeNull();
     const changedScope = await f.plan('grant-scope-changed', 'job', parent.id);

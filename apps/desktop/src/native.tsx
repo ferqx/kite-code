@@ -251,6 +251,20 @@ type CachedComposer = NativeModelDisplay & {
   contextUsage?: NonNullable<SessionPageProps['composer']>['contextUsage'];
 };
 
+// Match NativeHistory's observation identity, not its changing view revision.
+function nativeHistoryScope(state: NativeState | undefined): string | undefined {
+  const selection = state?.selection;
+  return selection && state
+    ? JSON.stringify([
+        state.generation,
+        selection.storeId,
+        selection.session.id,
+        selection.viewSelection ?? selection.viewGeneration,
+        state.historyEpoch ?? 0,
+      ])
+    : undefined;
+}
+
 function NativeDesktopContent({
   bridge,
   nativeWindow,
@@ -554,6 +568,7 @@ function NativeDesktopContent({
     | {
         sessionId: string;
         holdPresentation: boolean;
+        preservedHistoryScope?: string;
         latest?: NativeState;
       }
     | undefined
@@ -1023,6 +1038,7 @@ function NativeDesktopContent({
     const original: NonNullable<typeof selectionRead.current> = {
       sessionId,
       holdPresentation: true,
+      preservedHistoryScope: preserveHistory ? nativeHistoryScope(state) : undefined,
     };
     selectionRead.current = original;
     let preparedDraft: { value: NativeResult } | { error: unknown } | undefined;
@@ -1698,8 +1714,19 @@ function NativeDesktopContent({
   });
   parentHistoryVisible.current = readingParent;
   useLayoutEffect(() => {
-    if (!readingParent || selectionRead.current?.holdPresentation) {
+    const reading = selectionRead.current;
+    if (!readingParent) {
       history.current?.close();
+      return;
+    }
+    if (reading?.holdPresentation) {
+      // Recovery gates actions without canceling the same observation's scan.
+      // A changed Store, Session, activation or history epoch still revokes it.
+      if (
+        !reading.preservedHistoryScope ||
+        reading.preservedHistoryScope !== nativeHistoryScope(state)
+      )
+        history.current?.close();
       return;
     }
     if (state?.selection && selected.current === state.selection.session.id)
