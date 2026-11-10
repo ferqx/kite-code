@@ -33,6 +33,11 @@ export function manageSession(
     const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
     if (prior) {
       if (
+        prior.extension_id !== null ||
+        prior.scope_kind !== null ||
+        prior.scope_id !== null ||
+        prior.operation_key !== null ||
+        prior.status !== 'applied' ||
         prior.origin_store_id !== input.expectedStoreId ||
         prior.subject_id !== input.subjectId ||
         prior.session_id !== input.sessionId ||

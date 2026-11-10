@@ -6,6 +6,7 @@ import {
   interactionAttachment,
   type Message,
   requiresInteractionAttachment,
+  type SessionView,
   type Workspace,
 } from '@kite-ai/client';
 import { browserDraftMatches } from '../src/browser-annotation-content';
@@ -21,6 +22,7 @@ import type {
   NativeCreation,
   NativeDirectory,
   NativeEvent,
+  NativeExecutionObservation,
   NativeRequest,
   NativeResult,
   NativeState,
@@ -75,6 +77,10 @@ export class NativeCaller {
   private generation = 0;
   private selection = 0;
   private activation: { id: number; sessionId: string; selection: number } | undefined;
+  private selectionActivation?: {
+    key: string;
+    reading: Promise<DesktopSnapshot | undefined>;
+  };
   private selected: string | undefined;
   // A Renderer replacement loses its observation, not the user's selected
   // conversation. This is only an in-process display candidate; attach must
@@ -91,6 +97,11 @@ export class NativeCaller {
   private refreshing: Promise<unknown> | undefined;
   private refreshRequested = false;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private executionObservation?: NativeExecutionObservation;
+  private executionRefreshing?: Promise<void>;
+  private executionTarget?: { selection: number; cursor: string };
+  private admissionRevision = 0;
+  private admissionView?: { selection: number; revision: number; view: SessionView };
   private readonly workspaceAccessPreparations = new Set<string>();
   private workspaceAccessRefreshRequested = false;
   private readonly outputReads: NativeModelOutputReads;
@@ -219,7 +230,12 @@ export class NativeCaller {
       admittedClient: client,
       readContextOnSelect: false,
       readActiveCommandOnSelect: true,
-      onSnapshot: () => this.changed(),
+      onSnapshot: (snapshot) => {
+        if (snapshot.sessionId === this.selected)
+          this.lastView = { selection: this.selection, snapshot };
+        this.changed();
+      },
+      onExecutionObservation: (view) => this.observeExecution(view),
       onPermissionSubmission: () => this.changed(),
       onInteractionSubmission: () => this.changed(),
       interactionAnswerJournal: {
@@ -682,6 +698,21 @@ export class NativeCaller {
       throw new ClientError('native_selection_changed');
     return snapshot;
   }
+  private activateSelectedSession(sessionId: string): Promise<DesktopSnapshot | undefined> {
+    const key = JSON.stringify([
+      this.generation,
+      this.client.serverInfo?.storeId,
+      sessionId,
+      this.selection,
+      this.historyEpoch,
+    ]);
+    if (this.selectionActivation?.key === key) return this.selectionActivation.reading;
+    // Share the original activation outcome, including a lost reply or failure.
+    // Current permissions still come from the Controller's fresh snapshot.
+    const reading = this.controller.selectSession(sessionId);
+    this.selectionActivation = { key, reading };
+    return reading;
+  }
   private writableScope(sessionId: string) {
     const snapshot = this.selectScope(sessionId);
     if (snapshot.view.session.parentSessionId !== null)
@@ -694,6 +725,7 @@ export class NativeCaller {
     return snapshot;
   }
   private releaseReads(includeGlobalSettings = true) {
+    this.selectionActivation = undefined;
     this.inputQueue.release();
     this.environment.release();
     this.controller.cancelInteractionRead();
@@ -825,6 +857,93 @@ export class NativeCaller {
     this.scheduleDirectoryRefresh();
     this.scheduleSelectionRefresh(signal);
   }
+  private observeExecution(view: SessionView) {
+    if (view.session.id !== this.selected || view.storeId !== this.client.serverInfo?.storeId)
+      return;
+    const previous = this.executionObservation;
+    if (
+      previous &&
+      previous.generation === this.generation &&
+      previous.viewSelection === this.selection &&
+      previous.historyEpoch === this.historyEpoch &&
+      BigInt(previous.observedCursor) > BigInt(view.snapshotCursor)
+    )
+      return;
+    this.executionObservation = {
+      generation: this.generation,
+      storeId: view.storeId,
+      sessionId: view.session.id,
+      workspaceId: view.session.workspaceId,
+      viewSelection: this.selection,
+      historyEpoch: this.historyEpoch,
+      observedCursor: view.snapshotCursor,
+      phase: this.observationUnavailable
+        ? 'unavailable'
+        : this.executionTarget?.selection === this.selection &&
+            BigInt(view.snapshotCursor) < BigInt(this.executionTarget.cursor)
+          ? 'refreshing'
+          : 'fresh',
+      session: view.session,
+      runs: view.runs,
+      executions: view.executions,
+      compressionProgress: view.compressionProgress,
+    };
+    this.changed();
+  }
+  private scheduleExecutionRefresh(signal: AbortSignal, cursor: string) {
+    const sessionId = this.selected,
+      selection = this.selection,
+      epoch = this.historyEpoch;
+    if (!sessionId || signal.aborted || this.closed) return;
+    if (
+      !this.executionTarget ||
+      this.executionTarget.selection !== selection ||
+      BigInt(this.executionTarget.cursor) < BigInt(cursor)
+    )
+      this.executionTarget = { selection, cursor };
+    if (this.executionRefreshing) return;
+    const target = this.executionTarget;
+    const admissionRevision = this.admissionRevision;
+    if (this.executionObservation?.viewSelection === selection)
+      this.executionObservation = { ...this.executionObservation, phase: 'refreshing' };
+    const reading = (async () => {
+      try {
+        let view = await this.controller.refreshExecution(sessionId, signal);
+        // A shared GET may have captured its snapshot just before the event arrived.
+        if (
+          view &&
+          BigInt(view.snapshotCursor) < BigInt(target.cursor) &&
+          selection === this.selection &&
+          epoch === this.historyEpoch
+        )
+          view = await this.controller.refreshExecution(sessionId, signal);
+        if (selection !== this.selection || epoch !== this.historyEpoch) return;
+        if (!view || BigInt(view.snapshotCursor) < BigInt(target.cursor))
+          throw new ClientError('execution_observation_unavailable');
+        this.observeExecution(view);
+        this.admissionView = { selection, revision: admissionRevision, view };
+      } catch {
+        if (
+          selection === this.selection &&
+          epoch === this.historyEpoch &&
+          this.executionObservation
+        )
+          this.executionObservation = { ...this.executionObservation, phase: 'unavailable' };
+      }
+    })();
+    this.executionRefreshing = reading;
+    void reading.finally(() => {
+      if (this.executionRefreshing !== reading) return;
+      this.executionRefreshing = undefined;
+      this.changed();
+      const next = this.executionTarget;
+      const currentSignal = this.observer?.signal;
+      if (next && next !== target && currentSignal && !currentSignal.aborted && !this.closed)
+        this.scheduleExecutionRefresh(currentSignal, next.cursor);
+      else if (this.refreshRequested && !signal.aborted && !this.closed)
+        this.scheduleSelectionRefresh(signal);
+    });
+  }
   private environmentSnapshot(): DesktopSnapshot | undefined {
     if (this.permissionUnavailable) return undefined;
     const snapshot =
@@ -844,7 +963,14 @@ export class NativeCaller {
   }
   private scheduleSelectionRefresh(signal: AbortSignal) {
     this.refreshRequested = true;
-    if (this.refreshing || this.refreshTimer || signal.aborted || this.closed) return;
+    if (
+      this.refreshing ||
+      this.executionRefreshing ||
+      this.refreshTimer ||
+      signal.aborted ||
+      this.closed
+    )
+      return;
     const refresh = (async () => {
       if (this.refreshRequested && !this.closed && !signal.aborted) {
         this.refreshRequested = false;
@@ -852,7 +978,14 @@ export class NativeCaller {
           view = this.selection;
         if (selected) {
           try {
-            await this.controller.refreshSession(selected);
+            const offered = this.admissionView;
+            this.admissionView = undefined;
+            await this.controller.refreshSession(
+              selected,
+              offered?.selection === view && offered.revision === this.admissionRevision
+                ? offered.view
+                : undefined,
+            );
             if (selected === this.selected && view === this.selection)
               this.permissionUnavailable = false;
           } catch {
@@ -895,12 +1028,18 @@ export class NativeCaller {
     this.observer = signal;
     const originalStore = this.client.serverInfo!.storeId!;
     const invalidate = () => {
+      if (this.observationUnavailable) return;
       this.invalidateDirectory();
       this.background.release();
       this.environment.release();
       this.observationUnavailable = true;
+      this.controller.resetObservation();
       this.permissionUnavailable = true;
       this.historyEpoch++;
+      this.executionObservation = undefined;
+      this.executionTarget = undefined;
+      this.admissionRevision++;
+      this.admissionView = undefined;
       this.historyHead = undefined;
       this.skills.release();
       this.extensions.release();
@@ -921,11 +1060,14 @@ export class NativeCaller {
     this.stream = (async () => {
       let reset = false,
         readySeen = false,
+        resynchronize = false,
         startAfter: AppliedCursor | undefined;
       while (!signal.signal.aborted && !this.closed) {
         try {
           if (reset) {
             readySeen = false;
+            const info = await this.client.verifyConnection({ signal: signal.signal });
+            if (info.dataAvailability !== 'available') throw new ClientError('data_unavailable');
             if (this.client.serverInfo!.storeId !== originalStore)
               throw new ClientError('store_identity_mismatch');
             const baseline = await this.client.listWorkspaceDirectory(
@@ -934,18 +1076,9 @@ export class NativeCaller {
             );
             startAfter = { storeId: originalStore, sequence: baseline.snapshotCursor };
             if (this.directoryEnabled) await this.readDirectory();
-            if (this.selected) {
-              const sessionId = this.selected,
-                selection = this.selection;
-              await this.controller.selectSession(sessionId);
-              if (this.selected === sessionId && this.selection === selection) {
-                const complete = new Promise<void>((resolve) => {
-                  this.resetHistory = { selection, sessionId, resolve };
-                });
-                this.changed();
-                await complete;
-              }
-            }
+            // The replacement history depends on admitted Main reads. Establish
+            // it after ready; awaiting it here would prevent the stream opening.
+            resynchronize = true;
             reset = false;
           }
           const acknowledged = this.client.lastAppliedCursor;
@@ -958,12 +1091,20 @@ export class NativeCaller {
             startAfter = undefined;
           await this.client.observe({
             signal: signal.signal,
+            // Main owns the observation epoch. SDK-internal transport retries
+            // would leave the old execution/admission fresh until the next ready.
+            reconnect: false,
             ...(startAfter ? { startAfter } : acknowledged ? { cursor: acknowledged } : {}),
             onReady: async (ready) => {
-              // observe() reconnects internally. A new transport needs a fresh history
-              // baseline even when replay did not expire; ready's head is not an ACK.
+              // Every replacement transport needs a fresh history baseline even
+              // when replay did not expire; ready's head is not an ACK.
               if (readySeen) {
+                this.controller.resetObservation();
                 this.historyEpoch++;
+                this.executionObservation = undefined;
+                this.executionTarget = undefined;
+                this.admissionView = undefined;
+                this.admissionRevision++;
                 this.historyHead = undefined;
                 this.messageRead?.abort.abort();
               }
@@ -975,13 +1116,13 @@ export class NativeCaller {
               this.changed();
               if (
                 this.selected &&
-                this.client.serverInfo?.capabilities.includes('session_reconciliation')
+                (resynchronize ||
+                  this.client.serverInfo?.capabilities.includes('session_reconciliation'))
               ) {
                 const sessionId = this.selected,
                   selection = this.selection;
-                // Ready may arrive during an explicit activation. Keep its read alive,
-                // then reconcile the same selection as a tracked successor so callers
-                // wait for its verified facts and receive its actual read failure.
+                // Explicit selection, first input and initial ready share one
+                // activation within the exact admission/selection epoch.
                 const pending = this.refreshing;
                 const reading = (async () => {
                   await pending?.catch(() => {});
@@ -992,23 +1133,63 @@ export class NativeCaller {
                     this.selection !== selection
                   )
                     return;
-                  return this.controller.selectSession(sessionId);
+                  this.permissionUnavailable = true;
+                  const activated = await this.activateSelectedSession(sessionId);
+                  if (this.selected !== sessionId || this.selection !== selection) return;
+                  const snapshot = this.controller.snapshot;
+                  if (
+                    !snapshot ||
+                    BigInt(snapshot.view.snapshotCursor) < BigInt(ready.highWaterCursor)
+                  ) {
+                    const fresh = await this.controller.refreshSession(sessionId);
+                    if (fresh && BigInt(fresh.view.snapshotCursor) < BigInt(ready.highWaterCursor))
+                      throw new ClientError('observation_cursor_unavailable');
+                    return fresh;
+                  }
+                  return activated;
                 })();
                 this.refreshing = reading;
                 try {
                   await reading;
+                  if (this.selected === sessionId && this.selection === selection)
+                    this.permissionUnavailable = false;
                 } catch {
                   if (this.selected === sessionId && this.selection === selection) {
                     this.permissionUnavailable = true;
+                    if (this.executionObservation?.viewSelection === selection)
+                      this.executionObservation = {
+                        ...this.executionObservation,
+                        phase: 'unavailable',
+                      };
                     this.changed();
                   }
                 } finally {
                   if (this.refreshing === reading) this.refreshing = undefined;
                 }
               }
+              if (resynchronize && this.selected && !this.permissionUnavailable) {
+                const sessionId = this.selected,
+                  selection = this.selection;
+                const complete = new Promise<void>((resolve) => {
+                  this.resetHistory = { selection, sessionId, resolve };
+                });
+                this.changed();
+                await complete;
+              }
+              resynchronize = false;
               // A ready-only stream at the reloaded baseline adds no new facts.
-              if (!startAfter || ready.highWaterCursor !== startAfter.sequence)
-                this.scheduleRefresh(signal.signal);
+              if (!startAfter || ready.highWaterCursor !== startAfter.sequence) {
+                this.scheduleDirectoryRefresh();
+                const snapshot = this.controller.snapshot;
+                if (
+                  this.selected &&
+                  !this.permissionUnavailable &&
+                  (!snapshot ||
+                    snapshot.sessionId !== this.selected ||
+                    BigInt(snapshot.view.snapshotCursor) < BigInt(ready.highWaterCursor))
+                )
+                  this.scheduleSelectionRefresh(signal.signal);
+              }
             },
             onChange: (change) => {
               this.environmentRevision++;
@@ -1028,24 +1209,38 @@ export class NativeCaller {
                 this.changed();
               }
               this.scheduleDirectoryRefresh();
-              // The global cursor is still acknowledged for every change. Only
-              // selected facts and their observed root/Workspace controls invalidate metadata.
-              if (
+              const executionChange =
+                change.sessionId === this.selected &&
+                (change.type.startsWith('run.') || change.type.startsWith('execution.'));
+              const permissionChange = permissionChangeAffectsView(
+                change,
+                this.controller.permissionView,
+                this.client.serverInfo?.storeId,
+              );
+              const selectionChange =
                 (!change.sessionId && change.type !== 'host_control.changed') ||
                 change.sessionId === this.selected ||
-                permissionChangeAffectsView(
-                  change,
-                  this.controller.permissionView,
-                  this.client.serverInfo?.storeId,
-                )
-              ) {
+                permissionChange;
+              if (selectionChange && !historyOnly) this.admissionRevision++;
+              if (executionChange) {
+                this.controller.invalidateSelection();
+                this.scheduleExecutionRefresh(signal.signal, change.cursor);
+              }
+              const ownWorkspacePreparation =
+                change.type === 'host_control.changed' &&
+                this.workspaceAccessPreparations.has(change.objectId);
+              if (
+                !ownWorkspacePreparation &&
+                ((change.sessionId === this.selected && change.type.startsWith('interaction.')) ||
+                  permissionChange)
+              )
+                this.controller.invalidateSelection();
+              // The global cursor is still acknowledged for every change. Only
+              // selected facts and their observed root/Workspace controls invalidate metadata.
+              if (selectionChange) {
                 // Preparation itself re-reads the applied grant. Its own durable event
                 // must not invalidate that read; foreign changes still refresh immediately.
-                if (
-                  change.type === 'host_control.changed' &&
-                  this.workspaceAccessPreparations.has(change.objectId)
-                )
-                  this.workspaceAccessRefreshRequested = true;
+                if (ownWorkspacePreparation) this.workspaceAccessRefreshRequested = true;
                 else if (!historyOnly) this.scheduleSelectionRefresh(signal.signal);
               }
               // Creation is conservative: the next exact root directory establishes
@@ -1063,7 +1258,10 @@ export class NativeCaller {
               invalidate();
             },
           });
-          if (!signal.signal.aborted && !this.closed && !reset) invalidate();
+          if (!signal.signal.aborted && !this.closed && !reset) {
+            invalidate();
+            reset = true;
+          }
         } catch (error) {
           if (signal.signal.aborted || this.closed) break;
           invalidate();
@@ -1072,6 +1270,7 @@ export class NativeCaller {
               'store_identity_mismatch',
               'bootstrap_identity_mismatch',
               'profile_identity_mismatch',
+              'connection_identity_mismatch',
             ].includes((error as { code?: string }).code ?? '')
           )
             break;
@@ -1216,6 +1415,13 @@ export class NativeCaller {
       directory: this.directoryState(),
       backgroundUnavailable: this.observationUnavailable,
       selection,
+      executionObservation:
+        this.executionObservation?.viewSelection === this.selection &&
+        this.executionObservation.generation === this.generation &&
+        this.executionObservation.sessionId === this.selected &&
+        this.executionObservation.historyEpoch === this.historyEpoch
+          ? this.executionObservation
+          : undefined,
       historyEpoch: this.historyEpoch,
       creationSubmissions: [...this.creations.values()],
       grantSubmissions: this.grants.submissions,
@@ -2130,8 +2336,7 @@ export class NativeCaller {
             ? undefined
             : { id: request.activationId, sessionId: request.sessionId, selection: this.selection };
         const view = this.selection;
-        const reading = this.controller
-          .selectSession(request.sessionId)
+        const reading = this.activateSelectedSession(request.sessionId)
           .then(() => {
             if (this.selected === request.sessionId && this.selection === view)
               this.permissionUnavailable = false;

@@ -14,6 +14,8 @@
 
 `getView` 在同一只读事务返回该 Session 最早 Run、最近200项 Run 与活动 Run 的去重并集，按原 rowid 排序。首项因此保持实际首次运行，不能以时间戳、最近记录或当前配置替代；超过200轮后仍可据其封存配置核会话协议。没有新表、写入或累计历史物化，当前 Run、旧活动 Execution 与原消息读取范围保持。[公开 Service／Client／Desktop 回归](../../../../tests/isolated/unified-agent/active-view.test.ts)覆盖205轮后的首 Run、活动 Run、旧 Job、准确原 Command、去重和读取零变更。
 
+[首 Run 窄读](sqlite/session-first-run.ts)的 readFirstSessionRun 用单只读事务核当前 Store／Session 并返回 snapshotCursor 与原 rowid 首 Run，不物化消息／执行全集。恢复 Run 的 originStoreId 可不同于当前 Store，不能加同源假设。Service 协议检查已沿该端口，原配置／digest／processing wrapper 的严格解析保持；无 HTTP DTO、表或版本升级。[真实 Store 回归](../../test/isolated/storage/session-first-run.test.ts)核空记录、反序时间戳、恢复来源、错误 Store／Session、冷 readonly 和零事件；协议与耗时证据归[Service owner](../../../../apps/service/README.md#生命周期性能测量)。
+
 ## 消息历史变更读取
 
 [listMessageChanges](port.ts)由Worker在单个只读事务调用[持久变更读取](sqlite/message-changes.ts)。它固定原Store、Session和`(afterCursor,upperCursor]`，每批最多扫描200个全局`change_event`；`Message.seq`只负责候选分页和历史位置，不能作为内容版本。普通`message.updated`按原ID定位消息，同一序号的partial会返回新正文；全局非正文事件保守重投影具有展示依赖的原用户消息、解释/压缩Model消息及result_ref来源，覆盖原输入接管、外来名称、压缩结果与虚拟子结果的变化。候选按seq分页，公开可见消息复用原[结果展示证明](sqlite/agent-result-display.ts)，不可见候选返回`removedIds`；批次空页仍沿准确`nextCursor`前进。
@@ -48,7 +50,21 @@
 
 ## Session 标题写入
 
-[消息写入](sqlite/operations.ts)只保存原消息，不从首条正文推导标题，也不隐式增加 Session control revision 或产生 rename 事件。自动命名和原文兜底统一由[命名扩展](../business/session-title/index.ts)通过显式 `renameSession` 完成，Store 保留原主体、删除状态与 revision CAS 核实；未安装该扩展的宿主不自动命名。[真实 Store 测试](../../test/isolated/storage/session-titles.test.ts)核空标题保持、消息写入零 rename，以及跨 Worker 的显式名称保存。
+2026-11-10，旧reader兼容性补验：未修改HEAD `4a527742c` 的readonly Store实际打开本任务已关闭的隔离Native Profile，成功读取7个新格式attempt及其原Session／Run／Execution；原数据库SHA256、Command／Execution数量和change cursor逐项保持，未运行Runtime或提交业务。原始结果为本机`.cache/lifecycle-old-reader.json`。这只证明该原格式下的旧只读投影可读，不授予旧Runtime接管活动新Job或直接降级写入的资格；未知执行和原owner恢复约束保持。
+
+[消息写入](sqlite/operations.ts)不隐式改名。默认[命名扩展](../business/session-title/index.ts)已消费[专用 fallback 事务](sqlite/session-title-operations.ts)：核当前 Store／根 Session／主体、准确首输入摘要、空历史／无 Run／无手动命名／旧 marker，原子写 fallback、稳定 session.rename 收据和私有 automatic-title-attempt 版本1。自动 fallback／发布不推进 controlRevision；公共 rename 保持原 CAS／递增，两个入口不能复用对方 namespace 的同 ID 收据。旧 marker 和恢复到其他 Store 的记录不被重新接纳。
+
+[资格证明](sqlite/session-title-proof.ts)仅认可准确 beforeRun fallback Action 下由稳定 namespace／operation key 登记的 detached Job，绑定固定原首 Run。异步 factory 和事务共用[来源解析](../business/session-title/source.ts)。发布核原 Run 正式成功、准确内部 Model 完整收据／bounded 正文、原 record CAS、无手动覆盖／删除／取消；标题、稳定收据和 published record 同事务提交。关闭／发布共用终结性 CAS；同名 ABA 不冒充无手动改名，旧收据重查不覆盖后来标题。
+
+2026-11-10 Windows真实私有Profile备份／恢复补验包含待发布和已发布两种记录：[发布整文件](../../test/isolated/storage/session-title-publication.test.ts)24项／144断言通过。替换Store保原标题、完整私有record、已提交原收据及Run／Execution的旧origin；旧owner先由物理门禁拒绝，新owner下的旧Store及改填新Store的旧来源分别拒绝，且不推进cursor、不重写标题或record。记录保留不构成新Store的自动发布资格。原先预期先报Store错误的断言已按实际前置owner门禁修正，三层边界均单独验证。
+
+同日以独立依赖的HEAD `4a527742c` Store按只读模式打开已关闭的隔离Native Profile，实际读出新私有record、runless detached命名Job及`internal_metadata`终态、4个已完成Run与11条原消息，Store身份及cursor755均不变。通用旧Store reader可读这些原事实，旧业务解释器的`automatic-title` key仍按原规则，不消费新key。该证据在本机`.cache/lifecycle-legacy-read.log`，只证明读取兼容，不授予旧Runtime调度、继续新命名或直接降级执行资格；不能从数据库与公开版本未变推导这些资格。
+
+[效果域](sqlite/session-title-scope.ts)核完整来源，不以定义名／detached／runless／自报 purpose 授予豁免。准确 Job 的[终态投递](sqlite/job-operations.ts)为 suppressed／internal_metadata，不入业务邮箱；派发前明确拒绝的原 Job 同事务关闭资格。[owner 门禁](sqlite/owner-dispatch.ts)只忽略已关闭／发布的准确命名 Job／Model，普通未知仍阻断；最多读3个候选，超过一个 Job 加一个 Model 的集合即保守阻断。冷 acquire 在 frontend 取得物理根锁排除旧 supervisor 后关闭准确遗留资格，普通恢复门禁失败会回滚闭合；原 running／unknown 不改写，不重发 Provider。主 Run [恢复检查](sqlite/run-resume-operations.ts)不把准确独立命名纳入主 checkpoint。
+
+2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树，完整[发布](../../test/isolated/storage/session-title-publication.test.ts)、[首 Run](../../test/isolated/storage/session-first-run.test.ts)和[Worker 错误](../../test/isolated/storage/worker-errors.test.ts)组合27项／142断言通过。含原成功 Run、完整 Model、ABA、控制变化、删除、CAS／跨 Worker、半提交回滚、来源反例、丢回复原只读收据及冷 readonly、共享核验失败不关闭、冷失主闭合与附着伪装保留恢复门槛、错误属性不伪造原请求结束。原 fallback／历史兼容／owner 交接46项的既有证据保留；此后这些 producer 与格式规则未改。完整 Runtime 证据归[Agent owner](../../README.md#入口与职责)，不能代替实际故障组合或客户端全过程。Artifact 链与32KiB界保持，原受限环境 continuation 间歇失败也不被宿主通过覆盖。取舍见[独立命名决定](../../../../.agents/notes/implemented/architecture/2026-11-09-detached-session-title-metadata.md)。
+
+[只读发布核验](sqlite/session-title-publication.ts)的 readAutomaticSessionTitlePublication 在同一只读事务核原 Job、首 Run、完整 Model／候选和私有发布 namespace／稳定收据；冷 readonly 同样可读，不借 owner 发起新写入。Runtime 发布协调始终只调用一次原发布：已有收据按原结果结算；Worker 确认原请求已结束且准确约束／CAS失败、核验仍 pending 时才关闭；原调用仍可能提交则沿原事实唤醒继续查，查空不证明未提交。原请求结束证据由 Worker 的 assertRequestSettled 后以私有错误 WeakSet／封闭传输字段交接，不信任异常自报属性，不标记仍在写锁等待的原请求。owner／共享完整性／不可可靠读取仍失败关闭。新版只读方法使用 query 类别，不靠控制优先级伪造读取收益。
 
 ## 恢复后的只读 Interaction
 

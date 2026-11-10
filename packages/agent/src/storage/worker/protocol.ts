@@ -26,6 +26,7 @@ export type WorkerRequest =
   | { id: number; method: 'close'; args: [] };
 export const storeMethods: readonly (keyof Store)[] = [
   'getMetadata',
+  'readFirstSessionRun',
   'readRunExecutionSafety',
   'readExecutionGroupSafety',
   'verifyRunResume',
@@ -171,6 +172,11 @@ export const storeMethods: readonly (keyof Store)[] = [
   'forkSession',
   'readForkNamespacePage',
   'renameSession',
+  'claimAutomaticSessionTitle',
+  'bindAutomaticSessionTitle',
+  'publishAutomaticSessionTitle',
+  'readAutomaticSessionTitlePublication',
+  'closeAutomaticSessionTitle',
   'deleteSession',
   'getMessageOrigin',
   'readForkRecordSources',

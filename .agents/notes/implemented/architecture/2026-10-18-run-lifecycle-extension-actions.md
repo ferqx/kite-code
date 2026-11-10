@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-10：本文中默认标题在完成CAS前等待、共享业务模型槽与公共rename控制CAS的部分，已由[独立命名决定](2026-11-09-detached-session-title-metadata.md)替代，原段落保留取舍历史。当前行为和本机开发验证归Agent／Storage／Service owner；通用生命周期钩子、扩展业务归属、原Session内部Model、完整输出、准确取消与真实资源drain的理由继续适用。该决定不授予其他平台、安装版或远端模型资格。
+
 旧 Task 工具、专用 required-result 与显式 after_turn 执行的保留决定，已由[退役决定](2026-11-02-retire-legacy-task.md)部分取代；当前六工具、通用 Operation、独立 Session、准确来源和安全／恢复边界继续适用。
 
 2026-10-22：本文中自动审核／标题生成使用 child 的承载方式已由[内部模型调用边界](2026-10-22-internal-model-calls-without-child-agents.md)部分替代；原完整正文、准确授权与标题生命周期／CAS理由继续适用。下文相关 child 实现描述解释旧记录。

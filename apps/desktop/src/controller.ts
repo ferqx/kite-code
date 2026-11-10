@@ -73,6 +73,8 @@ export interface DesktopSnapshot {
 export interface DesktopOptions {
   readonly admittedClient: AgentClient;
   readonly onSnapshot: (snapshot: DesktopSnapshot) => void;
+  /** Readonly execution facts; this callback conveys no operation admission. */
+  readonly onExecutionObservation?: (view: SessionView) => void;
   readonly onPermissionSubmission?: (submission: PermissionSubmission) => void;
   readonly onContextSubmission?: (submission: ContextSubmission) => void;
   readonly onInteractionSubmission?: (submission: InteractionAnswerSubmission) => void;
@@ -171,6 +173,13 @@ export class DesktopController {
   private readonly verifiedAttachments = new Set<string>();
   private interactionRead: AbortController | undefined;
   private selectionRead: AbortController | undefined;
+  private executionRead: AbortController | undefined;
+  private activatingSelection: typeof this.selected;
+  private viewRead?: {
+    selection: { sessionId: string; queries: readonly QuerySelection[] };
+    abort: AbortController;
+    promise: Promise<SessionView>;
+  };
   private interactionReadGeneration: number | undefined;
   private interactionPageStartId: string | undefined;
   private readonly answers = new Map<
@@ -243,10 +252,13 @@ export class DesktopController {
     queries: readonly QuerySelection[] = [],
   ): Promise<DesktopSnapshot | undefined> {
     if (this.disposed) throw new Error('controller_disposed');
+    this.executionRead?.abort();
+    this.viewRead?.abort.abort();
     this.cancelInteractionRead();
     this.clearAttachmentReads();
     const generation = ++this.generation;
     this.selected = { sessionId, queries: structuredClone(queries) };
+    this.activatingSelection = this.selected;
     this.current = undefined;
     this.permissionScope = undefined;
     this.selectionRead?.abort();
@@ -262,6 +274,7 @@ export class DesktopController {
       }
     }
     if (activation.signal.aborted || generation !== this.generation || this.disposed) return;
+    this.activatingSelection = undefined;
     const snapshot = await this.readSelection(this.selected, generation);
     if (snapshot && reconciliationError) {
       this.options.onError?.(reconciliationError);
@@ -271,7 +284,10 @@ export class DesktopController {
   }
 
   /** Event refresh re-reads the visible bounded window using fresh observation facts. */
-  async refreshSession(sessionId: string): Promise<DesktopSnapshot | undefined> {
+  async refreshSession(
+    sessionId: string,
+    sourceView?: SessionView,
+  ): Promise<DesktopSnapshot | undefined> {
     if (this.disposed) throw new Error('controller_disposed');
     const original = this.current;
     if (
@@ -288,13 +304,77 @@ export class DesktopController {
     this.clearAttachmentReads(true);
     const generation = ++this.generation;
     this.current = undefined;
-    return this.readSelection(this.selected, generation, previous);
+    return this.readSelection(this.selected, generation, previous, sourceView);
+  }
+
+  /** Revoke stale operation targets without waiting for a retired GET to settle. */
+  invalidateSelection(): void {
+    if (this.activatingSelection === this.selected) return;
+    this.current = undefined;
+    ++this.generation;
+    this.selectionRead?.abort();
+    this.cancelInteractionRead();
+    this.clearAttachmentReads();
+  }
+
+  /** Transport/reset changes retire GETs captured under the preceding observation epoch. */
+  resetObservation(): void {
+    this.invalidateSelection();
+    this.viewRead?.abort.abort();
+    this.viewRead = undefined;
+    this.executionRead?.abort();
+  }
+
+  /** Independent single-flight owner is the caller; permissions cannot hold this read. */
+  async refreshExecution(sessionId: string, signal: AbortSignal): Promise<SessionView | undefined> {
+    const selection = this.selected;
+    if (this.disposed || selection?.sessionId !== sessionId) return;
+    this.executionRead?.abort();
+    const reading = new AbortController();
+    this.executionRead = reading;
+    const abort = () => reading.abort(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    try {
+      const view = await this.readExecutionView(selection);
+      reading.signal.throwIfAborted();
+      if (this.disposed || this.selected !== selection) return;
+      this.validateExecution(view, sessionId);
+      return view;
+    } finally {
+      signal.removeEventListener('abort', abort);
+      if (this.executionRead === reading) this.executionRead = undefined;
+    }
+  }
+
+  private readExecutionView(selection: NonNullable<typeof this.selected>): Promise<SessionView> {
+    if (this.viewRead?.selection === selection) return this.viewRead.promise;
+    const abort = new AbortController();
+    const promise = this.client.getView(selection.sessionId, { signal: abort.signal });
+    const read = { selection, abort, promise };
+    this.viewRead = read;
+    void promise
+      .finally(() => {
+        if (this.viewRead === read) this.viewRead = undefined;
+      })
+      .catch(() => {});
+    return promise;
+  }
+
+  private validateExecution(view: SessionView, sessionId: string): void {
+    if (view.session.id !== sessionId || view.storeId !== this.client.serverInfo?.storeId)
+      throw new ClientError('view_identity_mismatch');
+  }
+  private publishExecution(view: SessionView, sessionId: string): void {
+    this.validateExecution(view, sessionId);
+    this.options.onExecutionObservation?.(view);
   }
 
   private async readSelection(
     selection: { sessionId: string; queries: readonly QuerySelection[] },
     generation: number,
     previous?: { afterId: string; scope: SessionView },
+    sourceView?: SessionView,
   ): Promise<DesktopSnapshot | undefined> {
     this.cancelInteractionRead();
     this.selectionRead?.abort();
@@ -311,8 +391,9 @@ export class DesktopController {
         throw new ClientError('native_selection_changed');
     };
     try {
-      const view = await this.client.getView(selection.sessionId, { signal });
+      const view = sourceView ?? (await this.readExecutionView(selection));
       check();
+      this.publishExecution(view, selection.sessionId);
       this.permissionScope = view;
       const afterId =
         previous &&
@@ -1296,6 +1377,8 @@ export class DesktopController {
   }
 
   disposeNetwork(): void {
+    this.viewRead?.abort.abort();
+    this.executionRead?.abort();
     this.selectionRead?.abort();
     this.selectionRead = undefined;
     this.cancelInteractionRead();

@@ -41,7 +41,8 @@ async function fixture(existingRoot?: string) {
       requests.push({ path, body });
       if (rejectNext) {
         rejectNext = false;
-        return Response.json({ error: { message: 'fixture model rejection' } }, { status: 400 });
+        // This case needs a terminal rejection; the adapter deliberately retries HTTP400.
+        return Response.json({ error: { message: 'fixture model rejection' } }, { status: 401 });
       }
       if (path.endsWith('/responses'))
         return new Response(

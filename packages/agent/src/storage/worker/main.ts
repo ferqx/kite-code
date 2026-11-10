@@ -7,11 +7,12 @@ import {
 import { openDatabase } from '../sqlite/connection';
 import { runnableCommandPredicate } from '../sqlite/job-report-operations';
 import { SqliteOperations } from '../sqlite/operations';
-import { hasUnsettledOwnerGroup } from '../sqlite/owner-dispatch';
+import { closeAbandonedOwnerTitles, hasUnsettledOwnerGroup } from '../sqlite/owner-dispatch';
 import { readRecoveryToolHistory } from '../sqlite/recovery-history';
 import { getRecoveryReceipt } from '../sqlite/recovery-operations';
 import { inspectSessionReconciliation } from '../sqlite/session-reconciliation';
 import { UnstartedSqliteWrite } from '../sqlite/write-lock';
+import { isStorageTransactionUnconfirmed, markStorageRequestSettled } from '../transaction-state';
 import { AgentError, type OwnerRef } from '../types';
 import { deserializeStorageError, type StorageWorkerError, serializeStorageError } from './error';
 import type { WorkerRequest } from './protocol';
@@ -165,6 +166,7 @@ function execute(request: WorkerRequest): void {
         const session = operations!.row('SELECT * FROM session WHERE id=?', sessionId);
         if (!session || session.delete_requested) throw new AgentError('session_not_found');
         if (session.parent_id !== null) throw new AgentError('group_root_required');
+        closeAbandonedOwnerTitles(operations!, sessionId);
         // Settled public rows do not retire the private history-pairing boundary.
         // Ordinary dispatch must wait for explicit resume or proven new-work closure.
         if (
@@ -270,9 +272,15 @@ function execute(request: WorkerRequest): void {
         rejected = unsettled;
       }
     }
-    post({
-      id,
-      error: failure(rejected),
-    });
+    // Only the exact title publication coordinator consumes this lifetime evidence.
+    // Unstarted writes above retain their original request and never reach this branch.
+    if (
+      method === 'publishAutomaticSessionTitle' &&
+      rejected !== null &&
+      typeof rejected === 'object' &&
+      !isStorageTransactionUnconfirmed(rejected)
+    )
+      markStorageRequestSettled(rejected);
+    post({ id, error: failure(rejected) });
   }
 }

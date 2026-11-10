@@ -3,6 +3,8 @@ import type { Store } from '../port';
 import { AgentError, type ExecutionOutputRecord, type OwnerRef } from '../types';
 import { assertCurrentExecutionPurpose } from './child-operations';
 import type { SqliteOperations } from './operations';
+import { closeUndispatchedAutomaticTitle } from './session-title-publication';
+import { automaticTitleEffect } from './session-title-scope';
 
 const max = 9223372036854775807n;
 function decimal(value: string): bigint {
@@ -217,8 +219,11 @@ export function finishJobDelivery(
   );
   if (!['operation.job', 'operation.agent'].includes(String(command?.kind))) return;
   const target = db.row('SELECT * FROM session WHERE id=?', execution.delivery_target_session_id!);
-  const reason =
-    !target || target.delete_requested
+  const title = automaticTitleEffect(db, execution);
+  if (title) closeUndispatchedAutomaticTitle(db, title);
+  const reason = title
+    ? 'internal_metadata'
+    : !target || target.delete_requested
       ? 'target_deleted'
       : target.context_selection_id !== execution.context_selection_id
         ? 'context_changed'

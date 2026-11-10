@@ -181,6 +181,21 @@ export type NativeCallerBody = {
   data: string;
   bodyBytes: number;
 };
+/** Readonly execution projection. It cannot authorize input, answers, or cancellation. */
+export type NativeExecutionObservation = {
+  readonly generation: number;
+  readonly storeId: string;
+  readonly sessionId: string;
+  readonly workspaceId: string;
+  readonly viewSelection: number;
+  readonly historyEpoch: number;
+  readonly observedCursor: string;
+  readonly phase: 'fresh' | 'refreshing' | 'unavailable';
+  readonly session: Session;
+  readonly runs: readonly Run[];
+  readonly executions: readonly Execution[];
+  readonly compressionProgress?: SessionView['compressionProgress'];
+};
 export type NativeSelection = {
   readonly canReadInputQueue?: boolean;
   readonly canReadExtensions?: boolean;
@@ -473,6 +488,7 @@ export type NativeState = {
   readonly recoverySubmissions?: readonly NativeRecoverySubmission[];
   readonly historyEpoch?: number;
   readonly selection?: NativeSelection;
+  readonly executionObservation?: NativeExecutionObservation;
   readonly creationSubmissions: readonly NativeCreation[];
   readonly inputSubmissions: readonly InputMetadata[];
   readonly callerSubmissions?: readonly NativeCallerMetadata[];

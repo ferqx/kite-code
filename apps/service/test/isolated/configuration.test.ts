@@ -30,10 +30,12 @@ import {
 import { launchPairedService } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
-function readToolBaseline(content: unknown): unknown {
-  const baseline = /^baseline=(.*)$/m.exec(String(content));
-  expect(baseline).not.toBeNull();
-  return JSON.parse(baseline![1]!);
+function readToolBaseRef(content: unknown): string {
+  const reference = /^base_ref=(.*)$/m.exec(String(content));
+  expect(reference).not.toBeNull();
+  const value: unknown = JSON.parse(reference![1]!);
+  expect(typeof value).toBe('string');
+  return value as string;
 }
 
 function gate() {
@@ -43,8 +45,11 @@ function gate() {
   });
   return { promise, resolve };
 }
-async function until<T>(read: () => Promise<T>, condition: (value: T) => boolean) {
-  const deadline = Date.now() + 5000;
+async function until<T>(
+  read: () => Promise<T>,
+  condition: (value: T) => boolean,
+  deadline = Date.now() + 5000,
+) {
   while (true) {
     const value = await read();
     if (condition(value)) return value;
@@ -385,7 +390,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       const edit = requests.length === 2;
       const priorResult = edit
         ? {
-            baseline: readToolBaseline(
+            baseRef: readToolBaseRef(
               (body.messages as { role: string; content: unknown }[]).find(
                 (message) => message.role === 'tool',
               )!.content,
@@ -409,7 +414,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
                         edit
                           ? {
                               path: 'source.txt',
-                              base: priorResult!.baseline,
+                              base_ref: priorResult!.baseRef,
                               old_text: 'owned',
                               new_text: 'verified',
                               expected_matches: 1,
@@ -481,13 +486,18 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       replace: 'verified',
       occurrences: 1,
     });
-    expect((edit.input as Record<string, unknown>).base).toEqual(
-      readToolBaseline(
-        (requests[1]!.messages as { role: string; content: unknown }[]).find(
-          (message) => message.role === 'tool',
-        )!.content,
-      ),
-    );
+    const savedRead = JSON.parse(String((read.result as { content: string }).content)) as {
+      base_ref: string;
+      baseline: { hash: string; size: number; device: string; inode: string };
+    };
+    expect(savedRead.baseline).toEqual({
+      hash: createHash('sha256').update(marker).digest('hex'),
+      size: Buffer.byteLength(marker),
+      device: expect.any(String),
+      inode: expect.any(String),
+    });
+    expect((edit.input as Record<string, unknown>).baseRef).toBe(savedRead.base_ref);
+    expect(edit.input).not.toHaveProperty('base');
     const history = requests[2]!.messages as {
       role: string;
       tool_calls?: { function: { name: string; arguments: string } }[];
@@ -495,6 +505,11 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
     const calls = history.flatMap((message) => message.tool_calls ?? []);
     expect(calls.map((call) => call.function.name)).toEqual(['read_file', 'edit_file']);
     expect(JSON.parse(calls[1]!.function.arguments)).toMatchObject({
+      base_ref: readToolBaseRef(
+        (requests[1]!.messages as { role: string; content: unknown }[]).find(
+          (message) => message.role === 'tool',
+        )!.content,
+      ),
       old_text: 'owned',
       new_text: 'verified',
       expected_matches: 1,
@@ -650,24 +665,26 @@ async function launch(
       );
     },
     async finished(commandId: string) {
-      const completed = await until(
-        async () => ({
-          command: await handle.client.getCommand(commandId),
-          view: await handle.client.getView('session'),
-        }),
-        ({ command, view }) => {
-          const receipt = command.receipt as { runId?: string } | null;
-          return (
-            command.status === 'applied' &&
-            typeof receipt?.runId === 'string' &&
-            view.runs.some((run) => run.id === receipt.runId && !run.isActive)
-          );
-        },
+      const deadline = Date.now() + 5000;
+      const command = await until(
+        () => handle.client.getCommand(commandId),
+        (command) =>
+          command.status === 'applied' &&
+          typeof (command.receipt as { runId?: string } | null)?.runId === 'string',
+        deadline,
       );
-      const receipt = completed.command.receipt as { runId: string; businessCommandId?: string };
-      const commandRun = completed.view.runs.find((run) => run.id === receipt.runId)!;
+      const receipt = command.receipt as { runId: string; businessCommandId?: string };
+      await until(
+        () => handle.client.getRun(receipt.runId),
+        (run) => !run.isActive,
+        deadline,
+      );
+      // Poll the exact Run; reading full messages/executions every 5ms creates
+      // observer load in the very lifecycle this fixture is trying to verify.
+      const view = await handle.client.getView('session');
+      const commandRun = view.runs.find((run) => run.id === receipt.runId)!;
       expect(commandRun.originCommandId).toBe(receipt.businessCommandId ?? commandId);
-      return { ...completed.view, commandRun };
+      return { ...view, commandRun };
     },
   };
 }

@@ -58,6 +58,7 @@ import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
+import type { RunRecord } from '@kite-ai/agent/storage';
 import { WebFetchError, webExtractorAssets } from '@kite-ai/agent/web-fetch';
 import { createCompatibleModelBinding, type ReasoningEffort } from '@kite-ai/ai/sdk';
 import { createWorkspaceAssembly } from './assembly';
@@ -183,6 +184,12 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
 }
 
 const assemblyKeys = ['modelId', 'models', 'tools', 'skills', 'mcp'];
+function modelBindingDigest(model: ModelConfiguration): string {
+  return planningSnapshotDigest({
+    projection: createConfigurationSnapshot({ modelId: model.id, models: [model] }).digest,
+    providerName: model.providerName ?? null,
+  });
+}
 function readOnlyTaskGuidanceSource(root: string, description?: string): ContextSource {
   const content = [
     'This is a read-only task assignment: do not create, modify, or delete business files, make unauthorized network connections, or disclose task data outside its authorized scope.',
@@ -686,8 +693,8 @@ export function createDefaultProcessConfiguration(options: {
       if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
       return policyRuntime;
     },
-    resolveModel: ({ modelId, ...input }) =>
-      resolveConfigurationBinding(input, { modelId, modelOnly: true }),
+    resolveModel: ({ modelId, run, signal, ...input }) =>
+      resolveConfigurationBinding(input, { modelId, modelOnly: true, titleSource: run, signal }),
   });
   const resolveModel = async (
     selected: ModelConfiguration,
@@ -743,6 +750,8 @@ export function createDefaultProcessConfiguration(options: {
     selection?: {
       modelId: string;
       modelOnly?: boolean;
+      titleSource?: RunRecord;
+      signal?: AbortSignal;
       toolIds?: readonly string[];
       inheritedModelHiddenToolIds?: readonly string[];
       skillSelection?: SkillSelection;
@@ -762,8 +771,9 @@ export function createDefaultProcessConfiguration(options: {
     },
   ) => {
     let modelTransport: Awaited<ReturnType<typeof resolveModelTransport>> | undefined;
+    const signal = recovery?.signal ?? selection?.signal;
     try {
-      recovery?.signal.throwIfAborted();
+      signal?.throwIfAborted();
       const inheritedReview = recovery
         ? recovery.defaultAutoReview
         : selection?.defaultAutoReview === null
@@ -786,7 +796,7 @@ export function createDefaultProcessConfiguration(options: {
       const skillSelection = selection
         ? (selection.skillSelection?.requested ?? undefined)
         : commandSkills(command.request);
-      const user = (await readHostState(() => userConfiguration.read(), recovery?.signal)).value;
+      const user = (await readHostState(() => userConfiguration.read(), signal)).value;
       let root: string;
       try {
         const uri = new URL(workspace.rootUri);
@@ -809,7 +819,7 @@ export function createDefaultProcessConfiguration(options: {
       const project = (
         await readHostState(
           () => readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }),
-          recovery?.signal,
+          signal,
         )
       ).value;
       if (project.webFetch !== undefined)
@@ -869,7 +879,10 @@ export function createDefaultProcessConfiguration(options: {
       // A root command owns its temporary effort. Apply it before snapshot sealing;
       // a child selection (including follow-up and restore) uses its configured
       // preset. Only root recovery reproduces the original root request.
-      if ((!selection || recovery?.runIdentity) && request.reasoningEffort !== undefined) {
+      if (
+        (!selection || recovery?.runIdentity || selection.titleSource) &&
+        request.reasoningEffort !== undefined
+      ) {
         selected.options = { ...selected.options, reasoningEffort: request.reasoningEffort };
       }
       const actualOptions = parseModelPreset(selected.options);
@@ -878,9 +891,39 @@ export function createDefaultProcessConfiguration(options: {
       // selected subset is included in the final immutable snapshot below.
       createConfigurationSnapshot({ ...effective, skills: [] });
       modelTransport = await resolveModelTransport();
-      if (selection?.modelOnly)
+      signal?.throwIfAborted();
+      if (selection?.modelOnly) {
+        if (selection.titleSource) {
+          const manifest = selection.titleSource.configuration as {
+            modelId?: string;
+            snapshot?: Json;
+          };
+          let saved = manifest.snapshot as Record<string, Json> | undefined;
+          if (saved?.kind === 'human_input_processing')
+            saved = saved.originalConfiguration as Record<string, Json>;
+          // The new metadata producer only uses the original activated Service binding.
+          selected.modelCapabilities = {
+            contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+            ...selected.modelCapabilities,
+          };
+          if (
+            manifest.modelId !== selected.id ||
+            !saved ||
+            saved.version !== 1 ||
+            !saved.configuration ||
+            typeof saved.configuration !== 'object' ||
+            Array.isArray(saved.configuration) ||
+            createConfigurationSnapshot(saved.configuration).digest !== saved.digest ||
+            saved.modelBindingDigest !== modelBindingDigest(selected) ||
+            planningSnapshotDigest(saved.modelTransport ?? null) !==
+              planningSnapshotDigest(modelTransport.snapshot)
+          )
+            throw new AgentError('session_title_configuration_changed');
+        }
+        const resolved = await resolveModel(selected, modelTransport);
+        signal?.throwIfAborted();
         return {
-          model: (await resolveModel(selected, modelTransport)).model,
+          model: resolved.model,
           modelId: selected.id,
           dispose: modelTransport.close,
           toolIds: [],
@@ -891,6 +934,7 @@ export function createDefaultProcessConfiguration(options: {
             modelTransport: modelTransport.snapshot,
           } as unknown as Json,
         } satisfies RunConfiguration;
+      }
       // Freeze the host's declared default along with this Run's actual model.
       // Core's generic configuration leaf still preserves absent metadata verbatim.
       selected.modelCapabilities = {
@@ -1380,6 +1424,7 @@ export function createDefaultProcessConfiguration(options: {
           dispose,
           snapshot: {
             ...snapshot,
+            modelBindingDigest: modelBindingDigest(selected),
             authorizationCheckPreset,
             defaultAutoReview: defaultAutoReview ?? null,
             ...(defaultAutoReview

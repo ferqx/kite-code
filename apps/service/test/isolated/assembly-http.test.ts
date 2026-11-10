@@ -245,8 +245,8 @@ async function finished(f: Awaited<ReturnType<typeof setup>>, observation?: Asse
 test('paired default assembly binds real files/source freshness and never dispatches old arguments after permission wait', async () => {
   const started = performance.now();
   const provider = endpoint([
-    { name: 'write_file', input: { path: 'nested/output.txt', content: 'old', base: null } },
-    { name: 'write_file', input: { path: 'nested/output.txt', content: 'new', base: null } },
+    { name: 'write_file', input: { path: 'nested/output.txt', content: 'old' } },
+    { name: 'write_file', input: { path: 'nested/output.txt', content: 'new' } },
   ]);
   const observation = assemblyObservation(() => provider.requests.length, started);
   observation.stage('test.begin');
@@ -471,7 +471,7 @@ test('Skill tools reject removed description arguments, continue with selectors 
 
 test('a newly disabled file capability affects the next Run while an admitted waiting Run retains its original binding', async () => {
   const provider = endpoint([
-    { name: 'write_file', input: { path: 'old.txt', content: 'old binding', base: null } },
+    { name: 'write_file', input: { path: 'old.txt', content: 'old binding' } },
     undefined,
     {
       // Deliberately unavailable identity: rejection preserves its raw name without an alias.
@@ -557,7 +557,9 @@ test('a newly disabled file capability affects the next Run while an admitted wa
         .at(-1),
     ).toMatchObject({
       tool_call_id: 'call-3',
-      content: expect.stringContaining('tool_not_available'),
+      content: expect.stringContaining(
+        'This tool is not available in the current model tool catalogue.',
+      ),
     });
     expect(readFileSync(join(f.workspace, 'old.txt'), 'utf8')).toBe('old binding');
     expect(provider.requests[2]!.tools).toEqual([

@@ -19,10 +19,8 @@ export class Semaphore {
   }
   async acquire(signal: AbortSignal): Promise<() => void> {
     signal.throwIfAborted();
-    if (this.used < this.capacity) {
-      this.used++;
-      return this.releaseOnce();
-    }
+    const immediate = this.tryAcquire();
+    if (immediate) return immediate;
     return new Promise((resolve, reject) => {
       const waiter = {
         resolve,
@@ -37,6 +35,11 @@ export class Semaphore {
       signal.addEventListener('abort', waiter.abort, { once: true });
       this.waiters.push(waiter);
     });
+  }
+  tryAcquire(): (() => void) | undefined {
+    if (this.used >= this.capacity || this.waiters.length) return undefined;
+    this.used++;
+    return this.releaseOnce();
   }
   private releaseOnce(): () => void {
     let released = false;
@@ -57,6 +60,9 @@ export class ExecutionResources {
   readonly capacity: ResourceCapacity;
   private readonly serial = new Map<string, Semaphore>();
   private readonly model: Semaphore;
+  private readonly titleModel: Semaphore;
+  private readonly titleWaitingLimit: number;
+  private titleWaiting = 0;
   private readonly process: Semaphore;
   private readonly workspace?: WorkspaceSerialLocks;
   constructor(modelSlots = 4, processSlots = 4, workspace?: WorkspaceSerialLocks) {
@@ -69,8 +75,35 @@ export class ExecutionResources {
       throw new AgentError('invalid_capacity');
     this.capacity = Object.freeze({ model: modelSlots, process: processSlots });
     this.model = new Semaphore(modelSlots);
+    const titleSlots = Math.min(modelSlots, 4);
+    this.titleModel = new Semaphore(titleSlots);
+    this.titleWaitingLimit = titleSlots * 7;
     this.process = new Semaphore(processSlots);
     this.workspace = workspace;
+  }
+  /** Host-owned tool-free metadata calls have an independent local permit domain. */
+  async acquireTitleModel(signal: AbortSignal): Promise<() => void> {
+    signal.throwIfAborted();
+    const immediate = this.titleModel.tryAcquire();
+    if (immediate) return immediate;
+    if (this.titleWaiting >= this.titleWaitingLimit)
+      throw new AgentError('session_title_capacity_exceeded');
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(
+      () => controller.abort(new AgentError('session_title_queue_timeout')),
+      8000,
+    );
+    timer.unref();
+    this.titleWaiting++;
+    try {
+      return await this.titleModel.acquire(controller.signal);
+    } finally {
+      this.titleWaiting--;
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+    }
   }
   async acquire(
     request: ResourceRequest | undefined,

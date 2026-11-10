@@ -93,6 +93,7 @@ import {
 } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
+import { nativeExecutionObservation } from './native-execution-observation';
 import { NativeExtensions } from './native-extensions';
 import { NativeOperationDiff, NativeOutputFile } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
@@ -916,7 +917,12 @@ function NativeDesktopContent({
     if (value && 'observationId' in value && 'page' in value && 'items' in value.page)
       setGrantFacts({ observationId: value.observationId, page: value.page });
   }
-  async function select(sessionId: string, keepCurrentDraft = true, keepTaskPage = false) {
+  async function select(
+    sessionId: string,
+    keepCurrentDraft = true,
+    keepTaskPage = false,
+    admitted?: NativeState,
+  ) {
     if (!bridge || readLifecycle.current.quitting) return;
     setAgentBrowserOpen(false);
     if (keepCurrentDraft) rememberDraft();
@@ -965,7 +971,7 @@ function NativeDesktopContent({
     setHistoryState((previous) => ({ ...previous, phase: 'loading', error: undefined }));
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
-    await readSelection(sessionId, current, nonce, epoch, { freshPresentation });
+    await readSelection(sessionId, current, nonce, epoch, { freshPresentation, admitted });
   }
   async function exitWorktree() {
     if (
@@ -1023,7 +1029,8 @@ function NativeDesktopContent({
     {
       freshPresentation = false,
       preserveHistory = false,
-    }: { freshPresentation?: boolean; preserveHistory?: boolean } = {},
+      admitted,
+    }: { freshPresentation?: boolean; preserveHistory?: boolean; admitted?: NativeState } = {},
   ) {
     if (!isCurrentRead(current, epoch, nonce)) return;
     const original: NonNullable<typeof selectionRead.current> = {
@@ -1046,12 +1053,16 @@ function NativeDesktopContent({
         await afterNativePresentation(window);
         if (!isCurrentRead(current, epoch, nonce)) return;
       }
-      let value = await bridge.request({
-        method: 'select',
-        generation: current,
-        sessionId,
-        activationId: nonce,
-      });
+      // Attach already activates a restored selection in this new generation.
+      // Rebuild its readers without creating a second selection/reconciliation.
+      let value: NativeResult =
+        admitted ??
+        (await bridge.request({
+          method: 'select',
+          generation: current,
+          sessionId,
+          activationId: nonce,
+        }));
       if (!isCurrentRead(current, epoch, nonce)) return;
       if (value && 'generation' in value && value.selection?.session.id === sessionId) {
         const targetSelection = value.selection;
@@ -1292,9 +1303,9 @@ function NativeDesktopContent({
         !keepPreparation && !!value.selection && !value.selection.session.deletedAt;
       if (restoredSelection && value.selection) {
         // A new Root/Caller generation has no usable history or model facts.
-        // Rebuild those reads through the normal selection path before enabling
-        // the restored conversation and its retained browser presentation.
-        await select(value.selection.session.id, false);
+        // Rebuild readers for Main's activated selection before enabling the
+        // restored conversation and its retained browser presentation.
+        await select(value.selection.session.id, false, false, value);
         if (!alive || startupEpoch !== readLifecycle.current.epoch) return;
       } else {
         setPreparing(true);
@@ -1512,6 +1523,10 @@ function NativeDesktopContent({
   ]);
   const choiceViewIntent = viewIntent.current;
   const activeInputRun = selection?.runs.find((run) => run.isActive);
+  const executionObservation = nativeExecutionObservation(state);
+  const executionRuns = executionObservation?.runs ?? selection?.runs;
+  const executionRecords = executionObservation?.executions ?? selection?.executions;
+  const activeExecutionRun = executionRuns?.find((run) => run.isActive);
   const directoryActivity =
     directory?.storeId === selection?.storeId
       ? directory?.sessions.find((session) => session.id === selection?.session.id)?.activity
@@ -1519,14 +1534,19 @@ function NativeDesktopContent({
   // 目录观察只属于其原活动 Run；已协调终态或后来的新轮次不继承旧 owner 提示。
   // A failed directory refresh cannot confirm ownership or revive cached activity.
   const executionOwner =
-    activeInputRun &&
+    activeExecutionRun &&
     directoryActivity?.run?.isActive &&
-    directoryActivity.run.id === activeInputRun.id
+    directoryActivity.run.id === activeExecutionRun.id
       ? directory?.unavailable
         ? 'unknown'
         : directoryActivity.executionOwner
       : undefined;
-  const executionUnconfirmed = executionOwner === 'unheld' || executionOwner === 'unknown';
+  const executionUnconfirmed =
+    executionOwner === 'unheld' ||
+    executionOwner === 'unknown' ||
+    (!!executionObservation &&
+      !!activeExecutionRun &&
+      (executionObservation.phase === 'unavailable' || executionOwner !== 'held'));
   const jobs =
     selection?.executions.filter(
       (execution) =>
@@ -1751,6 +1771,7 @@ function NativeDesktopContent({
     [readingParent, state?.selection, displayMessages, executionUnconfirmed, toolMessages.entries],
   );
   const runMessages = useNativeRuns({
+    executionRuns,
     bridge,
     generation: state?.generation ?? generation.current,
     selection: !preparing && !scheduledTasksView ? selection : undefined,
@@ -2387,10 +2408,11 @@ function NativeDesktopContent({
       }
       if (
         (page === pageIntent.current || firstOpenPage.current === pageIntent.current) &&
-        (selected.current !== sessionId || preparing)
+        selected.current !== sessionId
       ) {
         // The selection records its own read recovery. Its failure cannot
-        // invalidate the already acknowledged first-submission receipt.
+        // invalidate the already acknowledged first-submission receipt. Later
+        // receipt lookups leave that activation and its read retries in place.
         await select(sessionId, false).catch(() => {});
       }
     } else if (
@@ -3034,9 +3056,11 @@ function NativeDesktopContent({
       messages: displayMessages,
       runs: runMessages.runs,
       tools: toolMessages.entries,
-      executions: selection.executions,
+      executions: executionRecords ?? [],
       compressionMessages: selection.compressionMessages,
-      compressionProgress: selection.compressionProgress,
+      compressionProgress: executionObservation
+        ? executionObservation.compressionProgress
+        : selection.compressionProgress,
       storeId: selection.storeId,
       sessionId: selection.session.id,
       fullReply: (message) => {
@@ -3054,6 +3078,8 @@ function NativeDesktopContent({
     runMessages.runs,
     toolMessages.entries,
     selection,
+    executionRecords,
+    executionObservation,
     replyDisplayScope,
     verifiedReplyRevision,
   ]);
@@ -4837,13 +4863,19 @@ function NativeDesktopContent({
               ...transcript.turnActivity,
               executionUnconfirmed,
               // Read admission is revoked during scans; the last observed Run still owns its label.
-              unavailable:
-                historyState.phase === 'unavailable' ||
-                !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+              unavailable: executionObservation
+                ? executionObservation.phase === 'unavailable'
+                : historyState.phase === 'unavailable' ||
+                  !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
             }
       }
       notices={
         <>
+          {!preparing && state?.backgroundUnavailable && (
+            <p role="status" className="notice">
+              连接暂不可用，当前状态待核实。
+            </p>
+          )}
           {diagnostics && fileTargets.error && (
             <p role="alert">
               {fileTargets.error}{' '}
@@ -5477,7 +5509,7 @@ function NativeDesktopContent({
                   onChange: changeDraft,
                   onSend: sendInput,
                   onCancel: () => void write(stopCurrentRun),
-                  active: !!activeInputRun && !executionUnconfirmed,
+                  active: !!activeExecutionRun && !executionUnconfirmed,
                   cacheMetrics: cacheMetrics.metrics,
                   contextUsage: contextUsage.metrics,
                   metricsLoading:
@@ -5487,7 +5519,7 @@ function NativeDesktopContent({
                     historyState.phase !== 'unavailable' &&
                     ((cacheMetrics.pending && !cacheMetrics.metrics) ||
                       (contextUsage.pending && !contextUsage.metrics)),
-                  stopping: activeInputRun?.status === 'cancelling',
+                  stopping: activeExecutionRun?.status === 'cancelling',
                   cancelDisabled: cancelCurrentRunBusinessDisabled,
                   disabled: pending || inputQueue.busy,
                   readOnly: selected.current !== selection.session.id,

@@ -141,8 +141,30 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     )!;
     const epoch = caller!.state().historyEpoch!;
     const fullReads = requests.filter((request) => request.path.endsWith('/messages')).length;
+    const streamsBeforeLoss = requests.filter((request) => request.path === '/v1/events').length;
+    const mutationsBeforeLoss = requests.filter((request) => request.method === 'POST').length;
     offline = true;
     stream!.abort();
+    // The real SDK must expose transport loss to Main before any successful
+    // reconnect. Healthy ordinary HTTP reads do not keep the old stream fresh.
+    await until(
+      () =>
+        caller!.state().historyEpoch! > epoch &&
+        caller!.state().selection?.permissionUnavailable === true,
+    );
+    expect(caller!.state().historyEpoch).toBeGreaterThan(epoch);
+    expect(caller!.state().executionObservation?.phase).not.toBe('fresh');
+    expect(caller!.state().backgroundUnavailable).toBe(true);
+    await until(
+      () => requests.filter((request) => request.path === '/v1/events').length > streamsBeforeLoss,
+    );
+    // A fresh HTTP baseline before ready must neither revive admission nor
+    // reconcile the selected Session as an implicit activation.
+    expect(caller!.state().selection?.permissionUnavailable).toBe(true);
+    expect(caller!.state().executionObservation?.phase).not.toBe('fresh');
+    expect(requests.filter((request) => request.method === 'POST')).toHaveLength(
+      mutationsBeforeLoss,
+    );
     second.release();
     await until(async () =>
       (await store.listMessages('s')).some((message) =>

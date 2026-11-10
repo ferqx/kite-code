@@ -16,6 +16,7 @@ Windows 的 POSIX mode 位不能证明 owner-only ACL。Profile、Store、协调
 
 TUI 原九份 `ui/*.json` 现沿闭合 host 的原生记录端口实现完整读写，原 codec／Store scope／etag／未知意图和格式不变。独立 record 端口允许 16 MiB，recovery 读取保 262144 字节；不扩大原通用 config 的 8 MiB，不借 artifact 1 GiB 端口绕过 journal 容量。Profile／短数据锁的 operation guard 先于可能打开探针的准入验证，准确 Close 未确认保原 SH／EX；撤销只使用本次成功新建 temporary 的原对象能力，创建未确认或 unknown 不按路径清理。当前事实归 [CLI owner](../../../../apps/cli/README.md#windows-tui-私有持久化)与 [Windows leaf](../../../../packages/agent/src/platform/windows-path-security.README.md#tui-私有记录端口)，完整 installed 调用者已接，实际 Windows 资格未执行。
 
+2026-11-09 的启动采样命中同步配置重复路径检查。当前普通 `readConfigurationFile` 将叶子 preflight 交给紧接的原生正文 reader：其同 HANDLE 前后路径、类型、nlink、所选私有 ACL 和字节界检查全部保留；只移除同一同步调用中另一次叶子遍历与探针。父目录 policy、额外可信 host override、写入及锁前检查不变，不跨调用保存安全结果。保留重复前置检查未提供额外正文身份保证，却在本机短历史准备路径产生实测开销；只按 path/stat 缓存则会绕过替换与 ACL 变更，因此未采用。当前证据与限制归[配置 owner](../../../../packages/agent/src/config/README.md)和[Service 测量](../../../../apps/service/README.md#生命周期性能测量)；本机原生反例不代替本 Note 其余平台／CI资格。
 ## Alternatives considered
 
 - 在 Windows 继续使用 POSIX mode 检查：不能核实际 DACL，已有 `icacls` 反例计划要求真实权限拒绝。

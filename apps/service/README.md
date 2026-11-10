@@ -94,7 +94,69 @@ Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短
 
 普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含文件、问答、网页、当前任务执行证据，以及宿主具备时的 Shell、浏览器和协作工具；实际目录按当前注册能力与用户选择生成，不把固定数量当作完整目录。`read_file` 统一读取工作区内文件和准确外部用户文件，专用外部读写工具已移除。外部读取复用统一权限和路径保护，不再附加基线、单链接限制或重复授权证明检查，不加载外部项目说明；外部写入使用 Shell。[真实 paired 回归](test/isolated/configuration.test.ts)核实际模型目录、外部完整正文、独立项目指令及显式禁用，[退役回归](test/isolated/tool-retirement.test.ts)核旧配置与激活在模型调用前拒绝。
 
-默认装配注册 [Agent 会话命名扩展](../../packages/agent/src/business/session-title/index.ts)，通过原 Run 生命周期 Action 和受限内部 Model 调用生成标题。Service 提供 Runtime 读取／rename／runInternalModel 端口与原轮选定模型的无工具绑定，不注册 session-title childConfiguration 或专用子 Agent。启动前保存原文兜底，正常完成前最多尝试一次；`session.title` Command 和同 Session 无 Run Model 保留实际输入、输出、用量和取消事实，普通消息不增加内部正文。标题规则、10秒取消、幂等与 CAS 归扩展，[本机 HTTP 回归](test/isolated/session-title.test.ts)核所选模型、目录自然零 child、消息隔离和冷读零调用。
+默认装配注册[Agent 命名扩展](../../packages/agent/src/business/session-title/index.ts)。beforeRun 短 Action 保存 fallback 并登记唯一 detached Job；原 Run 激活后独立生成，原 Run 正式成功后发布。不创建 child Agent，不等待完成前远端钩子。Service model-only resolver 接收原 Run 和 AbortSignal，核原配置封存摘要、所选模型绑定（含 Provider 身份）及实际路由摘要，重新读取当前凭据和宿主 ceiling；同 ID 新配置不能静默替换。只构造无工具独立绑定，不复用主 Run lease 或重新扫描知识。资源域、32KiB／10码点与真实 drain 归 Agent；自动元数据不推进 controlRevision。
+
+2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树，[完整 Service 命名 HTTP](test/isolated/session-title.test.ts)宿主7项／125断言通过：实际 compatible SDK 所选模型、默认／注入 ceiling、派发前拒绝零标题请求、超过4KiB完整结果、封存后同 ID 模型替换拒绝、fallback、目录／正文隔离、配置池单次关闭和冷读零调用。并行请求按实际标题指令识别用途，不依赖到达下标。独立预算、未知发布及本机Native过程的实际证据分别归下述测量、Agent和Desktop owner。
+
+### 生命周期性能测量
+
+本机非TUI开发范围已完成命名、启动优化与客户端过程核对；原全量Service162任务／163文件为118任务通过／44失败，859pass／114fail／68skip，整体返回1，日志为`.cache/lifecycle-all-service-coverage.log`。44个失败文件的114个当前失败均有HEAD同名失败；再以同目录、独立依赖与原生资产顺序切换HEAD／当前26份源码，7个原因有差异的完整文件均得到同一15个失败，原始结果为`.cache/lifecycle-service-cause-{head,current}-controlled.log`，源码已恢复。旧参数断言、私有目录／平台检查和清理错误保留，不宣称全量通过。
+
+准备／Web清理的缓存诊断确认，HEAD同样先在`opening_store`得到`data_unavailable`，随后EPIPE覆盖原错误；恢复准备也在原私有路径检查失败，未取得该文件恢复资格。进程清理的EBUSY及补齐资产后Files边界旧参数断言均在HEAD重现。Client全量24任务／46文件为250pass／1fail，唯一恢复用例的60秒超时在补齐原生运行器的HEAD上同样重现。它们不替代本节测量或定向命名证据，也未因本次交付放宽保护。
+
+当前同机固定预算已通过，范围限本节的默认 Service／本地 compatible Provider／同进程热态场景。配置同步读的重复叶子 preflight 已按[配置 owner](../../packages/agent/src/config/README.md)去除，原安全读取边界不变；按首次窄查询后同一场景、最近观测分位法复测，结果如下。每组仍为20次，长组前仍有100轮实际 seed，不将冷 profile 的单次值报告成分布。
+
+| 无并发检查的配置读去重后 | 提交到 Provider P50／P95 | 配置准备 P50／P95 | 协议窄读 P95 | prepare getView |
+| --- | --- | --- | --- | --- |
+| 短历史 | 253.07／295.97ms | 112.09／130.58ms | 1.07ms | 0 |
+| 长历史 | 458.14／503.17ms | 107.80／121.79ms | 1.79ms | 0 |
+
+原300ms／600ms／20ms预算未改；旧短历史311.26ms的未通过事实保留在后文和原数据。新原始结果为本机 `.cache/session-lifecycle-performance.after-config-read.json`，129个非 seed 样本，最终 drain 11.60ms。普通8次、8路／32路突发共48次标题全发布；40路过载32发布、8次 `session_title_capacity_exceeded` 保 fallback，全部40个主 Run completed。标题许可峰值仍4，等待申请 hook 峰值29含立即拒绝者，实际等待许可上限仍28；32路标题等待P95为7915.67ms。没有用该结果放宽并发、排队或调用预算，也不推导其他主机、远端或更高突发的成功率。此前与类型检查重叠的整组只作为 `.after-config-read.with-typecheck.json` 诊断保留，不作性能验收。
+
+本次受影响配置／平台／MCP选择原生三文件25项通过、1项POSIX用例在Windows跳过，共250断言；Service 的四份完整文件首次为23通过／4失败／2个测试间错误，失败涉及旧模型 Files 参数、正文基线呈现和重试终态等待。仅还原 `config/files.ts` 至 HEAD、其余候选不变，同四例仍全部失败，确认并非本次读去重新增。夹具现已按既有 Files 合同省略 create 的空基线、传回准确 `base_ref`，保留完整基线及最终字节断言；终态等待沿原5秒总期限查询准确原 Run，避免等待者反复全读历史。沿原 Windows runner 的30秒默认测试时限复验，assembly-http 整文件5项通过，configuration 整文件11项／160断言通过；此前同一生产候选的 session-model-protocol 4项／38断言和 session-title 7项／125断言仍适用。原失败记录保留，不把首次结果改写为通过。独立进程分布见下文，Native 的验证边界归[Desktop owner](../desktop/README.md#执行观察与操作准入)；本次命名故障组合与Native可见过程已补验，范围和限制以各owner当前证据为准。
+
+2026-11-09，后续范围已按用户要求排除 TUI，其候选不作为本节余项的前置。短历史定位可用原夹具的 `--profile-short`（首次加20次 warm-short，跳过长历史 seed 和标题突发）；它写入独立 `session-lifecycle-performance.short-profile.json`，不覆盖既有对照。`bun --cpu-prof-md --cpu-prof-dir=.cache --cpu-prof-name=lifecycle-short-profile.md apps/service/test/fixtures/session-lifecycle-performance.ts --profile-short` 的本机采样为9.27秒／587采样点；`lstatSync`、Windows 路径 `open` 和 `existsSync` 的 self 占比分别为11.9%、8.8%、8.8%。这是含初始模块装配的诊断采样，不能据此删去 ACL／路径／句柄核验，或把另一次短跑低于预算写成原固定对照已通过；原短历史未通过事实保留，当前无并发检查的验收结果见本节前表。
+
+2026-11-10，Windows x64／Bun1.4.4，同一工作树另运行[独立进程夹具](test/fixtures/session-lifecycle-process-performance.ts)：`bun apps/service/test/fixtures/session-lifecycle-process-performance.ts --samples=20`。每次新启实际 CLI Host argv 进程与其独立配套 Service，接默认配置／SDK／SQLite／本地合成 Provider；20个新 Store Profile、同一 Profile 的20次进程重开、标题延迟3秒／10秒共42次均成功退出，之后独立打开 Store 核原 Run completed。Profile 私有目录预先建立；没有清操作系统文件缓存或测安装制品，因此这里是源码进程冷启动基线，不是磁盘冷启动或发行性能资格。
+
+| 场景（各20次） | 进程开始→主 Provider P50／P95 | 进程开始→业务 terminal P50／P95 | terminal→实际退出 P50／P95 |
+| --- | --- | --- | --- |
+| 新 Store Profile | 2211.78／2238.65ms | 2648.97／2681.01ms | 76.42／79.01ms |
+| 已有 Profile 进程重开 | 2324.66／2364.04ms | 2821.04／2880.39ms | 80.70／85.94ms |
+
+两个独立进程的总退出P95为2758.04／2964.50ms，和上表一样沿父进程单调时钟观察。首份trace的CLI／Service导入、SDK准入和Run.finishedAt对齐使用墙钟，跨进程阶段差值只保留为诊断，不能当作已同步的单调分段或单次配置解析耗时。夹具现为每个子进程另记`monotonicAt`，后续只在同一进程内相减；墙钟只关联准确身份，启动／Provider／terminal／退出仍由父进程单调时钟测量。这里没有改等待间隔、跳过真实准备或把冷过程混入原300／600ms warm主请求预算。下方另补同路径源码对照。
+
+正常20次命名均发布；20次已有历史重开零额外命名。3秒／10秒延迟场景只各1例，不报告分位数：业务terminal为2654.78／2685.48ms，实际退出为2739.75／2789.13ms，均早于标题Provider的原延迟；关闭沿现有取消和真实drain，原尝试以`title_cancelled`关闭并保fallback，Job保留真实`service_shutdown`失败及`internal_metadata`抑制事实，未伪造成成功。完整22个Profile后查20份published、2份closed、零pending，40次正常主调用加2次延迟主调用均只一次。原始样本、阶段与冷读核验在本机`.cache/session-lifecycle-process-20-e2e8a742-58c0-4a88-886c-c3180499c97a`的`.json`／`.analysis.json`／`.title-audit.json`；首次夹具误调用Store方法的失败记录保留，不作性能验收。
+
+后续在同一缓存源码路径和独立按原锁文件复制安装的依赖上，先运行HEAD `4a527742c`，再仅覆盖当前26份非TUI Agent／Service源码；原生资产未改，源码摘要随样本保存，主工作树未切换。两版各20个新Profile、20次重开及两个标题延迟场景，均42／42通过。HEAD只调整夹具的旧marker读取断言，不改旧生产代码；当前夹具核新发布状态。以下均为父进程单调时钟、nearest-rank P50／P95：
+
+| 场景／源码 | 启动→主Provider | 启动→terminal | 启动→退出 |
+| --- | --- | --- | --- |
+| 新Profile／HEAD | 2550.61／3073.99ms | 3063.85／3717.55ms | 3146.22／3805.73ms |
+| 新Profile／当前 | 2690.41／3828.72ms | 3224.82／4292.72ms | 3311.74／4419.63ms |
+| 重开／HEAD | 3271.73／3835.08ms | 3775.66／4349.61ms | 3881.24／4460.63ms |
+| 重开／当前 | 2754.53／2828.98ms | 3313.65／3438.58ms | 3403.68／3528.50ms |
+
+新Profile的当前P95更高，且样本随次序明显漂移：当前前4次Provider为3601–3889ms，后10次为2525–2835ms；HEAD重开后段也较前段慢。这里保留全部样本，不删慢值、不改原warm预算，也不把重开较快解释为已隔离的算法收益或整体冷启动加速。单进程分段另核CLI导入、SDK准入、Service导入和资源关闭；未用跨PID墙钟相减归因。
+
+3秒／10秒标题延迟各1例中，HEAD的主Provider→terminal为3277.57／10189.34ms，当前为492.65／492.13ms；当前总退出3198.12／3095.17ms。两个当前标题调用均未完成即被关闭取消，原记录为closed／`title_cancelled`，原Job保真实failed／`internal_metadata`，主Run仍completed。当前20次正常标题全published，20次重开零新增标题，42次主调用各一次、退出码全0。原始文件在本机`.cache/lifecycle-head-agent-4a527742c/.cache/session-lifecycle-process-20-de50d1cc-816b-4579-b1ed-e721ea7b4d18.json`（HEAD）和`session-lifecycle-process-20-e6258a74-b0f8-4313-93e8-4cf96fc69da6.json`（当前），同名`.monotonic-analysis.json`／`.audit.json`保分段与事实核验；不外推安装版、真实远端Provider或其他平台资格。
+
+隔离[测量夹具](test/fixtures/session-lifecycle-performance.ts)在默认 Service／实际 compatible SDK／SQLite／HTTP 上采集启动、配置准备、Provider 入口、正式完成、最终 View 读取和独立标题许可。hooks 只在测试制品内安装，不存在 dev／prod 开启入口。2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树，固定配置 tools:[] 并保宿主必选目录，主 Provider 延迟10ms、标题100ms／1000ms；一份冷 profile、同进程热态，不是进程冷启、付费远端或客户端绘制资格。原始基线保留在本机 .cache/session-lifecycle-performance.before-first-run-query.json。
+
+| 固定场景 | 样本 | 提交到 Provider P50／P95 | 配置准备 P50 | 其中协议检查 View P50／P95 |
+| --- | --- | --- | --- | --- |
+| 短历史后续轮 | 20 | 267.41／289.18ms | 133.95ms | 12.17／19.94ms |
+| 先真实执行100轮后的长历史 | 20 | 586.96／645.52ms | 249.91ms | 122.63／135.50ms |
+
+首轮单样本提交到 Provider 612.23ms，其中准备404.90ms，只作观察值，不报告分位数。冷 profile Store open 294.03ms、Store ready 到 HTTP 准入完成739.51ms；最终 drain 11.76ms。最终 View 观察含 waitForCommand 的20ms轮询，不能当作 SSE 或窗口绘制延迟。长历史的协议 View 是已测关键路径，选择实施原首 Run 窄查询；在改动前固定同夹具对照预算：短历史提交到 Provider P95≤300ms、长历史P95≤600ms、协议窄读P95≤20ms，且不读取消息／执行全集。后续不得据结果放宽这些预算。该轮未覆盖进程冷启动或客户端绘制；后续进程证据见上文，Native验收范围归[Desktop owner](../desktop/README.md#执行观察与操作准入)，TUI已退出本次范围。
+
+标题正常8次和8路／32路突发共48次均发布，实际标题许可峰值4；32路、1秒标题 Provider 组的许可等待P95 7498.28ms、最大7508.62ms，同时等待申请峰值28。由此选择默认独立并发4、等待上限28、排队预算8秒；宿主配置较低 modelConcurrency 时保其较低并发并同比缩小等待上限（每许可7个等待），高于4不增加标题并发。实际调用另保原10秒取消，不把排队计入调用预算。后测结果如下；隔离许可不推导共享 Store／CPU 或远端零竞争。
+
+同夹具后测原始数据为本机 .cache/session-lifecycle-performance.after-first-run-query.json，129个非 seed 样本。短历史提交到 Provider P50／P95为245.39／311.26ms，协议窄读0.68／1.09ms；长历史为476.87／511.38ms，窄读0.83／1.01ms。两组准备阶段各20次均为零 getView；长历史与窄读预算通过，短历史P95超过固定300ms，该轮明确未通过，预算不变，后续配置读去重的独立验收见本节前表。首轮只有1个样本，两次冷 profile 的缓存／JIT条件不足以把单次变化解释成优化收益；未报告P99。最终 View 的长历史观察仍约188ms，不能从窄查询推导客户端终态绘制已优化。
+
+后测正常8次、8路突发和32路／1秒标题 Provider 共48次仍全部发布；40路过载32次发布、8次因容量界保 fallback，所有40个主 Run 正式 completed，标题并发峰值4。计时 hook 中尚未返回的 acquire 峰值29包含立即被拒的申请，真实等待上限仍由资源实现与定向测试核为28；不是29个队列许可。完整资源7项／41断言和 Runtime 的溢出反例归 Agent。当前预算仅约束这个本机合成场景，不外推真实远端成功率或所有共享资源零竞争。
+
+[协议完整回归](test/isolated/session-model-protocol.test.ts)宿主4项／38断言通过，保首实际 Run 的协议锁、同族模型更换、准备失败、processing wrapper、Codex 默认、坏历史与冷重开。原 HTTP400夹具在现有 SDK 会真实重试并随后完成；改用明确非重试401来验证原有首 Run failed 断言，生产重试规则未改。
 
 默认协作使用通用 child，可信宿主可登记可选 prompt 预设；普通 CLI/TUI/Native 宿主在 Task 扩展可用时默认选入六个协作工具，无需用户额外配置 `tools`，不按角色名取得权限。最小嵌入宿主保持显式选择，可信宿主将 `child` 设为空数组时不加入 Task 默认项；用户明确禁用或移除仍在后续 Run 生效。[普通 paired 宿主回归](test/isolated/configuration.test.ts)核实际 SDK 工具目录与显式禁用，[源码外制品回归](test/isolated/task-packaged-default.test.ts)以仅模型配置验证默认目录和实际 child 完整结果／唯一报告链。原内部 typed child、计划完成指导、MCP 发现／资源工具和 Provider 配置向导保持各自准确装配。业务行为由 Agent 对应模块实现；Service 仅选择身份、配置、公共响应和装配。Model 失败／重试响应只公开实际失败前驱的有限字段，不公开完整 decisionSource 或凭据。
 

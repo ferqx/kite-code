@@ -79,6 +79,8 @@ function categoryOf(method: WorkerRequest['method']): Category {
   if (
     method === 'readRunResumeExecutionPage' ||
     method === 'readExecutionEvidence' ||
+    method === 'readFirstSessionRun' ||
+    method === 'readAutomaticSessionTitlePublication' ||
     method.startsWith('get') ||
     method.startsWith('list')
   )

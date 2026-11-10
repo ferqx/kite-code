@@ -687,6 +687,12 @@ export interface Store {
     },
   ): Promise<ExtensionRecord>;
   getRun(id: string): Promise<RunRecord | null>;
+  readFirstSessionRun(input: WriteContext & { sessionId: string }): Promise<{
+    storeId: string;
+    session: SessionRecord;
+    snapshotCursor: string;
+    run: RunRecord | null;
+  }>;
   planExecution(input: PlanExecutionInput): Promise<ExecutionRecord>;
   /** Original-owner observation only; detached Jobs do not hold Task settlement. */
   inspectChildSettlement(
@@ -1100,6 +1106,49 @@ export interface Store {
     ifRevision: string;
     title: string;
   }): Promise<{ command: CommandRecord; session: SessionRecord }>;
+  /** Trusted automatic first-input metadata only. Does not advance execution controlRevision. */
+  claimAutomaticSessionTitle(
+    input: WriteContext & {
+      sessionId: string;
+      subjectId: string;
+      sourceCommandId: string;
+    },
+  ): Promise<{ record: ExtensionRecord; command: CommandRecord; session: SessionRecord } | null>;
+  /** Exact registered default naming Job; sourceRun can be bound only once after activation. */
+  bindAutomaticSessionTitle(
+    input: OwnedWrite & {
+      sessionId: string;
+      jobExecutionId: string;
+      expectedRevision: string;
+      sourceRunId?: string;
+    },
+  ): Promise<ExtensionRecord>;
+  publishAutomaticSessionTitle(
+    input: OwnedWrite & {
+      sessionId: string;
+      jobExecutionId: string;
+      expectedRevision: string;
+      modelExecutionId: string;
+      title: string;
+    },
+  ): Promise<{ record: ExtensionRecord; command: CommandRecord | null; session: SessionRecord }>;
+  /** Exact original publication proof only; never starts or retries a metadata write. */
+  readAutomaticSessionTitlePublication(
+    input: WriteContext & {
+      sessionId: string;
+      jobExecutionId: string;
+      modelExecutionId: string;
+      title: string;
+    },
+  ): Promise<{ record: ExtensionRecord; command: CommandRecord | null; session: SessionRecord }>;
+  closeAutomaticSessionTitle(
+    input: OwnedWrite & {
+      sessionId: string;
+      jobExecutionId: string;
+      expectedRevision: string;
+      reason: string;
+    },
+  ): Promise<ExtensionRecord>;
   deleteSession(input: {
     expectedStoreId: string;
     subjectId: string;

@@ -90,11 +90,13 @@ export async function runInternalModelCall(options: {
       await options.authorize();
     }
     if (options.timing) options.timing.queueStartedAt = Date.now();
-    release = await options.resources.acquire(
-      { slot: 'model' },
-      { sessionId: execution.sessionId, workspaceId: options.workspaceId },
-      signal,
-    );
+    release = permissionCheck
+      ? await options.resources.acquire(
+          { slot: 'model' },
+          { sessionId: execution.sessionId, workspaceId: options.workspaceId },
+          signal,
+        )
+      : await options.resources.acquireTitleModel(signal);
     if (options.timing) options.timing.queueFinishedAt = Date.now();
     signal.throwIfAborted();
     await options.checkpoint();
@@ -234,11 +236,15 @@ export async function runInternalModelCall(options: {
     }
     const input = prepared.input as Record<string, Json>;
     const body = bodyReference(input.body);
+    if (!permissionCheck && Buffer.byteLength(content) + Buffer.byteLength(reasoning) > 32768)
+      throw new AgentError('session_title_response_too_large');
     await finish({
       ...base,
       status: 'succeeded',
       result: {
-        content: descriptor ? preview() : content,
+        // Naming is bounded to 32KiB. Keep its complete text bound to the result
+        // receipt so the final metadata transaction never validates a streamed prefix.
+        content: !permissionCheck ? content : descriptor ? preview() : content,
         reasoning: descriptor ? '' : reasoning,
         ...(firstOutput ? { firstOutput } : {}),
         toolCalls: [],

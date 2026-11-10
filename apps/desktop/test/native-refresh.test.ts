@@ -3,8 +3,12 @@ import type { AgentClient } from '@kite-ai/client';
 import { NativeCaller } from '../electron/native-caller';
 import { sessionChange } from './native-change.fixture';
 
-test('Native reset reloads original facts before a ready-only stream restores write qualification without acknowledging the snapshot', async () => {
+test('Native reset verifies identity and reloads original facts after ready without acknowledging the snapshot', async () => {
   let reset!: () => void, endFirst!: () => void;
+  let releaseReady!: () => void;
+  const readyGate = new Promise<void>((resolve) => {
+    releaseReady = resolve;
+  });
   let streams = 0,
     ready = false;
   const order: string[] = [];
@@ -13,6 +17,10 @@ test('Native reset reloads original facts before a ready-only stream restores wr
     serverInfo: { storeId: 'store', capabilities: [] },
     lastAppliedCursor: acknowledged,
     connect: async () => {},
+    verifyConnection: async () => {
+      order.push('identity');
+      return { dataAvailability: 'available' };
+    },
     disposeNetwork() {},
     async observe(options: Parameters<AgentClient['observe']>[0]) {
       streams++;
@@ -29,6 +37,7 @@ test('Native reset reloads original facts before a ready-only stream restores wr
       }
       expect(options!.startAfter).toEqual({ storeId: 'store', sequence: '10' });
       expect(options!.cursor).toBeUndefined();
+      await readyGate;
       order.push('ready');
       await options!.onReady!({
         storeId: 'store',
@@ -91,9 +100,11 @@ test('Native reset reloads original facts before a ready-only stream restores wr
     await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
     order.length = 0;
     reset();
-    await until(() => order.includes('view'));
+    await until(() => streams === 2);
     expect(caller.state().selection?.permissionUnavailable).toBe(true);
-    expect(streams).toBe(1);
+    expect(order).toEqual(['identity', 'baseline', 'workspaces', 'sessions']);
+    releaseReady();
+    await until(() => order.includes('view'));
     await caller.invoke({
       method: 'messages',
       generation: 1,
@@ -105,10 +116,19 @@ test('Native reset reloads original facts before a ready-only stream restores wr
       limit: 200,
     });
     await until(() => ready);
-    expect(order).toEqual(['baseline', 'workspaces', 'sessions', 'view', 'history', 'ready']);
+    expect(order).toEqual([
+      'identity',
+      'baseline',
+      'workspaces',
+      'sessions',
+      'ready',
+      'view',
+      'history',
+    ]);
     expect(caller.state().selection?.permissionUnavailable).toBe(false);
     expect(client.lastAppliedCursor).toEqual(acknowledged);
   } finally {
+    releaseReady();
     endFirst?.();
     await caller.close();
   }
@@ -152,6 +172,7 @@ test('Native notification backlog coalesces fast directory and view reads, retai
       }
       return {
         storeId: 'store',
+        snapshotCursor: '1',
         session: {
           id,
           workspaceId: 'w',

@@ -9,6 +9,7 @@ import {
   authorizationCheckOutputRefId,
 } from './authorization-check-output';
 import { semanticReviewContent, semanticReviewContext } from './authorization-review-context';
+import { openAutomaticTitleOperation } from './business/session-title/operation';
 import {
   assertContextSource,
   type ContextCompressor,
@@ -605,6 +606,12 @@ export class AgentRuntime {
       scope: ToolScope;
     }
   >();
+  private readonly automaticTitleExecutions = new Set<string>();
+  private readonly titleModelOwners = new Map<string, OwnerRef>();
+  private readonly titleCleanupFailures = new Map<
+    string,
+    { error: unknown; dispose: () => Promise<void>; owner: OwnerRef | undefined }
+  >();
   private readonly nestedActions = new Map<
     string,
     { fingerprint: string; work: Promise<CommandRecord> }
@@ -1003,12 +1010,17 @@ export class AgentRuntime {
       }
     };
   }
-  private trackInternalModelTask<T>(task: Promise<T>, release?: () => Promise<void>): Promise<T> {
+  private trackInternalModelTask<T>(
+    task: Promise<T>,
+    release?: () => Promise<void>,
+    localCleanupFailure?: (error: unknown) => void,
+  ): Promise<T> {
     const retained = task.finally(async () => {
       try {
         await release?.();
       } catch (error) {
-        this.preparationCleanupFailed = true;
+        if (localCleanupFailure) localCleanupFailure(error);
+        else this.preparationCleanupFailed = true;
         throw error;
       }
     });
@@ -1076,6 +1088,7 @@ export class AgentRuntime {
       this.jobReconcileCleanupFailed ||
       this.runResumeCleanupFailed ||
       this.preparationCleanupFailed ||
+      this.titleCleanupFailures.size ||
       this.ownerReleaseFailures.size ||
       (this.closing && this.lifecycleState !== 'closed')
     )
@@ -2933,9 +2946,87 @@ export class AgentRuntime {
     });
     this.controlObservation.markDirty();
     this.watchControls();
-    return () => this.activeExecutions.delete(id);
+    return () => {
+      this.activeExecutions.delete(id);
+      this.automaticTitleExecutions.delete(id);
+    };
   }
-  /** Trusted title action only; this is not exposed to Model tools or child task creation. */
+  /** Trusted first-input metadata only; the Store verifies eligibility atomically. */
+  claimAutomaticSessionTitle(input: Readonly<CommandRecord>) {
+    return this.options.store.claimAutomaticSessionTitle({
+      expectedStoreId: input.originStoreId,
+      sessionId: input.sessionId,
+      subjectId: input.subjectId,
+      sourceCommandId: input.id,
+    });
+  }
+  /** Exact live default naming Job; never exposed through Model/observer capabilities. */
+  async openAutomaticSessionTitle(input: {
+    jobExecutionId: string;
+    sourceCommandId: string;
+    signal: AbortSignal;
+  }) {
+    const live = this.activeExecutions.get(input.jobExecutionId);
+    if (!live) throw new AgentError('session_title_job_inactive');
+    const signal = AbortSignal.any([input.signal, live.controller.signal]);
+    const operation = await openAutomaticTitleOperation({
+      store: this.options.store,
+      ...input,
+      owner: live.owner,
+      signal,
+      checkpoint: () => {
+        if (this.activeExecutions.get(input.jobExecutionId) !== live)
+          throw new AgentError('session_title_job_inactive');
+      },
+      wait: (cursor, signal) => {
+        const waiting = this.changeWaits.wait(cursor, signal, 30000);
+        this.watchControls();
+        return waiting;
+      },
+    });
+    if (this.activeExecutions.get(input.jobExecutionId) !== live)
+      throw new AgentError('session_title_job_inactive');
+    this.automaticTitleExecutions.add(input.jobExecutionId);
+    return operation;
+  }
+  /** Stop confirmation only; a terminal ledger cannot certify an unresolved disposer. */
+  automaticSessionTitleResourcesStopped(jobExecutionId: string): boolean {
+    return (
+      !this.titleModelOwners.has(jobExecutionId) && !this.titleCleanupFailures.has(jobExecutionId)
+    );
+  }
+  retainAutomaticSessionTitleCleanup(jobExecutionId: string, error: unknown): void {
+    const live = this.activeExecutions.get(jobExecutionId);
+    if (
+      !live ||
+      !this.automaticTitleExecutions.has(jobExecutionId) ||
+      !(error instanceof ConfigurationPreparationCleanupError)
+    )
+      throw new AgentError('session_title_job_invalid');
+    const failed = Promise.reject<void>(error);
+    void failed.catch(() => {});
+    this.titleCleanupFailures.set(jobExecutionId, {
+      error,
+      owner: live.owner,
+      dispose: () => failed,
+    });
+  }
+  async disposeAutomaticSessionTitleConfiguration(
+    jobExecutionId: string,
+    release: () => Promise<void>,
+  ): Promise<void> {
+    const live = this.activeExecutions.get(jobExecutionId);
+    if (!live || !this.automaticTitleExecutions.has(jobExecutionId))
+      throw new AgentError('session_title_job_invalid');
+    const dispose = this.preparationDisposer({ dispose: release });
+    try {
+      await dispose();
+    } catch (error) {
+      this.titleCleanupFailures.set(jobExecutionId, { error, owner: live.owner, dispose });
+      throw new AgentError('session_title_cleanup_unconfirmed');
+    }
+  }
+  /** Trusted title operation only; not exposed to Model tools or child task creation. */
   async runInternalModel(input: {
     parentExecutionId: string;
     model: ModelAdapter;
@@ -2946,8 +3037,21 @@ export class AgentRuntime {
   }): Promise<import('./execution').ModelResponse> {
     const dispose = this.preparationDisposer(input);
     let retained = false;
+    // Provider cleanup may finish after the live Job has retired.
+    const live = this.activeExecutions.get(input.parentExecutionId);
+    const naming = this.automaticTitleExecutions.has(input.parentExecutionId);
+    const cleanupFailed = (error: unknown) => {
+      if (naming) {
+        this.titleCleanupFailures.set(input.parentExecutionId, {
+          error,
+          dispose,
+          owner: live?.owner,
+        });
+        throw new AgentError('session_title_cleanup_unconfirmed');
+      }
+      this.preparationCleanupFailed = true;
+    };
     try {
-      const live = this.activeExecutions.get(input.parentExecutionId);
       const parent = await this.options.store.getExecution(input.parentExecutionId);
       if (
         !live ||
@@ -3020,6 +3124,7 @@ export class AgentRuntime {
         live.scope.bindings?.permissions ?? this.options.permissions,
         input.permissions,
       );
+      if (naming) this.titleModelOwners.set(parent.id, live.owner);
       const call = this.trackInternalModelTask(
         this.execution.internalModel(scope, {
           execution: fact.execution,
@@ -3070,7 +3175,9 @@ export class AgentRuntime {
           },
         }),
         dispose,
+        cleanupFailed,
       );
+      if (naming) void call.finally(() => this.titleModelOwners.delete(parent.id)).catch(() => {});
       retained = true;
       let timer: ReturnType<typeof setTimeout> | undefined;
       let onAbort: (() => void) | undefined;
@@ -3109,7 +3216,7 @@ export class AgentRuntime {
     } finally {
       if (!retained)
         await dispose().catch((error) => {
-          this.preparationCleanupFailed = true;
+          cleanupFailed(error);
           throw error;
         });
     }
@@ -3119,6 +3226,9 @@ export class AgentRuntime {
   }
   getMetadata() {
     return this.options.store.getMetadata();
+  }
+  readFirstSessionRun(input: Parameters<Store['readFirstSessionRun']>[0]) {
+    return this.options.store.readFirstSessionRun(input);
   }
   readSessionExportText(input: Parameters<Store['readSessionExportText']>[0]) {
     return this.options.store.readSessionExportText(input);
@@ -6349,6 +6459,18 @@ export class AgentRuntime {
     if (
       this.hasUnconfirmedCleanup() ||
       this.extensionHost.hasActiveOperations(owner.sessionId) ||
+      [...this.titleModelOwners.values()].some(
+        (held) =>
+          held.sessionId === owner.sessionId &&
+          held.instanceId === owner.instanceId &&
+          held.generation === owner.generation,
+      ) ||
+      [...this.titleCleanupFailures.values()].some(
+        ({ owner: held }) =>
+          held?.sessionId === owner.sessionId &&
+          held.instanceId === owner.instanceId &&
+          held.generation === owner.generation,
+      ) ||
       [...this.active.values()].some(
         (live) =>
           live.owner.sessionId === owner.sessionId &&
@@ -9381,7 +9503,8 @@ export class AgentRuntime {
       this.reportRecoveryCleanupFailed ||
       this.jobReconcileCleanupFailed ||
       this.runResumeCleanupFailed ||
-      this.preparationCleanupFailed
+      this.preparationCleanupFailed ||
+      this.titleCleanupFailures.size
     )
       throw new AgentError('shutdown_cleanup_unconfirmed');
     await Promise.all(this.configurationReleases.map((release) => release()));

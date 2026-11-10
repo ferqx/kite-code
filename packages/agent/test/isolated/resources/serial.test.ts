@@ -23,6 +23,61 @@ const finish: ModelEvent = {
   usage: { inputTokens: 1, outputTokens: 1 },
 };
 
+test.each([
+  1, 99,
+])('title permits and waiters stay bounded independently of business capacity: %s', async (modelSlots) => {
+  const resources = new ExecutionResources(modelSlots);
+  const titles = Math.min(modelSlots, 4);
+  const held = [];
+  const waits = [];
+  const controllers: AbortController[] = [];
+  try {
+    for (let i = 0; i < titles; i++)
+      held.push(await resources.acquireTitleModel(new AbortController().signal));
+    for (let i = 0; i < titles * 7; i++) {
+      const controller = new AbortController();
+      controllers.push(controller);
+      waits.push(resources.acquireTitleModel(controller.signal).catch((error) => error));
+    }
+    expect(
+      (await resources.acquireTitleModel(new AbortController().signal).catch((error) => error))
+        .code,
+    ).toBe('session_title_capacity_exceeded');
+    const business = await resources.acquire(
+      { slot: 'model' },
+      { sessionId: 'business', workspaceId: 'w' },
+      AbortSignal.timeout(250),
+    );
+    business();
+    for (const controller of controllers) controller.abort(new Error('retire title waiter'));
+    const results = await Promise.all(waits);
+    expect(results.every((result, i) => result === controllers[i]!.signal.reason)).toBe(true);
+  } finally {
+    for (const controller of controllers) controller.abort();
+    await Promise.all(waits);
+    for (const release of held) release();
+  }
+  const next = await resources.acquireTitleModel(AbortSignal.timeout(250));
+  next();
+});
+
+test('title queue timeout retires admission without consuming a later call signal or permit', async () => {
+  const resources = new ExecutionResources(1);
+  const signal = new AbortController().signal;
+  const held = await resources.acquireTitleModel(signal);
+  try {
+    const began = performance.now();
+    const error = await resources.acquireTitleModel(signal).catch((error) => error);
+    expect(error.code).toBe('session_title_queue_timeout');
+    expect(performance.now() - began).toBeGreaterThanOrEqual(7900);
+    expect(signal.aborted).toBe(false);
+  } finally {
+    held();
+  }
+  const next = await resources.acquireTitleModel(signal);
+  next();
+}, 10000);
+
 test('resource capacity is a frozen total and remains unchanged while permits are held or queued', async () => {
   const resources = new ExecutionResources(3, 2);
   const scope = { sessionId: 'capacity', workspaceId: 'capacity' };

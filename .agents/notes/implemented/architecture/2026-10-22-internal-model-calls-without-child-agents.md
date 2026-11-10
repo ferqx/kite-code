@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-10：本文中默认标题在完成CAS前等待、共享业务模型槽与公共rename控制CAS的部分，已由[独立命名决定](2026-11-09-detached-session-title-metadata.md)替代，原段落保留取舍历史。当前行为和本机开发验证归Agent／Storage／Service owner；通用生命周期钩子、扩展业务归属、原Session内部Model、完整输出、准确取消与真实资源drain的理由继续适用。该决定不授予其他平台、安装版或远端模型资格。
+
 本决定中保留旧 `authorization.review` child 回执读取／闭包兼容的部分，由[统一新版授权决定](2026-11-06-structured-session-grants.md)取代。当前按本轮 schema/checksum 拒绝旧库，只保存和消费统一编号1的完整 check 回执；无 Run 内部 Model、原 Session 身份、来源与最终派发的理由继续适用。
 
 ## Problem

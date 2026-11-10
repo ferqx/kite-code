@@ -1,26 +1,23 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import {
+  fixturePermissions,
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore, preflightSqliteStore } from '../../../src/sqlite';
 
 // Genuine format-1 profiles retain their original private review bodies. The
 // current same-major implementation still rejects their old schema/checksums.
 function unpack(shape: string) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-old-format-authorization-')));
+  const root = temporaryDirectory('kite-old-format-authorization-');
   const files = JSON.parse(
     gunzipSync(
       readFileSync(
@@ -30,9 +27,9 @@ function unpack(shape: string) {
   ) as Record<string, string>;
   for (const [name, bytes] of Object.entries(files)) {
     const path = join(root, name);
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    privateDirectory(dirname(path));
     writeFileSync(path, Buffer.from(bytes, 'base64'), { mode: 0o600 });
-    if (name.includes('/blobs/')) chmodSync(path, 0o400);
+    fixturePermissions(path, name.includes('/blobs/') ? 0o400 : 0o600);
   }
   return { root, files, profile: { dataRoot: join(root, 'data'), profile: 'owned' } };
 }

@@ -74,6 +74,7 @@ function fixture(
     holdSelection = false;
   let releaseSelection: (() => void) | undefined;
   let failHistory = false;
+  let connectionUnavailable = false;
   let holdMessages = false,
     releaseMessages: (() => void) | undefined;
   const imageData =
@@ -109,6 +110,7 @@ function fixture(
   const listeners = new Set<(event: NativeEvent) => void>();
   const state = (): NativeState => ({
     generation: 1,
+    backgroundUnavailable: connectionUnavailable,
     historyEpoch,
     creationSubmissions: [],
     inputSubmissions: [],
@@ -119,7 +121,7 @@ function fixture(
       viewGeneration: revision,
       viewSelection,
       canReadModelOutput: false,
-      permissionUnavailable: options.permissionUnavailable,
+      permissionUnavailable: connectionUnavailable || options.permissionUnavailable,
       session: {
         ...session,
         id: selected,
@@ -422,6 +424,12 @@ function fixture(
     revoked,
     until,
     release,
+    async setConnectionUnavailable(value: boolean) {
+      await act(async () => {
+        connectionUnavailable = value;
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+    },
     releaseChildren: () =>
       act(async () => {
         for (const release of pendingChildren.splice(0)) release();
@@ -475,13 +483,14 @@ function fixture(
         () => requests.filter((request) => request.method === 'messages').length > before,
       );
     },
-    async render(waitForMetadata = true) {
+    async render(waitForMetadata = true, selectOriginal = true) {
       await act(async () => root.render(<NativeDesktop />));
-      await act(async () => {
-        [...host.querySelectorAll<HTMLButtonElement>('button')]
-          .find((button) => button.textContent === 'Original')
-          ?.click();
-      });
+      if (selectOriginal)
+        await act(async () => {
+          [...host.querySelectorAll<HTMLButtonElement>('button')]
+            .find((button) => button.textContent === 'Original')
+            ?.click();
+        });
       if (waitForMetadata) await until(() => pending.runs.length > 0 && pending.tools.length > 0);
       else await until(() => requests.some((request) => request.method === 'messages'));
     },
@@ -579,6 +588,23 @@ test('retained transcript does not cover changed complete reply bytes, message s
       transcript: fresh,
     }),
   ).toBe(fresh);
+});
+
+test('a selection already activated by attach rebuilds its readers without another selection request', async () => {
+  const f = fixture();
+  try {
+    await f.render(true, false);
+    expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(0);
+    expect(f.requests.some((request) => request.method === 'draft.read')).toBe(true);
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.textContent?.includes(final));
+    expectReadableDuringMetadata(f.host);
+    await f.select('Other session');
+    expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
 });
 
 test('sent image thumbnails retain verified nodes and URLs through streaming and cached session switches', async () => {
@@ -722,6 +748,31 @@ test('a genuine permission failure bypasses pending structural readers and keeps
     expect(
       f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
     ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('ordinary Native connection loss is visible while saved reading stays in place and recovery clears the notice', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.textContent?.includes(final));
+    const original = f.host.querySelector('[data-message-id="final"]');
+    expect(original).not.toBeNull();
+    expect(f.host.textContent).not.toContain('连接暂不可用');
+    await f.setConnectionUnavailable(true);
+    await f.until(() => !!f.host.textContent?.includes('连接暂不可用，当前状态待核实。'));
+    expect(f.host.querySelector('[data-message-id="final"]')).toBe(original);
+    expect(f.host.textContent).toContain(final);
+    expect(
+      f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
+    ).toBe(true);
+    await f.setConnectionUnavailable(false);
+    await f.until(() => !f.host.textContent?.includes('连接暂不可用'));
+    expect(f.host.querySelector('[data-message-id="final"]')).toBe(original);
   } finally {
     await f.close();
   }

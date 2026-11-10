@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test';
+import {
+  isStorageRequestSettled,
+  markStorageRequestSettled,
+} from '../../../src/storage/transaction-state';
 import { AgentError } from '../../../src/storage/types';
 import {
   deserializeStorageError,
@@ -76,5 +80,20 @@ test('only a genuine branded transaction fact survives Worker decoding as strict
   );
   expect(
     isStorageTransactionUnconfirmed(deserializeStorageError(serializeStorageError(otherCleanup))),
+  ).toBe(false);
+});
+
+test('original request lifetime evidence survives Worker transfer without trusting an error property', () => {
+  const fake = Object.assign(new AgentError('SQLITE_CONSTRAINT_TRIGGER'), { requestSettled: true });
+  expect(isStorageRequestSettled(deserializeStorageError(serializeStorageError(fake)))).toBe(false);
+  const ended = markStorageRequestSettled(new AgentError('SQLITE_CONSTRAINT_TRIGGER'));
+  const decoded = deserializeStorageError(structuredClone(serializeStorageError(ended)));
+  expect(decoded.code).toBe('SQLITE_CONSTRAINT_TRIGGER');
+  expect(isStorageRequestSettled(decoded)).toBe(true);
+  expect(isStorageTransactionUnconfirmed(decoded)).toBe(false);
+  expect(
+    isStorageRequestSettled(
+      deserializeStorageError(serializeStorageError(new AggregateError([ended], 'outer failure'))),
+    ),
   ).toBe(false);
 });

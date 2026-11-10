@@ -2341,6 +2341,58 @@ for (const receiptSource of ['lookup', 'submit'] as const)
       }
     });
 
+test('a first receipt lookup joins its pending selection without a new activation or losing later draft edits', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let submission: NativeState['inputSubmissions'][number] | undefined;
+  let lookedUp = false;
+  bridge.request = async (input) => {
+    const value = await request(input);
+    if (input.method === 'conversation.send') {
+      submission = {
+        sessionId: input.creation.sessionId,
+        intent: input.intent,
+        phase: 'accepted',
+      };
+    }
+    if (input.method === 'conversation.lookup' && value && 'kind' in value) {
+      lookedUp = true;
+      submission = undefined;
+      return { ...value, phase: 'accepted', code: undefined } as NativeConversationResult;
+    }
+    return value && 'generation' in value
+      ? { ...value, inputSubmissions: submission ? [submission] : [] }
+      : value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('one original accepted first input');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    f.holdSelection();
+    const original = await f.resolve('accepted');
+    await f.refreshWhileSelecting();
+    await f.until(() => lookedUp);
+    const selections = () =>
+      f.calls.filter(
+        (call) => call.method === 'select' && call.sessionId === original.creation.sessionId,
+      );
+    expect(selections()).toHaveLength(1);
+    await f.edit('later edit during original selection');
+    await f.releaseSelection();
+    await f.until(() => !!f.input('当前会话私有草稿') && !f.input('新对话草稿'));
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('later edit during original selection');
+    expect(selections()).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(1);
+  } finally {
+    await f.releaseSelection();
+    await f.close();
+  }
+});
+
 test('a held directory observation cannot block the accepted first Session handoff', async () => {
   const f = fixture(true);
   const bridge = f.dom.window.kiteNative! as NativeBridge;

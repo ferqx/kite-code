@@ -17,6 +17,7 @@ import { identity as modelIdentity, sessionScope } from './model-input-operation
 import type { SqliteOperations } from './operations';
 import { assertEffectFreeModel, assertHistoricalExecution } from './recovery-audit-validation';
 import { withReconciledFrontier } from './session-reconciliation';
+import { automaticTitleEffect } from './session-title-scope';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined): Json =>
@@ -539,11 +540,11 @@ function attachGroup(
   );
   for (const child of root.children) allowed.add(child.carrier.id);
   for (const execution of db.rows(
-    "SELECT e.id FROM execution e LEFT JOIN session s ON s.id=e.session_id WHERE (s.root_id=? OR e.root_session_id=?) AND e.state IN('planned','dispatching','running','outcome_unknown')",
+    "SELECT e.* FROM execution e LEFT JOIN session s ON s.id=e.session_id WHERE (s.root_id=? OR e.root_session_id=?) AND e.state IN('planned','dispatching','running','outcome_unknown')",
     input.sessionId,
     input.sessionId,
   ))
-    if (!allowed.has(String(execution.id)))
+    if (!allowed.has(String(execution.id)) && !automaticTitleEffect(db, execution))
       throw new AgentError('run_resume_checkpoint_unavailable');
   for (const active of db.rows(
     'SELECT r.id FROM run r JOIN session s ON s.id=r.session_id WHERE r.is_active=1 AND s.root_id=?',

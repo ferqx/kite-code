@@ -66,6 +66,7 @@ export function useNativeRuns({
   messages,
   observationRevision,
   suspended = false,
+  executionRuns,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -74,6 +75,8 @@ export function useNativeRuns({
   messages: readonly Message[];
   observationRevision: number;
   suspended?: boolean;
+  /** Independently observed bounded execution facts; never enables the body reader. */
+  executionRuns?: NativeSelection['runs'];
 }) {
   const storeId = selection?.storeId,
     sessionId = selection?.session.id,
@@ -100,11 +103,11 @@ export function useNativeRuns({
   const view = useMemo(
     () =>
       JSON.stringify(
-        selection?.runs
+        (executionRuns ?? selection?.runs ?? [])
           .filter((run) => storeId && sessionId && presentableRun(run, storeId, sessionId))
           .map(nativeRunFact) ?? [],
       ),
-    [selection?.runs, storeId, sessionId],
+    [executionRuns, selection?.runs, storeId, sessionId],
   );
   const [retryRevision, setRetryRevision] = useState(0);
   const cache = useRef({

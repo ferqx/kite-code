@@ -162,9 +162,17 @@ import { readRunExecutionSafetySnapshot } from './run-execution-safety';
 import { callRunResume } from './run-resume-operations';
 import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
+import { readFirstSessionRun } from './session-first-run';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
 import { reconcileSession } from './session-reconciliation';
+import { claimAutomaticSessionTitle } from './session-title-operations';
+import {
+  bindAutomaticSessionTitle,
+  closeAutomaticSessionTitle,
+  publishAutomaticSessionTitle,
+  readAutomaticSessionTitlePublication,
+} from './session-title-publication';
 import {
   readWorkspaceRemoval,
   removeWorkspace,
@@ -1569,6 +1577,8 @@ export class SqliteOperations {
           this.event(String(command.session_id), id, 'run.started');
           return this.runRecord(this.row('SELECT * FROM run WHERE id=?', id)!);
         });
+      case 'readFirstSessionRun':
+        return readFirstSessionRun(this, args[0] as Parameters<Store['readFirstSessionRun']>[0]);
       case 'getRun': {
         const row = this.row('SELECT * FROM run WHERE id=?', String(args[0]));
         return row ? this.runRecord(row) : null;
@@ -1733,6 +1743,31 @@ export class SqliteOperations {
       case 'renameSession':
       case 'deleteSession':
         return manageSession(this, method, args[0] as Parameters<Store['renameSession']>[0]);
+      case 'claimAutomaticSessionTitle':
+        return claimAutomaticSessionTitle(
+          this,
+          args[0] as Parameters<Store['claimAutomaticSessionTitle']>[0],
+        );
+      case 'bindAutomaticSessionTitle':
+        return bindAutomaticSessionTitle(
+          this,
+          args[0] as Parameters<Store['bindAutomaticSessionTitle']>[0],
+        );
+      case 'publishAutomaticSessionTitle':
+        return publishAutomaticSessionTitle(
+          this,
+          args[0] as Parameters<Store['publishAutomaticSessionTitle']>[0],
+        );
+      case 'readAutomaticSessionTitlePublication':
+        return readAutomaticSessionTitlePublication(
+          this,
+          args[0] as Parameters<Store['readAutomaticSessionTitlePublication']>[0],
+        );
+      case 'closeAutomaticSessionTitle':
+        return closeAutomaticSessionTitle(
+          this,
+          args[0] as Parameters<Store['closeAutomaticSessionTitle']>[0],
+        );
       case 'forkSession':
         return forkSession(this, args[0] as Parameters<Store['forkSession']>[0]);
       case 'prepareForkReadonlySources':

@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +10,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { createArtifactStore } from '../../../src/artifacts';
 import { createSessionTitleExtension } from '../../../src/business/session-title';
 import { sessionTitleInstructions } from '../../../src/business/session-title/title';
 import type { Permissions } from '../../../src/extensions';
@@ -16,6 +18,7 @@ import { semanticDigest } from '../../../src/json';
 import { type AgentRuntime, createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
+import { AgentError } from '../../../src/storage/types';
 
 const usage = { inputTokens: 1, outputTokens: 1 };
 const finish = { type: 'finish', reason: 'stop', usage } as const;
@@ -39,9 +42,15 @@ async function fixture(
   options: {
     titlePermissions?(store: Store): Permissions;
     titleDispose?(): Promise<void>;
-    beforeResolveTitle?(): Promise<void>;
+    beforeResolveTitle?(sessionId: string): Promise<void>;
     blocker?: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> };
+    titleBlocker?: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> };
     modelConcurrency?: number;
+    artifacts?: boolean;
+    publishTitle?(
+      input: Parameters<Store['publishAutomaticSessionTitle']>[0],
+      publish: Store['publishAutomaticSessionTitle'],
+    ): ReturnType<Store['publishAutomaticSessionTitle']>;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-title-generation-')));
@@ -62,6 +71,10 @@ async function fixture(
       ) {
         expect(request.tools).toEqual([]);
         titleStarted.resolve();
+        if (options.titleBlocker && request.messages.at(-1)?.content === 'BLOCK_TITLE_MODEL_SLOT') {
+          options.titleBlocker.entered.resolve();
+          await options.titleBlocker.release.promise;
+        }
         yield* titleStream(signal);
       } else {
         if (
@@ -81,6 +94,9 @@ async function fixture(
   let pausedCompletion = false;
   const runtimeStore = new Proxy(store, {
     get(target, key) {
+      if (key === 'publishAutomaticSessionTitle' && options.publishTitle)
+        return (input: Parameters<Store['publishAutomaticSessionTitle']>[0]) =>
+          options.publishTitle!(input, target.publishAutomaticSessionTitle.bind(target));
       if (key === 'finishRun')
         return async (input: Parameters<Store['finishRun']>[0]) => {
           if (
@@ -102,8 +118,8 @@ async function fixture(
   let runtime!: AgentRuntime;
   const titles = createSessionTitleExtension({
     runtime: () => runtime,
-    resolveModel: async () => {
-      await options.beforeResolveTitle?.();
+    resolveModel: async ({ session }) => {
+      await options.beforeResolveTitle?.(session.id);
       return {
         model,
         modelId: 'fixture',
@@ -116,6 +132,7 @@ async function fixture(
   });
   runtime = createRuntime({
     store: runtimeStore,
+    ...(options.artifacts ? { artifacts: createArtifactStore({ profile, store }) } : {}),
     ...(mainMode === 'unavailable' ? {} : { model }),
     modelId: 'fixture',
     ...(options.modelConcurrency ? { modelConcurrency: options.modelConcurrency } : {}),
@@ -160,12 +177,202 @@ async function fixture(
         request.messages.some((message) => message.content === sessionTitleInstructions),
       );
     },
+    ordinaryRequests() {
+      return requests.filter(
+        (request) =>
+          !request.messages.some((message) => message.content === sessionTitleInstructions),
+      );
+    },
+    async waitForTitle(timeoutMs = 15000) {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const record = await store.getExtensionRecord({
+          extensionId: 'builtin.session-title',
+          sessionId: 'session',
+          key: 'automatic-title-attempt',
+        });
+        const attempt = record?.value as
+          | { publication: string; jobExecutionId: string | null }
+          | undefined;
+        const job = attempt?.jobExecutionId
+          ? await store.getExecution(attempt.jobExecutionId)
+          : null;
+        if (
+          !attempt ||
+          (attempt.publication !== 'pending' &&
+            job &&
+            ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(job.status))
+        )
+          return;
+        if (Date.now() >= deadline)
+          throw new Error(`title settlement timeout: ${JSON.stringify({ attempt, job })}`);
+        await Bun.sleep(5);
+      }
+    },
     async close() {
       await runtime.close();
       rmSync(root, { recursive: true, force: true });
     },
   };
 }
+
+test('main completion and the next Run do not wait for the original detached title Job', async () => {
+  const release = deferred();
+  const f = await fixture(
+    async function* () {
+      await release.promise;
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    { modelConcurrency: 1 },
+  );
+  try {
+    await f.submit();
+    await f.titleStarted.promise;
+    await f.runtime.waitForCommand('work', { timeoutMs: 2000 });
+    let view = await f.runtime.getView('session');
+    expect(view.runs.find((run) => run.originCommandId === 'work')?.status).toBe('completed');
+    expect(view.session).toMatchObject({ title: truncatedOriginal, controlRevision: '0' });
+    const job = view.executions.find(
+      (execution) => execution.definitionId === 'builtin.session-title/generate',
+    )!;
+    expect(job).toMatchObject({
+      kind: 'job',
+      runId: null,
+      status: 'running',
+      cancelWithParent: false,
+    });
+    expect(['dispatching', 'running']).toContain(
+      view.executions.find((execution) => execution.parentExecutionId === job.id)!.status,
+    );
+    await f.submit('later', '下一轮无需等待标题');
+    await f.runtime.waitForCommand('later', { timeoutMs: 2000 });
+    view = await f.runtime.getView('session');
+    expect(view.runs.find((run) => run.originCommandId === 'later')?.status).toBe('completed');
+    expect((await f.store.getExecution(job.id))?.status).toBe('running');
+    expect(
+      view.executions.filter(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      ),
+    ).toHaveLength(1);
+    release.resolve();
+    await f.waitForTitle();
+    expect((await f.store.getSession('session'))?.title).toBe(generated);
+    expect(await f.store.getExecution(job.id)).toMatchObject({
+      delivery: 'suppressed',
+      deliveryReason: 'internal_metadata',
+    });
+    expect(f.titleRequests()).toHaveLength(1);
+  } finally {
+    release.resolve();
+    await f.close();
+  }
+});
+
+test.each([
+  'committed-reply-lost',
+  'pending-reply-lost',
+  'unconfirmed-live-call',
+  'pending-rollback',
+] as const)('one original publication is resolved without repeating the title effect: %s', async (mode) => {
+  const gate = { entered: deferred(), release: deferred() };
+  let publications = 0;
+  let originalPublication: ReturnType<Store['publishAutomaticSessionTitle']> | undefined;
+  const f = await fixture(
+    async function* () {
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    {
+      publishTitle: async (input, publish) => {
+        publications++;
+        gate.entered.resolve();
+        if (mode === 'unconfirmed-live-call') {
+          originalPublication = gate.release.promise.then(() => publish(input));
+          void originalPublication.catch(() => {});
+          throw new AgentError('fixture_title_ack_unknown');
+        }
+        if (mode !== 'committed-reply-lost') await gate.release.promise;
+        const result = await publish(input);
+        if (mode !== 'pending-rollback') throw new AgentError('fixture_title_reply_lost');
+        return result;
+      },
+    },
+  );
+  const physical = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));
+  try {
+    if (mode === 'pending-rollback')
+      physical.run(
+        "CREATE TRIGGER fail_title_publish BEFORE UPDATE ON extension_record WHEN NEW.key='automatic-title-attempt' AND json_extract(NEW.json,'$.publication')='published' BEGIN SELECT RAISE(ABORT,'rollback publication'); END",
+      );
+    await f.submit();
+    await gate.entered.promise;
+    await f.runtime.waitForCommand('work');
+    if (mode !== 'committed-reply-lost') {
+      const before = await f.store.getExtensionRecord({
+        extensionId: 'builtin.session-title',
+        sessionId: 'session',
+        key: 'automatic-title-attempt',
+      });
+      expect(before?.value).toMatchObject({ publication: 'pending' });
+      expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
+      await f.submit('later', '标题事务尚未结束时继续业务');
+      await f.runtime.waitForCommand('later', { timeoutMs: 2000 });
+      expect(
+        (await f.runtime.getView('session')).runs.find((run) => run.originCommandId === 'later')
+          ?.status,
+      ).toBe('completed');
+      expect(
+        (
+          await f.store.getExtensionRecord({
+            extensionId: 'builtin.session-title',
+            sessionId: 'session',
+            key: 'automatic-title-attempt',
+          })
+        )?.value,
+      ).toMatchObject({ publication: 'pending' });
+      gate.release.resolve();
+    }
+    await f.waitForTitle();
+    expect(publications).toBe(1);
+    expect(f.titleRequests()).toHaveLength(1);
+    const view = await f.runtime.getView('session');
+    expect(view.session.title).toBe(mode === 'pending-rollback' ? truncatedOriginal : generated);
+    expect(
+      view.executions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      )?.status,
+    ).toBe('succeeded');
+    expect(
+      (
+        await f.store.getExtensionRecord({
+          extensionId: 'builtin.session-title',
+          sessionId: 'session',
+          key: 'automatic-title-attempt',
+        })
+      )?.value,
+    ).toMatchObject(
+      mode === 'pending-rollback'
+        ? { publication: 'closed', closedReason: 'title_publication_failed' }
+        : { publication: 'published' },
+    );
+    const events = await f.store.getChanges({ after: '0', limit: 200 });
+    expect(events.events.filter((event) => event.type === 'session.renamed')).toHaveLength(
+      mode === 'pending-rollback' ? 1 : 2,
+    );
+  } finally {
+    gate.release.resolve();
+    await originalPublication?.catch(() => {});
+    physical.close();
+    await f.close();
+  }
+});
 
 test('AI title is durable metadata, excluded from complete history and later model input', async () => {
   const f = await fixture(async function* () {
@@ -175,6 +382,7 @@ test('AI title is durable metadata, excluded from complete history and later mod
   try {
     await f.submit();
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     const view = await f.runtime.getView('session');
     expect(view.runs[0]?.status).toBe('completed');
     expect((await f.store.getSession('session'))?.title).toBe(generated);
@@ -197,6 +405,7 @@ test('AI title is durable metadata, excluded from complete history and later mod
     );
     expect(ordinary).toHaveLength(2);
     expect(JSON.stringify(ordinary[1]?.messages)).not.toContain(generated);
+    expect(JSON.stringify(ordinary[1]?.messages)).not.toContain('title_saved');
     expect((await f.runtime.getView('session')).messages).toHaveLength(4);
     await f.runtime.close();
     const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
@@ -208,6 +417,157 @@ test('AI title is durable metadata, excluded from complete history and later mod
     } finally {
       await cold.close();
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('title admission overflow retains fallback once while every business Run and the next input still complete', async () => {
+  const release = deferred();
+  const f = await fixture(
+    async function* () {
+      await release.promise;
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    { modelConcurrency: 1 },
+  );
+  const ids = Array.from({ length: 8 }, (_, i) => `overflow-${i}`);
+  const read = (sessionId: string) =>
+    f.store.getExtensionRecord({
+      extensionId: 'builtin.session-title',
+      sessionId,
+      key: 'automatic-title-attempt',
+    });
+  try {
+    await f.submit();
+    await f.titleStarted.promise;
+    await f.runtime.waitForCommand('work');
+    for (const sessionId of ids)
+      await f.runtime.createSession({
+        ...f.base,
+        sessionId,
+        commandId: `create-${sessionId}`,
+        workspaceId: 'workspace',
+        title: '',
+      });
+    await Promise.all(
+      ids.map((sessionId) =>
+        f.runtime.submitCommand({
+          ...f.base,
+          sessionId,
+          commandId: `work-${sessionId}`,
+          request: { kind: 'run.start', content: `overflow ${sessionId}` },
+        }),
+      ),
+    );
+    await Promise.all(
+      ids.map((sessionId) => f.runtime.waitForCommand(`work-${sessionId}`, { timeoutMs: 4000 })),
+    );
+    let records: Awaited<ReturnType<typeof read>>[] = [];
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      records = await Promise.all(ids.map(read));
+      if (
+        records.some(
+          (record) => (record?.value as { publication?: string })?.publication === 'closed',
+        )
+      )
+        break;
+      if (Date.now() >= deadline) throw Error('overflow was not retired');
+      await Bun.sleep(5);
+    }
+    const rejected = records.filter(
+      (record) => (record?.value as { publication?: string })?.publication === 'closed',
+    );
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.value).toMatchObject({ closedReason: 'session_title_capacity_exceeded' });
+    expect(f.titleRequests()).toHaveLength(1);
+    for (const id of ids) expect((await f.runtime.getView(id)).runs[0]?.status).toBe('completed');
+    const sessionId = rejected[0]!.sessionId;
+    const before = (await f.store.getSession(sessionId))!.title;
+    await f.runtime.submitCommand({
+      ...f.base,
+      sessionId,
+      commandId: 'overflow-next',
+      request: { kind: 'run.start', content: 'next business input' },
+    });
+    await f.runtime.waitForCommand('overflow-next', { timeoutMs: 2000 });
+    expect((await f.store.getSession(sessionId))?.title).toBe(before);
+    expect(f.titleRequests()).toHaveLength(1);
+    release.resolve();
+    await f.waitForTitle();
+    const settledDeadline = Date.now() + 3000;
+    while (
+      (await Promise.all(ids.map(read))).some(
+        (record) => (record?.value as { publication?: string })?.publication === 'pending',
+      )
+    ) {
+      if (Date.now() >= settledDeadline) throw Error('admitted titles did not settle');
+      await Bun.sleep(5);
+    }
+    await f.runtime.close();
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      const outcomes = await Promise.all(
+        ids.map((id) =>
+          cold.getExtensionRecord({
+            extensionId: 'builtin.session-title',
+            sessionId: id,
+            key: 'automatic-title-attempt',
+          }),
+        ),
+      );
+      expect(
+        outcomes.filter(
+          (record) => (record?.value as { publication?: string })?.publication === 'published',
+        ),
+      ).toHaveLength(7);
+      expect(
+        outcomes.filter(
+          (record) => (record?.value as { publication?: string })?.publication === 'closed',
+        ),
+      ).toHaveLength(1);
+      expect(f.titleRequests()).toHaveLength(8);
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    release.resolve();
+    await f.close();
+  }
+});
+
+test('a title continuation keeps complete bounded result text bound to its original output receipt', async () => {
+  const content = `${' '.repeat(4096)}${generated}${' '.repeat(4096)}`;
+  const f = await fixture(
+    async function* () {
+      yield { type: 'text_delta', text: content };
+      yield { ...finish, continuation: { protocol: 'fixture', token: 'original-title-only' } };
+    },
+    '',
+    undefined,
+    'success',
+    { artifacts: true },
+  );
+  try {
+    await f.submit();
+    await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
+    const model = (await f.runtime.getView('session')).executions.find(
+      (execution) => execution.kind === 'model' && execution.runId === null,
+    )!;
+    expect(model).toMatchObject({ status: 'succeeded' });
+    expect((await f.store.getExecution(model.id))?.result).toMatchObject({
+      content,
+      modelOutput: { complete: true },
+    });
+    const full = await f.runtime.readModelOutput({ ...f.base, executionId: model.id });
+    expect(full.output).toMatchObject({ content, complete: true, toolCalls: [] });
+    expect((await f.store.getSession('session'))?.title).toBe(generated);
   } finally {
     await f.close();
   }
@@ -232,6 +592,7 @@ test.each([
   try {
     await f.submit('work', input);
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     const view = await f.runtime.getView('session');
     expect(view.session.title).toBe('修复 会话 命名，保');
     expect((await f.runtime.getCommand('work'))?.request).toMatchObject({ content: input });
@@ -240,10 +601,13 @@ test.each([
       expect(view.runs).toHaveLength(0);
     } else {
       expect(view.messages[0]?.content).toBe(input);
-      expect(f.requests[0]?.messages.some((message) => message.content === input)).toBe(true);
+      expect(f.ordinaryRequests()[0]?.messages.some((message) => message.content === input)).toBe(
+        true,
+      );
       expect(view.runs[0]?.status).toBe(mode === 'success' ? 'completed' : 'failed');
     }
-    expect(f.titleRequests()).toHaveLength(mode === 'success' ? 1 : 0);
+    if (mode === 'unavailable') expect(f.titleRequests()).toHaveLength(0);
+    else expect(f.titleRequests().length).toBeLessThanOrEqual(1);
     if (mode === 'success') expect(f.titleRequests()[0]?.messages.at(-1)?.content).toBe(normalized);
   } finally {
     await f.close();
@@ -322,6 +686,7 @@ test('an unnamed Session with existing history is not named by a later Run', asy
 
 test('internal title Model isolation preserves the main recovery checkpoint before final Run completion', async () => {
   const completionGate = { entered: deferred(), release: deferred() };
+  let disposed = 0;
   const f = await fixture(
     async function* () {
       yield { type: 'text_delta', text: generated };
@@ -329,10 +694,19 @@ test('internal title Model isolation preserves the main recovery checkpoint befo
     },
     '',
     completionGate,
+    'success',
+    {
+      titleDispose: async () => {
+        disposed++;
+      },
+    },
   );
   try {
     await f.submit();
     await completionGate.entered.promise;
+    await f.titleStarted.promise;
+    for (let i = 0; disposed === 0 && i < 400; i++) await Bun.sleep(5);
+    expect(disposed).toBe(1);
     const before = await f.runtime.getView('session');
     const run = before.runs[0]!;
     expect(run.isActive).toBe(true);
@@ -371,6 +745,7 @@ test('internal title Model isolation preserves the main recovery checkpoint befo
     expect(recovery.executions.some((execution) => execution.id === titleExecution.id)).toBe(false);
     completionGate.release.resolve();
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     const after = await f.runtime.getView('session');
     expect(after.runs).toHaveLength(1);
     expect(after.runs[0]).toMatchObject({ id: run.id, status: 'completed' });
@@ -410,6 +785,7 @@ test('a late title result cannot overwrite a peer Worker manual rename', async (
     });
     release.resolve();
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     expect((await peer.getSession('session'))?.title).toBe('用户选择的名称');
     expect((await f.runtime.getView('session')).runs[0]?.status).toBe('completed');
   } finally {
@@ -483,6 +859,7 @@ test.each([
   try {
     await f.submit();
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     const view = await f.runtime.getView('session');
     expect(view.runs[0]?.status).toBe('completed');
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
@@ -553,6 +930,7 @@ test('the title deadline cancels the actual internal Model and waits for its rec
   try {
     await f.submit();
     await f.runtime.waitForCommand('work', { timeoutMs: 14000 });
+    await f.waitForTitle(14000);
     const view = await f.runtime.getView('session');
     expect(view.runs[0]?.status).toBe('completed');
     expect(cancelled).toBe(true);
@@ -572,7 +950,7 @@ test('the title deadline cancels the actual internal Model and waits for its rec
   }
 }, 15000);
 
-test('a failed first ordinary Model preserves the exact original input prefix without an AI title request', async () => {
+test('a failed first ordinary Model closes its parallel title without publishing or borrowing later success', async () => {
   const f = await fixture(
     async function* () {
       yield finish;
@@ -584,23 +962,30 @@ test('a failed first ordinary Model preserves the exact original input prefix wi
   try {
     await f.submit();
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     const view = await f.runtime.getView('session');
     expect(view.runs[0]?.status).toBe('failed');
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
     expect(Array.from((await f.store.getSession('session'))!.title)).toHaveLength(10);
-    expect(f.titleRequests()).toHaveLength(0);
-    expect(f.requests).toHaveLength(1);
+    const titleCalls = f.titleRequests().length;
+    expect(titleCalls).toBeLessThanOrEqual(1);
+    expect(f.requests).toHaveLength(1 + titleCalls);
     expect(
-      f.requests[0]?.messages.some(
-        (message) => message.role === 'user' && message.content === original,
-      ),
+      f
+        .ordinaryRequests()[0]
+        ?.messages.some((message) => message.role === 'user' && message.content === original),
     ).toBe(true);
-    expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
-    expect(view.executions.find((execution) => execution.kind === 'model')?.status).toBe('failed');
+    expect(
+      view.executions.filter((execution) => execution.kind === 'model' && execution.runId !== null),
+    ).toHaveLength(1);
+    expect(
+      view.executions.find((execution) => execution.kind === 'model' && execution.runId !== null)
+        ?.status,
+    ).toBe('failed');
     await f.submit('later', '第二条输入不能覆盖第一条原文');
     await f.runtime.waitForCommand('later');
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
-    expect(f.titleRequests()).toHaveLength(0);
+    expect(f.titleRequests()).toHaveLength(titleCalls);
   } finally {
     await f.close();
   }
@@ -635,7 +1020,7 @@ test('an unavailable Model before Run creation still preserves the exact first i
   }
 });
 
-test('actual provider retry waiting preserves the first raw input title and cancellation never starts title generation', async () => {
+test('actual business Provider retry waiting retains fallback and cancellation closes the parallel title', async () => {
   const f = await fixture(
     async function* () {
       yield finish;
@@ -649,7 +1034,8 @@ test('actual provider retry waiting preserves the first raw input title and canc
     while (Date.now() < deadline) {
       const view = await f.runtime.getView('session');
       const failed = view.executions.filter(
-        (execution) => execution.kind === 'model' && execution.status === 'failed',
+        (execution) =>
+          execution.kind === 'model' && execution.runId !== null && execution.status === 'failed',
       );
       if (failed.length >= count) return { view, failed };
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -663,7 +1049,7 @@ test('actual provider retry waiting preserves the first raw input title and canc
     expect(first.view.runs[0]?.isActive).toBe(true);
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
     expect(Array.from((await f.store.getSession('session'))!.title)).toHaveLength(10);
-    expect(f.titleRequests()).toHaveLength(0);
+    expect(f.titleRequests().length).toBeLessThanOrEqual(1);
     const retry = await failedAttempts(2);
     expect(retry.failed[1]?.decisionSource).toMatchObject({
       retry: {
@@ -675,16 +1061,17 @@ test('actual provider retry waiting preserves the first raw input title and canc
     });
     expect(retry.view.runs[0]?.isActive).toBe(true);
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
-    expect(f.titleRequests()).toHaveLength(0);
+    expect(f.titleRequests().length).toBeLessThanOrEqual(1);
     await f.runtime.cancelCommand({
       ...f.base,
       commandId: 'cancel-original',
       targetCommandId: 'work',
     });
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     expect((await f.runtime.getView('session')).runs[0]?.status).toBe('cancelled');
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
-    expect(f.titleRequests()).toHaveLength(0);
+    expect(f.titleRequests().length).toBeLessThanOrEqual(1);
   } finally {
     await f.close();
   }
@@ -719,6 +1106,7 @@ test.each([
   try {
     await f.submitPublic('work', content);
     const command = await publicInputSettled(f);
+    await f.waitForTitle();
     expect(command.request).toEqual({ kind: 'run.start', content });
     expect(command.receipt).not.toHaveProperty('humanInputCommandId');
     const view = await f.runtime.getView('session');
@@ -765,6 +1153,7 @@ test('a public first task directly binds metadata and one AI title to its origin
   try {
     await f.submitPublic();
     await f.runtime.waitForCommand('work', { timeoutMs: 2000 });
+    await f.waitForTitle();
     const command = (await f.runtime.getCommand('work'))!;
     const receipt = command.receipt as { runId: string };
     expect(receipt).not.toHaveProperty('humanInputCommandId');
@@ -868,7 +1257,8 @@ test('ordinary clarification preserves the first input, its reply and the manual
     expect(f.requests).toHaveLength(3);
     expect(f.titleRequests()).toHaveLength(1);
     expect(
-      f.requests
+      f
+        .ordinaryRequests()
         .at(-1)!
         .messages.filter((message) => message.role === 'user')
         .map((message) => message.content),
@@ -896,6 +1286,7 @@ test('a title adapter that ignores deadline cancellation remains unknown and its
     undefined,
     'success',
     {
+      modelConcurrency: 1,
       titleDispose: async () => {
         disposed++;
       },
@@ -905,6 +1296,7 @@ test('a title adapter that ignores deadline cancellation remains unknown and its
     await f.submit();
     await f.titleStarted.promise;
     await f.runtime.waitForCommand('work', { timeoutMs: 14000 });
+    await f.waitForTitle(14000);
     const before = await f.runtime.getView('session');
     const model = before.executions.find(
       (execution) => execution.kind === 'model' && execution.runId === null,
@@ -917,10 +1309,21 @@ test('a title adapter that ignores deadline cancellation remains unknown and its
       before.executions.find(
         (execution) => execution.definitionId === 'builtin.session-title/generate',
       )?.result,
-    ).toMatchObject({ outcome: 'outcome_unknown', content: 'title_stop_unconfirmed' });
+    ).toMatchObject({
+      outcome: 'outcome_unknown',
+      content: 'job_stop_unconfirmed',
+      details: { actualResult: { outcome: 'outcome_unknown', content: 'title_stop_unconfirmed' } },
+    });
     expect(before.session.title).toBe(truncatedOriginal);
     expect(before.runs[0]?.status).toBe('completed');
     expect(before.executions.every((execution) => execution.childSessionId === null)).toBe(true);
+    await f.submit('later', '标题停止未确认时继续业务');
+    await f.runtime.waitForCommand('later', { timeoutMs: 2000 });
+    expect(
+      (await f.runtime.getView('session')).runs.find((run) => run.originCommandId === 'later')
+        ?.status,
+    ).toBe('completed');
+    expect(disposed).toBe(0);
     let storeClosed = false;
     const closeStore = f.store.close.bind(f.store);
     f.store.close = async () => {
@@ -959,6 +1362,74 @@ test('a title adapter that ignores deadline cancellation remains unknown and its
     await f.close();
   }
 }, 17000);
+
+test('a late title disposer failure keeps its original physical owner after the Job became unknown', async () => {
+  const release = deferred();
+  const disposing = deferred();
+  let disposed = 0;
+  const f = await fixture(
+    async function* () {
+      yield { type: 'text_delta', text: 'title partial' };
+      await release.promise;
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    {
+      modelConcurrency: 1,
+      titleDispose: async () => {
+        disposed++;
+        disposing.resolve();
+        throw Error('fixture late title cleanup unconfirmed');
+      },
+    },
+  );
+  let peer: Store | undefined;
+  let peerOwner: Awaited<ReturnType<Store['acquireSessionOwner']>> | undefined;
+  try {
+    await f.submit();
+    await f.titleStarted.promise;
+    await f.runtime.waitForCommand('work', { timeoutMs: 14000 });
+    await f.waitForTitle(14000);
+    const before = await f.store.getSession('session');
+    expect(before?.ownerInstanceId).toBeTruthy();
+    expect(disposed).toBe(0);
+    expect(
+      (await f.runtime.getView('session')).executions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      )?.status,
+    ).toBe('outcome_unknown');
+    release.resolve();
+    await disposing.promise;
+    await f.submit('later', 'late title cleanup does not fence ordinary business');
+    await f.runtime.waitForCommand('later', { timeoutMs: 3000 });
+    const view = await f.runtime.getView('session');
+    expect(view.runs.find((run) => run.originCommandId === 'later')?.status).toBe('completed');
+    expect(view.session.title).toBe(truncatedOriginal);
+    expect(f.titleRequests()).toHaveLength(1);
+    const failure = await f.runtime.close().catch((error) => error);
+    expect(failure.code).toBe('shutdown_cleanup_unconfirmed');
+    expect(disposed).toBe(1);
+    expect(f.runtime.getLifecycleState().state).toBe('drain_failed');
+    expect((await f.store.getMetadata()).storeId).toBe(f.base.expectedStoreId);
+    peer = await openSqliteStore(f.profile);
+    peerOwner = await peer.acquireSessionOwner('session', 'late-cleanup-peer');
+    expect(peerOwner).toBeNull();
+    expect(await f.store.getSession('session')).toMatchObject({
+      ownerInstanceId: before!.ownerInstanceId,
+      ownerGeneration: before!.ownerGeneration,
+    });
+  } finally {
+    release.resolve();
+    if (peerOwner) await peer?.releaseSessionOwner(peerOwner);
+    await peer?.close();
+    await f.runtime.close().catch(() => {});
+    // The fixture disposer owns no real resource; production must retain this Store above.
+    await f.store.close();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+}, 20000);
 
 test('the resolved title Model host ceiling can deny a tool-free metadata call', async () => {
   let checked = 0;
@@ -1014,10 +1485,11 @@ test('the resolved title Model host ceiling can deny a tool-free metadata call',
   }
 });
 
-test('a title Model rechecks host controls after waiting for the shared Model slot', async () => {
+test('a title Model rechecks host controls after waiting for its independent title permit', async () => {
   const resolving = { entered: deferred(), release: deferred() };
   const blocker = { entered: deferred(), release: deferred() };
   let checks = 0;
+  let allowedChecks = 0;
   const f = await fixture(
     async function* () {
       yield { type: 'text_delta', text: generated };
@@ -1028,13 +1500,15 @@ test('a title Model rechecks host controls after waiting for the shared Model sl
     'success',
     {
       modelConcurrency: 1,
-      blocker,
-      beforeResolveTitle: async () => {
+      titleBlocker: blocker,
+      beforeResolveTitle: async (sessionId) => {
+        if (sessionId !== 'session') return;
         resolving.entered.resolve();
         await resolving.release.promise;
       },
       titlePermissions: (store) => ({
         async authorize(request) {
+          if (request.sessionId !== 'session') return { allowed: true, revision: 'blocker-title' };
           checks++;
           const control = await store.readHostControl({
             expectedStoreId: (await store.getMetadata()).storeId,
@@ -1043,6 +1517,7 @@ test('a title Model rechecks host controls after waiting for the shared Model sl
             scope: 'session:session',
           });
           const mode = (control.record?.safeRequest as { mode?: string } | undefined)?.mode;
+          if (mode === 'full') allowedChecks++;
           expect(request.kind).toBe('model');
           return {
             allowed: mode === 'full',
@@ -1102,7 +1577,7 @@ test('a title Model rechecks host controls after waiting for the shared Model sl
       sessionId: 'blocker',
       commandId: 'create-blocker',
       workspaceId: 'workspace',
-      title: 'manual blocker',
+      title: '',
     });
     await f.runtime.submitCommand({
       ...f.base,
@@ -1115,20 +1590,25 @@ test('a title Model rechecks host controls after waiting for the shared Model sl
     const deadline = Date.now() + 2000;
     let planned = false;
     while (!planned && Date.now() < deadline) {
-      planned = (await f.store.listExecutions('session')).some(
-        (execution) =>
-          execution.kind === 'model' && execution.runId === null && execution.status === 'planned',
-      );
+      planned =
+        allowedChecks > 0 &&
+        (await f.store.listExecutions('session')).some(
+          (execution) =>
+            execution.kind === 'model' &&
+            execution.runId === null &&
+            execution.status === 'planned',
+        );
       if (!planned) await new Promise((resolve) => setTimeout(resolve, 5));
     }
     expect(planned).toBe(true);
-    expect(f.titleRequests()).toHaveLength(0);
+    expect(f.titleRequests()).toHaveLength(1);
     await setMode('auto');
     blocker.release.resolve();
     await f.runtime.waitForCommand('blocker-work');
     await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
     expect(checks).toBeGreaterThanOrEqual(2);
-    expect(f.titleRequests()).toHaveLength(0);
+    expect(f.titleRequests()).toHaveLength(1);
     const view = await f.runtime.getView('session');
     expect(view.session.title).toBe(truncatedOriginal);
     expect(view.runs[0]?.status).toBe('completed');
@@ -1137,6 +1617,59 @@ test('a title Model rechecks host controls after waiting for the shared Model sl
     resolving.release.resolve();
     blocker.release.resolve();
     await f.close();
+  }
+});
+
+test('a proven title disposer failure retains its own cleanup without fencing later business work', async () => {
+  let disposed = 0;
+  const f = await fixture(
+    async function* () {
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    {
+      modelConcurrency: 1,
+      titleDispose: async () => {
+        disposed++;
+        throw new Error('fixture title cleanup unconfirmed');
+      },
+    },
+  );
+  try {
+    await f.submit();
+    await f.runtime.waitForCommand('work');
+    await f.waitForTitle();
+    expect(disposed).toBe(1);
+    const before = await f.runtime.getView('session');
+    expect(before.session.title).toBe(truncatedOriginal);
+    expect(
+      before.executions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      ),
+    ).toMatchObject({
+      status: 'outcome_unknown',
+      result: { details: { actualResult: { content: 'title_cleanup_unconfirmed' } } },
+    });
+    expect(f.runtime.getLifecycleState().reasons).toContain('cleanup');
+    await f.submit('later', '独立命名清理失败后继续业务');
+    await f.runtime.waitForCommand('later', { timeoutMs: 2000 });
+    expect(
+      (await f.runtime.getView('session')).runs.find((run) => run.originCommandId === 'later')
+        ?.status,
+    ).toBe('completed');
+    const failure = await f.runtime.close().catch((error) => error);
+    expect(failure.code).toBe('shutdown_cleanup_unconfirmed');
+    expect(disposed).toBe(1);
+    expect((await f.store.getMetadata()).storeId).toBe(f.base.expectedStoreId);
+  } finally {
+    // This fixture's disposer owns no real resource. Release only its test Store after
+    // asserting that production shutdown retained the failed cleanup and never replayed it.
+    await f.runtime.close().catch(() => {});
+    await f.store.close();
+    rmSync(f.root, { recursive: true, force: true });
   }
 });
 
@@ -1170,6 +1703,7 @@ for (const mode of ['success', 'provider-failure', 'permission-denied'] as const
     try {
       await f.submit();
       await f.runtime.waitForCommand('work');
+      await f.waitForTitle();
       expect(disposed).toBe(1);
       expect(f.titleRequests()).toHaveLength(mode === 'permission-denied' ? 0 : 1);
       const view = await f.runtime.getView('session');

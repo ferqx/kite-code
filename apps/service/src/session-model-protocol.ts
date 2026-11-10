@@ -39,18 +39,18 @@ export function runModelProtocol(run: Pick<RunRecord, 'configuration'>): ModelPr
   }
 }
 
-/** Store keeps the earliest Run in this ordered view, including after cold reconstruction. */
+/** Store keeps original allocation order, including after cold reconstruction. */
 export async function assertSessionModelProtocol(
-  runtime: Pick<AgentRuntime, 'getMetadata' | 'getView'> | undefined,
+  runtime: Pick<AgentRuntime, 'getMetadata' | 'readFirstSessionRun'> | undefined,
   sessionId: string,
   protocol: ModelProtocol,
 ): Promise<void> {
   if (!runtime) throw new AgentError('execution_scope_unavailable');
   const metadata = await runtime.getMetadata();
-  const view = await runtime.getView(sessionId);
+  const view = await runtime.readFirstSessionRun({ expectedStoreId: metadata.storeId, sessionId });
   if (view.storeId !== metadata.storeId || view.session.id !== sessionId)
     throw new AgentError('session_model_protocol_unavailable');
-  const first = view.runs[0];
+  const first = view.run;
   if (!first) return;
   // Restored Runs retain their original Store identity; the current Store view owns this read.
   if (first.sessionId !== sessionId) throw new AgentError('session_model_protocol_unavailable');

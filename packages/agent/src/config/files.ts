@@ -155,6 +155,14 @@ function readRaw(path: string, maxBytes: number, privateFile = false) {
     };
   } catch (error) {
     if (error instanceof ConfigurationError) throw error;
+    // The native body reader now owns the ordinary read's leaf preflight too.
+    // Preserve its fixed denial code; arbitrary backend errors remain sanitized.
+    if (
+      process.platform === 'win32' &&
+      error instanceof Error &&
+      error.message === 'windows_path_security_denied'
+    )
+      throw error;
     if (error instanceof Error && error.message === 'windows_path_size_limit')
       throw new ConfigurationError('configuration_limit');
     throw new ConfigurationError('configuration_unavailable');
@@ -162,10 +170,17 @@ function readRaw(path: string, maxBytes: number, privateFile = false) {
     if (fd !== undefined) closeSync(fd);
   }
 }
-function windowsConfigPath(path: string, options: ConfigurationFileOptions): void {
+function windowsConfigPath(
+  path: string,
+  options: ConfigurationFileOptions,
+  readOwnsLeaf = false,
+): void {
   if (process.platform !== 'win32') return;
   const native = defaultWindowsPathSecurity()!;
-  native.verifyPath(path);
+  // readRaw immediately uses readScopeFile's native handle, including complete
+  // path/leaf checks before and after reading. Keep the parent policy here;
+  // writes still need the independent path/leaf preflight before taking a lock.
+  if (!readOwnsLeaf) native.verifyPath(path);
   if (
     options.windowsPathPolicy !== undefined &&
     !['scope', 'private'].includes(options.windowsPathPolicy)
@@ -175,7 +190,8 @@ function windowsConfigPath(path: string, options: ConfigurationFileOptions): voi
     if (options.windowsPathPolicy === 'private') native.verifyDirectory(dirname(path));
     else native.verifyScopeDirectory(dirname(path));
   }
-  if (options.windowsPathPolicy === 'private' && existsSync(path)) native.verifyFile(path);
+  if (!readOwnsLeaf && options.windowsPathPolicy === 'private' && existsSync(path))
+    native.verifyFile(path);
   if (options.windowsPathSecurity && options.windowsPathSecurity !== native) {
     if (existsSync(dirname(path))) options.windowsPathSecurity.verifyDirectory(dirname(path));
     if (existsSync(path)) options.windowsPathSecurity.verifyFile(path);
@@ -208,7 +224,7 @@ export function readConfigurationFile(options: ConfigurationFileOptions): Config
     windowsPathSecurity: options.windowsPathSecurity ?? defaultWindowsPathSecurity(),
   };
   const path = hostPath(options.path);
-  windowsConfigPath(path, options);
+  windowsConfigPath(path, options, true);
   const raw = readRaw(path, limit(options), options.windowsPathPolicy === 'private');
   return { path, exists: raw.exists, etag: raw.etag, value: parseDocument(raw.text) };
 }

@@ -67,6 +67,58 @@ test.skipIf(process.platform === 'win32')(
 
 // This is native Windows qualification, never an emulation or optional availability skip.
 test.skipIf(process.platform !== 'win32')(
+  'configuration body handles retain private leaf, hardlink, UTF8, bounds and host override checks',
+  () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-windows-config-body-')));
+    const directory = join(root, 'private');
+    const native = defaultWindowsPathSecurity()!;
+    try {
+      privateDirectory(directory);
+      const path = join(directory, 'config.jsonc');
+      native.writePrivateFile(path, Buffer.from('{"value":1}'));
+      const privateOptions = { path, windowsPathPolicy: 'private' as const };
+      expect(readConfigurationFile(privateOptions).value).toEqual({ value: 1 });
+      expect(() => readConfigurationFile({ ...privateOptions, maxBytes: 1 })).toThrow(
+        'configuration_limit',
+      );
+      const alias = join(directory, 'alias');
+      linkSync(path, alias);
+      try {
+        expect(() => readConfigurationFile(privateOptions)).toThrow('windows_path_security_denied');
+        expect(() => readConfigurationFile({ path })).toThrow('windows_path_security_denied');
+      } finally {
+        unlinkSync(alias);
+      }
+      writeFileSync(path, Buffer.from([0xff]));
+      expect(() => readConfigurationFile(privateOptions)).toThrow('configuration_unavailable');
+      writeFileSync(path, '{"value":1}');
+      const denial = Error('additional_host_denial');
+      expect(() =>
+        readConfigurationFile({
+          ...privateOptions,
+          windowsPathSecurity: {
+            ...native,
+            verifyFile() {
+              throw denial;
+            },
+          },
+        }),
+      ).toThrow(denial);
+      const widened = spawnSync('icacls.exe', [path, '/grant', '*S-1-1-0:(F)'], {
+        encoding: 'utf8',
+      });
+      expect(widened.status).toBe(0);
+      expect(() => readConfigurationFile(privateOptions)).toThrow('windows_path_security_denied');
+      expect(readConfigurationFile({ path }).value).toEqual({ value: 1 });
+      expect(() => native.verifyFile(path)).toThrow('windows_path_security_denied');
+      expect(readFileSync(path, 'utf8')).toBe('{"value":1}');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.platform !== 'win32')(
   'default native private Profile/Worker/WAL/config and cold logs retain their real ACL and identities',
   async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-windows-native-'));

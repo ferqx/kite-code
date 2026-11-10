@@ -22,6 +22,75 @@ function view(id: string): SessionView {
   };
 }
 
+test('execution publishes before held admission and an invalidated late admission cannot grant operations', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const execution: string[] = [],
+    snapshots: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
+    getView: async (id: string) => view(id),
+    getPermissionMode: async () => {
+      await gate;
+      return { storeId: 'store', sessionId: 's' };
+    },
+    getWorkspaceTrust: async () => ({ readScopes: [] }),
+    disposeNetwork() {},
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot: (value) => snapshots.push(value.sessionId),
+    onExecutionObservation: (value) => execution.push(value.session.id),
+  });
+  const pending = controller.selectSession('s');
+  try {
+    await Bun.sleep(0);
+    expect(execution).toEqual(['s']);
+    expect(snapshots).toEqual([]);
+    expect(controller.snapshot).toBeUndefined();
+    controller.invalidateSelection();
+    release();
+    await pending;
+    expect(controller.snapshot).toBeUndefined();
+    expect(snapshots).toEqual([]);
+  } finally {
+    release();
+    controller.disposeNetwork();
+  }
+});
+
+test('independent execution read rejects a retired selection even when its transport ignores abort', async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let hold = false;
+  const seen: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: [] },
+    disposeNetwork() {},
+    async getView(id: string) {
+      if (hold && id === 'old') await held;
+      return view(id);
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot() {},
+    onExecutionObservation: (value) => seen.push(value.session.id),
+  });
+  await controller.selectSession('old');
+  hold = true;
+  const pending = controller.refreshExecution('old', new AbortController().signal);
+  await controller.selectSession('new');
+  release();
+  await expect(pending).rejects.toThrow();
+  expect(seen).toEqual(['old', 'new']);
+  controller.disposeNetwork();
+});
+
 test('a missing workspace preserves a fresh readable selection without permission facts and recovers only after a new trust read', async () => {
   let missing = false;
   let trusted = true;

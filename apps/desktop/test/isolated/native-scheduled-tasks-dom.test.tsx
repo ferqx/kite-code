@@ -370,6 +370,7 @@ test('a late creation receipt cannot replace the scheduled page or the original 
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
+    const originalSelections = f.calls.filter((call) => call.method === 'select').length;
     await f.click('在 Actual Workspace 中新建对话');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
     await f.edit(
@@ -384,7 +385,7 @@ test('a late creation receipt cannot replace the scheduled page or the original 
     await act(async () => f.releaseCreation());
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
     expect(f.selected()).toBe('a');
-    expect(f.calls.filter((call) => call.method === 'select')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'select')).toHaveLength(originalSelections);
     await f.click('Original A');
     expect(
       promptValue(

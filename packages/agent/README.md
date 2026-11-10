@@ -1,5 +1,7 @@
 # 通用 Agent
 
+默认命名使用一个受管detached Job和[自动标题元数据事务](src/storage/README.md#session-标题写入)，独立于主Run完成和业务模型额度；标题写入不推进执行控制修订，未知、原收据和真实清理各沿准确来源收口。当前职责与验证见[入口与职责](#入口与职责)，持久取舍见[独立命名决定](../../.agents/notes/implemented/architecture/2026-11-09-detached-session-title-metadata.md)。
+
 默认SDK模型请求与传输失败除明确HTTP401／403认证或权限拒绝外均取得重连资格，分类与未知错误净化归[AI owner](../ai/README.md)。自定义Adapter的未分类异常仍不能替代已确认关闭的重试证明。[模型重连](src/model-attempt.ts)由 Runtime 在原已确认失败、关闭和来源资格保持的 Model Execution 之后退避重试，同一连续故障最多重连5次（首次请求另计，共6次尝试）。新重试事实持久记录`maxAttempts:6`，第5次重连仍失败时以`model_reconnect_exhausted`结束原Run，不创建第7次请求；原部分正文、用量和工具事实保留，明确新任务独立计数。冷恢复沿原attempt继续计数，不扩大剩余次数；旧历史的`maxAttempts:null`仍按原值可读。Execution只保存AI边界核实的有限`modelFailure.detail`，客户端自行映射可读原因，不记录或转发远端日志。[模型回归](test/isolated/execution/model-attempt.test.ts)核最后一次成功、耗尽后新任务、原前驱与部分工具零效果；物理断流和公开投影归[Service回归](../../apps/service/test/isolated/responses-loop.test.ts)。
 
 2026-10-26，本轮失败修复已通过12份受影响 Agent 完整测试文件。普通输入的 Run、Model 和来源直接绑定原 Command；内部权限模型使用 `authorization.check`，不再把它算作子 Agent／业务 Run。原 Action 来源继承用当前 ensure／prepare／dispatch 检查链核对目标、输入、策略与模型身份，损坏后仍要求零派发事件；Files 协作从实际模型文本回执读取完整 baseline，保留真实 CAS 冲突、结果未知、取消、串行资源与恢复不重放断言。真实恢复 PTY 已核原 Session 和准确历史。此为受影响范围的定向资格，不代表全仓或跨平台验收。
@@ -64,13 +66,25 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 
 ## 入口与职责
 
+2026-11-10，Windows x64／Bun1.4.4，本次命名、资源、元数据、owner交接、普通执行围栏和恢复15份完整文件共196项／2024断言通过；其中Runtime命名43项／477断言、发布24项／144断言。实际日志为本机`.cache/lifecycle-all-agent-coverage.log`，备份替换Store及旧reader兼容性归[Storage](src/storage/README.md#session-标题写入)。这些定向通过不覆盖下述原全量失败。
+
 默认子 Agent 为 `general／explore`，子 Agent 不开放 `wait_agent_events`，主 Agent 保留等待子任务事件的能力；工具、任务指导及共享工作区边界归 [Task owner](src/extensions/task/README.md)。[Runtime](src/runtime.ts)保留当前版本同身份续作与冷恢复，完整父子 Tool／Job 身份、原 Model 请求、权限及 Source 仍严格核验。冷恢复只在原 Store／child Session／carrier／root work 全部核准后，向 Host resolver 提供冻结的 `originalRun`；原 initializer 不重跑，计划等 Host 绑定必须使用该原身份。不重建升级前旧角色目录或转换旧工具声明；定义变化时明确拒绝，不能用同名角色或历史快照扩大当前权限。已完成历史保持原身份只读，不清库、不改写；默认装配归 [Service owner](../../apps/service/README.md)。
 
 [扩展契约](src/extensions/index.ts)的 `lifecycle.beforeRun/beforeRunComplete` 分别在显式任务输入的启动前与正常完成前选择本 namespace 的已注册 Action。Core 在模型配置解析前、最终完成 CAS 前按注册顺序调度普通真实 Action；内部 child 激活和自动 Job report 不进入这两个业务钩子。稳定 Command ID 去重，完成重试和冷读不重复执行，失败保留 Action 自身结果，不替代主 Run 的业务结果。Action 继续通过原受控 operations 请求子执行；`resultDelivery:caller` 仅将普通 child 的自动交付标为调用扩展所有，实际状态、结果与取消证据保持。省略时保留原会话投递；它不能与必要结果义务或 after-turn 自动报告组合。[生命周期测试](test/isolated/execution/run-lifecycle.test.ts)与[结果交付测试](test/isolated/child/result-delivery.test.ts)验证这些通用合同，并核实未安装命名扩展时空标题及控制修订保持不变。
 
-[会话命名扩展](src/business/session-title/index.ts)继续用启动前 Action 保存原文标题兜底与自有 CAS marker，首次主任务正常完成前尝试一次可读标题。命名经受限 `runInternalModel` 保存 `session.title` Command 和原 Session 内的一条无 Run Model Execution；不创建 child Session、Run、carrier 或聊天 Message，不注册子 Agent 类别，也不占子 Agent 槽。实际模型沿原轮选定绑定；原宿主与选定模型的权限 ceiling 保持相交，申请共享模型槽前和等待后重新授权，最终 SQL 继续核准确输入、定义和 controlReads。输入只含标题说明与最多8192码点的原文副本，工具为空。10码点标题、32KiB输出、10秒取消、rename CAS、手动改名保护与冷读零重放保持。停止无法确认时保留原输出前缀与 `outcome_unknown`，晚结果不能覆盖未知或修改标题。命名 Action 保有准备期，内部实际调用持续持有配置和 Model 槽直至真实退出；标题 resolver 的 `dispose` 仅释放一次，Runtime drain 等待实际调用后才关闭正文与 Store。[命名集成](test/isolated/execution/session-title-generation.test.ts)与[Service](../../apps/service/test/isolated/session-title.test.ts)核实际内部 Model、零 child、取消与兜底。边界取舍见[内部模型调用决定](../../.agents/notes/implemented/architecture/2026-10-22-internal-model-calls-without-child-agents.md)。
+[会话命名扩展](src/business/session-title/index.ts)已切换为 beforeRun 短 Action 登记一个 detached generate Job，不再从 beforeRunComplete 调用远端命名。fallback 与意图由内部事务原子保存，不推进 execution controlRevision。Job 经[原事实协调](src/business/session-title/operation.ts)复用 Store 变更唤醒，绑定原 Command 的首 Run；激活／配置封存后并行生成，模型退出并释放配置后轻量等待该原 Run 正式 completed，再于同 Job 原子发布或关闭。不创建 child Session／Run，不占子 Agent 槽；内部 Model 不进入聊天正文或主恢复 checkpoint，准确默认 Job 的结果抑制为 internal_metadata，不投递业务邮箱。
 
-首条普通输入的标题兜底由正常启动前 Action 保存，模型不可用、失败和空白仍保原文兜底，手动名称优先。AI 命名沿首次普通轮的完成条件执行；新输入不调用 sessionInputMetadata.preserve 或捕获分类修订。保留的旧 metadata 端口与原 raw/clarification 收据只供历史兼容，不形成新的分类入口。
+受限 runInternalModel 保留宿主／所选模型 ceiling 相交、许可前后授权及最终 SQL controlReads。输入只有标题说明、最多8192码点原文和空工具；标题10码点、输出32KiB，约10秒调用取消从真正 Provider 入口计时。标题许可由 P0 同机正常／突发测量固定为最多4个独立许可、每许可7个等待（默认28）、排队8秒；宿主更低 modelConcurrency 仍保其更低并发，更多业务许可不扩大标题域。排队超时／溢出结算原未派发 Model 并关闭本次资格，不重试或消耗真正调用预算。停止未确认／标题 disposer 失败仍保准确 unknown／真实资源，不置普通 preparationCleanupFailed，也不阻同实例下一轮；Runtime drain 等真实调用，失败 disposer 不重放。
+
+2026-11-09，Windows x64／Bun1.4.4，4a527742c 加当前工作树：[完整命名 Runtime](test/isolated/execution/session-title-generation.test.ts)宿主43项／479断言通过。含并发1标题挂起而主 Run／下一轮 completed、单 Job、标题先退出释放配置后等原成功、主 checkpoint 隔离、来源／权限／取消／unknown、局部 disposer 与 drain；另核已提交丢回复、原调用仍活且首次查空、明确 SQL 回滚均只提交一次发布，过载9个来源只放弃1次且所有业务继续。完整[资源回归](test/isolated/resources/serial.test.ts)7项／41断言核默认／较低／较高业务额度的标题上限、业务许可独立、取消和真实8秒排队退出。Service／测量归[Service owner](../../apps/service/README.md#生命周期性能测量)，事务和只读收据归[Storage owner](src/storage/README.md#session-标题写入)。同机短／长热态启动达到原固定预算，进程冷启动和Native限定过程已补；本机开发证据、未取得的资格与设计理由分别以各owner和下述决定为准。
+
+2026-11-10 审查补验：内部 Model 接管时保留准确原 owner，迟到 disposer 不从已经退休的 live Job 反查 authority。上述 Runtime 整文件44项／495断言通过；新增组合先复现 Provider 忽略取消、Job 转 unknown 后迟到清理失败仍可被另一 Store 接管，修复后同实例后续业务可完成，失败 drain 保持 Store 可读及原物理 owner，另一 Store 无法取得新 owner，disposer 不重放。
+
+首条普通输入的标题兜底由启动前 Action 的原子 claim 保存，配置失败、首轮失败和空白仍保原文兜底，手动名称优先。新输入不调用旧分类流程或捕获分类修订；保留的 sessionInputMetadata 接点及 raw／decision／clarification 收据只服务准确历史来源解析。已发布／关闭的尝试不重开，历史读取不补发命名。
+
+原全量429任务为342通过／87失败，整体返回1；完整文件摘要2563pass／450fail／183skip，Browser execute在已失败后的清理挂起中终止，故该摘要不是含其全部用例的完整总数。85个失败文件对照中，449个当前失败名称有448个HEAD同名失败；唯一独有名称所在协作整文件宿主复验11项／239断言通过。私有路径、平台、旧断言及原生构建限制保留，不能把名称交集当作原因全部一致。维护资产夹具不创建Runtime或调度命名，其超时后原生构建错误不构成本次命名路径的通过证据。原始对照为`.cache/lifecycle-head-agent-final.comparison.json`及其所引日志。
+
+千次顺序子轮次在当前工作树达到原250秒时限；HEAD曾以原测试在228.44秒通过，随后同缓存路径、同依赖及原生资产的未改原测试中，HEAD和当前非TUI源码均达到250秒。前600次SQL累计接近，尚无稳定当前独有差异；不放宽时限、不授予千次耗时资格。原始输出为`.cache/lifecycle-child-history-{head,current}-controlled-original.log`，诊断不替代原测试。
 
 
 [统一执行](src/execution/index.ts)和[InteractionGate](src/execution/interactions.ts)区分业务信息与单次执行确认。`requestInteractionWithReceipt(question/plan_review)` 保存请求时完整 `informationPermission`，模式变化不取消原业务卡；接纳原答案前只计算原 Execution 的当前权限，硬拒绝仍拒绝，需人工或需审核只允许接纳信息，不因此启动审核或授予效果。当前控制读集的 SQL CAS 变化最多触发三次即刻重新观察；不重投卡、重复人答、调用模型或加入固定等待，其他身份、来源、版本、取消冲突不重试。持有自身执行槽、serial 资源或继承资源的执行请求信息时立即失败；业务等待须使用不持这些资源的定义，不自动暂停或释放活跃 lease。[信息回归](test/isolated/execution/information-permissions.test.ts)维护这些交错及资源边界。

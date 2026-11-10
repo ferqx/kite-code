@@ -1,5 +1,15 @@
 # CLI 与 TUI
 
+## 普通CLI生命周期验证
+
+2026-11-10，Windows x64／Bun1.4.4，按原CLI计划排除61个TUI／Ink／PTY交互文件，执行34任务／74文件：25任务通过／9失败，235pass／20fail／26skip，整体返回1。原根批次41文件164项通过，包含原128条journal的300秒专用时限；未改原时限。9个失败文件的20个失败均在独立HEAD对照重现；Skill缓存诊断确认原5秒进程期限先得到143，后续EBUSY不覆盖该原错误。维护4项在同一发布依赖复制的symlink EPERM处失败，尚未运行CLI；其余旧问答schema、冷恢复断言、长输出时限和原生收尾限制保留，不宣称全量或发布资格。原始日志为本机`.cache/lifecycle-all-cli-nontui-coverage.log`和`.cache/lifecycle-head-cli-{failures,extra-failures,last-failures}.log`。默认实际argv／paired的42个进程场景及标题取消／真实退出证据归[Service测量](../service/README.md#生命周期性能测量)；TUI候选仍未交付。
+
+## 会话历史增量读取
+
+[TUI history reader](host/tui-history.ts)在完整固定序号基线之后使用已准入 Client 的 `message_changes`，按原消息 ID 合并 same-seq 更新与删除。全部候选分页成功才发布新缓存和 cursor；失败保留原完整基线，cursor 过期回退完整读取。重连和 reset 撤销缓存观察代次，迟到页面不能接管新代。无该能力的已准入服务仍完整重读，不提高 requiredCapabilities。该子项尚未拆分 Host 的事件刷新和权限读取，不能据此宣称 TUI 摄取或整轮结束性能目标已经完成。
+
+2026-11-09，Windows x64／Bun1.4.4，`4a527742c` 加当前工作树：[历史回归](test/tui-history.test.ts)与[观察回归](test/tui-observation.test.ts)共8项／31断言、全仓 typecheck、公开 API、测试归属、文档结构／影响和跨包边界检查通过。CLI owned 全量运行出现本地 HTTP `network_outcome_unknown` 及临时目录硬链接 `EPERM`，宿主复验四个普通分片共205项通过／5项跳过，首个独占 ask-user-stdio 文件20项通过／3项失败后停止，失败涉及默认问答参数校验与 waiting_interaction；该文件及其 stdio／Agent／Service 依赖未被本次改动。未取得完整回归或真实 PTY 过程验收资格。
+
 2026-11-07，macOS arm64／Bun1.4.4，源码3402文件／`2273a30b…a9ed`：普通 CLI stdio 与 TUI80×24 分别以真实 `gpt-6-luna/medium` 完成三模式计划人答，六个 Run completed、六个 Shell Tool/自身 Job 成功且各精确效果一次，零 failed/unknown Execution。每端5个唯一原答案（3计划及Manual两张工具卡），无 mode／重复 POST；Auto 各一次 low/default5000 reviewer（CLI1721ms、TUI2156ms），Full零工具卡／reviewer。CLI Manual与TUI Auto实际丢202并离线，原未知状态保留，恢复后查原 Command、不重答；TUI待计划时权限面板可达，取消 Full 确认仍保 Auto 与同卡。正常退出及冷读核 CLI 3Run/41Exec/5Interaction/19Command、TUI3/45/5/19全行摘要与6效果相同，无进程残留。32个CLI阶段及61个TUI viewport/ANSI阶段、`final-audit.json`／`network-audit.json`／冷前后摘要在本机 `/private/tmp/kite-luna-plan-business-terminal-a7b9146b-79ff-44e5-848b-36dd9ccaf782/`。本轮未另起任务补做活动 Ctrl+C，活动取消复用已有固定PTY／Native资格；不外推其他平台或完整安装。
 
 当前测试夹具在隔离应用HOME前固定Rust工具链缓存，并按实际Windows ACL／junction／file URL建立测试前提；128条journal、四workspace构建与大正文等待按[测试体系](../../tests/README.md)提供硬件余量。恢复夹具持有同一只读WAL观察连接，逐原调用核SDK wire身份；[三类调用者强杀](test/isolated/caller-kind-crash.test.ts)整例预算现为120秒，仍核实际原生退出、原申请和零重发。下文既有30秒等记录对应原提交的实际资格，不代表本轮全部Windows或安装验收通过。

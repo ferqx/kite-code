@@ -637,7 +637,11 @@ test('a fresh Root rebuilds the selected conversation and retained page from the
       const current = generation;
       events.push(`${request.method}:${current}`);
       const value = await control.bridge.request(request);
-      if (request.method === 'select') selectedGeneration = current;
+      if (
+        request.method === 'select' ||
+        (request.method === 'attach' && value && 'generation' in value && value.selection)
+      )
+        selectedGeneration = current;
       return rebase(value, current) as Awaited<ReturnType<NativeBridge['request']>>;
     },
     async restoreBrowser(scope) {
@@ -694,8 +698,9 @@ test('a fresh Root rebuilds the selected conversation and retained page from the
     expect(generation).toBeGreaterThan(oldGeneration);
     const tail = events.slice(before);
     expect(tail.indexOf(`restore:${generation}`)).toBeGreaterThan(
-      tail.indexOf(`select:${generation}`),
+      tail.indexOf(`attach:${generation}`),
     );
+    expect(tail).not.toContain(`select:${generation}`);
     expect(tail).toContain(`messages:${generation}`);
     expect(tail).toContain(`draft.read:${generation}`);
     expect(tail).toContain(`input.models.read:${generation}`);

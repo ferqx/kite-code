@@ -5,21 +5,68 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import type { Store } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 
-for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
+async function namingSettled(store: Store, sessionId: string) {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    const record = await store.getExtensionRecord({
+      extensionId: 'builtin.session-title',
+      sessionId,
+      key: 'automatic-title-attempt',
+    });
+    const attempt = record?.value as
+      | { publication: string; jobExecutionId: string | null }
+      | undefined;
+    const job = attempt?.jobExecutionId ? await store.getExecution(attempt.jobExecutionId) : null;
+    if (
+      !attempt ||
+      (attempt.publication !== 'pending' &&
+        job &&
+        ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(job.status))
+    )
+      return;
+    if (Date.now() >= deadline)
+      throw new Error(`naming did not settle: ${JSON.stringify({ attempt, job })}`);
+    await Bun.sleep(5);
+  }
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+for (const policy of [
+  'default',
+  'custom',
+  'custom-deny-title',
+  'title-body',
+  'changed-title-model',
+] as const)
   test(
     policy === 'custom-deny-title'
       ? 'an injected title Job denial preserves the exact fallback and completed business without an AI title request'
-      : `a new Session receives a readable AI title through the selected model and public directory: ${policy} permissions`,
+      : policy === 'changed-title-model'
+        ? 'the title resolver refuses a same-ID replacement after the original Run binding was sealed'
+        : policy === 'title-body'
+          ? 'a bounded title Model retains complete text and output proof beyond 4KiB'
+          : `a new Session receives a readable AI title through the selected model and public directory: ${policy} permissions`,
     async () => {
       const root = temporaryDirectory('kite-service-title-');
       const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
       const requests: Record<string, unknown>[] = [];
+      const titleAdmission = { entered: deferred(), release: deferred() };
       const title = '修复新会话名称可读性';
+      const namingContent =
+        policy === 'title-body' ? `${' '.repeat(4096)}“${title}”${' '.repeat(4096)}` : `“${title}”`;
       const original = `${' \r\n'.repeat(3000)}请帮我调整新会话的   自动命名，\n\n让列表里的名称能概括任务内容。\t `;
       const titleInput = '请帮我调整新会话的 自动命名， 让列表里的名称能概括任务内容。';
       const provider = Bun.serve({
@@ -33,7 +80,7 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           const chunk = (delta: unknown, finish_reason: string | null = null) =>
             `data: ${JSON.stringify({ id: 'title-fixture', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
           return new Response(
-            `${chunk({ role: 'assistant', content: naming ? `“${title}”` : '任务已完成。' })}${chunk({}, 'stop')}data: [DONE]\n\n`,
+            `${chunk({ role: 'assistant', content: naming ? namingContent : '任务已完成。' })}${chunk({}, 'stop')}data: [DONE]\n\n`,
             {
               headers: { 'content-type': 'text/event-stream' },
             },
@@ -65,17 +112,29 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           remove: async () => {},
           resolve: async () => null,
         },
-        ...(policy !== 'default'
+        ...(policy === 'custom' ||
+        policy === 'custom-deny-title' ||
+        policy === 'changed-title-model'
           ? {
               permissions: {
-                authorize: async (request) => ({
-                  allowed: !(
-                    policy === 'custom-deny-title' &&
+                authorize: async (request) => {
+                  if (
+                    policy === 'changed-title-model' &&
                     request.kind === 'job' &&
                     request.definitionId === 'builtin.session-title/generate'
-                  ),
-                  revision: 'title-fixture',
-                }),
+                  ) {
+                    titleAdmission.entered.resolve();
+                    await titleAdmission.release.promise;
+                  }
+                  return {
+                    allowed: !(
+                      policy === 'custom-deny-title' &&
+                      request.kind === 'job' &&
+                      request.definitionId === 'builtin.session-title/generate'
+                    ),
+                    revision: 'title-fixture',
+                  };
+                },
               },
             }
           : {}),
@@ -127,8 +186,48 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           modelId: 'selected',
         });
         await runtime.waitForCommand('work');
+        if (policy === 'changed-title-model') {
+          await titleAdmission.entered.promise;
+          expect(requests).toHaveLength(1);
+          writeFileSync(
+            config,
+            JSON.stringify({
+              modelId: 'selected',
+              tools: [],
+              models: [
+                {
+                  id: 'selected',
+                  provider: 'compatible',
+                  model: 'replacement-with-the-same-id',
+                  baseURL: `http://127.0.0.1:${provider.port}/v1`,
+                  options: { temperature: 0.2, maxOutputTokens: 512 },
+                },
+              ],
+            }),
+          );
+          titleAdmission.release.resolve();
+        }
+        await namingSettled(store, 's');
         const view = await client.getView('s');
         expect(view.runs[0]?.status).toBe('completed');
+        if (policy === 'changed-title-model') {
+          expect(view.session).toMatchObject({ title: '请帮我调整新会话的', controlRevision: '0' });
+          expect(requests).toHaveLength(1);
+          expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
+          expect(view.executions.some((execution) => execution.status === 'outcome_unknown')).toBe(
+            false,
+          );
+          const record = await store.getExtensionRecord({
+            extensionId: 'builtin.session-title',
+            sessionId: 's',
+            key: 'automatic-title-attempt',
+          });
+          expect(record?.value).toMatchObject({
+            publication: 'closed',
+            closedReason: 'title_preparation_failed',
+          });
+          return;
+        }
         if (policy === 'custom-deny-title') {
           expect(view.session.title).toBe('请帮我调整新会话的');
           expect(requests).toHaveLength(1);
@@ -145,7 +244,18 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           expect(denied).toMatchObject({
             kind: 'job',
             status: 'failed',
-            result: { outcome: 'failed', content: 'permission_denied' },
+            authorization: { dispatched: false },
+            result: {
+              outcome: 'failed',
+              details: {
+                code: 'permission_denied',
+                reason: 'permission_denied',
+                adapterAttempted: false,
+              },
+            },
+          });
+          expect(denied?.result).toMatchObject({
+            content: expect.stringContaining('permission_denied'),
           });
           expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
           expect(
@@ -158,13 +268,31 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           expect(requests).toHaveLength(1);
           return;
         }
-        expect(view.session).toMatchObject({ title, controlRevision: '2' });
+        expect(view.session).toMatchObject({ title, controlRevision: '0' });
         expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
         expect(view.executions.every((execution) => execution.childSessionId === null)).toBe(true);
         expect(view.runs).toHaveLength(1);
         const namingExecution = view.executions.find(
           (execution) => execution.kind === 'model' && execution.runId === null,
         )!;
+        if (policy === 'title-body') {
+          const fact = await store.getExecution(namingExecution.id);
+          expect(fact?.result).toMatchObject({
+            content: namingContent,
+            finishReason: 'stop',
+          });
+          const full = await runtime.readModelOutput({
+            expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            executionId: namingExecution.id,
+          });
+          expect(full.output).toMatchObject({
+            content: namingContent,
+            complete: true,
+            toolCalls: [],
+          });
+        }
         expect(
           (await runtime.getCommand(
             (await store.getExecution(namingExecution.id))!.originCommandId,
@@ -193,7 +321,11 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           expect(body.temperature).toBe(0.2);
           expect(body.max_tokens).toBe(512);
         }
-        const naming = requests[1]!;
+        const naming = requests.find((body) =>
+          (body.messages as { content: string }[])[0]?.content.includes(
+            'readable conversation title',
+          ),
+        )!;
         expect(naming.tools ?? []).toEqual([]);
         expect(
           (naming.messages as { content: string }[]).some(
@@ -212,6 +344,7 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           // The title's model-only binding and the business Run each own a pool.
           expect(closedSessions).toHaveBeenCalledTimes(requests.length);
         } finally {
+          titleAdmission.release.resolve();
           closedSessions.mockRestore();
           provider.stop(true);
           rmSync(root, { recursive: true, force: true });
@@ -344,6 +477,7 @@ test.each([
       if (Date.now() >= deadline) throw Error('quoted_first_input_did_not_settle');
       await Bun.sleep(5);
     }
+    await namingSettled(store, 's');
     const command = await client.getCommand(input.commandId);
     const savedCommand = (await store.getCommand(command.id))!;
     expect(command.status).toBe(mode === 'ordinary' ? 'applied' : 'rejected');

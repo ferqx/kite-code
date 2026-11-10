@@ -1,5 +1,33 @@
 # Desktop 与 Native 制品
 
+## 执行观察与操作准入
+
+模型重连行由当前执行观察更新标题、次数、状态和失败详情，不继承等待中正文缓存的旧重连事实；新增行按当前投影插入原历史位置。终态过程仍沿原规则折叠。[完整 DOM 回归](test/isolated/native-transcript-dom.test.tsx)补失败、取消、连接成功、继续重试及新增行五种交接，核正文节点、单行和后续输入顺序；该文件32项／551断言通过。同机隔离Chrome沿实际投影／Conversation及生产CSS连续观察失败详情、恢复重试、取消与成功，33帧保原输入／草稿节点、焦点及阅读位置且无页面错误；本机`.cache/lifecycle-review-browser-process.json`保过程，夹具装配修正保留原失败，不代完整Native／Service或安装版资格。
+
+底层只读后台目录保留内部fallback／generate记录；普通[环境投影](src/native-environment.tsx)只接纳有准确Tool来源的后台Shell或真实child，命名不进入业务列表。通用后台面板的既有诊断入口差异归[原专题](#native-跨会话后台总览)。
+
+2026-11-10，Windows x64／Bun1.4.4，本次Native开发范围的执行／准入拆分、重连、同Run恢复、首次创建和阅读保持已验。原全量159任务／234文件为131任务通过／28失败，1902pass／90fail／50skip，整体返回1，日志为`.cache/lifecycle-all-desktop-coverage.log`。30个失败文件的85个用例有HEAD同名失败；当前独有差异中的刷新、Root重建和迟到回执夹具已对齐准确激活／重连契约，前两完整文件共8项／133断言通过，定时任务整文件2pass／1个HEAD既有表单失败。Node日志取消恢复宿主复验通过，但该文件另一次原本通过的启动用例触发原30秒时限及迟到错误，未取得全文件资格；其夹具直接使用未改的journal／私库／Client，不调用NativeCaller，根会话已明确命名。构建、平台及既有恢复限制保留，不能据这些定向通过宣称全量或发行通过。
+
+[Controller](src/controller.ts)在 bounded View 返回并核完 Store／Session 后即发出只读执行观察；完整 Snapshot 仍等待权限、交互和准确活动 Command。两域复用同选择在途的 View GET，执行 reader 不等待 admission Promise。[Native caller](electron/native-caller.ts)分别合并执行目标 cursor 和准入后继；Run／Execution 目标或相关交互／权限变化立即撤销旧操作快照，ready 协调期间也关闭准入。自身已登记的 Workspace 准备事件保留原准确授权交接。执行事件直接唤醒 reader，不等待普通100ms刷新间隔；无关会话 cursor 不成为当前执行目标。
+
+[只读投影](src/native-bridge.ts)带 generation／Store／Session／Workspace／viewSelection／historyEpoch 和 observedCursor，独立表达 fresh／refreshing／unavailable，不携带权限或操作目标证明。[展示核验](src/native-execution-observation.ts)按完整 scope 选取，[Run 投影](src/native-transcript.ts)与[保留展示](src/native-transcript-display.ts)据此更新活动、终态、计时和同消息复制资格，正文／工具分组及阅读身份继续由原 reader 管理。更高 cursor 的同 Run 恢复可以重新显示活动事实；热态动画还需准确目录 owner 资格，读取失败不能冒充完成。发送、引导、回答与取消仍从完整新鲜准入快照取得原目标。
+
+Native 使用现有 SDK 的单次 `observe({reconnect:false})`，由 Main 原观察循环负责重连。传输断开即撤销执行／准入资格并建立新历史 epoch，持续失败不重复推进 epoch；重新打开流前用 `verifyConnection` 核同 Profile／Store／instance／build，普通 HTTP 成功不能单独恢复旧流资格。新 ready 后再协调所选会话、读取完整历史；不在 ready 前等待依赖准入的历史，也不把重新读取当作激活协调。普通窗口在连接实际不可用时显示“连接暂不可用，当前状态待核实。”，恢复核实后撤下；它沿原提示区展示真实失败，不开启测试诊断或提供操作重放。
+
+同 generation／Store／Session／selection／historyEpoch 的 ready 与显式选择共用一次原激活结果；ready 水位更高时只补新鲜读取，失败或低于目标不能开放准入。Renderer 的 attach 若已带恢复选择，沿该准确结果建立模型、草稿和历史 reader，不再提交第二次 select。首次输入的后续原回执查询也沿用已经选中的 activation；读取失败由同 nonce 的既有只读重试恢复，不为准备页另起激活。实际重载原会话的协调 POST 从2次降为1次、View GET从9次降为6次，业务 POST 为0；这是该次请求计数，未取得 Native 启动耗时分布。
+
+2026-11-10，Windows x64／Bun1.4.4／Electron44.3.0：完整 Native caller 60项／647断言、历史展示 DOM 24项／482断言、首输入 DOM 109项／2307断言通过；首输入回归先复现原选择在途时原回执查询另起 activation，再核同一选择、后编辑草稿和单次提交。上述隔离普通制品的可见冷开窗口中，标题 Job／Model 保持 running，首 Run 已 completed、界面显示真实耗时且下一轮已进入 Provider；释放标题后二轮均 completed，24个变化状态中每条用户消息各一份，占位到持久消息保原节点。三次 select 读取均为同一 activation，重试零额外协调；首输入本身的初始协调与用户选择协调分属原有不同准入步骤，不合并其权限。
+
+同一隔离窗口另实际注入配套 Service 崩溃：断线立即撤销活动并保留原文，冷开后原 Run 显示 interrupted，明确恢复前业务 POST 为0；仅一次既有 `run.resume` 将同一 Run 在 cursor612→618重新显示活动，最终cursor708为completed。59个变化状态中三条用户输入各一份、节点保持，未发送草稿和80px阅读位置保留。原模型中断前缀与恢复后新模型内容分别保其原身份，不当作重复输入合并。原始事实在本机同目录 `recovery-*.json/png`。夹具在控制文件热写及关闭时另记录过 JSON 读取异常，不能据此授予无传输异常的全过程资格；后续复验须改为原子发布控制文件。注入崩溃的宿主退出1，健康恢复实例最终正常退出0，原错误保留。
+
+控制文件随后改为同私有目录写完整临时文件后原子重命名，按同配置／Provider URL对受影响的恢复过程补验：准确原Run在cursor720／726／755分别为interrupted／running／completed，三阶段文档均visible，明确恢复前业务POST为0，恢复POST仅1次；恢复后的Provider只有1次进入及其完整结束，未重启旧标题。59个变化状态中四条用户输入各一份并保原节点，下一条草稿和80px阅读位置保留，健康实例正常退出0且该次无控制JSON读取异常。原失败样本仍保留；补验证据为同目录`recovery-atomic-*.json/png`和本机`.cache/native-lifecycle-recovery-atomic-analysis.json`。
+
+CDP重载后曾出现原生窗口／View均报告可见而文档为hidden，原只读重试按可见性规则暂停；重新冷开并确认visible后完成上述并行与恢复过程。当前Windows菜单的[视图入口](electron/native-window-menu.ts)没有重新载入，本轮未改Main窗口／View可见性机制，普通冷重开和断线恢复不调用CDP重载；尚未确认该私有调试操作的现象归因，不授予CDP重载恢复体验资格，也不将其外推为普通冷开失败。OS截图工具的应用授权超时，本次图片为实际renderer捕获，不授予OS最终合成或其他平台资格。
+
+本轮真实窗口先发现 SDK 内部重连掩盖断流、旧活动仍为 fresh；[真实 HTTP 回归](test/isolated/native-history-incremental-http.test.ts)新增断流期间、第二次流申请与零额外 POST 断言，先失败后通过，当前整文件1项／16断言。完整 Native caller 58项／636断言、Controller／执行 scope 两文件17项／98断言、[普通窗口 DOM](test/isolated/native-history-presentation-dom.test.tsx)23项／472断言通过，后者核提示恢复和原正文节点保留。Windows x64／Bun1.4.4／Electron44.3.0 的独立源码制品接真实 Main／Service／SQLite／SDK 和合成本地 Provider，已连续观察权限未返回时主 Run 终态先显示、保留草稿在权限恢复后发为新 Run、SSE 断流撤销活动、离线完成后由新 ready 接管、迟到跨会话读取与80px阅读位置恢复；三条输入各一份。原始请求、过程帧和截图在本机 `.cache/native-lifecycle-window-806aa763-097e-49e5-8338-58f00ca6788b` 及 `.cache/native-lifecycle-*.png`，普通 renderer 诊断常量关闭。最初 Provider 夹具自身10秒空闲断流、修复前窗口及未通过回归均保留。该范围不代证真实远端模型、安装版或其他平台；同Run显式恢复及本机CLI进程分布已补验，限定范围见前述段落与Service owner。
+
+2026-11-09，Windows x64／Bun1.4.4，`4a527742c` 加当前工作树：Controller、Native caller、执行 scope、历史和会话五份完整文件在宿主共109项／986断言通过；两份 transcript／history-presentation DOM 完整文件共49项／970断言通过。可控权限 gate 证明它未释放时原 Run completed 与较新同 Run running 均可发布，旧 selection 仍不含权限；突发事件最大在途 View GET 为1，当前选择未追赶外会话水位。旧链路同 gate 下151ms观察窗内零后继 View GET；新链路单样本执行发布约0.4ms，只是本地替身的因果证据，不是实际 Service／Provider 启动预算或性能分布。最终渲染微调已按上述两份完整 DOM 文件复验；这是早期受控gate结果；后续可见窗口过程已在前述段落归位，不扩展安装版、远端模型或其他平台资格。
+
 新会话目录位置由 [NativeDirectoryProjection](src/native-presentation.ts)在同 Store 的连续完整目录间识别新增项；缺少首条消息时间时投影 `awaitingFirstMessage`，由 Sidebar 优先展示，时间到齐后移交原最近消息排序。该窗口内标记不写数据库、不伪造 `updatedAt`，冷读和 Store 切换不将旧空历史置顶。[目录回归](test/native-directory.test.tsx)覆盖首次发布、刷新、消息时间接管、单行和冷读隔离。
 
 2026-11-09，Windows／Bun1.4.4：目录与两份隔离 Sidebar 回归分别运行，共24项537断言通过；Desktop／UI 类型、四文件 Biome、文档结构与影响检查通过。Chrome156 的实际投影／Sidebar 生产样式隔离夹具按空项发布、刷新、消息时间接管逐步观察，145个连续动画帧中新增行始终第一、单份且保留原节点；阶段截图已核对，页面错误为0。材料在本机 `.cache/session-order/`；不以该受控目录过程代替真实 Service／Electron 端到端或其他平台验收。
@@ -1468,6 +1496,8 @@ ANGLE Metal同期123.22→15.59MiB、Skia资源4.79MiB→4096字节，SharedImag
 清理后的默认复核在ignored `.cache/native-session-stream-evidence/memory-1792128688458-cleanup-default/`。原16模型流／16 Shell／120次切换门禁通过，普通生产React窗口`diagnosticsAbsent=true`；导航P50／P95为176／229ms、长任务0，有限body最终active0／峰值2；根／子模型流关闭42／76ms、Shell树停止196／293ms，原70出生身份全部absent。两阶段GPU归因继续成功，原69及32监督进程集合、16份默认launchd argv完整核对。窗口／玻璃、会话缓存、流读取／取消及有界IO优化涉及的20份生产文件与清理前SHA全部相同，清理没有改动已验证的产品实现。
 
 ## Native 跨会话后台总览
+
+2026-11-10 生命周期核对发现既有入口差异：[产品手册](../../docs/handbook/clients/desktop/README.md)描述通用Native可打开后台总览；当前及未修改HEAD `4a527742c` 的[Root](src/native.tsx)均由`diagnostics && toolsOpen`才挂载该面板，普通dev／prod诊断关闭时没有这个入口。底层只读目录可读和隔离面板测试不证明普通入口已交付，也不改写手册承诺。本次新增命名Job仍被普通环境投影的Shell／child来源规则排除，相关生命周期目标不恢复或扩大这项既有入口；该客户端差异保留在本专题。
 
 [当前会话](src/native.tsx)的后台状态汇总仅在显式测试诊断中显示；普通 dev／prod 在计数非零、未知或观察不可用时也不显示该行。原轮次进度、环境信息中的实际任务、准确停止和真实读取／权限失败的恢复入口继续保留。测试计数限定当前 Session/Store 的未结束 Job 与 outcome_unknown；planned/dispatching/running 包含停止未结算的项，终态、其他 Session、旧 Store、非 Job 不计入。计数使用 getView 的全部非终态投影，不是跨会话完整目录；父 Run 完成不清除后台状态。观察／权限不可用时，测试汇总标为上次确认状态，数量不授予停止权或证明实际进程存活。[installed 默认 Shell](test/isolated/native-shell-lifecycle-bundle.test.ts)显式构建测试诊断，沿实际页面核父已完成、2 项未结束及准确停止后 1 项未结束；原完整输出、Main/Service fault、冷读与保数据卸载断言保持，准确证据和未验范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
 

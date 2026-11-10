@@ -19,6 +19,7 @@ import {
   nativePendingInputMessage,
   useNativeRuns,
 } from '../../src/native-transcript';
+import { NativeTranscriptDisplay } from '../../src/native-transcript-display';
 import type {
   NativeRunFact,
   NativeToolExecution,
@@ -53,6 +54,107 @@ function fixture() {
     },
   };
 }
+
+test('readonly execution ends the turn during held admission and newer same-Run recovery remains visible', async () => {
+  const f = fixture();
+  let reads = 0;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => {
+      reads++;
+      return null;
+    },
+  };
+  const messages: Message[] = [
+    {
+      id: 'final',
+      sessionId: 's',
+      runId: 'r',
+      seq: '2',
+      role: 'assistant',
+      status: 'complete',
+      content: 'Saved final answer',
+    },
+  ];
+  const run = (status: 'running' | 'completed') => ({
+    id: 'r',
+    originStoreId: 'store',
+    originCommandId: 'work',
+    sessionId: 's',
+    status,
+    isActive: status === 'running',
+    createdAt: 1,
+    finishedAt: status === 'completed' ? 2 : null,
+    reason: null,
+  });
+  const selection = {
+    storeId: 'store',
+    session: { id: 's', workspaceId: 'w' },
+    viewSelection: 1,
+    viewGeneration: 1,
+    viewLoading: true,
+    permissionUnavailable: true,
+    runs: [run('running')],
+    executions: [],
+  } as unknown as NativeSelection;
+  function Harness({ status, held = true }: { status: 'running' | 'completed'; held?: boolean }) {
+    const [display] = useState(() => new NativeTranscriptDisplay());
+    const facts = useNativeRuns({
+      bridge,
+      generation: 1,
+      selection,
+      historyEpoch: 0,
+      messages,
+      observationRevision: 1,
+      executionRuns: [run(status)] as NativeSelection['runs'],
+    });
+    const fresh = desktopTranscript({
+      messages,
+      runs: facts.runs,
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    const transcript = display.project({
+      bridge,
+      boundary: 'store',
+      key: 'reading',
+      messages,
+      replies: [],
+      transcript: fresh,
+      loading: held,
+      unavailable: false,
+      complete: !held,
+    });
+    return (
+      <div>
+        <p>{transcript.messages.map((message) => message.text).join('')}</p>
+        <output>{facts.runs[0]?.status}</output>
+        <output>{transcript.turnActivity ? 'active' : 'idle'}</output>
+        <output>
+          {transcript.messages.find((message) => message.systemKind === 'turn_terminal')
+            ?.turnTerminalStatus ?? 'no-terminal'}
+        </output>
+      </div>
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Harness status="running" held={false} />));
+    expect(f.host.textContent).toContain('active');
+    const body = f.host.querySelector('p');
+    await act(async () => f.root.render(<Harness status="completed" />));
+    expect(f.host.textContent).toContain('completedidle');
+    expect(f.host.textContent).not.toContain('no-terminal');
+    expect(f.host.querySelector('p')).toBe(body);
+    expect(f.host.textContent).toContain('Saved final answer');
+    await act(async () => f.root.render(<Harness status="running" />));
+    expect(f.host.textContent).toContain('runningactive');
+    expect(f.host.textContent).toContain('no-terminal');
+    expect(reads).toBe(0);
+  } finally {
+    await f.close();
+  }
+});
 /** Observe paint ranges while keeping each paragraph one continuous text node. */
 function streamingReveals(dom: JSDOM) {
   const reveals: string[] = [];
@@ -552,6 +654,142 @@ test('five failed reconnections expose one expandable human-readable error in th
           ?.modelConnectionFailure?.description,
       ).toContain(expected!);
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  'failed',
+  'cancelled',
+  'connected',
+  'retrying',
+  'new-row',
+] as const)('held metadata preserves body nodes while current execution updates model reconnection: %s', async (phase) => {
+  const f = fixture();
+  const attempts: NativeToolExecution[] = Array.from({ length: 6 }, (_, index) => ({
+    id: `model-${index}`,
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'r',
+    kind: 'model',
+    definitionId: 'model',
+    definitionVersion: '1',
+    status: 'failed',
+    resultRevision: '1',
+    cancelRequestedAt: null,
+    result: { code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:connection_failed', incomplete: true },
+    ...(index
+      ? {
+          modelRetry: {
+            previousExecutionId: `model-${index - 1}`,
+            attempt: index + 1,
+            maxAttempts: 6,
+            reason: 'connection_failed',
+          },
+        }
+      : {}),
+  }));
+  const messages = [
+    message('input', 'user', '1', '原任务正文保留'),
+    { ...message('later-input', 'user', '2', '后来的输入'), runId: 'later' },
+  ];
+  const project = (terminal: boolean) => {
+    const active = !terminal || phase === 'retrying';
+    return desktopTranscript({
+      messages,
+      runs: [
+        {
+          ...run(),
+          status: active
+            ? 'running'
+            : phase === 'cancelled'
+              ? 'cancelled'
+              : phase === 'connected'
+                ? 'completed'
+                : 'failed',
+          isActive: active,
+          reason: active ? null : 'model_reconnect_exhausted',
+          finishedAt: active ? null : 3000,
+        },
+        run('later'),
+      ],
+      executions: terminal
+        ? attempts.map((execution, index) =>
+            index === 5 && ['cancelled', 'connected', 'retrying'].includes(phase)
+              ? {
+                  ...execution,
+                  status:
+                    phase === 'connected'
+                      ? 'succeeded'
+                      : phase === 'cancelled'
+                        ? 'cancelled'
+                        : 'running',
+                  result: null,
+                }
+              : execution,
+          )
+        : phase === 'new-row'
+          ? [{ ...attempts[0]!, status: 'running', result: null }]
+          : attempts.slice(0, 2),
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+  };
+  const display = new NativeTranscriptDisplay();
+  const input = {
+    bridge: {},
+    boundary: 'store',
+    key: 'reading',
+    messages,
+    replies: [],
+    loading: false,
+    unavailable: false,
+    complete: true,
+    transcript: project(false),
+  };
+  const draw = async (transcript: ReturnType<typeof desktopTranscript>) =>
+    act(async () =>
+      f.root.render(
+        <Conversation {...transcript} selected connected loading={false} saveReading={() => {}} />,
+      ),
+    );
+  try {
+    await draw(display.project(input));
+    const originalInput = [...f.host.querySelectorAll('article.message')].find((row) =>
+      row.textContent?.includes('原任务正文保留'),
+    );
+    const oldRow = f.host.querySelector('.model-connection');
+    const fresh = project(true);
+    const expected = fresh.messages.find((row) => row.systemKind === 'model_connection')!;
+    const current = display.project({ ...input, loading: true, transcript: fresh });
+    expect(current.messages.find((row) => row.systemKind === 'model_connection')).toEqual(expected);
+    await draw(current);
+    // Completed/cancelled turns retain their ordinary collapsed process behavior.
+    if (!f.host.querySelector('.model-connection')) {
+      const toggle = f.host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => toggle.click());
+    }
+    const row = f.host.querySelector('.model-connection')!;
+    expect(row.textContent).toContain(expected.title!);
+    expect(row.textContent).toContain(expected.text);
+    expect(row.getAttribute('data-status')).toBe(expected.status!);
+    expect(!!f.host.querySelector('button[aria-label="展开重连失败详情"]')).toBe(
+      !!expected.modelConnectionFailure,
+    );
+    if (phase === 'retrying') expect(row === oldRow).toBe(true);
+    expect(
+      [...f.host.querySelectorAll('article.message')].find((item) =>
+        item.textContent?.includes('原任务正文保留'),
+      ) === originalInput,
+    ).toBe(true);
+    const laterInput = [...f.host.querySelectorAll('article.message')].find((item) =>
+      item.textContent?.includes('后来的输入'),
+    )!;
+    expect(row.compareDocumentPosition(laterInput) & 4).toBe(4);
+    expect(f.host.querySelectorAll('.model-connection')).toHaveLength(1);
   } finally {
     await f.close();
   }

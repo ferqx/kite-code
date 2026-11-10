@@ -34,7 +34,8 @@ async function fixture() {
     )
     .replace(
       /from (['"])(\.[^'"]+)\1/g,
-      (_match, quote, specifier) => `from ${quote}${resolve(dirname(original), specifier)}${quote}`,
+      (_match, _quote, specifier) =>
+        `from ${JSON.stringify(pathToFileURL(resolve(dirname(original), specifier)).href)}`,
     )
     .replaceAll('import.meta.url', JSON.stringify(pathToFileURL(original).href));
   const modulePath = join(root, 'sqlite-fault-fixture.ts');

@@ -5,6 +5,43 @@ import type { desktopTranscript } from './native-transcript';
 type Transcript = ReturnType<typeof desktopTranscript>;
 type Reply = { identity: string; text: string } | undefined;
 
+function executionMetadata(previous: Transcript, current: Transcript): Transcript['messages'] {
+  const lifecycle = (message: Transcript['messages'][number]) =>
+    ['turn_timing', 'turn_terminal', 'turn_failure', 'model_connection'].includes(
+      message.systemKind ?? '',
+    );
+  const turns = new Set(
+    current.messages
+      .filter((message) => message.systemKind === 'turn_timing')
+      .map((message) => message.turnId),
+  );
+  if (!turns.size) return previous.messages;
+  const fresh = new Map(current.messages.map((message) => [message.id, message]));
+  const messages = previous.messages.flatMap((message) => {
+    if (!turns.has(message.turnId)) return [message];
+    const next = fresh.get(message.id);
+    if (lifecycle(message)) return next ? [next] : [];
+    if (!next) return [message];
+    // Preserve verified tool grouping while the metadata/body readers are held.
+    // Only the same-message Run-dependent completion/copy facts are replaced.
+    return [
+      { ...message, settled: next.settled, finalReply: next.finalReply, copyText: next.copyText },
+    ];
+  });
+  const ids = new Set(messages.map((message) => message.id));
+  for (const [index, message] of current.messages.entries()) {
+    if (!lifecycle(message) || ids.has(message.id)) continue;
+    // A new execution row keeps its place before the following saved history.
+    const following = current.messages.slice(index + 1).find((item) => ids.has(item.id));
+    const position = following
+      ? messages.findIndex((item) => item.id === following.id)
+      : messages.length;
+    messages.splice(position, 0, message);
+    ids.add(message.id);
+  }
+  return messages;
+}
+
 /** Public snapshots are immutable JSON. Compare every field without copying large bodies. */
 function sameValue(left: unknown, right: unknown): boolean {
   if (left === right) return true;
@@ -59,7 +96,11 @@ export class NativeTranscriptDisplay {
       sameValue(retained.messages, input.messages) &&
       sameValue(retained.replies, input.replies)
     )
-      return { ...retained.transcript, turnActivity: input.transcript.turnActivity };
+      return {
+        ...retained.transcript,
+        messages: executionMetadata(retained.transcript, input.transcript),
+        turnActivity: input.transcript.turnActivity,
+      };
     if (!input.loading && input.complete)
       this.cache.set(input.key, {
         messages: [...input.messages],

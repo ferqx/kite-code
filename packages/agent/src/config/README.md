@@ -6,6 +6,8 @@
 
 `readConfigurationFile({path})` returns `{path,exists,etag,value}`. An absent file has a stable absence ETag and creates no directory or lock. The default bound is 1 MiB, optionally up to 8 MiB. Non-object, malformed, duplicate-key JSONC, non-regular/hardlinked/symlink files and invalid UTF-8 fail locally. Error codes contain no raw file text, backend exception or credentials.
 
+Windows 普通同步配置读取由紧接的 `readRaw`／原生 `readScopeFile` 负责叶子及整条路径的读取前后核验，不再在相同调用中额外遍历叶子路径、另开一次私有叶子探针。父目录的 scope/private 政策及额外可信 host override 仍先执行；正文始终从原 HANDLE 有界读取，前后核 regular／nlink／路径身份及所选私有 ACL，固定拒绝代码保持。没有跨调用缓存或准入证明复用；写入、修复、锁前 preflight 和发布前重核保持。实际 Windows [原生反例](../../test/isolated/windows-path-security/default.test.ts)、[配置](../../test/isolated/config/config.test.ts)及[MCP 选择](../../test/isolated/config/mcp-selection-windows.test.ts)共25项／250断言通过，另1项 POSIX import 用例在 Windows 跳过；新增反例核私有叶子宽 ACL、hardlink、UTF-8、字节界和 host override，不能把该范围写成完整平台或发布资格。测量动机及同夹具结果归[Service](../../../../apps/service/README.md#生命周期性能测量)。
+
 Windows 的普通 Workspace 发布临时文件使用原生 `writeScopeFile`，在 host 明确选择的普通父目录内新建 current SID 私有文件；原父 HANDLE、叶子身份、有限写入、Flush 和私有 ACL 复核保持。Profile 配置及 MCP 私有元数据继续要求私有父目录。工作区选择回归特意赋予父目录外部权限，验证修改成功且父 ACL 不变；平台反例同时核普通父目录不能通过 `writePrivateFile`，防止用放宽私有政策掩盖 scope 写入问题。
 
 配置数组不再额外按 512 或 4096 项拒绝；实际配置文件字节边界、JSON 深度、对象字段与凭据校验仍适用。完整命名目录按准确 ID 合并并封存，超过单页的目录由宿主公共读取接口分页，不能因默认项目数静默丢项。真实 5001 项 Skill 配置的文件读取、覆盖合并与不可变快照见[配置测试](../../test/isolated/config/config.test.ts)。

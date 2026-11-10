@@ -1,5 +1,7 @@
 import {
+  isStorageRequestSettled,
   isStorageTransactionUnconfirmed,
+  markStorageRequestSettled,
   markStorageTransactionUnconfirmed,
 } from '../transaction-state';
 import { AgentError } from '../types';
@@ -15,6 +17,7 @@ export type StorageWorkerError = {
   cause?: StorageWorkerError;
   errors?: StorageWorkerError[];
   transactionUnconfirmed?: true;
+  requestSettled?: true;
 };
 const detailLimit = (): StorageWorkerError => ({
   code: 'storage_error_detail_limit',
@@ -36,6 +39,7 @@ export function serializeStorageError(error: unknown): StorageWorkerError {
         message: value instanceof Error ? value.message : String(value),
       };
       if (isStorageTransactionUnconfirmed(value)) result.transactionUnconfirmed = true;
+      if (isStorageRequestSettled(value)) result.requestSettled = true;
       if (object && 'cause' in object && object.cause !== undefined)
         result.cause = visit(object.cause, depth + 1);
       if (value instanceof AggregateError) {
@@ -80,11 +84,13 @@ export function deserializeStorageError(input: StorageWorkerError): Error & { co
         const aggregate = Object.assign(new AggregateError(errors, value.message, { cause }), {
           code: value.code,
         });
+        if (value.requestSettled === true) markStorageRequestSettled(aggregate);
         return value.transactionUnconfirmed === true
           ? markStorageTransactionUnconfirmed(aggregate)
           : aggregate;
       }
       const error = new AgentError(value.code, value.message);
+      if (value.requestSettled === true) markStorageRequestSettled(error);
       if (cause) Object.defineProperty(error, 'cause', { value: cause, configurable: true });
       return value.transactionUnconfirmed === true
         ? markStorageTransactionUnconfirmed(error)

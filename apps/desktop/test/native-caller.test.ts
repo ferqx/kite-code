@@ -36,6 +36,7 @@ function client() {
     },
     serverInfo: { storeId: 'store', subjectId: 'local-user', capabilities: [] },
     connect: async () => ({}),
+    verifyConnection: async () => ({ dataAvailability: 'available' }),
     async observe({ signal }: { signal: AbortSignal }) {
       await new Promise<void>((resolve) =>
         signal.addEventListener('abort', () => resolve(), { once: true }),
@@ -71,6 +72,191 @@ function client() {
     },
   } as unknown as AgentClient & { writes: number };
 }
+
+test('execution observation progresses while an admission permission read is held', async () => {
+  const connection = client();
+  connection.serverInfo!.capabilities.push('permission_controls');
+  let observe!: Parameters<AgentClient['observe']>[0];
+  let cursor = '1',
+    views = 0,
+    hold = false;
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const original = connection.getView.bind(connection);
+  Object.assign(connection, {
+    async getCommand() {
+      return { id: 'work', originStoreId: 'store', sessionId: 's' };
+    },
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observe = options;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async getView(id: string) {
+      views++;
+      return {
+        ...(await original(id)),
+        snapshotCursor: cursor,
+        runs: [
+          {
+            id: 'r',
+            sessionId: 's',
+            originStoreId: 'store',
+            originCommandId: 'work',
+            isActive: cursor !== '3',
+            status: cursor === '3' ? 'completed' : 'running',
+          },
+        ],
+      };
+    },
+    async getPermissionMode() {
+      if (hold) {
+        entered();
+        await held;
+      }
+      return { storeId: 'store', sessionId: 's', scopeSessionId: 's', mode: 'auto', revision: '1' };
+    },
+    async getWorkspaceTrust() {
+      return { storeId: 'store', workspaceId: 'w', trusted: true, revision: '1', readScopes: [] };
+    },
+  });
+  let terminalPublished = 0;
+  let published!: () => void;
+  const terminalReady = new Promise<void>((resolve) => {
+    published = resolve;
+  });
+  const caller = new NativeCaller(connection, () => {
+    if (caller.state().executionObservation?.observedCursor === '3') {
+      terminalPublished ||= performance.now();
+      published();
+    }
+  });
+  try {
+    const start = performance.now();
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    const activationMs = performance.now() - start;
+    await Bun.sleep(120);
+    hold = true;
+    cursor = '2';
+    await observe.onChange?.(sessionChange('s', cursor));
+    await started;
+    const before = views;
+    cursor = '3';
+    const event = { ...sessionChange('s', cursor), type: 'run.finished', objectId: 'r' };
+    const terminal = performance.now();
+    await observe.onChange?.(event);
+    await terminalReady;
+    expect(views).toBeGreaterThan(before);
+    expect(caller.state().executionObservation).toMatchObject({
+      observedCursor: '3',
+      phase: 'fresh',
+      sessionId: 's',
+      viewSelection: caller.state().selection!.viewSelection,
+      runs: [{ id: 'r', status: 'completed', isActive: false }],
+    });
+    expect(caller.state().selection?.viewLoading).toBe(true);
+    expect(caller.state().selection?.permissions).toBeUndefined();
+    expect(caller.state().selection?.runs[0]).toMatchObject({ id: 'r', status: 'running' });
+    cursor = '4';
+    await observe.onChange?.({ ...event, cursor, type: 'run.started' });
+    await Bun.sleep(0);
+    expect(caller.state().executionObservation).toMatchObject({
+      observedCursor: '4',
+      runs: [{ id: 'r', status: 'running', isActive: true }],
+    });
+    expect(caller.state().selection?.permissions).toBeUndefined();
+    console.log(
+      JSON.stringify({
+        measurement: 'native-held-admission',
+        activationMs,
+        terminalPublishedMs: terminalPublished - terminal,
+        viewReadsWhileHeld: views - before,
+      }),
+    );
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+
+test('execution bursts share the in-flight View and ignore foreign cursor pressure', async () => {
+  const connection = client();
+  let observe!: Parameters<AgentClient['observe']>[0];
+  let cursor = '1',
+    hold = false,
+    inFlight = 0,
+    maximum = 0,
+    views = 0;
+  let release!: () => void, entered!: () => void, published!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const finished = new Promise<void>((resolve) => {
+    published = resolve;
+  });
+  const original = connection.getView.bind(connection);
+  Object.assign(connection, {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observe = options;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async getView(id: string) {
+      views++;
+      const snapshotCursor = cursor;
+      maximum = Math.max(maximum, ++inFlight);
+      try {
+        if (hold) {
+          hold = false;
+          entered();
+          await held;
+        }
+        return { ...(await original(id)), snapshotCursor };
+      } finally {
+        inFlight--;
+      }
+    },
+  });
+  const caller = new NativeCaller(connection, () => {
+    if (
+      caller.state().executionObservation?.observedCursor === '5' &&
+      caller.state().executionObservation?.phase === 'fresh'
+    )
+      published();
+  });
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    hold = true;
+    cursor = '2';
+    await observe.onChange?.({ ...sessionChange('s', cursor), type: 'execution.finished' });
+    await started;
+    cursor = '5';
+    await observe.onChange?.({ ...sessionChange('s', cursor), type: 'run.finished' });
+    await observe.onChange?.({ ...sessionChange('foreign', '999'), type: 'run.finished' });
+    expect(inFlight).toBe(1);
+    release();
+    await finished;
+    await Bun.sleep(0);
+    expect(maximum).toBe(1);
+    expect(views).toBe(3);
+    expect(caller.state().executionObservation?.observedCursor).toBe('5');
+  } finally {
+    release();
+    await caller.close();
+  }
+});
 
 test('a missing workspace remains readable on cold selection while writes are refused until fresh identity and trust return', async () => {
   const port = client();
@@ -751,8 +937,8 @@ test('browser scope never reads full state, journals or unrelated submission get
     await caller.close();
   }
 });
-for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
-  test(`Native ready reconciliation joins the pending selection and preserves ${outcome}`, async () => {
+for (const outcome of ['ready', 'read_failure', 'regressed', 'selection_changed'] as const) {
+  test(`Native ready joins one pending activation and preserves ${outcome}`, async () => {
     function gate() {
       let release!: () => void;
       const promise = new Promise<void>((resolve) => {
@@ -761,15 +947,19 @@ for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
       return { promise, release };
     }
     const first = gate(),
-      firstEntered = gate(),
-      successor = gate(),
-      successorEntered = gate();
+      firstEntered = gate();
     const connection = client();
     connection.serverInfo!.capabilities.push('session_reconciliation');
     let observe!: Parameters<AgentClient['observe']>[0],
       reconciliations = 0,
       settled = false;
     const failure = new ClientError('ready_read_failed');
+    const getView = connection.getView.bind(connection);
+    let views = 0;
+    connection.getView = async (sessionId) => {
+      if (++views > 2 && outcome === 'read_failure') throw failure;
+      return getView(sessionId);
+    };
     connection.observe = async (options) => {
       observe = options;
       await new Promise<void>((resolve) =>
@@ -781,11 +971,6 @@ for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
       if (reconciliations === 1) {
         firstEntered.release();
         await first.promise;
-      } else if (reconciliations === 2) {
-        successorEntered.release();
-        // Retain a late transport reply even if a new selection cancels its signal.
-        await successor.promise;
-        if (outcome === 'read_failure') throw failure;
       }
       return connection.getView(sessionId);
     };
@@ -803,20 +988,25 @@ for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
         },
       );
       await firstEntered.promise;
-      const ready = observe.onReady!({ storeId: 'store', replayFloor: '0', highWaterCursor: '0' });
+      const ready = observe.onReady!({
+        storeId: 'store',
+        replayFloor: '0',
+        highWaterCursor: outcome === 'read_failure' || outcome === 'regressed' ? '1' : '0',
+      });
       expect(reconciliations).toBe(1);
-      expect(settled).toBe(false);
-      first.release();
-      await successorEntered.promise;
       expect(settled).toBe(false);
       expect(caller.state().environmentReadUnavailable).toBe(true);
       if (outcome === 'selection_changed')
         await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
-      successor.release();
+      first.release();
       await ready;
       const result = await selected;
       if (outcome === 'read_failure') expect(result).toBe(failure);
-      else if (outcome === 'selection_changed') {
+      else if (outcome === 'regressed') {
+        expect(result).toMatchObject({ code: 'observation_cursor_unavailable' });
+        expect(caller.state().selection?.permissionUnavailable).toBe(true);
+        expect(caller.state().executionObservation?.phase).toBe('unavailable');
+      } else if (outcome === 'selection_changed') {
         expect(result).toMatchObject({ code: 'native_selection_changed' });
         expect(caller.state().selection?.session.id).toBe('other');
         expect(caller.state().selection?.permissionUnavailable).toBe(false);
@@ -824,25 +1014,59 @@ for (const outcome of ['ready', 'read_failure', 'selection_changed'] as const) {
         expect(result).toMatchObject({ selection: { session: { id: 's' } } });
         expect(caller.state().selection?.permissionUnavailable).toBe(false);
       }
-      expect(reconciliations).toBe(outcome === 'selection_changed' ? 3 : 2);
+      expect(reconciliations).toBe(outcome === 'selection_changed' ? 2 : 1);
       expect(connection.writes).toBe(0);
     } finally {
       first.release();
-      successor.release();
       await caller.close();
     }
   });
 }
+
+test('initial ready reuses completed activation while a replacement epoch reconciles again', async () => {
+  const connection = client();
+  connection.serverInfo!.capabilities.push('session_reconciliation');
+  let observer!: Parameters<AgentClient['observe']>[0],
+    reconciliations = 0;
+  connection.observe = async (options) => {
+    observer = options;
+    await new Promise<void>((resolve) =>
+      options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  connection.reconcileSessionState = async (sessionId) => {
+    reconciliations++;
+    return connection.getView(sessionId);
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    const ready = { storeId: 'store', replayFloor: '0', highWaterCursor: '0' };
+    await observer.onReady!(ready);
+    expect(reconciliations).toBe(1);
+    expect(caller.state().selection?.permissionUnavailable).toBe(false);
+    const epoch = caller.state().historyEpoch!;
+    await observer.onReady!(ready);
+    expect(reconciliations).toBe(2);
+    expect(caller.state().historyEpoch).toBe(epoch + 1);
+    expect(caller.state().selection?.permissionUnavailable).toBe(false);
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
 test('Native selected message events wake durable changes directly without View refresh and reconnect revokes the baseline', async () => {
   const connection = client();
   connection.serverInfo!.capabilities.push('message_changes');
   let observe!: Parameters<AgentClient['observe']>[0],
-    views = 0;
+    views = 0,
+    snapshotCursor = '5';
   const getView = connection.getView.bind(connection);
   connection.getView = async (id) => {
     views++;
     const view = await getView(id);
-    return { ...view, snapshotCursor: '5', session: { ...view.session, nextSeq: '2' } };
+    return { ...view, snapshotCursor, session: { ...view.session, nextSeq: '2' } };
   };
   const changeRequests: unknown[] = [];
   const changeSignals: AbortSignal[] = [];
@@ -920,6 +1144,7 @@ test('Native selected message events wake durable changes directly without View 
     expect(changeRequests).toMatchObject([{ upperSeq: undefined }, { upperSeq: '4' }]);
     expect(changeSignals[0]).toBe(changeSignals[1]);
     const epoch = caller.state().historyEpoch!;
+    snapshotCursor = '10';
     await observe.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '10' });
     expect(caller.state().historyEpoch).toBe(epoch + 1);
     expect(caller.state().selection!.historyTargetCursor).toBeUndefined();
@@ -2877,7 +3102,7 @@ test('global activity refresh follows non-selected changes, retains failed obser
       change = () => {
         void options.onChange?.(sessionChange('other-session'));
       };
-      await options.onReady?.({} as never);
+      await options.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '0' });
       await new Promise<void>((resolve) =>
         options.signal!.addEventListener('abort', () => resolve(), { once: true }),
       );
@@ -2982,7 +3207,7 @@ test('cold observer reset invalidates the old directory read explicitly and publ
     held: AbortSignal | undefined;
   Object.assign(port, {
     async observe(options: Parameters<AgentClient['observe']>[0]) {
-      await options.onReady?.({} as never);
+      await options.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '0' });
       await new Promise<void>((resolve) => {
         reset = () => {
           void options.onReset?.({} as never);
