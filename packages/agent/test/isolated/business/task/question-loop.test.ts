@@ -112,7 +112,7 @@ for (const carried of [true, false])
             events = call('wait_agent_events', { wait_ms: 0 });
             break;
           case 3:
-            cursor = body.next_seq;
+            cursor = body.next_cursor;
             events = call('ask_user', {
               questions: [
                 {
@@ -135,7 +135,7 @@ for (const carried of [true, false])
             break;
           case 5:
             expect(body).toMatchObject({ accepted: true, agent_id: agentId, mode: 'new_turn' });
-            events = call('wait_agent_events', { after_seq: cursor, wait_ms: 5000 });
+            events = call('wait_agent_events', { cursor, wait_ms: 5000 });
             break;
           default:
             expect(JSON.stringify(request.messages)).toContain(complete);
