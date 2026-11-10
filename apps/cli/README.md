@@ -6,9 +6,11 @@
 
 ## 会话历史读取
 
-当前 [TUI Host](host/tui.tsx) 的 `readSession` 先读取 Session view，再从序号0开始，按该 view 的 `nextSeq` 上界分页读取完整消息；每页核 Session 与序号边界。[观察恢复](host/tui-observation.ts)在重连时刷新原选择而不重复显式激活核实。当前仓库不包含先前记录的 `host/tui-history.ts` 与 `test/tui-history.test.ts`，不能据此宣称 TUI 已接入 `message_changes` 增量缓存或达到摄取／整轮结束性能目标。
+当前 [TUI Host](host/tui.tsx) 通过[会话读取器](host/tui-session.ts)分别读取执行、历史、操作准入和其他展示信息。首次打开会话按 View 的 `nextSeq` 上界分页读完整历史。支持 `message_changes` 的服务随后按变更游标合并消息更新和删除，保持同一条消息的序号；分页失败保留上一份完整历史，游标过期或服务不支持增量时重读完整基线。Host 持有单次事件流，断线先撤销活动与操作资格，再核实同一 Service 和 Store 后重开；[观察恢复](host/tui-observation.ts)在 ready 后重建读取基线并刷新原会话。[只读工作区观察](host/tui-workspace-observer.ts)也允许读取增量历史和核实连接，继续拒绝写入和未列入允许列表的方法。操作准入读取失败时，已经核实的历史仍可阅读。定向回归见[历史](test/tui-history.test.ts)、[会话读取](test/tui-session.test.ts)与[只读工作区](test/tui-workspace-observer.test.ts)。
 
-2026-11-09，Windows x64／Bun1.4.4，`4a527742c` 加当时工作树的历史记录报告 `test/tui-history.test.ts` 与[观察回归](test/tui-observation.test.ts)共8项／31断言；缺失的历史测试未能从当前提交核验，该记录不作为当前增量读取的通过证据。当时另报告全仓 typecheck、公开 API、测试归属、文档结构／影响和跨包边界检查通过。CLI owned 全量运行出现本地 HTTP `network_outcome_unknown` 及临时目录硬链接 `EPERM`，宿主复验四个普通分片共205项通过／5项跳过，首个独占 ask-user-stdio 文件20项通过／3项失败后停止，失败涉及默认问答参数校验与 waiting_interaction；该文件及其 stdio／Agent／Service 依赖未被本次改动。未取得完整回归或真实 PTY 过程验收资格。
+2026-11-11，Windows x64／Bun 1.4.4，`83fcdcb87` 加当前 TUI 工作树。定向 11 个完整文件共 143 项通过。隔离共享 Service 的实际 80×24 PTY 连续观察 14 个变化帧，核对同序号正文更新时未增加完整历史扫描、断线时撤下活动提示并保留正文和草稿、重连后恢复观察、任务完成及正常退出后的冷重开。整个过程仅有一次原模型调用，TUI 未重发任务，重开后正文和草稿各保留一份。原始观察在本机 `.cache/tui-delivery-pty-final.log`。缺失工作区的只读增量路径由上述组合回归验证，共享 Service 的 PTY 结果仅覆盖其原工作区有效时的终端过程。
+
+2026-11-09，Windows x64／Bun1.4.4，`4a527742c` 加当时工作树的历史记录报告历史读取与[观察回归](test/tui-observation.test.ts)共8项／31断言，以及全仓 typecheck、公开 API、测试归属、文档结构／影响和跨包边界检查通过。CLI owned 全量运行出现本地 HTTP `network_outcome_unknown` 及临时目录硬链接 `EPERM`，宿主复验四个普通分片共205项通过／5项跳过，首个独占 ask-user-stdio 文件20项通过／3项失败后停止，失败涉及默认问答参数校验与 waiting_interaction。该历史记录未取得完整回归或真实 PTY 过程验收资格。
 
 2026-11-07，macOS arm64／Bun1.4.4，源码3402文件／`2273a30b…a9ed`：普通 CLI stdio 与 TUI80×24 分别以真实 `gpt-6-luna/medium` 完成三模式计划人答，六个 Run completed、六个 Shell Tool/自身 Job 成功且各精确效果一次，零 failed/unknown Execution。每端5个唯一原答案（3计划及Manual两张工具卡），无 mode／重复 POST；Auto 各一次 low/default5000 reviewer（CLI1721ms、TUI2156ms），Full零工具卡／reviewer。CLI Manual与TUI Auto实际丢202并离线，原未知状态保留，恢复后查原 Command、不重答；TUI待计划时权限面板可达，取消 Full 确认仍保 Auto 与同卡。正常退出及冷读核 CLI 3Run/41Exec/5Interaction/19Command、TUI3/45/5/19全行摘要与6效果相同，无进程残留。32个CLI阶段及61个TUI viewport/ANSI阶段、`final-audit.json`／`network-audit.json`／冷前后摘要在本机 `/private/tmp/kite-luna-plan-business-terminal-a7b9146b-79ff-44e5-848b-36dd9ccaf782/`。本轮未另起任务补做活动 Ctrl+C，活动取消复用已有固定PTY／Native资格；不外推其他平台或完整安装。
 

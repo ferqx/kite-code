@@ -84,6 +84,15 @@ import { reviewableMcpSource } from './mcp-source-question';
 import { sameMcpToolsOrigin, type TuiMcpToolsState } from './mcp-tools';
 import type { TuiModelIntent, TuiModelOutcome, TuiModelPort } from './models';
 import {
+  mergeTuiDomain,
+  type TuiDomainState,
+  type TuiDomainUpdate,
+  type TuiReadDomain,
+  tuiAdmissionTarget,
+  tuiChangeDomains,
+  tuiReadDomains,
+} from './observation';
+import {
   permissionChangeAffectsSession,
   type TuiPermissionIntent,
   type TuiPermissionOutcome,
@@ -115,6 +124,7 @@ export * from './management';
 export * from './mcp';
 export * from './mcp-auth';
 export * from './models';
+export * from './observation';
 export * from './permissions';
 export * from './preferences';
 export * from './recovery';
@@ -125,6 +135,8 @@ export type TuiPendingInput = Omit<PendingInputPage['commands'][number], 'reques
   request: Exclude<PendingInputPage['commands'][number]['request'], { kind: 'result.include' }>;
 };
 export interface TuiSnapshot {
+  /** Completion status supplied by a split host's initial complete read. */
+  readonly domains?: Readonly<Partial<Record<TuiReadDomain, TuiDomainState>>>;
   readonly storeId: string;
   /** Authenticated public ServerInfo instance for this exact connection. Observation only. */
   readonly connectionInstanceId?: string;
@@ -267,6 +279,14 @@ export interface TuiPort {
   /** Explicit activation only; ordinary snapshot reads and observers remain read-only. */
   reconcileSession?(sessionId: string, signal: AbortSignal): Promise<void>;
   readSession(sessionId: string, signal: AbortSignal): Promise<TuiSnapshot>;
+  readonly messageChanges?: boolean;
+  /** Independent read-only domains. Older embeddings retain their full reader. */
+  readSessionDomain?(
+    domain: TuiReadDomain,
+    source: TuiSnapshot,
+    targetCursor: string | undefined,
+    signal: AbortSignal,
+  ): Promise<TuiDomainUpdate>;
   /** Public EOF/hash reader must prove the saved Model scope under the current admitted Store. */
   readModelOutput?(
     sessionId: string,
@@ -430,6 +450,7 @@ export interface TuiState {
   readonly loading: boolean;
   readonly stale: boolean;
   readonly snapshotStale: boolean;
+  readonly domains?: Readonly<Partial<Record<TuiReadDomain, TuiDomainState>>>;
   readonly errorSource?: 'snapshot' | 'observation' | 'input';
   readonly observationError?: string;
   readonly observationState: 'connecting' | 'ready' | 'unknown';
@@ -560,7 +581,21 @@ export class TuiController {
   private generation = 0;
   private historyGeneration = 0;
   private historyRead?: AbortController;
+  private domainEpoch = 0;
+  private domainReads = new Map<
+    TuiReadDomain,
+    {
+      revision: number;
+      applied: number;
+      cursor?: string;
+      read?: AbortController;
+      task?: Promise<void>;
+    }
+  >();
+  private fullRefresh?: Promise<void>;
+  private fullRefreshDirty = false;
   private sessionActivation?: { sessionId: string; done: Promise<boolean> };
+  private activationFailure?: { sessionId: string; error: string };
   private contextRead?: AbortController;
   private sessionDeletionRead?: AbortController;
   private modelRead?: AbortController;
@@ -997,7 +1032,7 @@ export class TuiController {
           )
             await this.lookupJobStop(sessionId);
           if (!this.disposed && !this.value.panel && sessionId === this.value.sessionId)
-            await this.select(sessionId!, { preserveReconnectionReview: true, reconcile: false });
+            await this.refresh();
         } catch {
           // Preserve original identities and fences until a later read succeeds.
         } finally {
@@ -1056,10 +1091,18 @@ export class TuiController {
   }
   observationUnavailable(code: string) {
     const error = `observation_unavailable:${code}`;
+    this.retireDomainReads();
+    this.historyRead?.abort();
+    this.permissionRefreshRead?.abort();
+    this.permissionRead?.abort();
     this.mcpReconnectionRead?.abort();
     this.publish({
       observationState: 'unknown',
       observationError: error,
+      snapshotStale: true,
+      domains: Object.fromEntries(
+        tuiReadDomains.map((domain) => [domain, { phase: 'unavailable' }]),
+      ),
       errorSource: 'observation',
       mcpReconnectionObservation: undefined,
       mcpReconnectionReading: false,
@@ -1076,6 +1119,7 @@ export class TuiController {
       this.observationUnavailable('store_changed');
       return;
     }
+    this.retireDomainReads();
     this.publish({
       observationState: 'ready',
       observationError: undefined,
@@ -1206,6 +1250,7 @@ export class TuiController {
         return;
     }
     const same = this.value.sessionId === sessionId;
+    this.retireDomainReads();
     if (!same) {
       this.fileRead?.abort();
       this.publish({ fileCandidates: undefined });
@@ -1216,6 +1261,7 @@ export class TuiController {
     if (!preserveReconnectionReview) this.mcpReconnectionRead?.abort();
     if (!same) {
       this.permissionFactsError = undefined;
+      this.activationFailure = undefined;
       this.closeSessionDeletion();
       this.clearedDisplay = undefined;
       this.fileRecoveryRead?.abort();
@@ -1286,21 +1332,19 @@ export class TuiController {
       notice: same ? this.value.notice : undefined,
       draft: this.drafts.get(sessionId) ?? '',
       loading: !same || !this.value.snapshot,
+      domains: undefined,
       error: undefined,
     });
     const read = this.reading();
     this.historyRead = read;
     let finishActivation: ((completed: boolean) => void) | undefined;
-    const activation =
-      options.reconcile !== false && this.port.reconcileSession
-        ? {
-            sessionId,
-            done: new Promise<boolean>((resolve) => {
-              finishActivation = resolve;
-            }),
-          }
-        : undefined;
-    if (activation) this.sessionActivation = activation;
+    const activation = {
+      sessionId,
+      done: new Promise<boolean>((resolve) => {
+        finishActivation = resolve;
+      }),
+    };
+    this.sessionActivation = activation;
     let activationCompleted = false;
     try {
       let reconciliationError: string | undefined;
@@ -1325,133 +1369,29 @@ export class TuiController {
         historyGeneration !== this.historyGeneration
       )
         return;
-      if (
-        snapshot.storeId !== this.port.storeId ||
-        snapshot.view.storeId !== this.port.storeId ||
-        snapshot.view.session.id !== sessionId ||
-        snapshot.messages.some((m) => m.sessionId !== sessionId) ||
-        snapshot.pendingInputs?.some(
-          (input) =>
-            input.sessionId !== sessionId ||
-            input.originStoreId !== this.port.storeId ||
-            input.status !== 'accepted' ||
-            input.cancelRequestedAt !== null ||
-            !['input.steer', 'input.follow_up'].includes(input.kind) ||
-            input.kind !== input.request.kind,
-        ) ||
-        snapshot.interactions.some(
-          (i) => i.originStoreId !== this.port.storeId || i.presentationSessionId !== sessionId,
-        )
-      )
-        throw new Error('tui_identity_mismatch');
-      if (
-        same &&
-        this.value.snapshot?.view.session.workspaceId !== snapshot.view.session.workspaceId
-      ) {
-        this.fileRead?.abort();
-        this.publish({ fileCandidates: undefined });
-        this.mcpToolsRead?.abort();
-        this.mcpConnectionRead?.abort();
-        this.mcpReconnectionRead?.abort();
-        this.mcpMutationRead?.abort();
-        this.mcpMutationFactsRead?.abort();
-        this.mcpAuthRead?.abort();
-        this.mcpSourceRead?.abort();
-        this.mcpSourceLookupRead?.abort();
-        this.publish({
-          mcpReconnection: undefined,
-          mcpReconnectionObservation: undefined,
-          mcpReconnectionReading: false,
-          mcpReconnectionObserving: false,
-          mcpMutationOpen: false,
-          mcpMutationFacts: undefined,
-          mcpMutationOutcome: undefined,
-          mcpMutationFactsReading: false,
-          mcpMutationReading: false,
-          mcpSource: undefined,
-          mcpSourceOutcome: undefined,
-          mcpSourceReading: false,
-          mcpTools: undefined,
-          mcpConnection: undefined,
-          mcpConnectionReading: false,
-        });
+      if (options.reconcile !== false)
+        this.activationFailure = reconciliationError
+          ? { sessionId, error: reconciliationError }
+          : undefined;
+      const domains: Partial<Record<TuiReadDomain, TuiDomainState>> = {
+        ...(snapshot.domains ??
+          Object.fromEntries(
+            tuiReadDomains.map((domain) => [
+              domain,
+              { phase: 'fresh', cursor: snapshot.view.snapshotCursor },
+            ]),
+          )),
+      };
+      for (const [domain, entry] of this.domainReads) {
+        if (entry.applied < entry.revision)
+          domains[domain] = { ...domains[domain], phase: 'refreshing' };
       }
-      if (
-        same &&
-        this.value.snapshot?.view.session.contextSelectionId !==
-          snapshot.view.session.contextSelectionId
-      ) {
-        this.fileRecoveryRead?.abort();
-        if (!this.value.fileRecovery?.intent) this.publish({ fileRecovery: undefined });
-      }
-      let draft = this.drafts.get(sessionId) ?? '';
-      if (this.port.drafts) {
-        const scope = {
-          storeId: this.port.storeId,
-          workspaceId: snapshot.view.session.workspaceId,
-          sessionId,
-        };
-        try {
-          if (!this.drafts.has(sessionId)) draft = this.port.drafts.read(scope);
-          else this.port.drafts.edit(scope, draft);
-          this.drafts.set(sessionId, draft);
-        } catch {
-          this.draftUnavailable('tui_draft_storage_unavailable');
-        }
-      }
-      const fullOutputs = new Map(
-        [...this.value.fullOutputs].filter(([id]) => {
-          const old = this.value.snapshot?.messages.find((m) => m.id === id);
-          const next = snapshot.messages.find((m) => m.id === id);
-          return old && next && JSON.stringify(old.outputBody) === JSON.stringify(next.outputBody);
-        }),
-      );
-      this.publish({
-        snapshot,
-        ...(reconciliationError
-          ? {
-              error: `会话执行状态核对失败：${reconciliationError}；已保留可读历史。`,
-              errorSource: 'snapshot' as const,
-            }
-          : {}),
-        planning:
-          this.planningDrafts.get(
-            this.planningKey({
-              storeId: this.port.storeId,
-              workspaceId: snapshot.view.session.workspaceId,
-              sessionId,
-            }),
-          )?.enabled ?? false,
-        attachments: new Map(
-          [...this.value.attachments].filter(([key]) => {
-            const [store, source, presentation, id, revision] = JSON.parse(key);
-            const current = snapshot.interactions.find(
-              (item) =>
-                item.originStoreId === store &&
-                item.sessionId === source &&
-                item.presentationSessionId === presentation &&
-                item.id === id,
-            );
-            if (!current) return presentation !== snapshot.view.session.id;
-            if (current.revision !== revision || current.state !== 'pending') return false;
-            try {
-              return this.attachmentProofs.get(key) === interactionAttachment(current)?.key;
-            } catch {
-              return false;
-            }
-          }),
-        ),
-        draft,
-        fullOutputs,
-        loadedOutputBodies: new Map(
-          [...this.value.loadedOutputBodies].filter(([id]) => fullOutputs.has(id)),
-        ),
-        loading: false,
-        snapshotStale: false,
-        context:
-          this.value.context?.selection.id === snapshot.view.session.contextSelectionId
-            ? this.value.context
-            : undefined,
+      this.applySnapshot(snapshot, {
+        same,
+        restoreDraft: true,
+        reconciliationError,
+        domains,
+        snapshotStale: domains.execution?.phase !== 'fresh' || domains.admission?.phase !== 'fresh',
       });
       // A root control can change before this newly selected child's View arrives.
       // Read its current controls once the actual root/Workspace scope is known.
@@ -1493,6 +1433,394 @@ export class TuiController {
       finishActivation?.(activationCompleted);
       this.reads.delete(read);
     }
+  }
+  private retireDomainReads() {
+    ++this.domainEpoch;
+    for (const entry of this.domainReads.values()) entry.read?.abort();
+    this.domainReads.clear();
+    this.fullRefreshDirty = false;
+    this.fullRefresh = undefined;
+  }
+  private domainState(domain: TuiReadDomain, state: TuiDomainState) {
+    const domains = { ...this.value.domains, [domain]: state };
+    this.publish({
+      domains,
+      snapshotStale:
+        domains.execution?.phase !== 'fresh' ||
+        domains.admission?.phase !== 'fresh' ||
+        this.activationFailure?.sessionId === this.value.sessionId,
+    });
+  }
+  /** Registration is synchronous; the wire cursor acknowledges invalidation only. */
+  changed(change: Change) {
+    const snapshot = this.value.snapshot;
+    const domains = snapshot
+      ? tuiChangeDomains(change, snapshot, this.port.messageChanges === true)
+      : change.sessionId === this.value.sessionId
+        ? tuiReadDomains
+        : [];
+    if (domains.length) void this.refresh(domains, change.cursor);
+    if (snapshot && permissionChangeAffectsSession(change, snapshot.view, this.port.storeId))
+      void this.refreshPermissions(change);
+  }
+  /** Automatic reads preserve selection, drafts, panels, and activation ownership. */
+  refresh(domains: readonly TuiReadDomain[] = tuiReadDomains, cursor?: string): Promise<void> {
+    if (this.disposed || !this.value.sessionId) return Promise.resolve();
+    if (!this.port.readSessionDomain) return this.refreshFullSnapshot();
+    const tasks: Promise<void>[] = [];
+    for (const domain of domains) {
+      let entry = this.domainReads.get(domain);
+      if (!entry) {
+        entry = { revision: 0, applied: 0 };
+        this.domainReads.set(domain, entry);
+      }
+      ++entry.revision;
+      if (cursor && (!entry.cursor || BigInt(cursor) > BigInt(entry.cursor))) entry.cursor = cursor;
+      this.domainState(domain, {
+        ...this.value.domains?.[domain],
+        phase: 'refreshing',
+        error: undefined,
+      });
+      if (!entry.task) {
+        const owned = entry;
+        owned.task = this.readDomain(domain, owned).finally(() => {
+          owned.task = undefined;
+          if (
+            !this.disposed &&
+            this.value.snapshot &&
+            this.domainReads.get(domain) === owned &&
+            owned.applied < owned.revision
+          )
+            return this.refresh([domain]);
+          return undefined;
+        });
+      }
+      tasks.push(entry.task!);
+    }
+    return Promise.all(tasks).then(() => {});
+  }
+  private async readDomain(
+    domain: TuiReadDomain,
+    entry: NonNullable<ReturnType<typeof this.domainReads.get>>,
+  ) {
+    const generation = this.generation,
+      epoch = this.domainEpoch,
+      sessionId = this.value.sessionId;
+    const current = () =>
+      !this.disposed &&
+      generation === this.generation &&
+      epoch === this.domainEpoch &&
+      sessionId === this.value.sessionId &&
+      this.domainReads.get(domain) === entry;
+    // Let all invalidations in this callback batch register before beginning I/O.
+    await Promise.resolve();
+    while (current() && entry.applied < entry.revision) {
+      const activation = this.sessionActivation;
+      if (activation && activation.sessionId === sessionId) {
+        if (!(await activation.done) || !current()) return;
+      }
+      if (domain !== 'execution' && domain !== 'history' && domain !== 'models')
+        await this.domainReads.get('execution')?.task;
+      if (!current()) return;
+      const source = this.value.snapshot;
+      if (!source) return;
+      const revision = entry.revision;
+      const read = this.reading();
+      entry.read = read;
+      try {
+        if (domain === 'admission' && this.value.domains?.execution?.phase === 'unavailable')
+          throw Error('execution_observation_unavailable');
+        const update = await this.port.readSessionDomain!(
+          domain,
+          source,
+          entry.cursor,
+          read.signal,
+        );
+        if (!current() || read.signal.aborted) return;
+        if (update.domain !== domain) throw Error('tui_read_domain_mismatch');
+        if (update.domain === 'metadata' && update.sessionId !== sessionId)
+          throw Error('tui_identity_mismatch');
+        const latest = this.value.snapshot!;
+        let observedCursor: string | undefined;
+        if (update.domain === 'execution') {
+          const view = update.facts.view;
+          observedCursor = view.snapshotCursor;
+          if (
+            view.storeId !== this.port.storeId ||
+            view.session.id !== sessionId ||
+            view.session.workspaceId !== source.view.session.workspaceId
+          )
+            throw Error('tui_identity_mismatch');
+          const oldCursor = this.value.domains?.execution?.cursor;
+          if (oldCursor && BigInt(observedCursor) < BigInt(oldCursor))
+            throw Error('tui_observation_cursor_regressed');
+        } else if (update.domain === 'history') observedCursor = update.cursor;
+        else {
+          if (revision !== entry.revision) continue;
+          if (
+            update.domain === 'admission' &&
+            (tuiAdmissionTarget(update.source) !== tuiAdmissionTarget(latest.view) ||
+              update.source.session.workspaceId !== source.view.session.workspaceId)
+          ) {
+            ++entry.revision;
+            continue;
+          }
+        }
+        if (observedCursor && entry.cursor && BigInt(observedCursor) < BigInt(entry.cursor)) {
+          if (revision !== entry.revision) continue;
+          throw Error('tui_observation_target_not_covered');
+        }
+        const next = mergeTuiDomain(latest, update);
+        const targetChanged =
+          update.domain === 'execution' &&
+          tuiAdmissionTarget(latest.view) !== tuiAdmissionTarget(next.view);
+        const dependenciesChanged =
+          update.domain === 'execution' &&
+          JSON.stringify([
+            latest.view.runs,
+            latest.view.executions,
+            latest.view.session.contextSelectionId,
+          ]) !==
+            JSON.stringify([
+              next.view.runs,
+              next.view.executions,
+              next.view.session.contextSelectionId,
+            ]);
+        const domains: Partial<Record<TuiReadDomain, TuiDomainState>> = {
+          ...this.value.domains,
+          [domain]: { phase: 'fresh', ...(observedCursor ? { cursor: observedCursor } : {}) },
+          ...(targetChanged ? { admission: { phase: 'refreshing' as const } } : {}),
+        };
+        this.applySnapshot(next, {
+          domain,
+          domains,
+          snapshotStale:
+            domains.execution?.phase !== 'fresh' || domains.admission?.phase !== 'fresh',
+        });
+        entry.applied = entry.revision;
+        if (targetChanged) void this.refresh(['admission']);
+        if (dependenciesChanged)
+          void this.refresh(['display', 'progress', 'live', 'jobs', 'labels']);
+        if (update.domain === 'history') void this.refresh(['display']);
+      } catch (error) {
+        if (!current() || read.signal.aborted) return;
+        if (revision !== entry.revision) continue;
+        entry.applied = revision;
+        this.domainState(domain, {
+          ...this.value.domains?.[domain],
+          phase: 'unavailable',
+          error: error instanceof Error ? error.message : 'read_failed',
+        });
+      } finally {
+        this.reads.delete(read);
+        if (entry.read === read) entry.read = undefined;
+      }
+    }
+  }
+  private refreshFullSnapshot(): Promise<void> {
+    this.fullRefreshDirty = true;
+    if (this.fullRefresh) return this.fullRefresh;
+    const generation = this.generation,
+      epoch = this.domainEpoch,
+      sessionId = this.value.sessionId!;
+    const current = () =>
+      !this.disposed &&
+      generation === this.generation &&
+      epoch === this.domainEpoch &&
+      sessionId === this.value.sessionId;
+    const task = (async () => {
+      await Promise.resolve();
+      while (current() && this.fullRefreshDirty) {
+        this.fullRefreshDirty = false;
+        if (this.sessionActivation?.sessionId === sessionId && !(await this.sessionActivation.done))
+          return;
+        if (!current()) return;
+        const read = this.reading();
+        try {
+          const snapshot = await this.port.readSession(sessionId, read.signal);
+          if (current() && !read.signal.aborted) this.applySnapshot(snapshot);
+        } catch (error) {
+          if (current() && !read.signal.aborted)
+            this.publish({
+              snapshotStale: true,
+              errorSource: 'snapshot',
+              error: error instanceof Error ? error.message : 'read_failed',
+            });
+        } finally {
+          this.reads.delete(read);
+        }
+      }
+    })().finally(() => {
+      if (this.fullRefresh === task) {
+        this.fullRefresh = undefined;
+        if (current() && this.fullRefreshDirty) return this.refreshFullSnapshot();
+      }
+      return undefined;
+    });
+    this.fullRefresh = task;
+    return task;
+  }
+  private applySnapshot(
+    snapshot: TuiSnapshot,
+    options: {
+      same?: boolean;
+      restoreDraft?: boolean;
+      snapshotStale?: boolean;
+      reconciliationError?: string;
+      domains?: TuiState['domains'];
+      domain?: TuiReadDomain;
+    } = {},
+  ) {
+    const {
+      same = true,
+      restoreDraft = false,
+      snapshotStale = false,
+      reconciliationError,
+    } = options;
+    const sessionId = snapshot.view.session.id;
+    if (
+      snapshot.storeId !== this.port.storeId ||
+      snapshot.view.storeId !== this.port.storeId ||
+      snapshot.view.session.id !== this.value.sessionId ||
+      ((!options.domain || options.domain === 'history') &&
+        snapshot.messages.some((m) => m.sessionId !== sessionId)) ||
+      ((!options.domain || options.domain === 'admission') &&
+        (snapshot.pendingInputs?.some(
+          (input) =>
+            input.sessionId !== sessionId ||
+            input.originStoreId !== this.port.storeId ||
+            input.status !== 'accepted' ||
+            input.cancelRequestedAt !== null ||
+            !['input.steer', 'input.follow_up'].includes(input.kind) ||
+            input.kind !== input.request.kind,
+        ) ||
+          snapshot.interactions.some(
+            (i) => i.originStoreId !== this.port.storeId || i.presentationSessionId !== sessionId,
+          )))
+    )
+      throw new Error('tui_identity_mismatch');
+    if (
+      same &&
+      this.value.snapshot?.view.session.workspaceId !== snapshot.view.session.workspaceId
+    ) {
+      this.fileRead?.abort();
+      this.publish({ fileCandidates: undefined });
+      this.mcpToolsRead?.abort();
+      this.mcpConnectionRead?.abort();
+      this.mcpReconnectionRead?.abort();
+      this.mcpMutationRead?.abort();
+      this.mcpMutationFactsRead?.abort();
+      this.mcpAuthRead?.abort();
+      this.mcpSourceRead?.abort();
+      this.mcpSourceLookupRead?.abort();
+      this.publish({
+        mcpReconnection: undefined,
+        mcpReconnectionObservation: undefined,
+        mcpReconnectionReading: false,
+        mcpReconnectionObserving: false,
+        mcpMutationOpen: false,
+        mcpMutationFacts: undefined,
+        mcpMutationOutcome: undefined,
+        mcpMutationFactsReading: false,
+        mcpMutationReading: false,
+        mcpSource: undefined,
+        mcpSourceOutcome: undefined,
+        mcpSourceReading: false,
+        mcpTools: undefined,
+        mcpConnection: undefined,
+        mcpConnectionReading: false,
+      });
+    }
+    if (
+      same &&
+      this.value.snapshot?.view.session.contextSelectionId !==
+        snapshot.view.session.contextSelectionId
+    ) {
+      this.fileRecoveryRead?.abort();
+      if (!this.value.fileRecovery?.intent) this.publish({ fileRecovery: undefined });
+    }
+    let draft = this.value.draft;
+    if (restoreDraft && this.port.drafts) {
+      const scope = {
+        storeId: this.port.storeId,
+        workspaceId: snapshot.view.session.workspaceId,
+        sessionId,
+      };
+      try {
+        if (!this.drafts.has(sessionId)) draft = this.port.drafts.read(scope);
+        else this.port.drafts.edit(scope, draft);
+        this.drafts.set(sessionId, draft);
+      } catch {
+        this.draftUnavailable('tui_draft_storage_unavailable');
+      }
+    }
+    const historyChanged = !options.domain || options.domain === 'history';
+    const fullOutputs = historyChanged
+      ? new Map(
+          [...this.value.fullOutputs].filter(([id]) => {
+            const old = this.value.snapshot?.messages.find((m) => m.id === id);
+            const next = snapshot.messages.find((m) => m.id === id);
+            return (
+              old && next && JSON.stringify(old.outputBody) === JSON.stringify(next.outputBody)
+            );
+          }),
+        )
+      : this.value.fullOutputs;
+    this.publish({
+      snapshot,
+      ...(options.domains ? { domains: options.domains } : {}),
+      ...(this.value.errorSource === 'snapshot' && !snapshotStale && !this.activationFailure
+        ? { error: undefined }
+        : {}),
+      ...(reconciliationError
+        ? {
+            error: `会话执行状态核对失败：${reconciliationError}；已保留可读历史。`,
+            errorSource: 'snapshot' as const,
+          }
+        : {}),
+      planning: restoreDraft
+        ? (this.planningDrafts.get(
+            this.planningKey({
+              storeId: this.port.storeId,
+              workspaceId: snapshot.view.session.workspaceId,
+              sessionId,
+            }),
+          )?.enabled ?? false)
+        : this.value.planning,
+      attachments:
+        !options.domain || options.domain === 'admission'
+          ? new Map(
+              [...this.value.attachments].filter(([key]) => {
+                const [store, source, presentation, id, revision] = JSON.parse(key);
+                const current = snapshot.interactions.find(
+                  (item) =>
+                    item.originStoreId === store &&
+                    item.sessionId === source &&
+                    item.presentationSessionId === presentation &&
+                    item.id === id,
+                );
+                if (!current) return presentation !== snapshot.view.session.id;
+                if (current.revision !== revision || current.state !== 'pending') return false;
+                try {
+                  return this.attachmentProofs.get(key) === interactionAttachment(current)?.key;
+                } catch {
+                  return false;
+                }
+              }),
+            )
+          : this.value.attachments,
+      draft,
+      fullOutputs,
+      loadedOutputBodies: historyChanged
+        ? new Map([...this.value.loadedOutputBodies].filter(([id]) => fullOutputs.has(id)))
+        : this.value.loadedOutputBodies,
+      loading: false,
+      snapshotStale: snapshotStale || this.activationFailure?.sessionId === this.value.sessionId,
+      context:
+        this.value.context?.selection.id === snapshot.view.session.contextSelectionId
+          ? this.value.context
+          : undefined,
+    });
   }
   private fileRecoveryRead?: AbortController;
   async openFileRecovery() {
@@ -1947,11 +2275,7 @@ export class TuiController {
         result.error === 'input_target_stopped'
       ) {
         this.recordInputRejection(request.commandId, scope.sessionId, result.error);
-        if (!this.disposed && this.value.sessionId === scope.sessionId)
-          await this.select(scope.sessionId, {
-            preserveReconnectionReview: true,
-            reconcile: false,
-          });
+        if (!this.disposed && this.value.sessionId === scope.sessionId) await this.refresh();
         throw Object.assign(Error(result.error), { notSubmitted: true });
       }
       throw Error('caller_outcome_unknown');
@@ -4867,8 +5191,7 @@ export class TuiController {
       !permissionChangeAffectsSession(change, this.value.snapshot?.view, this.port.storeId)
     )
       return;
-    if (!this.value.snapshot || !this.port.permissions || this.disposed || this.value.snapshotStale)
-      return;
+    if (!this.value.snapshot || !this.port.permissions || this.disposed) return;
     this.permissionRefreshRead?.abort();
     const read = this.reading();
     this.permissionRefreshRead = read;
@@ -5822,6 +6145,7 @@ export class TuiController {
     if (
       !snapshot ||
       this.busy ||
+      this.value.stale ||
       this.hasUnknownAnswer() ||
       this.value.intent?.phase === 'unknown' ||
       !answer ||

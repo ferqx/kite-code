@@ -2190,6 +2190,9 @@ function TuiSessionView({
     return withHistory(<TuiSkillsPanel key={state.sessionId} controller={controller} />);
   if (state.panel === 'help') return withHistory(<TuiHelpPanel controller={controller} />);
   const running = activity(state.snapshot);
+  const executionReadable =
+    !state.observationError &&
+    (state.domains ? state.domains.execution?.phase !== 'unavailable' : !state.snapshotStale);
   const focused = !!card || !!state.panel || chooser || cardChooser;
   const childOwnsActivity =
     !!state.snapshot &&
@@ -2208,7 +2211,7 @@ function TuiSessionView({
       run.sessionId === state.sessionId,
   );
   const activeLine =
-    !focused && !state.stale
+    !focused && executionReadable
       ? hasPendingRootCancellation(state, controller.port.storeId) &&
         !currentCancelling &&
         running !== 'Cancelling'
@@ -2256,8 +2259,7 @@ function TuiSessionView({
         </Text>
       )}
       {state.snapshot &&
-        !state.stale &&
-        !state.snapshotStale &&
+        executionReadable &&
         state.snapshot.storeId === controller.port.storeId &&
         state.snapshot.view.session.id === state.sessionId &&
         !state.snapshot.view.runs.some((run) => run.isActive) &&

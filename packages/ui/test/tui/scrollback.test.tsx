@@ -161,7 +161,7 @@ test('finite Plan controls reserve Host rows and retain every choice, descriptio
         'Approve this exact plan; tool permissions stay unchanged',
         '2. Continue planning with feedback',
         '3. Deny this plan',
-        'Keep implementation blocked without cancelling this task',
+        'Reject this plan and stop the current task',
         'Provide feedback to revise the plan',
         'none (Enter has no answer)',
       ])
@@ -616,7 +616,10 @@ test('interactive Ink emits completed bodies once across status/edit/append and 
   }
 });
 
-test('runless lifecycle Job retains its exact original position on append and a real result revision still rebuilds history', async () => {
+test.each([
+  false,
+  true,
+])('runless lifecycle Job with nested parent %s retains its exact original position on append and a real result revision still rebuilds history', async (nested) => {
   const original = Array.from({ length: 45 }, (_, i) => `SEQUENCE_HISTORY_${i}`).join('\n\n');
   let current = snapshot('a', [original]);
   const job: SessionView['executions'][number] = {
@@ -629,14 +632,25 @@ test('runless lifecycle Job retains its exact original position on append and a 
     definitionVersion: '1',
     rootWorkCommandId: 'lifecycle-command',
     rootWorkSeq: '2',
-    parentExecutionId: null,
+    parentExecutionId: nested ? 'fallback-parent' : null,
     childSessionId: null,
     status: 'succeeded',
     result: { content: 'ORIGINAL_LIFECYCLE_RESULT' },
     resultRevision: '1',
     cancelRequestedAt: null,
   };
-  current.view.executions = [job];
+  const parents = nested
+    ? [
+        {
+          ...job,
+          id: 'fallback-parent',
+          parentExecutionId: null,
+          definitionId: 'builtin.session-title/fallback',
+          result: { content: 'FALLBACK_PARENT' },
+        },
+      ]
+    : [];
+  current.view.executions = [...parents, job];
   const forbidden = async () => {
     throw Error('history observation never submits');
   };
@@ -701,6 +715,7 @@ test('runless lifecycle Job retains its exact original position on append and a 
       view: {
         ...current.view,
         executions: [
+          ...parents,
           {
             ...job,
             resultRevision: '2',

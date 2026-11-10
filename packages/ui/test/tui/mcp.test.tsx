@@ -409,6 +409,8 @@ test('stale observation, refreshed proof, unadmitted Server and absent workspace
   await f.controller.chooseMcp('refresh', true, 'user');
   expect(f.sent).toHaveLength(0);
   f.controller.observationReady('store');
+  expect(f.controller.state.snapshotStale).toBe(true);
+  await f.controller.refresh();
   await f.controller.openMcp();
   await f.controller.chooseMcp('refresh', true, 'user', old);
   expect(f.sent).toHaveLength(0);

@@ -606,7 +606,7 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 
 ## 选中与重连的后端状态核实
 
-[TuiController](src/tui/controller.ts) 的明确 `select` 默认先等待宿主可选 `reconcileSession` port，再读历史；普通刷新显式传 `reconcile:false`；同会话激活尚未完成时等待其核实与历史读取，不中止核实或重复写入。失败仍读历史并保留内部失败事实，普通会话在后台退避重读而不另加异常横幅或 Error 行，切换／取消后旧结果不发布，等待中的旧刷新也不能重新选中原会话。写入与 capability 核验归 [CLI Host](../../apps/cli/README.md)，纯 UI 不取得 authority。[选择器测试](test/tui/session-chooser.test.tsx)核顺序、跳过及失败阅读。桌面持久终态优先于 `executionUnconfirmed` 回退；后端与原恢复边界归[Core owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。
+[TuiController](src/tui/controller.ts) 的明确 `select` 默认先等待宿主可选 `reconcileSession` port，再读历史。普通刷新由 `refresh` 读取[事件影响的部分](src/tui/observation.ts)，等待在途激活并合并同范围的后续事件。执行状态与操作准入分别更新，只有当前执行与准入读数均新鲜时才恢复写操作。切换会话或断线会撤销旧读取资格，迟到结果不能接管当前会话。失败时保留可读历史并后台重读，写入与 capability 核验归 [CLI Host](../../apps/cli/README.md)。[选择器](test/tui/session-chooser.test.tsx)和[观察回归](test/tui/observation.test.tsx)覆盖激活、断线、迟到结果及读写顺序。桌面持久终态优先于 `executionUnconfirmed` 回退，后端恢复归[Core owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。
 
 TUI `/skills` 仅查看普通 Skill 知识目录；不再提供 Workflow 资格、激活按钮或动态 Skill 执行命令。刷新、详情和读取取消保留，MCP prompt 命令继续由独立目录提供。实现与键盘回归见 [Skills panel](src/tui/skills-panel.tsx) 和 [目录测试](test/tui/skills.test.tsx)。
 

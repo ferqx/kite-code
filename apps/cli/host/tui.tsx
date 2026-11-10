@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { type acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
-import { ClientError, type Interaction, type Message } from '@kite-ai/client';
+import { ClientError } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import {
   TuiController,
@@ -49,18 +49,18 @@ import { openMcpSourceApprovalJournal } from './mcp-source-approval-journal';
 import { openMcpSourceMutationJournal } from './mcp-source-mutation-journal';
 import { openRecoveryJournal } from './recovery-journal';
 import { connectSharedService } from './shared-service';
-import { createTuiDisplayReader, readTuiPendingInputs } from './tui-display';
+import { createTuiDisplayReader } from './tui-display';
 import { createTuiDraftPort } from './tui-draft-port';
 import { openTuiDraftFile } from './tui-drafts';
 import { createTuiExporter } from './tui-export';
+import { createTuiHistoryReader } from './tui-history';
 import { createTuiJobTailReader } from './tui-job-tails';
-import { readTuiLiveOutput } from './tui-live-output';
 import { createTuiMcpPort } from './tui-mcp';
 import { createTuiMcpAuthPort } from './tui-mcp-auth';
 import { prepareTuiObservationStart, refreshTuiObservation } from './tui-observation';
 import { createTuiOnboardingPort } from './tui-onboarding';
 import { openTuiPreferenceFile } from './tui-preferences';
-import { readTuiProgress } from './tui-progress';
+import { createTuiSessionReader } from './tui-session';
 import { waitForTuiProfileAccess } from './tui-startup-wait';
 import { createTuiToolLabelsReader } from './tui-tool-labels';
 import { createTuiWorkspaceObserver } from './tui-workspace-observer';
@@ -291,9 +291,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     quitRequested = false,
     finalizing = false;
   let ended = false,
-    newBusy = false,
-    refreshing = false,
-    refreshAgain = false;
+    newBusy = false;
   const endInput = () => {
     if (ended) return;
     ended = true;
@@ -418,6 +416,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
     });
     const readDisplay = createTuiDisplayReader(client, storeId);
+    const history = createTuiHistoryReader(client, storeId);
     const jobTails = createTuiJobTailReader(client, storeId);
     jobTailOwner = jobTails;
     const port: TuiPort = {
@@ -627,170 +626,22 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         )
           await originalClient.reconcileSessionState(sessionId, { signal });
       },
-      async readSession(sessionId, signal) {
-        const view = await client.getView(sessionId, { signal });
-        if (
-          view.storeId !== storeId ||
-          view.session.id !== sessionId ||
-          view.session.workspaceId !== workspaceId
-        )
-          throw new CLIHostError('workspace_identity_mismatch');
-        const messages: Message[] = [],
-          interactions: Interaction[] = [];
-        let afterSeq = '0';
-        for (;;) {
-          const page = await client.listMessages(sessionId, {
-            afterSeq,
-            upperSeq: view.session.nextSeq,
-            limit: 200,
-            signal,
-          });
-          for (const message of page) {
-            if (
-              message.sessionId !== sessionId ||
-              BigInt(message.seq) <= BigInt(afterSeq) ||
-              BigInt(message.seq) > BigInt(view.session.nextSeq)
-            )
-              throw new CLIHostError('history_identity_mismatch');
-            messages.push(message);
-            afterSeq = message.seq;
-          }
-          if (page.length < 200) break;
-        }
-        let afterId: string | undefined;
-        for (;;) {
-          const page = await client.listInteractions(
-            sessionId,
-            { storeId, limit: 100, ...(afterId ? { afterId } : {}) },
-            { signal },
-          );
-          interactions.push(...page.interactions);
-          if (!page.nextAfterId) break;
-          if (page.nextAfterId === afterId) throw new CLIHostError('interaction_cursor_invalid');
-          afterId = page.nextAfterId;
-        }
-        const active = view.runs.find((run) => run.isActive);
-        const activeCommand = active
-          ? await client.getCommand(active.originCommandId, { signal })
-          : undefined;
-        if (
-          activeCommand &&
-          (activeCommand.originStoreId !== storeId ||
-            activeCommand.sessionId !== sessionId ||
-            activeCommand.id !== active!.originCommandId)
-        )
-          throw new CLIHostError('active_command_identity_mismatch');
-        // Chrome uses public observed configuration. A failed optional read must not
-        // prevent the conversation or manufacture a configured model/permission.
-        const children = view.executions.filter(
-          (execution) =>
-            execution.kind === 'job' &&
-            execution.originStoreId === storeId &&
-            execution.sessionId === sessionId &&
-            execution.childSessionId !== null,
-        );
-        const [models, mode, pendingInputs, display, progress, live, tails, childViews, labels] =
-          await Promise.allSettled([
-            client.getModelSettings('user', { storeId, signal }),
-            client.getPermissionMode(sessionId, { storeId, signal }),
-            readTuiPendingInputs(client, storeId, sessionId, signal),
-            readDisplay(view, messages, signal),
-            readTuiProgress(client, view, storeId, signal),
-            readTuiLiveOutput(client, view, storeId, signal),
-            jobTails.read(view, signal),
-            Promise.allSettled(
-              children.map(async (carrier) => {
-                const child = await client.getView(carrier.childSessionId!, { signal });
-                if (
-                  child.storeId !== storeId ||
-                  child.session.id !== carrier.childSessionId ||
-                  child.session.parentSessionId !== sessionId ||
-                  child.session.rootSessionId !== view.session.rootSessionId ||
-                  child.session.workspaceId !== workspaceId
-                )
-                  throw new CLIHostError('child_view_identity_mismatch');
-                return { executionId: carrier.id, view: child };
-              }),
-            ),
-            toolLabelsOwner?.read(view, signal),
-          ]);
-        const modelFacts =
-          models.status === 'fulfilled' &&
-          models.value.storeId === storeId &&
-          models.value.workspaceId === undefined &&
-          models.value.scope === 'user'
-            ? models.value
-            : undefined;
-        const selectedModel = modelFacts?.models.find(
-          (model) => model.id === modelFacts.defaultModelId,
-        );
-        const permission =
-          mode.status === 'fulfilled' &&
-          mode.value.storeId === storeId &&
-          mode.value.sessionId === sessionId
-            ? mode.value.mode
-            : undefined;
-        return {
-          storeId,
-          connectionInstanceId: client.serverInfo!.instanceId,
-          ...(view.session.ownerInstanceId !== undefined &&
-          view.session.ownerGeneration !== undefined
-            ? {
-                activityOwner: {
-                  instanceId: view.session.ownerInstanceId,
-                  generation: view.session.ownerGeneration,
-                },
-              }
-            : {}),
-          view,
-          messages,
-          interactions,
-          ...(activeCommand ? { activeCommand } : {}),
-          ...(pendingInputs.status === 'fulfilled'
-            ? { pendingInputs: pendingInputs.value }
-            : { pendingInputsUnavailable: true }),
-          ...(display.status === 'fulfilled'
-            ? { executionTimings: display.value.executionTimings }
-            : {}),
-          ...(progress.status === 'fulfilled'
-            ? {
-                planProgress: progress.value.plan,
-                compactionPhase: progress.value.compactionPhase,
-              }
-            : {}),
-          ...(live.status === 'fulfilled' && live.value ? { liveModelOutput: live.value } : {}),
-          ...(tails.status === 'fulfilled' ? { jobTails: tails.value } : {}),
-          ...(labels.status === 'fulfilled' && labels.value ? { toolLabels: labels.value } : {}),
-          ...(childViews.status === 'fulfilled'
-            ? {
-                childViews: childViews.value.flatMap((result) =>
-                  result.status === 'fulfilled' ? [result.value] : [],
-                ),
-              }
-            : {}),
-          environment: {
+      ...createTuiSessionReader({
+        client,
+        storeId,
+        workspaceId,
+        history,
+        display: readDisplay,
+        jobTails,
+        labels: () => toolLabelsOwner,
+        get environment() {
+          return {
             workspacePath: initial.workspace.rootUri,
             ...(workspaceObserver.active ? { observer: 'workspace_missing' as const } : {}),
             homeDirectory: homedir(),
-            ...(selectedModel
-              ? {
-                  modelId: selectedModel.id,
-                  modelName: selectedModel.model,
-                  effort: selectedModel.reasoningEffort ?? undefined,
-                }
-              : {}),
-            ...(permission ? { permissionMode: permission } : {}),
-            ...(display.status === 'fulfilled'
-              ? {
-                  runtimeModel: display.value.runtimeModel,
-                  nextContext: display.value.nextContext,
-                  usage: display.value.usage,
-                  context: display.value.context,
-                }
-              : {}),
-          },
-        };
-      },
+          };
+        },
+      }),
       readModelOutput: (sessionId, executionId, signal) =>
         client.getModelOutput(sessionId, executionId, { signal }),
       readAttachment: async (card, signal) =>
@@ -895,26 +746,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         newBusy = false;
       }
     };
-    const refresh = async () => {
-      if (refreshing) {
-        refreshAgain = true;
-        return;
-      }
-      refreshing = true;
-      try {
-        do {
-          refreshAgain = false;
-          const target = controller!.state.sessionId;
-          if (target && !ended)
-            await controller!.select(target, {
-              preserveReconnectionReview: true,
-              reconcile: false,
-            });
-        } while (refreshAgain && !ended);
-      } finally {
-        refreshing = false;
-      }
-    };
+    const refresh = () => (ended ? Promise.resolve() : controller!.refresh());
     process.stdin.setRawMode(true);
     terminal = render(
       <TuiErrorBoundary
@@ -971,34 +803,43 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     void (async () => {
       let startAfter: { storeId: string; sequence: string } | undefined;
       let reconnectAttempt = 0;
+      let reconnect = false;
       while (!ended && !observer.signal.aborted) {
         try {
           let resetReason: string | undefined;
+          if (reconnect) {
+            const info = await client.verifyConnection({ signal: observer.signal });
+            if (info.dataAvailability !== 'available') throw new CLIHostError('data_unavailable');
+          }
+          reconnect = true;
           await client.observe({
             signal: observer.signal,
+            // Let the host retire stale execution and write targets before retrying.
+            reconnect: false,
             ...(startAfter &&
             (!client.lastAppliedCursor ||
               BigInt(client.lastAppliedCursor.sequence) < BigInt(startAfter.sequence))
               ? { startAfter }
               : {}),
-            onChange: async (change) => {
-              await controller!.refreshPermissions(change);
+            onChange: (change) => {
+              controller!.changed(change);
               if (
-                change.sessionId === controller!.state.sessionId ||
-                controller!.state.snapshot?.childViews?.some(
-                  (child) => child.view.session.id === change.sessionId,
-                )
+                change.type === 'session.renamed' ||
+                change.type === 'session.created' ||
+                change.type === 'session.deleted'
               )
-                await refresh();
+                void controller!.list();
             },
             onReady: async (ready) => {
               if (!ended && !observer.signal.aborted) {
                 reconnectAttempt = 0;
-                await refreshTuiObservation(controller!, ready.storeId);
+                history.reset();
+                void refreshTuiObservation(controller!, ready.storeId);
               }
             },
             onReset: async (reason) => {
               resetReason = reason;
+              history.reset();
               controller!.observationUnavailable(reason);
               if (reason === 'store_changed') {
                 return;
@@ -1027,20 +868,26 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           }
           // Reset closes the read stream. Reopen one observer using its read baseline until actual callbacks ACK it.
           // Snapshot reads do not advance lastAppliedCursor and no business intent is resubmitted.
-          if (!resetReason) {
+          if (!resetReason && !ended && !observer.signal.aborted) {
+            history.reset();
             controller!.observationUnavailable('network');
             void refresh();
           }
         } catch (error: unknown) {
-          if (!ended) {
-            controller!.observationUnavailable(
+          if (!ended && !observer.signal.aborted) {
+            history.reset();
+            const code =
               error !== null &&
-                typeof error === 'object' &&
-                'code' in error &&
-                typeof error.code === 'string'
+              typeof error === 'object' &&
+              'code' in error &&
+              typeof error.code === 'string'
                 ? error.code
-                : 'network',
-            );
+                : 'network';
+            if (code === 'store_identity_mismatch') {
+              controller!.observationUnavailable('store_changed');
+              break;
+            }
+            controller!.observationUnavailable(code);
             void refresh();
           }
         }

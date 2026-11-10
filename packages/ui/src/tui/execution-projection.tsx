@@ -247,12 +247,35 @@ export function inkStandaloneJobAnchor(
     snapshot.view.session.rootSessionId !== snapshot.view.session.id ||
     execution.kind !== 'job' ||
     execution.runId !== null ||
-    execution.parentExecutionId !== null ||
     execution.childSessionId !== null ||
     !execution.rootWorkCommandId ||
     !decimal64(execution.rootWorkSeq)
   )
     return undefined;
+  // Detached lifecycle Jobs may be owned by another runless Job (including a
+  // lifecycle Action's public carrier). Every ancestor must prove the same
+  // immutable work; ordinary Shell/child/Run parents keep their own placement.
+  let ancestor = execution;
+  const seen = new Set([execution.id]);
+  while (ancestor.parentExecutionId !== null) {
+    const parents = snapshot.view.executions.filter(
+      (item) => item.id === ancestor.parentExecutionId,
+    );
+    const parent = parents.length === 1 ? parents[0] : undefined;
+    if (
+      !parent ||
+      seen.has(parent.id) ||
+      !inkExecutionScope(parent, snapshot) ||
+      parent.kind !== 'job' ||
+      parent.runId !== null ||
+      parent.childSessionId !== null ||
+      parent.rootWorkCommandId !== execution.rootWorkCommandId ||
+      parent.rootWorkSeq !== execution.rootWorkSeq
+    )
+      return undefined;
+    seen.add(parent.id);
+    ancestor = parent;
+  }
   return messages.find(
     (message) =>
       !message.originMessage &&

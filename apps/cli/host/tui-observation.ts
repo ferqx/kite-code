@@ -22,12 +22,9 @@ export async function prepareTuiObservationStart(
 
 /** Reconnection refreshes observations; only explicit selection owns reconciliation. */
 export async function refreshTuiObservation(
-  controller: Pick<TuiController, 'observationReady' | 'refreshPermissions' | 'state' | 'select'>,
+  controller: Pick<TuiController, 'observationReady' | 'refreshPermissions' | 'refresh'>,
   storeId: string,
 ) {
   controller.observationReady(storeId);
-  await controller.refreshPermissions();
-  const target = controller.state.sessionId;
-  if (target)
-    await controller.select(target, { preserveReconnectionReview: true, reconcile: false });
+  await Promise.all([controller.refresh(), controller.refreshPermissions()]);
 }

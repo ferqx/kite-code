@@ -80,6 +80,8 @@ export function createTuiWorkspaceObserver(
     'getModelOutput',
     'listExecutionOutput',
     'listMessages',
+    'listMessageChanges',
+    'verifyConnection',
     'listBackgroundExecutions',
     'listAllBackgroundExecutions',
     'listWorkspaceDirectory',

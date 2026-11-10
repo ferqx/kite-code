@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { AgentClient } from '@kite-ai/client';
+import type { AgentClient, Message, SessionView } from '@kite-ai/client';
+import { createTuiHistoryReader } from '../host/tui-history';
 import { createTuiWorkspaceObserver } from '../host/tui-workspace-observer';
 
 async function fixture() {
@@ -23,6 +24,7 @@ async function fixture() {
   const settings = { storeId: 'store', scope: 'user', readSet: {}, errors: [] as string[] };
   const source = {
     getView: async () => view,
+    verifyConnection: async () => ({ storeId: expected.storeId }),
     getWorkspace: async () => ({ id: expected.workspaceId, rootUri: expected.rootUri }),
     getModelSettings: async () => settings,
     getCommand: async () => ({ id: 'original-command' }),
@@ -53,6 +55,7 @@ test('only missing saved root admits observer; original reads survive while all 
   try {
     expect(await f.observer.read('workspace')).toBe(true);
     expect(f.observer.active).toBe(true);
+    expect(await f.observer.client.verifyConnection()).toMatchObject({ storeId: 'store' });
     expect((await f.observer.client.getCommand('original-command')).id).toBe('original-command');
     expect(await Reflect.apply(f.observer.client.queryExtension, f.observer.client, [])).toEqual({
       availability: 'unavailable',
@@ -77,6 +80,44 @@ test('only missing saved root admits observer; original reads survive while all 
     await expect(
       Reflect.apply(f.observer.client.startRun, f.observer.client, []),
     ).rejects.toMatchObject({ code: 'workspace_observer_readonly' });
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('a missing workspace keeps reading same-sequence history updates through the read-only client', async () => {
+  const f = await fixture();
+  try {
+    const view = {
+      ...f.view,
+      snapshotCursor: '1',
+      session: { ...f.view.session, nextSeq: '1' },
+    } as SessionView;
+    const saved = {
+      id: 'original',
+      sessionId: 'session',
+      seq: '1',
+      content: 'first part',
+    } as Message;
+    const updated = { ...saved, content: 'first part and continuation' };
+    Object.assign(f.source, {
+      serverInfo: { capabilities: ['message_changes'] },
+      listMessages: async () => [saved],
+      listMessageChanges: async () => ({
+        nextCursor: '2',
+        highWaterSeq: '1',
+        messages: [updated],
+        removedIds: [],
+        nextAfterSeq: null,
+      }),
+    });
+    expect(await f.observer.read('workspace')).toBe(true);
+    const history = createTuiHistoryReader(f.observer.client, f.expected.storeId);
+    const signal = new AbortController().signal;
+    expect(await history.read(view, signal)).toEqual([saved]);
+    expect(await history.read({ ...view, snapshotCursor: '2' }, signal)).toEqual([updated]);
+    expect(f.observer.active).toBe(true);
+    expect(f.effects).toEqual([]);
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

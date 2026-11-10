@@ -161,6 +161,8 @@ test('models stale observation and obsolete panel observations cannot mutate; la
   await f.controller.chooseModel({ kind: 'default', modelId: 'two' });
   expect(f.sent).toHaveLength(0);
   f.controller.observationReady('store');
+  expect(f.controller.state.snapshotStale).toBe(true);
+  await f.controller.refresh();
   await f.controller.openModels();
   await f.controller.chooseModel({ kind: 'default', modelId: 'two' }, original);
   expect(f.sent).toHaveLength(0);

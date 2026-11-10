@@ -209,6 +209,33 @@ test('runless root Jobs use the same Session sequence without anchoring foreign,
   expect(inkStandaloneJobAnchor(job, descendant, [later])).toBeUndefined();
 });
 
+test('nested runless Jobs retain only a complete same-work parent chain and reject foreign, missing or cyclic parents', () => {
+  const parent = execution('parent-job', { kind: 'job', runId: null, rootWorkSeq: '2' });
+  const job = execution('metadata-job', {
+    kind: 'job',
+    runId: null,
+    rootWorkSeq: '2',
+    parentExecutionId: parent.id,
+  });
+  const later = message('later', '3');
+  const current = snapshot([parent, job], [later]);
+  expect(inkStandaloneJobAnchor(job, current, [later])).toBe('later');
+  for (const invalid of [
+    { originStoreId: 'foreign' },
+    { sessionId: 'foreign' },
+    { runId: 'ordinary-run' },
+    { kind: 'tool' as const },
+    { rootWorkSeq: '1' },
+    { rootWorkCommandId: 'other' },
+    { childSessionId: 'child' },
+    { parentExecutionId: job.id },
+  ])
+    expect(
+      inkStandaloneJobAnchor(job, snapshot([{ ...parent, ...invalid }, job]), [later]),
+    ).toBeUndefined();
+  expect(inkStandaloneJobAnchor(job, snapshot([job]), [later])).toBeUndefined();
+});
+
 test('accepted spawn stays in live history until the exact carrier settles without changing either execution status', () => {
   const spawn = execution('spawn', {
     definitionId: 'builtin.task/task.spawn',

@@ -133,7 +133,7 @@ Run 中的真实认证需要调用正式普通 Login Action，父 Tool 与 neste
 
 controller按原scope、selected ID、Abort和generation隔离读取，热submit迟到只更新原Map，不覆盖后选ID或后来Session。同Session原ID列表在空、失败、removed目录仍可进入；只选择零GET，明确Check才lookup。冷记录保持unknown；事实匹配原Store/S/Command/inputDigest及closed protocol后才显示ready/failed，旧停止、原ready代次和当前live/currentGeneration独立，合法当前代次可以高于原ready代次。
 
-实际CLI事件刷新用 `select(sessionId, { preserveReconnectionReview: true })`，仅健康的同Session历史刷新保留准确原Review对象，不重观察或提交。显式选择、Session/Workspace变化、observation unavailable和失败历史快照仍使旧Review失效；失效时Abort既有在途Review/原查回Reader，迟到回复即使忽略Abort也不发布旧确认；随后恢复ready不复活它。健康后台刷新保留在途读取状态。独立Confirm继续核当前carrier及Host的完整fresh target/source/read-set，Scope关闭只释放Reader。[回归](../../test/tui/mcp-reconnection.test.tsx)实际27项165断言；当前全TUI24文件234项1968断言，均限对应测试范围。
+实际 CLI 事件交给 `changed` 注册并按受影响的范围刷新，健康的同会话后台刷新保留原 Review。显式切换会话、工作区变化或观察断开会取消旧 Review 和在途读取，恢复 ready 后须重新核实。写操作仍须有当前执行和操作准入读数，独立 Confirm 继续核当前 carrier 及 Host 的准确 target、source 与 read-set。[回归](../../test/tui/mcp-reconnection.test.tsx)覆盖同会话刷新和重连边界。
 
 未知原申请阻同Store+S+Server冲突，不淘汰128条或换key绕过。Esc/Ctrl+C 关闭重连子面板后返回父 MCP；父面板 Esc 只返回 Main，Ctrl+C 则请求原整轮取消；关闭子面板后待决卡继续，完成普通回答前不要求New Run composer出现。physical Workspace移除后父面板标题为unavailable，原结果读取仍可用。Scope关闭不取消R/Run/Job或原审批，固定文案沿presentation三locale，metadata和原身份保持。
 
