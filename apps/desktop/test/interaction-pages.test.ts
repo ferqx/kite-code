@@ -133,6 +133,93 @@ test('event refresh re-reads the current later window with fresh revision; expli
   expect(f.cancels()).toBe(0);
 });
 
+test('admission invalidation preserves the page position but revokes old answers and respects scope changes', async () => {
+  const f = fixture(async () => ({ interactions: [card('b')], nextAfterId: null }));
+  try {
+    await f.controller.selectSession('s');
+    await f.controller.nextInteractionPage(1, 'a');
+    const old = f.controller.snapshot!.interactions[0]!;
+    f.controller.invalidateSelection();
+    f.controller.invalidateSelection();
+    expect(f.controller.snapshot).toBeUndefined();
+    await expect(
+      f.controller.answerInteraction(old, {
+        kind: 'approval',
+        decision: 'approve',
+        optionId: 'once',
+      }),
+    ).rejects.toThrow('interaction_scope_mismatch');
+    const refreshed = await f.controller.refreshSession('s');
+    expect(refreshed!.interactions.map((value) => value.id)).toEqual(['b']);
+    f.controller.invalidateSelection();
+    f.client.getView = async (id) => ({
+      ...view(id),
+      session: { ...view(id).session, contextSelectionId: 'different' },
+    });
+    expect((await f.controller.refreshSession('s'))!.interactions.map((value) => value.id)).toEqual(
+      ['a'],
+    );
+    await f.controller.nextInteractionPage(f.controller.viewGeneration, 'a');
+    f.controller.invalidateSelection();
+    await f.controller.selectSession('other');
+    expect(f.controller.snapshot!.interactions).toEqual([]);
+    await f.controller.selectSession('s');
+    expect(f.controller.snapshot!.interactions.map((value) => value.id)).toEqual(['a']);
+    expect(f.posts()).toBe(0);
+    expect(f.cancels()).toBe(0);
+  } finally {
+    f.controller.disposeNetwork();
+  }
+});
+
+test.each([
+  'run.updated',
+  'execution.updated',
+  'interaction.updated',
+])('Native %s retains the later interaction page after invalidating admission', async (type) => {
+  const f = fixture(async () => ({ interactions: [card('b')], nextAfterId: null }));
+  let observer!: Parameters<AgentClient['observe']>[0];
+  f.client.connect = async () => f.client.serverInfo!;
+  f.client.observe = async (options) => {
+    observer = options;
+    await new Promise<void>((resolve) =>
+      options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  const caller = new NativeCaller(f.client, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    const first = (await caller.invoke({
+      method: 'select',
+      generation: 1,
+      sessionId: 's',
+    })) as NativeState;
+    await caller.invoke({
+      method: 'interactions.next',
+      generation: 1,
+      viewGeneration: first.selection!.viewGeneration,
+      afterId: 'a',
+    });
+    const previous = caller.state().selection!.viewGeneration;
+    await observer.onChange({ ...sessionChange('s'), type });
+    for (
+      let i = 0;
+      i < 100 &&
+      (caller.state().selection!.viewGeneration === previous ||
+        caller.state().selection!.permissionUnavailable);
+      i++
+    )
+      await Bun.sleep(5);
+    expect(caller.state().selection!.viewGeneration).toBeGreaterThan(previous);
+    expect(caller.state().selection!.permissionUnavailable).toBe(false);
+    expect(caller.state().selection!.interactions.map((value) => value.id)).toEqual(['b']);
+    expect(f.posts()).toBe(0);
+    expect(f.cancels()).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
 test('Native Main automatic change refresh re-reads the visible later page rather than sending it back to the first page', async () => {
   let trigger!: () => void,
     revision = '0',

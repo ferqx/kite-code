@@ -156,7 +156,6 @@ export class NativeCaller {
   private historyEpoch = 0;
   private historyHead?: { sessionId: string; selection: number; cursor: string };
   private observationUnavailable = false;
-  private resetHistory: { selection: number; sessionId: string; resolve: () => void } | undefined;
   private messageRead:
     | {
         readId: string;
@@ -750,8 +749,6 @@ export class NativeCaller {
     this.toolMessages.release();
     this.imageReads.release();
     this.interactionHistory.release();
-    this.resetHistory?.resolve();
-    this.resetHistory = undefined;
     this.messageRead?.abort.abort();
     this.messageRead = undefined;
     this.outputReads.release();
@@ -1172,15 +1169,9 @@ export class NativeCaller {
                   if (this.refreshing === reading) this.refreshing = undefined;
                 }
               }
-              if (resynchronize && this.selected && !this.permissionUnavailable) {
-                const sessionId = this.selected,
-                  selection = this.selection;
-                const complete = new Promise<void>((resolve) => {
-                  this.resetHistory = { selection, sessionId, resolve };
-                });
-                this.changed();
-                await complete;
-              }
+              // History is a separately scoped renderer read. Hidden pages may
+              // never open it, and a failed read must not stall global changes.
+              // The new historyEpoch already retires the preceding baseline.
               resynchronize = false;
               // A ready-only stream at the reloaded baseline adds no new facts.
               if (!startAfter || ready.highWaterCursor !== startAfter.sequence) {
@@ -2630,16 +2621,6 @@ export class NativeCaller {
           for (const message of messages)
             this.observedMessages.set(message.id, structuredClone(message));
           for (const id of changesPage?.removedIds ?? []) this.observedMessages.delete(id);
-          if (
-            page.nextAfterSeq === null &&
-            !request.changes &&
-            this.resetHistory?.selection === selection &&
-            this.resetHistory.sessionId === request.sessionId &&
-            upperSeq === snapshot.view.session.nextSeq
-          ) {
-            this.resetHistory.resolve();
-            this.resetHistory = undefined;
-          }
           result = page;
           break;
         }

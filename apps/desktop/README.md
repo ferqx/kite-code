@@ -8,11 +8,11 @@
 
 2026-11-10，Windows x64／Bun1.4.4，本次Native开发范围的执行／准入拆分、重连、同Run恢复、首次创建和阅读保持已验。原全量159任务／234文件为131任务通过／28失败，1902pass／90fail／50skip，整体返回1，日志为`.cache/lifecycle-all-desktop-coverage.log`。30个失败文件的85个用例有HEAD同名失败；当前独有差异中的刷新、Root重建和迟到回执夹具已对齐准确激活／重连契约，前两完整文件共8项／133断言通过，定时任务整文件2pass／1个HEAD既有表单失败。Node日志取消恢复宿主复验通过，但该文件另一次原本通过的启动用例触发原30秒时限及迟到错误，未取得全文件资格；其夹具直接使用未改的journal／私库／Client，不调用NativeCaller，根会话已明确命名。构建、平台及既有恢复限制保留，不能据这些定向通过宣称全量或发行通过。
 
-[Controller](src/controller.ts)在 bounded View 返回并核完 Store／Session 后即发出只读执行观察；完整 Snapshot 仍等待权限、交互和准确活动 Command。两域复用同选择在途的 View GET，执行 reader 不等待 admission Promise。[Native caller](electron/native-caller.ts)分别合并执行目标 cursor 和准入后继；Run／Execution 目标或相关交互／权限变化立即撤销旧操作快照，ready 协调期间也关闭准入。自身已登记的 Workspace 准备事件保留原准确授权交接。执行事件直接唤醒 reader，不等待普通100ms刷新间隔；无关会话 cursor 不成为当前执行目标。
+[Controller](src/controller.ts)在 bounded View 返回并核完 Store／Session 后即发出只读执行观察；完整 Snapshot 仍等待权限、交互和准确活动 Command。两域复用同选择在途的 View GET，执行 reader 不等待 admission Promise。[Native caller](electron/native-caller.ts)分别合并执行目标 cursor 和准入后继；Run／Execution 目标或相关交互／权限变化立即撤销旧操作快照，ready 协调期间也关闭准入。只读交互分页位置与操作快照分开保存；撤销准入不把后页退回首页，重新读取仍核 Store／Session／Workspace／contextSelection，显式选择或 scope 改变从首页开始。自身已登记的 Workspace 准备事件保留原准确授权交接。执行事件直接唤醒 reader，不等待普通100ms刷新间隔；无关会话 cursor 不成为当前执行目标。
 
 [只读投影](src/native-bridge.ts)带 generation／Store／Session／Workspace／viewSelection／historyEpoch 和 observedCursor，独立表达 fresh／refreshing／unavailable，不携带权限或操作目标证明。[展示核验](src/native-execution-observation.ts)按完整 scope 选取，[Run 投影](src/native-transcript.ts)与[保留展示](src/native-transcript-display.ts)据此更新活动、终态、计时和同消息复制资格，正文／工具分组及阅读身份继续由原 reader 管理。更高 cursor 的同 Run 恢复可以重新显示活动事实；热态动画还需准确目录 owner 资格，读取失败不能冒充完成。发送、引导、回答与取消仍从完整新鲜准入快照取得原目标。
 
-Native 使用现有 SDK 的单次 `observe({reconnect:false})`，由 Main 原观察循环负责重连。传输断开即撤销执行／准入资格并建立新历史 epoch，持续失败不重复推进 epoch；重新打开流前用 `verifyConnection` 核同 Profile／Store／instance／build，普通 HTTP 成功不能单独恢复旧流资格。新 ready 后再协调所选会话、读取完整历史；不在 ready 前等待依赖准入的历史，也不把重新读取当作激活协调。普通窗口在连接实际不可用时显示“连接暂不可用，当前状态待核实。”，恢复核实后撤下；它沿原提示区展示真实失败，不开启测试诊断或提供操作重放。
+Native 使用现有 SDK 的单次 `observe({reconnect:false})`，由 Main 原观察循环负责重连。传输断开即撤销执行／准入资格并建立新历史 epoch，持续失败不重复推进 epoch；重新打开流前用 `verifyConnection` 核同 Profile／Store／instance／build，普通 HTTP 成功不能单独恢复旧流资格。新 ready 后再协调所选会话；历史沿新 epoch 由 Renderer 独立读取，不在 ready 回调等待历史 EOF，隐藏页面或历史读取失败不能阻塞全局 change/checkpoint 消费。重新读取不当作激活协调。普通窗口在连接实际不可用时显示“连接暂不可用，当前状态待核实。”，恢复核实后撤下；它沿原提示区展示真实失败，不开启测试诊断或提供操作重放。
 
 同 generation／Store／Session／selection／historyEpoch 的 ready 与显式选择共用一次原激活结果；ready 水位更高时只补新鲜读取，失败或低于目标不能开放准入。Renderer 的 attach 若已带恢复选择，沿该准确结果建立模型、草稿和历史 reader，不再提交第二次 select。首次输入的后续原回执查询也沿用已经选中的 activation；读取失败由同 nonce 的既有只读重试恢复，不为准备页另起激活。实际重载原会话的协调 POST 从2次降为1次、View GET从9次降为6次，业务 POST 为0；这是该次请求计数，未取得 Native 启动耗时分布。
 

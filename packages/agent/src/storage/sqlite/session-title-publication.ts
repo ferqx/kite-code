@@ -87,7 +87,7 @@ export function closeUndispatchedAutomaticTitle(db: SqliteOperations, claim: Cla
   if (titleObject(result.details).adapterAttempted !== false) return;
   closed(db, claim, 'title_not_dispatched');
 }
-/** Called only inside cold owner acquisition after the frontend holds the physical root lock.
+/** Called only during cold owner acquisition or explicit resume adoption with the physical root lock.
  * Closing publication does not invent an execution outcome or replay a provider call. */
 export function closeAbandonedAutomaticTitle(db: SqliteOperations, claim: Claim): void {
   if (claim.attempt.publication !== 'pending') return;

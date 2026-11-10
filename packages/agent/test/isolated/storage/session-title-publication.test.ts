@@ -391,6 +391,126 @@ test.each([
   }
 });
 
+test('explicit resume closes abandoned naming publication without changing fallback or execution facts', async () => {
+  const f = await fixture();
+  let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  let peer: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  try {
+    const originalJob = await f.store.getExecution(f.operation.executionId!);
+    const originalModel = await f.store.getExecution(f.model.execution.id);
+    const fallback = (await f.store.getSession('s'))!.title;
+    expect(fallback).toBe('原始输入内容');
+    await f.store.close();
+    cold = await openSqliteStore(f.profile);
+    const input = {
+      ...f.scope,
+      commandId: 'resume-title-source',
+      runId: f.run.id,
+      expectedOwnerGeneration: f.base.owner.generation,
+    };
+    const state = await cold.verifyRunResume(input);
+    const begun = await cold.beginRunResume({
+      ...input,
+      checkpoint: state.checkpoint!,
+      instanceId: 'resuming-host',
+    });
+    expect(
+      (await cold.getExtensionRecord({ ...automaticTitleRecord, sessionId: 's' }))?.value,
+    ).toMatchObject({ publication: 'pending' });
+    await refused(
+      cold.commitRunResume({
+        expectedStoreId: f.scope.expectedStoreId,
+        lease: begun.lease!,
+        checkpoint: state.checkpoint!,
+        expectedConfiguration: { modelId: 'changed' },
+      }),
+      'run_configuration_changed',
+    );
+    expect(
+      (await cold.getExtensionRecord({ ...automaticTitleRecord, sessionId: 's' }))?.value,
+    ).toMatchObject({ publication: 'pending' });
+    const resumed = await cold.commitRunResume({
+      expectedStoreId: f.scope.expectedStoreId,
+      lease: begun.lease!,
+      checkpoint: state.checkpoint!,
+      expectedConfiguration: { modelId: 'fixture' },
+    });
+    expect(
+      (await cold.getExtensionRecord({ ...automaticTitleRecord, sessionId: 's' }))?.value,
+    ).toMatchObject({ publication: 'closed', closedReason: 'title_supervisor_lost' });
+    expect(await cold.getExecution(f.operation.executionId!)).toEqual(originalJob);
+    expect(await cold.getExecution(f.model.execution.id)).toEqual(originalModel);
+    expect((await cold.getSession('s'))!.title).toBe(fallback);
+    await cold.finishRun({
+      expectedStoreId: f.scope.expectedStoreId,
+      owner: resumed.owner,
+      runId: f.run.id,
+      status: 'completed',
+      requirements: [],
+    });
+    expect(await cold.releaseSessionOwner(resumed.owner)).toBe(true);
+    // The original Store stays open: another Worker must acquire the real root lock now.
+    peer = await openSqliteStore(f.profile);
+    const nextOwner = await peer.acquireSessionOwner('s', 'next-host');
+    expect(nextOwner).not.toBeNull();
+    expect(await peer.releaseSessionOwner(nextOwner!)).toBe(true);
+  } finally {
+    await peer?.close();
+    await cold?.close();
+    await f.close();
+  }
+});
+
+test('failed resume adoption rolls back abandoned naming closure with its receipt', async () => {
+  const f = await fixture();
+  let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  try {
+    await f.store.close();
+    cold = await openSqliteStore(f.profile);
+    const faultDb = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));
+    try {
+      faultDb.run(`CREATE TRIGGER fail_title_resume BEFORE UPDATE OF status ON command
+        WHEN NEW.id='resume-title-source' AND NEW.status='applied'
+        BEGIN SELECT RAISE(ABORT, 'injected_resume_commit_failure'); END`);
+    } finally {
+      faultDb.close();
+    }
+    const input = {
+      ...f.scope,
+      commandId: 'resume-title-source',
+      runId: f.run.id,
+      expectedOwnerGeneration: f.base.owner.generation,
+    };
+    const state = await cold.verifyRunResume(input);
+    const begun = await cold.beginRunResume({
+      ...input,
+      checkpoint: state.checkpoint!,
+      instanceId: 'resuming-host',
+    });
+    const cursor = (await cold.getMetadata()).lastChangeCursor;
+    const failed = await cold
+      .commitRunResume({
+        expectedStoreId: f.scope.expectedStoreId,
+        lease: begun.lease!,
+        checkpoint: state.checkpoint!,
+        expectedConfiguration: { modelId: 'fixture' },
+      })
+      .catch((error) => error);
+    expect(failed).toBeInstanceOf(Error);
+    expect(String(failed)).toContain('injected_resume_commit_failure');
+    expect(
+      (await cold.getExtensionRecord({ ...automaticTitleRecord, sessionId: 's' }))?.value,
+    ).toMatchObject({ publication: 'pending' });
+    expect((await cold.getCommand(input.commandId))?.status).toBe('accepted');
+    expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect((await cold.getSession('s'))?.title).toBe('原始输入内容');
+    await cold.releaseRunResumeLease(begun.lease!);
+  } finally {
+    await cold?.close();
+    await f.close();
+  }
+});
+
 test('publish and close have one terminal CAS winner and a foreign Worker cannot borrow the owner', async () => {
   const f = await fixture(),
     peer = await openSqliteStore(f.profile);

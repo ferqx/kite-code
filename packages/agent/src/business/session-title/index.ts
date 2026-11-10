@@ -247,6 +247,8 @@ export function createSessionTitleExtension(options: {
             'session_title_model_failed',
             'session_title_response_invalid',
             'session_title_response_too_large',
+            'model_response_incomplete',
+            'model_event_after_finish',
           ].includes(error.code)
         )
           return await retained('title_generation_failed');

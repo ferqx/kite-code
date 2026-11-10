@@ -15,6 +15,7 @@ import { assertConfigurationReads } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
+import { closeAbandonedOwnerTitles } from './owner-dispatch';
 import { assertEffectFreeModel, assertHistoricalExecution } from './recovery-audit-validation';
 import { withReconciledFrontier } from './session-reconciliation';
 import { automaticTitleEffect } from './session-title-scope';
@@ -795,6 +796,10 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
       })
     )
       throw new AgentError('run_configuration_changed');
+    // The verified resume lease holds the physical root lock: its prior naming
+    // supervisor cannot still run. Close only the exact detached title lineage,
+    // atomically with adoption, without rewriting its execution or replaying it.
+    closeAbandonedOwnerTitles(db, lease.sessionId);
     const frontier = [
       ...s.executions,
       ...children.flatMap(

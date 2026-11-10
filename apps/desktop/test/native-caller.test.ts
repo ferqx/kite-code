@@ -1056,6 +1056,68 @@ test('initial ready reuses completed activation while a replacement epoch reconc
     await caller.close();
   }
 });
+test.each([
+  'hidden',
+  'failed',
+])('ordinary reconnect consumes changes without a %s history reader reaching EOF', async (history) => {
+  const connection = client();
+  connection.serverInfo!.capabilities.push('message_changes');
+  let disconnect!: () => void;
+  let observer!: Parameters<AgentClient['observe']>[0];
+  let observations = 0,
+    readyReturns = 0,
+    cursor = '1';
+  const original = connection.getView.bind(connection);
+  Object.assign(connection, {
+    getView: async (id: string) => ({ ...(await original(id)), snapshotCursor: cursor }),
+    listWorkspaceDirectory: async () => ({ snapshotCursor: cursor }),
+    listMessages: async () => {
+      throw new ClientError('history_unavailable');
+    },
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observer = options;
+      observations++;
+      await options.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: cursor });
+      readyReturns++;
+      await new Promise<void>((resolve) => {
+        disconnect = resolve;
+        options.signal!.addEventListener('abort', () => resolve(), { once: true });
+      });
+    },
+  });
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    const epoch = caller.state().historyEpoch!;
+    cursor = '2';
+    disconnect();
+    for (let i = 0; i < 150 && readyReturns < 2; i++) await Bun.sleep(5);
+    expect(observations).toBe(2);
+    expect(readyReturns).toBe(2);
+    expect(caller.state().historyEpoch).toBe(epoch + 1);
+    if (history === 'failed') {
+      await expect(
+        caller.invoke({
+          method: 'messages',
+          generation: 1,
+          sessionId: 's',
+          expectedStoreId: 'store',
+          readId: 'failed-history',
+          afterSeq: '0',
+        }),
+      ).rejects.toThrow('history_unavailable');
+    }
+    // This is delivered only after onReady returns, as in the SDK SSE reader.
+    await observer.onChange({ ...sessionChange('s', '3'), type: 'message.updated' });
+    expect(caller.state().selection!.historyTargetCursor).toBe('3');
+    expect(caller.state().backgroundUnavailable).toBe(false);
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
 test('Native selected message events wake durable changes directly without View refresh and reconnect revokes the baseline', async () => {
   const connection = client();
   connection.serverInfo!.capabilities.push('message_changes');

@@ -1673,14 +1673,22 @@ test('a proven title disposer failure retains its own cleanup without fencing la
   }
 });
 
-for (const mode of ['success', 'provider-failure', 'permission-denied'] as const)
+for (const mode of [
+  'success',
+  'provider-failure',
+  'permission-denied',
+  'missing-finish',
+  'event-after-finish',
+] as const)
   test(`a resolved title Model disposes its configuration exactly once after ${mode}`, async () => {
     let disposed = 0;
     const f = await fixture(
       async function* () {
         if (mode === 'provider-failure') throw Error('fixture title Provider failed');
         yield { type: 'text_delta', text: generated };
+        if (mode === 'missing-finish') return;
         yield finish;
+        if (mode === 'event-after-finish') yield { type: 'text_delta', text: 'late' };
       },
       '',
       undefined,

@@ -189,6 +189,26 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     expect(requests.some((request) => request.path.endsWith('/message-changes'))).toBe(true);
     reader!.dispose();
     reader = undefined;
+    // Settings / scheduled-task pages retain Main selection but close history.
+    // A second real transport loss must not wait for an absent renderer EOF.
+    const hiddenEpoch = caller!.state().historyEpoch!;
+    const hiddenReads = requests.filter((request) => request.path.endsWith('/messages')).length;
+    stream!.abort();
+    await until(() => caller!.state().historyEpoch! > hiddenEpoch);
+    await until(
+      () =>
+        !caller!.state().backgroundUnavailable && !caller!.state().selection?.permissionUnavailable,
+    );
+    finish.release();
+    await until(
+      () =>
+        caller!.state().executionObservation?.runs.some((run) => run.status === 'completed') ===
+        true,
+    );
+    expect(requests.filter((request) => request.path.endsWith('/messages'))).toHaveLength(
+      hiddenReads,
+    );
+    expect(caller!.state().executionObservation?.phase).toBe('fresh');
     await caller!.close();
     caller = undefined;
     await open(await connect());

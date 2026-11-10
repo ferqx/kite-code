@@ -181,7 +181,10 @@ export class DesktopController {
     promise: Promise<SessionView>;
   };
   private interactionReadGeneration: number | undefined;
-  private interactionPageStartId: string | undefined;
+  // Read position is not operation authority and survives admission invalidation.
+  private interactionPage:
+    | { afterId: string; scope: Pick<SessionView, 'storeId' | 'session'> }
+    | undefined;
   private readonly answers = new Map<
     string,
     { state: InteractionAnswerSubmission; promise?: Promise<Command> }
@@ -260,6 +263,7 @@ export class DesktopController {
     this.selected = { sessionId, queries: structuredClone(queries) };
     this.activatingSelection = this.selected;
     this.current = undefined;
+    this.interactionPage = undefined;
     this.permissionScope = undefined;
     this.selectionRead?.abort();
     const activation = new AbortController();
@@ -296,10 +300,7 @@ export class DesktopController {
       (original && original.sessionId !== sessionId)
     )
       return this.selectSession(sessionId);
-    const previous =
-      this.interactionPageStartId && original
-        ? { afterId: this.interactionPageStartId, scope: original.view }
-        : undefined;
+    const previous = this.interactionPage;
     this.cancelInteractionRead();
     this.clearAttachmentReads(true);
     const generation = ++this.generation;
@@ -373,7 +374,7 @@ export class DesktopController {
   private async readSelection(
     selection: { sessionId: string; queries: readonly QuerySelection[] },
     generation: number,
-    previous?: { afterId: string; scope: SessionView },
+    previous?: { afterId: string; scope: Pick<SessionView, 'storeId' | 'session'> },
     sourceView?: SessionView,
   ): Promise<DesktopSnapshot | undefined> {
     this.cancelInteractionRead();
@@ -503,7 +504,9 @@ export class DesktopController {
       check();
       this.remember(snapshot);
       this.current = snapshot;
-      this.interactionPageStartId = afterId;
+      this.interactionPage = afterId
+        ? { afterId, scope: { storeId: view.storeId, session: view.session } }
+        : undefined;
       const visibleAttachmentKeys = new Set<string>();
       for (const interaction of snapshot.interactions) {
         try {
@@ -624,7 +627,10 @@ export class DesktopController {
         throw new ClientError('interaction_page_budget_exceeded');
       this.clearAttachmentReads();
       this.current = next;
-      this.interactionPageStartId = afterId;
+      this.interactionPage = {
+        afterId,
+        scope: { storeId: scope.storeId, session: scope.session },
+      };
       this.remember(next);
       this.options.onSnapshot(next);
       return next;
