@@ -1,0 +1,21 @@
+{
+  "apiVersion": 1,
+  "name": "metadata-example",
+  "history": true,
+  "eventKinds": [
+    "command",
+    "run",
+    "model",
+    "tool",
+    "job",
+    "interaction",
+    "child",
+    "context",
+    "recovery",
+    "artifact",
+    "verification"
+  ],
+  "evidenceKinds": [],
+  "origins": [],
+  "settings": {}
+}

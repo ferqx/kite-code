@@ -1,6 +1,14 @@
 # 显式离线备份
 
-当前 Core Store 只接纳 `formatMajor=1` 与 reviewed `0001-baseline.sql` 的准确闭合 schema/checksum，审核回执与范围授权均使用新版合同。backup／inspect／restore 不转换或重标历史旧结构；遇到旧库或旧 Core 备份明确拒绝，原数据保持。下文 Desktop 私有 DB、manifest 和配置资产各自的格式语法不因此升级，也不提供旧 Run 的执行兼容。
+当前 Core Store 接纳 `formatMajor=1` 下明确列出的 `0001-baseline` 及 `0001-baseline`→`0002-trajectory-facts` 的准确闭合 schema/checksum，审核回执与范围授权均使用新版合同。backup／inspect／restore 不迁移或重标数据库；未受支持的历史结构或旧 Core 备份明确拒绝，原数据保持。下文 Desktop 私有 DB、manifest 和配置资产各自的格式语法不因此升级，也不提供旧 Run 的执行兼容。
+
+## Trajectory 原事实的维护
+
+完整数据库复制原样保留 `trajectory_fact_json`、事实中的原来源身份和 `trajectory_enabled_after_cursor`，包括未知新事实字节；维护不解释或回填历史。恢复仅沿原规则更换当前 Store、提高通知 floor 并结算活动行，不重写旧事实或格式边界。后续新事实由新 Store 的业务事务记录。
+
+历史 GC 仍按原完整 Session 组／Workspace 清理：原事件连同事实列一起删除，覆盖依据沿用同事务的现有历史收集标记。全局维护事件使用显式列清单，事实列为空；其他 Session 的保留事件不因通知 floor 提升而消失。Artifact 仍沿原 `blob_ref` 引用闭包保留，没有新增未采用引用或 head 可达性回收。
+
+[备份回归](../../test/isolated/maintenance/backup.test.ts)核 WAL、超过安全整数的边界及未知事实原字节；[恢复回归](../../test/isolated/maintenance/restore.test.ts)核新 Store 下旧事实／边界保持，GC 的实际历史与材料边界继续由[原回归](../../test/isolated/maintenance/gc.test.ts)覆盖。格式迁移和只读准入归[Store owner](../storage/README.md#trajectory-事实格式与一次性边界)。
 
 ## 会话工作文件与 manifest v20
 
@@ -46,7 +54,7 @@ backup、inspect、restore／reconcile 和 GC 在各自调用的资源 owner 内
 
 [backup.ts](backup.ts) 在原 profile-use 排他锁内，先由 [files.ts](files.ts) 将完整 Core DB 与实际存在的 WAL 配对复制到本次私有 scratch，只打开该副本，核原 schema/capture 后执行 `VACUUM INTO` 生成一致候选。原 DB/WAL 的完整字节、存在状态及 dev/ino/ctime/size/mode/uid/nlink 在配对采集、每次复制之后和 SQL 回调前后重新核对；缺失 WAL 不创建替代，原 SHM 不复制，任何变化均拒绝发布。SQL 不打开原库，因此关闭后没有副文件的原 Profile 不会因只读 SQLite 连接而新建 WAL/SHM。scratch 在后续候选验证和发布前删除，不进入备份树。
 
-候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配当前 baseline 的准确闭合 schema/checksum，通过 integrity/FK 检查；capture checksum 绑定这套 reviewed 结构，未知或历史迁移链拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
+候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配显式受支持结构的准确闭合 schema/checksum，通过 integrity/FK 检查；capture checksum 绑定实际 reviewed 结构，未知或未受支持历史迁移链拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
 
 仅本次创建的私有 staging 会在失败时删除。数据库、媒体、清单完成验证和 fsync 后才发布 `ready.json`，最后将 staging 改名到独立备份目录并同步父目录。检查备份重新核对数据库、媒体清单、每个媒体完整 hash 和目录内容，不能仅凭 ready 标记认定有效。文件要求私有、当前主体持有、非软链接、单一硬链接；媒体不可写。检查失败不会修改原 profile。
 

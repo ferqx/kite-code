@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
-import { act, useEffect, useState } from 'react';
+import { act, useCallback, useEffect, useState } from 'react';
 import { childAgentAppearance } from '../../src/desktop/ApprovalHeader';
 import type {
   SessionChildTabRequest,
@@ -1062,4 +1062,400 @@ test('the original tab header retains document panel associations and keyboard s
   expect(document.activeElement).toBe(tabs[1]!);
   expect(tabs[1]!.getAttribute('aria-selected')).toBe('true');
   expect(document.querySelectorAll('.session-tab-content')).toHaveLength(2);
+});
+
+test('trajectory is one ordinary bounded tab; hiding and switching release only its reader', async () => {
+  let model!: SessionTabsModel;
+  let mounts = 0,
+    releases = 0;
+  function TrajectoryReader() {
+    useEffect(() => {
+      mounts++;
+      return () => {
+        releases++;
+      };
+    }, []);
+    return <p data-trajectory-reader>Saved trajectory</p>;
+  }
+  function Harness({
+    scope = 'trajectory-owner',
+    visible = true,
+  }: {
+    scope?: string;
+    visible?: boolean;
+  }) {
+    model = useSessionTabs(scope);
+    return (
+      <SessionTabs
+        model={model}
+        visible={visible}
+        changes={null}
+        onClose={() => {}}
+        renderTrajectory={() => <TrajectoryReader />}
+      />
+    );
+  }
+  root = createRoot(document.body);
+  await act(() => root!.render(<Harness />));
+  await act(() => {
+    expect(model.openTrajectory()).toBe(true);
+    expect(model.openTrajectory()).toBe(true);
+  });
+  expect(model.tabs).toHaveLength(1);
+  expect(model.tabs[0]!.kind).toBe('trajectory');
+  expect(mounts).toBe(1);
+  expect(releases).toBe(0);
+  await act(() => {
+    for (let index = 0; index < 7; index++) model.addBrowser();
+  });
+  expect(model.tabs).toHaveLength(8);
+  expect(releases).toBe(1);
+  await act(() => expect(model.openTrajectory()).toBe(true));
+  expect(model.tabs).toHaveLength(8);
+  expect(mounts).toBe(2);
+  await act(() => root!.render(<Harness visible={false} />));
+  expect(releases).toBe(2);
+  await act(() => root!.render(<Harness />));
+  expect(mounts).toBe(3);
+  await act(() => model.closeTab('trajectory'));
+  await act(() => model.addBrowser());
+  expect(model.tabs).toHaveLength(8);
+  await act(() => expect(model.openTrajectory()).toBe(false));
+  await act(() => root!.render(<Harness scope="another-session" />));
+  expect(model.tabs).toEqual([]);
+});
+
+test('SessionPage opens trajectory from the new tab tools and selects one existing reader for explicit requests', async () => {
+  const renderPage = (requestId?: number) => (
+    <SessionPage
+      workspaces={[]}
+      selected="trajectory-session"
+      readingKey="trajectory-session"
+      sessionLabel="Trajectory session"
+      messages={[]}
+      connected
+      connectionLabel=""
+      loading={false}
+      actions={{}}
+      trajectoryTabRequest={requestId === undefined ? undefined : { requestId }}
+      renderTrajectory={() => <p data-page-trajectory>Original saved trace</p>}
+    />
+  );
+  root = createRoot(document.body);
+  await act(() => root!.render(renderPage()));
+  expect(document.querySelector('[data-page-trajectory]')).toBeNull();
+  expect(
+    [...document.querySelectorAll('button')].some((button) => button.textContent === '执行轨迹'),
+  ).toBe(false);
+  await click('标签页');
+  await click('执行轨迹');
+  expect(document.querySelector('[data-page-trajectory]')).not.toBeNull();
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  await act(() => root!.render(renderPage(1)));
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  await click('关闭标签页：执行轨迹');
+  expect(document.querySelector('[data-page-trajectory]')).toBeNull();
+  await act(() => root!.render(renderPage(2)));
+  expect(document.querySelector('[data-page-trajectory]')).not.toBeNull();
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+});
+
+test('trajectory details keep as-of materials and exact replay cursor strings', async () => {
+  const { trajectoryEventSchema, projectTrajectory } = await import('@kite-ai/trajectory');
+  const { TrajectoryPanel } = await import('../../src/desktop/trajectory/TrajectoryPanel');
+  const { initialTrajectoryViewState } = await import('../../src/desktop/trajectory/view-state');
+  const integrity = {
+    facts: 'complete' as const,
+    identityConfidence: 'verified_origin' as const,
+    reasons: [],
+  };
+  const descriptor = {
+    storeId: 'store',
+    sessionId: 'session',
+    upperCursor: '9007199254740993',
+    formatVersion: 1 as const,
+    historyCoverage: {
+      enabledAfterCursor: '0',
+      upperCursor: '9007199254740993',
+      status: 'retained' as const,
+      integrity,
+    },
+  };
+  const first = trajectoryEventSchema.parse({
+    schema: 'kite.trajectory',
+    schemaVersion: 1,
+    eventId: `te_${'1'.padStart(64, '0')}`,
+    sequence: '1',
+    origin: { storeId: 'store', cursor: '1' },
+    sessionId: 'session',
+    workspaceId: 'workspace',
+    executionId: 'model',
+    sourceEventType: 'execution.running',
+    sourceRecordRevision: '1',
+    kind: 'model',
+    phase: 'running',
+    recordedStatus: 'running',
+    occurredAt: null,
+    identityConfidence: 'verified_origin',
+    attributes: { usage: { inputTokens: '11', outputTokens: '2' } },
+    evidenceRefs: [
+      {
+        evidenceId: 'evidence-old',
+        contentVersion: 'old-head',
+        kind: 'model_output',
+        availability: 'partial',
+        mediaType: 'text/plain',
+      },
+      {
+        evidenceId: 'input-old',
+        contentVersion: 'old-request',
+        kind: 'model_input',
+        availability: 'available',
+        mediaType: 'application/json',
+      },
+    ],
+  });
+  const later = trajectoryEventSchema.parse({
+    ...first,
+    sequence: '3',
+    origin: { storeId: 'store', cursor: '3' },
+    eventId: `te_${'3'.padStart(64, '0')}`,
+    phase: 'completed',
+    recordedStatus: 'succeeded',
+    attributes: { usage: { inputTokens: '111', outputTokens: '20' } },
+    evidenceRefs: [
+      { ...first.evidenceRefs[0], evidenceId: 'evidence-later', contentVersion: 'latest-head' },
+      { ...first.evidenceRefs[1], evidenceId: 'input-later', contentVersion: 'latest-request' },
+    ],
+  });
+  const opened: { eventId: string; evidenceId: string; version: string }[] = [];
+  const batches: (typeof opened)[] = [];
+  const sought: string[] = [];
+  const exported: boolean[] = [];
+  let paused = 0,
+    evidenceClosed = 0;
+  let setView!: (cursor: string) => void;
+  function Harness({ futureBody = false }: { futureBody?: boolean }) {
+    const [state, setState] = useState({
+      ...initialTrajectoryViewState(descriptor),
+      cursor: '1',
+      listMode: 'all_events' as const,
+    });
+    const [materials, setMaterials] = useState<
+      NonNullable<Parameters<typeof TrajectoryPanel>[0]['materials']>
+    >([]);
+    const requestMaterials = useCallback<
+      NonNullable<Parameters<typeof TrajectoryPanel>[0]['onMaterialsChange']>
+    >((targets) => {
+      batches.push(
+        targets.map(({ event, reference }) => ({
+          eventId: event.eventId,
+          evidenceId: reference.evidenceId,
+          version: reference.contentVersion,
+        })),
+      );
+      for (const { event, reference } of targets)
+        opened.push({
+          eventId: event.eventId,
+          evidenceId: reference.evidenceId,
+          version: reference.contentVersion,
+        });
+      setMaterials(
+        targets.map(({ event, reference }) => ({
+          eventId: event.eventId,
+          evidenceId: reference.evidenceId,
+          contentVersion: reference.contentVersion,
+          kind: reference.kind,
+          status: 'available',
+          data:
+            reference.kind === 'model_input'
+              ? {
+                  request: { messages: [], tools: [] },
+                  metadata: {
+                    adapter: {
+                      availability: 'available',
+                      provider: {
+                        availability: 'available',
+                        family: 'openai-compatible',
+                        modelId: event.eventId === first.eventId ? 'old-model' : 'latest-model',
+                      },
+                      settings: { reasoningEffort: 'high' },
+                    },
+                  },
+                }
+              : {
+                  reasoning: event.eventId === first.eventId ? 'ORIGINAL PREFIX' : 'LATEST OUTPUT',
+                  content:
+                    event.eventId === first.eventId ? 'OLD PUBLIC OUTPUT' : 'LATEST PUBLIC OUTPUT',
+                  complete: event.phase === 'completed',
+                },
+        })),
+      );
+    }, []);
+    setView = (cursor) => setState((old) => ({ ...old, cursor }));
+    return (
+      <TrajectoryPanel
+        state={state}
+        onStateChange={(value) => setState({ ...value, listMode: 'all_events' })}
+        events={[]}
+        projection={projectTrajectory([first, later], {
+          atCursor: state.cursor,
+          completePrefix: true,
+        })}
+        integrity={integrity}
+        mode="history"
+        playing={false}
+        exhausted
+        newEventsAvailable
+        onSeek={(cursor) => sought.push(cursor)}
+        onStep={() => {}}
+        onPlay={() => {}}
+        onPause={() => {
+          paused++;
+        }}
+        onReturnToLatest={() => {}}
+        onExport={(includeEvidence) => exported.push(includeEvidence)}
+        onMaterialsChange={requestMaterials}
+        onEvidenceClose={() => {
+          evidenceClosed++;
+        }}
+        materials={
+          futureBody
+            ? [
+                {
+                  eventId: later.eventId,
+                  evidenceId: 'evidence-later',
+                  contentVersion: 'latest-head',
+                  status: 'available',
+                  data: { reasoning: 'FUTURE CONTENT', complete: true },
+                },
+              ]
+            : materials
+        }
+      />
+    );
+  }
+  root = createRoot(document.body);
+  await act(() => root!.render(<Harness />));
+  const thinkingId = 'execution:model:part:thinking';
+  expect(document.querySelectorAll(`[data-trajectory-row="${thinkingId}"]`)).toHaveLength(1);
+  expect(document.querySelector('[data-trajectory-row="execution:model"]')).toBeNull();
+  expect(document.querySelectorAll('.trajectory-event')).toHaveLength(0);
+  expect(document.querySelector('[role="tab"]')).toBeNull();
+  expect(document.querySelector('[aria-label="选中节点详情"]')).toBeNull();
+  expect(document.querySelector('[aria-label="轨迹证据"]')).toBeNull();
+  expect(document.body.textContent).not.toContain('已完成');
+  expect(document.body.textContent).toContain('当前阅读位置保持不变');
+  expect(opened).toEqual([]);
+  const model = document.querySelector<HTMLButtonElement>(
+    `[data-trajectory-row="${thinkingId}"] .trajectory-node-select`,
+  )!;
+  expect(model).not.toBeNull();
+  await act(() => model.click());
+  expect(document.querySelector('[role="tab"][data-state="active"]')?.textContent).toBe('思考');
+  expect([...document.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual([
+    '思考',
+  ]);
+  expect(document.body.textContent).not.toContain('生命周期');
+  const oldRead = { eventId: first.eventId, evidenceId: 'evidence-old', version: 'old-head' };
+  const latestRead = {
+    eventId: later.eventId,
+    evidenceId: 'evidence-later',
+    version: 'latest-head',
+  };
+  const oldInput = { eventId: first.eventId, evidenceId: 'input-old', version: 'old-request' };
+  const latestInput = {
+    eventId: later.eventId,
+    evidenceId: 'input-later',
+    version: 'latest-request',
+  };
+  expect(opened).toEqual([oldRead]);
+  expect(document.body.textContent).toContain('ORIGINAL PREFIX');
+  await act(() => root!.render(<Harness futureBody />));
+  expect(document.body.textContent).not.toContain('FUTURE CONTENT');
+  expect(opened).toEqual([oldRead]);
+  await act(() => root!.render(<Harness />));
+  const point = document.querySelector<HTMLButtonElement>('.trajectory-request-marker')!;
+  expect(point).not.toBeNull();
+  await act(() => point.click());
+  const request = () => document.querySelector<HTMLElement>('[aria-label="模型请求详情"]')!;
+  const requestTab = async (label: string) => {
+    const selected = [...request().querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (tab) => tab.textContent === label,
+    )!;
+    expect(selected).toBeDefined();
+    await act(() => {
+      selected.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      selected.click();
+    });
+  };
+  expect(document.querySelector('[aria-label="选中节点详情"]')).toBeNull();
+  expect([...request().querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual([
+    '概述',
+    '选项',
+    '用量',
+    '计时',
+  ]);
+  expect(batches.at(-1)).toEqual([oldInput, oldRead]);
+  expect(request().textContent).toContain('old-model');
+  expect(request().textContent).not.toContain('latest-model');
+  expect(request().textContent).not.toContain('ORIGINAL PREFIX');
+  await requestTab('选项');
+  expect(batches.at(-1)).toEqual([oldInput]);
+  expect(request().textContent).toContain('old-model');
+  const oldBodyReads = opened.length;
+  await requestTab('用量');
+  expect(request().querySelector('[aria-label="本次请求用量"]')?.textContent).toContain('11');
+  await requestTab('计时');
+  expect(opened).toHaveLength(oldBodyReads);
+  await act(() => setView('9007199254740993'));
+  const more = document.querySelector<HTMLButtonElement>('button[aria-label="更多轨迹操作"]')!;
+  await act(() =>
+    more.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0 })),
+  );
+  const replay = [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')].find((item) =>
+    item.textContent?.includes('显示回放控制'),
+  )!;
+  expect(replay).toBeDefined();
+  await act(() => replay.click());
+  const jump = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '跳转',
+  )!;
+  await act(() => jump.click());
+  expect(sought).toEqual(['9007199254740993']);
+  expect(document.querySelectorAll(`[data-trajectory-row="${thinkingId}"]`)).toHaveLength(1);
+  await requestTab('概述');
+  expect(batches.at(-1)).toEqual([latestInput, latestRead]);
+  expect(request().textContent).toContain('latest-model');
+  expect(request().textContent).toContain('已完成');
+  expect(request().textContent).not.toContain('old-model');
+  await requestTab('选项');
+  expect(batches.at(-1)).toEqual([latestInput]);
+  expect(request().textContent).toContain('latest-model');
+  const latestBodyReads = opened.length;
+  await requestTab('用量');
+  expect(request().querySelector('[aria-label="本次请求用量"]')?.textContent).toContain('111');
+  await requestTab('计时');
+  expect(opened).toHaveLength(latestBodyReads);
+  expect(exported).toEqual([]);
+  for (const [label, includeEvidence] of [
+    ['导出事件', false],
+    ['导出含证据', true],
+  ] as const) {
+    await act(() =>
+      more.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0 })),
+    );
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (element) => element.textContent === label,
+    )!;
+    expect(item).toBeDefined();
+    await act(() => item.click());
+    expect(exported.at(-1)).toBe(includeEvidence);
+  }
+  expect(exported).toEqual([false, true]);
+  expect(opened).toHaveLength(latestBodyReads);
+  await act(() => root!.unmount());
+  root = undefined;
+  expect(paused).toBeGreaterThan(0);
+  expect(evidenceClosed).toBeGreaterThan(0);
 });

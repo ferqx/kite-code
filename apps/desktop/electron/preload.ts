@@ -50,6 +50,11 @@ import {
   type NativeModelPreferenceReply,
   nativeModelPreferenceChannel,
 } from '../src/native-model-preference-bridge';
+import {
+  type NativeTrajectoryFileBridge,
+  type NativeTrajectoryFileReply,
+  nativeTrajectoryFileChannel,
+} from '../src/native-trajectory-file-bridge';
 
 type BrowserLayoutReply = NativeBrowserReply;
 let modalRoot: HTMLElement | undefined;
@@ -83,6 +88,18 @@ const bridge: NativeBridge &
   NativeWindowBridge &
   NativeWindowMenuBridge &
   NativeStartupBridge = {
+  trajectoryFiles: Object.freeze<NativeTrajectoryFileBridge>({
+    async request(input) {
+      const reply = (await ipcRenderer.invoke(
+        nativeTrajectoryFileChannel,
+        structuredClone(input),
+      )) as NativeTrajectoryFileReply;
+      if (!reply || typeof reply !== 'object' || typeof reply.ok !== 'boolean')
+        throw Error('invalid_native_reply');
+      if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+      return reply.value;
+    },
+  }),
   async browserRequest(input) {
     const reply = (await ipcRenderer.invoke(nativeBrowserChannel, input)) as NativeBrowserReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });

@@ -356,6 +356,7 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
   expect(actual.baseline.pathname.endsWith('/storage/migrations/0001-baseline.sql')).toBe(true);
   expect(actual.migrations.map((migration) => migration.pathname.split('/').at(-1))).toEqual([
     '0001-baseline.sql',
+    '0002-trajectory-facts.sql',
     '0002-recovery-audit.sql',
     '0003-session-reconciliation.sql',
     '0004-pending-input-order.sql',

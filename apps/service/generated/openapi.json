@@ -5,6 +5,760 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/v1/trace/extensions/{installationId}/delivery": {
+      "get": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceRemoteDeliveryStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/integrations/opentelemetry/install": {
+      "post": {
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceOtelInstallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions": {
+      "get": {
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallationList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/validate": {
+      "post": {
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceInstallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceBundleValidation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/install": {
+      "post": {
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceInstallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/configure": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceConfigureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/grant": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/enable": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/disable": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/revoke": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/uninstall": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/update": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceInstallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceInstallation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/history": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceHistoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceHistoryResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/partitions/{partitionId}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TracePartitionStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/partitions/{partitionId}/dead-letters": {
+      "get": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceDeadLetterList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/partitions/{partitionId}/retry": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/partitions/{partitionId}/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/partitions/{partitionId}/pause": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/partitions/{partitionId}/resume": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partitionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceAction"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/credentials/bind": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceCredentialBind"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceCredentialResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trace/extensions/{installationId}/credentials/revoke": {
+      "post": {
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceCredentialRevoke"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sessions/{id}/input-files": {
       "post": {
         "parameters": [
@@ -1712,6 +2466,186 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionLogPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/trajectory/open": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrajectoryScope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectorySnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/trajectory/events": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrajectoryReadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryPage"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/trajectory/evidence/open": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrajectoryEvidenceOpen"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/trajectory/evidence/read": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrajectoryEvidenceReadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryEvidenceChunk"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/trajectory/evidence/close": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrajectoryEvidenceCloseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrajectoryEvidenceClosed"
                 }
               }
             }
@@ -3688,6 +4622,1484 @@
   },
   "components": {
     "schemas": {
+      "TraceOtelInstallRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "sampleRate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["endpoint"],
+        "additionalProperties": false
+      },
+      "TraceRemoteDeliveryStatus": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "third_party"
+              },
+              "status": {
+                "type": "string",
+                "const": "not_applicable"
+              }
+            },
+            "required": ["kind", "status"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "opentelemetry"
+              },
+              "status": {
+                "type": "string",
+                "const": "not_started"
+              },
+              "inspection": {
+                "type": "null"
+              }
+            },
+            "required": ["kind", "status", "inspection"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "opentelemetry"
+              },
+              "status": {
+                "type": "string",
+                "const": "unavailable"
+              },
+              "inspection": {
+                "type": "null"
+              },
+              "code": {
+                "type": "string",
+                "const": "inspection_unavailable"
+              }
+            },
+            "required": ["kind", "status", "inspection", "code"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "opentelemetry"
+              },
+              "status": {
+                "type": "string",
+                "const": "available"
+              },
+              "inspection": {
+                "type": "object",
+                "properties": {
+                  "grant": {
+                    "type": "object",
+                    "properties": {
+                      "revision": {
+                        "type": "string",
+                        "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                      },
+                      "epoch": {
+                        "type": "string",
+                        "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                      },
+                      "active": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["revision", "epoch", "active"],
+                    "additionalProperties": false
+                  },
+                  "openSpans": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "acceptedEvents": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "unmappedEvents": {
+                    "type": "object",
+                    "properties": {
+                      "notSpan": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "identityUnavailable": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "timingUnavailable": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "incompletePrefix": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "notSpan",
+                      "identityUnavailable",
+                      "timingUnavailable",
+                      "incompletePrefix"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "outgoingTotal": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "outgoingStates": {
+                    "maxItems": 9,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "sending",
+                            "accepted",
+                            "retry_wait",
+                            "rejected",
+                            "partial_unknown",
+                            "unconfirmed",
+                            "sampled_out",
+                            "stopped"
+                          ]
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": ["status", "count"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "outgoing": {
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "taskId": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "sending",
+                            "accepted",
+                            "retry_wait",
+                            "rejected",
+                            "partial_unknown",
+                            "unconfirmed",
+                            "sampled_out",
+                            "stopped"
+                          ]
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "partial_success",
+                                    "response_unavailable",
+                                    "response_invalid",
+                                    "transport_unconfirmed",
+                                    "send_not_authorized",
+                                    "permission_revoked",
+                                    "task_cancelled",
+                                    "retry_exhausted",
+                                    "ECONNRESET",
+                                    "ECONNREFUSED",
+                                    "EPIPE",
+                                    "ETIMEDOUT",
+                                    "EAI_AGAIN",
+                                    "ENOTFOUND",
+                                    "ENETUNREACH",
+                                    "EHOSTUNREACH"
+                                  ]
+                                },
+                                {
+                                  "type": "string",
+                                  "pattern": "^http_[3-5][0-9]{2}$"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "attempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "rejectedCount": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "possibleDuplicate": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "const": 0
+                            },
+                            {
+                              "type": "number",
+                              "const": 1
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "taskId",
+                        "status",
+                        "code",
+                        "attempts",
+                        "rejectedCount",
+                        "possibleDuplicate"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "grant",
+                  "openSpans",
+                  "acceptedEvents",
+                  "unmappedEvents",
+                  "outgoingTotal",
+                  "outgoingStates",
+                  "outgoing"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": ["kind", "status", "inspection"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "TraceInstallRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "manifest": {
+            "type": "object",
+            "properties": {
+              "apiVersion": {
+                "type": "number",
+                "const": 1
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "history": {
+                "type": "boolean"
+              },
+              "eventKinds": {
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "run",
+                    "model",
+                    "tool",
+                    "job",
+                    "interaction",
+                    "child",
+                    "context",
+                    "recovery",
+                    "artifact",
+                    "verification",
+                    "message"
+                  ]
+                }
+              },
+              "evidenceKinds": {
+                "maxItems": 11,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "model_input",
+                    "model_output",
+                    "tool_input",
+                    "tool_result",
+                    "job_output",
+                    "artifact",
+                    "file_change",
+                    "verification",
+                    "interaction",
+                    "context",
+                    "message"
+                  ]
+                }
+              },
+              "origins": {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "settings": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean"]
+                }
+              }
+            },
+            "required": [
+              "apiVersion",
+              "name",
+              "history",
+              "eventKinds",
+              "evidenceKinds",
+              "origins",
+              "settings"
+            ],
+            "additionalProperties": false
+          },
+          "bundle": {
+            "type": "object",
+            "properties": {
+              "apiVersion": {
+                "type": "number",
+                "const": 1
+              },
+              "source": {
+                "type": "string",
+                "maxLength": 524288
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": ["apiVersion", "source", "sha256"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["manifest", "bundle"],
+        "additionalProperties": false
+      },
+      "TraceBundleValidation": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "const": true
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["valid", "digest"],
+        "additionalProperties": false
+      },
+      "TraceInstallResult": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "installationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["installationId"],
+        "additionalProperties": false
+      },
+      "TraceInstallationList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "installations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["third_party", "opentelemetry"]
+                },
+                "installationId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["installed", "configured", "enabled", "disabled", "uninstalled"]
+                }
+              },
+              "required": ["kind", "installationId", "name", "digest", "status"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["installations"],
+        "additionalProperties": false
+      },
+      "TraceInstallation": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["third_party", "opentelemetry"]
+          },
+          "installationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["installed", "configured", "enabled", "disabled", "uninstalled"]
+          },
+          "manifest": {
+            "type": "object",
+            "properties": {
+              "apiVersion": {
+                "type": "number",
+                "const": 1
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_.-]{0,63}$"
+              },
+              "history": {
+                "type": "boolean"
+              },
+              "eventKinds": {
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "run",
+                    "model",
+                    "tool",
+                    "job",
+                    "interaction",
+                    "child",
+                    "context",
+                    "recovery",
+                    "artifact",
+                    "verification",
+                    "message"
+                  ]
+                }
+              },
+              "evidenceKinds": {
+                "maxItems": 11,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "model_input",
+                    "model_output",
+                    "tool_input",
+                    "tool_result",
+                    "job_output",
+                    "artifact",
+                    "file_change",
+                    "verification",
+                    "interaction",
+                    "context",
+                    "message"
+                  ]
+                }
+              },
+              "origins": {
+                "maxItems": 8,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "settings": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean"]
+                }
+              }
+            },
+            "required": [
+              "apiVersion",
+              "name",
+              "history",
+              "eventKinds",
+              "evidenceKinds",
+              "origins",
+              "settings"
+            ],
+            "additionalProperties": false
+          },
+          "settings": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          },
+          "grant": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "string",
+                    "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                  },
+                  "epoch": {
+                    "type": "string",
+                    "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "grant": {
+                    "type": "object",
+                    "properties": {
+                      "scopes": {
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "storeId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            },
+                            "sessionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            },
+                            "runId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            },
+                            "executionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "required": ["storeId", "sessionId"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "eventKinds": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "command",
+                            "run",
+                            "model",
+                            "tool",
+                            "job",
+                            "interaction",
+                            "child",
+                            "context",
+                            "recovery",
+                            "artifact",
+                            "verification",
+                            "message"
+                          ]
+                        }
+                      },
+                      "metadata": {
+                        "maxItems": 3,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": ["timing", "usage", "output_checkpoint"]
+                        }
+                      },
+                      "evidenceKinds": {
+                        "maxItems": 11,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "model_input",
+                            "model_output",
+                            "tool_input",
+                            "tool_result",
+                            "job_output",
+                            "artifact",
+                            "file_change",
+                            "verification",
+                            "interaction",
+                            "context",
+                            "message"
+                          ]
+                        }
+                      },
+                      "origins": {
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2048
+                        }
+                      },
+                      "originalIdentity": {
+                        "type": "boolean"
+                      },
+                      "allowHistory": {
+                        "type": "boolean"
+                      },
+                      "credentialHandles": {
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "allowPrivateNetwork": {
+                        "type": "boolean"
+                      },
+                      "evidenceContent": {
+                        "type": "string",
+                        "enum": ["redacted", "full"]
+                      }
+                    },
+                    "required": [
+                      "scopes",
+                      "eventKinds",
+                      "metadata",
+                      "evidenceKinds",
+                      "origins",
+                      "originalIdentity",
+                      "allowHistory"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["revision", "epoch", "active", "grant"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "partitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "installationId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "epoch": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                },
+                "lane": {
+                  "type": "string",
+                  "enum": ["live", "history"]
+                },
+                "exportId": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "object",
+                  "properties": {
+                    "storeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "runId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "eventKinds": {
+                      "maxItems": 12,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "command",
+                          "run",
+                          "model",
+                          "tool",
+                          "job",
+                          "interaction",
+                          "child",
+                          "context",
+                          "recovery",
+                          "artifact",
+                          "verification",
+                          "message"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["storeId", "sessionId"],
+                  "additionalProperties": false
+                },
+                "fromCursor": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                },
+                "upperCursor": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                },
+                "sourceScanPosition": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                },
+                "contiguousAcknowledgedPosition": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["active", "paused", "cancelled", "revoked", "unavailable"]
+                },
+                "integrity": {
+                  "type": "object",
+                  "properties": {
+                    "facts": {
+                      "type": "string",
+                      "enum": ["complete", "partial", "unknown"]
+                    },
+                    "identityConfidence": {
+                      "type": "string",
+                      "enum": ["verified_origin", "legacy_local"]
+                    },
+                    "reasons": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "legacy_format",
+                          "history_purged",
+                          "missing_fact",
+                          "corrupt_fact",
+                          "unknown_version",
+                          "unknown_event",
+                          "identity_unverified",
+                          "missing_material",
+                          "truncated_material",
+                          "incomplete_prefix",
+                          "source_unavailable"
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["facts", "identityConfidence", "reasons"],
+                  "additionalProperties": false
+                },
+                "pending": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "deadLetter": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "exhausted": {
+                  "type": "boolean"
+                },
+                "deliveryComplete": {
+                  "type": "boolean"
+                },
+                "contentMode": {
+                  "type": "string",
+                  "enum": ["metadata", "authorized_evidence"]
+                }
+              },
+              "required": [
+                "id",
+                "installationId",
+                "epoch",
+                "lane",
+                "scope",
+                "fromCursor",
+                "upperCursor",
+                "sourceScanPosition",
+                "contiguousAcknowledgedPosition",
+                "status",
+                "integrity",
+                "pending",
+                "deadLetter",
+                "exhausted",
+                "deliveryComplete",
+                "contentMode"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "credentials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "handle": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "origin": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["handle", "origin", "active"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "installationId",
+          "name",
+          "digest",
+          "status",
+          "manifest",
+          "settings",
+          "grant",
+          "partitions",
+          "credentials"
+        ],
+        "additionalProperties": false
+      },
+      "TraceAction": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "TraceActionResult": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "completed": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": ["completed"],
+        "additionalProperties": false
+      },
+      "TraceConfigureRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "settings": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            }
+          }
+        },
+        "required": ["settings"],
+        "additionalProperties": false
+      },
+      "TraceGrantRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "scopes": {
+            "minItems": 1,
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "storeId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "executionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "required": ["storeId", "sessionId"],
+              "additionalProperties": false
+            }
+          },
+          "eventKinds": {
+            "minItems": 1,
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "command",
+                "run",
+                "model",
+                "tool",
+                "job",
+                "interaction",
+                "child",
+                "context",
+                "recovery",
+                "artifact",
+                "verification",
+                "message"
+              ]
+            }
+          },
+          "metadata": {
+            "maxItems": 3,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["timing", "usage", "output_checkpoint"]
+            }
+          },
+          "evidenceKinds": {
+            "maxItems": 11,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "model_input",
+                "model_output",
+                "tool_input",
+                "tool_result",
+                "job_output",
+                "artifact",
+                "file_change",
+                "verification",
+                "interaction",
+                "context",
+                "message"
+              ]
+            }
+          },
+          "origins": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          },
+          "originalIdentity": {
+            "type": "boolean"
+          },
+          "allowHistory": {
+            "type": "boolean"
+          },
+          "credentialHandles": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          "allowPrivateNetwork": {
+            "type": "boolean"
+          },
+          "evidenceContent": {
+            "type": "string",
+            "enum": ["redacted", "full"]
+          }
+        },
+        "required": [
+          "scopes",
+          "eventKinds",
+          "metadata",
+          "evidenceKinds",
+          "origins",
+          "originalIdentity",
+          "allowHistory"
+        ],
+        "additionalProperties": false
+      },
+      "TraceHistoryRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "object",
+            "properties": {
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "executionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            },
+            "required": ["storeId", "sessionId"],
+            "additionalProperties": false
+          },
+          "fromSequence": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "toSequence": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "eventKinds": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "command",
+                "run",
+                "model",
+                "tool",
+                "job",
+                "interaction",
+                "child",
+                "context",
+                "recovery",
+                "artifact",
+                "verification",
+                "message"
+              ]
+            }
+          },
+          "contentMode": {
+            "type": "string",
+            "enum": ["metadata", "authorized_evidence"]
+          }
+        },
+        "required": ["scope", "contentMode"],
+        "additionalProperties": false
+      },
+      "TraceHistoryResult": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "partitionId": {
+            "type": "string"
+          }
+        },
+        "required": ["partitionId"],
+        "additionalProperties": false
+      },
+      "TracePartitionStatus": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "installationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "epoch": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "lane": {
+            "type": "string",
+            "enum": ["live", "history"]
+          },
+          "exportId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "object",
+            "properties": {
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "executionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "eventKinds": {
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "command",
+                    "run",
+                    "model",
+                    "tool",
+                    "job",
+                    "interaction",
+                    "child",
+                    "context",
+                    "recovery",
+                    "artifact",
+                    "verification",
+                    "message"
+                  ]
+                }
+              }
+            },
+            "required": ["storeId", "sessionId"],
+            "additionalProperties": false
+          },
+          "fromCursor": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "upperCursor": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "sourceScanPosition": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "contiguousAcknowledgedPosition": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused", "cancelled", "revoked", "unavailable"]
+          },
+          "integrity": {
+            "type": "object",
+            "properties": {
+              "facts": {
+                "type": "string",
+                "enum": ["complete", "partial", "unknown"]
+              },
+              "identityConfidence": {
+                "type": "string",
+                "enum": ["verified_origin", "legacy_local"]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "legacy_format",
+                    "history_purged",
+                    "missing_fact",
+                    "corrupt_fact",
+                    "unknown_version",
+                    "unknown_event",
+                    "identity_unverified",
+                    "missing_material",
+                    "truncated_material",
+                    "incomplete_prefix",
+                    "source_unavailable"
+                  ]
+                }
+              }
+            },
+            "required": ["facts", "identityConfidence", "reasons"],
+            "additionalProperties": false
+          },
+          "pending": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "deadLetter": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "exhausted": {
+            "type": "boolean"
+          },
+          "deliveryComplete": {
+            "type": "boolean"
+          },
+          "contentMode": {
+            "type": "string",
+            "enum": ["metadata", "authorized_evidence"]
+          }
+        },
+        "required": [
+          "id",
+          "installationId",
+          "epoch",
+          "lane",
+          "scope",
+          "fromCursor",
+          "upperCursor",
+          "sourceScanPosition",
+          "contiguousAcknowledgedPosition",
+          "status",
+          "integrity",
+          "pending",
+          "deadLetter",
+          "exhausted",
+          "deliveryComplete",
+          "contentMode"
+        ],
+        "additionalProperties": false
+      },
+      "TraceDeadLetterList": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "entries": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "eventId": {
+                  "type": "string"
+                },
+                "sequence": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+                },
+                "attempts": {
+                  "type": "integer",
+                  "minimum": 8,
+                  "maximum": 9007199254740991
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "retry",
+                    "invalid_event",
+                    "unsupported_kind",
+                    "capacity_exceeded",
+                    "delivery_failed"
+                  ]
+                }
+              },
+              "required": ["eventId", "sequence", "attempts", "reason"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["entries"],
+        "additionalProperties": false
+      },
+      "TraceCredentialBind": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          }
+        },
+        "required": ["origin", "secret"],
+        "additionalProperties": false
+      },
+      "TraceCredentialResult": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "origin": {
+            "type": "string"
+          }
+        },
+        "required": ["handle", "origin"],
+        "additionalProperties": false
+      },
+      "TraceCredentialRevoke": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["handle"],
+        "additionalProperties": false
+      },
       "FileCheckpointListQuery": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -6269,6 +8681,2730 @@
           "entries",
           "complete"
         ],
+        "additionalProperties": false
+      },
+      "TrajectoryScope": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectoryScope/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectoryScope/$defs/__schema0"
+          },
+          "runId": {
+            "$ref": "#/components/schemas/TrajectoryScope/$defs/__schema0"
+          },
+          "executionId": {
+            "$ref": "#/components/schemas/TrajectoryScope/$defs/__schema0"
+          },
+          "eventKinds": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryScope/$defs/__schema1"
+            }
+          }
+        },
+        "required": ["storeId", "sessionId"],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "__schema1": {
+            "type": "string",
+            "enum": [
+              "command",
+              "run",
+              "model",
+              "tool",
+              "job",
+              "interaction",
+              "child",
+              "context",
+              "recovery",
+              "artifact",
+              "verification",
+              "message"
+            ]
+          }
+        }
+      },
+      "TrajectorySnapshot": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema0"
+          },
+          "runId": {
+            "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema0"
+          },
+          "executionId": {
+            "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema0"
+          },
+          "eventKinds": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema1"
+            }
+          },
+          "upperCursor": {
+            "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema2"
+          },
+          "historyCoverage": {
+            "type": "object",
+            "properties": {
+              "enabledAfterCursor": {
+                "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema2"
+              },
+              "upperCursor": {
+                "$ref": "#/components/schemas/TrajectorySnapshot/$defs/__schema2"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["retained", "legacy", "purged", "unknown"]
+              },
+              "integrity": {
+                "type": "object",
+                "properties": {
+                  "facts": {
+                    "type": "string",
+                    "enum": ["complete", "partial", "unknown"]
+                  },
+                  "identityConfidence": {
+                    "type": "string",
+                    "enum": ["verified_origin", "legacy_local"]
+                  },
+                  "reasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "legacy_format",
+                        "history_purged",
+                        "missing_fact",
+                        "corrupt_fact",
+                        "unknown_version",
+                        "unknown_event",
+                        "identity_unverified",
+                        "missing_material",
+                        "truncated_material",
+                        "incomplete_prefix",
+                        "source_unavailable"
+                      ]
+                    }
+                  }
+                },
+                "required": ["facts", "identityConfidence", "reasons"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["enabledAfterCursor", "upperCursor", "status", "integrity"],
+            "additionalProperties": false
+          },
+          "formatVersion": {
+            "type": "number",
+            "const": 1
+          }
+        },
+        "required": ["storeId", "sessionId", "upperCursor", "historyCoverage", "formatVersion"],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "__schema1": {
+            "type": "string",
+            "enum": [
+              "command",
+              "run",
+              "model",
+              "tool",
+              "job",
+              "interaction",
+              "child",
+              "context",
+              "recovery",
+              "artifact",
+              "verification",
+              "message"
+            ]
+          },
+          "__schema2": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          }
+        }
+      },
+      "TrajectoryReadRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema0"
+          },
+          "runId": {
+            "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema0"
+          },
+          "executionId": {
+            "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema0"
+          },
+          "eventKinds": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema1"
+            }
+          },
+          "afterCursor": {
+            "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema2"
+          },
+          "upperCursor": {
+            "$ref": "#/components/schemas/TrajectoryReadRequest/$defs/__schema2"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "required": ["storeId", "sessionId", "afterCursor", "upperCursor"],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "__schema1": {
+            "type": "string",
+            "enum": [
+              "command",
+              "run",
+              "model",
+              "tool",
+              "job",
+              "interaction",
+              "child",
+              "context",
+              "recovery",
+              "artifact",
+              "verification",
+              "message"
+            ]
+          },
+          "__schema2": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          }
+        }
+      },
+      "TrajectoryPage": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "runId": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "executionId": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "eventKinds": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema1"
+            }
+          },
+          "afterCursor": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+          },
+          "upperCursor": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+          },
+          "scannedThrough": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+          },
+          "exhausted": {
+            "type": "boolean"
+          },
+          "events": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema3"
+            }
+          },
+          "integrity": {
+            "type": "object",
+            "properties": {
+              "facts": {
+                "type": "string",
+                "enum": ["complete", "partial", "unknown"]
+              },
+              "identityConfidence": {
+                "type": "string",
+                "enum": ["verified_origin", "legacy_local"]
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "legacy_format",
+                    "history_purged",
+                    "missing_fact",
+                    "corrupt_fact",
+                    "unknown_version",
+                    "unknown_event",
+                    "identity_unverified",
+                    "missing_material",
+                    "truncated_material",
+                    "incomplete_prefix",
+                    "source_unavailable"
+                  ]
+                }
+              }
+            },
+            "required": ["facts", "identityConfidence", "reasons"],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "storeId",
+          "sessionId",
+          "afterCursor",
+          "upperCursor",
+          "scannedThrough",
+          "exhausted",
+          "events",
+          "integrity"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "__schema1": {
+            "type": "string",
+            "enum": [
+              "command",
+              "run",
+              "model",
+              "tool",
+              "job",
+              "interaction",
+              "child",
+              "context",
+              "recovery",
+              "artifact",
+              "verification",
+              "message"
+            ]
+          },
+          "__schema2": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "__schema3": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "message"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "display": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema24"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "const": "message"
+                          },
+                          "summary": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                          },
+                          "outputPresence": {
+                            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema25"
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      "messageId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": ["user", "assistant"]
+                      },
+                      "messageSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "revision": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": ["complete", "incomplete"]
+                      }
+                    },
+                    "required": ["messageId", "role", "messageSeq", "revision", "status"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "command"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "commandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "commandType": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "reasonCode": {
+                        "type": "string",
+                        "maxLength": 128
+                      }
+                    },
+                    "required": ["commandId"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "run"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "commandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "rootWorkCommandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "rootWorkSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "reasonCode": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "cancellationRequested": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "model"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "commandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema26"
+                      },
+                      "rootWorkCommandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema27"
+                      },
+                      "rootWorkSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema28"
+                      },
+                      "definitionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema29"
+                      },
+                      "definitionVersion": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema30"
+                      },
+                      "display": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema31"
+                      },
+                      "compressionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "compressionTrigger": {
+                        "type": "string",
+                        "enum": ["automatic", "manual"]
+                      },
+                      "compression": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema32"
+                      },
+                      "resultRevision": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "previousExecutionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "previousExecutionOriginStoreId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "retryReason": {
+                        "type": "string",
+                        "enum": ["provider_unavailable", "connection_failed", "stream_incomplete"]
+                      },
+                      "retryAttempt": {
+                        "type": "integer",
+                        "minimum": 2,
+                        "maximum": 9007199254740991
+                      },
+                      "maxAttempts": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "inputTokens": {
+                            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                          },
+                          "outputTokens": {
+                            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                          },
+                          "totalTokens": {
+                            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                          },
+                          "cachedInputTokens": {
+                            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "tool"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "commandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema26"
+                      },
+                      "rootWorkCommandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema27"
+                      },
+                      "rootWorkSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema28"
+                      },
+                      "definitionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema29"
+                      },
+                      "definitionVersion": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema30"
+                      },
+                      "display": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema31"
+                      },
+                      "upperOutputSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema34"
+                      },
+                      "stream": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema35"
+                      },
+                      "gaps": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema36"
+                      },
+                      "droppedBytes": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema37"
+                      },
+                      "truncated": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema38"
+                      },
+                      "callId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "resultRevision": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "job"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "commandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema26"
+                      },
+                      "rootWorkCommandId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema27"
+                      },
+                      "rootWorkSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema28"
+                      },
+                      "definitionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema29"
+                      },
+                      "definitionVersion": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema30"
+                      },
+                      "display": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema31"
+                      },
+                      "childSessionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "delivery": {
+                        "type": "string",
+                        "enum": ["pending", "consumed", "suppressed"]
+                      },
+                      "deliveryReasonCode": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "resultRevision": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "upperOutputSeq": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema34"
+                      },
+                      "stream": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema35"
+                      },
+                      "gaps": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema36"
+                      },
+                      "droppedBytes": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema37"
+                      },
+                      "truncated": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema38"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "interaction"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "interactionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "interactionKind": {
+                        "type": "string",
+                        "enum": ["approval", "question", "plan_review"]
+                      },
+                      "revision": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "decision": {
+                        "type": "string",
+                        "enum": [
+                          "requested",
+                          "projected",
+                          "answered",
+                          "accepted",
+                          "rejected",
+                          "cancelled"
+                        ]
+                      }
+                    },
+                    "required": ["interactionId", "revision"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "child"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "childSessionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "carrierExecutionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "childRunId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "delivery": {
+                        "type": "string",
+                        "enum": ["pending", "accepted", "delivered", "rejected"]
+                      }
+                    },
+                    "required": ["childSessionId", "carrierExecutionId"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "context"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "selectionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "compressionId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "compressionTrigger": {
+                        "type": "string",
+                        "enum": ["automatic", "manual"]
+                      },
+                      "compression": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema32"
+                      },
+                      "revision": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                      },
+                      "action": {
+                        "type": "string",
+                        "enum": ["selected", "compressed", "published"]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "recovery"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "reasonCode": {
+                        "type": "string",
+                        "maxLength": 128
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": ["interrupted", "unknown", "verified", "resumed", "failed"]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "artifact"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    },
+                    "required": ["artifactId"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "verification"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "verificationId": {
+                        "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": ["passed", "failed", "unknown"]
+                      },
+                      "method": {
+                        "type": "string",
+                        "enum": ["business_reconciliation", "required_check", "test_evidence"]
+                      }
+                    },
+                    "required": ["verificationId", "outcome", "method"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema4"
+                  },
+                  "schemaVersion": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema5"
+                  },
+                  "eventId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema6"
+                  },
+                  "sequence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "origin": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema7"
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "workspaceId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                  },
+                  "runId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema8"
+                  },
+                  "executionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema9"
+                  },
+                  "parentExecutionId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema10"
+                  },
+                  "executionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema11"
+                  },
+                  "runOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema12"
+                  },
+                  "operationOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema13"
+                  },
+                  "parentExecutionOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema14"
+                  },
+                  "messageOriginStoreId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema15"
+                  },
+                  "operationId": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema16"
+                  },
+                  "attempt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema17"
+                  },
+                  "sourceEventType": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema18"
+                  },
+                  "sourceRecordRevision": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                  },
+                  "phase": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema19"
+                  },
+                  "recordedStatus": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema20"
+                  },
+                  "occurredAt": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema21"
+                  },
+                  "identityConfidence": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema22"
+                  },
+                  "evidenceRefs": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema23"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "unknown"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "reason": {
+                        "type": "string",
+                        "enum": [
+                          "unrecognized_source_type",
+                          "legacy_fields_missing",
+                          "unsupported_version"
+                        ]
+                      }
+                    },
+                    "required": ["reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "schema",
+                  "schemaVersion",
+                  "eventId",
+                  "sequence",
+                  "origin",
+                  "sessionId",
+                  "workspaceId",
+                  "sourceEventType",
+                  "sourceRecordRevision",
+                  "phase",
+                  "recordedStatus",
+                  "occurredAt",
+                  "identityConfidence",
+                  "evidenceRefs",
+                  "kind",
+                  "attributes"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "__schema4": {
+            "type": "string",
+            "const": "kite.trajectory"
+          },
+          "__schema5": {
+            "type": "number",
+            "const": 1
+          },
+          "__schema6": {
+            "type": "string",
+            "pattern": "^te_[a-f0-9]{64}$"
+          },
+          "__schema7": {
+            "type": "object",
+            "properties": {
+              "storeId": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              },
+              "cursor": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+              }
+            },
+            "required": ["storeId", "cursor"],
+            "additionalProperties": false
+          },
+          "__schema8": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema9": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema10": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema11": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema12": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema13": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema14": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema15": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema16": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema17": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "__schema18": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "__schema19": {
+            "type": "string",
+            "enum": [
+              "planned",
+              "dispatching",
+              "running",
+              "waiting_interaction",
+              "waiting_execution",
+              "cancelling",
+              "completed",
+              "failed",
+              "cancelled",
+              "outcome_unknown",
+              "observed"
+            ]
+          },
+          "__schema20": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "__schema21": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "__schema22": {
+            "type": "string",
+            "enum": ["verified_origin", "legacy_local"]
+          },
+          "__schema23": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "evidenceId": {
+                  "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                },
+                "contentVersion": {
+                  "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "model_input",
+                    "model_output",
+                    "tool_input",
+                    "tool_result",
+                    "job_output",
+                    "artifact",
+                    "file_change",
+                    "verification",
+                    "interaction",
+                    "context",
+                    "message"
+                  ]
+                },
+                "availability": {
+                  "type": "string",
+                  "enum": [
+                    "available",
+                    "partial",
+                    "truncated",
+                    "missing",
+                    "unavailable",
+                    "redacted",
+                    "empty"
+                  ]
+                },
+                "mediaType": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "visibleBytes": {
+                  "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                }
+              },
+              "required": ["evidenceId", "contentVersion", "kind", "availability", "mediaType"],
+              "additionalProperties": false
+            }
+          },
+          "__schema24": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "__schema25": {
+            "type": "object",
+            "properties": {
+              "hasText": {
+                "type": "boolean"
+              },
+              "toolCallCount": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "complete": {
+                "type": "boolean"
+              },
+              "evidenceId": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              },
+              "contentVersion": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              }
+            },
+            "required": ["hasText", "toolCallCount", "complete", "evidenceId", "contentVersion"],
+            "additionalProperties": false
+          },
+          "__schema26": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema27": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema28": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+          },
+          "__schema29": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+          },
+          "__schema30": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "__schema31": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "model",
+                  "file",
+                  "shell",
+                  "task",
+                  "web",
+                  "browser",
+                  "plan",
+                  "skill",
+                  "worktree",
+                  "question",
+                  "message"
+                ]
+              },
+              "title": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema24"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 320
+              },
+              "modelName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "outputPresence": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema25"
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "request",
+                  "read",
+                  "write",
+                  "edit",
+                  "execute",
+                  "launch",
+                  "wait",
+                  "stop",
+                  "spawn",
+                  "follow_up",
+                  "message",
+                  "events",
+                  "list",
+                  "interrupt",
+                  "fetch",
+                  "open",
+                  "snapshot",
+                  "click",
+                  "fill",
+                  "scroll",
+                  "press",
+                  "hover",
+                  "select",
+                  "back",
+                  "forward",
+                  "reload",
+                  "close",
+                  "capture",
+                  "image",
+                  "view",
+                  "request_human",
+                  "update",
+                  "review",
+                  "load",
+                  "resource",
+                  "create",
+                  "remove",
+                  "ask"
+                ]
+              },
+              "targetExecutionId": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              },
+              "targetExecutionOriginStoreId": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              },
+              "targetSessionId": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              },
+              "targetRunId": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema0"
+              },
+              "observedStatus": {
+                "type": "string",
+                "enum": [
+                  "planned",
+                  "dispatching",
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "cancelled",
+                  "outcome_unknown"
+                ]
+              },
+              "accepted": {
+                "type": "boolean"
+              },
+              "terminal": {
+                "type": "boolean"
+              },
+              "cancelRequested": {
+                "type": "boolean"
+              },
+              "timedOut": {
+                "type": "boolean"
+              },
+              "exitCode": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "requestContext": {
+                "type": "object",
+                "properties": {
+                  "systemMessages": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "historyMessages": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "tools": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["systemMessages", "historyMessages", "tools"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["kind"],
+            "additionalProperties": false
+          },
+          "__schema32": {
+            "type": "object",
+            "properties": {
+              "adopted": {
+                "type": "boolean"
+              },
+              "accounting": {
+                "type": "object",
+                "properties": {
+                  "basis": {
+                    "type": "string",
+                    "const": "local-context-estimate-v1"
+                  },
+                  "beforeTokens": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema33"
+                  },
+                  "afterTokens": {
+                    "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema33"
+                  }
+                },
+                "required": ["basis", "beforeTokens", "afterTokens"],
+                "additionalProperties": false
+              },
+              "triggerTokens": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema33"
+              },
+              "triggerBasis": {
+                "type": "string",
+                "enum": ["reported_baseline", "local_estimate"]
+              },
+              "measuredInputTokens": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema33"
+              },
+              "estimatedInputTokens": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema33"
+              },
+              "thresholdTokens": {
+                "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema33"
+              }
+            },
+            "required": ["adopted"],
+            "additionalProperties": false
+          },
+          "__schema33": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "__schema34": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+          },
+          "__schema35": {
+            "type": "string",
+            "enum": ["stdout", "stderr", "progress", "gap"]
+          },
+          "__schema36": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "stream": {
+                  "type": "string",
+                  "enum": ["stdout", "stderr", "progress"]
+                },
+                "fromSeq": {
+                  "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                },
+                "throughSeq": {
+                  "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                },
+                "droppedBytes": {
+                  "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+                }
+              },
+              "required": ["stream", "fromSeq", "throughSeq", "droppedBytes"],
+              "additionalProperties": false
+            }
+          },
+          "__schema37": {
+            "$ref": "#/components/schemas/TrajectoryPage/$defs/__schema2"
+          },
+          "__schema38": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TrajectoryEvidenceOpen": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema0"
+          },
+          "upperCursor": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema1"
+          },
+          "atCursor": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema1"
+          },
+          "eventId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema0"
+          },
+          "evidenceId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema0"
+          },
+          "contentVersion": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceOpen/$defs/__schema0"
+          }
+        },
+        "required": [
+          "storeId",
+          "sessionId",
+          "upperCursor",
+          "atCursor",
+          "eventId",
+          "evidenceId",
+          "contentVersion"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "__schema1": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          }
+        }
+      },
+      "TrajectoryEvidenceReadRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceReadRequest/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceReadRequest/$defs/__schema0"
+          },
+          "readId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceReadRequest/$defs/__schema0"
+          },
+          "offset": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65536
+          }
+        },
+        "required": ["storeId", "sessionId", "readId", "offset"],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "TrajectoryEvidenceCloseRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "storeId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceCloseRequest/$defs/__schema0"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceCloseRequest/$defs/__schema0"
+          },
+          "readId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceCloseRequest/$defs/__schema0"
+          }
+        },
+        "required": ["storeId", "sessionId", "readId"],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "TrajectoryEvidenceDescriptor": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "readId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema0"
+          },
+          "eventId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema0"
+          },
+          "evidenceId": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema0"
+          },
+          "contentVersion": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema0"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "partial",
+              "truncated",
+              "missing",
+              "unavailable",
+              "redacted",
+              "empty"
+            ]
+          },
+          "mediaType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "viewBytes": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema1"
+          },
+          "viewSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "transformation": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema0"
+          },
+          "policyRevision": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema1"
+          },
+          "authorizationEpoch": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceDescriptor/$defs/__schema1"
+          }
+        },
+        "required": [
+          "readId",
+          "eventId",
+          "evidenceId",
+          "contentVersion",
+          "availability",
+          "mediaType",
+          "viewBytes",
+          "viewSha256",
+          "transformation",
+          "policyRevision",
+          "authorizationEpoch"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "__schema1": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          }
+        }
+      },
+      "TrajectoryEvidenceChunk": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "readId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "offset": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceChunk/$defs/__schema0"
+          },
+          "nextOffset": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceChunk/$defs/__schema0"
+          },
+          "data": {
+            "type": "string"
+          },
+          "eof": {
+            "type": "boolean"
+          },
+          "viewSha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "policyRevision": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceChunk/$defs/__schema0"
+          },
+          "authorizationEpoch": {
+            "$ref": "#/components/schemas/TrajectoryEvidenceChunk/$defs/__schema0"
+          }
+        },
+        "required": [
+          "readId",
+          "offset",
+          "nextOffset",
+          "data",
+          "eof",
+          "viewSha256",
+          "policyRevision",
+          "authorizationEpoch"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)$"
+          }
+        }
+      },
+      "TrajectoryEvidenceClosed": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "closed": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": ["closed"],
         "additionalProperties": false
       },
       "SkillCatalogueQuery": {
@@ -11766,6 +16902,61 @@
           "trigger": {
             "type": "string",
             "enum": ["manual", "automatic"]
+          },
+          "compression": {
+            "type": "object",
+            "properties": {
+              "adopted": {
+                "type": "boolean"
+              },
+              "accounting": {
+                "type": "object",
+                "properties": {
+                  "basis": {
+                    "type": "string",
+                    "const": "local-context-estimate-v1"
+                  },
+                  "beforeTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "afterTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["basis", "beforeTokens", "afterTokens"],
+                "additionalProperties": false
+              },
+              "triggerTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "triggerBasis": {
+                "type": "string",
+                "enum": ["reported_baseline", "local_estimate"]
+              },
+              "measuredInputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "estimatedInputTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "thresholdTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["adopted"],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -20194,6 +25385,9 @@
                 "model_outputs",
                 "session_exports",
                 "session_logs",
+                "trajectory",
+                "trajectory_evidence",
+                "trace_extensions",
                 "file_checkpoints"
               ]
             }
@@ -21878,6 +27072,61 @@
               "trigger": {
                 "type": "string",
                 "enum": ["manual", "automatic"]
+              },
+              "compression": {
+                "type": "object",
+                "properties": {
+                  "adopted": {
+                    "type": "boolean"
+                  },
+                  "accounting": {
+                    "type": "object",
+                    "properties": {
+                      "basis": {
+                        "type": "string",
+                        "const": "local-context-estimate-v1"
+                      },
+                      "beforeTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "afterTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": ["basis", "beforeTokens", "afterTokens"],
+                    "additionalProperties": false
+                  },
+                  "triggerTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "triggerBasis": {
+                    "type": "string",
+                    "enum": ["reported_baseline", "local_estimate"]
+                  },
+                  "measuredInputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "estimatedInputTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "thresholdTokens": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["adopted"],
+                "additionalProperties": false
               }
             },
             "required": [

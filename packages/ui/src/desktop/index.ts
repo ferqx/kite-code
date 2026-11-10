@@ -142,6 +142,7 @@ export {
   type SessionChildTarget,
   SessionTabs,
   type SessionTabsModel,
+  type SessionTrajectoryPageProps,
   useSessionTabs,
 } from './SessionTabs';
 export { SettingsActionIcon } from './SettingsActionIcon';
@@ -149,6 +150,49 @@ export { SettingsNavigationIcon } from './SettingsNavigationIcon';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';
+export {
+  type TrajectoryEvidenceView,
+  type TrajectoryMaterialTarget,
+  TrajectoryPanel,
+  type TrajectoryPanelProps,
+} from './trajectory/TrajectoryPanel';
+export {
+  buildTrajectoryTree,
+  filterTrajectoryTree,
+  type TrajectoryTreeFilter,
+  type TrajectoryTreeNode,
+  trajectoryNodeEventIds,
+} from './trajectory/tree';
+export {
+  initialTrajectoryViewState,
+  type TrajectoryDetailTab,
+  type TrajectoryViewState,
+  trajectoryViewStateKey,
+} from './trajectory/view-state';
+export {
+  buildTrajectoryWorkbench,
+  buildTrajectoryWorkbenchIndex,
+  defaultWorkbenchFilters,
+  filterTrajectoryWorkbench,
+  type TrajectoryWorkbench,
+  type TrajectoryWorkbenchIndex,
+  type WorkbenchCategory,
+  type WorkbenchFilters,
+  type WorkbenchObservedInterval,
+  type WorkbenchRow,
+  type WorkbenchRunOption,
+  type WorkbenchTimelineDomain,
+  workbenchRunKey,
+} from './trajectory/workbench';
+export {
+  normalizeTrajectoryDetailTab,
+  type TrajectoryDetailKind,
+  trajectoryCompressionMetadata,
+  trajectoryDetailKind,
+  trajectoryDetailTabs,
+  trajectoryMaterialTargets,
+  trajectorySelectedObservation,
+} from './trajectory/workbench-details';
 export type {
   Message,
   TurnActivity,

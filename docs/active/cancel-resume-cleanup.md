@@ -39,7 +39,7 @@ receipt 已确认，才把不再拥有 live executor 的 Tool 收敛为 cancelle
 `authorized_queued` receipt 和有效 Subagent continuation 继续保留，不能为清除 spinner 而写成用户拒绝。TUI 必须 await
 Host readiness，再重新读取 recovery 后的 event tail；注册前读取的 SessionData 不能用于最终 replay。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## Runtime 取消语义
 

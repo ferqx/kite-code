@@ -7,6 +7,8 @@ import {
 } from './check-unified-agent-boundary';
 
 export const UNIFIED_WORKSPACES = Object.freeze([
+  'packages/trajectory',
+  'packages/trace-extension-sdk',
   'packages/ai',
   'packages/agent',
   'packages/client',
@@ -833,7 +835,7 @@ export function checkUnifiedWorkspaces(repositoryRoot: string): UnifiedWorkspace
   if (top) {
     if (JSON.stringify(top.workspaces) !== JSON.stringify(UNIFIED_WORKSPACES))
       add(
-        'workspaces-not-exact-eight',
+        'workspaces-not-exact',
         'package.json',
         `must match ordered ${UNIFIED_WORKSPACES.join(', ')}`,
       );

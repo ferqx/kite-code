@@ -554,14 +554,7 @@ console.log(JSON.stringify({storeId:meta.storeId,pending:pending.status,backupSt
         storeId: f.storeId,
         pending: 'accepted',
         backupStore: f.storeId,
-        migrations: [
-          '0001-baseline.sql',
-          '0002-recovery-audit.sql',
-          '0003-session-reconciliation.sql',
-          '0004-pending-input-order.sql',
-          '0005-authorization-check.sql',
-          '0006-input-file-imports.sql',
-        ],
+        migrations: ['0001-baseline.sql', '0002-trajectory-facts.sql'],
       });
     } finally {
       if (timer) clearTimeout(timer);

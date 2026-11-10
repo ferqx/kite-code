@@ -35,11 +35,15 @@ Auto 由权限系统的 `authorization.check` 直接执行一次无工具 Model�
 
 [Model 元数据](../model-snapshot.ts)在该次 Model Execution 规划前捕获实际 Adapter 的纯描述、准确 Extension/Tool 版本和 namespace、装配摘要与来源 ID/digest。消息、来源顺序和完整 Schema 引用这次不可变原请求，不重复拷贝正文。超过 64 KiB 的静态元数据使用同原 scope 的完整 Artifact，SQL 保存有限 header；这不是拒绝或截断阈值。读取在事务外完整核 scope/hash/size/UTF-8/JSON，冷只读展开原数据，不 capture 新来源或启动 Provider。
 
+原请求已转为 Artifact 时，小静态 metadata 也沿同一版本 1 `body` 外壳保存；Core 在转引用前从原实际请求／Adapter 描述生成可选闭合 `display`，仅保存有界实际模型名、固定操作／标题及 system／对话／工具目录计数。SQLite 的第一方轨迹索引复用这个有限摘要，不预读正文、不复制提示词或 Schema。metadata 大正文和请求正文仍各自完整验证；typed reader 丢弃外壳摘要并返回原公开材料，旧无 `display` 外壳保持可读，新增自由字段明确拒绝。没有协议版本或权限变更，第三方 Trace 不外发该第一方摘要。具体字段与[真实大正文 writer 证据](../../test/isolated/storage/trajectory-display-flow.test.ts)归[轨迹 owner](../trajectory/README.md)。
+
 实际 settings 还可保存有限 `reasoningEffort`，由 AI 中立类型和 Core 闭合校验共同核实；它来自原绑定，不能从现在配置推断，传输编码范围不等于远端模型支持事实。
 
 最终派发事务另封存实际 authorization revision、definitionVersion、inputDigest 与 controlReads。可选 policy 解释是中立 `{namespace,version,data}`，默认 Service 只给闭合非秘密的 mode/trust/该次真实 capability；它不替代权限判定，也不是凭据或完整 Run 配置。外部 opaque policy 解释不可用，但实际派发事实仍保留。未派发显示 `not_dispatched`；未记录或未来版本静态 metadata 显示不可用，不能用当前配置回填。planned metadata 仅证明已准备，不证明 Provider 已接收。
 
 [真实元数据回归](../../test/isolated/model-snapshot/metadata.test.ts)使用 SQLite Worker、实际 SDK Adapter 和注入固定传输，核对 17 MiB 请求完整到达、同 Run 两次实际调用各自 policy/settings、实际 namespace/source、child 的 parent/child 原策略交集、冷 readonly、大元数据完整展开与损坏/取消拒绝；不连接外部付费 Provider，不证明巨量 Model 输出持久化资格。
+
+2026-11-09，macOS arm64／Bun 1.4.4，`e8a483d65` 加当前工作树：上述元数据整文件与原[检查准备窗口](../../test/isolated/model-input/authorization-check-window.test.ts)合跑 6 项／56 断言通过。17 MiB 请求的小 metadata 已沿新有限外壳保存，测试从实际 Runtime typed reader 展开后继续核原 SDK settings、policy 与私有字段过滤，不把持久引用外壳直接交给内联 metadata 解析器。展示外壳与原 Inspector 的另外 13 项／176 断言记录在[轨迹 owner](../trajectory/README.md)。
 
 
 Model 输出以[原 Execution scope 的不可变段链](../model-output/README.md)保存完整 text/reasoning/ToolCall；普通会话消息保留稳定身份并只在真实完整终态原位结算。内部检查与标题 Model 不写聊天 Message，改由准确用途、封存输入和完成结果 digest 核其完整传输；小内联原正文与大输出 descriptor 的 scope／登记／完整性证明分别保留，决定是否有效不妨碍只读观察真实原输出。它与 Model 输入 Body 的来源、完整 EOF/hash 验证一致，不把 preview 或 descriptor 当成完整正文。

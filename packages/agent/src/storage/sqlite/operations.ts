@@ -165,6 +165,8 @@ import { callSessionExport } from './session-export';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
 import { reconcileSession } from './session-reconciliation';
+import { recordTrajectoryFact, type VerificationTrajectoryFact } from './trajectory-facts';
+import { openTrajectory, readTrajectoryBinding, readTrajectoryEvents } from './trajectory-reader';
 import {
   readWorkspaceRemoval,
   removeWorkspace,
@@ -598,7 +600,13 @@ export class SqliteOperations {
           : null;
     }
   }
-  event(session: string | null, object: string, type: string, payload: Json = null): void {
+  event(
+    session: string | null,
+    object: string,
+    type: string,
+    payload: Json = null,
+    verification?: VerificationTrajectoryFact,
+  ): void {
     if (
       BigInt(
         this.row('SELECT last_change_cursor FROM storage_meta WHERE singleton=1')!
@@ -607,12 +615,15 @@ export class SqliteOperations {
     )
       throw new AgentError('sequence_exhausted');
     this.run('UPDATE storage_meta SET last_change_cursor=last_change_cursor+1 WHERE singleton=1');
+    const envelope = sessionLogEnvelope(this, session, object, type, payload);
+    const occurredAt = (envelope as { occurredAt: number }).occurredAt;
     this.run(
-      'INSERT INTO change_event SELECT last_change_cursor,?,?,0,?,? FROM storage_meta WHERE singleton=1',
+      'INSERT INTO change_event(cursor,scope_session_id,object_id,revision,type,payload_json,trajectory_fact_json) SELECT last_change_cursor,?,?,0,?,?,? FROM storage_meta WHERE singleton=1',
       session,
       object,
       type,
-      canonicalJson(sessionLogEnvelope(this, session, object, type, payload)),
+      canonicalJson(envelope),
+      recordTrajectoryFact(this, session, object, type, occurredAt, verification),
     );
   }
   metadata() {
@@ -2474,6 +2485,15 @@ export class SqliteOperations {
         );
       case 'getSessionLogs':
         return getSessionLogs(this, args[0] as Parameters<Store['getSessionLogs']>[0]);
+      case 'openTrajectory':
+        return openTrajectory(this, args[0] as Parameters<Store['openTrajectory']>[0]);
+      case 'readTrajectoryEvents':
+        return readTrajectoryEvents(this, args[0] as Parameters<Store['readTrajectoryEvents']>[0]);
+      case 'readTrajectoryBinding':
+        return readTrajectoryBinding(
+          this,
+          args[0] as Parameters<Store['readTrajectoryBinding']>[0],
+        );
       case 'getChanges': {
         this.db.run('BEGIN');
         try {

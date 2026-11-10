@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import { bodyReference, persistedModelRequest } from '../../model-body';
 import { persistedModelRequestMetadata } from '../../model-snapshot';
+import { sealedModelTrajectoryDisplay } from '../../trajectory/display';
 import type { Store } from '../port';
 import {
   AgentError,
@@ -162,7 +163,8 @@ function modelNavigation(db: SqliteOperations, sessionId: string, execution: Row
     } else persistedModelRequest(input);
     if (obj(metadata) && bodyReference(metadata.body)) {
       if (
-        Object.keys(metadata).sort().join(',') !== 'body,version' ||
+        Object.keys(metadata).some((key) => !['version', 'body', 'display'].includes(key)) ||
+        (metadata.display !== undefined && !sealedModelTrajectoryDisplay(metadata.display)) ||
         metadata.version !== 1 ||
         bodyReference(metadata.body)!.reference.mediaType !== 'application/json'
       )

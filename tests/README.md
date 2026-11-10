@@ -2,7 +2,9 @@
 
 ## 类型检查
 
-`bun run typecheck` 使用 Bun 1.4.4，以 `bun check -b -p tsconfig.typecheck.json` 单进程检查原根和精确八 workspace；[聚合配置](../tsconfig.typecheck.json)不覆盖项目设置，各包独立检查与[原 runner](../scripts/run-runtime-workspace-script.ts)保留。开发要求见[本地开发](../docs/development/local-development.md)。此前 2026-11-04，Windows x64、源码基线 `4f29be4e0` 加上一轮迁移改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同。原九份 tsconfig 与严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。
+`bun run typecheck` 使用 Bun 1.4.4，以 `bun check -b -p tsconfig.typecheck.json` 单进程检查原根和精确十 workspace；[聚合配置](../tsconfig.typecheck.json)不覆盖项目设置，各包独立检查与[原 runner](../scripts/run-runtime-workspace-script.ts)保留。开发要求见[本地开发](../docs/development/local-development.md)。此前 2026-11-04，Windows x64、源码基线 `4f29be4e0` 加上一轮迁移改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同。原九份 tsconfig 与严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。
+
+2026-11-08，`e8a483d65` 加 Trajectory／Trace 工作树，macOS arm64／Bun1.4.4：根构建十个 workspace 通过，聚合类型检查覆盖原根及十包共11个项目。quality 下载缓存键同步两个新增 manifest；[CI 消费闭包](integration/scripts/unified-ci.test.ts)完整25项／513断言通过，原命令、action 与预算保持。此为本机配置与构建验证，不代表 hosted workflow 或新增平台资格；下表保留此前九配置对照的原范围。
 
 | 配置 | 两种检查器共同覆盖的仓库文件数 |
 | --- | ---: |
@@ -68,7 +70,7 @@ Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP
 
 [工具退役回归](../apps/service/test/isolated/tool-retirement.test.ts)核旧 Workflow／外部专用工具拒绝和模型零效果；[统一外部只读](../packages/agent/test/isolated/files/external-file-reads.test.ts)核分页、无基线、硬链接、私有实际路径与完整结果。普通 Skill、Planning、MCP 和 Shell／rg 检索由各 owner 回归负责；[全工具真实模型](e2e/live/model/README.md#全工具真实模型)核当前30个内置工具及合成动态MCP工具，保实际成功、结果交付和业务效果证据；同一入口的[扩展场景](e2e/live/model/README.md#扩展工具场景)另核并发、活动消息／引导、准确取消、审批、基线冲突、物理丢回应与Client重连。
 
-本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
+本页负责当前测试归属、发现和执行。当前默认为精确十个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
 [Agent 任务质量真实验证](e2e/live/model/README.md#工具反馈与任务质量)使用独立合成工作区、真实 Files/Task/SQLite 和已配置模型，核搜索范围、当前调用链、角色选择、子交付与父验收。它沿显式测试入口执行，不进入默认测试发现；原始模型输入、工具回执与最终内容一起核对，保留失败，不能只以最终文本标记或工具调用计数判定正确。
 
@@ -86,11 +88,11 @@ Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP
 
 Caller、Recovery、MCP Selection／Connection／Reconnection／Source Approval journal 中连续执行128次真实持久化的六项容量测试，各平台统一使用显式300秒上限，核满额拒绝、原记录完整及未知记录不被淘汰。17MiB压缩摘要及扩展Fork的单次命令等待为300秒、整例600秒；原544分段、Fork、损坏拒绝及冷读全文继续验证。Caller Port 的完整正文与密集journal整例同为600秒。这些是按用户要求适应不同主机I/O速度的功能测试等待预算，不定义单次保存延迟或产品性能承诺；产品取消、连接与清理约束保持。原32–37秒、120秒及40秒超时记录保留，不能据此宣称数据丢失，也不能由功能测试通过授予性能资格。
 
-[测试运行器](../scripts/test-suite.ts)在分配隔离HOME之前，用[显式工具链环境](../scripts/test-environment.ts)固定Cargo／Rustup缓存；TUI子进程沿相同规则传递这两个路径，避免每个临时HOME重新安装工具链。应用配置仍只读取自有HOME，不拷贝用户配置或凭据。四workspace夹具每个实际构建子命令上限为120秒，TUI就绪等待为60秒；各外层测试预算仍生效。恢复夹具在派发前建立并持有同一只读WAL观察连接，结束后先关闭再删自有根；Provider原调用核模型公开名及SDK的`write_file` wire身份，持久层继续核`files.write`。Run绑定夹具先结束Runtime，再关闭自己提供的串行锁和Store，最后删根。具体取舍和本轮证据见[测试环境决定](../.agents/notes/implemented/testing/2026-10-18-portable-test-environment.md)。
+[测试运行器](../scripts/test-suite.ts)在分配隔离HOME之前，用[显式工具链环境](../scripts/test-environment.ts)固定Cargo／Rustup缓存；TUI子进程沿相同规则传递这两个路径，避免每个临时HOME重新安装工具链。应用配置仍只读取自有HOME，不拷贝用户配置或凭据。共享workspace夹具每个实际构建子命令上限为120秒，TUI就绪等待为60秒；各外层测试预算仍生效。恢复夹具在派发前建立并持有同一只读WAL观察连接，结束后先关闭再删自有根；Provider原调用核模型公开名及SDK的`write_file` wire身份，持久层继续核`files.write`。Run绑定夹具先结束Runtime，再关闭自己提供的串行锁和Store，最后删根。具体取舍和本轮证据见[测试环境决定](../.agents/notes/implemented/testing/2026-10-18-portable-test-environment.md)。
 
 正式默认／统一／TUI测试入口遇到Windows Bun安装路径不满足原候选制品ACL条件时，只在自有私有目录复制同字节Bun并复核SHA及实际原生pin，再用它执行原入口与全部原参数；不改安装目录权限。成功并确认关闭后清理自有副本，失败保留准确目录；未知pin关闭直接失败。`--list`和非法参数仍直接只读处理。该准备不提供MSVC或Windows Shell能力。TUI模型夹具保留所有请求的完整观察，另提供显式普通工作请求视图，避免自动标题子会话消耗普通响应队列；精确标题请求必须无Tool。原工具映射核SDK wire名及准确Core ID，Files baseline使用真实原生身份与完整EOF／SHA，未声明或歧义映射继续拒绝。
 
-[daemon宿主](../apps/cli/test/daemon-host.test.ts)、[共享CLI](../apps/cli/test/isolated/shared-cli.test.ts)、[管理](../apps/cli/test/isolated/shared-management.test.ts)、[状态](../apps/cli/test/isolated/status-host.test.ts)和[Skills](../apps/cli/test/isolated/shared-skills.test.ts)夹具的 `beforeAll` 必须沿各自用例的同一既有平台条件：前四份在macOS/Linux构建，Skills保持仅macOS。构建入口的file URL用 `fileURLToPath` 转成真实本地路径。Windows不执行这些原已跳过用例的构建准备，实际适用的恢复等调用者仍执行完整四workspace构建。共享构建器的每个子命令现为120秒，上述五份文件的准备60秒保持。[构建环境原语](fixtures/build-tool-environment.ts)为直接运行的构建子进程定位已安装的标准Cargo／rustup目录，并保留显式工具链环境；运行时HOME和来源隔离不变。Windows专属endpoint／pipe及实际安装链另行验证，不能将平台跳过计作Windows daemon能力通过。
+[daemon宿主](../apps/cli/test/daemon-host.test.ts)、[共享CLI](../apps/cli/test/isolated/shared-cli.test.ts)、[管理](../apps/cli/test/isolated/shared-management.test.ts)、[状态](../apps/cli/test/isolated/status-host.test.ts)和[Skills](../apps/cli/test/isolated/shared-skills.test.ts)夹具的 `beforeAll` 必须沿各自用例的同一既有平台条件：前四份在macOS/Linux构建，Skills保持仅macOS。构建入口的file URL用 `fileURLToPath` 转成真实本地路径。Windows不执行这些原已跳过用例的构建准备，实际适用的恢复等调用者仍执行共享构建器明确选择的完整workspace闭包。共享构建器的每个子命令现为120秒，上述五份文件的准备60秒保持。[构建环境原语](fixtures/build-tool-environment.ts)为直接运行的构建子进程定位已安装的标准Cargo／rustup目录，并保留显式工具链环境；运行时HOME和来源隔离不变。Windows专属endpoint／pipe及实际安装链另行验证，不能将平台跳过计作Windows daemon能力通过。
 
 客户端 UI 迁移回归沿当前 TUI 全库存、Desktop／UI／Web owner 整文件及受影响的 Browser／Cookie Gateway／恢复调用者执行，实际整轮结果归[客户端 UI 收束记录](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-15客户端-ui-迁移缺口与回归收束)。模型夹具只读写自有 HOME 的用户配置，不再依赖退役的 Profile 配置。Thought 的快速搜索通过实际下一次 Model 请求的显式同步点观察活动画面，保原步骤、终态及超时，不靠生产延迟或伪造终端帧。
 
@@ -503,7 +505,7 @@ Windows另接[安装版本／维护完整caller](fixtures/unified-agent/windows-
 原 [交互历史 DOM](../apps/desktop/test/isolated/native-interaction-history-dom.test.tsx)核通用 JSON 答案、取消、准确反馈、只读按钮与迟到范围；[Main reader](../apps/desktop/test/native-interaction-history.test.ts)核43项分页、child 原关系、变化拒绝和历史／当前审批附件资格隔离。[真实 HTTP](isolated/unified-agent/client-interactions.test.ts)另核实际 child 卡和 Core 通用问题的原答案／受理、游标与效果不增长。原默认窗口保首次／冷读，计划历史原字节从已验证完整附件读取，不把格式化 Markdown 的显示文本当源字节。邻接附件 fixture 等实际通知读取失败／恢复后才断言，原拒绝、零写入和期限保持；准确失败与通过归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。
 
 
-根默认和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)：精确八 workspace、mini-review 独立扩展、新 root unified-agent 场景及有限脚本安全列表；不会发现整个旧 integration/qualification/release/e2e/golden/TUI 树。原测试机制的独立 HOME、exclusive、失败停止派发、运行者 drain 与 OS 并发上限保持。新增 source-free/真实 Native/TTY 场景按实际分类单独进程执行，不以历史排除规则丢失其断言。
+根默认和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)：精确十 workspace、mini-review 独立扩展、新 root unified-agent 场景及有限脚本安全列表；不会发现整个旧 integration/qualification/release/e2e/golden/TUI 树。原测试机制的独立 HOME、exclusive、失败停止派发、运行者 drain 与 OS 并发上限保持。新增 source-free/真实 Native/TTY 场景按实际分类单独进程执行，不以历史排除规则丢失其断言。
 
 新 `test:tui:system` 由[当前 runner](../scripts/run-unified-tui-system-tests.ts)从新 UI TUI 与 CLI `tui*.test.ts` owner 动态发现，按当前文件清单分配四个 shard；`--list` 只读返回准确 inventory，只有所有 shard 成功才通过既有 `tui-system` check。根 runtime mock/e2e/fault/stdio/transport 与 Desktop aliases 已指向当前 owner 测试；旧 WebSocket/standalone/foundation/模型 live aliases 已退出，未将 paid Provider 测试重命名为 mock 通过。
 

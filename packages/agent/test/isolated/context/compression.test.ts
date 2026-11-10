@@ -52,6 +52,7 @@ async function fixture(
     refreshAfterAutoFailure?: boolean;
     instructions?: string;
     holdPreparing?: boolean;
+    accountingReport?: 'accepted' | 'rejected' | 'invalid';
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-compression-'))),
@@ -77,6 +78,23 @@ async function fixture(
       expect(input.summary === summary).toBe(true);
       return !rejectSummary;
     },
+    ...(options.accountingReport
+      ? {
+          async validateSummaryReport(
+            input: import('../../../src/context').CompressionInput & { readonly summary: string },
+          ) {
+            expect(input.summary).toBe(summary);
+            return {
+              accepted: options.accountingReport !== 'rejected',
+              accounting: {
+                basis: 'local-context-estimate-v1' as const,
+                beforeTokens: options.accountingReport === 'invalid' ? -1 : 333,
+                afterTokens: 111,
+              },
+            };
+          },
+        }
+      : {}),
     async validateExpanded(input) {
       if (options.changeStepOnReset) capabilityVersion++;
       return (
@@ -94,6 +112,17 @@ async function fixture(
       }
       return {
         instructions: options.instructions ?? 'SUMMARIZE EXACT INPUT; no tool calls',
+        ...(options.accountingReport
+          ? {
+              measurement: {
+                triggerTokens: 444,
+                triggerBasis: 'reported_baseline' as const,
+                measuredInputTokens: 400,
+                estimatedInputTokens: 44,
+                thresholdTokens: 420,
+              },
+            }
+          : {}),
         snapshot: {
           algorithm: 'fixture',
           ordering: ['contributions', 'compression', 'completion'],
@@ -339,6 +368,62 @@ async function fixture(
   };
 }
 
+for (const accountingReport of ['accepted', 'rejected', 'invalid'] as const)
+  test(`optional compression accounting report ${accountingReport} is validated in the actual publication transaction`, async () => {
+    const f = await fixture({ accountingReport });
+    try {
+      await f.work('original', 'original work');
+      const selection = (await f.store.getSession('s'))!.contextSelectionId;
+      await f.runtime.compressContext({
+        ...f.base,
+        commandId: 'accounting-compact',
+        expectedContextSelectionId: selection,
+      });
+      await f.runtime.waitForCommand('accounting-compact');
+      const page = await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' });
+      if (accountingReport === 'accepted')
+        expect(page.compression?.compression).toEqual({
+          adopted: true,
+          triggerTokens: 444,
+          triggerBasis: 'reported_baseline',
+          measuredInputTokens: 400,
+          estimatedInputTokens: 44,
+          thresholdTokens: 420,
+          accounting: { basis: 'local-context-estimate-v1', beforeTokens: 333, afterTokens: 111 },
+        });
+      else expect(page.compression).toBeUndefined();
+      const scope = { storeId: f.storeId, sessionId: 's', subjectId: 'owner' },
+        upperCursor = (await f.store.getMetadata()).lastChangeCursor;
+      let afterCursor = '0';
+      const facts: import('@kite-ai/trajectory').TrajectoryEvent[] = [];
+      for (;;) {
+        const page = await f.store.readTrajectoryEvents({ ...scope, upperCursor, afterCursor });
+        facts.push(...page.events);
+        if (page.exhausted) break;
+        afterCursor = page.scannedThrough;
+      }
+      expect(facts.some((event) => event.sourceEventType === 'context.compressed')).toBe(
+        accountingReport === 'accepted',
+      );
+      const models = facts.filter(
+        (event) => event.kind === 'model' && event.attributes.compressionId,
+      );
+      expect(models.length).toBeGreaterThan(0);
+      for (const event of models)
+        if (event.kind === 'model')
+          expect(event.attributes.compression).toEqual({
+            adopted: false,
+            triggerTokens: 444,
+            triggerBasis: 'reported_baseline',
+            measuredInputTokens: 400,
+            estimatedInputTokens: 44,
+            thresholdTokens: 420,
+          });
+    } finally {
+      await f.close();
+    }
+  });
+
 test('a View crossing compression publication keeps the same attempt observed before its Store snapshot', async () => {
   const f = await fixture({ holdPreparing: true });
   const snapshotEntered = gate(),
@@ -510,6 +595,7 @@ test('manual compression has recorded Model/usage and exact immutable coverage, 
     await f.runtime.waitForCommand('compact', { timeoutMs: 10000 });
     const page = await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' });
     expect(page.compression).toBeDefined();
+    expect(page.compression!.compression).toEqual({ adopted: true });
     expect(page.selection.id).toBe(selection);
     expect(page.compression!.coveredThroughSeq).toBe(command.seq);
     expect(page.messages).toHaveLength(0);

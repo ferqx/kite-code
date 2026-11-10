@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { homedir, release } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import {
@@ -68,6 +68,9 @@ import { canonicalProtectedPath } from './protected-path';
 import { settleDesktopQuit } from './quit-settlement';
 import { ScheduledTaskRunner } from './scheduled-task-runner';
 import { assertNativeSqliteEngine } from './sqlite-engine';
+import { registerNativeTrajectoryFileIpc } from './trajectory-file-ipc';
+import { NativeTrajectoryFiles } from './trajectory-files';
+import { createTrajectoryOfflineWindow } from './trajectory-offline-window';
 import { loadWindowsAccess } from './windows-access';
 import {
   acquireWindowsNativeCandidate,
@@ -139,6 +142,40 @@ let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
 let scheduledTasks: ScheduledTaskRunner | undefined;
 let privateAccess: DesktopProfileAccess | undefined;
+let offlineTrajectory: ReturnType<typeof createTrajectoryOfflineWindow> | undefined;
+const trajectoryFiles = new NativeTrajectoryFiles();
+let initialTrajectoryPath = process.argv
+  .slice(1)
+  .find((value) => isAbsolute(value) && value.endsWith('.kite-trajectory'));
+let openingOfflineTrajectory: Promise<void> | undefined;
+const openOfflineTrajectory = async (path?: string) => {
+  if (openingOfflineTrajectory) {
+    await openingOfflineTrajectory;
+    return openOfflineTrajectory(path);
+  }
+  const work = (async () => {
+    if (offlineTrajectory && !offlineTrajectory.window.isDestroyed())
+      return offlineTrajectory.open(path);
+    await offlineTrajectory?.close();
+    offlineTrajectory = createTrajectoryOfflineWindow({ development, initialPath: path });
+    await offlineTrajectory.ready;
+  })();
+  openingOfflineTrajectory = work;
+  try {
+    await work;
+  } finally {
+    if (openingOfflineTrajectory === work) openingOfflineTrajectory = undefined;
+  }
+};
+app.on('open-file', (event, path) => {
+  if (!path.endsWith('.kite-trajectory')) return;
+  event.preventDefault();
+  if (app.isReady())
+    void openOfflineTrajectory(path).catch(() => {
+      process.stderr.write(`${JSON.stringify({ code: 'trajectory_window_unavailable' })}\n`);
+    });
+  else initialTrajectoryPath = path;
+});
 let windowsArtifactAccess: WindowsNativeCandidateAccess | undefined;
 const acquireFormalWindowsAccess = () => {
   if (!formalAssets || !windowsAsset || !formalAssets.windowsCandidateFiles || !windowsHandoff)
@@ -343,6 +380,8 @@ async function openCaller(): Promise<NativeCaller> {
 function closeNativeResources(): Promise<void> {
   if (closingNativeResources) return closingNativeResources;
   const closing = (async () => {
+    await offlineTrajectory?.close();
+    await trajectoryFiles.close();
     await opening?.catch(() => {});
     await scheduledTasks?.stop();
     scheduledTasks = undefined;
@@ -513,6 +552,10 @@ void app
   .whenReady()
   .then(async () => {
     if (stoppingNativeProcess || exitAllowed) return;
+    if (initialTrajectoryPath) {
+      await openOfflineTrajectory(initialTrajectoryPath);
+      return;
+    }
     if (process.platform === 'win32' && windowsAsset) {
       const profile = selectProfile(
         assets.profile ?? {
@@ -784,6 +827,33 @@ void app
       },
       write: (path, report) =>
         writeFile(path, report, { encoding: 'utf8', flag: 'wx', mode: 0o600 }),
+    });
+    registerNativeTrajectoryFileIpc({
+      ipcMain,
+      window: () => window,
+      rendererUrl,
+      files: trajectoryFiles,
+      async pickPath() {
+        await openOfflineTrajectory();
+        return null;
+      },
+      async exportSnapshot(request) {
+        const host = await openCaller();
+        await host.invoke({ method: 'state', generation: request.generation });
+        const selected = await dialog.showSaveDialog(window!, {
+          title: '导出轨迹包',
+          defaultPath: 'trajectory.kite-trajectory',
+          filters: [{ name: 'Kite trajectory', extensions: ['kite-trajectory'] }],
+        });
+        if (selected.canceled || !selected.filePath) return false;
+        await host.exportTrajectory(
+          request.generation,
+          selected.filePath,
+          request.snapshot,
+          request.includeEvidence,
+        );
+        return true;
+      },
     });
     registerNativeIpc({
       ipcMain,

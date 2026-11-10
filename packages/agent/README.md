@@ -1,5 +1,7 @@
 # 通用 Agent
 
+[Trajectory owner](src/trajectory/README.md)已接原业务事务的不可变历史事实、固定上界的无状态分页及 typed Evidence；模型输入／输出、Files 原 receipt、Job 有界预览均按原版本读取，恢复保原来源。Service 的独立 Trace 消费不进入业务 ExtensionHost；原生命周期通知与 Session Logs 保持各自合同。
+
 默认SDK模型请求与传输失败除明确HTTP401／403认证或权限拒绝外均取得重连资格，分类与未知错误净化归[AI owner](../ai/README.md)。自定义Adapter的未分类异常仍不能替代已确认关闭的重试证明。[模型重连](src/model-attempt.ts)由 Runtime 在原已确认失败、关闭和来源资格保持的 Model Execution 之后退避重试，同一连续故障最多重连5次（首次请求另计，共6次尝试）。新重试事实持久记录`maxAttempts:6`，第5次重连仍失败时以`model_reconnect_exhausted`结束原Run，不创建第7次请求；原部分正文、用量和工具事实保留，明确新任务独立计数。冷恢复沿原attempt继续计数，不扩大剩余次数；旧历史的`maxAttempts:null`仍按原值可读。Execution只保存AI边界核实的有限`modelFailure.detail`，客户端自行映射可读原因，不记录或转发远端日志。[模型回归](test/isolated/execution/model-attempt.test.ts)核最后一次成功、耗尽后新任务、原前驱与部分工具零效果；物理断流和公开投影归[Service回归](../../apps/service/test/isolated/responses-loop.test.ts)。
 
 2026-10-26，本轮失败修复已通过12份受影响 Agent 完整测试文件。普通输入的 Run、Model 和来源直接绑定原 Command；内部权限模型使用 `authorization.check`，不再把它算作子 Agent／业务 Run。原 Action 来源继承用当前 ensure／prepare／dispatch 检查链核对目标、输入、策略与模型身份，损坏后仍要求零派发事件；Files 协作从实际模型文本回执读取完整 baseline，保留真实 CAS 冲突、结果未知、取消、串行资源与恢复不重放断言。真实恢复 PTY 已核原 Session 和准确历史。此为受影响范围的定向资格，不代表全仓或跨平台验收。

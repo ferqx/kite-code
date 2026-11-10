@@ -24,6 +24,13 @@ import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-prote
 import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
 import { measureServiceStartup } from './startup-timing';
 import {
+  createProfileTraceRuntime,
+  type ProfileTraceRuntime,
+  selectTraceRuntimeAssetPaths,
+  TraceRuntimeCleanupError,
+} from './trace-runtime';
+import { createTrajectorySource } from './trajectory';
+import {
   borrowWindowsPairedArtifact,
   retainWindowsPairedArtifact,
 } from './windows-paired-artifact';
@@ -34,6 +41,7 @@ type ProcessResources = {
   artifacts?: ReturnType<typeof createArtifactStore>;
   workspaceSerialLocks?: ReturnType<typeof createWorkspaceSerialLocks>;
   runtimeAssetAccess?: { release(): void };
+  trace?: ProfileTraceRuntime;
 };
 
 /** Trusted process marker; errors and retained owners must never become HTTP diagnostics. */
@@ -121,7 +129,9 @@ export async function assembleProcessService(
   )
     throw new Error('profile_identity_mismatch');
   let runtimeAssetAccess: { release(): void } | undefined;
-  let runtimeAssets = startup.runtimeProtection ? [] : defaultRuntimeAssets(entrypoint);
+  let runtimeAssets = startup.runtimeProtection
+    ? []
+    : [...defaultRuntimeAssets(entrypoint), ...Object.values(selectTraceRuntimeAssetPaths())];
   if (startup.runtimeProtection && process.platform === 'win32') {
     try {
       const actual = {
@@ -228,6 +238,7 @@ export async function assembleProcessService(
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let artifacts: ReturnType<typeof createArtifactStore> | undefined;
   let workspaceSerialLocks: ReturnType<typeof createWorkspaceSerialLocks> | undefined;
+  let trace: ProfileTraceRuntime | undefined;
   try {
     store = await measureServiceStartup('store', () =>
       openSqliteStore({
@@ -288,12 +299,33 @@ export async function assembleProcessService(
       throw error;
     }
   }
+  const trajectory = store
+    ? createTrajectorySource(
+        store,
+        runtime ? (input) => runtime!.readTrajectoryEvidence(input) : undefined,
+      )
+    : undefined;
   try {
+    if (trajectory) {
+      try {
+        trace = createProfileTraceRuntime({
+          profile: selected,
+          source: trajectory,
+          subjectId,
+          ...(options.credentialBackend ? { credentialBackend: options.credentialBackend } : {}),
+        });
+      } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'trace_unavailable')
+          throw error;
+        process.stderr.write(`${JSON.stringify({ code: 'trace_unavailable' })}\n`);
+      }
+    }
     return await measureServiceStartup('http', () =>
       startService({
         subjectId,
         runtime,
         beforeResourceClose: async () => {
+          await trace?.close();
           assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
           await beforeResourceClose?.();
           await workspaceSerialLocks?.close();
@@ -309,6 +341,8 @@ export async function assembleProcessService(
         sessionLogs: store
           ? (query, observer) => readSessionLogs(store!, query, observer)
           : undefined,
+        trajectory,
+        traceHost: trace?.host,
         buildId: startup.buildId,
         instanceId: startup.instanceId,
         token: startup.token,
@@ -323,6 +357,7 @@ export async function assembleProcessService(
   } catch (error) {
     try {
       assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
+      await trace?.close();
       await runtime?.close();
       await workspaceSerialLocks?.close();
       runtimeAssetAccess?.release();
@@ -333,8 +368,18 @@ export async function assembleProcessService(
         artifacts,
         workspaceSerialLocks,
         runtimeAssetAccess,
+        trace,
       });
     }
+    if (error instanceof TraceRuntimeCleanupError)
+      throw new ProcessServiceCleanupError('http_assembly', error, error, {
+        runtime,
+        store,
+        artifacts,
+        workspaceSerialLocks,
+        runtimeAssetAccess,
+        trace,
+      });
     throw error;
   }
 }

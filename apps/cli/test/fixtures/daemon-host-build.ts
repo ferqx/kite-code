@@ -51,7 +51,14 @@ async function runBuild(args: string[], cwd: string) {
 export async function buildOwnedDaemon(artifact: string): Promise<string> {
   const modules = join(artifact, 'node_modules');
   const dependencies = new Map<string, Set<string>>();
-  for (const directory of ['packages/agent', 'packages/ai', 'packages/client', 'apps/service']) {
+  for (const directory of [
+    'packages/trajectory',
+    'packages/trace-extension-sdk',
+    'packages/agent',
+    'packages/ai',
+    'packages/client',
+    'apps/service',
+  ]) {
     const source = join(repository, directory);
     const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as {
       name: string;

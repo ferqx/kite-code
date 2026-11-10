@@ -61,6 +61,8 @@ export { verifyTerminalBundle };
 
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 const workspaces = [
+  'packages/trajectory',
+  'packages/trace-extension-sdk',
   'packages/ai',
   'packages/agent',
   'packages/client',

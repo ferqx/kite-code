@@ -1,8 +1,8 @@
 # 开发入口
 
-产品预期由[产品手册](../handbook/README.md)和用户确认需求定义；实现与运行证据说明当前交付范围。[通用 Agent V1.3](../plans/unified-agent-refactor-v1.md)仍在实施，37 项能力和三平台资格见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。当前根正式入口、默认测试与 CI 已选择以下精确八个 workspace；入口切换不表示整个 §35 已完成。
+产品预期由[产品手册](../handbook/README.md)和用户确认需求定义；实现与运行证据说明当前交付范围。[通用 Agent V1.3](../plans/unified-agent-refactor-v1.md)仍在实施，37 项能力和三平台资格见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。当前根正式入口、默认测试与 CI 已选择以下精确十个 workspace；入口切换不表示整个 §35 已完成。
 
-2026-10-26 已删除其余旧架构 workspace；仅保留 `apps/kite-cli` 的历史源码，且其运行依赖闭包已移除。当前构建、测试与正式入口仍只选择以下八 workspace，删除决定见[取舍](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧源码删除不代替现有平台、资源、恢复或发布门禁。
+2026-10-26 已删除其余旧架构 workspace；仅保留 `apps/kite-cli` 的历史源码，且其运行依赖闭包已移除。当前构建、测试与正式入口仍只选择以下十 workspace，删除决定见[取舍](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧源码删除不代替现有平台、资源、恢复或发布门禁。
 
 `native/` 的独立原生后端与观测资产，以及通用发布、运维和测试基础设施不属于旧 workspace 删除范围。保留范围与通用 helper 的 owner 迁移见上述删除决定；源码保留不表示已接入新 Runtime 或取得平台资格。
 
@@ -10,6 +10,8 @@
 
 | 模块 | 职责与入口 |
 | --- | --- |
+| [Trajectory](../../packages/trajectory/README.md) | 纯事件／Evidence／分页和可靠消费协议、运行时验证与确定性投影 |
+| [Trace SDK](../../packages/trace-extension-sdk/README.md) | 有限消费接口、ACK 与本地 bundle 模板 |
 | [AI](../../packages/ai/README.md) | 中立模型流与明确 SDK adapter |
 | [Agent](../../packages/agent/README.md) | 唯一 Loop、Execution/Job、[独立权限模块](../../packages/agent/src/permissions/README.md)、业务记录、扩展及 I/O owner leaves |
 | [Client](../../packages/client/README.md) | 公开 HTTP/SSE 准入、原身份与未知回执查询 |
@@ -40,7 +42,7 @@
 
 ## 架构学习与历史追溯
 
-[架构总览](architecture.md)、[workspace 依赖表](architecture/dependencies.md)、[拓扑](architecture/topology.md)及流程/子系统均按当前八 workspace 定位。旧实现与证据通过固定 revision 保留历史追溯；适用的安全与发布约束继续由当前 owner 和 active 维护。
+[架构总览](architecture.md)、[workspace 依赖表](architecture/dependencies.md)、[拓扑](architecture/topology.md)及流程/子系统均按当前十 workspace 定位。旧实现与证据通过固定 revision 保留历史追溯；适用的安全与发布约束继续由当前 owner 和 active 维护。
 
 [执行、后台子 Agent 与审批交互图](prototypes/execution-observability/README.md)提供当前流程推演和代表性真实测试日志的离线 HTML 查看。
 

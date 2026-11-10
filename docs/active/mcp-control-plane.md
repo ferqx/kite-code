@@ -5,7 +5,7 @@
 验证：`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:unified-api`与当前根默认测试；具体MCP/Service/Caller实际断言和平台范围沿对应owner及[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
 相关：[Agent Note 0010](../../.agents/notes/implemented/architecture/2026-07-15-mcp-supervisor-control-plane.md)、[Agent Note 0013](../../.agents/notes/implemented/feature/2026-07-16-mcp-credential-store-and-oauth-session.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0015](../../.agents/notes/implemented/architecture/2026-07-17-mcp-provider-availability-boundary.md)、[Agent Note 0016](../../.agents/notes/implemented/feature/2026-07-17-mcp-provider-action-runtime-lifecycle.md)、[Agent Note 0017](../../.agents/notes/implemented/feature/2026-07-17-required-mcp-provider-admission.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`packages/builtin-runtime/src/mcp/supervisor.ts`、`packages/builtin-runtime/src/mcp/control-types.ts`、`apps/kite-cli/src/tui/mcp/`。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 当前通用 Agent 边界
 

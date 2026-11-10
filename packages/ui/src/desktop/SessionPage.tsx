@@ -38,6 +38,7 @@ import {
   type SessionChildTarget,
   SessionTabs,
   type SessionTabsModel,
+  type SessionTrajectoryPageProps,
   useSessionTabs,
 } from './SessionTabs';
 import { type PageActions, Sidebar } from './Sidebar';
@@ -253,6 +254,8 @@ export interface SessionPageProps {
   browserRestoreKey?: string;
   browserPending?: boolean;
   childTabRequest?: SessionChildTabRequest;
+  trajectoryTabRequest?: { requestId: number };
+  renderTrajectory?: (props: SessionTrajectoryPageProps) => ReactNode;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
   onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
   newConversation?: NewConversationProps;
@@ -272,7 +275,8 @@ export function SessionPage(props: SessionPageProps) {
       props.renderBrowser !== undefined ||
       props.fileChanges !== undefined ||
       props.fileChangesContent !== undefined ||
-      props.renderChildSession !== undefined);
+      props.renderChildSession !== undefined ||
+      props.renderTrajectory !== undefined);
   const tabModel = useSessionTabs(
     hasTabs ? (props.tabsScopeKey ?? props.readingKey) : 'inactive',
     props.closeBrowser,
@@ -406,7 +410,11 @@ function SessionPageContent({
   };
   const detailsSizing = {
     minSize: workspaceDetails ? '240px' : '300px',
-    maxSize: workspaceDetails ? '85%' : '640px',
+    maxSize:
+      workspaceDetails ||
+      tabModel.tabs.some((tab) => tab.id === tabModel.active && tab.kind === 'trajectory')
+        ? '85%'
+        : '640px',
     groupResizeBehavior: props.scheduledTasks
       ? ('preserve-pixel-size' as const)
       : ('preserve-relative-size' as const),
@@ -827,6 +835,37 @@ function SessionPageContent({
     hostDetailsOpen,
     tabModel.restoring,
     tabModel.restoreIssue,
+  ]);
+  const trajectoryOpener = useRef(tabModel.openTrajectory);
+  trajectoryOpener.current = tabModel.openTrajectory;
+  const handledTrajectoryRequest = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    const request = props.trajectoryTabRequest;
+    if (
+      !hasTabs ||
+      !request ||
+      !props.renderTrajectory ||
+      props.loading ||
+      tabModel.restoring ||
+      tabModel.restoreIssue
+    )
+      return;
+    const key = JSON.stringify([tabsScopeKey, request.requestId]);
+    if (handledTrajectoryRequest.current === key) return;
+    handledTrajectoryRequest.current = key;
+    const opened = trajectoryOpener.current();
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    detailClose.current?.();
+    changeTabsOpen(true);
+  }, [
+    props.trajectoryTabRequest,
+    props.renderTrajectory,
+    props.loading,
+    hasTabs,
+    tabsScopeKey,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    changeTabsOpen,
   ]);
   const handledChildRequest = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
@@ -1632,6 +1671,7 @@ function SessionPageContent({
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}
                       renderChildSession={props.renderChildSession}
+                      renderTrajectory={props.renderTrajectory}
                       onChildSessionChange={props.onChildSessionChange}
                       changes={
                         props.fileChangesContent ?? (

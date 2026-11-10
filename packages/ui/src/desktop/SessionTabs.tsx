@@ -50,6 +50,10 @@ export interface SessionChildPageProps extends SessionChildTarget {
   readonly onTitleChange: (title: string) => void;
 }
 
+export interface SessionTrajectoryPageProps {
+  readonly visible: boolean;
+}
+
 export interface SessionTabsProps {
   readonly model: SessionTabsModel;
   readonly visible: boolean;
@@ -57,6 +61,7 @@ export interface SessionTabsProps {
   readonly changes: ReactNode;
   readonly renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
   readonly renderChildSession?: (props: SessionChildPageProps) => ReactNode;
+  readonly renderTrajectory?: (props: SessionTrajectoryPageProps) => ReactNode;
   readonly onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
   readonly workspace?: {
     readonly render: (visible: boolean) => ReactNode;
@@ -68,7 +73,7 @@ export interface SessionTabsProps {
 type SessionTab =
   | {
       readonly id: string;
-      readonly kind: 'browser' | 'changes' | 'workspace';
+      readonly kind: 'browser' | 'changes' | 'workspace' | 'trajectory';
       readonly title: string;
     }
   | {
@@ -100,6 +105,7 @@ export interface SessionTabsModel {
   readonly title: (id: string, title: string) => void;
   readonly addBrowser: () => void;
   readonly openChanges: () => void;
+  readonly openTrajectory: () => boolean;
   readonly openChild: (
     target: SessionChildTarget,
     title: string,
@@ -408,6 +414,20 @@ export function useSessionTabs(
     const tab: SessionTab = { id: 'changes', kind: 'changes', title: '变更' };
     update((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
+  const openTrajectory = () => {
+    if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
+    const existing = latest.current.tabs.find((tab) => tab.kind === 'trajectory');
+    if (!existing && occupiedSlots() >= maxTabs) return false;
+    intent.current++;
+    update((value) => ({
+      ...value,
+      tabs: existing
+        ? value.tabs
+        : [...value.tabs, { id: 'trajectory', kind: 'trajectory', title: '执行轨迹' }],
+      selected: 'trajectory',
+    }));
+    return true;
+  };
   const openChild = (target: SessionChildTarget, title: string, childAgentIdentity?: string) => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const tabs = latest.current.tabs;
@@ -520,6 +540,7 @@ export function useSessionTabs(
     title,
     addBrowser,
     openChanges,
+    openTrajectory,
     openChild,
     openWorkspace,
     closeTab,
@@ -648,6 +669,7 @@ export function SessionTabs({
   changes,
   renderBrowser,
   renderChildSession,
+  renderTrajectory,
   onChildSessionChange,
   workspace,
   onClose,
@@ -684,6 +706,22 @@ export function SessionTabs({
         <HugeiconsIcon icon={SourceCodeIcon} />
         <span>变更</span>
       </Button>
+      {renderTrajectory && (
+        <Button
+          type="button"
+          className="session-browser-tool"
+          disabled={
+            model.restoring ||
+            model.restoreIssue ||
+            (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'trajectory'))
+          }
+          onClick={() => model.openTrajectory()}
+          aria-label="执行轨迹"
+        >
+          <HugeiconsIcon icon={SourceCodeIcon} />
+          <span>执行轨迹</span>
+        </Button>
+      )}
     </section>
   );
   return (
@@ -704,6 +742,12 @@ export function SessionTabs({
               <div className="session-tab-workspace">
                 {workspace?.render(visible && active === tab.id)}
               </div>
+            ) : tab.kind === 'trajectory' ? (
+              visible && active === tab.id ? (
+                <div className="session-tab-trajectory">
+                  {renderTrajectory?.({ visible: true })}
+                </div>
+              ) : null
             ) : tab.kind === 'changes' ? (
               visible && active === tab.id ? (
                 <div className="session-tab-changes">{changes}</div>

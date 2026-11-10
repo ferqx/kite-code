@@ -62,4 +62,4 @@ bun run agent run \
 
 ## 通用 Agent V1.3 当前入口
 
-根 build、typecheck、默认测试、CLI/TUI 和 release 工具已选择八个新 workspace。正式 `agent` / `tui` 前先运行 `bun run build` 与 `bun run release:build`；开发入口保持明确 development profile。当前行为及资格限制见[实施进度](docs/plans/unified-agent-refactor-v1-progress.md)与[release control](docs/active/release-control.md)。完整 V1.3 与三平台发布资格仍在实施。
+根 build、typecheck、默认测试、CLI/TUI 和 release 工具已选择十个当前 workspace（含纯 Trajectory 协议与 Trace SDK）。正式 `agent` / `tui` 前先运行 `bun run build` 与 `bun run release:build`；开发入口保持明确 development profile。当前行为及资格限制见[实施进度](docs/plans/unified-agent-refactor-v1-progress.md)与[release control](docs/active/release-control.md)。完整 V1.3 与三平台发布资格仍在实施。

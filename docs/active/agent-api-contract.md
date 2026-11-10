@@ -14,7 +14,19 @@ OpenAPI/schema生成、Public compatibility或静态`/api-docs` artifact时。
 [`packages/agent-api-contract/README.md`](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/agent-api-contract/README.md)与
 [`packages/agent-api-client/README.md`](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/packages/agent-api-client/README.md)。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+
+## 当前 Trajectory 与 Trace 管理
+
+当前同源 [Service schema](../../apps/service/src/http/schema/index.ts)与生成 Client 新增 `trajectory`、`trajectory_evidence`、`trace_extensions` 可选能力，已有 API major、工具定义版本与 Session Logs 合同保持。事件 open 固定 upper，后页携带同范围／filter及排他 after，每页短事务重新准入；返回空匹配页仍可推进 scannedThrough，穷尽不证明完整或终态。Evidence 独立按精确 event/ref/version/atCursor 授权，连续块绑定 view SHA／长度与读取 epoch，取消／撤销停止后续块。
+
+规范事件可选封存原 Model／Context 的有限压缩身份与 automatic／manual 分类，以及 Interaction 的 approval／question／plan_review 分类；缺少这些字段的旧事实仍有效，不追补历史。Desktop 默认四类视图只筛选展示与详情页，不改变底层读取 scope、原父子关系、保存或导出范围；API major、事实格式和 Projector 版本保持。
+
+独立`message`事实封存原消息身份、角色、序号、修订及完成状态，正文经独立`message` Evidence沿原授权与准确版本读取。消息事件和正文分别受Trace grant中的eventKinds与evidenceKinds显式约束，现有授权不会自动包含新类型；第三方messageRef沿安装域和可证原消息出处做opaque映射，不输出原messageId或正文属性。用户消息和Agent回复是默认树的对话上下文，旧事实没有消息身份时不重建历史；各协议版本保持原值。
+
+Trace 管理只提供具名安装／配置／grant／启停／更新／卸载、历史任务／DLQ与用途凭据操作，不接受自报主体、宿主路径或通用 secret resolve。历史 fromSequence／toSequence 均为包含边界，Host 转换为Reader的排他 after；暂停／继续保持首次 upper。安装／配置不自动启用，Full 模式不授予外发，Host ACK 与 OTel 远端结果分别报告。准确当前合同归 [Trace owner](../../apps/service/src/trace-extensions/README.md)与[Client](../../packages/client/README.md)。
+
+同源轨迹索引可包含第一方 `display.outputPresence`，只绑定原事件准确公开输出的正文存在性、工具调用数量与完整性。没有该字段的旧事实保持未知，不从正文预览或加载状态推断为空；原消息、材料与父子关系不删除。生成 schema／Client／离线包同步保留该可选值，第三方 Trace 继续排除 `display`，既有 grant、API major、事件与材料版本均不变。
 
 ## 当前实现事实
 

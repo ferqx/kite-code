@@ -45,6 +45,9 @@ import {
   unavailableSkillCatalogue,
   unavailableUserSkillCatalogue,
 } from './skill-catalogue';
+import type { TraceHost } from './trace-extensions/host';
+import { registerTraceExtensionRoutes } from './trace-extensions/http';
+import type { TrajectorySource } from './trajectory';
 import type { UserMcpManagementPort } from './user-mcp-management';
 
 export interface ServiceOptions {
@@ -60,6 +63,8 @@ export interface ServiceOptions {
   diagnosticSource?: HostStatusSource;
   skillCatalogue?: SkillCatalogueSource;
   sessionLogs?: SessionLogsSource;
+  trajectory?: TrajectorySource;
+  traceHost?: TraceHost;
   profile: { dataRoot: string; name: string; accessKey: string };
   buildId: string;
   token?: string;
@@ -231,6 +236,13 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function isTrajectoryRead(method: string, path: string): boolean {
+  return (
+    method === 'POST' &&
+    /^\/v1\/sessions\/[^/]+\/trajectory\/(?:open|events|evidence\/(?:open|read|close))$/.test(path)
+  );
+}
+
 /** Thin HTTP projection of the public Agent API. No execution loop lives here. */
 export async function startService(options: ServiceOptions) {
   // Authenticated business routes are rejected by middleware in diagnostic mode.
@@ -238,11 +250,16 @@ export async function startService(options: ServiceOptions) {
   const token = options.token ?? `${crypto.randomUUID()}${crypto.randomUUID()}`;
   const subjectId = options.subjectId ?? 'local-user';
   const sessionLogs = options.sessionLogs;
+  const trajectory = options.trajectory;
+  let traceClose: Promise<void> | undefined;
+  const closeTrace = () => (traceClose ??= options.traceHost?.close() ?? Promise.resolve());
   const instanceId = options.instanceId ?? crypto.randomUUID();
   const app = new Hono();
   let endpoint = '';
   let closing = false;
   const lifecycle = createHttpLifecycle(options.runtime, async () => {
+    await closeTrace();
+    trajectory?.evidence?.dispose();
     await options.userMcpManagement?.close();
     await options.skillCatalogue?.dispose?.();
     await options.beforeResourceClose?.();
@@ -333,6 +350,9 @@ export async function startService(options: ServiceOptions) {
   if (options.skillCatalogue?.listUser) capabilities.push('user_skill_catalogue');
   if (options.skillCatalogue?.readUserDocument) capabilities.push('user_skill_document');
   if (sessionLogs) capabilities.push('session_logs');
+  if (trajectory) capabilities.push('trajectory');
+  if (trajectory?.evidence) capabilities.push('trajectory_evidence');
+  if (options.traceHost) capabilities.push('trace_extensions');
   if (supportsFileRecovery(options.runtime)) capabilities.push('file_recovery');
   schemas.ServerInfo.parse({
     instanceId,
@@ -389,6 +409,7 @@ export async function startService(options: ServiceOptions) {
     if (
       closing &&
       context.req.method !== 'GET' &&
+      !isTrajectoryRead(context.req.method, context.req.path) &&
       context.req.path !== '/v1/lifecycle/shutdown' &&
       !(context.req.method === 'POST' && /^\/v1\/sessions\/[^/]+\/commands$/.test(context.req.path))
     )
@@ -416,7 +437,10 @@ export async function startService(options: ServiceOptions) {
       ? () => {}
       : (() => {
           try {
-            return lifecycle.enter(context.req.method !== 'GET');
+            return lifecycle.enter(
+              context.req.method !== 'GET' &&
+                !isTrajectoryRead(context.req.method, context.req.path),
+            );
           } catch {
             throw new HttpFailure('service_draining', 503);
           }
@@ -437,7 +461,7 @@ export async function startService(options: ServiceOptions) {
         ? error.status
         : code === 'interaction_too_large'
           ? 413
-          : code === 'interaction_limit'
+          : code === 'interaction_limit' || code === 'trajectory_evidence_busy'
             ? 429
             : [
                   'permission_denied',
@@ -453,11 +477,14 @@ export async function startService(options: ServiceOptions) {
                   'directory_scope_denied',
                   'export_scope_denied',
                   'session_log_scope_denied',
+                  'trajectory_scope_denied',
                   'execution_group_scope_denied',
                 ].includes(code)
               ? 403
               : [
                     'invalid_cursor',
+                    'invalid_trajectory_request',
+                    'trajectory_evidence_offset_invalid',
                     'invalid_page',
                     'artifact_scope_invalid',
                     'invalid_configuration_scope',
@@ -504,11 +531,17 @@ export async function startService(options: ServiceOptions) {
                 ? 400
                 : code === 'context_item_too_large' ||
                     code === 'export_record_too_large' ||
-                    code === 'session_log_page_too_large'
+                    code === 'session_log_page_too_large' ||
+                    code === 'trajectory_page_too_large' ||
+                    code === 'trajectory_event_too_large'
                   ? 413
-                  : code === 'cursor_expired'
+                  : code === 'cursor_expired' ||
+                      code === 'history_unavailable' ||
+                      code === 'trajectory_evidence_read_closed'
                     ? 410
                     : code.endsWith('_not_found') ||
+                        code === 'trajectory_evidence_unavailable' ||
+                        code === 'trajectory_evidence_read_missing' ||
                         code === 'definition_missing' ||
                         code === 'workspace_missing'
                       ? 404
@@ -599,6 +632,14 @@ export async function startService(options: ServiceOptions) {
       }),
       status,
     );
+  });
+  registerTraceExtensionRoutes(app, {
+    host: options.traceHost,
+    readBody: (request, schema, maximum) =>
+      readBody(request, schema, maximum, { requireStoreId: false, readers: bodyReaders }),
+    fail(code, status): never {
+      throw new HttpFailure(code, status);
+    },
   });
   app.get('/v1/sessions/:id/export/manifest', async (context) => {
     const { storeId } = sessionExportQuery(
@@ -818,6 +859,70 @@ export async function startService(options: ServiceOptions) {
     context.header('cache-control', 'no-store');
     context.header('x-content-type-options', 'nosniff');
     return context.json(result);
+  });
+  app.post('/v1/sessions/:id/trajectory/open', async (context) => {
+    if (!trajectory) throw new HttpFailure('capability_unavailable', 503);
+    const input = await readBody(context.req.raw, apiSchemas.TrajectoryScope, 8192, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    if (input.sessionId !== context.req.param('id')) throw new HttpFailure('invalid_request', 400);
+    const signal = context.req.raw.signal;
+    const snapshot = await trajectory.open({ ...input, subjectId }, { signal });
+    signal.throwIfAborted();
+    context.header('cache-control', 'no-store');
+    context.header('x-content-type-options', 'nosniff');
+    return context.json(apiSchemas.TrajectorySnapshot.parse(snapshot));
+  });
+  app.post('/v1/sessions/:id/trajectory/events', async (context) => {
+    if (!trajectory) throw new HttpFailure('capability_unavailable', 503);
+    const input = await readBody(context.req.raw, apiSchemas.TrajectoryReadRequest, 8192, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    if (input.sessionId !== context.req.param('id')) throw new HttpFailure('invalid_request', 400);
+    const signal = context.req.raw.signal;
+    const page = await trajectory.readEvents({ ...input, subjectId }, { signal });
+    signal.throwIfAborted();
+    const result = apiSchemas.TrajectoryPage.parse(page);
+    if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 512 * 1024)
+      throw new HttpFailure('trajectory_page_too_large', 413);
+    context.header('cache-control', 'no-store');
+    context.header('x-content-type-options', 'nosniff');
+    return context.json(result);
+  });
+  app.post('/v1/sessions/:id/trajectory/evidence/open', async (context) => {
+    if (!trajectory?.evidence) throw new HttpFailure('capability_unavailable', 503);
+    const input = await readBody(context.req.raw, apiSchemas.TrajectoryEvidenceOpen, 8192, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    if (input.sessionId !== context.req.param('id')) throw new HttpFailure('invalid_request', 400);
+    const value = await trajectory.evidence.open({ ...input, subjectId }, context.req.raw.signal);
+    context.header('cache-control', 'no-store');
+    return context.json(apiSchemas.TrajectoryEvidenceDescriptor.parse(value));
+  });
+  app.post('/v1/sessions/:id/trajectory/evidence/read', async (context) => {
+    if (!trajectory?.evidence) throw new HttpFailure('capability_unavailable', 503);
+    const input = await readBody(context.req.raw, apiSchemas.TrajectoryEvidenceReadRequest, 8192, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    if (input.sessionId !== context.req.param('id')) throw new HttpFailure('invalid_request', 400);
+    const value = await trajectory.evidence.read(input, subjectId, context.req.raw.signal);
+    context.header('cache-control', 'no-store');
+    return context.json(apiSchemas.TrajectoryEvidenceChunk.parse(value));
+  });
+  app.post('/v1/sessions/:id/trajectory/evidence/close', async (context) => {
+    if (!trajectory?.evidence) throw new HttpFailure('capability_unavailable', 503);
+    const input = await readBody(context.req.raw, apiSchemas.TrajectoryEvidenceCloseRequest, 8192, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    if (input.sessionId !== context.req.param('id')) throw new HttpFailure('invalid_request', 400);
+    trajectory.evidence.close(input.readId, subjectId, input.storeId, input.sessionId);
+    context.header('cache-control', 'no-store');
+    return context.json({ closed: true as const });
   });
   app.get('/v1/sessions/:id/model-inputs', async (context) => {
     const raw = context.req.queries();
@@ -1238,6 +1343,8 @@ export async function startService(options: ServiceOptions) {
       mode,
       () => {
         closing = true;
+        trajectory?.evidence?.dispose();
+        void closeTrace().catch(() => {});
         for (const subscriber of subscribers) subscriber.abort();
         for (const reader of bodyReaders) void reader.cancel().catch(() => {});
       },

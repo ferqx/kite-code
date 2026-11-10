@@ -278,6 +278,7 @@ test('real HTTP exposes projected facts, distinguishes initialization writes and
     try {
       expect(db.query('SELECT id FROM schema_migration ORDER BY id').all()).toEqual([
         { id: '0001-baseline' },
+        { id: '0002-trajectory-facts' },
       ]);
       expect(db.query('SELECT COUNT(*) AS count FROM command').get()).toEqual({ count: 0 });
     } finally {

@@ -4,6 +4,13 @@ import {
   canonicalCallerCommandRequest,
   validateRequest,
 } from '@kite-ai/client';
+import {
+  evidenceCloseRequestSchema,
+  evidenceOpenSchema,
+  evidenceReadRequestSchema,
+  trajectoryReadRequestSchema,
+  trajectoryScopeSchema,
+} from '@kite-ai/trajectory';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import { composeBrowserDraft, readBrowserAnnotations } from '../src/browser-annotation-content';
 import type { DesktopEditor } from '../src/file-changes-bridge';
@@ -36,10 +43,12 @@ import type { NativeCaller } from './native-caller';
 import type { NativeRootWindow as BrowserWindow } from './native-root-window';
 import { parseScheduledTaskSaveInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
+import { decodeNativeTraceOperation } from './trace-extensions';
 
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'trace.manage': ['operation'],
   'session.markRead': ['expectedStoreId', 'sessionId', 'runId', 'status'],
   'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
   'input.queue.close': ['readId'],
@@ -211,6 +220,12 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'modelOutput.open': ['readId', 'expectedStoreId', 'sessionId', 'executionId', 'messageId'],
   'modelOutput.read': ['readId', 'offset', 'limit'],
   'modelOutput.close': ['readId'],
+  'trajectory.open': ['request'],
+  'trajectory.events': ['request'],
+  'trajectory.evidence.open': ['request'],
+  'trajectory.evidence.read': ['request'],
+  'trajectory.evidence.close': ['request'],
+  'trajectory.cancel': [],
   'interactionAttachment.open': ['readId', 'key'],
   'interactionAttachment.read': ['readId', 'offset', 'limit'],
   'interactionAttachment.close': ['readId'],
@@ -291,7 +306,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     candidate.method === 'submit' ||
     candidate.method === 'extensions.invoke'
       ? 16777216
-      : requestBytes)
+      : candidate.method === 'trace.manage'
+        ? 2 * 1048576 + 4096
+        : requestBytes)
   )
     throw Error('native_request_too_large');
   const input = record(value),
@@ -677,6 +694,20 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     ...fields[method as NativeRequest['method']],
     ...(method.startsWith('background.') ? ['surface'] : []),
   ]);
+  if (method === 'trace.manage') decodeNativeTraceOperation(input.operation);
+  if (method.startsWith('trajectory.') && method !== 'trajectory.cancel') {
+    const schema =
+      method === 'trajectory.open'
+        ? trajectoryScopeSchema
+        : method === 'trajectory.events'
+          ? trajectoryReadRequestSchema
+          : method === 'trajectory.evidence.open'
+            ? evidenceOpenSchema
+            : method === 'trajectory.evidence.read'
+              ? evidenceReadRequestSchema
+              : evidenceCloseRequestSchema;
+    if (!schema.safeParse(input.request).success) throw Error('invalid_native_request');
+  }
   if (
     method !== 'attach' &&
     (!Number.isSafeInteger(input.generation) || Number(input.generation) < 1)

@@ -97,7 +97,13 @@ async function fixture(large = false) {
     '  {"unknown":true}  ',
   );
   db.run("UPDATE session SET title='wal-only-title',next_seq=9007199254740993 WHERE id='s'");
-  db.run('UPDATE storage_meta SET last_change_cursor=9007199254740993');
+  db.run(
+    'UPDATE storage_meta SET last_change_cursor=9007199254740993,trajectory_enabled_after_cursor=9007199254740992',
+  );
+  // Maintenance preserves independent future fact bytes without interpreting them as business state.
+  db.run('UPDATE change_event SET trajectory_fact_json=? WHERE cursor=1', [
+    '  {"schema":"future.trajectory","version":99,"origin":{"storeId":"original-fact-origin","cursor":"1"}}  ',
+  ]);
   writeFileSync(join(selected.profilePath, 'credentials'), 'excluded credential fixture', {
     mode: 0o600,
   });
@@ -163,6 +169,17 @@ test('offline backup captures WAL and complete 17MiB media with original busines
       });
       expect(copy.query('SELECT origin_store_id FROM blob_ref').get()).toEqual({
         origin_store_id: 'original-store-origin',
+      });
+      expect(
+        copy
+          .query('SELECT CAST(trajectory_enabled_after_cursor AS TEXT) AS cursor FROM storage_meta')
+          .get(),
+      ).toEqual({ cursor: '9007199254740992' });
+      expect(
+        copy.query('SELECT trajectory_fact_json FROM change_event WHERE cursor=1').get(),
+      ).toEqual({
+        trajectory_fact_json:
+          '  {"schema":"future.trajectory","version":99,"origin":{"storeId":"original-fact-origin","cursor":"1"}}  ',
       });
     } finally {
       copy.close();
@@ -461,6 +478,7 @@ test('built maintenance leaf creates and inspects a backup from a consumer outsi
     mkdirSync(join(packaged, 'storage', 'migrations'), { recursive: true });
     for (const name of [
       '0001-baseline.sql',
+      '0002-trajectory-facts.sql',
       '0002-recovery-audit.sql',
       '0003-session-reconciliation.sql',
       '0004-pending-input-order.sql',

@@ -272,6 +272,34 @@ test('complete seventeen MiB input is verified without a body cap; cancelled rea
     expect(saved.request).toEqual(model.requests[0]!);
     expect(BigInt(saved.bodyBytes)).toBeGreaterThan(17n * 1024n * 1024n);
     expect(saved.request.messages.some((message) => message.content === content)).toBe(true);
+    const trajectoryScope = {
+      storeId: f.scope.expectedStoreId,
+      sessionId: 's',
+      subjectId: f.scope.subjectId,
+      executionId,
+    };
+    const trajectory = await f.store.openTrajectory(trajectoryScope);
+    const trajectoryPage = await f.store.readTrajectoryEvents({
+      ...trajectoryScope,
+      afterCursor: '0',
+      upperCursor: trajectory.upperCursor,
+    });
+    const inputEvent = trajectoryPage.events
+      .filter((event) => event.evidenceRefs.some((ref) => ref.kind === 'model_input'))
+      .at(-1)!;
+    const inputRef = inputEvent.evidenceRefs.find((ref) => ref.kind === 'model_input')!;
+    const evidenceInput = {
+      storeId: f.scope.expectedStoreId,
+      sessionId: 's',
+      subjectId: f.scope.subjectId,
+      upperCursor: trajectory.upperCursor,
+      atCursor: inputEvent.sequence,
+      eventId: inputEvent.eventId,
+      evidenceId: inputRef.evidenceId,
+      contentVersion: inputRef.contentVersion,
+    };
+    const evidence = await f.runtime.readTrajectoryEvidence(evidenceInput);
+    expect(JSON.parse(Buffer.from(evidence.content).toString()).request).toEqual(saved.request);
     const execution = (await f.store.getExecution(executionId))!;
     const body = (execution.input as Record<string, Json>).body as unknown as ModelBodyReference;
     expect(saved.bodyHash).toBe(body.reference.hash);
@@ -291,6 +319,13 @@ test('complete seventeen MiB input is verified without a body cap; cancelled rea
       corruption = error;
     }
     expect(corruption).toBeDefined();
+    let evidenceCorruption: unknown;
+    try {
+      await f.runtime.readTrajectoryEvidence(evidenceInput);
+    } catch (error) {
+      evidenceCorruption = error;
+    }
+    expect(evidenceCorruption).toBeDefined();
     writeFileSync(path, bytes);
     chmodSync(path, 0o400);
     const database = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));

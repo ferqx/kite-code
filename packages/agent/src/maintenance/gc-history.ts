@@ -360,7 +360,8 @@ export function collectHistory(db: Database, plan: HistoryCollectionPlan, now: n
         'UPDATE storage_meta SET replay_floor=last_change_cursor,last_change_cursor=last_change_cursor+1 WHERE singleton=1',
       );
       db.run(
-        `INSERT INTO change_event SELECT last_change_cursor,NULL,'maintenance',0,?,?
+        `INSERT INTO change_event(cursor,scope_session_id,object_id,revision,type,payload_json)
+              SELECT last_change_cursor,NULL,'maintenance',0,?,?
               FROM storage_meta WHERE singleton=1`,
         [
           plan.workspaces.length ? 'workspace.history_collected' : 'session.history_collected',

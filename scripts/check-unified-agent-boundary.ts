@@ -27,6 +27,8 @@ interface ModuleReference {
 const legacy =
   /(?:@kite-ai\/|packages\/|#)(?:agent-api-(?:contract|client)|agent-kernel|builtin-runtime|runtime-(?:host|spi|contract|protocol|server|client|storage-sqlite)|kite-(?:app-contract|local-runtime|client-ui|cli|service|web|desktop))(?:\/|$)|(?:^|\/)apps\/kite-(?:cli|service|web|desktop)(?:\/|$)/;
 const workspacePaths: Readonly<Record<string, string>> = {
+  trajectory: 'packages/trajectory',
+  'trace-extension-sdk': 'packages/trace-extension-sdk',
   ai: 'packages/ai',
   agent: 'packages/agent',
   client: 'packages/client',
@@ -151,7 +153,7 @@ export function checkUnifiedAgentBoundary(
   // File/manifest results belong to this invocation; later checks must observe edits and links.
   const localModules = createLocalModuleResolver(normalizedRoot);
   const targets = [
-    ...['ai', 'agent', 'client', 'ui'].map((owner) => ({
+    ...['trajectory', 'trace-extension-sdk', 'ai', 'agent', 'client', 'ui'].map((owner) => ({
       owner,
       directory: `packages/${owner}/src`,
     })),
@@ -220,6 +222,14 @@ export function checkUnifiedAgentBoundary(
     const lineOf = (node: ts.Node) =>
       source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
     const visit = (node: ts.Node): void => {
+      if (
+        path.startsWith('packages/trajectory/src/') &&
+        ts.isIdentifier(node) &&
+        /^(?:fetch|WebSocket|EventSource|Worker|Bun|process|Deno|XMLHttpRequest|indexedDB|localStorage|sessionStorage)$/.test(
+          node.text,
+        )
+      )
+        add(file, lineOf(node), 'trajectory-no-runtime-io', node.text);
       if (
         path.startsWith('apps/service/') &&
         (ts.isFunctionDeclaration(node) ||
@@ -294,6 +304,8 @@ export function checkUnifiedAgentBoundary(
     policy:
       | 'loop'
       | 'ai'
+      | 'trajectory'
+      | 'trace-sdk'
       | 'portable'
       | 'host'
       | 'test-consumer'
@@ -325,40 +337,51 @@ export function checkUnifiedAgentBoundary(
           continue;
         }
         const invalid =
-          policy === 'permissions'
-            ? /^@kite-ai\/service(?:\/|$)/.test(ref.specifier) ||
-              targets.some((value) =>
-                relative(normalizedRoot, value).replaceAll('\\', '/').startsWith('apps/service/'),
-              )
-            : policy === 'service-assembly'
-              ? shellParserDependency.test(ref.specifier) &&
-                !relative(normalizedRoot, file).replaceAll('\\', '/').startsWith('packages/agent/')
-              : policy === 'host' || policy === 'test-consumer'
-                ? false
-                : policy === 'loop'
-                  ? infrastructure.test(ref.specifier) ||
-                    /packages\/agent\/src\/(?:tools|skills|mcp|platform|storage\/(?:sqlite|worker))\//.test(
-                      targetPath,
-                    ) ||
-                    /^@kite-ai\/agent\/(?:sqlite|tools)/.test(ref.specifier)
-                  : policy === 'ai'
-                    ? /^@kite-ai\/(?:agent|client|ui)(?:\/|$)/.test(ref.specifier) ||
-                      /packages\/(?:agent|client|ui)\//.test(targetPath) ||
-                      /(?:^|\/)session(?:\/|$)/.test(targetPath)
-                    : (/^@kite-ai\//.test(ref.specifier) &&
-                        !/^@kite-ai\/(?:client|ui)(?:\/|$)/.test(ref.specifier)) ||
-                      serverDependency.test(ref.specifier) ||
-                      (nativeDependency.test(ref.specifier) &&
-                        !(
-                          relative(normalizedRoot, entry)
-                            .replaceAll('\\', '/')
-                            .startsWith('apps/cli/src/') &&
-                          ['node:process', 'process'].includes(ref.specifier)
-                        )) ||
-                      /^(?:ai|@kite-ai\/ai)(?:\/|$)/.test(ref.specifier) ||
-                      /(?:packages\/(?:agent|ai)\/|apps\/(?:service|kite-service)\/|native\/)/.test(
-                        targetPath,
-                      );
+          policy === 'trajectory'
+            ? (!ref.specifier.startsWith('.') && ref.specifier !== 'zod') ||
+              /^(?:packages\/(?!trajectory\/)|apps\/)/.test(targetPath)
+            : policy === 'trace-sdk'
+              ? (!ref.specifier.startsWith('.') &&
+                  !['@kite-ai/trajectory', 'zod'].includes(ref.specifier)) ||
+                /^(?:packages\/(?!(?:trajectory|trace-extension-sdk)\/)|apps\/)/.test(targetPath)
+              : policy === 'permissions'
+                ? /^@kite-ai\/service(?:\/|$)/.test(ref.specifier) ||
+                  targets.some((value) =>
+                    relative(normalizedRoot, value)
+                      .replaceAll('\\', '/')
+                      .startsWith('apps/service/'),
+                  )
+                : policy === 'service-assembly'
+                  ? shellParserDependency.test(ref.specifier) &&
+                    !relative(normalizedRoot, file)
+                      .replaceAll('\\', '/')
+                      .startsWith('packages/agent/')
+                  : policy === 'host' || policy === 'test-consumer'
+                    ? false
+                    : policy === 'loop'
+                      ? infrastructure.test(ref.specifier) ||
+                        /packages\/agent\/src\/(?:tools|skills|mcp|platform|storage\/(?:sqlite|worker))\//.test(
+                          targetPath,
+                        ) ||
+                        /^@kite-ai\/agent\/(?:sqlite|tools)/.test(ref.specifier)
+                      : policy === 'ai'
+                        ? /^@kite-ai\/(?:agent|client|ui)(?:\/|$)/.test(ref.specifier) ||
+                          /packages\/(?:agent|client|ui)\//.test(targetPath) ||
+                          /(?:^|\/)session(?:\/|$)/.test(targetPath)
+                        : (/^@kite-ai\//.test(ref.specifier) &&
+                            !/^@kite-ai\/(?:trajectory|client|ui)(?:\/|$)/.test(ref.specifier)) ||
+                          serverDependency.test(ref.specifier) ||
+                          (nativeDependency.test(ref.specifier) &&
+                            !(
+                              relative(normalizedRoot, entry)
+                                .replaceAll('\\', '/')
+                                .startsWith('apps/cli/src/') &&
+                              ['node:process', 'process'].includes(ref.specifier)
+                            )) ||
+                          /^(?:ai|@kite-ai\/ai)(?:\/|$)/.test(ref.specifier) ||
+                          /(?:packages\/(?:agent|ai)\/|apps\/(?:service|kite-service)\/|native\/)/.test(
+                            targetPath,
+                          );
         if (invalid)
           add(
             file,
@@ -377,6 +400,8 @@ export function checkUnifiedAgentBoundary(
     else if (/^packages\/agent\/src\/loop(?:\.|\/)/.test(path)) closure(file, 'loop');
     else if (/^(?:tests\/|(?:packages|apps)\/[^/]+\/test\/)/.test(path))
       closure(file, 'test-consumer');
+    else if (path.startsWith('packages/trajectory/')) closure(file, 'trajectory');
+    else if (path === 'packages/trace-extension-sdk/src/index.ts') closure(file, 'trace-sdk');
     else if (path.startsWith('packages/ai/')) closure(file, 'ai');
     else if (/^(?:packages\/(?:client|ui)\/src\/|apps\/(?:cli|desktop|web)\/src\/)/.test(path))
       closure(file, 'portable');

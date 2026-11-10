@@ -325,6 +325,28 @@ test('new resumed checker may record an inconclusive check of the exact old term
       ),
     );
     await store.commitMutationCheck({ ...resumedWrite, ...check });
+    const trajectory = await store.openTrajectory({
+      storeId: expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      eventKinds: ['verification'],
+    });
+    const checks = await store.readTrajectoryEvents({
+      storeId: expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      eventKinds: ['verification'],
+      afterCursor: '0',
+      upperCursor: trajectory.upperCursor,
+    });
+    expect(checks.events).toHaveLength(1);
+    expect(checks.events[0]).toMatchObject({
+      kind: 'verification',
+      executionId: 'checker',
+      recordedStatus: 'inconclusive',
+      phase: 'observed',
+      attributes: { outcome: 'unknown', method: 'required_check' },
+    });
     const facts = await store.listMutationFacts({ expectedStoreId, requirement });
     expect(facts.facts[0]).toMatchObject({
       executionId: target.id,

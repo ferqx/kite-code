@@ -8,6 +8,16 @@
 
 2026-10-26，本轮失败修复已通过21份受影响 Service 完整测试文件。夹具按持久权限控制保存 Full／工作区信任，并保持 Native Shell 的准确读取范围；普通输入沿原 Command 核 Run／Model 来源，显式 steering 与排队 follow-up 分别验证。Files 测试消费当前模型可见的文本回执及完整 baseline，不把呈现当作持久 JSON；原版本绑定、零重放、取消与清理断言保留。真实联验含257次文件读取、4／16槽混合 Shell 压测及公开 HTTP／SDK 读取；上下文预测只在提供准确捕获的呈现定义时取得资格，缺失定义的冷态读取仍明确不可用。Core复用原模型请求中已经封存的工具正文，并核对既有Store／Session／Run、调用、消息来源及不可变终态结果；不新增metadata字段，不改变统计数据结构，不重新执行工具或调用现在的格式器。主／子Agent及Run／step工具共用该通用路径，新增工具无需登记。相同事实在运行中、结束后和重启后保持同一统计口径；确实缺少原请求或来源冲突时才不可估算。机制与限制归[上下文owner](../../packages/agent/src/context-estimate.README.md)。该结果不代表全仓全量测试或其他平台资格。
 
+## Trajectory 与独立 Trace 消费
+
+[Trajectory source](src/trajectory/index.ts)将原 Store 的短事务 Reader 与 Runtime typed Evidence 交给同源 HTTP／生成 Client，事件分页固定 upper、逐页准入，无跨页 lease；只有材料读取持有有界分片 lease。旧 Session Logs 与通知 floor 的语义保持。原事实、材料、恢复与 GC 归 [Agent trajectory owner](../../packages/agent/src/trajectory/README.md)。
+
+同源 schema／OpenAPI／生成 Client 保留可选第一方 `display.outputPresence`，描述原输出正文存在性、调用数量、完整性及准确 Evidence 绑定；它不代表正文已加载，不补读 Artifact，也不改变 API major 或材料权限。第三方 Trace 继续排除整个 `display`，既有授权范围不扩大。
+
+[默认装配](src/trace-runtime.ts)从本 Service 已构建的固定目录校验 QuickJS-WASM 与 OTel runner，不在运行时编译。TraceHost 的独立 consumer DB、凭据用途、安装、独立数据／Origin grant、实时／历史队列和第三方隔离归 [Trace owner](src/trace-extensions/README.md)；官方 SDK／Exporter、私有 open-span／spool、decoded OTLP 结果与发送前再授权归 [OTel owner](src/trace-integrations/opentelemetry/README.md)。普通业务 ExtensionHost 和 Full 权限不授予 Trace 外发资格。consumer 装配失败仅使该能力不可用；原进程退出或资源关闭未知保留 owner，不能伪装关闭成功。
+
+`trace_extensions`只在可信 Host 已装配时声明。管理路由 `/v1/trace/extensions` 与有限官方安装 `/v1/trace/integrations/opentelemetry/install` 共享原认证／Origin 门禁，不接收自报主体、任意宿主路径或凭据 resolve。安装不自动授权／启用；历史任务首次固定范围及 upper。Host 连续 ACK、扫描穷尽、材料完整性及 OTel 远端接受分别报告。[真实 HTTP／Client 回归](test/isolated/trace-http.test.ts)核安装→独立授权→历史控制→撤销／卸载与零业务写入，隔离与真实接收端证据分别在上述 owner 中维护。
+
 ## 消息历史变更协议
 
 可选能力`message_changes`公开只读`GET /v1/sessions/:id/message-changes`，闭合查询和回应来自[HTTP schema](src/http/schema/index.ts)并生成Client及OpenAPI。原Store与持久变更范围由[Runtime/Store](../../packages/agent/src/storage/README.md#消息历史变更读取)核实，Service沿`messageResponses`保原公开消息、Fork来源及正文引用投影，不从SSE载荷拼装消息，不发起补写或重放执行。首个候选页可取得Store当前序号上界，后续固定该值，回收/过期要求新基线。桌面按能力采用，Web/TUI不切换读取路径；[真实HTTP回归](test/isolated/http.test.ts)覆盖分页、保存消息、闭合查询和Store拒绝，客户端接收边界归[Client owner](../../packages/client/README.md#消息历史增量)。
@@ -126,13 +136,15 @@ Session 原始记录导出使用可选 `session_exports` 与四个有限 GET：`
 
 Context 提供 `POST /v1/sessions/{id}/context/compress` 和 `/context/compression/reset`。人工压缩携原 Store、Command、selection 和可选完整 `focus`；说明没有 4096 字符算法门禁，HTTP 仍遵守宿主统一 JSON 传输预算并明确拒绝超限，不能裁剪后提交。重置另携原 `expectedCompressionId`（无活动点为 null）。202 只表示原命令受理，最终结果读取该命令的实际 Run；丢回复只查询原 ID。SelectedContext 的有限 `compression` 记录保留原 Store/Session、实际 Model Execution、覆盖范围、旧点引用及算法快照，原历史和实际模型正文保持可读。
 
-默认装配的 `createSummaryCompressor` 从公开 `/configuration` 导出，纯描述摘要请求；所有实际模型调用与发布仍由同一 Core 执行。宿主可明确选择一个可信 `compressor`，启动时绑定其 `prepare/shouldCompress/validateSummary/validateExpanded`，后来改对象或 JSONC 字段不能替换回调。多个候选冲突明确拒绝。`shouldCompress` 缺省不自动触发；`validateSummary` 可基于宿主准确模型事实拒绝真实输出，`validateExpanded` 必须明确返回 true 才允许清除活动点。默认算法没有准确 tokenizer/window 事实，不把字节量当 token，不宣称目标窗口资格。摘要在后续请求中按带准确 source ID 的低权限用户数据呈现，不获得 Tool 或审批权。默认维护说明明确自身仅用于本次内部 checkpoint，不改变业务目标或父委派，也不把禁止执行／工具的本次限制延续到后继请求；摘要应交接原任务。实际 SDK 自动压缩回归核维护请求绑定原压缩来源、没有成为独立业务历史或新 Command，原输入来源与后继请求保持；另核摘要请求和后继真实 HTTP 采用相同可信 contract，原 Tool 退出窗口不授权重放、原次数限制继续有效，历史承接与当前状态／新回执／授权保持区别。固定模型断言证明实际请求边界，真实模型是否遵循由原窗口独立核验。
+默认装配的 `createSummaryCompressor` 从公开 `/configuration` 导出，纯描述摘要请求；所有实际模型调用与发布仍由同一 Core 执行。宿主可明确选择一个可信 `compressor`，启动时绑定其 `prepare/shouldCompress/validateSummary/validateSummaryReport/validateExpanded`，后来改对象或 JSONC 字段不能替换回调。多个候选冲突明确拒绝。`shouldCompress` 缺省不自动触发；`validateSummary` 可基于宿主准确模型事实拒绝真实输出，`validateExpanded` 必须明确返回 true 才允许清除活动点。默认算法没有准确 tokenizer/window 事实，不把字节量当 token，不宣称目标窗口资格。摘要在后续请求中按带准确 source ID 的低权限用户数据呈现，不获得 Tool 或审批权。默认维护说明明确自身仅用于本次内部 checkpoint，不改变业务目标或父委派，也不把禁止执行／工具的本次限制延续到后继请求；摘要应交接原任务。实际 SDK 自动压缩回归核维护请求绑定原压缩来源、没有成为独立业务历史或新 Command，原输入来源与后继请求保持；另核摘要请求和后继真实 HTTP 采用相同可信 contract，原 Tool 退出窗口不授权重放、原次数限制继续有效，历史承接与当前状态／新回执／授权保持区别。固定模型断言证明实际请求边界，真实模型是否遵循由原窗口独立核验。
 
 [默认权限整文件](test/isolated/permission-configuration.test.ts)以显式注入的自定义任务审核器覆盖只读项目探索的自动拒绝场景：实际 resolver、compatible SDK、SQLite与Files执行读取→占位写入被拒→模型取得具体原因→继续读取→最终答复。默认风险审核不以任务语义审查 Files；此用例验证保留的自定义审核合同。目标写入未派发、adapter零调用、原配置字节保持；没有人工卡或自动cancelCommand，后续读取仍经原策略。历史记录：2026-10-25，macOS arm64／Bun1.4.2，`bfdb6a273`加当时工作树，原完整文件11项／147断言通过；Provider是本机受控HTTP服务，不是付费真实模型。自动与人工拒绝的权限边界归[Agent权限owner](../../packages/agent/src/permissions/README.md)。
 
 [默认 compatible SDK 压缩](test/isolated/compression-configuration.test.ts)与[自动分支](test/isolated/compression-automatic-configuration.test.ts)两个完整文件在本机 Windows x64/Bun 1.4.2 为 6 项／134 条断言通过，包含五个实际 SDK 场景与一个纯准备资格场景：45KiB 自定义说明完整进入实际请求、真实摘要与覆盖来源、后续 Model 精确采用摘要、可信摘要拒绝后的旧输入继续、两种 reset 预检、压缩/reset 物理丢 202 回复只查原命令且各一次 POST、冷只读零 Provider，以及单任务已结算 Tool 历史可压缩。Profile 由真实 Store 创建私有 ACL，不以 POSIX mkdir mode 代替 Windows 权限。该资格使用临时 profile、固定本地模型与临时凭据 backend，不代替真实模型压缩质量、目标窗口计数、正式调用者或完整平台资格。
 
 默认 Run binding 按原选中模型元数据启用自动压缩。用户模型条目兼容 `contextWindow`，同时提供时优先采用 `contextWindowTokens`；选中模型未声明窗口时，在该 Run 快照封存前明确写入 256K（262144 token）默认值。输入达到总窗口 75% 时触发，默认阈值 196608，1M 窗口阈值 786432。可选 JSONC `compression.thresholdTokens` 为正安全整数，随配置快照冻结并覆盖比例。触发与摘要后验证采用同一阈值；系统／可信来源／实际工具目录本身已超阈值，或缩小后仍达阈值时，以 `compression_insufficient_space` 结束原 Run。自动摘要按相同本地估算验证真实缩小，非缩小返回 `compression_not_reducing`；这两种错误保原历史、终止原执行，不走已知临时摘要失败的降级重试。摘要指令只保真正未完成的用户要求，不将未读参考文件变成义务。自定义可信 compressor 和手动选择保原合同。边界与真实 Core 停机分别见[窗口回归](test/isolated/compression-window.test.ts)、[原 Run 停机](test/isolated/compression-window-runtime.test.ts)；[用户窗口接线](test/isolated/user-window-compression.test.ts)覆盖真实本地 SDK 的 1M 别名、256K 缺省与自定义阈值；[长任务](test/isolated/long-running-compression.test.ts)继续覆盖完整 Files 和临时摘要失败。
+
+默认算法通过可选 `prepare.measurement` 和 `validateSummaryReport` 交付冻结输入的触发观察及同口径前后本地估算；同一个验证输入复用计数计算，旧 `validateSummary` 仍须通过。人工压缩可记录实际前后值，但不因此新增自动缩小门禁。公开 `CompressionRecord.compression` 与 Trajectory attributes 共用有限合同，HTTP／Client 不丢 adopted 或准确统计，原版本不变；未采用结果不作为已释放上下文，旧算法缺值不推算。统计、原事务采用状态和准确摘要材料的完整边界归[压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)。本次 macOS／Bun 1.4.4、当前工作树经隔离本地假 Provider 的压缩 HTTP／automatic／window-runtime／Evidence 四文件共 10 项／265 断言通过；纯窗口 25 项／76 断言区分原基线、同口径前后和另一份真实摘要。不使用用户 Profile 或付费 Provider，不能替代目标模型 tokenizer／质量或 Native 体验资格。
 
 公共 `modelRetry` 接受无本地上限的 `maxAttempts:null` 和任意实际正 attempt；旧有限上界仍可读取。Service 不替 Core 决定重试次数，生成 Client/OpenAPI 与 TUI 显示同源更新。主／子 Run 的工具失败都保存原调用并交回下一 Model，不按五次同参失败硬停，也不自动重放未知效果；来源数量不再由装配层另设 256 门槛。权限、格式、namespace、真实来源 read-set 与未知效果守卫保持。
 

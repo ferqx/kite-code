@@ -16,6 +16,8 @@ Runtime 在普通 Loop 安全边界由最近已完成的 assistant 原 Execution
 
 `AgentRuntime.readContextEstimate` 是有资源生命周期的只读观察：按原 Model 输入权限展开完整所选历史，保留固定 selection/upper，复核压缩点和选择未变化；不捕获新项目指令、不解析现在配置、不初始化 Provider、不写 Store。来源布局沿最近已保存请求，因此只是基于已保存来源和历史的预测，随后配置、工具、来源或尚未提交输入仍可能使实际请求不同。冷恢复可重建，不保存估算为消费事实。工具呈现校验只约束实际进入历史的工具结果；未使用工具的注册定义在 Run 结束后释放，不使普通回复的估算失效。真正使用的工具仍须核原执行身份、结果与封存正文，不为预测重新装配动态能力。Core复用原模型请求中已经封存的工具正文，并核对既有Store／Session／Run、调用、消息来源及不可变终态结果；不新增metadata字段，不改变统计数据结构，不重新执行工具或调用现在的格式器。主／子Agent及Run／step工具共用该通用路径，新增工具无需登记。相同事实在运行中、结束后和重启后保持同一统计口径；确实缺少原请求或来源冲突时才不可估算。取舍见[封存输入与事实一致性](../../../.agents/notes/implemented/bug-fix/2026-11-09-context-estimate-sealed-input-consistency.md)。
 
+轨迹中的压缩对比另由可信算法在原冻结输入／真实摘要验证时提供并在发布事务封存，详见[压缩 owner](storage/sqlite/context/compression.README.md)。`triggerBasis:'reported_baseline'` 是原基线与新增估算之和；`accounting.basis:'local-context-estimate-v1'` 的前后值使用相同本地算法，after 包括替换后完整固定来源／工具／保留输入及摘要。它们均不与压缩 Model 的 usage 混用，也不调用当前 `readContextEstimate` 回补历史缺值。
+
 公开查询为 `GET /v1/sessions/{id}/context/estimate?storeId=...&executionId=...`，主体来自宿主，闭合 query 不接受文件路径或回调。响应保留原请求、模型、selection、upper 和 cursor，分别提供测量／新增／总预测及累计覆盖情况。Client 核目标与计数关系；错误或不同 scope 不发布结果。UI 动态预测随观察更新，不同模型的下一次选择不能继承原比例。没有新增 SQL migration，也未替换原实际输入 API。
 
 ## 验证

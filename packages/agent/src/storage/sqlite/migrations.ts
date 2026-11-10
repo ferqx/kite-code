@@ -20,7 +20,7 @@ export function supportedSchemas(
   const result: SchemaVersion[] = [];
   const migrations: SchemaVersion['migrations'] = [];
   try {
-    for (const id of ['0001-baseline']) {
+    for (const id of ['0001-baseline', '0002-trajectory-facts']) {
       const sql = readFileSync(new URL(`./${id}.sql`, baseline), 'utf8');
       const checksum = createHash('sha256').update(sql).digest('hex');
       db.exec(sql);

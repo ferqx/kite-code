@@ -8,7 +8,7 @@
 
 相关：[Agent Note 0022](../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-single-narrative.md)、[Agent Note 0023](../../.agents/notes/implemented/simplification/2026-07-23-model-capabilities-no-builtin-catalog.md)、[Agent Note 0024](../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-manual-auto-only.md)、[Agent Note 0066](../../.agents/notes/implemented/process/2026-08-03-deepseek-owner-accepted-provider-data-policy.md)、[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、[Agent Note 0093](../../.agents/notes/implemented/process/2026-08-09-opencode-go-release-provider-smoke.md)、[Agent Note 0109](../../.agents/notes/implemented/testing/2026-08-18-model-invocation-evidence-and-replay.md)、[Agent Note 0114](../../.agents/notes/implemented/testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、`private-artifact-storage.md`、`open-source-first-release.md`、`plan-state-reminder.md`。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 规则
 

@@ -629,3 +629,71 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 解析最多64 KiB／400行，每行最多2048个UTF-16单元，裁剪保持代理对。轻量词法着色每行最多48个着色token、整份最多1024个着色token，另有每行纯文本回退；双栏复用模型且最多生成2048个着色span；长行或预算用尽时回退纯文本，不加载异步语言包。切换布局和折叠不重读正文，一个ScrollArea同时滚动两侧，保留Home／End交接；不为每行建立滚动器。`layout/onLayoutChange`可由宿主管理，文件切换清除旧折叠，宿主可保留当前视图布局选择。[独立样式](src/desktop/file-diff.css)由style.css导入，正式UI构建同时复制该文件。
 
 原SessionPage中的宿主变更工作区允许右栏扩至85%，首次可见变更页按62%准备阅读宽度；同scope后续选择、刷新和重开保留用户宽度，用户先自行调整时不再覆盖，关闭／切scope／覆盖会取消未执行的尺寸操作。这些最小／最大尺寸属于共享右栏，因此同宿主中的浏览器和子页沿用该范围；62%的首次尺寸准备只针对变更页，不主动调整其他页。没有宿主变更内容的浏览器右栏仍为300px／640px约束。[布局回归](test/isolated/desktop-changes-layout.test.tsx)、[解析回归](test/desktop-file-diff-model.test.ts)和[差异滚动回归](test/isolated/desktop-file-diff-scroll.test.tsx)分别负责宿主布局、有限模型与阅读交接。历史来源、Git状态、取消及实际窗口资格归[Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。
+
+## 执行轨迹展示
+
+[分型指标与计时](src/desktop/trajectory/DetailMetrics.tsx)只取准确所选Model事件的显式usage和实际模型名，0值保留，合计不补算；请求指标与选项只属于独立圆点详情的概述／选项／用量／计时，普通思考仅正文及准确历史尝试选择。思考采用轻背景、强调线和14px前景文字，阅读宽度约76ch，长思考局部展开，不恢复输出跳转或来源编号。计时核原member与所选sequence截止，不把重连退避的逻辑总span当单次请求，缺界／倒序／跨来源保未知，不制造TTFT、生成时长或吞吐量。通用Tool／Job显示自己的执行记录区间；Run只列直接范围逻辑摘要，不借子执行时长。
+
+[结果呈现](src/desktop/trajectory/TrajectoryResult.tsx)按有限typed种类列核心字段与公开正文，次要操作／版本／回执标志折叠。Shell突出目标状态／退出码，观察成功不代替命令成功；Task分受理／工作／交付，选择旧观察时概述也按当前截止过滤原事件。压缩容量主信息明示本地估算，未采用不造效果。异常／未知的独有公开诊断主区域可读，仅与同一typed正文逐字相同才去重；明确空正文不借其他fallback，MCP的null／false／0保留，Browser元素目录不吞掉附带公开文本。文件、Web、计划、工作树、技能、问答及正式媒体保持原准确材料边界，不重取当前文件或网页。
+
+[附件视图](src/desktop/trajectory/TrajectoryAttachments.tsx)只将获准的原ModelMessage.images四格式闭合base64内容转为data:图片；描述性消息附件只列name／mediaType／size，精确Decimal64大小含0，保顺序和重复，不从URI／路径或当前文件反推图片。畸形列表、非法格式与浏览器解码失败有独立说明，换准确图片不保旧失败。仅附件消息无空正文Accordion，正常原文／用户JSON／空白保留。系统／输入预览均使用该组件，日志结构不依赖加载后图片结果。
+
+[操作内容](src/desktop/trajectory/TrajectoryOperationContent.tsx)只从准确子Agent的prompt／taskName／preset展示委派信息，参数JSON继续完整保留；压缩context的selection只读原消息boundarySeq／tailFromSeq／ranges，明确为消息序号而非事件游标。压缩metadata实测基线与估算分量按需可读，不混摘要请求usage。[交互内容](src/desktop/trajectory/TrajectoryInteraction.tsx)只消费闭合公开问题／选项与原答案，按原id匹配，不用邻近工具参数或当前schema补题目；取消只取原事实，不能由null答复推断。
+
+[输出存在性规则](src/desktop/trajectory/output-presence.ts)仅消费同一 verified 原 Store／Session／Execution、准确事件与引用版本的第一方 `outputPresence`，不按已加载正文增删行。成功且完整的工具调用独占输出精简其虚拟输出与 canonical assistant Message，原 byId／target 仍保留；生成中准确无正文的前缀由思考承载进度，有正文、完整空输出、失败／取消／未知及旧缺字段分别保留。纯空白正文不删。重连前有正文或未知输出继续显示“历史输出”并提供原尝试选择，思考正文页直接呈现公开思考，不放“查看该次公开输出”跳转按钮或材料来源编号；回复与历史输出仍从对应行进入。被精简的 Message 同步退出回复统计、过滤匹配与消息时间轴，原逻辑 Agent 处理仍计一次。
+
+日志行身份与结构只由事实／展示设置决定，材料读取仅更新固定38px行内文案；原读取取消和迟到拒绝不变。[事实阅读锚点](src/desktop/trajectory/fact-anchor.ts)只在同源向前新事实、展示控制未变时以原行ID及行内偏移恢复位置；原行被 canonical 消息接管时可回其思考代表。主动seek、返回最新、搜索与折叠不被自动纠正。输出状态与DOM回归见[存在性反例](test/trajectory-output-presence.test.ts)及[原树过程](test/isolated/desktop-trajectory-tree.test.tsx)，生产编译连续过程归Desktop owner。
+
+主干按[Agent loop展示](src/desktop/trajectory/loops.ts)表达：原Run就是唯一Agent loop，不再给内部每次模型请求另加loop。Run下普通阶段平铺，主Model包装presentationHidden但仍保byId与准确材料，presentationRepresentativeId映射思考；originalParentId保平铺前逻辑父级，原tree与operation.members保完整原关系，仅child carrier与child Run显示层级。自动重连不加loop或主行；Run.loopPhase只取原Run生命周期，requestPhase另核原请求和Tool回执，后台Job不拖住已经返回的launch。归并到旧Shell行的后续read仍按其原父模型归属对应原模型请求。底层model／Tool／Job和生命周期不合并，系统／本次请求上下文／思考／输出行只是准确材料切片，不计逻辑调用或时间轴标记；独立消息事实优先去重，旧缺消息身份时不推断当前用户或补造消息事件。
+
+[实机分类与顺序](src/desktop/trajectory/loops.ts)使用原写事务封存的Model `display.operation=review` 识别无独立Command事实的自动审批检查，仍须准确Tool／Job父、原Store／Session及verified身份；旧缺证明不猜。准确canonical回复的阶段呈现锚最多提前到该回复首观察，确保系统准备／思考先于回复，原材料版本与真实Tool／child顺序不变。子Agent有同一原Job可用终态结果时，默认预览省较早或同事件附带的进度检查点；显式历史观察仍保原材料。新记录提示位于固定高度顶部工具栏，不增列表前布局块；未显式返回最新不刷新游标。
+
+[业务树过滤](src/desktop/trajectory/tree.ts)为准确无Run的审批检查Model派生`approvalCheck`：要求已验证同Store／Session的`authorization.check`原Command与准确commandId、已验证原父Tool／Job，缺证明不猜。Workbench将其归approval并保留一条“自动审批检查”，不生成Agent虚拟阶段；原检查请求／规则／结果仍按原ref读取，真实Interaction仍独立。默认仅省略双方completed／succeeded、同Store／Session／Run、准确父链、第一方封存display与已知definition/version共同核实的`git.worktree→shell.command`、`browser.open→browser.session`、`browser.execute→browser.code_session`支撑Job；异常、运行中、child或缺证明一律保留，all_events与原byId／member不裁剪。重连不跨业务category归并。边界由[降噪纯回归](test/trajectory-auxiliary-presentation.test.ts)覆盖默认／全量、异常、缺证明、旧材料与同文独立消息。没有任一准确材料的system／input／reply不造空壳，thinking始终作为原Model选择代表；任一旧attempt有材料时仍留原入口。
+
+阶段详情沿[纯Tab与材料规则](src/desktop/trajectory/workbench-details.ts)：系统准备为system_prompt／tools，只归类原请求的system角色，移除developer兼容判断和专用标签，输入与回复为content，思考仅为thinking（旧request_info归一化到thinking），真实Tool为overview／parameters／result，轮次为overview／preview；所有节点均移除raw入口，内部Model包装不显示为独立阶段。不合法旧Tab回该阶段首项；tools只看当次public request.tools的id／description／完整inputSchema，不以内部assembly目录替代。request_info保持同attempt的准确输入／输出截止，不重铺其他阶段正文；参数和结果权限不因此扩大。系统提示词单Accordion调整经原树DOM32项1270断言及材料／详情24项384断言通过；新构建完整Electron候选中唯一条目标题为“系统提示词”，收起与重开恢复原文、切换工具Tab保原4项目录，连续89帧日志几何保持，Tab client／scroll均38px；本机证据`.cache/trajectory-desktop-live-4Bq6OE/system-single-accordion-review.json`，多system正文保序由原DOM夹具覆盖。工具目录使用本地名称／说明搜索与紧凑行，520px目录容器以上同行、较窄时双行；左侧chevron／工具图标、等宽名称与次要摘要分层，展开才挂载完整说明和Schema JSON。搜索不增加Evidence读取且保留同材料已展开状态；换原event／ref／contentVersion仍重置。各类型详情不再显示来源sequence／sourceIds、来源组及来源计数，也不再重复展示Tab正文上方的caption标题；原模型输入与事件完整保留，完整版本保父材料section的title及原材料键；系统指令合为一个默认展开的无边框Radix Accordion，原system消息正文和图片按原顺序保留，不再生成编号折叠项；请求用户上下文和消息正文仍以multiple独立开合、首条默认开，其余关闭，按event／ref／version的父key切换重建且开合不新增Evidence读取。思考、工具目录、工具参数／结果、审批和压缩继续沿各类型结构，不机械再套一层；输入阶段以“本次请求上下文”标明历史范围，不再重复冗长免责声明。审批检查预览只列检查内容、结果和按需规则，有公开检查思考时保按需展开，零工具与空思考不另占组。 无原问题的旧问答若明确保存answers为空对象，仍显示“已保存的答复”及原空对象；有原问题时逐题保留未答状态，不把缺失答复补为空对象。提交前定向交互9项66断言通过。
+
+列表[材料摘录](src/desktop/trajectory/loop-materials.ts)只消费当前可见最多四个原模型请求的准确model_input／output，系统提示词、用户上下文、公开reasoning与输出可直接定位阅读，不预读所有历史。新事实真实模型名优先step.display，旧数据沿当次已读metadata.adapter.provider回退；内部request.modelId不冒充名称，缺值明确提示。概述去父级／内部绑定字段，思考直接可见；压缩仍只公开摘要。当前视口和详情分别管理读取，选择、切片、折叠与取消保留原版本边界。输入详情与列表摘录共用`trajectoryRequestUserMessages`：仅准确完整、verified_origin的model_input且metadata.context装配版本／顺序匹配时，按当次sources中准确Session的session-files与准确Run的`builtin.planning:runtime:<runId>`来源，仅省略其最后一次单来源user项；不按JSON正文或全局sourceId裁剪，历史复制和用户粘贴保留。部分／截断、旧身份、缺metadata或顺序不明保持原内容。空白正文仅无images／toolCalls时省略，图片与工具请求提示仍展示；原request、事件和Evidence不变，摘录保持惰性有界读取。
+
+[统计纯函数](src/desktop/trajectory/stats.ts)为每个Run提供统一`row.summary`，供轮次详情及准确child内部摘要使用；主列表的Run展开、折叠、筛选均不展示右侧统计或相同统计悬浮文案。原统计仍消费同一集合：`model/tool/child/approval/compression`分别表示重连归一的逻辑Agent处理、Shell观察归一的工具操作、子任务、审批和压缩，`actions`仅为这五项之和；`userMessages/assistantMessages`独立统计。范围按原Store／Session／Run key，排除虚拟切片、结构和辅助事件，不递归累计子Run；child载体只在准确子Session／Run与原Execution命名空间核实且已载入时附其内部summary，否则保持未知而非0。筛选改变命中小计，八种展开组合与子scope加载不改变主Run统计。摘要不代表原网络attempt或实际Tool请求数，成员与attempt仍完整保留供原详情核对。
+
+系统准备提示由`loopSystemPreparations`仅比较同一真实Run内紧邻的两个逻辑请求，材料必须是当前已准入、准确版本且完整available的`model_input`；只比较原system指令与public tools，不把其他上下文相同当成准备相同。完全相同显示“沿用系统准备”，确认不同显示“系统准备已更新”；材料缺失、部分／截断或超比较预算不分类。当前比较不预读历史、不留正文或指纹cache；行继续占38px，准确快照详情入口及原owner／ref不变。
+
+本轮按用户确认的[逻辑操作决定](../../.agents/notes/implemented/feature/2026-11-09-trajectory-semantic-operations.md)维护当前展示；[原工作台布局](../../.agents/notes/implemented/feature/2026-11-08-trajectory-workbench.md)与[分型详情](../../.agents/notes/implemented/feature/2026-11-08-trajectory-node-details.md)中仍适用的入口、材料和历史边界保留。本机连续过程与交付资格由Desktop owner记录。
+
+[SessionTabs](src/desktop/SessionTabs.tsx)在右侧栏“新标签页”的“工具”区提供“执行轨迹”，每会话scope只有一个轨迹标签，与浏览器、变更等共用原8项容量；已打开时复选回到原页。`SessionPage.renderTrajectory`与`trajectoryTabRequest`沿原右侧栏交接，不新增对话／轨迹主区域切换或第二份同会话reader。对话位置、草稿和待处理交互继续由原会话owner保持。
+
+[TrajectoryPanel](src/desktop/trajectory/TrajectoryPanel.tsx)展示执行概览、独立时长坐标切换、筛选菜单、元数据搜索和按需详情。顶部不再提供轮次／调用／子调用三个全局展开按钮，轮次与子Agent保留可折叠容器和局部箭头；历史expansion与局部覆盖仍按原状态读取，普通阶段没有层级箭头。筛选菜单仅六种类型，“工具”与“子 Agent”分别控制普通操作和准确子任务载体；Panel将旧视图的duration／runKeys／subcalls归一化为all／null／all，不再提供对应入口或条件chip，Workbench底层过滤契约保留；`childAgents`缺省视为开启，保持旧视图兼容。筛选外子任务若承担命中内部日志祖先，仅保留上下文身份。父级不覆写后代偏好，默认不额外显示会话结构行、固定上界、事实覆盖泛化提示或上下文祖先数；事实覆盖状态随“轨迹信息”按需显示，真实读取错误与legacy缺失提示保持。匹配数量只在筛选生效时于日志头出现一次，执行概览不再重复；固定上界与当前cursor由“轨迹信息”按需查看。视觉沿确认原型采用轻量图标、右对齐搜索、彩色类型badge、细层级连接、原Run band、右侧观测时长／状态与蓝色选中行。日志行高38px，有界滚动与窗口化保持；全局顺序按逻辑操作首次`firstSequence`，不以DFS重排并行过程。宽容器详情初始40%，沿现有ResizablePanelGroup调宽；小于840px为同工作区覆盖式Sheet。关闭恢复原焦点且不为归焦重新滚动列表。详情Tablist使用39px外高／38px按钮与overflow-y:hidden，保留必要横向滚动；正文padding为8px 12px 14px，首材料无额外上边距。
+
+行背景只由整行拥有，选择和折叠按钮的hover／active不另叠背景；覆盖详情使用主题分隔边框。Sheet开关与行归焦使用`preventScroll`，避免进入动画中的焦点目标推动祖先滚动；列表因并排／覆盖布局替换viewport时，在首次绘制前按原阅读锚点恢复实际滚动与窗口化位置。
+
+[完整树](src/desktop/trajectory/tree.ts)继续拥有原Store／Session身份、父子、独立重试、消息聚合和全部来源ID。[逻辑操作归并](src/desktop/trajectory/operations.ts)在其后合并准确重连链、Shell原启动／Job／观察、子任务载体及压缩生成／发布；稳定链首／原启动行保留全部member、attempt、observation及原ID别名，工具结果不会被观察成功覆写。相同名称或时间不能构成归并依据。折叠和计数只作用于逻辑行，不裁剪底层事件。[Workbench索引与过滤](src/desktop/trajectory/workbench.ts)按固定前缀建立安全索引，再由独立筛选与搜索AND过滤；同类多选OR、空集合法。默认业务范围及精确标题子树排除保持，辅助事件仅全量且五类全选时加入。命中祖先保留淡显，活动过滤临时展开路径，不改用户偏好。
+
+[请求圆点](src/desktop/trajectory/request-markers.ts)从准确逻辑Model与可见阶段建立只读Map，优先以thinking为anchor但圆点位于其上沿节点间隙，不是阶段本身；缺thinking才退首可见切片。含准确Model的compression操作也在原操作行之前有边界，单纯context采纳／发布不造点，自动审批Model不混成对话请求。重连成员共享一点，不增行或tree层级。线只表示可核实同Run记录顺序，scope／业务省略／缺身份处断开，默认不可见辅助记录不造伪gap；Shell按原starter证明范围，不能据邻近请求迁移因果。每个内容节点仍按原顺序平铺。
+
+[独立请求详情](src/desktop/trajectory/TrajectoryRequestDetails.tsx)使用`selectedRequestId`与`requestTab`选择准确owner和overview／options／usage／timing，普通node选择清请求模式；不借thinking节点承载四Tabs。概述取原Model的input/output、选项只取input、用量／计时不读正文；[选择规则](src/desktop/trajectory/request-details.ts)只接当前选定Model member及事件截止的原ref，不把压缩context／采纳材料或其他request混入。公开adapter／provider可用才显示配置，字段缺失不补零；Token直接取选中Model事件，计时用`trajectoryDetailTiming`核原边界，缺首Token／服务生成耗时不编造。结果优先准确可见原reply，历史输出须选原ref且有正文证明；canonical Message须核原Store／Session／Execution和观察截止，工具专用空输出不出空占位入口。关闭回原圆点并preventScroll，节点与请求的阅读状态分开；无新权限、数据版本或工具协议。普通思考仅保正文与准确历史内容选择，请求指标不再混入；旧request_info状态归首合法thinking Tab，不读取旧输入通道。[边界回归](test/trajectory-request-markers.test.ts)、[请求回归](test/trajectory-request-details.test.tsx)、[现有DOM](test/isolated/desktop-trajectory-tree.test.tsx)分别核纯边界、精确材料／计时和实际交互。浏览器证据归Desktop owner。
+
+[子范围组合](src/desktop/trajectory/related.ts)只接收已经各自获准、与父cursor一致的子投影，核准确carrier／childSession／childRun和原Run命名空间；子展示ID命名空间化，原step与event不变。冲突、缺证明、未来与重复事实不任意拼接。在线scope读取和准确材料路由归Native；离线不借此取得联网资格。
+
+[执行概览](src/desktop/trajectory/TrajectoryTimeline.tsx)按输入／回复、Agent、工具／子任务、压缩／审批四条命名泳道呈现刻度与网格，支持观测时间与事件顺序。Agent条保持模型请求跨度口径，含重连、不含工具执行；消息是记录时间点，确证区间为条，并行区间分轨。缺时域只用原sequence刻度，全量辅助原事件单独定位，不冒充业务调用。缺界、缺时、倒序与跨Store保持未知，消息不被当成调用时长。顺序轴等距不代表耗时，材料切片不增加标记，选中切片高亮所属loop。时间轴不移动cursor或扩展upper；只保留底部坐标模式标签，不常驻显示右侧区间解释，原标记计时语义不变。定位后按当前视口的有界规则读取材料。搜索仅用公开元数据，不为搜索预读正文或生成模型摘要。
+
+[分型详情](src/desktop/trajectory/TrajectoryDetails.tsx)与[纯材料目标选择](src/desktop/trajectory/workbench-details.ts)按逻辑操作和原成员确定Tab：工具／Shell为概述／参数／结果，其他常规节点为概述／预览；消息仅使用内容。请求圆点及内容阶段可选原准确重连尝试；输入准备按原system／用户上下文／工具目录分组，不展示来源文案。Shell默认原启动参数和Job输出，附属观察按需选读，无Job输出只回退准确最近观察，不预读全部轮询。子任务的接纳、工作状态和交付分开。完整原事件和材料仍由底层保留，显式选择只读该观察材料。旧raw及其他不合法Tab回该节点首个合法Tab，归一化前不发起材料读取；没有通用生命周期区，筛选／折叠不改选或补未来材料。概述首屏仅保主要状态、耗时与适用业务信息，记录时间和计时范围收进默认关闭的“记录信息”；压缩保采用与容量变化首屏，阈值及计数口径收进“压缩信息”。按需展开信息不恢复raw或父级／内部绑定ID。
+
+工具参数沿原`tool_input`材料呈现完整公开执行请求JSON，空对象、null、缺封存和不可读分别表达，不使用当前intent或邻近Model补历史。结果通过[共享只读结果视图](src/desktop/trajectory/TrajectoryResult.tsx)消费原定义／版本对应的typed公开DTO及通用文本／JSON回退，去掉执行、批准和重试动作；原Files差异、Shell预览／gap、图片与PDF页图不从今天的文件或网页重建。Shell renderer跳过空stdout／stderr标题块及无丢弃字节的非gap空分片，原非空空格、不同序号同文输出、gap、截断和状态保持；不借此改变typed材料覆盖与未知结果的原回退。模型、消息、Job、child和交互保持各自材料owner，不把接纳回执当关联任务完成。
+
+自动压缩Model与发布Context按确证压缩／执行身份关联而不合并或重挂父子。概述只对已采用、同口径的原before／after计数展示减少量；调用usage单列，缺值不补0、不用Provider outputTokens推算摘要大小。Model默认当前前缀可引用已确证的采用状态；显式旧观察不会读到之后发布。摘要沿原Model公开输出读取；候选、部分输出与实际采用结果在概述与压缩预览中分别说明。
+
+节点详情不再提供原始内容、规范事件JSON或公开字节查看入口；底层原记录与现有导出保持完整。阶段详情不开放私有reasoning、transport、授权或内部continuation。材料目标绑定原event/ref/contentVersion；实际open/read/close、主体与权限epoch、Blob/hash校验由Native owner处理。组件不读取文件、网络、Store或取得执行权限。
+
+[TrajectoryViewState](src/desktop/trajectory/view-state.ts)只保存descriptor、cursor、筛选、坐标、展示行与独立请求选择、各自合法Tab、原观察、折叠、详情宽度／阅读锚点等纯值。行政行用稳定rowId区分同对象的多个原观察，nodeId仍指向原树owner。隐藏、换来源、seek、切观察／Tab或关闭详情释放材料；清除条件不重置原选择和阅读。精确来源与A→B→A迟到结果的门禁归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+
+旧格式`unknown/legacy_local`显示“旧记录 · 原sourceEventType”，现行未知来源独立标识；无时间、父关系、入参或正文时保留缺失，不重分类或追补。固定历史上界、新事实提示、显式返回最新以及仅事件／含获准Evidence导出保持原合同。
+
+当前回归入口为[投影](../trajectory/test/projection.test.ts)、[树](test/trajectory-tree.test.ts)、[工作台](test/trajectory-workbench.test.ts)、[详情目标](test/trajectory-workbench-details.test.ts)、[状态](test/trajectory-view-state.test.ts)、[工作台DOM](test/isolated/desktop-trajectory-tree.test.tsx)和[Session标签](test/isolated/desktop-session-tabs.test.tsx)。本轮连续UI过程和实际验收范围统一归Desktop owner；下列2026-11-08记录是此前消息／树页面迭代证据，不授予本轮新布局、参数或typed结果资格。
+
+同日消息上下文迭代，`e8a483d65`加本轮工作树、macOS arm64／Bun1.4.4：七个完整协议／投影／树／状态／reader／材料纯文件71项516断言，树DOM9项266断言，离线DOM9项74断言，Trace设置DOM4项33断言；真实Store／消息Evidence及相关输入、Fork、恢复材料回归93项1086断言，Trace consumer／host32项304断言，共218项2279断言通过。UI／Desktop／Trajectory／Agent／Client／Service类型、UI／Desktop／Trajectory构建、API生成、文档、边界和测试归属检查通过；定向Biome无错误，Runtime未变路径的optional-chain提示保持。真实Store反例另验证未知／损坏wrapper不能向后续消息传播未核实namespace。浏览器连续过程和边界归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+
+同日默认四类过滤迭代，macOS arm64／Bun1.4.4：六个完整协议／投影／树／状态／reader纯文件60项449断言、树DOM8项204断言、标签DOM30项401断言、离线DOM9项74断言、四个真实Store隔离文件26项268断言，共133项1396断言通过。覆盖精确标题子树排除、旧分类不猜测、10,000层父链、默认根匹配分页和未决读取期间切换全量保留所选工具／Tab。UI／Desktop／Trajectory及相关Agent／Client／Service类型通过，定向Biome、UI／Desktop／Trajectory构建、API生成核对、文档、边界和测试归属检查通过。受控浏览器全过程及资格边界归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)。
+
+同日按用户确认的树与三个 Tab 改造后，`e8a483d65` 加本轮工作树、macOS arm64／Bun1.4.4：共享树、状态与协议／reader回归53项／302断言，完整标签 DOM 30项／401断言，树 DOM 6项／105断言，离线 DOM 9项／74断言，共98项／882断言通过。树 DOM 包含真实组件10,000层执行链的完整节点、原事件、真实父身份和层级；首次／重开读取未决时保持原 Tab，用加载占位替代根节点和零记录闪现，索引到达后恢复原选择与滚动。UI类型636文件、Desktop类型1,392文件通过；UI／Desktop构建、定向Biome、文档、API、边界和测试归属检查通过。实际编译Chrome156隔离页面的连续操作与范围归[Desktop owner](../../apps/desktop/README.md#执行轨迹离线窗口与-trace-设置)，不将旧列表布局的Native窗口画面作为本次树界面的像素验收。
+
+2026-11-08，本机 macOS／Bun1.4.4，完整[标签页 DOM 回归](test/isolated/desktop-session-tabs.test.tsx)和[纯值状态回归](test/trajectory-view-state.test.ts)共31 pass／0 fail、406断言，UI类型633文件通过；UI build在本轮轨迹组件边界建立时通过，后续布局与游标修复复验上述DOM及类型。新增断言覆盖8项共享容量、唯一轨迹页、显隐／切scope释放、正式入口、旧游标不展示未来正文、Evidence原版本、超安全整数位置和卸载暂停。此为共享组件与JSDOM验证，完整Native窗口过程及安装／其他平台资格归[Desktop owner](../../apps/desktop/README.md)，不以DOM或最终画面代替。

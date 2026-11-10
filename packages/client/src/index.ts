@@ -1,3 +1,16 @@
+import {
+  evidenceCloseRequestSchema,
+  evidenceOpenSchema,
+  evidenceReadRequestSchema,
+  type TrajectoryEvidenceCloseRequest,
+  type TrajectoryEvidenceOpen,
+  type TrajectoryEvidenceReadRequest,
+  type TrajectoryReadRequest,
+  type TrajectoryScope,
+  trajectoryReadRequestSchema,
+  trajectoryScopeSchema,
+  verifyTrajectoryPage,
+} from '@kite-ai/trajectory';
 import { verifyContextCompression } from './context';
 import {
   ClientError,
@@ -114,11 +127,37 @@ import {
   SSEParseError,
   validateCursorBounds,
 } from './sse';
+import { TraceExtensionClient } from './trace-extensions';
+import { verifyTrajectorySnapshot } from './trajectory';
 
+export type {
+  TrajectoryEvent,
+  TrajectoryEvidenceRef,
+  TrajectoryPage,
+  TrajectoryReadRequest,
+  TrajectoryScope,
+  TrajectorySnapshot,
+} from '@kite-ai/trajectory';
 export { type ApprovalOptionView, readApprovalOptions } from './approval-options';
 export { type CallerCommandRequest, canonicalCallerCommandRequest } from './command-request';
 export type { OrdinaryCommandApplication, OrdinaryCommandObservation } from './ordinary-command';
 export { readOrdinaryCommandApplication } from './ordinary-command';
+export { type TrajectorySource, verifyTrajectorySnapshot } from './trajectory';
+export {
+  createTrajectoryBundle,
+  type LocalTrajectoryBundle,
+  openTrajectoryBundle,
+  type TrajectoryBundleBudgets,
+  type TrajectoryBundleDirectory,
+  type TrajectoryBundleFrame,
+} from './trajectory-bundle';
+export { readTrajectoryEvidence, type TrajectoryEvidenceSource } from './trajectory-evidence';
+export {
+  TrajectoryReplayController,
+  type TrajectoryReplayMode,
+  type TrajectoryReplaySource,
+  type TrajectoryReplayState,
+} from './trajectory-replay';
 /** Closed, non-secret configuration intent for a Native original-operation journal. */
 export function canonicalConfigurationRequest(
   kind: 'model' | 'provider',
@@ -157,6 +196,7 @@ export {
   verifyUserSkillCataloguePage,
   verifyUserSkillDocument,
 } from './skill-catalogue';
+export { TraceExtensionClient } from './trace-extensions';
 export type Json = ExtensionCommandRequest['input'];
 export type { SessionExportFrame, SessionExportSection } from './session-export';
 export { parseCursorSequence, validateCursorBounds } from './sse';
@@ -215,6 +255,19 @@ function admit(info: ServerInfo, expected: ConnectionExpectation): void {
 }
 
 export class AgentClient {
+  readonly traceExtensions = new TraceExtensionClient({
+    request: async (path, response, body, signal) => {
+      this.requireCapability('trace_extensions');
+      const generation = this.connectionGeneration;
+      const result = await this.fetchJSON(path, response, {
+        method: body === undefined ? 'GET' : 'POST',
+        body,
+        signal,
+      });
+      if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+      return result;
+    },
+  });
   private readonly endpoint: string;
   private readonly expected: ConnectionExpectation;
   private readonly maximum: number;
@@ -357,7 +410,9 @@ export class AgentClient {
         return (await readModelOutputResponse(response, controller.signal)) as Responses[K];
       const value = await this.responseJSON(
         response,
-        shape === 'SessionLogPage' ? Math.min(this.maximum, 512 * 1024) : this.maximum,
+        shape === 'SessionLogPage' || shape === 'TrajectoryPage'
+          ? Math.min(this.maximum, 512 * 1024)
+          : this.maximum,
       );
       if (!response.ok) {
         const problem = decodeResponse('Problem', value);
@@ -2651,6 +2706,90 @@ export class AgentClient {
       `/v1/executions/${encodeURIComponent(executionId)}`,
       'Execution',
       options,
+    );
+  }
+  async openTrajectory(scope: TrajectoryScope, options: { signal?: AbortSignal } = {}) {
+    this.requireCapability('trajectory');
+    const input = trajectoryScopeSchema.parse(scope);
+    if (input.storeId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const value = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/trajectory/open`,
+      'TrajectorySnapshot',
+      { ...options, method: 'POST', body: input },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return verifyTrajectorySnapshot(value, input);
+  }
+  async readTrajectoryEvents(
+    request: TrajectoryReadRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('trajectory');
+    const input = trajectoryReadRequestSchema.parse(request);
+    if (input.storeId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const value = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/trajectory/events`,
+      'TrajectoryPage',
+      { ...options, method: 'POST', body: input },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return verifyTrajectoryPage(value, input);
+  }
+  async openTrajectoryEvidence(
+    request: TrajectoryEvidenceOpen,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('trajectory_evidence');
+    const input = evidenceOpenSchema.parse(request);
+    if (input.storeId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const value = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/trajectory/evidence/open`,
+      'TrajectoryEvidenceDescriptor',
+      { ...options, method: 'POST', body: input },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      value.eventId !== input.eventId ||
+      value.evidenceId !== input.evidenceId ||
+      value.contentVersion !== input.contentVersion
+    )
+      throw new ClientError('trajectory_evidence_identity_mismatch');
+    return value;
+  }
+  async readTrajectoryEvidenceChunk(
+    request: TrajectoryEvidenceReadRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('trajectory_evidence');
+    const input = evidenceReadRequestSchema.parse(request);
+    if (input.storeId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const value = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/trajectory/evidence/read`,
+      'TrajectoryEvidenceChunk',
+      { ...options, method: 'POST', body: input },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (value.readId !== input.readId || value.offset !== input.offset)
+      throw new ClientError('trajectory_evidence_identity_mismatch');
+    return value;
+  }
+  async closeTrajectoryEvidence(request: TrajectoryEvidenceCloseRequest) {
+    this.requireCapability('trajectory_evidence');
+    const input = evidenceCloseRequestSchema.parse(request);
+    if (input.storeId !== this.lastServer!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    return this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.sessionId)}/trajectory/evidence/close`,
+      'TrajectoryEvidenceClosed',
+      { method: 'POST', body: input },
     );
   }
   listSessionLogs(

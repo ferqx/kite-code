@@ -2,6 +2,7 @@ import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type Json, type MutationFactPage, type RequirementRef } from '../types';
 import type { SqliteOperations } from './operations';
+import type { VerificationTrajectoryFact } from './trajectory-facts';
 
 const contentType = 'agent.mutation-policy';
 const object = (value: unknown): Record<string, Json> => {
@@ -73,7 +74,13 @@ function record(db: SqliteOperations, ref: RequirementRef, key: string) {
     throw new AgentError('mutation_record_unverifiable');
   return row;
 }
-function save(db: SqliteOperations, ref: RequirementRef, key: string, value: Json) {
+function save(
+  db: SqliteOperations,
+  ref: RequirementRef,
+  key: string,
+  value: Json,
+  check?: Omit<VerificationTrajectoryFact, 'kind' | 'revision' | 'verificationId'>,
+) {
   if (Buffer.byteLength(canonicalJson(value)) > 32 * 1024 || key.length > 256)
     throw new AgentError('mutation_limit');
   const prior = record(db, ref, key),
@@ -89,7 +96,20 @@ function save(db: SqliteOperations, ref: RequirementRef, key: string, value: Jso
     ref.originStoreId!,
     canonicalJson(value),
   );
-  db.event(ref.sessionId, `${ref.extensionId}/${key}`, 'extension.record_updated');
+  db.event(
+    ref.sessionId,
+    `${ref.extensionId}/${key}`,
+    'extension.record_updated',
+    null,
+    check
+      ? {
+          ...check,
+          kind: 'verification',
+          revision: String(revision),
+          verificationId: `${ref.extensionId}/${key}`,
+        }
+      : undefined,
+  );
 }
 const prefix = (ref: RequirementRef) => `run/${ref.runId}/mutation/`;
 const headKey = (ref: RequirementRef) => `run/${ref.runId}/mutation.current`;
@@ -461,11 +481,23 @@ export function commitMutationCheck(
       )
         throw new AgentError('mutation_check_invalid');
     }
-    save(db, ref, `${prefix(ref)}check-attempt/${input.executionId}`, {
-      outcome: input.outcome,
-      executionId: input.executionId,
-      evidence: input.evidence,
-    });
+    save(
+      db,
+      ref,
+      `${prefix(ref)}check-attempt/${input.executionId}`,
+      {
+        outcome: input.outcome,
+        executionId: input.executionId,
+        evidence: input.evidence,
+      },
+      {
+        runId: ref.runId,
+        executionId: input.executionId,
+        targetExecutionId: input.mutationExecutionId,
+        outcome: input.outcome,
+        evidence: input.evidence,
+      },
+    );
     save(db, ref, `${prefix(ref)}check/${input.mutationExecutionId}`, {
       outcome: input.outcome,
       executionId: input.executionId,

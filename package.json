@@ -5,6 +5,8 @@
   "type": "module",
   "module": "scripts/release/source-terminal.ts",
   "workspaces": [
+    "packages/trajectory",
+    "packages/trace-extension-sdk",
     "packages/ai",
     "packages/agent",
     "packages/client",
@@ -114,7 +116,9 @@
     "ink-testing-library": "^4.0.0",
     "lefthook": "^2.1.9",
     "react-dom": "19.2.7",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@kite-ai/trajectory": "workspace:*",
+    "@kite-ai/trace-extension-sdk": "workspace:*"
   },
   "patchedDependencies": {
     "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch",

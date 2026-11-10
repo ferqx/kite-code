@@ -28,6 +28,7 @@ import {
   type SessionPageProps,
   SettingsNavigationIcon,
   ToolActivity,
+  type TrajectoryViewState,
 } from '@kite-ai/ui/desktop';
 import {
   type CSSProperties,
@@ -140,6 +141,8 @@ import {
   NativeToolPresentation,
   useNativeToolMessages,
 } from './native-tool-messages';
+import { NativeTraceSettings } from './native-trace-settings';
+import { NativeTrajectory } from './native-trajectory';
 import {
   desktopTranscript,
   nativeInputTurnId,
@@ -157,6 +160,7 @@ import {
   resolveNativeWorktreeExit,
 } from './native-worktree-navigation';
 import { promptTextForSend } from './prompt-text';
+import { cleanupNativeTrajectoryCaches } from './trajectory-bridge';
 import { useNativePermissionChange } from './use-native-permission-change';
 
 const imageScope = (storeId: string | undefined, sessionId: string) =>
@@ -435,6 +439,10 @@ function NativeDesktopContent({
   >();
   const [activeChildTab, setActiveChildTab] = useState<SessionChildTarget & { parent: string }>();
   const childReadings = useRef(new ReadingStateCache());
+  const trajectoryReadings = useRef(new NativeDisplayCache<TrajectoryViewState>());
+  useEffect(() => {
+    if (globalThis.indexedDB) void cleanupNativeTrajectoryCaches().catch(() => {});
+  }, []);
   const [historyState, setHistoryState] = useState<HistoryState>({
     messages: [],
     phase: 'loading',
@@ -453,9 +461,9 @@ function NativeDesktopContent({
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [queueFocusKey, setQueueFocusKey] = useState(0);
   const [planMode, setPlanMode] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<'general' | 'providers' | 'mcp' | 'skills'>(
-    'general',
-  );
+  const [settingsPage, setSettingsPage] = useState<
+    'general' | 'providers' | 'mcp' | 'skills' | 'trace'
+  >('general');
   const [editor, setEditor] = useState<DesktopEditor>('vscode');
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [, choiceChanged] = useState(0);
@@ -5037,6 +5045,20 @@ function NativeDesktopContent({
       onChildSessionChange={(target) =>
         setActiveChildTab(target ? { ...target, parent: childParent } : undefined)
       }
+      renderTrajectory={
+        !preparing && !scheduledTasksView && selection?.canReadTrajectory === true
+          ? () => (
+              <NativeTrajectory
+                bridge={bridge}
+                generation={state?.generation ?? generation.current}
+                storeId={selection.storeId}
+                sessionId={selection.session.id}
+                selection={selection.viewSelection}
+                stateCache={trajectoryReadings.current}
+              />
+            )
+          : undefined
+      }
       renderChildSession={({ sessionId, executionId, onTitleChange }) => (
         <NativeChildDetail
           child={environment.child}
@@ -5825,6 +5847,15 @@ function NativeDesktopContent({
                   <DesktopButton
                     variant="ghost"
                     type="button"
+                    aria-pressed={settingsPage === 'trace'}
+                    onClick={() => setSettingsPage('trace')}
+                  >
+                    <SettingsNavigationIcon name="mcp" />
+                    <span>轨迹与集成</span>
+                  </DesktopButton>
+                  <DesktopButton
+                    variant="ghost"
+                    type="button"
                     aria-pressed={settingsPage === 'skills'}
                     onClick={() => setSettingsPage('skills')}
                   >
@@ -5846,6 +5877,17 @@ function NativeDesktopContent({
                         editor={editor}
                         onEditorChange={setEditor}
                       />
+                    ) : settingsPage === 'trace' ? (
+                      directory?.storeId ? (
+                        <NativeTraceSettings
+                          bridge={bridge}
+                          generation={generation.current}
+                          storeId={directory.storeId}
+                          selection={!preparing ? selection : undefined}
+                        />
+                      ) : (
+                        <p role="status">连接可用的本机数据后管理轨迹集成。</p>
+                      )
                     ) : settingsPage === 'skills' ? (
                       <NativeSkillsSettings
                         panelHost={settingsEditorHost}

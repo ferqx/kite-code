@@ -1,6 +1,16 @@
 # Store 边界
 
-当前未投产版本按用户确认统一为 Store `formatMajor=1`、内部自动审核回执 `version=1`，公开 API 保持 `/v1`。当前 reviewed schema 与新版审批完整合同保持；既有 Tool／Job、Native 私库和备份清单版本不属于本次重编号。Profile 的 `schemaChecksum` 在打开 SQLite 前区分历史同编号旧结构，实际数据库仍完整核 schema/checksum。此次 SQL baseline 仅首行编号注释改变，DDL 逐字保持。
+当前未投产版本按用户确认统一为 Store `formatMajor=1`、内部自动审核回执 `version=1`，公开 API 保持 `/v1`。当前 reviewed schema 与新版审批完整合同保持；既有 Tool／Job、Native 私库和备份清单版本不属于本次重编号。Profile 的 `schemaChecksum` 在打开 SQLite 前区分历史同编号旧结构，实际数据库仍完整核 schema/checksum。`0001-baseline` 保持原字节；新增的受支持迁移及只读／写入准入见下节。
+
+## Trajectory 事实格式与一次性边界
+
+[明确迁移](migrations/0002-trajectory-facts.sql)为原 `change_event` 新增 nullable `trajectory_fact_json`，为 `storage_meta` 新增 `trajectory_enabled_after_cursor`。写入打开在原初始化事务内从准确 baseline 升级，并以当时的全 Store `last_change_cursor` 一次性封存边界；新库为 0，重开和追加不推进边界，旧事件不补造事实。`formatMajor`、原 `payload_json` 和 Session Log envelope 保持。
+
+[连接 owner](sqlite/connection.ts)只在写入模式迁移，未知 schema/checksum 先拒绝。数据库提交后经私有 temporary、fsync 和原子 rename 发布新 Profile checksum；中断残留的旧 marker 仍由新程序核准确数据库，旧程序不能将新 schema 当旧格式读取。只读打开准确旧 baseline 不写库或 marker，也不承诺新增事实。
+
+[格式回归](../../test/isolated/storage/trajectory-schema.test.ts)在 macOS／Bun 1.4.4 验证旧库只读字节保持、超过安全整数的精确格式边界、重开不移动、迁移失败完整回滚及明确资产清单；备份／恢复及 GC 保留范围归[维护 owner](../maintenance/README.md)。
+
+[原事实 owner](../trajectory/README.md)维护 Command／Run 原因、活动取消 phase、Context action／revision、Interaction 决定、Recovery 和 Files 回执材料的准确映射与验证范围。原事件出处和 Run／Execution／Operation／父实体出处分别封存；恢复只改变读取 Store，不能用当前行补写旧事实。原 [flow 回归](../../test/isolated/storage/trajectory-flow.test.ts)从真实事务、原 writer SIGKILL、取消、Interaction 和 child scope 验 Reader；schema／preflight／资产构建与完整材料、备份／恢复／GC 的本轮结果集中记录在该 owner，避免以格式迁移测试代替材料或生命周期资格。
 
 ## 回复完成与原工具未知
 
@@ -184,7 +194,7 @@ Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Ru
 
 Session 完整原始记录的只读导出与分块文本范围见 [export owner](sqlite/export/README.md)。SQL 冻结读集完成验证、完整下载 footer 和原 scope 媒体 EOF 是独立证明；导出不恢复或消费旧工作。
 
-`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的当前独立 baseline schema 与 checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表；只接纳新版独立基线；旧 major／schema／checksum 明确拒绝，不转换或重写旧库。已存在的私有 `profile.json` 必须声明当前 major 1 与本轮 baseline 的 `schemaChecksum`，在打开 SQLite 前拒绝不匹配的标记，不创建或改动 WAL／SHM；这只用于提前拒绝，数据库实际 major、完整 schema 与 migration checksum 仍独立校验。缺失该文件时仍沿原未完成建库路径核实际数据库。其他 SQLite 只读 WAL 发现可能建立空 sidecar，不改变原库／profile 字节或业务记录。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
+`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的显式受支持 schema 与 checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表。准确 `0001-baseline` 和 `0001-baseline`→`0002-trajectory-facts` 两种结构可只读打开；其他旧 major／schema／checksum 明确拒绝。已存在的私有 `profile.json` 必须声明当前 major 1 与这两种结构之一的 `schemaChecksum`，在打开 SQLite 前拒绝不匹配的标记，不创建或改动 WAL／SHM；这只用于提前拒绝，数据库实际 major、完整 schema 与 migration checksum 仍独立校验。缺失该文件时仍沿原未完成建库路径核实际数据库。其他 SQLite 只读 WAL 发现可能建立空 sidecar，不改变原库／profile 字节或业务记录。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
 
 未完成 restore journal、exclusive 维护占用、rollback journal、链接/非私有文件和未知/损坏格式明确拒绝。只读连接使用 strict close 后才释放 lease；若数据库关闭未获确认，返回 `store_preflight_cleanup_failed` 并保留该进程的 profile-use 锁，不能冒充已释放。`compatible` 仅证明该次观察的格式与身份，未来 launch 仍须重新执行正式格式和身份准入，也不是完整业务历史的健康证明。源码与发布 SQLite leaf 分别使用各自真实包内 migration SQL，不回退到源码树。
 
@@ -346,6 +356,6 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 原主体成功 Rewind 时，在同一事务先核当前 selection、完整执行组已结算且没有未知 Tool／Job，再由 [retireReconciliationForRewind](sqlite/session-reconciliation.ts) 完整验证旧 checkpoint 的来源、generation、组与原行读集，并与新 selection／Command 一起退休该准确边界。准备中的恢复 owner 仍拒绝 Rewind；校验仅临时叠加并回滚原 frontier，不恢复旧活动状态或执行。退休后的新明确 start／follow-up 可以正常开始，旧 Run 仍为 interrupted 且不可 resume；错误主体／Store／selection、损坏证明、未知效果及后续 SQL 失败均保原 checkpoint。[真实强杀与事务回归](../../test/isolated/recovery/reconciled-rewind-runtime.test.ts)覆盖新输入、旧恢复拒绝、子组未知效果、恢复 lease、双 Worker 选择 CAS 与整体回滚。
 
 
-内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。[独立基线](migrations/0001-baseline.sql)直接定义当前 execution 约束、索引和恢复触发器；Worker 资产只复制该 reviewed SQL。旧格式在只读 preflight 即拒绝，不执行旧迁移／清空或转换。
+内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。[独立基线](migrations/0001-baseline.sql)直接定义当前 execution 约束、索引和恢复触发器；Worker 资产只复制该 reviewed SQL 和明确列出的 `0002-trajectory-facts.sql`；不自动发现目录迁移。历史未受支持格式在只读 preflight 即拒绝，不执行旧迁移／清空或转换。
 
 2026-11-07 本轮编号统一回归：20个相关整文件206项／2718断言通过，覆盖 Store build／preflight、维护备份恢复、真实历史 major 1 归档拒绝且全文件／sidecar不变、新版完整 v1 回执与旧同编号形状拒绝、非内置工具及冷恢复。伪造当前清单指纹的旧 schema 仍拒绝，未放宽最终校验。真实开发入口整文件10项／177断言含原 Main 三场景，TUI工作区信任1项／28断言通过；6545文件／9项目类型检查通过。当前本机开发库在独占、完整旧／新 schema 相同及原checksum确认后，只重标版本／准确checksum／清单指纹，26张表其他事实与Store ID不变；原 `bun run desktop:dev` 随后5.11秒就绪，准确原生窗口已实际核对。旧实模及历史报告保原来源与当时编号，这组验证不重授其他平台或发行资格。

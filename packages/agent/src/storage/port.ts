@@ -1,4 +1,13 @@
 import type {
+  TrajectoryEvent,
+  TrajectoryEvidenceOpen,
+  TrajectoryEvidenceRef,
+  TrajectoryPage,
+  TrajectoryReadRequest,
+  TrajectoryScope,
+  TrajectorySnapshot,
+} from '@kite-ai/trajectory';
+import type {
   ArtifactReference,
   ArtifactScope,
   ChangeEvent,
@@ -885,6 +894,21 @@ export interface Store {
     upperCursor?: string;
     limit?: number;
   }): Promise<SessionLogPage>;
+  /** Pure descriptors; each page independently checks the current observer and original scope. */
+  openTrajectory(input: TrajectoryScope & { subjectId: string }): Promise<TrajectorySnapshot>;
+  readTrajectoryEvents(
+    input: TrajectoryReadRequest & { subjectId: string },
+  ): Promise<TrajectoryPage>;
+  /** Private checkpoint, delivered only to the corresponding typed Evidence owner. */
+  readTrajectoryBinding(input: TrajectoryEvidenceOpen & { subjectId: string }): Promise<{
+    event: TrajectoryEvent;
+    binding: {
+      evidenceId: string;
+      contentVersion: string;
+      kind: TrajectoryEvidenceRef['kind'];
+      value: Json;
+    };
+  }>;
   getChanges(input: {
     after: string;
     limit?: number;
@@ -1068,12 +1092,17 @@ export interface Store {
       expectedContextSelectionId: string;
       compressor: { id: string; version: string; snapshot: Json };
       trigger: 'manual' | 'automatic';
+      measurement?: Omit<
+        import('@kite-ai/trajectory').CompressionPresentation,
+        'adopted' | 'accounting'
+      >;
     },
   ): Promise<import('./types').CompressionRecord>;
   commitCompression(
     input: OwnedWrite & {
       runId: string;
       compressionId: string;
+      accounting?: import('@kite-ai/trajectory').CompressionAccounting;
       requirements?: RequirementEvaluation[];
     },
   ): Promise<import('./types').CompressionRecord>;

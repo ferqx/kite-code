@@ -313,6 +313,16 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
     fileURLToPath(new URL('../../../src/storage/migrations/0001-baseline.sql', import.meta.url)),
     migration,
   );
+  const trajectoryMigration = join(
+    packageRoot,
+    'dist/storage/migrations/0002-trajectory-facts.sql',
+  );
+  copyFileSync(
+    fileURLToPath(
+      new URL('../../../src/storage/migrations/0002-trajectory-facts.sql', import.meta.url),
+    ),
+    trajectoryMigration,
+  );
   writeFileSync(
     join(packageRoot, 'package.json'),
     JSON.stringify({

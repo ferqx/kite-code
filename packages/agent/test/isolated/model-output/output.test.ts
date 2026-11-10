@@ -119,6 +119,45 @@ test('seventeen MiB actual output survives history and enters the next actual Mo
     const saved = await runtime.readModelOutput({ ...scope, executionId: source });
     expect(saved.output.content).toBe(full);
     expect(saved.output.complete).toBe(true);
+    const trajectoryScope = {
+      storeId: expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      executionId: source,
+    };
+    const trajectory = await store.openTrajectory(trajectoryScope);
+    let afterCursor = '0',
+      completedEvent: import('@kite-ai/trajectory').TrajectoryEvent | undefined;
+    for (;;) {
+      const page = await store.readTrajectoryEvents({
+        ...trajectoryScope,
+        afterCursor,
+        upperCursor: trajectory.upperCursor,
+      });
+      completedEvent =
+        page.events
+          .filter(
+            (event) =>
+              event.phase === 'completed' &&
+              event.evidenceRefs.some((ref) => ref.kind === 'model_output'),
+          )
+          .at(-1) ?? completedEvent;
+      if (page.exhausted) break;
+      afterCursor = page.scannedThrough;
+    }
+    const outputEvidence = completedEvent!.evidenceRefs.find((ref) => ref.kind === 'model_output')!;
+    const bodyEvidence = await runtime.readTrajectoryEvidence({
+      storeId: expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      upperCursor: trajectory.upperCursor,
+      atCursor: completedEvent!.sequence,
+      eventId: completedEvent!.eventId,
+      evidenceId: outputEvidence.evidenceId,
+      contentVersion: outputEvidence.contentVersion,
+    });
+    expect(JSON.parse(Buffer.from(bodyEvidence.content).toString()).content).toBe(full);
+    expect(bodyEvidence.availability).toBe('available');
     const snapshot = await store.getModelOutputSnapshot({ ...scope, executionId: source });
     expect(snapshot.output).not.toBeNull();
     expect(JSON.stringify(snapshot).length).toBeLessThan(8192);

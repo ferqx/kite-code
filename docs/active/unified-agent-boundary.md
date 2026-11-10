@@ -120,11 +120,11 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 验证：`bun run test:unified-agent`、`bun run check:unified-agent-boundary`，实际运行范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 
-总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。除 `apps/kite-cli` 历史源码外，其他旧架构模块及其独占测试已删除；保留目录不具有运行依赖闭包，不进入正式产物或默认调度。旧实现与原验证证据通过删除前固定 revision 追溯。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
+总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确十个 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。除 `apps/kite-cli` 历史源码外，其他旧架构模块及其独占测试已删除；保留目录不具有运行依赖闭包，不进入正式产物或默认调度。旧实现与原验证证据通过删除前固定 revision 追溯。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
 
 正式命令/CI 中 `bun test` 明确列出的 `*.test/spec.*` 文件必须存在，包含 `--cwd` 解析后的输入；缺失由 [workspace 守卫](../../scripts/check-unified-workspaces.ts)以 `formal-test-file-missing` 拒绝。此检查不把 build 尚未生成的输出当测试输入，不改变运行预算、选择范围或原资格要求。
 
-质量作业、提交 hook 和 pre-release architecture 统一通过该 workspace 守卫执行一次默认源码及正式消费入口的边界检查；独立 `check:unified-agent-boundary`／`check:core-boundary` 仍可诊断。合并结果保留 source-boundary 拒绝、覆盖计数、pending 与未完成发布资格提示，不将源码缺失或计算夹具当作实际运行通过。`tsconfig.typecheck.json` 仅聚合原根和精确八 workspace，原九份配置独立生效；清单守卫拒绝漏项、重复、越界及额外配置，文件和失败路径验证归[测试体系](../../tests/README.md#类型检查)。
+质量作业、提交 hook 和 pre-release architecture 统一通过该 workspace 守卫执行一次默认源码及正式消费入口的边界检查；独立 `check:unified-agent-boundary`／`check:core-boundary` 仍可诊断。合并结果保留 source-boundary 拒绝、覆盖计数、pending 与未完成发布资格提示，不将源码缺失或计算夹具当作实际运行通过。`tsconfig.typecheck.json` 仅聚合原根和精确十 workspace，共十一份配置独立生效；清单守卫拒绝漏项、重复、越界及额外配置，文件和失败路径验证归[测试体系](../../tests/README.md#类型检查)。
 
 依赖解析只在一次守卫调用内缓存工作区 manifest 和候选文件的存在／类型／实际路径；不缓存跨入口策略的通过结论，不忽略条件导出的任何分支，也不沿越界链接继续寻找替代源码。下一次调用重新读取，包括新增／删除文件、清单修改及目录链接换向；原来源、循环依赖与 CLI 专属例外保持。quality 显式准备 Web 资产，缺失导出仍拒绝；禁用安装脚本只适用于该静态作业，不放宽运行时或发布的原生资产要求。相关[负例与冷安装记录](../../tests/README.md#质量作业冷安装与边界缓存)不表示三平台运行或发布资格。
 
@@ -376,7 +376,7 @@ Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，�
 
 默认 Service 的项目来源目标选择只接受原 Workspace 内路径；越界 Files 输入不触发外部项目说明读取，仍由 Files 原边界以普通 Tool 失败返回，原 Run 可以继续解释。根说明不可读或内部目标来源不安全仍失败关闭，不能把来源错误普遍降级为可忽略。实现与验证归 [Service owner](../../apps/service/README.md)及其 [拒绝回归](../../apps/service/test/isolated/assembly-file-denial.test.ts)，未扩大文件授权。
 
-2026-10-26 已删除其余旧架构 workspace；仅保留 `apps/kite-cli` 的历史源码，且其运行依赖闭包已移除。当前构建、测试与正式入口仍只选择上述八 workspace，删除决定见[取舍](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧源码删除不代替现有平台、资源、恢复或发布门禁。
+2026-10-26 已删除其余旧架构 workspace；仅保留 `apps/kite-cli` 的历史源码，且其运行依赖闭包已移除。当前构建、测试与正式入口仍只选择上述十 workspace，删除决定见[取舍](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧源码删除不代替现有平台、资源、恢复或发布门禁。
 
 ## 授权观察与执行资格
 
@@ -398,7 +398,7 @@ TUI 用户模型/effort 设置按准确 Store+user scope 保存和查询原意�
 
 ## 新终端候选边界
 
-`release:terminal` 将六个新 workspace、实际 npm 图、固定 Bun 和全部宿主资产封存在独立候选，完整 manifest 身份交给 CLIServiceArtifact 与客户端准入。安装发布 current/previous 指针，已经运行的 CLI/TUI/Service 固定原 candidate；独立 daemon 的 artifact lease 不依赖启动 CLI 存活。归档、目录持久化、卸载白名单与平台限制由[终端 owner](../../apps/cli/docs/terminal-release.md)完整维护。制品锁不取得 Profile 或业务权限；unsigned SHA 只证明完整性，真实沙箱、发布者身份及旧正式入口退役仍须原有资格。
+`release:terminal` 将八个新 workspace、实际 npm 图、固定 Bun 和全部宿主资产封存在独立候选，完整 manifest 身份交给 CLIServiceArtifact 与客户端准入。安装发布 current/previous 指针，已经运行的 CLI/TUI/Service 固定原 candidate；独立 daemon 的 artifact lease 不依赖启动 CLI 存活。归档、目录持久化、卸载白名单与平台限制由[终端 owner](../../apps/cli/docs/terminal-release.md)完整维护。制品锁不取得 Profile 或业务权限；unsigned SHA 只证明完整性，真实沙箱、发布者身份及旧正式入口退役仍须原有资格。
 
 Service 与 CLI 现在共用 [runtime-assets](../../apps/service/src/runtime-assets.ts) 的唯一完整 tree verifier。trusted launcher 的私有 pipe 只传闭合 candidate root/manifest SHA/kind；实际 Service 独立取得 shared lease、核 build/entrypoint/executable 后才将全 closure 作为默认 Files 的保护范围，Model/JSONC/HTTP 不能提供该证明。Runtime、Workspace FD、readers/stream 全部确认关闭才释放，失败保持原资源与 listener。实际 public builder→default native paired/daemon、CLI 父退出后 live busy/stop 后 free 的 1/23 资格归 [Service owner](../../apps/service/README.md)；不能只从 parent wrapper 正常存活推定 child 已保护完整资产。
 
@@ -448,7 +448,7 @@ UI只持可选connection port和原读取代次；Host用公开完整Workspace�
 
 ## 当前发布与资格工具
 
-根 `agent/tui/prod:tui` 固定完整新 Terminal，`desktop` 固定完整 Native，`server` 显式复用新默认 daemon/Web。八 workspace 的 build/typecheck 与统一默认计划共用同一发现源；root 仅有限脚本安全测试及新公开制品场景。静态守卫检查 root/workspace scripts、递归 aliases、CI run 与实际 import 闭包，包含四个标准/Native CLI/TUI entry；计算模块的 fixture 仍记 pending，不把静态检查当运行资格。
+根 `agent/tui/prod:tui` 固定完整新 Terminal，`desktop` 固定完整 Native，`server` 显式复用新默认 daemon/Web。十 workspace 的 build/typecheck 与统一默认计划共用同一发现源；root 仅有限脚本安全测试及新公开制品场景。静态守卫检查 root/workspace scripts、递归 aliases、CI run 与实际 import 闭包，包含四个标准/Native CLI/TUI entry；计算模块的 fixture 仍记 pending，不把静态检查当运行资格。
 
 Terminal 与 Native 分别固定真实 Bun/Node SQLite，包内 selection 在 Store/maintenance/Worker 开库前生效；损坏选定资产不回退开发库。Windows ordinary Workspace 配置与 private Profile/协调/数据库角色分开，既有 ACL 不自动修复；实际 native Windows 仍待 CI 证据。三平台 workflow 保原检查名称、固定 Bun/action、源 head 与 clean-source 约束。平台诊断、bounded soak 和源码外制品通过均不等于完整 Shell/confinement、正式 soak 或发布者认证；formal verifier 保持拒绝缺资格。当前边界见[release control](release-control.md)、[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
 
@@ -510,3 +510,13 @@ Windows右栏分隔线与拖拽中的把手由Main的普通原生View随准确Pa
 下述已发布的受管Browser与手动WebContentsView隔离合同尚未整体替代。当前未提交分支按用户要求尝试统一页面owner，新增Main与paired Service之间的临时私有单页控制通道；公共Tool/Protocol版本和原权限判断保持；Runtime新增的受信只读work资格接缝不授予派发权，renderer不取得endpoint/target/任意JS控制。Job只拥有daemon/provider与租约，不拥有共享renderer；蓝光/光标不成为authority。该分支普通Tab/冻结备注、异步Agent请求人工及主动交接已有代码/mock；最终Native资格仍未取得，不可发布。通用可信Action定义可显式声明有限runControl，活动owner下只串行派发该类控制响应，完整鉴权与未知清理门禁保持，且禁止创建新工作/Question；普通Action队列不变。Browser请求记录和有限响应Job仍归扩展，人工明确响应才用既有result.include向准确活动原Run投递一次，不伪造输入或复活旧Run。准确源码与mock范围归[Desktop候选](../../apps/desktop/README.md#普通页面控制租约候选2026-10-27未发布)，长期理由归[proposed Note](../../.agents/notes/proposed/architecture/2026-10-27-native-page-control-lease.md)。
 
 Native首次页面授权候选在原browser.open Tool内先取得既有持久Question的原接受事实，才创建browser.session；Tool执行许可与自然语言不替代页面/登录状态授权。Main短期许可固定原请求、页面与选择stamp，原Job通过真实父链消费一次，不扫描别页；提交丢ACK只查询同requestId，取消只清理原未消费许可。私有通道与扩展记录承载该接线，不增公共工具输入、版本或业务表。准确实现与替身验证边界归[Desktop候选](../../apps/desktop/README.md#普通页面控制租约候选2026-10-27未发布)，旧unknown不因本次修复改写。
+
+## Trajectory 与 Trace 独立消费者边界
+
+[Trajectory](../../packages/trajectory/README.md)与[Trace SDK](../../packages/trace-extension-sdk/README.md)是明确新增的两个 workspace，根清单共十包。纯协议保存闭合事件／Evidence／完整性、固定上界分页、原来源身份和确定性投影；SDK公共入口只承担有限消费、broker context与明确ACK／reject，不提供通用CAS／outbox。纯入口不导入Agent、SQLite、Provider、React、Electron或宿主网络／文件I/O；SDK本地打包叶与guest入口分别检查。
+
+[原事务事实／Reader](../../packages/agent/src/trajectory/README.md)仍由原Runtime Store拥有，公开分页每页短事务重新准入，无跨页lease；typed材料按原事件／版本授权，Shell沿原截断预览。备份恢复保原来源，旧格式与缺口不推测完整，Blob ref／GC生命周期不因轨迹改变。
+
+工作台仍是只读消费者：完整前缀投影持安全规范事件／ref及有限时间、usage、压缩 metadata，正文与私有 binding 不进入索引；UI 按首次出现顺序、真实父级和本地组合过滤派生行，不重排并行因果或通过筛选获得新范围。原 Tool 执行参数用独立 `tool_input` typed 材料，Job 程序、Model 私有请求和恢复清单不沿该通道公开；结果 presentation 受原定义／版本白名单约束。事件、Projector、工具定义和 bundle 版本未为展示改造递增，旧 V1 缺字段保持可读／缺失，新材料与未来未知内容按[共享协议](../../packages/trajectory/README.md)和当前读端闭合校验处理。
+
+[Service TraceHost](../../apps/service/src/trace-extensions/README.md)是独立消费者，不进入业务ExtensionHost，不持原Store事务或跨库生命周期lease。授权／consumer queue与独立QuickJS进程负责第三方，可信[OTel adapter](../../apps/service/src/trace-integrations/opentelemetry/README.md)拥有私有去重／open-span／spool，持久接受与远端发送分开。源删除只影响未复制事实／未读材料，不撤销安全副本或回退ACK；任务取消与当前grant继续约束未来外发。无默认正文、身份或隐式Full继承，运营观测约束另见[隐私边界](observability-privacy-operations.md)。

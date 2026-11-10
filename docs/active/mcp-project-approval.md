@@ -5,7 +5,7 @@
 验证：当前来源与授权验证见 `apps/service/test/isolated/mcp-credentials.test.ts`、`apps/service/test/isolated/default-mcp-credentials.test.ts`、`packages/agent/test/isolated/maintenance/mcp-source-approval-intents.test.ts`，以及 `bun run check:pre-release-architecture`、`bun run typecheck`、`bun run check:docs`。下文旧 Service 的配置和旧 Runtime E2E 只保留历史追溯，不再作为当前可执行入口。
 相关：[Agent Note 0009](../../.agents/notes/implemented/feature/2026-07-15-project-mcp-local-approval.md)、[Agent Note 0010](../../.agents/notes/implemented/architecture/2026-07-15-mcp-supervisor-control-plane.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、`apps/kite-service/src/config/mcp-config.ts`、`apps/kite-service/src/config/mcp-project-approvals.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、`apps/kite-cli/src/tui/mcp/`。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 当前安全性质
 

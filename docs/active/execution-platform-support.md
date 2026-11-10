@@ -7,7 +7,7 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 验证：`bun run test:shell:native`、`bun test tests/isolated/unified-agent/formal-optional-capabilities.test.ts tests/isolated/unified-agent/native-runtime-protection.test.ts tests/isolated/unified-agent/unified-platform.test.ts`、`bun run scripts/release/unified-platform-probe.ts`、`bun run scripts/release/unified-platform-verify.ts`；三OS声明和formal verifier由[CI守卫](../../tests/integration/scripts/unified-ci.test.ts)核验，实际run仍必须另验。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 
 2026-11-02：Skill Workflow 的执行实现、工具及客户端激活入口已退役，旧 flags 和核验／补偿资格不再代表可启用的运行能力。保留的历史证据不提升其他平台或正式发布资格；普通 Skill 知识、MCP、Shell、取消／未知效果及现行安全门禁继续按各自 owner 核验。当前范围见[执行边界](unified-agent-boundary.md#skill-workflow-的执行边界)。

@@ -4,6 +4,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import standalone from 'ajv/dist/standalone';
 import { z } from 'zod';
 import { apiRoutes, apiSchemas } from '../apps/service/src/http/schema';
+import { traceExtensionRoutes } from '../apps/service/src/trace-extensions/schemas';
 
 interface Schema {
   $ref?: string;
@@ -55,10 +56,14 @@ function type(schema: Schema, root: string): string {
 }
 
 const schemas = Object.fromEntries(
-  Object.entries(apiSchemas).map(([name, value]) => [name, z.toJSONSchema(value)]),
+  Object.entries(apiSchemas).map(([name, value]) => [
+    name,
+    z.toJSONSchema(value, name.startsWith('Trajectory') ? { reused: 'ref' } : {}),
+  ]),
 ) as Record<string, Schema>;
 // Schema selection only; all actual validation rules still come from the Service schema.
 const responseNames = [
+  ...new Set(traceExtensionRoutes.map((route) => route.response)),
   'ContextEstimate',
   'WorkspaceRemoval',
   'FileCheckpointPage',
@@ -66,6 +71,11 @@ const responseNames = [
   'FileRestoreStatus',
   'FileCheckpointRecoveryBoundary',
   'SessionLogPage',
+  'TrajectorySnapshot',
+  'TrajectoryPage',
+  'TrajectoryEvidenceDescriptor',
+  'TrajectoryEvidenceChunk',
+  'TrajectoryEvidenceClosed',
   'SkillCataloguePage',
   'UserSkillCataloguePage',
   'UserSkillDocument',
@@ -138,6 +148,16 @@ const responseNames = [
   'MessageChangesPage',
 ];
 const requestNames = [
+  ...new Set(
+    traceExtensionRoutes.flatMap((route) =>
+      'request' in route && route.request ? [route.request] : [],
+    ),
+  ),
+  'TrajectoryScope',
+  'TrajectoryReadRequest',
+  'TrajectoryEvidenceOpen',
+  'TrajectoryEvidenceReadRequest',
+  'TrajectoryEvidenceCloseRequest',
   'RemoveWorkspaceRequest',
   'FileCheckpointListQuery',
   'SessionLogQuery',
@@ -239,6 +259,7 @@ const validatorCompiler = new Ajv2020({
   removeAdditional: false,
   code: { source: true, esm: true },
 });
+validatorCompiler.addFormat('uuid', z.regexes.uuid());
 const validatorRefs: Record<string, string> = {};
 for (const [prefix, names] of [
   ['response', responseNames],
@@ -248,6 +269,7 @@ for (const [prefix, names] of [
     const key = `${prefix}_${name}`;
     validatorCompiler.addSchema(
       (prefix === 'response' &&
+      !name.startsWith('Trace') &&
       name !== 'WorkspaceRemoval' &&
       name !== 'HostStatus' &&
       name !== 'SkillCataloguePage' &&

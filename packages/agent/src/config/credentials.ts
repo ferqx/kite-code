@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { ConfigurationError } from './types';
 export interface OwnedCredentialScope {
-  readonly namespace: 'mcp.oauth';
+  readonly namespace: 'mcp.oauth' | 'trace.http';
   readonly ownerDigest: string;
 }
 export type OwnedCredentialStatus = 'available' | 'locked' | 'unavailable';
@@ -24,7 +24,7 @@ function ownedKey(scope: OwnedCredentialScope): string {
     Object.keys(scope).length !== 2 ||
     !Object.hasOwn(scope, 'namespace') ||
     !Object.hasOwn(scope, 'ownerDigest') ||
-    scope.namespace !== 'mcp.oauth' ||
+    !['mcp.oauth', 'trace.http'].includes(scope.namespace) ||
     typeof scope.ownerDigest !== 'string' ||
     !/^[a-f0-9]{64}$/.test(scope.ownerDigest)
   )

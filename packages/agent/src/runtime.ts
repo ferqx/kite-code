@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ModelAdapter, ModelMessage, ModelRequest } from '@kite-ai/ai';
+import { trajectoryAttributesSchemas } from '@kite-ai/trajectory';
 import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
 import { authorizationCheckInput, authorizationReadBodies } from './authorization-check-input';
 import {
@@ -152,6 +153,14 @@ import {
 import { failureOutcomeExplanation, toolFailurePresentation } from './tool-failure-presentation';
 import { toolImages } from './tool-images';
 import { childToolEvidence } from './tool-observations';
+import { modelTrajectoryDisplay, sealedModelTrajectoryDisplay } from './trajectory/display';
+import {
+  contextEvidence,
+  evidenceObject,
+  fileChangeEvidence,
+  interactionEvidence,
+  toolResultEvidence,
+} from './trajectory/evidence-projection';
 
 /** A trusted configuration producer could not confirm cleanup of its actual preparation resources. */
 export class ConfigurationPreparationCleanupError extends AgentError {
@@ -759,7 +768,8 @@ export class AgentRuntime {
     this.execution = new UnifiedExecution({
       store: options.store,
       sealModelInput: (scope, request) => this.sealModelInput(scope, request),
-      sealModelMetadata: (scope, metadata) => this.sealModelMetadata(scope, metadata),
+      sealModelMetadata: (scope, metadata, request, sealedInput) =>
+        this.sealModelMetadata(scope, metadata, request, sealedInput),
       publishModelOutput: options.artifacts
         ? (scope, executionId, value) => this.publishModelOutput(scope, executionId, value)
         : undefined,
@@ -937,6 +947,7 @@ export class AgentRuntime {
     this.listModelInputs = this.accountEntry(this.listModelInputs, 'observation');
     this.readModelInput = this.accountEntry(this.readModelInput, 'observation');
     this.readModelOutput = this.accountEntry(this.readModelOutput, 'observation');
+    this.readTrajectoryEvidence = this.accountEntry(this.readTrajectoryEvidence, 'observation');
     this.readExecutionEvidence = this.accountEntry(this.readExecutionEvidence, 'observation');
     this.readArtifact = this.accountEntry(this.readArtifact, 'observation');
     this.readHostControl = this.accountEntry(this.readHostControl, 'observation');
@@ -1755,13 +1766,7 @@ export class AgentRuntime {
           const captured = modelMetadataJson(
             await captureModelRequestMetadata({}, checker.model, structuredClone(actual)),
           );
-          const metadata =
-            Buffer.byteLength(canonicalJson(captured)) > 64 * 1024
-              ? {
-                  version: 1,
-                  body: (await this.publishBody(checkScope, captured)) as unknown as Json,
-                }
-              : captured;
+          const metadata = await this.sealModelMetadata(checkScope, captured, actual, sealed);
           const publish = async (value: Json, signal: AbortSignal, receipt = false) => {
             if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
             signal.throwIfAborted();
@@ -3002,10 +3007,7 @@ export class AgentRuntime {
       const captured = modelMetadataJson(
         await captureModelRequestMetadata({}, input.model, structuredClone(actual)),
       );
-      const metadata =
-        Buffer.byteLength(canonicalJson(captured)) > 64 * 1024
-          ? { version: 1, body: (await this.publishBody(scope, captured)) as unknown as Json }
-          : captured;
+      const metadata = await this.sealModelMetadata(scope, captured, actual, sealed);
       const fact = await this.options.store.ensureInternalModel({
         expectedStoreId: parent.originStoreId,
         owner: live.owner,
@@ -3138,7 +3140,13 @@ export class AgentRuntime {
   async readModelInput(
     input: Parameters<Store['getModelInputSnapshot']>[0] & { signal?: AbortSignal },
   ): Promise<ModelInputSnapshot> {
-    const { authorizationCheck: check, ...snapshot } = await this.readOriginalModelInput(input);
+    return this.publicModelInput(await this.readOriginalModelInput(input), input.signal);
+  }
+  private async publicModelInput(
+    original: ModelInputSnapshot & { authorizationCheck: { sourceIds: [string, string] } | null },
+    signal?: AbortSignal,
+  ): Promise<ModelInputSnapshot> {
+    const { authorizationCheck: check, ...snapshot } = original;
     let changed = false;
     const request = {
       ...snapshot.request,
@@ -3168,7 +3176,7 @@ export class AgentRuntime {
         return message;
       }),
     };
-    input.signal?.throwIfAborted();
+    signal?.throwIfAborted();
     changed ||=
       request.tools !== snapshot.request.tools ||
       canonicalJson(request.messages as unknown as Json) !==
@@ -3181,8 +3189,8 @@ export class AgentRuntime {
     }
     // Public digest describes the public body; original receipt verification stays private above.
     const bytes = Buffer.from(canonicalJson(request as unknown as Json));
-    const bodyHash = await semanticDigestBytes(bytes, input.signal);
-    input.signal?.throwIfAborted();
+    const bodyHash = await semanticDigestBytes(bytes, signal);
+    signal?.throwIfAborted();
     return { ...snapshot, request, metadata, bodyHash, bodyBytes: String(bytes.byteLength) };
   }
   /** Internal replay retains opaque transport state; the public Inspector omits it. */
@@ -3196,6 +3204,12 @@ export class AgentRuntime {
     const { signal, ...scope } = input;
     signal?.throwIfAborted();
     const snapshot = await this.options.store.getModelInputSnapshot(scope);
+    return this.readSealedModelInput(snapshot, signal);
+  }
+  private async readSealedModelInput(
+    snapshot: import('./storage/types').StoredModelInput,
+    signal?: AbortSignal,
+  ): Promise<ModelInputSnapshot & { authorizationCheck: { sourceIds: [string, string] } | null }> {
     signal?.throwIfAborted();
     const stored = snapshot.input;
     if (!stored || typeof stored !== 'object' || Array.isArray(stored))
@@ -3255,7 +3269,8 @@ export class AgentRuntime {
     ) {
       const sealed = bodyReference(metadata.body);
       if (
-        Object.keys(metadata).some((key) => key !== 'version' && key !== 'body') ||
+        Object.keys(metadata).some((key) => !['version', 'body', 'display'].includes(key)) ||
+        (metadata.display !== undefined && !sealedModelTrajectoryDisplay(metadata.display)) ||
         !sealed ||
         sealed.reference.storeId !== snapshot.originStoreId ||
         sealed.reference.sessionId !== snapshot.identity.sessionId ||
@@ -3280,6 +3295,311 @@ export class AgentRuntime {
       metadata: modelInputMetadata(metadata, snapshot.dispatchAuthorization),
     };
   }
+  /** Historical Evidence expands only the checkpoint sealed by its original event. */
+  async readTrajectoryEvidence(
+    input: import('@kite-ai/trajectory').TrajectoryEvidenceOpen & {
+      subjectId: string;
+      signal?: AbortSignal;
+    },
+  ): Promise<{
+    content: Uint8Array;
+    mediaType: string;
+    availability: import('@kite-ai/trajectory').TrajectoryEvidenceRef['availability'];
+    transformation: string;
+  }> {
+    const { signal, ...scope } = input;
+    signal?.throwIfAborted();
+    const sealed = await this.options.store.readTrajectoryBinding(scope);
+    signal?.throwIfAborted();
+    const { event, binding } = sealed;
+    let availability = event.evidenceRefs.find(
+      (ref) => ref.evidenceId === binding.evidenceId,
+    )!.availability;
+    let view: Json, transformation: string;
+    switch (binding.kind) {
+      case 'tool_input': {
+        const saved = evidenceObject(binding.value);
+        if (
+          event.kind !== 'tool' ||
+          saved.subjectId !== scope.subjectId ||
+          saved.sessionId !== scope.sessionId ||
+          saved.executionId !== event.executionId ||
+          saved.originStoreId !== event.executionOriginStoreId ||
+          saved.definitionId !== event.attributes.definitionId ||
+          saved.definitionVersion !== event.attributes.definitionVersion ||
+          !Object.hasOwn(saved, 'input')
+        )
+          throw new AgentError('trajectory_scope_denied');
+        view = saved.input!;
+        transformation = 'kite.tool-input-public@1';
+        break;
+      }
+      case 'message': {
+        const saved = evidenceObject(binding.value);
+        if (saved.subjectId !== scope.subjectId) throw new AgentError('trajectory_scope_denied');
+        const body = evidenceObject(saved.body!);
+        let content = typeof body.content === 'string' ? body.content : '';
+        if (saved.checkpoint !== null && saved.checkpoint !== undefined) {
+          const checkpoint = evidenceObject(saved.checkpoint),
+            output = evidenceObject(checkpoint.output!);
+          if (checkpoint.subjectId !== scope.subjectId)
+            throw new AgentError('trajectory_scope_denied');
+          const identity =
+            checkpoint.identity as unknown as import('./storage/types').ModelInputIdentity;
+          const projected = await this.readSealedModelOutput(
+            {
+              storeId: scope.storeId,
+              originStoreId: String(checkpoint.originStoreId),
+              subjectId: scope.subjectId,
+              identity,
+              snapshotCursor: event.sequence,
+              output: modelOutputReference(output.modelOutput),
+              content,
+              reasoning: '',
+              toolCalls: [],
+              complete: identity.status === 'succeeded',
+            },
+            signal,
+          );
+          content = projected.output.content;
+        }
+        const attachments = (value: Json | undefined) =>
+          Array.isArray(value)
+            ? value.flatMap((item) => {
+                const description = evidenceObject(item);
+                if (typeof description.name !== 'string') return [];
+                return [
+                  {
+                    name: description.name,
+                    ...(typeof description.mediaType === 'string'
+                      ? { mediaType: description.mediaType }
+                      : {}),
+                    ...(typeof description.size === 'string' ? { size: description.size } : {}),
+                  },
+                ];
+              })
+            : [];
+        if (event.kind !== 'message') throw new AgentError('trajectory_evidence_unavailable');
+        view = {
+          role: event.attributes.role,
+          status: event.attributes.status,
+          content,
+          attachments: [...attachments(body.images), ...attachments(body.files)],
+        };
+        transformation = 'kite.message-public@1';
+        break;
+      }
+      case 'model_input': {
+        const saved = evidenceObject(binding.value);
+        if (saved.subjectId !== scope.subjectId) throw new AgentError('trajectory_scope_denied');
+        const original = await this.readSealedModelInput(
+          {
+            ...saved,
+            storeId: scope.storeId,
+            snapshotCursor: event.sequence,
+          } as unknown as import('./storage/types').StoredModelInput,
+          signal,
+        );
+        const projected = await this.publicModelInput(original, signal);
+        view = {
+          request: projected.request as unknown as Json,
+          metadata: projected.metadata as unknown as Json,
+        };
+        transformation = 'kite.model-input-public@1';
+        break;
+      }
+      case 'model_output': {
+        const saved = evidenceObject(binding.value),
+          output = evidenceObject(saved.output!);
+        if (saved.subjectId !== scope.subjectId) throw new AgentError('trajectory_scope_denied');
+        const identity = saved.identity as unknown as import('./storage/types').ModelInputIdentity;
+        const complete = identity.status === 'succeeded';
+        const projected = await this.readSealedModelOutput(
+          {
+            storeId: scope.storeId,
+            originStoreId: String(saved.originStoreId),
+            subjectId: scope.subjectId,
+            identity,
+            snapshotCursor: event.sequence,
+            output: modelOutputReference(output.modelOutput),
+            content: typeof output.content === 'string' ? output.content : '',
+            reasoning: typeof output.reasoning === 'string' ? output.reasoning : '',
+            toolCalls:
+              complete && Array.isArray(output.toolCalls)
+                ? (output.toolCalls as unknown as import('./storage/types').ToolCall[])
+                : [],
+            complete,
+          },
+          signal,
+        );
+        view =
+          event.kind === 'context' || (event.kind === 'model' && event.attributes.compressionId)
+            ? { content: projected.output.content, complete: projected.output.complete }
+            : (projected.output as unknown as Json);
+        transformation = 'kite.model-output-public@1';
+        break;
+      }
+      case 'tool_result': {
+        const sealed = evidenceObject(binding.value);
+        if (
+          sealed.format === 'kite.tool-result' &&
+          !Object.hasOwn(sealed, 'outcome') &&
+          sealed.version !== 1
+        )
+          throw new AgentError('trajectory_evidence_unavailable');
+        const wrapper =
+          sealed.format === 'kite.tool-result' &&
+          sealed.version === 1 &&
+          !Object.hasOwn(sealed, 'outcome');
+        if (
+          wrapper &&
+          (sealed.subjectId !== scope.subjectId ||
+            sealed.sessionId !== scope.sessionId ||
+            sealed.executionId !== event.executionId ||
+            sealed.originStoreId !== event.executionOriginStoreId)
+        )
+          throw new AgentError('trajectory_scope_denied');
+        const saved = wrapper ? evidenceObject(sealed.result!) : sealed;
+        view = toolResultEvidence(saved, wrapper ? sealed.presentation : undefined);
+        if (saved.modelContent !== undefined) {
+          const execution = wrapper
+            ? ({
+                id: sealed.executionId,
+                originStoreId: sealed.originStoreId,
+                sessionId: sealed.sessionId,
+                originCommandId: sealed.originCommandId,
+              } as unknown as ExecutionRecord)
+            : event.executionId
+              ? await this.options.store.getExecution(event.executionId)
+              : null;
+          if (!execution || execution.sessionId !== scope.sessionId)
+            throw new AgentError('trajectory_scope_denied');
+          (view as Record<string, Json>).content = await this.resultModelBody(
+            execution,
+            saved,
+            scope.storeId,
+            signal,
+          );
+        }
+        transformation = 'kite.tool-result-public@1';
+        break;
+      }
+      case 'job_output': {
+        if (!event.executionId) throw new AgentError('trajectory_evidence_unavailable');
+        const decoded = trajectoryAttributesSchemas.job
+          .pick({ upperOutputSeq: true, gaps: true, truncated: true })
+          .required()
+          .safeParse(binding.value);
+        if (!decoded.success) throw new AgentError('trajectory_evidence_unavailable');
+        const checkpoint = decoded.data;
+        const upper = checkpoint.upperOutputSeq,
+          items: Json[] = [];
+        let after = '0';
+        while (BigInt(after) < BigInt(upper)) {
+          signal?.throwIfAborted();
+          const page = await this.options.store.listExecutionOutput({
+            executionId: event.executionId,
+            afterSeq: after,
+            upperSeq: upper,
+            limit: 200,
+          });
+          // Coalesced live gap counters may advance. Only normal immutable rows are used here;
+          // every historical gap/count comes from the original checkpoint below.
+          for (const item of page.items)
+            if (item.droppedBytes === '0')
+              items.push({ seq: item.seq, stream: item.stream, content: item.content });
+          const next = page.items.reduce(
+            (cursor, item) => (BigInt(item.throughSeq) > BigInt(cursor) ? item.throughSeq : cursor),
+            after,
+          );
+          if (next === after) break;
+          after = next;
+        }
+        view = {
+          upperOutputSeq: upper,
+          items,
+          gaps: checkpoint.gaps,
+          truncated: checkpoint.truncated === true,
+          contentMode: 'retained_preview',
+        };
+        transformation = 'kite.execution-output-checkpoint@1';
+        break;
+      }
+      case 'artifact': {
+        const saved = evidenceObject(binding.value);
+        if (
+          typeof saved.id !== 'string' ||
+          typeof saved.ownerId !== 'string' ||
+          !['session', 'execution'].includes(String(saved.ownerKind))
+        )
+          throw new AgentError('trajectory_evidence_unavailable');
+        const artifact = await this.readArtifact({
+          expectedStoreId: scope.storeId,
+          sessionId: scope.sessionId,
+          subjectId: scope.subjectId,
+          refId: saved.id,
+          scope: { kind: saved.ownerKind as 'session' | 'execution', id: saved.ownerId },
+          signal,
+        });
+        if (
+          artifact.reference.hash !== saved.hash ||
+          artifact.reference.size !== saved.size ||
+          artifact.reference.storeId !== saved.storeId
+        )
+          throw new AgentError('trajectory_evidence_unavailable');
+        await this.options.store.readTrajectoryBinding(scope);
+        signal?.throwIfAborted();
+        return {
+          content: artifact.content,
+          mediaType: artifact.reference.mediaType,
+          availability,
+          transformation: 'kite.artifact-bytes@1',
+        };
+      }
+      case 'file_change': {
+        view = fileChangeEvidence(binding.value)!;
+        if (!view) throw new AgentError('trajectory_evidence_unavailable');
+        transformation = 'kite.file-change-receipt@1';
+        break;
+      }
+      case 'interaction':
+        view = interactionEvidence(binding.value);
+        availability = 'partial';
+        transformation = 'kite.interaction-public-preview@1';
+        break;
+      case 'verification': {
+        const saved = evidenceObject(binding.value);
+        view = Object.fromEntries(
+          [
+            'verificationId',
+            'revision',
+            'outcome',
+            'checkerExecutionId',
+            'targetExecutionId',
+          ].flatMap((key) => (typeof saved[key] === 'string' ? [[key, saved[key]!]] : [])),
+        );
+        availability = 'partial';
+        transformation = 'kite.verification-public-preview@1';
+        break;
+      }
+      case 'context':
+        view = contextEvidence(binding.value);
+        availability = 'partial';
+        transformation = 'kite.context-selection-public-preview@1';
+        break;
+      default:
+        throw new AgentError('trajectory_evidence_unavailable');
+    }
+    // Long material reads cannot return after the original source/observer became invalid.
+    await this.options.store.readTrajectoryBinding(scope);
+    signal?.throwIfAborted();
+    return {
+      content: Buffer.from(canonicalJson(view)),
+      mediaType: 'application/json',
+      availability,
+      transformation,
+    };
+  }
   async readExecutionEvidence(
     input: import('./business/execution-evidence').ExecutionEvidenceReadRequest,
   ) {
@@ -3296,6 +3616,15 @@ export class AgentRuntime {
     const { signal, ...scope } = input;
     signal?.throwIfAborted();
     const snapshot = await this.options.store.getModelOutputSnapshot(scope);
+    return this.readSealedModelOutput(snapshot, signal);
+  }
+  private async readSealedModelOutput(
+    snapshot: import('./storage/types').StoredModelOutput,
+    signal?: AbortSignal,
+  ): Promise<ModelOutputSnapshot> {
+    signal?.throwIfAborted();
+    if (snapshot.output && snapshot.output.complete !== snapshot.complete)
+      throw new AgentError('model_output_invalid');
     const fullOutput = snapshot.output
       ? await readModelOutput(
           snapshot.output,
@@ -7935,8 +8264,12 @@ export class AgentRuntime {
               snapshot: prepared.snapshot,
             },
             trigger,
+            ...(prepared.measurement ? { measurement: prepared.measurement } : {}),
           });
           attemptedExecutionId = requestId;
+          let compressionAccounting:
+            | import('@kite-ai/trajectory').CompressionAccounting
+            | undefined;
           stage = 'model';
           const originalModel = model!;
           const compressionModel: ModelAdapter = {
@@ -7986,15 +8319,18 @@ export class AgentRuntime {
                 throw new AgentError('compression_summary_invalid');
               stage = 'pure';
               progress.phase = 'validating';
+              const validationInput = Object.freeze({ ...input, summary: response.content });
               if (
                 !response.toolCalls.length &&
                 selectedCompressor.validateSummary &&
-                (await selectedCompressor.validateSummary({
-                  ...input,
-                  summary: response.content,
-                })) !== true
+                (await selectedCompressor.validateSummary(validationInput)) !== true
               )
                 throw new AgentError('compression_not_reducible');
+              if (!response.toolCalls.length && selectedCompressor.validateSummaryReport) {
+                const report = await selectedCompressor.validateSummaryReport(validationInput);
+                if (report.accepted !== true) throw new AgentError('compression_not_reducible');
+                compressionAccounting = report.accounting;
+              }
               return response;
             },
           });
@@ -8006,6 +8342,7 @@ export class AgentRuntime {
             owner,
             runId: run.id,
             compressionId: pending.id,
+            ...(compressionAccounting ? { accounting: compressionAccounting } : {}),
             ...(trigger === 'manual'
               ? { requirements: await this.execution.requirements(scope, 'completion') }
               : {}),
@@ -9732,11 +10069,20 @@ export class AgentRuntime {
     });
   }
   private async sealModelMetadata(
-    scope: import('./execution').ExecutionScope,
+    scope: ToolScope,
     metadata: Json,
+    request: ModelRequest,
+    sealedInput: Json,
   ): Promise<Json> {
-    if (Buffer.byteLength(canonicalJson(metadata)) <= 64 * 1024) return metadata;
-    return { version: 1, body: (await this.publishBody(scope, metadata)) as unknown as Json };
+    const input = sealedInput as Record<string, Json>;
+    if (!input.body && Buffer.byteLength(canonicalJson(metadata)) <= 64 * 1024) return metadata;
+    // Capture only bounded public identity/counts while the original request is available.
+    // SQLite never expands private Artifacts to construct the first-party list index.
+    return {
+      version: 1,
+      body: (await this.publishBody(scope, metadata)) as unknown as Json,
+      display: modelTrajectoryDisplay(request as unknown as Json, metadata) as unknown as Json,
+    };
   }
   private async sealModelInput(
     scope: import('./execution').ExecutionScope,

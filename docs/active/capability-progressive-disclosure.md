@@ -93,4 +93,4 @@ V2 不再按 Runtime phase 裁剪已经发现并绑定的动态 MCP：同一 bin
 仍在模型表面和 Provider 调用生成前使该会话失败。当前 Runtime 不为旧 Plan 建立 recovery-only capability surface。
 > 路径同步：能力运行时引用当前无版本命名的 state/store 路径；不引入兼容 alias。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
