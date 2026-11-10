@@ -6,6 +6,8 @@ Shell 活动摘要采用原调用的可选 description，省略时沿用命令�
 
 `Sidebar` 接受宿主的窗口内 `SessionSummary.awaitingFirstMessage` 展示标记，优先排列新出现且尚无首条消息时间的会话；这些会话之间按可选 `awaitingFirstMessageOrder` 从大到小排列，只传原布尔标记时保留原排序。标记撤下后忽略次序，继续按 `updatedAt` 排序，不改变悬浮提示中的消息时间。Native 的新增识别与冷读隔离归 [Desktop owner](../../apps/desktop/README.md)。
 
+[SessionPage](src/desktop/SessionPage.tsx)接受可选 `sidebarSelected`，让宿主已核实的本次新会话行在正文仍准备时接管唯一导航高亮。它不改变正文的 `selected`、输入节点或操作资格；工作台／定时任务仍优先，未提供该字段时保原准备页的空间选中规则。[共享页面](test/isolated/desktop-session-page-render.test.tsx)与[侧栏](test/isolated/desktop-sidebar-render.test.tsx)两个完整文件25项／313断言通过；首次目录／回执的 DOM 和实际 Native 过程证据归上述 Desktop owner。
+
 全局原生滚动条在[共享样式](src/desktop/style.css)中使用当前主题前景色与透明色混合：普通滑块不透明度为10%，悬停／拖动为18%，轨道透明。深浅主题使用相同比例，覆盖会话、嵌套详情、侧栏、附件列表及Portal原生viewport。支持`::-webkit-scrollbar`且未开启强制颜色时，将标准滚动条属性恢复为`auto`，让滑块悬停／按下样式实际生效；当前Windows Chromium的轨道显式保留10px占位。其他浏览器沿标准细滚动条，悬停由浏览器处理；强制颜色模式保留标准原生绘制，不覆盖系统配色。原生滚动交接仍交给浏览器，不增加wheel接管。
 
 2026-11-06，Windows／Bun1.4.4，20%／32%版本的既有会话与嵌套滚动两个完整回归文件6项／846断言通过，定向Biome及隔离工作树文档检查通过，隔离客户端生产CSS编译通过。随后按实际反馈进一步降至10%／18%，只调整颜色混合比例；上述回归仅复用于未变化的滚动逻辑，不证明新比例的外观。IAB连接本机服务超时，本机Chrome观察被Computer Use因无法可靠识别当前URL而停止，深浅主题的实机外观与拖动过程验收仍未完成。

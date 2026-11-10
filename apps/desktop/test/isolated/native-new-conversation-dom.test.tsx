@@ -586,6 +586,19 @@ function fixture(
     refreshWhileSelecting: () => act(async () => watcher?.({ kind: 'changed', generation: 1 })),
     releaseModels: () => act(async () => releaseModels?.()),
     selected: () => selected,
+    publishFirstCreation: async () => {
+      const send = [...calls]
+        .reverse()
+        .find((call) => call.method === 'conversation.send') as Extract<
+        NativeRequest,
+        { method: 'conversation.send' }
+      >;
+      if (!sessions.some((item) => item.id === send.creation.sessionId))
+        sessions.push(session(send.creation.sessionId));
+      publishDirectory = true;
+      await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
+      return send;
+    },
     holdSelection: () => {
       holdSelection = true;
     },
@@ -2165,6 +2178,86 @@ test('first-send loading preserves editable next drafts through Session handoff 
     } finally {
       await f.close();
     }
+  }
+});
+
+test('a confirmed first Session row is selected before its send receipt and prepared readers without moving the editor focus', async () => {
+  for (const held of ['selection', 'models'] as const) {
+    const f = fixture(true);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit('first input with a delayed handoff');
+      await f.chooseModel();
+      await f.click('发送首条消息');
+      expect(f.host.querySelector('.session-row[aria-current="page"]')).toBeNull();
+      const editor = f.input()!;
+      editor.focus();
+      const send = await f.publishFirstCreation();
+      const row = f.host.querySelector('.session-row[aria-label="新对话"]')!;
+      expect(row).not.toBeNull();
+      expect(row.getAttribute('aria-current')).toBe('page');
+      expect(row.classList.contains('selected')).toBe(true);
+      expect(f.host.querySelectorAll('.session-row[aria-current="page"]')).toHaveLength(1);
+      expect(f.host.querySelectorAll('.sidebar [aria-current="page"]')).toHaveLength(1);
+      expect(f.host.activeElement).toBe(editor);
+      expect(f.selected()).toBe('a');
+      expect(
+        f.calls.filter(
+          (call) => call.method === 'select' && call.sessionId === send.creation.sessionId,
+        ),
+      ).toHaveLength(0);
+      await f.edit('next editable prompt');
+      if (held === 'selection') f.holdSelection();
+      else f.holdModels();
+      await f.resolve('accepted');
+      await f.until(() =>
+        held === 'selection' ? f.selected() === send.creation.sessionId : f.modelsHeld(),
+      );
+      await f.refreshWhileSelecting();
+      expect(f.host.querySelector('.session-row[aria-current="page"]')).toBe(row);
+      expect(f.input()).toBe(editor);
+      expect(promptValue(editor)).toBe('next editable prompt');
+      if (held === 'selection') await f.releaseSelection();
+      else await f.releaseModels();
+      await f.until(() => !!f.input('当前会话私有草稿'));
+      expect(f.host.querySelector('.session-row[aria-current="page"]')).toBe(row);
+      expect(f.input('当前会话私有草稿')).toBe(editor);
+      expect(promptValue(editor)).toBe('next editable prompt');
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
+    } finally {
+      await f.releaseSelection();
+      await f.releaseModels();
+      await f.close();
+    }
+  }
+});
+
+test('a late first Session directory row and receipt cannot select over a later explicit conversation', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('first input left before its creation observation');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    await f.click('Other B');
+    const row = f.host.querySelector('.session-row[aria-current="page"]');
+    expect(row?.getAttribute('aria-label')).toBe('Other B');
+    const send = await f.publishFirstCreation();
+    expect(f.host.querySelector('.session-row[aria-current="page"]')).toBe(row);
+    await f.resolve('accepted');
+    expect(f.host.querySelector('.session-row[aria-current="page"]')).toBe(row);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+    expect(
+      f.calls.filter(
+        (call) => call.method === 'select' && call.sessionId === send.creation.sessionId,
+      ),
+    ).toHaveLength(0);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
   }
 });
 

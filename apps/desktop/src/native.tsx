@@ -2996,6 +2996,21 @@ function NativeDesktopContent({
         selected.current === firstSubmission.creation.sessionId) &&
         selection?.storeId === firstSubmission.creation.expectedStoreId &&
         selection.session.id === firstSubmission.creation.sessionId));
+  // The directory can confirm creation before the send receipt or prepared
+  // readers arrive. Highlight that original page's row without changing IO.
+  const firstDirectorySession =
+    firstVisible &&
+    firstOpenPage.current === pageIntent.current &&
+    !directory?.unavailable &&
+    firstSubmission.result?.creation?.phase !== 'rejected'
+      ? directory?.sessions.find(
+          (session) =>
+            session.id === firstSubmission.creation.sessionId &&
+            session.workspaceId === firstSubmission.creation.workspaceId &&
+            !session.deletedAt &&
+            !session.parentSessionId,
+        )
+      : undefined;
   const firstSaved =
     firstVisible &&
     (savedFirstInput.current === firstInputIdentity ||
@@ -4786,6 +4801,7 @@ function NativeDesktopContent({
           );
       }}
       workspaces={workspaceModels}
+      sidebarSelected={firstDirectorySession?.id}
       selected={
         !scheduledTasksView &&
         !preparing &&

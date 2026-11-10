@@ -16,6 +16,10 @@ Native 使用现有 SDK 的单次 `observe({reconnect:false})`，由 Main 原观
 
 同 generation／Store／Session／selection／historyEpoch 的 ready 与显式选择共用一次原激活结果；ready 水位更高时只补新鲜读取，失败或低于目标不能开放准入。Renderer 的 attach 若已带恢复选择，沿该准确结果建立模型、草稿和历史 reader，不再提交第二次 select。首次输入的后续原回执查询也沿用已经选中的 activation；读取失败由同 nonce 的既有只读重试恢复，不为准备页另起激活。实际重载原会话的协调 POST 从2次降为1次、View GET从9次降为6次，业务 POST 为0；这是该次请求计数，未取得 Native 启动耗时分布。
 
+首次创建的会话先进入已核实目录时，[Native renderer](src/native.tsx)按原 Store／Workspace／Session 及仍打开的首次提交页立即给出侧栏选中目标，不再等待首次回执、selection 或模型读取。未确认目录、已删除／child 行、被拒绝的创建和后来页面不取得该展示目标。共享页面的 `sidebarSelected` 只接管导航高亮，正文 `selected`、原输入节点与准备／操作准入保持原链路，该展示更新不提交 Main 选择或额外业务。
+
+2026-11-10，完整首次会话 DOM 111项／2378断言、共享页面与侧栏两个完整文件25项／313断言通过；新增回归先复现“行已出现但无选中”，再核首条回执前、selection／模型读取持有期间、输入焦点／草稿及迟到目录／回执不覆盖后来选择。全仓6716文件／9项目类型检查通过。Windows／Bun1.4.4／Electron44.3.0 的相同隔离 Native 制品中，旧renderer直到回执释放才选中新行；修复后10个可见变化状态里，新行首次出现即为唯一导航选中项，fallback到AI标题及完整读取接管均保原行、原输入节点和下一条草稿，每条用户消息单份，实际仅一次`conversation.send`及一次`run.start`，原Run真实completed。连续状态在本机`.cache/native-first-row-focus-{old,new}-{held,after}.json`，图片为`native-first-row-focus-old-held.png`及`native-first-row-focus-new-{held,after}.png`，汇总为`.cache/native-first-row-focus-final-audit.json`。测试后台按键未提交的样本保留，前台可见驱动补验无页面异常；普通renderer诊断关闭，使用本地合成Provider，不外推安装版或远端模型资格。
+
 2026-11-10，Windows x64／Bun1.4.4／Electron44.3.0：完整 Native caller 60项／647断言、历史展示 DOM 24项／482断言、首输入 DOM 109项／2307断言通过；首输入回归先复现原选择在途时原回执查询另起 activation，再核同一选择、后编辑草稿和单次提交。上述隔离普通制品的可见冷开窗口中，标题 Job／Model 保持 running，首 Run 已 completed、界面显示真实耗时且下一轮已进入 Provider；释放标题后二轮均 completed，24个变化状态中每条用户消息各一份，占位到持久消息保原节点。三次 select 读取均为同一 activation，重试零额外协调；首输入本身的初始协调与用户选择协调分属原有不同准入步骤，不合并其权限。
 
 同一隔离窗口另实际注入配套 Service 崩溃：断线立即撤销活动并保留原文，冷开后原 Run 显示 interrupted，明确恢复前业务 POST 为0；仅一次既有 `run.resume` 将同一 Run 在 cursor612→618重新显示活动，最终cursor708为completed。59个变化状态中三条用户输入各一份、节点保持，未发送草稿和80px阅读位置保留。原模型中断前缀与恢复后新模型内容分别保其原身份，不当作重复输入合并。原始事实在本机同目录 `recovery-*.json/png`。夹具在控制文件热写及关闭时另记录过 JSON 读取异常，不能据此授予无传输异常的全过程资格；后续复验须改为原子发布控制文件。注入崩溃的宿主退出1，健康恢复实例最终正常退出0，原错误保留。

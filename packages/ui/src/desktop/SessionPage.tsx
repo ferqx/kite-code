@@ -188,6 +188,8 @@ function PrepareConversationLayout({ prepare }: { prepare: () => void }) {
 export interface SessionPageProps {
   workspaces: readonly WorkspaceSummary[];
   selected?: string;
+  /** Confirmed navigation row while its conversation frame is still preparing. */
+  sidebarSelected?: string;
   sessionLabel: string;
   readingKey: string;
   /** Stable conversation identity for tab display; fresh reads keep their own readingKey. */
@@ -1104,16 +1106,16 @@ function SessionPageContent({
         <MemoizedSidebar
           workspaces={props.workspaces}
           selectedWorkspace={
-            !props.workbench && !props.scheduledTasks
+            !props.workbench && !props.scheduledTasks && !props.sidebarSelected
               ? props.workspaces.find(
                   (workspace) => workspace.id === props.newConversation?.workspace,
                 )?.id
               : undefined
           }
           selected={
-            props.newConversation || props.workbench || props.scheduledTasks
+            props.workbench || props.scheduledTasks
               ? undefined
-              : props.selected
+              : (props.sidebarSelected ?? (props.newConversation ? undefined : props.selected))
           }
           busy={props.busy}
           mutationBusy={props.mutationBusy}
@@ -1124,7 +1126,7 @@ function SessionPageContent({
               ? 'scheduledTasks'
               : props.workbench
                 ? 'workbench'
-                : props.newConversation
+                : props.newConversation && !props.sidebarSelected
                   ? 'newConversation'
                   : 'conversation'
           }
