@@ -17,7 +17,7 @@ export async function buildStorageAssets(outdir: string): Promise<void> {
     packages: 'bundle',
   });
   if (!result.success) throw new AggregateError(result.logs, 'Storage Worker build failed.');
-  for (const name of ['0001-baseline.sql'])
+  for (const name of ['0001-baseline.sql', '0002-trajectory-facts.sql'])
     copyFileSync(new URL(`../migrations/${name}`, import.meta.url), join(migrations, name));
 }
 if (import.meta.main)

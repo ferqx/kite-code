@@ -6,7 +6,7 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/isolated/unified-agent/unified-soak.test.ts tests/isolated/unified-agent/dispatch-recovery.test.ts`、`bun run test:tui:system`、`bun run typecheck`、`bun run check:plan-evidence`。完整 formal 门禁与实际范围见[当前进度](../plans/unified-agent-refactor-v1-progress.md)。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 [历史报告模型](../../scripts/runtime/fault-soak-report.ts)、[其严格 verifier](../../scripts/runtime/verify-fault-soak-qualification.ts)与独立测试采样/重复原语保留，供原 retained evidence 和明确测试使用；旧 Runtime launcher 不恢复。当前正式 workflow 仍只调用 `unified-soak.ts` 与 `unified-soak-verify.ts`，不能将历史 verifier 的通过转授当前资格。
 

@@ -68,7 +68,13 @@ export async function buildOwnedDefaultArtifactConsumer(root: string) {
   const original = join(root, 'original'),
     modules = join(original, 'node_modules');
   const dependencies = new Set<string>();
-  for (const relative of ['packages/ai', 'packages/agent', 'packages/client', 'apps/service']) {
+  for (const relative of [
+    'packages/trajectory',
+    'packages/ai',
+    'packages/agent',
+    'packages/client',
+    'apps/service',
+  ]) {
     const source = join(repository, relative),
       manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as Manifest;
     const destination = join(modules, manifest.name);

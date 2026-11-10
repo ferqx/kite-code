@@ -6,4 +6,10 @@ The directory uses existing positive execution rowid as an exact Decimal64 seque
 
 This introduces no schema migration or new dispatcher behavior. Tests prepare 205 legitimate Model intents through owner/startRun/planExecution, without inventing successful Provider receipts, to exercise directory pagination. Separate actual Core calls verify succeeded inputs, child provenance and actual Provider failure remaining unconfirmed. The only direct SQL mutations are isolated malformed-data/cursor fault probes on those original records; no authorization, obligation or successful Model input is fabricated.
 
+[Trajectory Evidence](../../../trajectory/README.md)另由原事件封存准确输入／metadata／receipt／dispatch 授权版本和原身份，Runtime 的 `readSealedModelInput` 与原 Inspector 共用完整验证，再执行同一公开投影。历史读取不调用当前 snapshot 补后来 request，不外传原授权绑定或 opaque continuation；输入体损坏和取消继续拒绝成功前缀。[Inspector 回归](../../../../test/isolated/model-input/inspector.test.ts)的真实 17 MiB 样本同时经 Evidence 路径读取，并验证同一物理损坏被拒绝。
+
+实际请求或 metadata 转为 Artifact 前，Core 可在原版本 1 metadata `body` 外壳封存可选闭合 Model `display`，仅含有界实际模型名、固定标题和准备计数；它不是完整 metadata 或正文，也不参与执行权限。Worker 原样保存这个外壳，不读取 Artifact 字节。typed reader 拒绝外壳或摘要中的未知字段，再完整展开、验证原 metadata，公开 Inspector／Evidence 返回原公开材料而非外壳摘要。旧 `version/body` 无摘要外壳继续合法，缺字段不从当前配置或业务状态追补。[真实 writer 回归](../../../../test/isolated/storage/trajectory-display-flow.test.ts)覆盖大请求加小／大 metadata、准确模型名和计数、旧外壳读取、额外字段拒绝以及读取零新 Model／水位不变；与原 Inspector 和纯展示回归合跑 13 项／176 断言通过（2026-11-09，macOS arm64／Bun 1.4.4，`e8a483d65` 加当前工作树）。
+
+[原事务 flow 回归](../../../../test/isolated/storage/trajectory-flow.test.ts)另验独立原 writer 提交 Model intent 后、Reader／投递尚未运行时被 SIGKILL，readonly 重开仍取得相同事件与封存输入；child Model 检查点只能从准确 child Session 打开，父 Session 不取得材料。事件的当前提交 Store 和材料的原 Execution Store 独立保存，不从恢复后的读取 Store 推导原 body identity。完整 P1 矩阵与本轮实际结果归 [Trajectory owner](../../../trajectory/README.md)。
+
 恢复后读取先核当前 Store 准入，再封存原 Execution 的 `originStoreId`；Run、Command、root-work 与 child carrier 必须属于互相一致的原出处。root 创建命令保留准确主体与执行组关系，其旧出处不强求等于新 Run 或当前 Store。私有 snapshot 携带原出处供 Runtime 核完整正文，公开 snapshot 的 Store 仍为当前连接。此变更仅作用于只读，未放宽计划、发布、ensure 或 commit。实际恢复证据见[完整正文回归](../../../../test/isolated/restored-media/read.test.ts)。

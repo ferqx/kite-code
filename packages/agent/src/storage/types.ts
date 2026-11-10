@@ -79,6 +79,8 @@ export interface CompressionRecord {
   previousCompressionId: string | null;
   compressor: { id: string; version: string; snapshot: Json };
   trigger: 'manual' | 'automatic';
+  /** Original frozen input observation; adopted changes only in its publication transaction. */
+  compression?: import('@kite-ai/trajectory').CompressionPresentation;
 }
 export interface ExtensionInput {
   extensionId: string;

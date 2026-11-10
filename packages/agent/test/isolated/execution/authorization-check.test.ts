@@ -200,6 +200,44 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
         parentExecutionId: target.id,
         definitionId: 'check-model',
       });
+      // The actual checker writer does not publish a separate authorization.check Command fact.
+      // Its sealed Model display must therefore carry the original command's classification.
+      const scope = { storeId: expectedStoreId, sessionId: 's', subjectId: 'owner' };
+      const upperCursor = (await store.openTrajectory(scope)).upperCursor;
+      const facts = [];
+      let afterCursor = '0';
+      for (;;) {
+        const page = await store.readTrajectoryEvents({ ...scope, upperCursor, afterCursor });
+        facts.push(...page.events);
+        if (page.exhausted) break;
+        afterCursor = page.scannedThrough;
+      }
+      const checkerFacts = facts.filter(
+        (fact) => fact.kind === 'model' && fact.executionId === carrier.id,
+      );
+      expect(checkerFacts.length).toBeGreaterThan(0);
+      expect(
+        checkerFacts.every(
+          (fact) =>
+            fact.kind === 'model' &&
+            fact.runId === undefined &&
+            fact.parentExecutionId === target.id &&
+            fact.attributes.display?.kind === 'model' &&
+            fact.attributes.display.operation === 'review',
+        ),
+      ).toBe(true);
+      expect(
+        facts.some(
+          (fact) =>
+            fact.kind === 'command' && fact.attributes.commandId === carrier.originCommandId,
+        ),
+      ).toBe(false);
+      expect(checkerFacts.at(-1)!.evidenceRefs.some((ref) => ref.kind === 'model_input')).toBe(
+        true,
+      );
+      expect(checkerFacts.at(-1)!.evidenceRefs.some((ref) => ref.kind === 'model_output')).toBe(
+        true,
+      );
       expect((await store.listExecutions('s')).every((item) => item.childSessionId === null)).toBe(
         true,
       );

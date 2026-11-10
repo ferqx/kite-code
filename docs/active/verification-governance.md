@@ -5,7 +5,7 @@
 验证：既有正式路径用 `bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/verification tests/runtime` 与 `bun run check:core-boundary`；新通用路径用 `bun run test:unified-agent`、`bun run check:unified-agent-boundary`，类型检查用 `bun run typecheck`。实际范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 相关：[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 通用 Agent 迁移状态
 

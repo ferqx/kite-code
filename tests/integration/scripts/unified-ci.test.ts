@@ -125,7 +125,7 @@ test('quality and local gates retain one combined boundary check and independent
   );
   expect(scripts['check:core-boundary']).toBe('bun run scripts/check-unified-agent-boundary.ts');
 });
-test('actual ten workflows and all recursive eight-workspace script consumers remain new; historical files do not imply execution', () => {
+test('actual ten workflows and all recursive ten-workspace script consumers remain new; historical files do not imply execution', () => {
   const root = resolve(import.meta.dir, '../../..');
   const report = checkUnifiedFormalConsumers(root);
   expect(report.violations).toEqual([]);

@@ -3,6 +3,8 @@ import { planTestSuites, runTestPlan, type TestPlan } from './test-plan';
 import { collectTestFiles, testParallelism } from './test-suite';
 
 export const UNIFIED_RUNTIME_WORKSPACES = [
+  'packages/trajectory',
+  'packages/trace-extension-sdk',
   'packages/ai',
   'packages/agent',
   'packages/client',

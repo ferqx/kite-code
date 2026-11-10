@@ -1,3 +1,4 @@
+import { compressionAccountingSchema, compressionPresentationSchema } from '@kite-ai/trajectory';
 import { canonicalJson } from '../../json';
 import type { PlanExecutionInput, Store } from '../port';
 import { AgentError, type CompressionRecord, type Json } from '../types';
@@ -106,6 +107,16 @@ export function beginCompression(
       previousCompressionId: current?.id ?? null,
       compressor: input.compressor,
       trigger: input.trigger,
+      ...(input.measurement === undefined
+        ? {}
+        : {
+            compression: {
+              ...compressionPresentationSchema
+                .omit({ adopted: true, accounting: true })
+                .parse(input.measurement),
+              adopted: false,
+            },
+          }),
     };
     db.run(
       "INSERT INTO context_snapshot(id,session_id,selection_id,sources_json,request_json,kind) VALUES(?,?,?,'[]',?,'compression_pending')",
@@ -222,6 +233,15 @@ export function commitCompression(
     record.publishedSeq = String(
       db.row('SELECT next_seq FROM session WHERE id=?', record.sessionId)!.next_seq,
     );
+    record.compression = compressionPresentationSchema.parse({
+      ...record.compression,
+      adopted: true,
+      ...(input.accounting === undefined
+        ? {}
+        : {
+            accounting: compressionAccountingSchema.parse(input.accounting),
+          }),
+    });
     db.run(
       "UPDATE context_snapshot SET kind='compression',seq=?,request_json=? WHERE id=?",
       BigInt(record.publishedSeq),

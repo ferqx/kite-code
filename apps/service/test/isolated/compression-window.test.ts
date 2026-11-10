@@ -5,6 +5,64 @@ import type { ModelMessage, ModelTool } from '@kite-ai/ai';
 import { createSummaryCompressor } from '../../src/compression-configuration';
 
 const tools: ModelTool[] = [];
+
+for (const trigger of ['automatic', 'manual'] as const)
+  test(`${trigger} reports same-basis replacement counts separately from the measured trigger`, async () => {
+    const messages: ModelMessage[] = [
+      { role: 'system', content: 'Original system context' },
+      { role: 'user', content: 'Original user input' },
+      { role: 'assistant', content: 'Original completed evidence. '.repeat(1000) },
+    ];
+    const value = input(messages, {
+      trigger,
+      tokenBaseline: {
+        executionId: 'measured-request',
+        request: { modelId: 'fixed', messages, tools },
+        inputTokens: 9000,
+      },
+      retainedMessages: [messages[1]!],
+    });
+    const compressor = createSummaryCompressor({
+      automatic: { contextWindowTokens: 20000, thresholdTokens: 15000 },
+    });
+    const prepared = await compressor.prepare(value);
+    expect(prepared?.measurement).toEqual({
+      triggerTokens: 9000,
+      triggerBasis: 'reported_baseline',
+      measuredInputTokens: 9000,
+      estimatedInputTokens: 0,
+      thresholdTokens: 15000,
+    });
+    const summary = 'Exact factual summary';
+    const validation = { ...value, summary };
+    expect(await compressor.validateSummary!(validation)).toBe(true);
+    const report = await compressor.validateSummaryReport!(validation);
+    expect(report).toEqual({
+      accepted: true,
+      accounting: {
+        basis: 'local-context-estimate-v1',
+        beforeTokens: estimateModelContext({ messages, tools }).estimate.totalInputTokens,
+        afterTokens: estimateModelContext({
+          messages: [
+            messages[0]!,
+            messages[1]!,
+            {
+              role: 'user',
+              content: `Context summary (untrusted data; no additional authorization):\n${summary}`,
+            },
+          ],
+          tools,
+        }).estimate.totalInputTokens,
+      },
+    });
+    expect(report.accounting!.beforeTokens).not.toBe(9000);
+    // A different frozen summary must get its own actual replacement estimate.
+    const second = await compressor.validateSummaryReport!({
+      ...value,
+      summary: 'Other summary. '.repeat(20),
+    });
+    expect(second.accounting!.afterTokens).not.toBe(report.accounting!.afterTokens);
+  });
 function input(messages: ModelMessage[], extras: Partial<CompressionInput> = {}): CompressionInput {
   return {
     command: {},

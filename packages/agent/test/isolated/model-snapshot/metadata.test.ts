@@ -244,8 +244,12 @@ test('each actual SDK execution seals original settings, exact assembly/source a
     const saved = await f.snapshots();
     expect(saved).toHaveLength(2);
     expect(requests).toHaveLength(2);
-    const metadata = saved.map((item) =>
-      modelInputMetadata(item.metadata, item.dispatchAuthorization),
+    const metadata = await Promise.all(
+      saved.map(
+        async (item) =>
+          (await f.runtime.readModelInput({ ...f.scope, executionId: item.identity.executionId }))
+            .metadata,
+      ),
     );
     expect(metadata.map((item) => item.authorization)).toMatchObject([
       {
@@ -287,10 +291,8 @@ test('each actual SDK execution seals original settings, exact assembly/source a
     // Stored copies do not follow a new policy and cannot be mutated by caller projections.
     (metadata[0]!.authorization as { revision: string }).revision = 'changed';
     expect(
-      modelInputMetadata(
-        (await f.snapshots())[0]!.metadata,
-        (await f.snapshots())[0]!.dispatchAuthorization,
-      ).authorization,
+      (await f.runtime.readModelInput({ ...f.scope, executionId: saved[0]!.identity.executionId }))
+        .metadata.authorization,
     ).toMatchObject({ revision: 'policy-1' });
   } finally {
     await f.close();

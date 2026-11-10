@@ -25,6 +25,17 @@ import type {
   WorkspaceRemoval,
 } from '@kite-ai/client';
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
+import type {
+  TrajectoryEvidenceChunk,
+  TrajectoryEvidenceCloseRequest,
+  TrajectoryEvidenceDescriptor,
+  TrajectoryEvidenceOpen,
+  TrajectoryEvidenceReadRequest,
+  TrajectoryPage,
+  TrajectoryReadRequest,
+  TrajectoryScope,
+  TrajectorySnapshot,
+} from '@kite-ai/trajectory';
 import type { NativeBackgroundRequest, NativeBackgroundResult } from './background-bridge';
 import type {
   BrowserAnnotationReceiptRef,
@@ -62,6 +73,8 @@ import type {
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeModelPreferenceBridge } from './native-model-preference-bridge';
+import type { NativeTraceRequest, NativeTraceResult } from './native-trace-bridge';
+import type { NativeTrajectoryFileBridge } from './native-trajectory-file-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
 import type { NativeSkillDocument, NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
@@ -204,6 +217,7 @@ export type NativeSelection = {
   readonly canReadContext?: boolean;
   readonly canReadModelOutput: boolean;
   readonly canReadModelInput?: boolean;
+  readonly canReadTrajectory?: boolean;
   readonly canReadPermissionGrants?: boolean;
   readonly permissionUnavailable?: boolean;
   readonly workspaceUnavailable?: boolean;
@@ -611,6 +625,21 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeTraceRequest
+  | { method: 'trajectory.open'; generation: number; request: TrajectoryScope }
+  | { method: 'trajectory.events'; generation: number; request: TrajectoryReadRequest }
+  | { method: 'trajectory.evidence.open'; generation: number; request: TrajectoryEvidenceOpen }
+  | {
+      method: 'trajectory.evidence.read';
+      generation: number;
+      request: TrajectoryEvidenceReadRequest;
+    }
+  | {
+      method: 'trajectory.evidence.close';
+      generation: number;
+      request: TrajectoryEvidenceCloseRequest;
+    }
+  | { method: 'trajectory.cancel'; generation: number }
   | {
       method: 'session.markRead';
       generation: number;
@@ -907,6 +936,11 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeTraceResult
+  | { kind: 'trajectory.snapshot'; trajectory: TrajectorySnapshot }
+  | { kind: 'trajectory.page'; trajectory: TrajectoryPage }
+  | { kind: 'trajectory.evidence.opened'; trajectory: TrajectoryEvidenceDescriptor }
+  | { kind: 'trajectory.evidence.chunk'; trajectory: TrajectoryEvidenceChunk }
   | NativeInputQueueResult
   | NativeInputFileResult
   | NativeScheduledResult
@@ -981,6 +1015,7 @@ export type NativeResult =
   | null;
 export type NativeReply = { ok: true; value: NativeResult } | { ok: false; code: string };
 export interface NativeBridge {
+  readonly trajectoryFiles?: NativeTrajectoryFileBridge;
   fileReferences?(files: readonly File[]): readonly { name: string; uri: string }[];
   request(input: NativeRequest): Promise<NativeResult>;
   watch(listener: (event: NativeEvent) => void): () => void;

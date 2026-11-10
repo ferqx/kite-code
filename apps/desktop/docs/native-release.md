@@ -4,6 +4,8 @@
 
 本轮会话 PDF 能力的 parser／Canvas／字体／CMap／WASM 由内含 Terminal 的同次依赖闭包交付，准确版本与剩余资格见[Terminal 构建说明](../../cli/docs/terminal-release.md#构建与操作)。隔离浏览器里的 Native 页面和 Main reader 通过不等于完整 Electron 制品或各平台的原生解析资产通过；旧窗口／安装证据不自动覆盖新增闭包。
 
+轨迹只读窗口另有固定 `trajectory.html`／renderer／preload 构建入口，仅暴露本地 `trajectoryFiles`，冷开位于 Profile／Runtime 初始化之前，生产 CSP 禁止联网。内含 Terminal 同次物化独立 Trace engine／QuickJS WASM 和可信 OTel runner／官方依赖与 notices；缺资产只关闭相应 Trace 能力，原资源关闭未知仍阻止虚报清理成功。本轮源码 Native 过程及 Terminal 候选包外闭包证据归 [Desktop owner](../README.md#执行轨迹离线窗口与-trace-设置)和 [Trace owner](../../service/src/trace-extensions/README.md)，不继承旧安装制品或其他平台资格。
+
 本地图片工具另新增固定处理程序／摘要及Sharp0.35.5平台native闭包，同样由内含Terminal依赖物化。当前Agent构建与源码树外离线读取已核实，实际范围见[Files owner](../../../packages/agent/src/tools/files/README.md#当前验证与性能)；本轮没有构建或安装包含这些新资产的完整Native候选，旧资格不自动覆盖。
 
 Windows 构建预检和运行清单均要求 Chromium 的 `chrome_100_percent.pak`、`chrome_200_percent.pak`、`resources.pak` 为非空普通资源文件，仍核完整递归库存与每字节摘要。只有 Electron Node/SQLite 通过不能证明窗口资源完整。本机原已安装 Electron 44.3.0 分发后来发现缺两份 scale pak；原字节一致性证据只证明当时副本与该输入相同。新的隔离输入从缓存原 ZIP 解出，SHA256 `26bf9a617d58d81772b3d68305d59ee48272969c15083c06db634a77358a8d9d` 与锁定 npm checksums 和[官方发布清单](https://github.com/electron/electron/releases/download/v44.3.0/SHASUMS256.txt)一致，不修改原安装。缺资源反例归[归档/构建合同](../../../tests/isolated/unified-agent/native-archive.test.ts)；真实窗口和维护仍须分别通过原 caller。

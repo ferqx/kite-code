@@ -1619,7 +1619,7 @@ export async function verifyColdSessionToolbarWidth(
             };
           });
           assert(layout.model.x > layout.permission.x, 'permission stays on the left');
-          assert(layout.model.right <= layout.ring.x, 'model precedes context');
+          assert(layout.ring.right <= layout.model.x, 'context precedes model');
           assert(Math.abs(layout.model.y - layout.ring.y) < 12, 'model and context share a row');
           assert.equal(layout.permissionIcons, 1);
           assert.equal(layout.placeholder, '输入新的想法');

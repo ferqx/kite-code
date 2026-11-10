@@ -7,6 +7,7 @@ import { UnifiedExecution } from '../../../src/execution';
 import { ExecutionResources } from '../../../src/execution/resources';
 import type { JobDefinition } from '../../../src/extensions';
 import { semanticDigest } from '../../../src/json';
+import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
 async function rejected(promise: Promise<unknown>, code: string) {
@@ -144,6 +145,75 @@ async function dispatched(
   });
   return ref;
 }
+test('trajectory Job Evidence preserves original gap counters and retained preview after later coalescing', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const runtime = createRuntime({
+    store: f.store,
+    permissions: {
+      async authorize() {
+        throw Error('observer must not authorize');
+      },
+    },
+    model: {
+      async *stream() {
+        calls++;
+        yield { type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+    },
+  });
+  try {
+    const ref = await dispatched(f);
+    const output = {
+      expectedStoreId: f.expectedStoreId,
+      owner: f.owner,
+      executionId: ref.executionId!,
+      stream: 'stdout' as const,
+      content: 'x'.repeat(32768),
+    };
+    for (let index = 0; index < 33; index++) await f.store.appendExecutionOutput(output);
+    const scope = {
+      storeId: f.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'user',
+      executionId: ref.executionId!,
+    };
+    const snapshot = await f.store.openTrajectory(scope);
+    const page = await f.store.readTrajectoryEvents({
+      ...scope,
+      afterCursor: '0',
+      upperCursor: snapshot.upperCursor,
+    });
+    const event = page.events
+      .filter((value) => value.sourceEventType === 'execution.output')
+      .at(-1)!;
+    const evidence = event.evidenceRefs.find((value) => value.kind === 'job_output')!;
+    const input = {
+      storeId: f.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'user',
+      upperCursor: snapshot.upperCursor,
+      atCursor: event.sequence,
+      eventId: event.eventId,
+      evidenceId: evidence.evidenceId,
+      contentVersion: evidence.contentVersion,
+    };
+    const before = await runtime.readTrajectoryEvidence(input);
+    const original = JSON.parse(Buffer.from(before.content).toString());
+    expect(original.contentMode).toBe('retained_preview');
+    expect(original.truncated).toBe(true);
+    expect(original.gaps[0].throughSeq).toBe('33');
+    for (let index = 0; index < 5; index++) await f.store.appendExecutionOutput(output);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect((await runtime.readTrajectoryEvidence(input)).content).toEqual(before.content);
+    expect((await f.store.getExecution(ref.executionId!))!.status).toBe('dispatching');
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(calls).toBe(0);
+  } finally {
+    await runtime.close();
+    await f.cleanup();
+  }
+});
 test('Job creation is atomic, stable-keyed, parent scoped and separate from success', async () => {
   const f = await fixture();
   try {
@@ -325,9 +395,39 @@ test('Job output retains bounded prefix, three coalesced stream gaps and indepen
     );
     for (let index = 0; index < 36; index++)
       await f.store.appendExecutionOutput({ ...input, content: 'x'.repeat(32768) });
+    const checkpoint = f.db
+      .query<{ cursor: number; trajectory_fact_json: string }, []>(
+        "SELECT cursor,trajectory_fact_json FROM change_event WHERE type='execution.output' ORDER BY cursor DESC LIMIT 1",
+      )
+      .get()!;
+    const sealed = JSON.parse(checkpoint.trajectory_fact_json);
+    expect(sealed.event.attributes).toMatchObject({
+      upperOutputSeq: '36',
+      truncated: true,
+      gaps: [{ stream: 'stdout', fromSeq: '32', throughSeq: '36', droppedBytes: '163840' }],
+    });
+    expect(
+      sealed.bindings.find((binding: { kind: string }) => binding.kind === 'job_output').value.gaps,
+    ).toEqual(sealed.event.attributes.gaps);
     for (const stream of ['stderr', 'progress'] as const)
       for (let index = 0; index < 10; index++)
         await f.store.appendExecutionOutput({ ...input, stream, content: 'y'.repeat(100) });
+    await f.store.appendExecutionOutput({ ...input, content: 'later' });
+    expect(
+      f.db
+        .query('SELECT trajectory_fact_json FROM change_event WHERE cursor=?')
+        .get(checkpoint.cursor),
+    ).toEqual({ trajectory_fact_json: checkpoint.trajectory_fact_json });
+    const latestCheckpoint = f.db
+      .query<{ trajectory_fact_json: string }, []>(
+        "SELECT trajectory_fact_json FROM change_event WHERE type='execution.output' ORDER BY cursor DESC LIMIT 1",
+      )
+      .get()!;
+    expect(
+      JSON.parse(latestCheckpoint.trajectory_fact_json).event.attributes.gaps.find(
+        (gap: { stream: string }) => gap.stream === 'stdout',
+      ).droppedBytes,
+    ).toBe('163845');
     expect(
       f.db
         .query('SELECT count(*) AS count FROM execution_output WHERE execution_id=?')
@@ -340,7 +440,7 @@ test('Job output retains bounded prefix, three coalesced stream gaps and indepen
       limit: 1,
     });
     expect(clipped.items[0]).toMatchObject({ seq: '34', throughSeq: '35', droppedBytes: null });
-    expect(clipped.highWaterSeq).toBe('56');
+    expect(clipped.highWaterSeq).toBe('57');
     const tail = await f.store.listExecutionOutput({
       executionId: ref.executionId!,
       afterSeq: '31',
@@ -349,7 +449,7 @@ test('Job output retains bounded prefix, three coalesced stream gaps and indepen
     expect(tail.items).toHaveLength(3);
     expect(tail.items.every((item) => item.droppedBytes !== null)).toBe(true);
     await rejected(
-      f.store.listExecutionOutput({ executionId: ref.executionId!, upperSeq: '57' }),
+      f.store.listExecutionOutput({ executionId: ref.executionId!, upperSeq: '58' }),
       'cursor_ahead',
     );
     f.db.query('UPDATE execution SET output_seq=9007199254740993 WHERE id=?').run(ref.executionId!);

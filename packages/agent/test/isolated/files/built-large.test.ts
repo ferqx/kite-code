@@ -50,7 +50,7 @@ test('fresh complete package outside source runs large file and streamed Artifac
   const modules = join(root, 'node_modules');
   try {
     const manifests: Manifest[] = [];
-    for (const name of ['agent', 'ai']) {
+    for (const name of ['agent', 'ai', 'trajectory']) {
       const source = join(repository, 'packages', name);
       const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as Manifest;
       manifests.push(manifest);

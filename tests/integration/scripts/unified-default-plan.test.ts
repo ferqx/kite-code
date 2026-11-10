@@ -54,7 +54,7 @@ test('default selection covers current public safety and formal lifecycle files 
       { label: `exclusive:${file}`, files: [absolute], maxConcurrency: 1 },
     ]);
   }
-  expect(UNIFIED_RUNTIME_WORKSPACES).toHaveLength(8);
+  expect(UNIFIED_RUNTIME_WORKSPACES).toHaveLength(10);
   expect(
     files.some((file) => file.startsWith('apps/kite-') || file.startsWith('packages/runtime-')),
   ).toBe(false);

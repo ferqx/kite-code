@@ -1,7 +1,7 @@
 # 本地无正文 Observability 与运营边界
 
 状态：active
-读取时机：修改本地结构化指标、health/status、alert、kill switch、incident runbook 或退出 flush 时。
+读取时机：修改本地结构化指标、health/status、alert、kill switch、incident runbook、Trace 外发授权或退出 flush 时。
 验证：`bun test ./tests/integration/observability`、`bun run scripts/operations/rehearse-agent-incident.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 相关：[Agent Note 0056](../../.agents/notes/implemented/architecture/2026-07-30-metadata-first-data-boundaries.md)、[Agent Note 0063](../../.agents/notes/implemented/process/2026-08-02-no-content-observability-and-single-maintainer-operations.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、Phase 3。
@@ -12,9 +12,17 @@ runbook 与本地 rehearsal。项目不建立 external cohort、长期服务等�
 当前版本不包含 synthetic evaluation cassette。reporter、metric、status 与 observability artifact 都不能读取
 Production Model Artifact 或任何未来实验输入，也不能把 Runtime restore/replay authority 当作 telemetry consent。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 [独立本地 rehearsal](../../scripts/operations/rehearse-agent-incident.ts)与同目录 metadata/evidence 工具保留，依赖通用发布脚本而非旧 Runtime。合成回放仍标记 `synthetic_contract_only`、`operationsReady=false` 与 evidence `not_run`；恢复源码和受控测试不恢复 cohort、长期 SLO 或任何运营资格。
+
+## 用户授权的 Trace 产品通道
+
+[Service TraceHost](../../apps/service/src/trace-extensions/README.md)是独立产品通道，明确安装、数据范围、metadata／Evidence、原身份、历史、精确 HTTP Origin、私网和用途凭据分别授权后才消费，不从工具审批、Full 模式、项目配置或运营 reporter 继承权限。默认事件使用每安装稳定的不可逆引用，无正文、路径、自由异常或原身份；完整材料另经原 typed owner、准确事件／版本与当前 grant，按用户显式 full 内容选择读取，撤权封住后续块与发送。
+
+闭合 Evidence enum 增加 `tool_input` 不扩大既有 manifest 或已存 grant：新种类必须先声明并显式重新授权，原 batch／lease 继续核当前种类许可和 epoch。第一方轨迹的闭合 display（含有界公开消息／操作摘要）、完整公开参数、typed 工具结果及压缩 accounting 不自动变成 Trace metadata；display 在第三方 schema 与 Service 投影中排除，timing、usage 与原身份仍各自通过原 allowlist／grant。工作台的筛选、展开、原始内容或含材料导出也不授予外发，私有 binding／reasoning／transport 不因页面命名为“原始”开放。[负向与兼容回归](../../apps/service/test/isolated/trajectory-workbench-compat.test.ts)覆盖旧授权不扩种类及压缩 metadata 不旁路。
+
+可靠消费库只复制已获准安全 envelope；原 Store／GC 删除只影响尚未复制事实和未取得材料，不撤回已复制队列／自包含 OTel spool，也不回退旧 ACK。取消任务／撤权仍停止未发送项，未知在途结果保留。OTel 私有持久接受与远端 full／partial／permanent／transient／unconfirmed 分开报告；任何状态都不授予 Runtime 重放权。当前参考集成、官方版本／映射锁定和本机接收端证据归 [OTel owner](../../apps/service/src/trace-integrations/opentelemetry/README.md)。下文运营 metric／health／reporter 的无正文、默认关闭及无远程 transport 约束继续独立适用。
 
 ## 数据与启用边界
 

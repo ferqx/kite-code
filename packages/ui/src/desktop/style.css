@@ -5870,7 +5870,7 @@ body {
   padding: 6px 8px;
   gap: 4px;
 }
-.kite-client .session-tabs [data-slot="tabs-list"] {
+.kite-client .session-tabs .session-tabs-heading > [data-slot="tabs-list"] {
   flex: 1;
   min-width: 0;
   height: 36px;
@@ -5924,17 +5924,17 @@ body {
 .kite-client .session-tabs .session-tab-add {
   flex: none;
 }
-.kite-client .session-tabs [data-slot="tabs-content"] {
+.kite-client .session-tabs-root > .session-tab-content {
   padding: 0;
   flex: 1;
   min-height: 0;
   margin: 0;
   outline: none;
 }
-.kite-client .session-tabs [data-slot="tabs-content"][data-state="inactive"] {
+.kite-client .session-tabs-root > .session-tab-content[data-state="inactive"] {
   display: none;
 }
-.kite-client .session-tabs [data-slot="tabs-content"][data-state="active"] {
+.kite-client .session-tabs-root > .session-tab-content[data-state="active"] {
   display: flex;
   flex-direction: column;
 }
@@ -6100,4 +6100,1468 @@ body {
       height: 10px;
     }
   }
+}
+
+/* Trajectory viewing shares the existing bounded SessionTabs and native scrolling. */
+.kite-client .session-tab-trajectory {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+/* The workbench follows its owning right-side tab; every reader remains height bounded. */
+.kite-client .trajectory-panel {
+  --trajectory-blue: var(--info-foreground);
+  --trajectory-model: var(--important-foreground);
+  --trajectory-tool: light-dark(#a46110, #e6a34c);
+  --trajectory-message: var(--info-foreground);
+  --trajectory-compression: var(--identity-secondary);
+  --trajectory-approval: var(--info-foreground);
+  --trajectory-top: color-mix(in srgb, var(--background) 97%, var(--foreground));
+  --trajectory-surface: color-mix(in srgb, var(--background) 96%, var(--foreground));
+  --trajectory-selected: color-mix(in srgb, var(--trajectory-blue) 17%, var(--background));
+  display: flex;
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  background: var(--background);
+  font-size: 13px;
+}
+.kite-client .trajectory-panel[hidden] {
+  display: none;
+}
+.kite-client .trajectory-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 8px;
+  height: 35px;
+  min-height: 35px;
+  max-height: 35px;
+  box-sizing: border-box;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--trajectory-top);
+}
+.kite-client .trajectory-heading,
+.kite-client .trajectory-actions,
+.kite-client .trajectory-position {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.kite-client .trajectory-heading h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .trajectory-heading {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.kite-client .trajectory-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+}
+.kite-client .trajectory-toolbar-actions .trajectory-new-records {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 6px;
+  color: var(--trajectory-blue);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.kite-client .trajectory-heading > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 400;
+}
+.kite-client .trajectory-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 5px 9px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--trajectory-surface);
+}
+.kite-client .trajectory-filter-controls {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.kite-client .trajectory-filter-button {
+  height: 28px;
+  min-height: 28px;
+  gap: 5px;
+  padding: 4px 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  border-radius: 5px;
+}
+.kite-client .trajectory-filter-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kite-client .trajectory-filter-button > svg {
+  width: 14px;
+  height: 14px;
+}
+.kite-client .trajectory-filter-button .trajectory-filter-chevron {
+  width: 12px;
+  height: 12px;
+}
+.kite-client .trajectory-filter-button[data-active] {
+  color: var(--trajectory-blue);
+  background: var(--trajectory-selected);
+}
+.kite-client .trajectory-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  flex: 0 1 228px;
+  min-width: 140px;
+  height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-search > svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.kite-client .trajectory-search input {
+  height: 20px;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  font-size: 12px;
+}
+.kite-client .trajectory-search:focus-within {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+}
+.kite-client .trajectory-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .trajectory-filter-summary > button {
+  height: 22px;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--trajectory-blue);
+  background: var(--trajectory-selected);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kite-client .trajectory-integrity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 4px 9px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .trajectory-timeline {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 7px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--trajectory-surface);
+}
+.kite-client .trajectory-timeline-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.kite-client .trajectory-timeline-scroll {
+  max-height: 180px;
+  overflow: auto;
+}
+.kite-client .trajectory-timeline-domain + .trajectory-timeline-domain {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.kite-client .trajectory-timeline-domain-label {
+  margin: 0 0 3px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.kite-client .trajectory-timeline-ruler,
+.kite-client .trajectory-timeline-lane,
+.kite-client .trajectory-timeline-auxiliary {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+}
+.kite-client .trajectory-timeline-ruler-track {
+  position: relative;
+  height: 18px;
+  margin-inline: 2px;
+}
+.kite-client .trajectory-timeline-tick {
+  position: absolute;
+  top: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.kite-client .trajectory-timeline-tick:first-child {
+  transform: none;
+}
+.kite-client .trajectory-timeline-tick:last-child {
+  transform: translateX(-100%);
+}
+.kite-client .trajectory-timeline-lane-label {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.kite-client .trajectory-timeline-track {
+  position: relative;
+  min-height: 22px;
+  margin-inline: 2px;
+}
+.kite-client .trajectory-timeline-gridline {
+  position: absolute;
+  inset-block: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.kite-client .trajectory-time-point {
+  position: absolute;
+  display: block;
+  min-width: 5px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--muted-foreground);
+  opacity: 0.85;
+}
+.kite-client .trajectory-time-instant {
+  width: 5px;
+  min-width: 5px;
+  height: 12px;
+  border-radius: 0;
+}
+.kite-client .trajectory-time-duration {
+  min-width: 6px;
+}
+.kite-client .trajectory-time-point[data-category="message"] {
+  background: var(--trajectory-message);
+}
+.kite-client .trajectory-time-point[data-category="message"][data-role="assistant"],
+.kite-client .trajectory-time-point[data-category="model"] {
+  background: var(--trajectory-model);
+}
+.kite-client .trajectory-time-point[data-category="tool"] {
+  background: var(--trajectory-tool);
+}
+.kite-client .trajectory-time-point[data-category="compression"] {
+  background: var(--trajectory-compression);
+}
+.kite-client .trajectory-time-point[data-category="approval"] {
+  background: var(--trajectory-approval);
+}
+.kite-client .trajectory-time-point:hover,
+.kite-client .trajectory-time-point:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--trajectory-blue);
+  outline-offset: 2px;
+}
+.kite-client .trajectory-time-point.trajectory-timeline-selected {
+  opacity: 1;
+  outline: 2px solid var(--trajectory-blue);
+  outline-offset: 2px;
+}
+.kite-client .trajectory-timeline-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 5px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .trajectory-timeline-modes {
+  display: flex;
+  gap: 3px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.kite-client .trajectory-timeline-modes > button {
+  height: 21px;
+  min-height: 0;
+  padding: 1px 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 400;
+}
+.kite-client .trajectory-timeline-modes > button[aria-pressed="true"] {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.kite-client .trajectory-workspace {
+  display: flex;
+  position: relative;
+  isolation: isolate;
+  contain: layout paint;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.kite-client .trajectory-workspace[data-detail-layout="drawer"] {
+  position: static;
+  contain: none;
+  isolation: auto;
+}
+.kite-client .trajectory-workspace > [data-slot="resizable-panel-group"] {
+  min-height: 0;
+}
+.kite-client .trajectory-workspace [data-panel] {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.kite-client .trajectory-tree {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--background);
+}
+.kite-client .trajectory-tree-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 6px;
+  min-height: 31px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.kite-client .trajectory-tree-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.kite-client .trajectory-tree-list {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  padding: 0;
+  margin: 0;
+}
+.kite-client .trajectory-tree-list td {
+  width: 100%;
+}
+.kite-client .trajectory-tree-node {
+  height: 38px;
+  min-height: 38px;
+}
+.kite-client .trajectory-node {
+  display: flex;
+  align-items: center;
+  position: relative;
+  height: 38px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 9px 0 10px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.kite-client .trajectory-node:hover {
+  background: var(--accent);
+}
+.kite-client .trajectory-node-selected {
+  background: var(--trajectory-selected);
+}
+.kite-client .trajectory-node-selected:hover {
+  background: var(--trajectory-selected);
+}
+.kite-client .trajectory-node-selected::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--trajectory-blue);
+}
+.kite-client .trajectory-row-branch {
+  flex: 0 0 15px;
+  position: relative;
+  align-self: stretch;
+  border-left: 1px solid var(--border);
+}
+.kite-client .trajectory-row-branch::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 9px;
+  height: 1px;
+  background: var(--border);
+}
+.kite-client .trajectory-row-branch.trajectory-request-rail {
+  border-left: 0;
+}
+.kite-client .trajectory-request-rail::after {
+  display: none;
+}
+.kite-client .trajectory-request-rail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  bottom: 50%;
+  width: 1px;
+  background: var(--border);
+}
+.kite-client .trajectory-request-rail[data-connect-before]::before {
+  top: -1px;
+}
+.kite-client .trajectory-request-rail[data-connect-after]::before {
+  bottom: -1px;
+}
+.kite-client .trajectory-request-rail[data-omitted-before]::after {
+  display: block;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: calc(50% - 6px);
+  background: repeating-linear-gradient(to bottom, var(--border) 0 3px, transparent 3px 6px);
+}
+.kite-client .trajectory-request-rail[data-request-boundary]::before {
+  top: 0;
+}
+.kite-client .trajectory-request-marker {
+  position: absolute;
+  left: -9px;
+  top: -12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  min-width: 19px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-request-marker > span {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 2px var(--trajectory-surface);
+}
+.kite-client .trajectory-request-marker[aria-pressed="true"],
+.kite-client .trajectory-request-marker:hover {
+  background: transparent;
+  color: var(--trajectory-blue);
+}
+.kite-client .trajectory-request-marker[aria-pressed="true"] > span {
+  background: var(--trajectory-surface);
+  box-shadow: 0 0 0 2px currentColor;
+}
+.kite-client .trajectory-request-marker:focus-visible {
+  outline: 2px solid var(--trajectory-blue);
+  outline-offset: 1px;
+}
+.kite-client .trajectory-node:not(.trajectory-node-selected):has(.trajectory-request-marker:hover) {
+  background: transparent;
+}
+.kite-client .trajectory-root-mark {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  margin-inline: 1px 8px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.kite-client .trajectory-node > .trajectory-node-collapse {
+  flex: 0 0 21px;
+  width: 21px;
+  min-width: 21px;
+  padding: 0;
+}
+.kite-client .trajectory-chevron-space {
+  flex: 0 0 21px;
+  width: 21px;
+}
+.kite-client .trajectory-node-select {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  height: 37px;
+  min-height: 37px;
+  gap: 8px;
+  padding: 0;
+  white-space: nowrap;
+  text-align: start;
+  border-radius: 0;
+  font-size: 12px;
+  font-weight: 400;
+}
+.kite-client
+  .trajectory-node
+  > .button:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]) {
+  background: transparent;
+}
+.kite-client .trajectory-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .trajectory-node-label {
+  font-size: 13px;
+}
+.kite-client .trajectory-code {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.kite-client .trajectory-row-secondary {
+  margin-inline-start: 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .trajectory-node-duration,
+.kite-client .trajectory-run-count {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kite-client .trajectory-run-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 65%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kite-client .trajectory-input-preparation {
+  flex: none;
+  margin-inline-start: 6px;
+}
+.kite-client .trajectory-node-status {
+  display: flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-node-status > svg {
+  width: 13px;
+  height: 13px;
+}
+.kite-client .trajectory-negative {
+  color: var(--destructive);
+}
+.kite-client .trajectory-structural:not(.trajectory-run-band):not(.trajectory-session-row) {
+  opacity: 0.62;
+}
+.kite-client .trajectory-run-band .trajectory-node {
+  background: var(--trajectory-top);
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-run-band .trajectory-node-select,
+.kite-client .trajectory-run-band .trajectory-node-label {
+  font-size: 11px;
+}
+.kite-client .trajectory-run-band .trajectory-row-branch {
+  display: none;
+}
+.kite-client .trajectory-session-row .trajectory-node {
+  color: var(--muted-foreground);
+  background: var(--trajectory-top);
+}
+.kite-client .trajectory-session-row .trajectory-node-select,
+.kite-client .trajectory-session-row .trajectory-node-label {
+  font-size: 10px;
+}
+.kite-client .trajectory-type-badge {
+  --trajectory-tone: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  min-height: 18px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--trajectory-tone) 12%, transparent);
+  color: var(--trajectory-tone);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.kite-client .trajectory-type-badge[data-tone="user"] {
+  --trajectory-tone: var(--trajectory-message);
+}
+.kite-client .trajectory-type-badge[data-tone="assistant"],
+.kite-client .trajectory-type-badge[data-tone="model"] {
+  --trajectory-tone: var(--trajectory-model);
+}
+.kite-client .trajectory-type-badge[data-tone="tool"] {
+  --trajectory-tone: var(--trajectory-tool);
+}
+.kite-client .trajectory-type-badge[data-tone="compression"] {
+  --trajectory-tone: var(--trajectory-compression);
+}
+.kite-client .trajectory-type-badge[data-tone="approval"] {
+  --trajectory-tone: var(--trajectory-approval);
+}
+.kite-client .trajectory-detail {
+  container: trajectory-detail / inline-size;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--trajectory-surface);
+}
+.kite-client .trajectory-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-height: 49px;
+  padding: 10px 14px 8px;
+}
+.kite-client .trajectory-detail-context {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kite-client .trajectory-detail-context-label {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-detail-heading > button {
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-detail-tabs {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  gap: 0;
+}
+.kite-client .trajectory-detail-tabs > [role="tablist"] {
+  display: flex;
+  justify-content: flex-start;
+  align-self: stretch;
+  flex: 0 0 auto;
+  gap: 20px;
+  height: 39px;
+  width: auto;
+  margin: 0;
+  padding: 0 15px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+.kite-client .trajectory-detail-tabs > [role="tablist"] > [role="tab"] {
+  flex: 0 0 auto;
+  height: 38px;
+  line-height: 18px;
+  padding: 8px 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 400;
+}
+.kite-client .trajectory-detail-tabs > [role="tablist"] > [role="tab"][data-state="active"] {
+  color: var(--trajectory-blue);
+  border-bottom-color: var(--trajectory-blue);
+}
+.kite-client .trajectory-detail-tabs > [role="tablist"] > [role="tab"]:not(:focus-visible) {
+  box-shadow: none;
+}
+.kite-client .trajectory-detail-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.kite-client .trajectory-detail .trajectory-detail-content {
+  min-width: 0;
+  padding: 8px 12px 14px;
+  margin: 0;
+}
+.kite-client .trajectory-detail-content[data-state="inactive"] {
+  display: none;
+}
+.kite-client .trajectory-detail-content[data-state="active"] {
+  display: block;
+}
+.kite-client .trajectory-detail-content p {
+  margin: 8px 0 12px;
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-detail-content h4 {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-detail-content pre {
+  max-width: 100%;
+  padding: 11px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--background);
+  font-size: 11px;
+  line-height: 1.7;
+  overflow: auto;
+}
+.kite-client .trajectory-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-metadata {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 9px 10px;
+  margin: 0 0 18px;
+  font-size: 12px;
+}
+.kite-client .trajectory-metadata dt {
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-metadata dd > button {
+  justify-content: flex-start;
+  padding: 0;
+  height: auto;
+  max-width: 100%;
+  color: var(--trajectory-blue);
+  white-space: normal;
+  text-align: start;
+}
+.kite-client .trajectory-metadata-pair {
+  display: contents;
+}
+.kite-client .trajectory-detail-summary {
+  min-width: 0;
+  margin-block-end: 20px;
+}
+.kite-client .trajectory-request-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+.kite-client .trajectory-request-identity dd {
+  margin: 0;
+}
+.kite-client .trajectory-request-model {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.kite-client .trajectory-request-state {
+  flex: 0 0 auto;
+  max-width: 60%;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-request-state[data-state="completed"] {
+  background: var(--success-background);
+  color: var(--success-foreground);
+}
+.kite-client .trajectory-request-state[data-state="failed"] {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, var(--trajectory-surface));
+}
+.kite-client .trajectory-request-state[data-state="running"],
+.kite-client .trajectory-request-state[data-state="dispatching"] {
+  color: var(--trajectory-blue);
+  background: color-mix(in srgb, var(--trajectory-blue) 10%, var(--trajectory-surface));
+}
+.kite-client .trajectory-request-usage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--background) 55%, var(--trajectory-surface));
+}
+.kite-client .trajectory-usage-item {
+  min-width: 0;
+}
+.kite-client .trajectory-usage-item dt {
+  margin-block-end: 3px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.kite-client .trajectory-usage-item dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.kite-client .trajectory-detail[data-thinking-content] .trajectory-detail-content {
+  max-inline-size: 920px;
+  padding: 8px 12px 14px;
+}
+.kite-client .trajectory-request-detail .trajectory-request-retries {
+  padding: 8px 12px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .trajectory-request-retries ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 0;
+  margin: 0;
+  list-style: none;
+}
+.kite-client .trajectory-request-detail .trajectory-request-usage {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+.kite-client .trajectory-request-detail .trajectory-usage-item {
+  display: grid;
+  grid-template-columns: minmax(90px, 35%) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+}
+.kite-client .trajectory-usage-item dt {
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-usage-item dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.kite-client .trajectory-request-detail > p[role="status"] {
+  padding-inline: 12px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-thinking-content {
+  min-width: 0;
+  max-inline-size: 76ch;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--trajectory-blue) 16%, var(--border));
+  border-inline-start: 2px solid color-mix(in srgb, var(--trajectory-blue) 65%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--trajectory-blue) 4%, var(--trajectory-surface));
+}
+.kite-client .trajectory-detail-content .trajectory-thinking-content > h4 {
+  margin: 0 0 10px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.kite-client .trajectory-detail-content .trajectory-thinking-content p {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.85;
+}
+.kite-client .trajectory-detail-timing {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  min-width: 0;
+  margin-block-start: 26px;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--border);
+}
+.kite-client .trajectory-timing-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+.kite-client .trajectory-timing-line dt {
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-timing-line dd {
+  margin: 0;
+  color: var(--foreground);
+  font-weight: 500;
+}
+.kite-client .trajectory-timing-records {
+  min-width: 0;
+}
+.kite-client .trajectory-timing-records[open] {
+  flex-basis: 100%;
+}
+.kite-client .trajectory-detail-content .trajectory-timing-records > summary {
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.kite-client .trajectory-timing-records .trajectory-metadata {
+  grid-template-columns: minmax(96px, 0.42fr) minmax(0, 1fr);
+  margin-block: 12px;
+  font-variant-numeric: tabular-nums;
+}
+@container trajectory-detail (min-width: 620px) {
+  .kite-client .trajectory-request-usage {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+}
+.kite-client .trajectory-thought-preview {
+  min-width: 0;
+}
+.kite-client .trajectory-thought-preview[data-expanded="false"] .trajectory-thought-body {
+  max-height: 240px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+}
+.kite-client .trajectory-thought-preview > button {
+  margin-block-start: 4px;
+  color: var(--trajectory-blue);
+}
+.kite-client .trajectory-thought-body .message-content {
+  min-width: 0;
+}
+.kite-client .trajectory-detail-content .trajectory-result-receipt {
+  margin-block-start: 14px;
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-content-accordion {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-item"] {
+  padding-inline: 0;
+  border: 0;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-item"]:last-child {
+  border-bottom: 0;
+}
+.kite-client .trajectory-content-accordion h3 {
+  margin: 0;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-trigger"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-trigger"]:focus-visible {
+  outline: 2px solid var(--trajectory-blue);
+  outline-offset: 2px;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-trigger"] > svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.kite-client
+  .trajectory-content-accordion
+  [data-slot="accordion-trigger"][data-state="open"]
+  > svg {
+  transform: rotate(180deg);
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-content"] > div {
+  padding-bottom: 12px;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-content"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-content-accordion [data-slot="accordion-content"] p:first-child {
+  margin-top: 0;
+}
+.kite-client .trajectory-material {
+  min-width: 0;
+  margin-block: 14px;
+}
+.kite-client .trajectory-detail-content > .trajectory-material:first-child {
+  margin-block-start: 0;
+}
+.kite-client .trajectory-detail-content > h4:first-child,
+.kite-client .trajectory-detail-content > section:first-child > h4:first-child,
+.kite-client .trajectory-detail-content > .trajectory-operation-summary:first-child {
+  margin-block-start: 0;
+}
+.kite-client .trajectory-thinking-content .trajectory-material {
+  margin: 0;
+}
+.kite-client .trajectory-material-notice {
+  flex: 0 0 auto;
+  padding: 5px 14px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-request-detail .trajectory-detail-timing {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.kite-client .trajectory-request-detail .trajectory-material-notice {
+  padding-inline: 0;
+  font-size: 11px;
+}
+.kite-client .trajectory-artifact-image {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+.kite-client .trajectory-file-change pre > span {
+  white-space: pre;
+}
+.kite-client .trajectory-diff-added {
+  color: var(--diff-added-foreground);
+  background: var(--diff-added-background);
+}
+.kite-client .trajectory-diff-removed {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+}
+.kite-client .trajectory-detail-content summary {
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 0;
+}
+.kite-client .trajectory-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-inline-start: 20px;
+  font-size: 12px;
+}
+.kite-client .trajectory-plan-steps li > small {
+  margin-inline-start: 8px;
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-workspace > [data-slot="sheet-overlay"] {
+  position: absolute;
+  inset: 0;
+}
+.kite-client .trajectory-workspace > .trajectory-detail-drawer {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: min(100%, 640px);
+  height: 100%;
+  max-width: 100%;
+  border: 0;
+  border-inline-start: 1px solid var(--border);
+  border-radius: 0;
+}
+.kite-client .trajectory-tree-loading,
+.kite-client .trajectory-empty {
+  margin: 0;
+  padding: 15px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .trajectory-replay-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--trajectory-top);
+}
+.kite-client .trajectory-position {
+  min-width: 0;
+  font-size: 11px;
+}
+.kite-client .trajectory-position input {
+  width: 100px;
+  min-width: 70px;
+  flex: 1;
+  height: 27px;
+}
+.kite-client .trajectory-position > span {
+  overflow-wrap: anywhere;
+}
+.kite-client.trajectory-offline-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+}
+.kite-client .trajectory-offline-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .trajectory-offline-heading h1 {
+  margin: 0;
+  font-size: 16px;
+}
+@container (max-width: 520px) {
+  .kite-client .trajectory-filter-controls {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+  }
+  .kite-client .trajectory-filter-button {
+    width: 100%;
+    justify-content: center;
+    padding-inline: 2px;
+    gap: 4px;
+    font-size: 11px;
+  }
+  .kite-client .trajectory-filter-chevron {
+    display: none;
+  }
+  .kite-client .trajectory-search {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .kite-client .trajectory-timeline-ruler,
+  .kite-client .trajectory-timeline-lane,
+  .kite-client .trajectory-timeline-auxiliary {
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 6px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kite-client .trajectory-panel * {
+    scroll-behavior: auto;
+  }
+}
+.kite-client .trajectory-run-band .trajectory-node-selected,
+.kite-client .trajectory-session-row .trajectory-node-selected {
+  background: var(--trajectory-selected);
+}
+
+.kite-client .trajectory-request-tools {
+  container: trajectory-tools / inline-size;
+  min-width: 0;
+}
+.kite-client .trajectory-detail-content[data-detail-tab="tools"] {
+  padding-top: 8px;
+}
+.kite-client .trajectory-detail-content[data-detail-tab="tools"] .trajectory-material {
+  margin-block: 0;
+}
+.kite-client .trajectory-request-tools-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.kite-client .trajectory-request-tools-search {
+  display: block;
+  position: relative;
+  margin-bottom: 10px;
+}
+.kite-client .trajectory-request-tools-search > svg {
+  position: absolute;
+  inset-inline-start: 9px;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.kite-client .trajectory-request-tools-search > input {
+  padding-inline-start: 30px;
+}
+.kite-client .trajectory-request-tools-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.kite-client .trajectory-request-tools-list > li {
+  margin: 0;
+  padding: 0;
+}
+.kite-client .trajectory-request-tool {
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .trajectory-request-tool > summary {
+  display: grid;
+  grid-template-columns: 12px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 10px 4px;
+  list-style: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kite-client .trajectory-request-tool > summary::-webkit-details-marker {
+  display: none;
+}
+.kite-client .trajectory-request-tool > summary:hover {
+  background: var(--muted);
+}
+.kite-client .trajectory-request-tool > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.kite-client .trajectory-request-tool-chevron,
+.kite-client .trajectory-request-tool-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+}
+.kite-client .trajectory-request-tool-chevron {
+  width: 12px;
+  height: 12px;
+}
+.kite-client .trajectory-request-tool[open] .trajectory-request-tool-chevron {
+  transform: rotate(90deg);
+}
+.kite-client .trajectory-request-tool-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.kite-client .trajectory-request-tool-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.kite-client .trajectory-request-tool-description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.kite-client .trajectory-request-tool-body {
+  min-width: 0;
+  padding: 0 4px 14px 48px;
+}
+.kite-client .trajectory-request-tool[open] > summary .trajectory-request-tool-name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-request-tool-body > h4:first-child {
+  margin-top: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+@container trajectory-tools (min-width: 520px) {
+  .kite-client .trajectory-request-tool-copy {
+    grid-template-columns: fit-content(45%) minmax(0, 1fr);
+    align-items: baseline;
+    gap: 12px;
+  }
+  .kite-client .trajectory-request-tool[open] .trajectory-request-tool-copy {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .kite-client .trajectory-request-tool > summary {
+    min-height: 40px;
+    padding-block: 8px;
+  }
+}
+
+/* Exact saved trajectory attachment descriptions and inline request images. */
+.kite-client .trajectory-attachments {
+  min-width: 0;
+  margin-block: 12px;
+}
+.kite-client .trajectory-attachments > h4 {
+  margin-block: 0 6px;
+}
+.kite-client .trajectory-attachments > ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kite-client .trajectory-attachment-description {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.kite-client .trajectory-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.kite-client .trajectory-attachment-metadata {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.kite-client .trajectory-message-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 10px;
+  min-width: 0;
+  margin-block: 10px;
+}
+.kite-client .trajectory-message-images > figure {
+  min-width: 0;
+  margin: 0;
+}
+.kite-client .trajectory-message-images img {
+  display: block;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  max-height: 180px;
+  object-fit: contain;
+}
+.kite-client .trajectory-message-images figcaption {
+  margin-block-start: 4px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  overflow-wrap: anywhere;
 }

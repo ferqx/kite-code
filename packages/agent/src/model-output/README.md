@@ -8,6 +8,12 @@ Adapter 可在成功 `finish` 携带中立 `continuation: Json`。Core 不解释
 
 `ModelOutputReference` 是私有 Store／Core descriptor，不是公共 ArtifactRef。`Store.getModelOutputSnapshot` 在一致读里核原 Model、Run、Command、root work、subject 和 child ancestry，再封存当时准确 head。成功的原 partial Message 保留原 id/seq，原位结算为 complete；没有 partial 时才新建消息，避免已成功后仍留下另一张 incomplete 卡。result 与 Message 指向同一 head，不在 SQL 多列复制全文。最终 SQL 核实际登记 metadata 和已确认的当前检查点；正文文件读取／JSON 解析不进入派发或终态事务。
 
+[Trajectory Evidence](../trajectory/README.md)从原事件封存的 head／可见前缀构造私有 snapshot，复用 Runtime 的同一 `readSealedModelOutput` 及公开投影；后来完成或换 head 不升级旧游标，也不公开 continuation／内部工具映射。原完整输出回归另通过此路径读取 17 MiB；[流式回归](../../test/isolated/model-output/trajectory-evidence.test.ts)核完成后旧 prefix 字节保持、取消及零新 Model 调用。
+
+事件 phase 与输出完整性独立：取消请求的 cancelling 和恢复后的 outcome_unknown 不能把保存前缀升成 complete，只有原 succeeded 结果提供完整输出。当前读取 Store 与封存 Model 的原出处分别校验，恢复后的旧材料继续沿原 head 和 Artifact 身份读取；不会用当前 `getModelOutputSnapshot` 替换旧事件。Tool／Job 输出、Files 预览和 Verification 材料各走 [typed Evidence owner](../trajectory/README.md)，不复用 Model 私有正文的公共 Artifact 下载权。本轮完整材料与生命周期回归结果统一记录于该 owner。
+
+轨迹第一方输出存在性仅取同次原输出的准确计数：Artifact 使用已登记 `ModelOutputReference.contentBytes/toolCallCount/complete`，内联使用明确正文及有效工具数组；大输出的 preview 不能证明无正文或无工具。字段缺失、不完整前缀和未读取正文分别保留，不用“空字符串”统一解释。纯工具成功输出可精简展示，但原 Model 输出链、Message、正文和工具请求不删除，版本不变。
+
 取消、远端失败或没有完整 finish 时保留已接收、成功发布的 prefix，`complete:false`；不伪造总正文，也不把完整外观的 ToolCall 当成工具授权。ToolCall JSON 可分段，但只有真实成功完整终态和全文校验后才能成为 Loop 的完整调用。尚未确认的持久前缀不自动重放 Model 或工具。Artifact 发布／确认丢失仍按真实未知处理，不把无法登记的内容冒充持久成功。
 
 完整读取按实际原 Execution 派生 authority，逐段核 scope、连续 seq、无循环、hash/size/MIME、严格 UTF-8/闭合 JSON 与内容计数；损坏、错误 scope 或取消不返回成功前缀。历史和下一次 Model 的完整展开由 [Runtime](../runtime.ts)完成，保持原 source ID，不用当前配置、当前模型结果或摘要替代原文。HTTP/Client 的完整正文读取与便携 UI 按需展示由各自 owner 验证；私有 head 不进入公共 DTO，也不把 preview 冒充已加载全文。

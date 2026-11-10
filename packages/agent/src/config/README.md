@@ -48,6 +48,8 @@ Evidence: twelve focused tests use actual temporary files, two real Bun processe
 
 ## 同 Vault 的 owned OAuth 材料
 
+Trace HTTP 使用独立闭合 `namespace:'trace.http'`，由 [Service purpose broker](../../../../apps/service/src/trace-extensions/credentials.ts)绑定 installation、用途和精确 Origin；`mcp.oauth` 的原 key、调用与撤销语义保持。两者沿同一注入 backend 的 owned 原语和 namespace-domain-separated digest，不互相读取或借用。扩展只取得用途 handle，秘密只在可信 Host 的具体授权发送中解析；Trace 撤权及后端清理由其 Service owner 核验。这个新增 owned namespace 不为普通扩展开放通用 Vault resolver，也不引入文件秘密存储。
+
 `readOwned/writeOwned/removeOwned/statusOwned` 只接收闭合 `{namespace:'mcp.oauth',ownerDigest:<64hex>}`。key 是 domain-separated `owned-credential:<sha256>`，普通 `credential:<uuid>` 不能解析或删除它；同一 backend 与 Vault 负责全部存储，没有第二套认证 store。完整 UTF-8 材料≤64KiB，同 key 的 mutation 串行；remove/new login 会使本 Vault 的旧 pending read 失效。后端删除失败仍阻断当前 authority，但另一 Vault 可能看到实际残留，已解析字符串或已发送请求不能撤回。
 
 Windows 的[原生适配](os-credentials.ts)仅对 owned OAuth 使用[有界分段](windows-owned-credential.ts)：同一 service/account 下的固定88个子项，每项最多1000个Base64字符加随机写入标记，适配原生2560字节／UTF-16限制。base 保存 writing／ready、长度、段数、摘要及标记；完整段校验与base重读通过才返回材料。部分写入、混合段、损坏或并发替换拒绝读取，失败仍为原 publication unknown，不回滚或声称多项原子提交。更新清除未使用的固定槽，Remove核对全部槽后才移除base；中断删除保留base并可明确重试。旧单项材料仍可读取并在下一次写入转换；macOS/Linux及普通手工引用保持原路径。所有材料留在同一OS后端，没有文件回退、账户枚举或新的公开协议版本。

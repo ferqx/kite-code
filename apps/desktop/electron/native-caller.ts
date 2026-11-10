@@ -63,6 +63,8 @@ import type { ScheduledTaskRunner } from './scheduled-task-runner';
 import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
 import { NativeToolMessages } from './tool-messages';
+import { invokeNativeTrace } from './trace-extensions';
+import { NativeTrajectory } from './trajectory';
 import { NativeUserMcpSettings } from './user-mcp-settings';
 import { NativeWorkspaceChanges } from './workspace-changes';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
@@ -105,6 +107,7 @@ export class NativeCaller {
   private readonly workspaceAccessPreparations = new Set<string>();
   private workspaceAccessRefreshRequested = false;
   private readonly outputReads: NativeModelOutputReads;
+  private readonly trajectory: NativeTrajectory;
   private readonly inputReads: NativeModelOutputReads<'modelInput'>;
   private readonly attachmentReads: NativeInteractionAttachmentReads;
   private readonly grants: NativePermissionGrants;
@@ -368,6 +371,7 @@ export class NativeCaller {
           }
         : undefined;
     this.outputReads = new NativeModelOutputReads(client, current);
+    this.trajectory = new NativeTrajectory(client, current);
     const messageScope = () => {
       const scope = current(),
         fresh = this.controller.snapshot;
@@ -751,6 +755,7 @@ export class NativeCaller {
     this.messageRead?.abort.abort();
     this.messageRead = undefined;
     this.outputReads.release();
+    this.trajectory.release();
     this.inputReads.release();
     this.attachmentReads.release();
     this.inputDirectory?.abort.abort();
@@ -1356,6 +1361,7 @@ export class NativeCaller {
               !snapshot.workspaceUnavailable,
             canReadModelOutput: this.client.serverInfo!.capabilities.includes('model_outputs'),
             canReadModelInput: this.client.serverInfo!.capabilities.includes('model_inputs'),
+            canReadTrajectory: this.client.serverInfo!.capabilities.includes('trajectory'),
             canReadPermissionGrants:
               this.client.serverInfo!.capabilities.includes('permission_grants'),
             canReadContext: this.client.serverInfo!.capabilities.includes('context'),
@@ -1614,6 +1620,8 @@ export class NativeCaller {
       !request.method.startsWith('background.') &&
       !request.method.startsWith('interactionHistory.') &&
       !request.method.startsWith('extensions.') &&
+      !request.method.startsWith('trajectory.') &&
+      request.method !== 'trace.manage' &&
       !request.method.startsWith('settings.userMcp.') &&
       ![
         // These reads use the exact retained selection and report unavailable
@@ -1689,6 +1697,40 @@ export class NativeCaller {
     )
       throw new ClientError('workspace_identity_unavailable');
     switch (request.method) {
+      case 'trace.manage':
+        result = await invokeNativeTrace(this.client.traceExtensions, request.operation);
+        break;
+      case 'trajectory.open':
+        result = {
+          kind: 'trajectory.snapshot',
+          trajectory: await this.trajectory.open(request.request),
+        };
+        break;
+      case 'trajectory.events':
+        result = {
+          kind: 'trajectory.page',
+          trajectory: await this.trajectory.readEvents(request.request),
+        };
+        break;
+      case 'trajectory.evidence.open':
+        result = {
+          kind: 'trajectory.evidence.opened',
+          trajectory: await this.trajectory.openEvidence(request.request),
+        };
+        break;
+      case 'trajectory.evidence.read':
+        result = {
+          kind: 'trajectory.evidence.chunk',
+          trajectory: await this.trajectory.readEvidence(request.request),
+        };
+        break;
+      case 'trajectory.evidence.close':
+        result = await this.trajectory.closeEvidence(request.request);
+        break;
+      case 'trajectory.cancel':
+        this.trajectory.release();
+        result = null;
+        break;
       case 'session.markRead': {
         const snapshot = this.selectScope(request.sessionId);
         const run = snapshot.view.runs.find((run) => run.id === request.runId);
@@ -3030,6 +3072,7 @@ export class NativeCaller {
       await this.images.close();
       await this.inputFiles.close();
       await this.imageReads.closeAll();
+      await this.trajectory.close();
       await this.disposeNetwork();
       await this.inputQueue.close();
       await this.settingsMutationTail;
@@ -3040,6 +3083,16 @@ export class NativeCaller {
     } finally {
       await stopped;
     }
+  }
+  async exportTrajectory(
+    generation: number,
+    path: string,
+    snapshot: import('@kite-ai/trajectory').TrajectorySnapshot,
+    includeEvidence: boolean,
+  ): Promise<void> {
+    this.check(generation);
+    await this.trajectory.export(path, snapshot, includeEvidence);
+    this.check(generation);
   }
   private acceptWorkspaceRemoval(result: import('../src/native-bridge').NativeWorkspaceRemoval) {
     if (result.phase !== 'applied' || result.storeId !== this.client.serverInfo?.storeId) return;

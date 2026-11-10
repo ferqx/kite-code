@@ -4,13 +4,17 @@
 
 读取时机：修改当前会话日志的 metadata、读取与隐私边界，或核对历史 SessionLogCollector、日志目录和 `sessionLoggingPolicy` 的设计时。
 
-验证：当前会话日志运行 `bun test ./packages/agent/test/isolated/storage/session-logs.test.ts ./apps/service/test/isolated/session-logs.test.ts`；私有存储权限使用 `bun run scripts/runtime/unified-session-log-acl.ts`，另运行 `bun run typecheck`。本页下述旧 Session Logger 的验证记录仅供历史追溯。
+验证：当前会话日志运行 `bun test ./packages/agent/test/isolated/storage/session-logs.test.ts ./apps/service/test/isolated/session-logs.test.ts`；轨迹参数／独立授权／离线兼容运行 `bun test ./apps/service/test/isolated/trajectory-workbench-compat.test.ts`；私有存储权限使用 `bun run scripts/runtime/unified-session-log-acl.ts`，另运行 `bun run typecheck`。本页下述旧 Session Logger 的验证记录仅供历史追溯。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`release/oss-first-release/evidence/2026-07-29-agent-production-local-data-privacy.md`、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)。
 
 ## 当前实现与历史记录范围
 
 当前会话日志由 [Agent Store](../../packages/agent/src/storage/sqlite/session-logs.README.md)在既有 `change_event` 中记录有限私有 metadata，经 [Service](../../apps/service/README.md)提供读取。本页下文描述的 SessionLogCollector、JSONL writer、lease、retention 和旧 Runtime 事件投影属于已删除的旧 Session Logger；不能将这些机制视作当前实现或继续运行旧 smoke 脚本。隐私、授权与恢复边界仍按当前 owner 和适用跨包合同核对。
+
+[Trajectory Reader](../../packages/agent/src/trajectory/README.md)是独立历史接口，在原 change_event 的独立事实列封存准确历史，保留原 Session Log 五字段 envelope、payload 与通知 floor 合同；不将 SessionLogPage 改名冒充完整轨迹。事件页无跨请求 lease，逐页核主体／范围，Evidence 才持分块资源。独立 Trace 消费及外发需要自己的 grant，按[观测隐私边界](observability-privacy-operations.md#用户授权的-trace-产品通道)核对，普通历史读取不隐式授权外发。
+
+轨迹工作台的完整前缀索引只保规范安全事件、关系、时间、有限 usage／压缩 accounting、原 owner 封存的闭合第一方 display 和准确材料引用；display 仅包含有界公开消息摘要、显式工具执行描述、安全目标与准确关联，不展开请求、输出或私有 checkpoint。筛选、元数据搜索与概述不读取完整正文，也不把这些元数据复制成 Session Logger 内容。原 Tool 的公开执行参数通过独立 `tool_input` 材料在原事务封存，工具 typed 结果只经原定义／版本白名单投影；它们不扩大旧日志 metadata allowlist，不包含 Model 请求封装、Job 程序或恢复清单。界面移除生命周期列表不删除原事件、phase、修订、材料或导出，旧记录也不从当前业务行追补。新材料／旧 V1 与授权负向边界由[兼容回归](../../apps/service/test/isolated/trajectory-workbench-compat.test.ts)核验，完整协议与投影归[Trajectory owner](../../packages/trajectory/README.md)。
 
 ## 旧 Session Logger 实现背景
 
@@ -26,7 +30,7 @@ telemetry consent；remote consent 也不改变本地 logger mode、retention �
 日志写入是两个独立域：Session Logger 不能作为 Runtime event source，也不能扩大 content allowlist 或复制
 production Artifact。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## SAQ-10 审批队列日志边界
 

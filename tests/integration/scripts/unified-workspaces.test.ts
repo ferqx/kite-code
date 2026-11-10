@@ -88,7 +88,7 @@ function edit(
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-test('exact eight manifests and trusted formal aliases pass without inspecting installed old links', () => {
+test('exact current manifests and trusted formal aliases pass without inspecting installed old links', () => {
   const root = fixture();
   put(root, 'node_modules/@kite-ai/runtime-host/package.json', { name: '@kite-ai/runtime-host' });
   const report = checkUnifiedWorkspaces(root);
@@ -127,7 +127,7 @@ test('wildcard, order drift, unknown workspace and old root dependency reject', 
     const root = fixture();
     edit(root, 'package.json', (m) => (m.workspaces = workspaces));
     expect(
-      checkUnifiedWorkspaces(root).violations.some((v) => v.code === 'workspaces-not-exact-eight'),
+      checkUnifiedWorkspaces(root).violations.some((v) => v.code === 'workspaces-not-exact'),
     ).toBe(true);
   }
   const root = fixture();
@@ -165,6 +165,10 @@ test('combined boundary preserves standalone refusals and pending diagnostics', 
     ['packages/agent/src/permissions/check.ts', 'import "@kite-ai/service";'],
     ['packages/agent/src/loop.ts', 'import "node:fs";'],
     ['packages/ai/src/index.ts', 'import "@kite-ai/agent";'],
+    ['packages/trajectory/src/index.ts', 'import "node:fs";'],
+    ['packages/trajectory/src/index.ts', 'import "@kite-ai/client";'],
+    ['packages/trajectory/src/index.ts', 'import "react";'],
+    ['packages/trajectory/src/index.ts', 'void fetch("https://example.invalid");'],
     ['packages/ui/src/index.ts', 'import "node:fs";'],
     ['apps/service/src/index.ts', 'export function createPermissionPolicy() { return {}; }'],
     ['apps/desktop/electron/bridge.ts', 'import "@kite-ai/runtime-host";'],

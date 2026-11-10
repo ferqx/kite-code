@@ -10,7 +10,7 @@
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、[Agent Note 0007](../../.agents/notes/implemented/architecture/2026-07-14-capability-bindings.md)、[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)、[Agent Note 0042](../../.agents/notes/implemented/feature/2026-07-25-file-tool-semantics-and-write-safety.md)、[Agent Note 0048](../../.agents/notes/implemented/bug-fix/2026-07-29-durable-user-turn-cancellation.md)、[Agent Note 0049](../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0114](../../.agents/notes/implemented/testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 当前 V1.3 正式工具授权
 

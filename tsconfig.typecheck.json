@@ -2,6 +2,8 @@
   "files": [],
   "references": [
     { "path": "./tsconfig.json" },
+    { "path": "./packages/trajectory/tsconfig.json" },
+    { "path": "./packages/trace-extension-sdk/tsconfig.json" },
     { "path": "./packages/ai/tsconfig.json" },
     { "path": "./packages/agent/tsconfig.json" },
     { "path": "./packages/client/tsconfig.json" },

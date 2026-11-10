@@ -2,6 +2,16 @@ import type * as API from './generated/api';
 import { queryInput, requestValidators, responseValidators } from './generated/validators.js';
 
 export interface Responses {
+  TraceRemoteDeliveryStatus: API.TraceRemoteDeliveryStatus;
+  TraceBundleValidation: API.TraceBundleValidation;
+  TraceInstallResult: API.TraceInstallResult;
+  TraceInstallationList: API.TraceInstallationList;
+  TraceInstallation: API.TraceInstallation;
+  TraceActionResult: API.TraceActionResult;
+  TraceHistoryResult: API.TraceHistoryResult;
+  TracePartitionStatus: API.TracePartitionStatus;
+  TraceDeadLetterList: API.TraceDeadLetterList;
+  TraceCredentialResult: API.TraceCredentialResult;
   InputImage: API.InputImage;
   InputFileReference: API.InputFileReference;
   InputFileImport: API.InputFileImport;
@@ -11,6 +21,11 @@ export interface Responses {
   FileRestoreStatus: API.FileRestoreStatus;
   FileCheckpointRecoveryBoundary: API.FileCheckpointRecoveryBoundary;
   SessionLogPage: API.SessionLogPage;
+  TrajectorySnapshot: API.TrajectorySnapshot;
+  TrajectoryPage: API.TrajectoryPage;
+  TrajectoryEvidenceDescriptor: API.TrajectoryEvidenceDescriptor;
+  TrajectoryEvidenceChunk: API.TrajectoryEvidenceChunk;
+  TrajectoryEvidenceClosed: API.TrajectoryEvidenceClosed;
   SkillCataloguePage: API.SkillCataloguePage;
   UserSkillCataloguePage: API.UserSkillCataloguePage;
   UserSkillDocument: API.UserSkillDocument;
@@ -102,6 +117,14 @@ export function decodeResponse<K extends keyof Responses>(name: K, value: unknow
 
 export function validateRequest(
   name:
+    | 'TraceInstallRequest'
+    | 'TraceOtelInstallRequest'
+    | 'TraceConfigureRequest'
+    | 'TraceGrantRequest'
+    | 'TraceHistoryRequest'
+    | 'TraceAction'
+    | 'TraceCredentialBind'
+    | 'TraceCredentialRevoke'
     | 'MessageChangesQuery'
     | 'FileCheckpointListQuery'
     | 'SessionLogQuery'

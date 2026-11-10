@@ -220,6 +220,8 @@ export interface TurnActivity {
 export interface SessionSummary {
   /** Newly observed in this window, awaiting its first saved message time. */
   readonly awaitingFirstMessage?: boolean;
+  /** Window-local observation order among pending rows; larger means newer, not a time. */
+  readonly awaitingFirstMessageOrder?: number;
   /** Host-confirmed successful worktree creation history; not a live path check. */
   readonly hasCreatedWorktree?: boolean;
   /** Host-confirmed latest terminal turn has not been read in this client. */

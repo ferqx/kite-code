@@ -48,9 +48,22 @@ export interface ContextSources {
 export interface ContextCompressor {
   readonly id: string;
   readonly version: string;
-  prepare(input: CompressionInput): Promise<{ instructions: string; snapshot: Json } | null>;
+  prepare(input: CompressionInput): Promise<{
+    instructions: string;
+    snapshot: Json;
+    /** Trusted measurement of this frozen input, distinct from Provider usage. */
+    measurement?: Omit<
+      import('@kite-ai/trajectory').CompressionPresentation,
+      'adopted' | 'accounting'
+    >;
+  } | null>;
   /** Trusted actual-output reduction/window check; no Provider call. */
   validateSummary?(input: CompressionInput & { readonly summary: string }): Promise<boolean>;
+  /** Optional additive report. It cannot override a rejecting legacy validator. */
+  validateSummaryReport?(input: CompressionInput & { readonly summary: string }): Promise<{
+    accepted: boolean;
+    accounting?: import('@kite-ai/trajectory').CompressionAccounting;
+  }>;
   /** Explicit opt-in automatic trigger. Absence means manual only. */
   shouldCompress?(input: CompressionInput): Promise<boolean>;
   /** Trusted model-window preflight for restoring complete selected history; no Provider call. */
@@ -90,6 +103,9 @@ export function sealCompressor(
     version: value.version,
     prepare: value.prepare.bind(value),
     ...(value.validateSummary ? { validateSummary: value.validateSummary.bind(value) } : {}),
+    ...(value.validateSummaryReport
+      ? { validateSummaryReport: value.validateSummaryReport.bind(value) }
+      : {}),
     ...(value.validateExpanded ? { validateExpanded: value.validateExpanded.bind(value) } : {}),
     ...(value.shouldCompress ? { shouldCompress: value.shouldCompress.bind(value) } : {}),
   });

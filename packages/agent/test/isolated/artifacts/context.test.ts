@@ -419,13 +419,7 @@ test('effects followed by nonexistent, foreign, wrong-scope or forged metadata r
         },
       ],
     },
-    createFixedModel(
-      modes.flatMap((mode) =>
-        mode === 'initial'
-          ? [call('fixture.result', { mode }), [finish]]
-          : [call('fixture.result', { mode })],
-      ),
-    ),
+    createFixedModel(modes.flatMap((mode) => [call('fixture.result', { mode }), [finish]])),
   );
   try {
     const foreignOriginal = await f.artifacts.publish({
@@ -467,9 +461,11 @@ test('effects followed by nonexistent, foreign, wrong-scope or forged metadata r
         originStoreId: f.expectedStoreId,
       });
       if (receipt.businessCommandId) expect(receipt.outcome).toBe('human_input_applied');
-      const tool = (await f.store.listExecutions('s')).find(
+      const tools = (await f.store.listExecutions('s')).filter(
         (e) => e.runId === runId && e.kind === 'tool',
       );
+      expect(tools).toHaveLength(1);
+      const tool = tools[0];
       expect(tool?.status).toBe(mode === 'initial' ? 'succeeded' : 'outcome_unknown');
       if (mode !== 'initial')
         expect(readErrors[mode]).toBe(
@@ -480,7 +476,7 @@ test('effects followed by nonexistent, foreign, wrong-scope or forged metadata r
       expect(effects).toBe(before);
     }
     expect(effects).toBe(5);
-    expect(f.model.requests).toHaveLength(6);
+    expect(f.model.requests).toHaveLength(10);
   } finally {
     await f.close();
   }

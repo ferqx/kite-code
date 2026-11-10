@@ -10,7 +10,7 @@
 
 压缩 effect 在模型调用前后重新解析实际 projection environment，并把 provider/model、能力、estimator、summary policy、工具 schema、active Skill 与 workflow descriptor 的稳定 digest 纳入同一 lease；环境变化产生 retryable `stale_context` failed 终态并清除 pending，不写 checkpoint。安全 source 只能由从最旧消息开始的完整 settled turns 组成，tool call/result 必须一一配对；manual 覆盖全部 safe source，但 Runtime 当前 turn 仍为 active 时同样必须保护该 turn；auto 始终保护当前 turn。Correctness hard block 只能由带 invariant reason、source digest、turn 和诊断证据的统一 factory 创建，且只允许匹配原 reason/digest 的恢复事件清除。
 
-2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[八 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
+2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 规则
 

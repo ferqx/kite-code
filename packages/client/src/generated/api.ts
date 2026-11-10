@@ -1,4 +1,401 @@
 // Generated from apps/service/src/http/schema. Run bun run generate:unified-api.
+export type TraceOtelInstallRequest = { endpoint: string; sampleRate?: number };
+export type TraceRemoteDeliveryStatus =
+  | { kind: 'third_party'; status: 'not_applicable' }
+  | { kind: 'opentelemetry'; status: 'not_started'; inspection: null }
+  | {
+      kind: 'opentelemetry';
+      status: 'unavailable';
+      inspection: null;
+      code: 'inspection_unavailable';
+    }
+  | {
+      kind: 'opentelemetry';
+      status: 'available';
+      inspection: {
+        grant: { revision: string; epoch: string; active: boolean };
+        openSpans: number;
+        acceptedEvents: number;
+        unmappedEvents: {
+          notSpan: number;
+          identityUnavailable: number;
+          timingUnavailable: number;
+          incompletePrefix: number;
+        };
+        outgoingTotal: number;
+        outgoingStates: Array<{
+          status:
+            | 'pending'
+            | 'sending'
+            | 'accepted'
+            | 'retry_wait'
+            | 'rejected'
+            | 'partial_unknown'
+            | 'unconfirmed'
+            | 'sampled_out'
+            | 'stopped';
+          count: number;
+        }>;
+        outgoing: Array<{
+          key: string;
+          taskId: string;
+          status:
+            | 'pending'
+            | 'sending'
+            | 'accepted'
+            | 'retry_wait'
+            | 'rejected'
+            | 'partial_unknown'
+            | 'unconfirmed'
+            | 'sampled_out'
+            | 'stopped';
+          code:
+            | (
+                | (
+                    | 'partial_success'
+                    | 'response_unavailable'
+                    | 'response_invalid'
+                    | 'transport_unconfirmed'
+                    | 'send_not_authorized'
+                    | 'permission_revoked'
+                    | 'task_cancelled'
+                    | 'retry_exhausted'
+                    | 'ECONNRESET'
+                    | 'ECONNREFUSED'
+                    | 'EPIPE'
+                    | 'ETIMEDOUT'
+                    | 'EAI_AGAIN'
+                    | 'ENOTFOUND'
+                    | 'ENETUNREACH'
+                    | 'EHOSTUNREACH'
+                  )
+                | string
+              )
+            | null;
+          attempts: number;
+          rejectedCount: number | null;
+          possibleDuplicate: 0 | 1;
+        }>;
+      };
+    };
+export type TraceInstallRequest = {
+  manifest: {
+    apiVersion: 1;
+    name: string;
+    history: boolean;
+    eventKinds: Array<
+      | 'command'
+      | 'run'
+      | 'model'
+      | 'tool'
+      | 'job'
+      | 'interaction'
+      | 'child'
+      | 'context'
+      | 'recovery'
+      | 'artifact'
+      | 'verification'
+      | 'message'
+    >;
+    evidenceKinds: Array<
+      | 'model_input'
+      | 'model_output'
+      | 'tool_input'
+      | 'tool_result'
+      | 'job_output'
+      | 'artifact'
+      | 'file_change'
+      | 'verification'
+      | 'interaction'
+      | 'context'
+      | 'message'
+    >;
+    origins: Array<string>;
+    settings: { [key: string]: 'string' | 'number' | 'boolean' };
+  };
+  bundle: { apiVersion: 1; source: string; sha256: string };
+};
+export type TraceBundleValidation = { valid: true; digest: string };
+export type TraceInstallResult = { installationId: string };
+export type TraceInstallationList = {
+  installations: Array<{
+    kind: 'third_party' | 'opentelemetry';
+    installationId: string;
+    name: string;
+    digest: string;
+    status: 'installed' | 'configured' | 'enabled' | 'disabled' | 'uninstalled';
+  }>;
+};
+export type TraceInstallation = {
+  kind: 'third_party' | 'opentelemetry';
+  installationId: string;
+  name: string;
+  digest: string;
+  status: 'installed' | 'configured' | 'enabled' | 'disabled' | 'uninstalled';
+  manifest: {
+    apiVersion: 1;
+    name: string;
+    history: boolean;
+    eventKinds: Array<
+      | 'command'
+      | 'run'
+      | 'model'
+      | 'tool'
+      | 'job'
+      | 'interaction'
+      | 'child'
+      | 'context'
+      | 'recovery'
+      | 'artifact'
+      | 'verification'
+      | 'message'
+    >;
+    evidenceKinds: Array<
+      | 'model_input'
+      | 'model_output'
+      | 'tool_input'
+      | 'tool_result'
+      | 'job_output'
+      | 'artifact'
+      | 'file_change'
+      | 'verification'
+      | 'interaction'
+      | 'context'
+      | 'message'
+    >;
+    origins: Array<string>;
+    settings: { [key: string]: 'string' | 'number' | 'boolean' };
+  };
+  settings: { [key: string]: string | number | boolean };
+  grant: {
+    revision: string;
+    epoch: string;
+    active: boolean;
+    grant: {
+      scopes: Array<{ storeId: string; sessionId: string; runId?: string; executionId?: string }>;
+      eventKinds: Array<
+        | 'command'
+        | 'run'
+        | 'model'
+        | 'tool'
+        | 'job'
+        | 'interaction'
+        | 'child'
+        | 'context'
+        | 'recovery'
+        | 'artifact'
+        | 'verification'
+        | 'message'
+      >;
+      metadata: Array<'timing' | 'usage' | 'output_checkpoint'>;
+      evidenceKinds: Array<
+        | 'model_input'
+        | 'model_output'
+        | 'tool_input'
+        | 'tool_result'
+        | 'job_output'
+        | 'artifact'
+        | 'file_change'
+        | 'verification'
+        | 'interaction'
+        | 'context'
+        | 'message'
+      >;
+      origins: Array<string>;
+      originalIdentity: boolean;
+      allowHistory: boolean;
+      credentialHandles?: Array<string>;
+      allowPrivateNetwork?: boolean;
+      evidenceContent?: 'redacted' | 'full';
+    };
+  } | null;
+  partitions: Array<{
+    id: string;
+    installationId: string;
+    epoch: string;
+    lane: 'live' | 'history';
+    exportId?: string;
+    scope: {
+      storeId: string;
+      sessionId: string;
+      runId?: string;
+      executionId?: string;
+      eventKinds?: Array<
+        | 'command'
+        | 'run'
+        | 'model'
+        | 'tool'
+        | 'job'
+        | 'interaction'
+        | 'child'
+        | 'context'
+        | 'recovery'
+        | 'artifact'
+        | 'verification'
+        | 'message'
+      >;
+    };
+    fromCursor: string;
+    upperCursor: string;
+    sourceScanPosition: string;
+    contiguousAcknowledgedPosition: string;
+    status: 'active' | 'paused' | 'cancelled' | 'revoked' | 'unavailable';
+    integrity: {
+      facts: 'complete' | 'partial' | 'unknown';
+      identityConfidence: 'verified_origin' | 'legacy_local';
+      reasons: Array<
+        | 'legacy_format'
+        | 'history_purged'
+        | 'missing_fact'
+        | 'corrupt_fact'
+        | 'unknown_version'
+        | 'unknown_event'
+        | 'identity_unverified'
+        | 'missing_material'
+        | 'truncated_material'
+        | 'incomplete_prefix'
+        | 'source_unavailable'
+      >;
+    };
+    pending: number;
+    deadLetter: number;
+    exhausted: boolean;
+    deliveryComplete: boolean;
+    contentMode: 'metadata' | 'authorized_evidence';
+  }>;
+  credentials: Array<{ handle: string; origin: string; active: boolean }>;
+};
+export type TraceAction = Record<string, never>;
+export type TraceActionResult = { completed: true };
+export type TraceConfigureRequest = { settings: { [key: string]: string | number | boolean } };
+export type TraceGrantRequest = {
+  scopes: Array<{ storeId: string; sessionId: string; runId?: string; executionId?: string }>;
+  eventKinds: Array<
+    | 'command'
+    | 'run'
+    | 'model'
+    | 'tool'
+    | 'job'
+    | 'interaction'
+    | 'child'
+    | 'context'
+    | 'recovery'
+    | 'artifact'
+    | 'verification'
+    | 'message'
+  >;
+  metadata: Array<'timing' | 'usage' | 'output_checkpoint'>;
+  evidenceKinds: Array<
+    | 'model_input'
+    | 'model_output'
+    | 'tool_input'
+    | 'tool_result'
+    | 'job_output'
+    | 'artifact'
+    | 'file_change'
+    | 'verification'
+    | 'interaction'
+    | 'context'
+    | 'message'
+  >;
+  origins: Array<string>;
+  originalIdentity: boolean;
+  allowHistory: boolean;
+  credentialHandles?: Array<string>;
+  allowPrivateNetwork?: boolean;
+  evidenceContent?: 'redacted' | 'full';
+};
+export type TraceHistoryRequest = {
+  scope: { storeId: string; sessionId: string; runId?: string; executionId?: string };
+  fromSequence?: string;
+  toSequence?: string;
+  eventKinds?: Array<
+    | 'command'
+    | 'run'
+    | 'model'
+    | 'tool'
+    | 'job'
+    | 'interaction'
+    | 'child'
+    | 'context'
+    | 'recovery'
+    | 'artifact'
+    | 'verification'
+    | 'message'
+  >;
+  contentMode: 'metadata' | 'authorized_evidence';
+};
+export type TraceHistoryResult = { partitionId: string };
+export type TracePartitionStatus = {
+  id: string;
+  installationId: string;
+  epoch: string;
+  lane: 'live' | 'history';
+  exportId?: string;
+  scope: {
+    storeId: string;
+    sessionId: string;
+    runId?: string;
+    executionId?: string;
+    eventKinds?: Array<
+      | 'command'
+      | 'run'
+      | 'model'
+      | 'tool'
+      | 'job'
+      | 'interaction'
+      | 'child'
+      | 'context'
+      | 'recovery'
+      | 'artifact'
+      | 'verification'
+      | 'message'
+    >;
+  };
+  fromCursor: string;
+  upperCursor: string;
+  sourceScanPosition: string;
+  contiguousAcknowledgedPosition: string;
+  status: 'active' | 'paused' | 'cancelled' | 'revoked' | 'unavailable';
+  integrity: {
+    facts: 'complete' | 'partial' | 'unknown';
+    identityConfidence: 'verified_origin' | 'legacy_local';
+    reasons: Array<
+      | 'legacy_format'
+      | 'history_purged'
+      | 'missing_fact'
+      | 'corrupt_fact'
+      | 'unknown_version'
+      | 'unknown_event'
+      | 'identity_unverified'
+      | 'missing_material'
+      | 'truncated_material'
+      | 'incomplete_prefix'
+      | 'source_unavailable'
+    >;
+  };
+  pending: number;
+  deadLetter: number;
+  exhausted: boolean;
+  deliveryComplete: boolean;
+  contentMode: 'metadata' | 'authorized_evidence';
+};
+export type TraceDeadLetterList = {
+  entries: Array<{
+    eventId: string;
+    sequence: string;
+    attempts: number;
+    reason:
+      | 'retry'
+      | 'invalid_event'
+      | 'unsupported_kind'
+      | 'capacity_exceeded'
+      | 'delivery_failed';
+  }>;
+};
+export type TraceCredentialBind = { origin: string; secret: string };
+export type TraceCredentialResult = { handle: string; origin: string };
+export type TraceCredentialRevoke = { handle: string };
 export type FileCheckpointListQuery = { afterKey?: string; limit?: number };
 export type FileCheckpointBaseline = { hash: string; size: number; device: string; inode: string };
 export type FileCheckpointArtifact = {
@@ -461,6 +858,837 @@ export type SessionLogPage = {
   }>;
   complete: boolean;
 };
+type TrajectoryScope___schema0 = string;
+type TrajectoryScope___schema1 =
+  | 'command'
+  | 'run'
+  | 'model'
+  | 'tool'
+  | 'job'
+  | 'interaction'
+  | 'child'
+  | 'context'
+  | 'recovery'
+  | 'artifact'
+  | 'verification'
+  | 'message';
+export type TrajectoryScope = {
+  storeId: TrajectoryScope___schema0;
+  sessionId: TrajectoryScope___schema0;
+  runId?: TrajectoryScope___schema0;
+  executionId?: TrajectoryScope___schema0;
+  eventKinds?: Array<TrajectoryScope___schema1>;
+};
+type TrajectorySnapshot___schema0 = string;
+type TrajectorySnapshot___schema1 =
+  | 'command'
+  | 'run'
+  | 'model'
+  | 'tool'
+  | 'job'
+  | 'interaction'
+  | 'child'
+  | 'context'
+  | 'recovery'
+  | 'artifact'
+  | 'verification'
+  | 'message';
+type TrajectorySnapshot___schema2 = string;
+export type TrajectorySnapshot = {
+  storeId: TrajectorySnapshot___schema0;
+  sessionId: TrajectorySnapshot___schema0;
+  runId?: TrajectorySnapshot___schema0;
+  executionId?: TrajectorySnapshot___schema0;
+  eventKinds?: Array<TrajectorySnapshot___schema1>;
+  upperCursor: TrajectorySnapshot___schema2;
+  historyCoverage: {
+    enabledAfterCursor: TrajectorySnapshot___schema2;
+    upperCursor: TrajectorySnapshot___schema2;
+    status: 'retained' | 'legacy' | 'purged' | 'unknown';
+    integrity: {
+      facts: 'complete' | 'partial' | 'unknown';
+      identityConfidence: 'verified_origin' | 'legacy_local';
+      reasons: Array<
+        | 'legacy_format'
+        | 'history_purged'
+        | 'missing_fact'
+        | 'corrupt_fact'
+        | 'unknown_version'
+        | 'unknown_event'
+        | 'identity_unverified'
+        | 'missing_material'
+        | 'truncated_material'
+        | 'incomplete_prefix'
+        | 'source_unavailable'
+      >;
+    };
+  };
+  formatVersion: 1;
+};
+type TrajectoryReadRequest___schema0 = string;
+type TrajectoryReadRequest___schema1 =
+  | 'command'
+  | 'run'
+  | 'model'
+  | 'tool'
+  | 'job'
+  | 'interaction'
+  | 'child'
+  | 'context'
+  | 'recovery'
+  | 'artifact'
+  | 'verification'
+  | 'message';
+type TrajectoryReadRequest___schema2 = string;
+export type TrajectoryReadRequest = {
+  storeId: TrajectoryReadRequest___schema0;
+  sessionId: TrajectoryReadRequest___schema0;
+  runId?: TrajectoryReadRequest___schema0;
+  executionId?: TrajectoryReadRequest___schema0;
+  eventKinds?: Array<TrajectoryReadRequest___schema1>;
+  afterCursor: TrajectoryReadRequest___schema2;
+  upperCursor: TrajectoryReadRequest___schema2;
+  limit?: number;
+};
+type TrajectoryPage___schema0 = string;
+type TrajectoryPage___schema1 =
+  | 'command'
+  | 'run'
+  | 'model'
+  | 'tool'
+  | 'job'
+  | 'interaction'
+  | 'child'
+  | 'context'
+  | 'recovery'
+  | 'artifact'
+  | 'verification'
+  | 'message';
+type TrajectoryPage___schema2 = string;
+type TrajectoryPage___schema3 =
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'message';
+      attributes: {
+        display?: {
+          title?: TrajectoryPage___schema24;
+          kind: 'message';
+          summary?: string;
+          outputPresence?: TrajectoryPage___schema25;
+        };
+        messageId: TrajectoryPage___schema0;
+        role: 'user' | 'assistant';
+        messageSeq: TrajectoryPage___schema2;
+        revision: TrajectoryPage___schema2;
+        status: 'complete' | 'incomplete';
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'command';
+      attributes: {
+        commandId: TrajectoryPage___schema0;
+        commandType?: string;
+        reasonCode?: string;
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'run';
+      attributes: {
+        commandId?: TrajectoryPage___schema0;
+        rootWorkCommandId?: TrajectoryPage___schema0;
+        rootWorkSeq?: TrajectoryPage___schema2;
+        reasonCode?: string;
+        cancellationRequested?: boolean;
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'model';
+      attributes: {
+        commandId?: TrajectoryPage___schema26;
+        rootWorkCommandId?: TrajectoryPage___schema27;
+        rootWorkSeq?: TrajectoryPage___schema28;
+        definitionId?: TrajectoryPage___schema29;
+        definitionVersion?: TrajectoryPage___schema30;
+        display?: TrajectoryPage___schema31;
+        compressionId?: TrajectoryPage___schema0;
+        compressionTrigger?: 'automatic' | 'manual';
+        compression?: TrajectoryPage___schema32;
+        resultRevision?: TrajectoryPage___schema2;
+        previousExecutionId?: TrajectoryPage___schema0;
+        previousExecutionOriginStoreId?: TrajectoryPage___schema0;
+        retryReason?: 'provider_unavailable' | 'connection_failed' | 'stream_incomplete';
+        retryAttempt?: number;
+        maxAttempts?: number | null;
+        usage?: {
+          inputTokens?: TrajectoryPage___schema2;
+          outputTokens?: TrajectoryPage___schema2;
+          totalTokens?: TrajectoryPage___schema2;
+          cachedInputTokens?: TrajectoryPage___schema2;
+        };
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'tool';
+      attributes: {
+        commandId?: TrajectoryPage___schema26;
+        rootWorkCommandId?: TrajectoryPage___schema27;
+        rootWorkSeq?: TrajectoryPage___schema28;
+        definitionId?: TrajectoryPage___schema29;
+        definitionVersion?: TrajectoryPage___schema30;
+        display?: TrajectoryPage___schema31;
+        upperOutputSeq?: TrajectoryPage___schema34;
+        stream?: TrajectoryPage___schema35;
+        gaps?: TrajectoryPage___schema36;
+        droppedBytes?: TrajectoryPage___schema37;
+        truncated?: TrajectoryPage___schema38;
+        callId?: TrajectoryPage___schema0;
+        resultRevision?: TrajectoryPage___schema2;
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'job';
+      attributes: {
+        commandId?: TrajectoryPage___schema26;
+        rootWorkCommandId?: TrajectoryPage___schema27;
+        rootWorkSeq?: TrajectoryPage___schema28;
+        definitionId?: TrajectoryPage___schema29;
+        definitionVersion?: TrajectoryPage___schema30;
+        display?: TrajectoryPage___schema31;
+        childSessionId?: TrajectoryPage___schema0;
+        delivery?: 'pending' | 'consumed' | 'suppressed';
+        deliveryReasonCode?: string;
+        resultRevision?: TrajectoryPage___schema2;
+        upperOutputSeq?: TrajectoryPage___schema34;
+        stream?: TrajectoryPage___schema35;
+        gaps?: TrajectoryPage___schema36;
+        droppedBytes?: TrajectoryPage___schema37;
+        truncated?: TrajectoryPage___schema38;
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'interaction';
+      attributes: {
+        interactionId: TrajectoryPage___schema0;
+        interactionKind?: 'approval' | 'question' | 'plan_review';
+        revision: TrajectoryPage___schema2;
+        decision?: 'requested' | 'projected' | 'answered' | 'accepted' | 'rejected' | 'cancelled';
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'child';
+      attributes: {
+        childSessionId: TrajectoryPage___schema0;
+        carrierExecutionId: TrajectoryPage___schema0;
+        childRunId?: TrajectoryPage___schema0;
+        delivery?: 'pending' | 'accepted' | 'delivered' | 'rejected';
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'context';
+      attributes: {
+        selectionId?: TrajectoryPage___schema0;
+        compressionId?: TrajectoryPage___schema0;
+        compressionTrigger?: 'automatic' | 'manual';
+        compression?: TrajectoryPage___schema32;
+        revision?: TrajectoryPage___schema2;
+        action?: 'selected' | 'compressed' | 'published';
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'recovery';
+      attributes: {
+        reasonCode?: string;
+        outcome?: 'interrupted' | 'unknown' | 'verified' | 'resumed' | 'failed';
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'artifact';
+      attributes: { artifactId: TrajectoryPage___schema0; mediaType?: string };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'verification';
+      attributes: {
+        verificationId: TrajectoryPage___schema0;
+        outcome: 'passed' | 'failed' | 'unknown';
+        method: 'business_reconciliation' | 'required_check' | 'test_evidence';
+      };
+    }
+  | {
+      schema: TrajectoryPage___schema4;
+      schemaVersion: TrajectoryPage___schema5;
+      eventId: TrajectoryPage___schema6;
+      sequence: TrajectoryPage___schema2;
+      origin: TrajectoryPage___schema7;
+      sessionId: TrajectoryPage___schema0;
+      workspaceId: TrajectoryPage___schema0;
+      runId?: TrajectoryPage___schema8;
+      executionId?: TrajectoryPage___schema9;
+      parentExecutionId?: TrajectoryPage___schema10;
+      executionOriginStoreId?: TrajectoryPage___schema11;
+      runOriginStoreId?: TrajectoryPage___schema12;
+      operationOriginStoreId?: TrajectoryPage___schema13;
+      parentExecutionOriginStoreId?: TrajectoryPage___schema14;
+      messageOriginStoreId?: TrajectoryPage___schema15;
+      operationId?: TrajectoryPage___schema16;
+      attempt?: TrajectoryPage___schema17;
+      sourceEventType: TrajectoryPage___schema18;
+      sourceRecordRevision: TrajectoryPage___schema2;
+      phase: TrajectoryPage___schema19;
+      recordedStatus: TrajectoryPage___schema20;
+      occurredAt: TrajectoryPage___schema21;
+      identityConfidence: TrajectoryPage___schema22;
+      evidenceRefs: TrajectoryPage___schema23;
+      kind: 'unknown';
+      attributes: {
+        reason: 'unrecognized_source_type' | 'legacy_fields_missing' | 'unsupported_version';
+      };
+    };
+type TrajectoryPage___schema4 = 'kite.trajectory';
+type TrajectoryPage___schema5 = 1;
+type TrajectoryPage___schema6 = string;
+type TrajectoryPage___schema7 = {
+  storeId: TrajectoryPage___schema0;
+  cursor: TrajectoryPage___schema2;
+};
+type TrajectoryPage___schema8 = TrajectoryPage___schema0;
+type TrajectoryPage___schema9 = TrajectoryPage___schema0;
+type TrajectoryPage___schema10 = TrajectoryPage___schema0;
+type TrajectoryPage___schema11 = TrajectoryPage___schema0;
+type TrajectoryPage___schema12 = TrajectoryPage___schema0;
+type TrajectoryPage___schema13 = TrajectoryPage___schema0;
+type TrajectoryPage___schema14 = TrajectoryPage___schema0;
+type TrajectoryPage___schema15 = TrajectoryPage___schema0;
+type TrajectoryPage___schema16 = TrajectoryPage___schema0;
+type TrajectoryPage___schema17 = number;
+type TrajectoryPage___schema18 = string;
+type TrajectoryPage___schema19 =
+  | 'planned'
+  | 'dispatching'
+  | 'running'
+  | 'waiting_interaction'
+  | 'waiting_execution'
+  | 'cancelling'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'outcome_unknown'
+  | 'observed';
+type TrajectoryPage___schema20 = string | null;
+type TrajectoryPage___schema21 = number | null;
+type TrajectoryPage___schema22 = 'verified_origin' | 'legacy_local';
+type TrajectoryPage___schema23 = Array<{
+  evidenceId: TrajectoryPage___schema0;
+  contentVersion: TrajectoryPage___schema0;
+  kind:
+    | 'model_input'
+    | 'model_output'
+    | 'tool_input'
+    | 'tool_result'
+    | 'job_output'
+    | 'artifact'
+    | 'file_change'
+    | 'verification'
+    | 'interaction'
+    | 'context'
+    | 'message';
+  availability:
+    | 'available'
+    | 'partial'
+    | 'truncated'
+    | 'missing'
+    | 'unavailable'
+    | 'redacted'
+    | 'empty';
+  mediaType: string;
+  visibleBytes?: TrajectoryPage___schema2;
+}>;
+type TrajectoryPage___schema24 = string;
+type TrajectoryPage___schema25 = {
+  hasText: boolean;
+  toolCallCount: number;
+  complete: boolean;
+  evidenceId: TrajectoryPage___schema0;
+  contentVersion: TrajectoryPage___schema0;
+};
+type TrajectoryPage___schema26 = TrajectoryPage___schema0;
+type TrajectoryPage___schema27 = TrajectoryPage___schema0;
+type TrajectoryPage___schema28 = TrajectoryPage___schema2;
+type TrajectoryPage___schema29 = TrajectoryPage___schema0;
+type TrajectoryPage___schema30 = string;
+type TrajectoryPage___schema31 = {
+  kind:
+    | 'model'
+    | 'file'
+    | 'shell'
+    | 'task'
+    | 'web'
+    | 'browser'
+    | 'plan'
+    | 'skill'
+    | 'worktree'
+    | 'question'
+    | 'message';
+  title?: TrajectoryPage___schema24;
+  summary?: string;
+  modelName?: string;
+  outputPresence?: TrajectoryPage___schema25;
+  operation?:
+    | 'request'
+    | 'read'
+    | 'write'
+    | 'edit'
+    | 'execute'
+    | 'launch'
+    | 'wait'
+    | 'stop'
+    | 'spawn'
+    | 'follow_up'
+    | 'message'
+    | 'events'
+    | 'list'
+    | 'interrupt'
+    | 'fetch'
+    | 'open'
+    | 'snapshot'
+    | 'click'
+    | 'fill'
+    | 'scroll'
+    | 'press'
+    | 'hover'
+    | 'select'
+    | 'back'
+    | 'forward'
+    | 'reload'
+    | 'close'
+    | 'capture'
+    | 'image'
+    | 'view'
+    | 'request_human'
+    | 'update'
+    | 'review'
+    | 'load'
+    | 'resource'
+    | 'create'
+    | 'remove'
+    | 'ask';
+  targetExecutionId?: TrajectoryPage___schema0;
+  targetExecutionOriginStoreId?: TrajectoryPage___schema0;
+  targetSessionId?: TrajectoryPage___schema0;
+  targetRunId?: TrajectoryPage___schema0;
+  observedStatus?:
+    | 'planned'
+    | 'dispatching'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'cancelled'
+    | 'outcome_unknown';
+  accepted?: boolean;
+  terminal?: boolean;
+  cancelRequested?: boolean;
+  timedOut?: boolean;
+  exitCode?: number;
+  requestContext?: { systemMessages: number; historyMessages: number; tools: number };
+};
+type TrajectoryPage___schema32 = {
+  adopted: boolean;
+  accounting?: {
+    basis: 'local-context-estimate-v1';
+    beforeTokens: TrajectoryPage___schema33;
+    afterTokens: TrajectoryPage___schema33;
+  };
+  triggerTokens?: TrajectoryPage___schema33;
+  triggerBasis?: 'reported_baseline' | 'local_estimate';
+  measuredInputTokens?: TrajectoryPage___schema33;
+  estimatedInputTokens?: TrajectoryPage___schema33;
+  thresholdTokens?: TrajectoryPage___schema33;
+};
+type TrajectoryPage___schema33 = number;
+type TrajectoryPage___schema34 = TrajectoryPage___schema2;
+type TrajectoryPage___schema35 = 'stdout' | 'stderr' | 'progress' | 'gap';
+type TrajectoryPage___schema36 = Array<{
+  stream: 'stdout' | 'stderr' | 'progress';
+  fromSeq: TrajectoryPage___schema2;
+  throughSeq: TrajectoryPage___schema2;
+  droppedBytes: TrajectoryPage___schema2;
+}>;
+type TrajectoryPage___schema37 = TrajectoryPage___schema2;
+type TrajectoryPage___schema38 = boolean;
+export type TrajectoryPage = {
+  storeId: TrajectoryPage___schema0;
+  sessionId: TrajectoryPage___schema0;
+  runId?: TrajectoryPage___schema0;
+  executionId?: TrajectoryPage___schema0;
+  eventKinds?: Array<TrajectoryPage___schema1>;
+  afterCursor: TrajectoryPage___schema2;
+  upperCursor: TrajectoryPage___schema2;
+  scannedThrough: TrajectoryPage___schema2;
+  exhausted: boolean;
+  events: Array<TrajectoryPage___schema3>;
+  integrity: {
+    facts: 'complete' | 'partial' | 'unknown';
+    identityConfidence: 'verified_origin' | 'legacy_local';
+    reasons: Array<
+      | 'legacy_format'
+      | 'history_purged'
+      | 'missing_fact'
+      | 'corrupt_fact'
+      | 'unknown_version'
+      | 'unknown_event'
+      | 'identity_unverified'
+      | 'missing_material'
+      | 'truncated_material'
+      | 'incomplete_prefix'
+      | 'source_unavailable'
+    >;
+  };
+};
+type TrajectoryEvidenceOpen___schema0 = string;
+type TrajectoryEvidenceOpen___schema1 = string;
+export type TrajectoryEvidenceOpen = {
+  storeId: TrajectoryEvidenceOpen___schema0;
+  sessionId: TrajectoryEvidenceOpen___schema0;
+  upperCursor: TrajectoryEvidenceOpen___schema1;
+  atCursor: TrajectoryEvidenceOpen___schema1;
+  eventId: TrajectoryEvidenceOpen___schema0;
+  evidenceId: TrajectoryEvidenceOpen___schema0;
+  contentVersion: TrajectoryEvidenceOpen___schema0;
+};
+type TrajectoryEvidenceReadRequest___schema0 = string;
+export type TrajectoryEvidenceReadRequest = {
+  storeId: TrajectoryEvidenceReadRequest___schema0;
+  sessionId: TrajectoryEvidenceReadRequest___schema0;
+  readId: TrajectoryEvidenceReadRequest___schema0;
+  offset: string;
+  limit?: number;
+};
+type TrajectoryEvidenceCloseRequest___schema0 = string;
+export type TrajectoryEvidenceCloseRequest = {
+  storeId: TrajectoryEvidenceCloseRequest___schema0;
+  sessionId: TrajectoryEvidenceCloseRequest___schema0;
+  readId: TrajectoryEvidenceCloseRequest___schema0;
+};
+type TrajectoryEvidenceDescriptor___schema0 = string;
+type TrajectoryEvidenceDescriptor___schema1 = string;
+export type TrajectoryEvidenceDescriptor = {
+  readId: TrajectoryEvidenceDescriptor___schema0;
+  eventId: TrajectoryEvidenceDescriptor___schema0;
+  evidenceId: TrajectoryEvidenceDescriptor___schema0;
+  contentVersion: TrajectoryEvidenceDescriptor___schema0;
+  availability:
+    | 'available'
+    | 'partial'
+    | 'truncated'
+    | 'missing'
+    | 'unavailable'
+    | 'redacted'
+    | 'empty';
+  mediaType: string;
+  viewBytes: TrajectoryEvidenceDescriptor___schema1;
+  viewSha256: string;
+  transformation: TrajectoryEvidenceDescriptor___schema0;
+  policyRevision: TrajectoryEvidenceDescriptor___schema1;
+  authorizationEpoch: TrajectoryEvidenceDescriptor___schema1;
+};
+type TrajectoryEvidenceChunk___schema0 = string;
+export type TrajectoryEvidenceChunk = {
+  readId: string;
+  offset: TrajectoryEvidenceChunk___schema0;
+  nextOffset: TrajectoryEvidenceChunk___schema0;
+  data: string;
+  eof: boolean;
+  viewSha256: string;
+  policyRevision: TrajectoryEvidenceChunk___schema0;
+  authorizationEpoch: TrajectoryEvidenceChunk___schema0;
+};
+export type TrajectoryEvidenceClosed = { closed: true };
 export type SkillCatalogueQuery = {
   storeId: string;
   afterId?: string;
@@ -1427,6 +2655,15 @@ export type CompressionRecord = {
   previousCompressionId: string | null;
   compressor: { id: string; version: string; snapshot: CompressionRecord___schema0 };
   trigger: 'manual' | 'automatic';
+  compression?: {
+    adopted: boolean;
+    accounting?: { basis: 'local-context-estimate-v1'; beforeTokens: number; afterTokens: number };
+    triggerTokens?: number;
+    triggerBasis?: 'reported_baseline' | 'local_estimate';
+    measuredInputTokens?: number;
+    estimatedInputTokens?: number;
+    thresholdTokens?: number;
+  };
 };
 export type IncludeResultRequest = {
   expectedStoreId: string;
@@ -2871,6 +4108,9 @@ export type BrowserInfo = {
     | 'model_outputs'
     | 'session_exports'
     | 'session_logs'
+    | 'trajectory'
+    | 'trajectory_evidence'
+    | 'trace_extensions'
     | 'file_checkpoints'
   >;
 };
@@ -3171,6 +4411,19 @@ export type SelectedContextPage = {
     previousCompressionId: string | null;
     compressor: { id: string; version: string; snapshot: SelectedContextPage___schema0 };
     trigger: 'manual' | 'automatic';
+    compression?: {
+      adopted: boolean;
+      accounting?: {
+        basis: 'local-context-estimate-v1';
+        beforeTokens: number;
+        afterTokens: number;
+      };
+      triggerTokens?: number;
+      triggerBasis?: 'reported_baseline' | 'local_estimate';
+      measuredInputTokens?: number;
+      estimatedInputTokens?: number;
+      thresholdTokens?: number;
+    };
   };
 };
 export type ContextEstimate = {

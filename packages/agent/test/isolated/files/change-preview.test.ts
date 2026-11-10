@@ -345,6 +345,57 @@ test('real Core saves the preview in original Execution receipts; repeated call 
         scope: ref.scope,
       });
       expect(Buffer.from(saved.content).toString()).toBe(`actual ${facts.path} bytes`);
+      const snapshot = await store.openTrajectory({
+        storeId,
+        sessionId: 's',
+        subjectId: 'owner',
+        executionId: execution.id,
+      });
+      let afterCursor = '0',
+        checkpoint: import('@kite-ai/trajectory').TrajectoryEvent | undefined;
+      for (;;) {
+        const page = await store.readTrajectoryEvents({
+          storeId,
+          sessionId: 's',
+          executionId: execution.id,
+          upperCursor: snapshot.upperCursor,
+          subjectId: 'owner',
+          afterCursor,
+        });
+        checkpoint =
+          page.events.find(
+            (event) =>
+              event.executionId === execution.id &&
+              event.evidenceRefs.some((ref) => ref.kind === 'file_change'),
+          ) ?? checkpoint;
+        if (page.exhausted) break;
+        afterCursor = page.scannedThrough;
+      }
+      expect(checkpoint).toMatchObject({
+        kind: 'tool',
+        recordedStatus: 'succeeded',
+        attributes: { resultRevision: execution.resultRevision },
+      });
+      const preview = checkpoint!.evidenceRefs.find((ref) => ref.kind === 'file_change')!;
+      const watermark = (await store.getMetadata()).lastChangeCursor,
+        providerCalls = model.requests.length;
+      const evidence = await runtime.readTrajectoryEvidence({
+        storeId,
+        sessionId: 's',
+        subjectId: 'owner',
+        upperCursor: snapshot.upperCursor,
+        atCursor: checkpoint!.sequence,
+        eventId: checkpoint!.eventId,
+        evidenceId: preview.evidenceId,
+        contentVersion: preview.contentVersion,
+      });
+      expect(evidence.transformation).toBe('kite.file-change-receipt@1');
+      expect(JSON.parse(Buffer.from(evidence.content).toString())).toEqual(
+        result.details.fileChange,
+      );
+      expect(Buffer.from(evidence.content).toString()).not.toContain('later outside edit');
+      expect((await store.getMetadata()).lastChangeCursor).toBe(watermark);
+      expect(model.requests.length).toBe(providerCalls);
     }
   } finally {
     await runtime.close();

@@ -1,4 +1,17 @@
+import {
+  compressionPresentationSchema,
+  evidenceChunkSchema,
+  evidenceCloseRequestSchema,
+  evidenceDescriptorSchema,
+  evidenceOpenSchema,
+  evidenceReadRequestSchema,
+  trajectoryPageSchema,
+  trajectoryReadRequestSchema,
+  trajectoryScopeSchema,
+  trajectorySnapshotSchema,
+} from '@kite-ai/trajectory';
 import { z } from 'zod';
+import { traceExtensionRoutes, traceExtensionSchemas } from '../../trace-extensions/schemas';
 import {
   FileCheckpointArtifactSchema,
   FileCheckpointBaselineSchema,
@@ -805,6 +818,7 @@ export const schemas = {
       snapshot: json,
     }),
     trigger: z.enum(['manual', 'automatic']),
+    compression: compressionPresentationSchema.optional(),
   }),
   IncludeResultRequest: z.strictObject({
     expectedStoreId: id,
@@ -1645,6 +1659,9 @@ export const BrowserInfoSchema = z.object({
       'model_outputs',
       'session_exports',
       'session_logs',
+      'trajectory',
+      'trajectory_evidence',
+      'trace_extensions',
       'file_checkpoints',
     ]),
   ),
@@ -1889,6 +1906,7 @@ export const SessionExportCompletionSchema = z.object({
   contentMedia: z.literal('sqlite-records-and-original-scope-artifact-references'),
 });
 export const apiSchemas = {
+  ...traceExtensionSchemas,
   FileCheckpointListQuery: FileCheckpointListQuerySchema,
   FileCheckpointBaseline: FileCheckpointBaselineSchema,
   FileCheckpointArtifact: FileCheckpointArtifactSchema,
@@ -1904,6 +1922,16 @@ export const apiSchemas = {
   SessionLogDetails: SessionLogDetailsSchema,
   SessionLogEntry: SessionLogEntrySchema,
   SessionLogPage: SessionLogPageSchema,
+  TrajectoryScope: trajectoryScopeSchema,
+  TrajectorySnapshot: trajectorySnapshotSchema,
+  TrajectoryReadRequest: trajectoryReadRequestSchema,
+  TrajectoryPage: trajectoryPageSchema,
+  TrajectoryEvidenceOpen: evidenceOpenSchema,
+  TrajectoryEvidenceReadRequest: evidenceReadRequestSchema,
+  TrajectoryEvidenceCloseRequest: evidenceCloseRequestSchema,
+  TrajectoryEvidenceDescriptor: evidenceDescriptorSchema,
+  TrajectoryEvidenceChunk: evidenceChunkSchema,
+  TrajectoryEvidenceClosed: z.strictObject({ closed: z.literal(true) }),
   SkillCatalogueQuery: SkillCatalogueQuerySchema,
   SkillCataloguePage: SkillCataloguePageSchema,
   UserSkillCatalogueQuery: UserSkillCatalogueQuerySchema,
@@ -2001,6 +2029,7 @@ export const apiSchemas = {
   SessionExportCompletion: SessionExportCompletionSchema,
 };
 export const apiRoutes = [
+  ...traceExtensionRoutes,
   {
     method: 'post',
     path: '/v1/sessions/{id}/input-files',
@@ -2176,6 +2205,36 @@ export const apiRoutes = [
     path: '/v1/sessions/{id}/logs',
     query: 'SessionLogQuery',
     response: 'SessionLogPage',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/trajectory/open',
+    request: 'TrajectoryScope',
+    response: 'TrajectorySnapshot',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/trajectory/events',
+    request: 'TrajectoryReadRequest',
+    response: 'TrajectoryPage',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/trajectory/evidence/open',
+    request: 'TrajectoryEvidenceOpen',
+    response: 'TrajectoryEvidenceDescriptor',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/trajectory/evidence/read',
+    request: 'TrajectoryEvidenceReadRequest',
+    response: 'TrajectoryEvidenceChunk',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/trajectory/evidence/close',
+    request: 'TrajectoryEvidenceCloseRequest',
+    response: 'TrajectoryEvidenceClosed',
   },
   { method: 'get', path: '/v1/sessions/{id}/model-inputs', response: 'ModelInputPage' },
   {

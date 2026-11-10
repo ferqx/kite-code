@@ -69,7 +69,13 @@ beforeAll(async () => {
   artifact = join(root, 'artifact');
   const modules = join(artifact, 'node_modules');
   const dependencies = new Map<string, Set<string>>();
-  for (const directory of ['packages/agent', 'packages/ai', 'packages/client', 'apps/service']) {
+  for (const directory of [
+    'packages/trajectory',
+    'packages/agent',
+    'packages/ai',
+    'packages/client',
+    'apps/service',
+  ]) {
     const source = join(repository, directory);
     const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as {
       name: string;

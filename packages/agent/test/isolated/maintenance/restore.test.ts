@@ -192,12 +192,32 @@ test('restore publishes a new Store, preserves origins and fences pending facts 
     expect(backedUp.query('SELECT checkpoint_json FROM session_reconciliation').get()).toEqual({
       checkpoint_json: '{"privateFrontier":"original resume evidence"}',
     });
+    const originalFacts = backedUp
+      .query(
+        'SELECT CAST(cursor AS TEXT) AS cursor,trajectory_fact_json FROM change_event ORDER BY cursor',
+      )
+      .all();
+    const originalBoundary = backedUp
+      .query('SELECT CAST(trajectory_enabled_after_cursor AS TEXT) AS cursor FROM storage_meta')
+      .get();
     backedUp.close(true);
     const result = await restoreProfileBackup(f.input);
     expect(result.outcome).toBe('restored');
     expect(result.storeId).not.toBe(f.storeId);
     const restored = new Database(f.selected.databasePath, { readonly: true });
     expect(restored.query('SELECT * FROM session_reconciliation').all()).toEqual([]);
+    expect(
+      restored
+        .query(
+          'SELECT CAST(cursor AS TEXT) AS cursor,trajectory_fact_json FROM change_event ORDER BY cursor',
+        )
+        .all(),
+    ).toEqual(originalFacts);
+    expect(
+      restored
+        .query('SELECT CAST(trajectory_enabled_after_cursor AS TEXT) AS cursor FROM storage_meta')
+        .get(),
+    ).toEqual(originalBoundary);
     restored.close(true);
     expect(inspectProfileRestore({ profile: f.profile })).toBeNull();
     const old = new Database(join(result.preservedDirectory, 'core.db'), { readonly: true });

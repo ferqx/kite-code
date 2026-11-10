@@ -46,7 +46,7 @@ jobs:
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ env.BUN_INSTALL_CACHE_DIR }}
-          key: quality-bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-${{ hashFiles('bun.lock', 'package.json', 'bunfig.toml', '.npmrc', 'packages/ai/package.json', 'packages/agent/package.json', 'packages/client/package.json', 'packages/ui/package.json', 'apps/service/package.json', 'apps/cli/package.json', 'apps/desktop/package.json', 'apps/web/package.json', 'patches/**') }}
+          key: quality-bun-${{ runner.os }}-${{ runner.arch }}-1.4.4-${{ hashFiles('bun.lock', 'package.json', 'bunfig.toml', '.npmrc', 'packages/trajectory/package.json', 'packages/trace-extension-sdk/package.json', 'packages/ai/package.json', 'packages/agent/package.json', 'packages/client/package.json', 'packages/ui/package.json', 'apps/service/package.json', 'apps/cli/package.json', 'apps/desktop/package.json', 'apps/web/package.json', 'patches/**') }}
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Prepare quality Web assets
         working-directory: apps/web

@@ -35,7 +35,9 @@ test('actual Runtime output read preserves cancellation through the final comple
       };
     },
   };
-  const reader = { options: { store } } as unknown as AgentRuntime;
+  const reader = Object.assign(Object.create(AgentRuntime.prototype), {
+    options: { store },
+  }) as AgentRuntime;
   const reading = AgentRuntime.prototype.readModelOutput.call(reader, {
     expectedStoreId: 'store',
     sessionId: 's',

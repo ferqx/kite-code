@@ -1,0 +1,57 @@
+{
+  "identity": {
+    "origin": {
+      "storeId": "original-store",
+      "cursor": "9007199254740993"
+    },
+    "readStoreIdAfterRestore": "restored-read-store",
+    "canonicalIdentityPayload": "[\"kite.trajectory.event@1\",\"original-store\",\"9007199254740993\"]",
+    "eventId": "te_29b039fadcd414ebacb74971b671c0ab8e864cca69c5ad25c5b8e87da9ddd210"
+  },
+  "emptyFilteredPage": {
+    "request": {
+      "storeId": "read-store",
+      "sessionId": "session",
+      "afterCursor": "3",
+      "upperCursor": "10",
+      "eventKinds": ["model"]
+    },
+    "page": {
+      "storeId": "read-store",
+      "sessionId": "session",
+      "afterCursor": "3",
+      "upperCursor": "10",
+      "eventKinds": ["model"],
+      "scannedThrough": "7",
+      "exhausted": false,
+      "events": [],
+      "integrity": {
+        "facts": "complete",
+        "identityConfidence": "verified_origin",
+        "reasons": []
+      }
+    },
+    "nextAfterCursor": "7"
+  },
+  "partialAcknowledgment": {
+    "sentSequences": ["1", "9"],
+    "acknowledgedSequences": ["9"],
+    "unacknowledgedSequences": ["1"],
+    "scannedThrough": "10",
+    "contiguousAcknowledgedPosition": "0",
+    "deadLetterAtFirstMemberStillBlocks": true
+  },
+  "phase": {
+    "recordedStatus": "dispatching",
+    "phase": "dispatching",
+    "terminal": false,
+    "providerAcceptanceProven": false
+  },
+  "restoredEntity": {
+    "originalEventOriginStoreId": "original-store",
+    "newEventOriginStoreId": "restored-store",
+    "executionId": "same-execution",
+    "executionOriginStoreId": "original-store",
+    "previousExecutionOriginStoreId": "predecessor-store"
+  }
+}

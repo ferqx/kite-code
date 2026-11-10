@@ -111,7 +111,7 @@ async function buildNativeApp(
       .update(await readFile(join(outdir, 'profile-access.js')))
       .digest('hex'),
   };
-  for (const entry of ['main', 'preload', 'global-dialog-preload']) {
+  for (const entry of ['main', 'preload', 'global-dialog-preload', 'trajectory-preload']) {
     const result = await Bun.build({
       entrypoints: [join(root, 'electron', `${entry}.ts`)],
       target: 'node',
@@ -156,10 +156,15 @@ async function buildNativeApp(
           input: {
             main: join(root, 'index.html'),
             'global-dialog': join(root, 'global-dialog.html'),
+            trajectory: join(root, 'trajectory.html'),
           },
           output: {
             entryFileNames: (chunk) =>
-              chunk.name === 'global-dialog' ? 'global-dialog-renderer.js' : 'renderer.js',
+              chunk.name === 'global-dialog'
+                ? 'global-dialog-renderer.js'
+                : chunk.name === 'trajectory'
+                  ? 'trajectory-renderer.js'
+                  : 'renderer.js',
           },
         },
       },

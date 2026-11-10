@@ -1,5 +1,21 @@
 # Client
 
+2026-11-09输出存在性传输／离线补充：`bun test packages/client/test/trajectory-replay.test.ts`整文件8项60断言通过，Client371文件类型检查通过；同源生成一致性检查通过，不代替实际材料或Native过程资格。
+
+`openTrajectory/readTrajectoryEvents`核固定 upper、全 Store 扫描单调性与当前连接身份；空筛选页继续推进。`readTrajectoryEvidence`核精确事件／版本、连续分片／总长／view SHA 并在结束或取消后关闭材料 lease。原 Session Logs 继续承担其有限诊断合同。
+
+[纯 Replay Controller](src/trajectory-replay.ts)只消费已加载的 source，播放／seek 不接 Provider、Tool 或执行权。 [离线包](src/trajectory-bundle.ts)按 manifest／sections／材料摘要、路径和预算验证，缓存有界；缺失材料不访问 latest。[回归](test/trajectory-replay.test.ts)覆盖离线、迟到读取、固定 upper、新记录提示及损坏／缺前缀。
+
+轨迹工作台的概述／筛选使用完整前缀轻量索引；参数、结果与公开原文继续通过准确 event/ref/contentVersion 的 Evidence 读取。`tool_input` 为原 Tool 的完整公开执行请求 JSON，typed 工具结果与压缩 metadata 由同源闭合 schema 接纳；SDK 不查询当前 Execution、模型参数、工作区文件或 URL 补历史材料。空对象、null、缺材料与拒绝读取保持独立语义，分块到原 EOF／总长／view SHA 核实后才称完整。
+
+生成类型与同源校验保留可选第一方 `display.outputPresence`；实际分页再经共享闭合 `verifyTrajectoryPage` 验证，不以生成 decoder 对未来字段的兼容代替规范事件校验。离线包保留准确存在性及其原引用，即使正文未包含也不当成空输出；旧事件无该字段仍有效。[离线／传输回归](test/trajectory-replay.test.ts)同时覆盖 Model、Message、错误字段／计数拒绝和缺正文，不新增材料读取权或升级版本。
+
+V1 bundle 保留新 `tool_input` 引用、有限压缩字段及缺少新字段的旧 V1 事件，不升级包版本；材料严格绑定原 event/ref/version，错误版本或原包未包含时不访问在线来源。未来 manifest 拒绝打开，包内事件和 ref 仍走闭合校验，未知未来事件当前以读取失败保留安全边界，不把未知 attributes 或正文透传给 renderer。新增字段兼容现读端不代表所有旧闭合读端透明理解新材料种类。[兼容回归](../../apps/service/test/isolated/trajectory-workbench-compat.test.ts)覆盖超安全整数游标、完整参数 JSON、新旧事实 round-trip、错版本与未来字段拒绝；不授予 Runtime 或联网能力。
+
+`AgentClient.traceExtensions`提供有限安装／配置／独立 grant／enable／停用／更新／卸载、固定历史任务控制、DLQ 和凭据用途绑定；写入结果未知时不自动重试。`delivery()`单独读取可信 OTel 的持久适配与远端结果，Host ACK 不作为 Collector 接收。类型与 validators 均由 Service 同源 schema 生成； [真实 HTTP 联验](../../apps/service/test/isolated/trace-http.test.ts)核原 Runtime 水位和模型调用不变。
+
+工具参数 `tool_input` 与其他材料一样要求 manifest 声明和显式 Evidence grant；原已存数组授权不自动增加新种类，重新授权使旧 epoch 的 lease 失效。usage、timing 和原身份仍分别授权，第一方压缩 accounting 不因出现在规范事件中自动进入 Trace metadata allowlist。
+
 冷报告恢复的专用 decoder 接受 `report_deferred`、null Run ID 与明确 reason。它是已落定的暂缓回执；CLI／TUI／Native 不因此读取不存在的 Run，也不重新提交原恢复申请。实际丢回复与冷 SQLite 路径见 [Service 回归](../../apps/service/test/isolated/job-report-resume.test.ts)。
 
 2026-10-26，[默认 Files 恢复联验](test/isolated/file-recovery-intent-default.test.ts)完整文件1项／174断言通过。夹具固定当前 Service 封存的 read／write 绑定，从实际模型可见的文本回执读取完整 baseline；恢复意图、两个独立申请的原身份、丢失响应后的只读查询及冷态不隐式重发断言保留。Client 生产协议和恢复实现未改，这项定向结果不代替全量测试或其他平台资格。

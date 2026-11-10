@@ -496,7 +496,7 @@ test.skipIf(process.platform !== 'win32')(
 );
 
 test.skipIf(process.platform !== 'win32')(
-  'Windows built SQLite and maintenance leaves use the packaged baseline and a real Worker',
+  'Windows built SQLite and maintenance leaves use both packaged migrations and a real Worker',
   async () => {
     const f = await fixture();
     let child: ReturnType<typeof Bun.spawn> | undefined;
@@ -554,9 +554,7 @@ console.log(JSON.stringify({storeId:meta.storeId,pending:pending.status,backupSt
         storeId: f.storeId,
         pending: 'accepted',
         backupStore: f.storeId,
-        // Current format 1 opens its reviewed standalone baseline. Historical
-        // migration files remain in source but are not runtime migration inputs.
-        migrations: ['0001-baseline.sql'],
+        migrations: ['0001-baseline.sql', '0002-trajectory-facts.sql'],
       });
     } finally {
       if (timer) clearTimeout(timer);

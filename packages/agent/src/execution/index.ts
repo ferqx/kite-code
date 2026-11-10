@@ -261,7 +261,12 @@ export interface ExecutionOptions {
     executionId: string,
     value: Json,
   ) => Promise<import('../storage/types').ArtifactReference>;
-  sealModelMetadata?: (scope: ExecutionScope, metadata: Json) => Promise<Json>;
+  sealModelMetadata?: (
+    scope: ExecutionScope,
+    metadata: Json,
+    request: ModelRequest,
+    sealedInput: Json,
+  ) => Promise<Json>;
   sealSource?: (scope: ToolScope, source: Json) => Promise<Json>;
   sealApprovalRequest?: (scope: ToolScope, executionId: string, request: Json) => Promise<Json>;
   verifyApprovalRequest?: (
@@ -1164,7 +1169,7 @@ export class UnifiedExecution {
         ),
       );
       const modelMetadata = this.options.sealModelMetadata
-        ? await this.options.sealModelMetadata(scope, capturedMetadata)
+        ? await this.options.sealModelMetadata(scope, capturedMetadata, request, input)
         : capturedMetadata;
       execution = await this.prepare(scope, {
         executionId,

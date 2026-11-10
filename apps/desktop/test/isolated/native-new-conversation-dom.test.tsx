@@ -2875,6 +2875,7 @@ test('settings replace the painted page without remounting its draft or re-readi
       '常规',
       '提供商与模型',
       'MCP',
+      '轨迹与集成',
       'Skills',
     ]);
     for (const button of navigationButtons) {

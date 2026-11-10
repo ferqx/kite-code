@@ -1,6 +1,6 @@
 # 系统组成与运行拓扑
 
-当前正式源码只有根 manifest 中的八个 workspace：AI、Agent、Client、UI、Service、CLI、Desktop、Web。`apps/kite-cli` 仅保留旧源码，运行依赖已删除，不属于可运行产品。模块职责见[依赖边界](dependencies.md)。
+当前正式源码只有根 manifest 中的十个 workspace：Trajectory、Trace SDK、AI、Agent、Client、UI、Service、CLI、Desktop、Web。`apps/kite-cli` 仅保留旧源码，运行依赖已删除，不属于可运行产品。模块职责见[依赖边界](dependencies.md)。
 
 ```mermaid
 flowchart TD
@@ -13,11 +13,19 @@ flowchart TD
   S --> A[唯一 Agent Runtime / Loop]
   A --> DB[(当前 Profile / Store)]
   A --> IO[受控 Model / Tool / Job]
+  A --> F[原事务 Trajectory facts / typed Reader]
+  S --> H[TraceHost / 独立 consumer DB]
+  H --> F
+  H --> Q[独立 QuickJS / 有限 broker]
+  H --> O[独立 OTel / 私有 state 与 spool]
+  M --> B[本地轨迹文件 / 独立离线窗口]
 ```
 
 图中箭头表示业务请求与数据访问，静态 import 方向另见 manifest。CLI/TUI 与 Desktop 的宿主分别拥有其配套 Service 的进程生命周期；私有 bootstrap/发现用于准入，不提供第二条业务通道。显式 daemon 与 Web 的组合由 [Service daemon](../../../apps/service/src/daemon/README.md)负责。
 
 Service 通过[可信装配](../../../apps/service/src/assembly.ts)和[配置](../../../apps/service/src/configuration.ts)注入模型、权限、工具与平台资源。Agent 的 [Runtime](../../../packages/agent/src/runtime.ts)、[Loop](../../../packages/agent/src/loop.ts)及[Store](../../../packages/agent/src/storage/README.md)共同保持原 Command、Run、Execution 与持久事实；客户端与连接不拥有执行权。
+
+TraceHost只读原事实并管理独立授权、扫描／ACK和队列；第三方guest与可信OTel适配器分别拥有进程，均不取得Runtime mutation或跨库生命周期lease。OTel持久接受和远端结果分开；原Store清理不自动撤回已复制安全副本。离线窗口只读固定本地包，没有Service／Runtime构造入口。接口和资源关闭归 [Trace owner](../../../apps/service/src/trace-extensions/README.md)与[Desktop](../../../apps/desktop/README.md)。
 
 当前 Profile 的数据根、development 与正式候选的选择见[本地开发](../local-development.md)。相同 Profile/Store 也不允许另一进程凭连接成功重放未知请求，写入身份、owner 锁和恢复结算仍由 Store 裁决。
 

@@ -1,11 +1,22 @@
 import { constants, Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { assertNoSymlinkPath, type ProfileAccess } from '../../platform/profile';
 import { defaultWindowsPathSecurity, privateDirectory } from '../../platform/windows-path-security';
 import { initializeDefaultSqliteEngine, type SqliteEngineSelection } from '../../sqlite-engine';
-import { matchingSchema } from './migrations';
+import { matchingSchema, supportedSchemas } from './migrations';
 export const FORMAT_MAJOR = 1;
 export class StoreOpenError extends Error {
   readonly code: string;
@@ -31,11 +42,6 @@ function validateFiles(access: ProfileAccess): void {
     )
       throw new StoreOpenError('store_access_denied', 'Profile must be a private owned directory.');
   }
-}
-function baselineChecksum(
-  baseline = new URL('../migrations/0001-baseline.sql', import.meta.url),
-): string {
-  return createHash('sha256').update(readFileSync(baseline)).digest('hex');
 }
 /** Reject an unsupported profile before SQLite can create WAL sidecars.
  * The schema fingerprint also distinguishes prior unpublished schemas with major 1.
@@ -63,9 +69,50 @@ function validateProfileFormat(access: ProfileAccess, baseline?: URL): void {
     !('formatMajor' in value) ||
     value.formatMajor !== FORMAT_MAJOR ||
     !('schemaChecksum' in value) ||
-    value.schemaChecksum !== baselineChecksum(baseline)
+    !supportedSchemas(baseline).some((schema) => schema.checksum === value.schemaChecksum)
   )
     throw new StoreOpenError('store_incompatible', 'Unsupported profile format.');
+}
+/** The marker is an early refusal hint; SQLite independently validates the exact schema.
+ * Publish after its commit, atomically, so either supported marker survives interruption. */
+function publishProfileFormat(profilePath: string): void {
+  const path = join(profilePath, 'profile.json');
+  assertNoSymlinkPath(path);
+  const checksum = supportedSchemas().at(-1)!.checksum;
+  if (existsSync(path)) {
+    privateRegular(path);
+    if (JSON.parse(readFileSync(path, 'utf8')).schemaChecksum === checksum) return;
+  }
+  const temporary = join(profilePath, `.profile-${randomUUID()}.tmp`);
+  try {
+    writeFileSync(
+      temporary,
+      JSON.stringify({ formatMajor: FORMAT_MAJOR, schemaChecksum: checksum }),
+      {
+        flag: 'wx',
+        mode: 0o600,
+      },
+    );
+    defaultWindowsPathSecurity()?.secureFile(temporary);
+    // Windows flushes the newly written marker through a writable handle.
+    const file = openSync(temporary, 'r+');
+    try {
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
+    renameSync(temporary, path);
+    if (process.platform !== 'win32') {
+      const directory = openSync(profilePath, 'r');
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
+    }
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
 }
 export function openDatabase(
   access: ProfileAccess,
@@ -107,18 +154,7 @@ export function openDatabase(
       database.run('PRAGMA journal_mode=WAL');
       database.run('PRAGMA synchronous=FULL');
       chmodSync(access.databasePath, 0o600);
-      const profileFile = join(access.profilePath, 'profile.json');
-      if (!existsSync(profileFile)) {
-        try {
-          writeFileSync(
-            profileFile,
-            JSON.stringify({ formatMajor: FORMAT_MAJOR, schemaChecksum: baselineChecksum() }),
-            { flag: 'wx', mode: 0o600 },
-          );
-        } catch (error) {
-          if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
-        }
-      }
+      publishProfileFormat(access.profilePath);
     }
     validateFiles(access);
     if (existsSync(join(access.profilePath, 'profile.json')))
@@ -245,6 +281,17 @@ function initialize(database: Database): void {
     }
     const current = matchingSchema(database);
     if (!current)
+      throw new StoreOpenError('store_incompatible', 'Store migration identity is invalid.');
+    const latest = supportedSchemas().at(-1)!;
+    for (const migration of latest.migrations.slice(current.migrations.length)) {
+      database.exec(migration.sql);
+      database.run('INSERT INTO schema_migration VALUES(?,?,?)', [
+        migration.id,
+        migration.checksum,
+        new Date().toISOString(),
+      ]);
+    }
+    if (matchingSchema(database)?.checksum !== latest.checksum)
       throw new StoreOpenError('store_incompatible', 'Store migration identity is invalid.');
     if (database.query('PRAGMA foreign_key_check').get())
       throw new StoreOpenError('store_incompatible', 'Store foreign keys are invalid.');
