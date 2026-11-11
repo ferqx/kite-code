@@ -20,10 +20,13 @@ for provenance rather than claimed to be transitively locked.
 
 `oracle` must produce reward 1. `nop` must produce reward 0 because its requested
 files are absent. The nop missing-artifact manifest entries are expected, not
-trial exceptions. Both must complete with zero exceptions. The checker requires
+trial exceptions. Its empty convention directory can be marked `ok` after a
+successful download or `empty` when mounted; the checker also requires no files
+in that directory and the verifier's missing-output diagnostics. Both must complete with zero exceptions. The checker requires
 actual results, completed phases, the official Docker backend, separate-verifier
 mode, aggregate/trial/reward-file agreement, artifact evidence, and distinct
-agent/verifier container starts from Docker daemon events. A zero process exit
+agent/verifier `main` container starts from Docker daemon events, matching the
+agent `__env` and verifier `__verifier__trial` project names. A zero process exit
 code alone is insufficient. The oracle's unconfigured agent-only file must not
 be visible to the verifier, as checked by the unmodified official verifier.
 

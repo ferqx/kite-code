@@ -57,7 +57,7 @@ network_mode = "no-network"
             "verifier_result": {"rewards": {"reward": 1}},
         }
         project = self.trial.name
-        self.events.write_text("\n".join(json.dumps({"Type": "container", "Action": "start", "Actor": {"ID": id_, "Attributes": {"com.docker.compose.project": name}}}) for id_, name in [("agent-container", project), ("verifier-container", project + "__verifier__trial")]) + "\n")
+        self.events.write_text("\n".join(json.dumps({"Type": "container", "Action": "start", "Actor": {"ID": id_, "Attributes": {"com.docker.compose.project": name, "com.docker.compose.service": "main"}}}) for id_, name in [("agent-container", project + "__env"), ("verifier-container", project + "__verifier__trial")]) + "\n")
         self.prepare_agent("oracle")
 
     def prepare_agent(self, agent):
@@ -72,6 +72,9 @@ network_mode = "no-network"
             {"source": "/logs/artifacts", "status": "ok" if agent == "oracle" else "empty"},
             {"source": "/tmp/configured-artifact.txt", "status": "ok" if agent == "oracle" else "failed"},
         ]))
+        if agent == "nop":
+            for artifact in ("logs/artifacts/answer.txt", "tmp/configured-artifact.txt"):
+                (self.trial / "artifacts" / artifact).unlink(missing_ok=True)
         if agent == "oracle":
             (self.trial / "artifacts/logs/artifacts/answer.txt").write_text("separate verifier ok\n")
             (self.trial / "artifacts/tmp/configured-artifact.txt").write_text("configured artifact ok\n")
@@ -87,6 +90,30 @@ network_mode = "no-network"
     def test_nop_pass_with_expected_missing_artifacts(self):
         self.prepare_agent("nop")
         self.assertEqual(self.evaluate("nop")["reward"], 0)
+
+    def test_nop_downloaded_empty_directory_is_valid(self):
+        self.prepare_agent("nop")
+        manifest_path = self.trial / "artifacts/manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest[0]["status"] = "ok"
+        manifest_path.write_text(json.dumps(manifest))
+        self.assertEqual(self.evaluate("nop")["reward"], 0)
+
+    def test_nop_unexpected_output_is_rejected(self):
+        self.prepare_agent("nop")
+        (self.trial / "artifacts/logs/artifacts/answer.txt").write_text("unexpected")
+        with self.assertRaises(InvalidResult):
+            self.evaluate("nop")
+
+    def test_sidecar_does_not_prove_main_container_execution(self):
+        self.events.write_text(self.events.read_text().replace('"main"', '"harbor-docker-egress-control-sidecar"'))
+        with self.assertRaises(InvalidResult):
+            self.evaluate()
+
+    def test_wrong_agent_project_is_rejected(self):
+        self.events.write_text(self.events.read_text().replace("__env", "__other"))
+        with self.assertRaises(InvalidResult):
+            self.evaluate()
 
     def test_nonzero_process_rejected(self):
         with self.assertRaises(InvalidResult):

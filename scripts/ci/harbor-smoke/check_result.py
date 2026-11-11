@@ -98,7 +98,11 @@ def check(job_dir, agent, process_exit_code, task_dir, docker_events):
         require((artifacts / "logs/artifacts/answer.txt").read_text() == "separate verifier ok\n", "wrong answer artifact")
         require((artifacts / "tmp/configured-artifact.txt").read_text() == "configured artifact ok\n", "wrong configured artifact")
     else:
-        require(statuses.get("/logs/artifacts") == "empty", "unexpected nop convention artifact")
+        # Downloading an empty directory reports "ok"; a mounted empty directory
+        # reports "empty". Actual missing output, not this label, is decisive.
+        require(statuses.get("/logs/artifacts") in ("ok", "empty"), "nop convention directory was not collected")
+        require(not any((artifacts / "logs/artifacts").rglob("*")), "nop unexpectedly produced convention artifacts")
+        require(not (artifacts / "tmp/configured-artifact.txt").exists(), "nop unexpectedly exported a configured artifact")
         require(statuses.get("/tmp/configured-artifact.txt") == "failed", "nop unexpectedly produced configured artifact")
         stdout = (paths[0].parent / "verifier/test-stdout.txt").read_text()
         require("missing /logs/artifacts/answer.txt" in stdout and "missing configured artifact" in stdout, "missing negative-control verifier evidence")
@@ -111,11 +115,13 @@ def check(job_dir, agent, process_exit_code, task_dir, docker_events):
         event = json.loads(line)
         if event.get("Type") == "container" and event.get("Action") == "start":
             actor = event["Actor"]
+            if actor["Attributes"].get("com.docker.compose.service") != "main":
+                continue
             label = actor["Attributes"].get("com.docker.compose.project")
             starts.setdefault(label, set()).add(actor["ID"])
-    agent_ids = starts.get(project, set())
+    agent_ids = starts.get(project + "__env", set())
     verifier_ids = starts.get(project + "__verifier__trial", set())
-    require(bool(agent_ids) and bool(verifier_ids) and agent_ids.isdisjoint(verifier_ids), "missing distinct agent/verifier Docker container starts")
+    require(len(agent_ids) == 1 and len(verifier_ids) == 1 and agent_ids.isdisjoint(verifier_ids), "missing distinct agent/verifier Docker container starts")
     return {
         "status": "passed",
         "agent": agent,
