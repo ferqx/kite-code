@@ -1,0 +1,117 @@
+name: Harbor Docker isolation smoke
+
+# Dedicated, opt-in trial branch only. No schedule, pull_request, model, or secret.
+on:
+  push:
+    branches: [ci/harbor-isolation-smoke-20261111]
+    paths:
+      - .github/workflows/harbor-isolation-smoke.yml
+      - scripts/ci/harbor-smoke/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harbor-isolation-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  separate-verifier:
+    if: github.repository == 'ferqx/kite-code' && github.ref == 'refs/heads/ci/harbor-isolation-smoke-20261111'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        agent: [oracle, nop]
+    env:
+      HARBOR_SOURCE_SHA: fdba28fc411e47e8765420a1a063b4918fce3def
+      HARBOR_VERSION: 0.25.0
+      EVIDENCE: dist/harbor-isolation/${{ matrix.agent }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check out the pinned official Harbor example
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: harbor-framework/harbor
+          ref: fdba28fc411e47e8765420a1a063b4918fce3def
+          path: .harbor-smoke-source
+          persist-credentials: false
+      - name: Record inputs and require a working Docker engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE"
+          test "$(git -C .harbor-smoke-source rev-parse HEAD)" = "$HARBOR_SOURCE_SHA"
+          {
+            printf 'kite_commit=%s\nharbor_commit=%s\nharbor_version=%s\n' "$GITHUB_SHA" "$HARBOR_SOURCE_SHA" "$HARBOR_VERSION"
+            printf 'run_id=%s\nrun_attempt=%s\nrunner_os=%s\nrunner_arch=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RUNNER_OS" "$RUNNER_ARCH"
+            python3 --version
+            uname -a
+            docker version
+            docker compose version
+            docker info
+          } 2>&1 | tee "$EVIDENCE/preflight.log"
+          find .harbor-smoke-source/examples/tasks/separate-verifier-environment -type f -print0 | sort -z | xargs -0 sha256sum > "$EVIDENCE/task-sha256.txt"
+      - name: Install the pinned Harbor release without model credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/harbor-smoke-venv"
+          "$RUNNER_TEMP/harbor-smoke-venv/bin/python" -m pip install --disable-pip-version-check "harbor==$HARBOR_VERSION" 2>&1 | tee "$EVIDENCE/install.log"
+          "$RUNNER_TEMP/harbor-smoke-venv/bin/python" -c "import importlib.metadata; assert importlib.metadata.version('harbor') == '0.25.0'"
+          "$RUNNER_TEMP/harbor-smoke-venv/bin/python" -m pip freeze > "$EVIDENCE/packages.txt"
+          echo "$RUNNER_TEMP/harbor-smoke-venv/bin" >> "$GITHUB_PATH"
+      - name: Test the fail-closed result checker
+        run: python3 -m unittest discover -s scripts/ci/harbor-smoke -p 'test_*.py' -v
+      - name: Run exactly one task and inspect its actual result
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker events --since "$(date +%s)" --filter type=container --format '{{json .}}' > "$EVIDENCE/docker-events.jsonl" 2> "$EVIDENCE/docker-events.stderr" &
+          events_pid=$!
+          trap 'kill "$events_pid"' EXIT
+          set +e
+          timeout --signal=TERM --kill-after=30s 15m harbor run \
+            --path .harbor-smoke-source/examples/tasks/separate-verifier-environment \
+            --agent '${{ matrix.agent }}' --env docker \
+            --n-concurrent 1 --n-attempts 1 --max-retries 0 \
+            --job-name '${{ matrix.agent }}' --jobs-dir "$EVIDENCE/jobs" \
+            > "$EVIDENCE/harbor.log" 2>&1
+          code=$?
+          set -e
+          sleep 1
+          kill "$events_pid"
+          if wait "$events_pid"; then
+            echo "Docker event stream ended unexpectedly without its termination signal"
+            exit 1
+          else
+            events_status=$?
+            test "$events_status" -eq 143
+          fi
+          trap - EXIT
+          printf '%s\n' "$code" > "$EVIDENCE/process-exit-code.txt"
+          cat "$EVIDENCE/harbor.log"
+          python3 scripts/ci/harbor-smoke/check_result.py \
+            --job-dir "$EVIDENCE/jobs/${{ matrix.agent }}" \
+            --agent '${{ matrix.agent }}' --process-exit-code "$code" \
+            --task-dir .harbor-smoke-source/examples/tasks/separate-verifier-environment \
+            --docker-events "$EVIDENCE/docker-events.jsonl" \
+            --output "$EVIDENCE/check.json"
+      - name: Record resolved Docker images
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$EVIDENCE"
+          docker image ls --digests --no-trunc > "$EVIDENCE/docker-images.txt" 2>&1
+      - name: Retain raw logs, task artifacts, results and strict checks
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: harbor-isolation-${{ matrix.agent }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/harbor-isolation/${{ matrix.agent }}/
+          if-no-files-found: error
+          retention-days: 7
