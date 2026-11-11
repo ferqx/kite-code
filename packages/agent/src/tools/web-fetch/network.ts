@@ -31,11 +31,32 @@ export interface WebAdmissionFacts {
   readonly addresses: readonly { address: string; family: 4 | 6 }[];
   readonly admissionRevision: string;
 }
+export type WebFetchStage =
+  | 'prepare'
+  | 'proxy_configuration'
+  | 'queue'
+  | 'admission'
+  | 'system_dns'
+  | 'https_dns'
+  | 'destination_check'
+  | 'audit'
+  | 'request'
+  | 'connect'
+  | 'robots'
+  | 'response_headers'
+  | 'response_body'
+  | 'extract'
+  | 'artifact';
+interface WebHopOptions {
+  signal: AbortSignal;
+  beforeConnect?: (facts: WebAdmissionFacts) => Promise<void>;
+  onStage?: (stage: WebFetchStage) => void;
+  /** Starts the initial robots transfer budget after admission and resolution. */
+  startTransport?: () => AbortSignal;
+}
 export interface WebNetworkPort {
-  request(
-    binding: WebHop,
-    options: { signal: AbortSignal; beforeConnect?: (facts: WebAdmissionFacts) => Promise<void> },
-  ): Promise<WebResponse>;
+  request(binding: WebHop, options: WebHopOptions): Promise<WebResponse>;
+  openRequest?(): Pick<WebNetworkPort, 'request'>;
 }
 export type WebNetworkPolicy =
   | { mode: 'off' | 'public' }
@@ -57,6 +78,8 @@ export interface PinnedWebNetworkOptions {
   readonly dnsOverHttps?: WebDnsSettings;
   /** Default Service opts in; low-level custom hosts retain their original DNS policy. */
   readonly recoverFakeIp?: boolean;
+  /** Re-resolve a system Teredo answer when the target and resolver use the same proxy. */
+  readonly recoverProxiedTeredoDns?: boolean;
   /** Trusted host CA, including isolated TLS fixtures. Certificate and hostname checks stay on. */
   readonly certificateAuthority?: string;
 }
@@ -76,6 +99,10 @@ export function webUrl(value: string): URL {
     throw new WebFetchError('web_url_denied');
   url.hash = '';
   return url;
+}
+// 2001::/32 is a transition prefix, not a routable destination for this tool.
+function isTeredoAddress(address: string): boolean {
+  return isIP(address) === 6 && /^2001:(?::|0{1,4}:)/.test(address);
 }
 function publicAddress(address: string, loopback: boolean) {
   if (isIP(address) === 4) {
@@ -101,6 +128,7 @@ function publicAddress(address: string, loopback: boolean) {
     ].some(([base, bits]) => inRange(base!, bits!));
   }
   if (isIP(address) === 6) {
+    if (address.includes('%')) return false;
     const canonical = new URL(`http://[${address}]/`).hostname.slice(1, -1).toLowerCase();
     if (canonical === '::1') return loopback;
     // Reject mapped IPv4, transition, link-local, metadata, special-use and non-global ranges.
@@ -167,117 +195,173 @@ export function createPinnedWebNetworkPort(options: PinnedWebNetworkOptions): We
       })));
   const admit = options.admitHop,
     loopback = options.allowLoopbackForTests === true;
-  return {
-    async request(input, { signal, beforeConnect }) {
-      const binding = Object.freeze(structuredClone(input));
-      const url = webUrl(binding.url),
-        hostname = url.hostname.replace(/^\[|\]$/g, '');
+  type ResolvedAddresses = WebAdmissionFacts['addresses'];
+  async function resolveTarget(
+    url: URL,
+    hostname: string,
+    literalFamily: number,
+    signal: AbortSignal,
+    onStage: WebHopOptions['onStage'],
+  ): Promise<ResolvedAddresses> {
+    let addresses: readonly { address: string; family: 4 | 6 }[];
+    onStage?.('system_dns');
+    try {
+      addresses = literalFamily
+        ? [{ address: hostname, family: literalFamily as 4 | 6 }]
+        : options.dnsOverHttps
+          ? []
+          : await abortable(resolve(hostname), signal);
+    } catch {
       signal.throwIfAborted();
-      if (
-        !binding.executionId ||
-        !binding.originStoreId ||
-        !binding.sessionId ||
-        policy.mode === 'off' ||
-        (policy.mode === 'allowlist' &&
-          !policy.hosts.some((host) => host.toLowerCase() === hostname.toLowerCase()))
-      )
-        throw new WebFetchError('web_network_denied');
-      let admission: { allowed: boolean; revision: string };
-      try {
-        admission = await abortable(Promise.resolve(admit(binding, { signal })), signal);
-      } catch {
-        signal.throwIfAborted();
-        throw new WebFetchError('web_network_denied');
-      }
-      if (!admission.allowed || !admission.revision || admission.revision.length > 256)
-        throw new WebFetchError('web_network_denied');
-      signal.throwIfAborted();
-      let addresses: readonly { address: string; family: 4 | 6 }[];
-      try {
-        addresses = isIP(hostname)
-          ? [{ address: hostname, family: isIP(hostname) as 4 | 6 }]
-          : options.dnsOverHttps
-            ? []
-            : await abortable(resolve(hostname), signal);
-      } catch {
-        signal.throwIfAborted();
-        throw new WebFetchError('web_dns_unavailable');
-      }
-      signal.throwIfAborted();
-      if (
-        !isIP(hostname) &&
-        (options.dnsOverHttps ||
-          (options.recoverFakeIp &&
-            addresses.length > 0 &&
-            addresses.length <= 64 &&
-            addresses.every(
-              (value) => isIP(value.address) === value.family && fakeIp(value.address),
-            )))
-      ) {
-        addresses = await resolveWebDns(hostname, async (body) => {
-          const response = await requestPinned(
-            dnsUrl,
-            dns.addresses[0]!,
-            signal,
-            options.proxy,
-            options.certificateAuthority,
-            {
-              method: 'POST',
-              headers: {
-                accept: 'application/dns-message',
-                'content-type': 'application/dns-message',
-                'content-length': String(body.byteLength),
-              },
-              body,
-            },
-          );
-          if (
-            response.status !== 200 ||
-            response.contentType.split(';')[0]!.trim().toLowerCase() !== 'application/dns-message'
-          ) {
-            await response.body.cancel();
-            throw new WebFetchError('web_dns_unavailable');
-          }
-          const reader = response.body.getReader(),
-            chunks: Uint8Array[] = [];
-          let size = 0;
-          try {
-            for (;;) {
-              const next = await reader.read();
-              if (next.done) break;
-              size += next.value.byteLength;
-              if (size > 65535) throw new WebFetchError('web_dns_unavailable');
-              chunks.push(next.value);
-            }
-            return Buffer.concat(chunks);
-          } finally {
-            await reader.cancel().catch(() => {});
-            reader.releaseLock();
-          }
-        });
-      }
-      if (
-        !addresses.length ||
-        addresses.length > 64 ||
-        addresses.some((x) => isIP(x.address) !== x.family || !publicAddress(x.address, loopback))
-      )
-        throw new WebFetchError('web_destination_denied');
-      const captured = Object.freeze(addresses.map((value) => Object.freeze({ ...value }))),
-        pinned = captured[0]!;
-      if (beforeConnect)
-        await abortable(
-          beforeConnect({ addresses: captured, admissionRevision: admission.revision }),
+      throw new WebFetchError('web_dns_unavailable');
+    }
+    signal.throwIfAborted();
+    const validSystemAnswer =
+      !literalFamily &&
+      addresses.length > 0 &&
+      addresses.length <= 64 &&
+      addresses.every(({ address, family }) => !address.includes('%') && isIP(address) === family);
+    const gateway =
+      validSystemAnswer && options.recoverProxiedTeredoDns
+        ? selectedProxy(options.proxy, url)
+        : undefined;
+    if (
+      !literalFamily &&
+      (options.dnsOverHttps ||
+        (options.recoverFakeIp && validSystemAnswer && addresses.every((x) => fakeIp(x.address))) ||
+        (gateway &&
+          selectedProxy(options.proxy, dnsUrl) === gateway &&
+          addresses.some((x) => isTeredoAddress(x.address)) &&
+          addresses.every((x) => isTeredoAddress(x.address) || publicAddress(x.address, false))))
+    ) {
+      onStage?.('https_dns');
+      addresses = await resolveWebDns(hostname, async (body) => {
+        const response = await requestPinned(
+          dnsUrl,
+          dns.addresses[0]!,
           signal,
+          options.proxy,
+          options.certificateAuthority,
+          {
+            method: 'POST',
+            headers: {
+              accept: 'application/dns-message',
+              'content-type': 'application/dns-message',
+              'content-length': String(body.byteLength),
+            },
+            body,
+          },
         );
+        if (
+          response.status !== 200 ||
+          response.contentType.split(';')[0]!.trim().toLowerCase() !== 'application/dns-message'
+        ) {
+          await response.body.cancel();
+          throw new WebFetchError('web_dns_unavailable');
+        }
+        const reader = response.body.getReader(),
+          chunks: Uint8Array[] = [];
+        let size = 0;
+        try {
+          for (;;) {
+            const next = await reader.read();
+            if (next.done) break;
+            size += next.value.byteLength;
+            if (size > 65535) throw new WebFetchError('web_dns_unavailable');
+            chunks.push(next.value);
+          }
+          return Buffer.concat(chunks);
+        } finally {
+          await reader.cancel().catch(() => {});
+          reader.releaseLock();
+        }
+      });
+    }
+    onStage?.('destination_check');
+    if (
+      !addresses.length ||
+      addresses.length > 64 ||
+      addresses.some((x) => isIP(x.address) !== x.family || !publicAddress(x.address, loopback))
+    )
+      throw new WebFetchError('web_destination_denied');
+    return Object.freeze(addresses.map((value) => Object.freeze({ ...value })));
+  }
+  interface RequestScope {
+    initial?: { key: string; addresses: ResolvedAddresses };
+  }
+  async function request(
+    input: WebHop,
+    { signal, beforeConnect, onStage, startTransport }: WebHopOptions,
+    scope?: RequestScope,
+  ): Promise<WebResponse> {
+    const binding = Object.freeze(structuredClone(input));
+    const url = webUrl(binding.url),
+      hostname = url.hostname.replace(/^\[|\]$/g, ''),
+      literalFamily = isIP(hostname);
+    onStage?.('admission');
+    signal.throwIfAborted();
+    if (
+      !binding.executionId ||
+      !binding.originStoreId ||
+      !binding.sessionId ||
+      policy.mode === 'off' ||
+      (policy.mode === 'allowlist' &&
+        !policy.hosts.some((host) => host.toLowerCase() === hostname.toLowerCase()))
+    )
+      throw new WebFetchError('web_network_denied');
+    let admission: { allowed: boolean; revision: string };
+    try {
+      admission = await abortable(Promise.resolve(admit(binding, { signal })), signal);
+    } catch {
       signal.throwIfAborted();
-      const response = await requestPinned(
-        url,
-        pinned.address,
+      throw new WebFetchError('web_network_denied');
+    }
+    if (!admission.allowed || !admission.revision || admission.revision.length > 256)
+      throw new WebFetchError('web_network_denied');
+    signal.throwIfAborted();
+    const key =
+      scope && binding.hop === 0 && url.origin === webUrl(binding.originalUrl).origin
+        ? JSON.stringify([
+            binding.originalUrl,
+            binding.executionId,
+            binding.sessionId,
+            binding.originStoreId,
+          ])
+        : undefined;
+    const previous = scope?.initial;
+    let captured: ResolvedAddresses;
+    if (scope && key && binding.resource === 'page' && previous?.key === key) {
+      delete scope.initial;
+      captured = previous.addresses;
+    } else {
+      captured = await resolveTarget(url, hostname, literalFamily, signal, onStage);
+      if (scope && key && binding.resource === 'robots')
+        scope.initial = { key, addresses: captured };
+    }
+    signal.throwIfAborted();
+    if (startTransport) signal = startTransport();
+    onStage?.('audit');
+    if (beforeConnect)
+      await abortable(
+        beforeConnect({ addresses: captured, admissionRevision: admission.revision }),
         signal,
-        options.proxy,
-        options.certificateAuthority,
       );
-      return { ...response, addresses: captured, admissionRevision: admission.revision };
+    signal.throwIfAborted();
+    onStage?.('connect');
+    const response = await requestPinned(
+      url,
+      captured[0]!.address,
+      signal,
+      options.proxy,
+      options.certificateAuthority,
+    );
+    return { ...response, addresses: captured, admissionRevision: admission.revision };
+  }
+  return {
+    request,
+    openRequest() {
+      const scope: RequestScope = {};
+      return { request: (input, options) => request(input, options, scope) };
     },
   };
 }

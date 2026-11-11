@@ -26,7 +26,7 @@ Provider 凭据通过实际支持的配置和认证入口维护，不在手册�
 
 ## 网页网络配置
 
-通常无需配置，`web_fetch` 默认自动适配[系统代理与 Fake-IP DNS](tools-and-approvals.md)。网络选择在每轮运行开始时固定；更改系统或环境代理后，新运行采用新设置，活动运行继续使用原设置。冷恢复发现出口或解析配置变化时报告 `recovery_configuration_changed`，需恢复原设置或开始新任务。
+通常无需配置，`web_fetch` 默认自动适配[系统代理、Fake-IP 和特定异常 DNS 响应](tools-and-approvals.md)。网络选择在每轮运行开始时固定；更改系统或环境代理后，新运行采用新设置，活动运行继续使用原设置。冷恢复发现出口或解析策略变化时报告 `recovery_configuration_changed`，需恢复原设置或开始新任务。升级前封存的代理 Run 若没有新的自动复核策略，需开始新任务。
 
 特殊环境可在用户级 `~/.kite-code/kite-code.jsonc` 添加 `webFetch`。项目 `kite-agent.jsonc`、模型工具参数和网页内容不能选择代理、DNS 或安全例外。以下为备用配置，省略 `webFetch` 或设置 `"proxy": "auto"` 即恢复自动选择：
 

@@ -663,7 +663,11 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 普通默认宿主在选择含 `web_fetch` 的 Run 时，通过 [web-fetch-proxy.ts](src/web-fetch-proxy.ts)封存当前 HTTP(S)/NO_PROXY 环境（小写优先），无环境代理时读取 Windows HKCU Internet Settings 或 macOS `scutil --proxy` 的手动代理，Linux 使用环境变量；没有登记则直连。`ALL_PROXY`/`all_proxy` 不参与发现，只有这些变量的环境需显式提供受支持的 HTTP(S) 入口。系统查询使用固定程序和参数、隐藏窗口、1500ms/64KiB 上限，不执行 PAC/WPAD 或扫描端口。仅用户级 JSONC 可通过 `webFetch.proxy` 选择 auto/direct/无需认证 HTTP(S) 入口，通过 `webFetch.dns` 选择可信 HTTPS wire DNS 服务及公网 bootstrap IP；项目声明明确拒绝。用户配置格式归[手册](../../docs/handbook/features/models-and-configuration.md#网页网络配置)。自动设置不支持或读取失败封存为网页工具的准确失败，不妨碍文件任务；macOS 明确启用 SOCKS 时（包括同时登记 HTTP/HTTPS 的混合设置）报告 `web_proxy_protocol_unsupported`，不把未支持的出口当成直连。手动配置错误明确阻止绑定，不丢失错误码。
 
-每个 Run 封存非秘密 `snapshot.web.transport`（实际代理、绕过表、DNS 设置、自动 Fake-IP 恢复和 resolver 版本），变更仅影响后续 Run。`snapshot.web.defaultTimeoutMs` 从同一工具工厂取得实际默认总时限60000毫秒，显式调用仍可指定 `timeout_ms`；取消不等待时限到期。冷恢复在凭据读取、模型及 Tool 派发前比较完整 `snapshot.web`；旧默认快照不自动迁移，未保存该默认值的旧 Run 也不会悄悄采用新时限。显式宿主不选择自动传输时保留原传输结构，默认时限独立封存。相同当前配置复用最近工厂及其 robots cache/队列，网络变化后建立新工厂，已有 Run 保留原工厂；不建立无限历史配置缓存。解析 scope 仍归原 binding lease。导入、元数据工厂和 model-only 绑定不发现系统代理、不解析 DNS或建立 socket；登记代理的读取不是目标网络 I/O，目标连接仍只在原 Tool 已批准派发后发生。代理凭据、页面输入和代理 header 不能成为网络权威或 SSRF 例外。
+默认宿主有 HTTP(S) 代理且未显式选择 DNS 时，封存 `recoverProxiedTeredoDns: true`，由 Agent 按每跳的实际代理选择和系统候选决定是否使用 HTTPS DNS 复核。直接连接、绕过名单和显式 DNS 继续使用各自选择的解析路径；显式宿主可独立选择是否启用。
+
+固定地址 Web port 封存 `snapshot.web.initialResolutionReuse`，将同一次调用的初始 robots 与正文解析复用及传输时限绑定到该 Run。每个资源请求独立准入和审计。缺少该字段的旧快照按完整 Web 配置比较拒绝冷恢复。
+
+每个 Run 封存非秘密 `snapshot.web.transport`（实际代理、绕过表、DNS 设置、自动复核策略和 resolver 版本），变更仅影响后续 Run。`snapshot.web.defaultTimeoutMs` 从同一工具工厂取得实际默认总时限60000毫秒，显式调用仍可指定 `timeout_ms`；取消不等待时限到期。冷恢复在凭据读取、模型及 Tool 派发前比较完整 `snapshot.web`；旧默认快照不自动迁移，未保存该默认值或应启用的代理复核策略时报告 `recovery_configuration_changed`。显式宿主不选择自动传输时保留原传输结构，默认时限独立封存。相同当前配置复用最近工厂及其 robots cache/队列，网络变化后建立新工厂，已有 Run 保留原工厂；不建立无限历史配置缓存。解析 scope 仍归原 binding lease。导入、元数据工厂和 model-only 绑定不发现系统代理、不解析 DNS或建立 socket；登记代理的读取不是目标网络 I/O，目标连接仍只在原 Tool 已批准派发后发生。代理凭据、页面输入和代理 header 不能成为网络权威或 SSRF 例外。
 
 [代理选择测试](test/isolated/web-fetch-configuration.test.ts)覆盖环境优先级、系统手动设置、PAC/协议/认证拒绝和覆盖；macOS SOCKS 单独启用及混合配置的合成夹具核准确失败封存、Tool 执行结果和零准入/DNS/审计，不读取或修改真实系统设置，不授 macOS 实机资格。[默认 Web 集成测试](test/isolated/default-web-fetch.test.ts)经实际 SQLite/Core、HTTP Service、普通模型 Tool、CONNECT 与完整 Artifact 核零用户代理配置、准确审计、下一 Run 变更、冷恢复零 Provider/Store 效果及项目越权拒绝。底层 IP/TLS/DoH/取消覆盖归 [Web Fetch owner](../../packages/agent/src/tools/web-fetch/README.md)。
 

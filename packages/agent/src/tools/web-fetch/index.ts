@@ -4,10 +4,12 @@ import { createPassiveWebExtractor, type WebExtractor } from './extraction';
 import {
   parsingLimit,
   WebFetchError,
+  type WebFetchStage,
   type WebNetworkPort,
   type WebResponse,
   webUrl,
 } from './network';
+import { parseRobots, robotsAllows } from './robots';
 
 export {
   createPassiveWebExtractor,
@@ -140,7 +142,7 @@ export function createWebFetchBindingFactory(options: {
 }
 function webState() {
   return {
-    robots: new Map<string, { disallowed: string[]; at: number }>(),
+    robots: new Map<string, { rules: ReturnType<typeof parseRobots>; at: number }>(),
     queues: new Map<string, Promise<void>>(),
   };
 }
@@ -253,16 +255,21 @@ function createWebFetchDefinition(
           const execution = await context.getExecution(context.executionId);
           if (!execution?.originStoreId)
             return { outcome: 'failed', content: 'web_execution_unavailable' };
+          const scopedNetwork = network.openRequest?.();
+          const requestNetwork = scopedNetwork ?? network;
+          let stage: WebFetchStage = 'prepare';
+          let resource: 'page' | 'robots' = 'page';
           const deadline = timeLimit(context.signal, Number(input.timeout_ms ?? defaultTimeoutMs));
           async function get(
             url: string,
             resource: 'page' | 'robots',
             hop: number,
             signal: AbortSignal,
+            startTransport?: () => AbortSignal,
           ) {
             signal.throwIfAborted();
             const parsed = webUrl(url);
-            return network.request(
+            return requestNetwork.request(
               {
                 url,
                 originalUrl: initial.href,
@@ -274,6 +281,17 @@ function createWebFetchDefinition(
               },
               {
                 signal,
+                onStage: (value) => {
+                  stage = value;
+                },
+                ...(startTransport
+                  ? {
+                      startTransport: () => {
+                        signal = startTransport();
+                        return signal;
+                      },
+                    }
+                  : {}),
                 beforeConnect: async (facts) => {
                   signal.throwIfAborted();
                   await context.records.write({
@@ -296,19 +314,35 @@ function createWebFetchDefinition(
           }
           async function follow(
             url: string,
-            resource: 'page' | 'robots',
+            targetResource: 'page' | 'robots',
             signal: AbortSignal,
             maximum: number,
+            startTransport?: () => AbortSignal,
           ) {
             const seen = new Set<string>();
             let hop = 0;
+            resource = targetResource;
             for (;;) {
               signal.throwIfAborted();
               const parsed = webUrl(url);
               url = parsed.href;
+              stage = resource === 'robots' ? 'robots' : 'request';
               if (seen.has(url)) throw new WebFetchError('web_redirect_loop');
               seen.add(url);
-              const response = await get(url, resource, hop++, signal);
+              const response = await get(
+                url,
+                resource,
+                hop,
+                signal,
+                hop === 0 && startTransport
+                  ? () => {
+                      signal = startTransport();
+                      return signal;
+                    }
+                  : undefined,
+              );
+              hop++;
+              stage = resource === 'robots' ? 'robots' : 'response_headers';
               try {
                 if ([301, 302, 303, 307, 308].includes(response.status) && response.location) {
                   const next = webUrl(new URL(response.location, url).href).href;
@@ -318,6 +352,7 @@ function createWebFetchDefinition(
                 }
                 if (response.status < 200 || response.status >= 300)
                   throw new WebHttpError(response.status);
+                if (resource === 'page') stage = 'response_body';
                 return {
                   url,
                   contentType: response.contentType,
@@ -335,44 +370,49 @@ function createWebFetchDefinition(
               deadline.signal,
             );
             deadline.signal.throwIfAborted();
+            stage = 'queue';
             await throttle(initial.origin, deadline.signal);
             const cached = robots.get(initial.origin);
-            let rules = cached && Date.now() - cached.at < 300000 ? cached.disallowed : undefined;
+            let rules = cached && Date.now() - cached.at < 300000 ? cached.rules : undefined;
             if (!rules) {
-              const robotTime = timeLimit(deadline.signal, 3000);
+              let robotTime: ReturnType<typeof timeLimit> | undefined;
+              const startRobots = () => {
+                robotTime ??= timeLimit(deadline.signal, 3000);
+                return robotTime.signal;
+              };
               try {
                 const body = (
                   await follow(
                     new URL('/robots.txt', initial).href,
                     'robots',
-                    robotTime.signal,
+                    scopedNetwork ? deadline.signal : startRobots(),
                     500000,
+                    scopedNetwork ? startRobots : undefined,
                   )
                 ).body;
-                rules = [];
-                let applies = true;
-                for (const line of body.split(/\r?\n/)) {
-                  const content = line.split('#')[0]!.trim();
-                  const agent = /^user-agent\s*:\s*(.*)$/i.exec(content);
-                  if (agent)
-                    applies = ['*', 'kitecode', 'kitecode/1.0 webfetchbot'].includes(
-                      agent[1]!.trim().toLowerCase(),
-                    );
-                  const rule = /^disallow\s*:\s*(.*)$/i.exec(content);
-                  if (applies && rule?.[1]?.trim()) rules.push(rule[1].trim());
-                }
+                rules = parseRobots(body);
               } catch {
                 deadline.signal.throwIfAborted();
                 rules = [];
               } finally {
-                robotTime.close();
+                robotTime?.close();
               }
               if (robots.size >= 200) robots.delete(robots.keys().next().value!);
-              robots.set(initial.origin, { disallowed: rules, at: Date.now() });
+              robots.set(initial.origin, { rules, at: Date.now() });
             }
-            if (rules.some((rule) => initial.pathname.startsWith(rule)))
-              throw new WebFetchError('web_robots_denied');
+            if (!robotsAllows(rules, initial))
+              return {
+                outcome: 'failed',
+                content: `The robots.txt policy for ${initial.origin} does not permit fetching this page. The page itself was not requested. Respect the site's robots policy.`,
+                details: {
+                  code: 'web_robots_denied',
+                  origin: initial.origin,
+                  stage: 'robots',
+                  resource: 'robots',
+                },
+              };
             const result = await follow(initial.href, 'page', deadline.signal, parsingLimit);
+            stage = 'extract';
             const extracted = /text\/html|application\/xhtml\+xml/i.test(result.contentType)
               ? await extractor.extract(
                   { html: result.body, url: result.url },
@@ -394,6 +434,7 @@ function createWebFetchDefinition(
               characters: content.length,
             };
             if (new TextEncoder().encode(content).byteLength > 64 * 1024) {
+              stage = 'artifact';
               if (!context.artifacts) throw new WebFetchError('web_artifact_unavailable');
               const reference = await context.artifacts.publish({
                 key: 'web-body',
@@ -421,9 +462,14 @@ function createWebFetchDefinition(
               return {
                 outcome: 'failed',
                 content: `The web request received HTTP ${known.status}. No successful page content was returned. This response does not grant permission to retry or change the target.`,
-                details: { code: known.code, httpStatus: known.status },
+                details: { code: known.code, httpStatus: known.status, stage, resource },
               };
-            if (known instanceof WebFetchError) return { outcome: 'failed', content: known.code };
+            if (known instanceof WebFetchError)
+              return {
+                outcome: 'failed',
+                content: known.code,
+                details: { code: known.code, stage, resource },
+              };
             throw error;
           } finally {
             deadline.close();

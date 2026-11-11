@@ -10,6 +10,10 @@ Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desk
 
 默认 Service 的模型代理选择归 [Service owner](../../apps/service/README.md)，不下沉到 AI／Core 或客户端。新 Run 的 `snapshot.modelTransport.digest` 只绑定宿主代理环境与系统选择的摘要；恢复前变化拒绝，旧无字段记录不追补。代理传输不改变模型请求、权限、工具身份、未知结果或零重放边界，也不把模型自动代理推广到 MCP 网络准入。
 
+普通 `web_fetch` 的默认代理 DNS 复核策略封存于 `snapshot.web.transport`，冷恢复在凭据和派发前核对。由 Agent 对已授权的单跳确认目标与解析器选中同一代理，再按 [Web owner](../../packages/agent/src/tools/web-fetch/README.md) 的候选规则复核；DNS 服务只取得域名，目标 socket 仍依赖新响应的全候选公网检查与原持久审计。
+
+Web 初始 DNS 复用只在一个 Tool Execution 内将已验证候选从同源 robots 交给正文初始请求，二者各自核准入、取消和 socket 前持久审计。重定向重新解析；Service 通过原 Web 快照核对新运行语义和冷恢复。
+
 模型绑定在首次请求时创建独立 `Bun.FetchSession`，普通 Run、标题 model-only 绑定和模型目录查询沿原 owner 收尾关闭空闲池；关闭封住该绑定的新请求并复用原清理结果。原 AbortSignal 继续负责活跃请求取消，连接池关闭不冒充业务取消、成功或完整进程退出。代理选择、摘要字节和恢复拒绝仍用原规则；不共享其他绑定的连接，不因连接失败改出口或重放。具体接线与真实本地网络回归归[Service owner](../../apps/service/README.md#模型连接池与原取消恢复边界)。
 
 默认SDK模型请求与传输失败由[AI边界](../../packages/ai/README.md)提供重连分类，明确HTTP401／403认证或权限拒绝除外；未知网络错误不因缺少系统code而退出重连路径。Runtime仍必须核原Model Execution失败、关闭及来源资格，并限制同串故障最多5次重连；此分类不赋予客户端重发权，不把取消、本地历史校验、未知效果或未确认关闭转换为可重试证明，协议与持久格式保持。

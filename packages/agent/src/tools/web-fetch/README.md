@@ -14,13 +14,19 @@
 
 `proxy` 是宿主已选定的 HTTP/HTTPS 入口与 `noProxy` 绕过表；低层 port 自身不读取环境或发现系统设置。HTTP/HTTPS 目标均通过 CONNECT 连接已验证的字面 IP，代理不能重新解析目标域名；原 Host、TLS SNI、证书链与主机名检查保留，HTTPS 代理本身也校验证书。仅支持无需认证的 HTTP/HTTPS 代理，拒绝 user-info、路径、查询与片段；不转发 Proxy-Authorization，不跟随 CONNECT 重定向，不在代理失败后直连。每次连接有独立 agent，关闭 ambient proxy；握手、响应体和取消均归原请求，不取消兄弟请求。可信 `certificateAuthority` 可提供所属 CA，证书/名称校验始终开启；该选项不接受 JSONC、模型或网页输入。
 
-`recoverFakeIp` 默认关闭，正式默认 Service 显式开启。仅非字面主机且系统 DNS 的 1–64 项有效候选全部属于 `198.18.0.0/15` 或 `2001:2::/48` 时，使用固定 Cloudflare HTTPS DNS wire POST（`cloudflare-dns.com/dns-query`，公网 bootstrap IP）恢复真实地址；混合、私网、literal Fake-IP 或解析失败不借此放行。可信 `dnsOverHttps` 可选择另一 HTTPS endpoint 和 1–8 个公网 bootstrap IP，显式选择时跳过系统 DNS。当前连接固定使用第一个 bootstrap 地址，不重新解析 endpoint；标准 wire A/AAAA 顺序查询并检查 transaction ID、问题名/类型、边界、压缩及 CNAME 环，65,535 字节上限，不跟随 DNS HTTP 跳转。解析 endpoint 走同一已选代理/绕过规则，只发送目标域名；所有真实结果继续执行原全候选公网检查，然后才记录目标审计并连接。失败和取消不改用未验证的系统结果。
+`recoverFakeIp` 默认关闭，正式默认 Service 显式开启。仅非字面主机且系统 DNS 的 1–64 项有效候选全部属于 `198.18.0.0/15` 或 `2001:2::/48` 时，使用固定 Cloudflare HTTPS DNS wire POST（`cloudflare-dns.com/dns-query`，公网 bootstrap IP）恢复真实地址。另有默认 Service 选择的 `recoverProxiedTeredoDns`，只在有效系统候选含 `2001::/32` 且其余地址均为公网，以及当前目标与默认 DNS 服务经代理选择后命中同一个入口时触发复核。该分支保留两者的 `NO_PROXY` 和分协议出口选择；其他非公网候选、字面地址与系统解析失败均不触发复核。
+
+可信 `dnsOverHttps` 可选择另一 HTTPS endpoint 和 1–8 个公网 bootstrap IP，显式选择时跳过系统 DNS。当前连接固定使用第一个 bootstrap 地址，不重新解析 endpoint；标准 wire A/AAAA 顺序查询并检查 transaction ID、问题名/类型、边界、压缩及 CNAME 环，65,535 字节上限，不跟随 DNS HTTP 跳转。解析请求只发送目标域名。自动复核替换整组系统候选；所有 HTTPS DNS 结果继续执行原全候选公网检查，然后才记录目标审计并连接。失败和取消不改用未验证的系统结果。
 
 URL 中的字面地址同样接受检查；private、loopback、link-local、metadata、reserved 及非 global 地址被拒绝，IPv4-mapped 与 transition IPv6 也被保守拒绝。显式宿主选项 `allowLoopbackForTests` 只用于本机 fixture 资格，不能推导生产网络授权。宿主可注入 DNS 解析，但仍不能绕过地址校验。单跳 `WebNetworkPort` 是明确的可信契约，其实现必须在 socket I/O 前运行 `beforeConnect`；提供的 pinned port 会在准入/DNS 后执行它，并等待普通 extension record 写入。记录包含精确 URL SHA-256、host/port、策略 revision 和已验证地址；query string、fragment、原始 URL 和响应正文不是 audit/log 字段。原 Tool 输入仍由 Core 作为准确原始意图保存。
 
 排查 `web_destination_denied` 时，在同一宿主网络环境复核实际 DNS 候选：空集合、超过64项、地址族不符或任一非公网地址都在连接前失败。普通工具批准不能放开这些目的地。正式宿主的自动选择、备用用户配置和精确失败码归 [Service](../../../../../apps/service/README.md)及[手册](../../../../../docs/handbook/features/models-and-configuration.md#网页网络配置)。2026-10-25 Windows x64／Bun1.4.3 原 GitHub API 请求的 DNS 返回 Fake-IP，旧 port 在 `beforeConnect` 前拒绝；新版在不修改本机网络设置下自动选择已登记代理，真实解析后成功读取 `github.com/octocat/Hello-World`（HTTP200，226,219字节）。同一 API 另见 HTTP403 或超时，不能以网页成功承诺 API 配额或远端稳定性。
 
-robots 检查保留原 owner 基线：最多读取 500 KB 完整规则文本，没有固定 100 条规则裁剪；缓存为 5 分钟、200 个 origin，读取失败/超时采用宽松回退，取消仍向外传播。同 origin 请求在可取消的 500ms 域名队列等待；队列项会释放和移除，不设累计 hostname 预算。robots 请求遵守相同的逐跳 DNS、准入和 socket 规则。
+robots 检查对初始 URL 使用 [RFC 9309 的匹配规则](https://www.rfc-editor.org/rfc/rfc9309.html#section-2.2)，合并适用于 KiteCode 产品标识的组，仅在没有匹配组时采用通用组。规则对规范化的路径和查询部分匹配，支持 `*` 和结尾 `$`，最长匹配生效，同长优先 `Allow`。远端模式按字面片段匹配。拒绝结果使用 `details.code: web_robots_denied` 和 `details.origin`，可读内容说明该站点的规则及页面尚未请求，不回显路径、查询或规则原文。早期仅含错误码的历史结果沿通用失败说明呈现。
+
+最多读取 500 KB 完整规则文本，没有固定 100 条规则裁剪；缓存为 5 分钟、200 个 origin，读取失败/超时采用宽松回退，取消仍向外传播。同 origin 请求在可取消的 500ms 域名队列等待；队列项会释放和移除，不设累计 hostname 预算。
+
+固定地址 port 在一次 Tool 调用内保留初始同源 robots 已验证的候选列表供正文初始请求使用一次，绑定原 URL、Execution、Session 和 Store。每次资源请求仍独立准入并在 socket 前持久审计；跳转、其他调用和解析失败均不复用。初始 robots 的准入与解析只消耗总时限，3 秒 robots 传输预算在已验证候选就绪后开始，覆盖 robots 连接、正文和后续 robots 跳转。没有请求 scope 的显式网络 port 沿原预算。已知失败的原结果保留错误码并记录 `details.stage` 和 `details.resource`，不回显 DNS 响应或请求 URL。
 
 网络取消先将已交付的 Web 响应体置为失败，再移除监听并销毁所属 socket/解压器。压缩消息可能已经完整接收而解码读取仍在等待，不能仅依赖 `IncomingMessage.aborted`：单独销毁解压器会留下未结算的 `reader.read()`，普通 Tool 的总时限也不能解除该等待。[网络回归](../../../test/isolated/web-fetch/network.test.ts)在 Linux/Bun1.4.2 通过真实 loopback 覆盖 gzip/deflate/br 的响应后与首块后取消、兄弟隔离，以及受控 Tool 执行的准确取消；[代理回归](../../../test/isolated/web-fetch/proxy.test.ts)覆盖 HTTP/HTTPS CONNECT 的解码读取结算与所属 socket 关闭。Tool 仍依据原 signal 区分 `web_cancelled`/`web_timeout`，不把局部响应体或资源销毁当成成功；这些夹具不证明远端工作已停止或其他平台的原生资格。
 
@@ -41,5 +47,9 @@ parser 在自有 Bun Worker 中使用被动 JSDOM/Readability/Turndown，不执�
 [包外完整 manifest 测试](../../../../../tests/isolated/unified-agent/built-package.test.ts)已在 macOS/Bun 1.4.2 实际执行通过（`bun test tests/isolated/unified-agent/built-package.test.ts`，1 pass、46 个 Bun expect 调用）。它在源码树外构建并解析 17 个公开入口，通过公开默认配置和本机 compatible 模型调用普通 `web_fetch`，实际使用第四个 Worker asset 完成 HTML→Readability→Markdown，读取超过 64 KiB 的完整 Artifact 并核实原 execution scope、Store、SHA、Tool 终态和下一 Model 的完整正文。测试还移走私有包 Worker，确认新调用返回 `web_parser_unavailable`，网络和准入计数不增加，恢复 asset 后完成清理；原 SQLite Worker、Shell/MCP guardian、Skills、Client 和 Service 组合仍保留。外部 npm 依赖链接自已安装模块，这不构成新机安装资格。
 
 [代理回归](../../../test/isolated/web-fetch/proxy.test.ts)在 Windows x64／Bun1.4.3 使用隔离 HTTP/HTTPS CONNECT、真实 TLS 和仅 fixture 信任的测试证书，核原 Host/SNI、错误主机和未信任证书拒绝、Fake-IP 自动恢复、显式 wire DNS、私网/混合/literal 拒绝、伪造响应、DNS HTTP 跳转拒绝、CONNECT 407无直连回退和准确取消/兄弟隔离。普通 Core 测试另核代理后的公开跳转与私网跳转在连接前拒绝。Windows 环境/已登记代理及真实 GitHub 网页探测已验证；macOS 设置仅有解析 fixture，Linux 环境分支及这两平台的原生代理 socket 尚未实测。PAC/WPAD、SOCKS、代理认证、系统没有暴露的入口仍不在支持范围。
+
+2026-11-11 Windows x64／Bun 1.4.4，源码实测：系统 HTTP 代理下 Google 首页通过自动 DNS 复核取得正文。关闭 TUN 后，普通直连读取 `example.com` 成功，Google 的异常候选在 `destination_check` 阶段被拒绝且未连接目标。启用真实 Meta TUN 后，仅 TUN 和 TUN 加系统代理均读取了这两个站点。每次成功的同源抓取只做一轮解析，robots 和正文各自留下连接前审计。
+
+macOS 待真机复测无代理直连、系统 HTTP(S) 代理、仅 TUN 和 TUN 加系统代理。可沿用上述站点，核对实际出口、系统 DNS 候选、复核次数及 robots 与正文的独立审计。系统 SOCKS 混合设置目前有解析和拒绝的夹具证据，真机需单独核对，避免把 `web_proxy_protocol_unsupported` 归因于 TUN。
 
 完整响应、字符串、DOM 和 Artifact 可能同时驻留内存，不宣称固定内存流式处理。普通远端网页数据是低信任内容；这个 leaf 不是 Shell/MCP 进程的网络 sandbox。

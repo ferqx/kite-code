@@ -3,7 +3,10 @@ import { join } from 'node:path';
 import { type PinnedWebNetworkOptions, WebFetchError } from '@kite-ai/agent/web-fetch';
 
 type Proxy = NonNullable<PinnedWebNetworkOptions['proxy']>;
-type Transport = Pick<PinnedWebNetworkOptions, 'proxy' | 'dnsOverHttps' | 'recoverFakeIp'> & {
+type Transport = Pick<
+  PinnedWebNetworkOptions,
+  'proxy' | 'dnsOverHttps' | 'recoverFakeIp' | 'recoverProxiedTeredoDns'
+> & {
   unavailableReason?: string;
 };
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -158,6 +161,7 @@ export async function resolveWebTransport(
   return {
     proxy: { ...proxy },
     recoverFakeIp: true,
+    ...(!dns && (proxy.http || proxy.https) ? { recoverProxiedTeredoDns: true } : {}),
     ...(dns ? { dnsOverHttps: dns } : {}),
     ...(unavailableReason ? { unavailableReason } : {}),
   };

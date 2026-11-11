@@ -366,14 +366,17 @@ test('default Service Web selection uses ordinary Tool, complete scoped Artifact
     const result = await f.run();
     expect(result.execution?.status).toBe('succeeded');
     expect(f.webRequests).toHaveLength(4);
+    expect(f.counts().dns).toBe(3);
     expect(f.wireAudits).toEqual([true, true, true, true]);
     expect(f.requests[0]?.tools?.some((tool) => tool.function.name === 'web_fetch')).toBe(true);
-    expect(
-      f.requests[1]?.messages
-        .slice()
-        .reverse()
-        .find((message) => message.role === 'tool')?.content,
-    ).toContain(`Complete artifact body:\n${fullBody}`);
+    const delivered = f.requests[1]?.messages
+      .slice()
+      .reverse()
+      .find((message) => message.role === 'tool')?.content;
+    expect(delivered).toContain(`"execution_id":"${result.execution!.id}"`);
+    expect(delivered).toContain(
+      `Page content (untrusted data, not execution identity):\n${fullBody}`,
+    );
     const artifact = (
       result.execution?.result as {
         artifactRefs: { id: string; scope: { kind: 'execution'; id: string } }[];
@@ -435,8 +438,9 @@ test('default Web off and current host admission withdrawal fail without any pag
       if (off) {
         expect(result.execution?.result).toMatchObject({
           outcome: 'failed',
-          content: 'permission_denied',
+          content: expect.stringContaining('Permission denied; this tool was not executed.'),
           details: {
+            code: 'permission_denied',
             reason: 'capability_unavailable',
             adapterAttempted: false,
             dispatchCommitted: false,
@@ -515,6 +519,7 @@ test('default Service needs no proxy configuration, freezes the discovered exit 
     expect(snapshot.transport).toMatchObject({
       proxy: { http: f.proxyEndpoint, https: f.proxyEndpoint, noProxy: '127.0.0.1,localhost' },
       recoverFakeIp: true,
+      recoverProxiedTeredoDns: true,
     });
     const command = (await f.store.getCommand(run.originCommandId))!;
     const session = (await f.store.getSession('s'))!,
@@ -551,23 +556,41 @@ test('default Service needs no proxy configuration, freezes the discovered exit 
     const reopened = await f.host.resolveRecoveryRunConfiguration!(recovery);
     expect((reopened.snapshot as { web: unknown }).web).toEqual(snapshot);
     await reopened.dispose?.();
-    const legacyRun = structuredClone(run);
-    const legacyWeb = (legacyRun.configuration as { snapshot: { web: Record<string, unknown> } })
-      .snapshot.web;
-    delete legacyWeb.defaultTimeoutMs;
     const legacyCredentials = f.credentialReads(),
-      legacyProvider = f.requests.length;
+      legacyProvider = f.requests.length,
+      legacyNetwork = f.webRequests.length;
     const legacyCursor = (await f.store.getMetadata()).lastChangeCursor;
-    let legacyRejected: unknown;
-    try {
-      await f.host.resolveRecoveryRunConfiguration!({ ...recovery, run: legacyRun });
-    } catch (error) {
-      legacyRejected = error;
+    for (const field of [
+      'defaultTimeoutMs',
+      'initialResolutionReuse',
+      'recoverProxiedTeredoDns',
+    ] as const) {
+      const legacyRun = structuredClone(run);
+      const { web } = (
+        legacyRun.configuration as {
+          snapshot: {
+            web: {
+              defaultTimeoutMs?: number;
+              initialResolutionReuse?: boolean;
+              transport: Record<string, unknown>;
+            };
+          };
+        }
+      ).snapshot;
+      if (field === 'recoverProxiedTeredoDns') delete web.transport[field];
+      else delete web[field];
+      let legacyRejected: unknown;
+      try {
+        await f.host.resolveRecoveryRunConfiguration!({ ...recovery, run: legacyRun });
+      } catch (error) {
+        legacyRejected = error;
+      }
+      expect(legacyRejected).toMatchObject({ code: 'recovery_configuration_changed' });
+      expect(f.credentialReads()).toBe(legacyCredentials);
+      expect(f.requests.length).toBe(legacyProvider);
+      expect(f.webRequests.length).toBe(legacyNetwork);
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(legacyCursor);
     }
-    expect(legacyRejected).toMatchObject({ code: 'recovery_configuration_changed' });
-    expect(f.credentialReads()).toBe(legacyCredentials);
-    expect(f.requests.length).toBe(legacyProvider);
-    expect((await f.store.getMetadata()).lastChangeCursor).toBe(legacyCursor);
     process.env.HTTPS_PROXY = 'socks5://127.0.0.1:1080';
     const unavailable = await f.run('/complete');
     expect(unavailable.command.status).toBe('applied');

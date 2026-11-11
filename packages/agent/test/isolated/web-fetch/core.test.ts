@@ -25,7 +25,13 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
 };
 async function setup(
   handler: RequestListener,
-  options: { deny?: boolean; extractor?: WebExtractor; denyHop?: string; proxy?: boolean } = {},
+  options: {
+    deny?: boolean;
+    extractor?: WebExtractor;
+    denyHop?: string;
+    proxy?: boolean;
+    dnsDelayMs?: number;
+  } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-web-fetch-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
@@ -67,6 +73,7 @@ async function setup(
       : {}),
     resolveAddresses: async () => {
       dns++;
+      if (options.dnsDelayMs) await Bun.sleep(options.dnsDelayMs);
       return [{ address: options.proxy ? '8.8.8.8' : '127.0.0.1', family: 4 }];
     },
     admitHop: async (hop) => {
@@ -338,7 +345,7 @@ test('robots full rules, true redirect loop, per-hop denial and malformed input 
     (req, res) => {
       if (req.url === '/robots.txt') {
         res.end(
-          `User-agent: *\n${Array.from({ length: 120 }, (_, i) => `Disallow: /irrelevant${i}\n`).join('')}Disallow: /forbidden`,
+          `User-agent: *\n${Array.from({ length: 120 }, (_, i) => `Disallow: /irrelevant${i}\n`).join('')}Disallow: /forbidden\nAllow: /forbidden/public$`,
         );
         return;
       }
@@ -355,11 +362,26 @@ test('robots full rules, true redirect loop, per-hop denial and malformed input 
     { denyHop: '/blocked' },
   );
   try {
-    const robots = await f.run({ url: `${f.url}/forbidden` });
-    expect(
-      robots.execution?.result && (robots.execution.result as { content: string }).content,
-    ).toBe('web_robots_denied');
-    expect(f.counts().requests).toBe(1);
+    const robots = await f.run({ url: `${f.url}/forbidden?token=PRIVATE_QUERY` });
+    expect(robots.execution?.result).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'web_robots_denied', origin: f.url },
+      content: expect.stringContaining(`robots.txt policy for ${f.url}`),
+    });
+    const delivered = [...robots.model.requests.at(-1)!.messages]
+      .reverse()
+      .find((message) => message.role === 'tool')!;
+    expect(delivered.content).toContain('The page itself was not requested.');
+    expect(delivered.content).not.toContain('PRIVATE_QUERY');
+    expect(JSON.stringify(robots.execution?.result)).not.toContain('PRIVATE_QUERY');
+    expect(f.admissions).toEqual([`${f.url}/robots.txt`]);
+    expect(f.counts()).toEqual({ requests: 1, dns: 1 });
+    const allowed = await f.run({ url: `${f.url}/forbidden/public#local` });
+    expect(allowed.execution?.result).toMatchObject({
+      outcome: 'succeeded',
+      content: 'unexpected',
+    });
+    expect(f.admissions).toEqual([`${f.url}/robots.txt`, `${f.url}/forbidden/public`]);
     const loop = await f.run({ url: `${f.url}/loop` });
     expect((loop.execution?.result as { content?: string } | null)?.content).toBe(
       'web_redirect_loop',
@@ -376,6 +398,29 @@ test('robots full rules, true redirect loop, per-hop denial and malformed input 
     await f.close();
   }
 }, 20000);
+test('initial robots and page share checked DNS after the slow resolution and keep separate admissions', async () => {
+  const f = await setup(
+    (request, response) => {
+      response.end(request.url === '/robots.txt' ? 'User-agent: *' : 'PUBLIC_PAGE');
+    },
+    { dnsDelayMs: 3200 },
+  );
+  try {
+    const first = await f.run({ url: `${f.url}/first`, timeout_ms: 6000 });
+    expect(first.execution?.result).toMatchObject({ outcome: 'succeeded', content: 'PUBLIC_PAGE' });
+    expect(f.admissions).toEqual([`${f.url}/robots.txt`, `${f.url}/first`]);
+    expect(f.counts()).toEqual({ requests: 2, dns: 1 });
+    const second = await f.run({ url: `${f.url}/second`, timeout_ms: 1000 });
+    expect(second.execution?.result).toMatchObject({
+      outcome: 'failed',
+      content: 'web_timeout',
+      details: { code: 'web_timeout', stage: 'system_dns', resource: 'page' },
+    });
+    expect(f.counts()).toEqual({ requests: 2, dns: 2 });
+  } finally {
+    await f.close();
+  }
+}, 15000);
 test('HTTP errors preserve the exact status in the next Model without response bodies or headers', async () => {
   const secret = 'HTTP_PRIVATE_RESPONSE_MARKER';
   const f = await setup((request, response) => {
@@ -391,7 +436,7 @@ test('HTTP errors preserve the exact status in the next Model without response b
       expect(result.execution?.status).toBe('failed');
       expect(result.execution?.result).toMatchObject({
         outcome: 'failed',
-        details: { code: 'web_http_failed', httpStatus: status },
+        details: { code: 'web_http_failed', httpStatus: status, stage: 'response_headers' },
       });
       const delivered = [...result.model.requests.at(-1)!.messages]
         .reverse()
@@ -497,23 +542,38 @@ test('Tool timeout covers domain queue and live page transfer; cancelled request
   const closed = new Promise<void>((resolve) => {
     pageClosed = resolve;
   });
-  const f = await setup((req, res) => {
-    if (req.url === '/robots.txt') {
-      res.end('User-agent: *');
-      return;
-    }
-    req.socket.once('close', pageClosed);
-    pageStarted();
-    res.write('partial-not-a-success');
-  });
+  const f = await setup(
+    (req, res) => {
+      if (req.url === '/robots.txt') {
+        res.end('User-agent: *');
+        return;
+      }
+      req.socket.once('close', pageClosed);
+      pageStarted();
+      res.write('partial-not-a-success');
+    },
+    {
+      extractor: {
+        async extract() {
+          throw new Error('unexpected_html_extraction');
+        },
+      },
+    },
+  );
   try {
     const queued = await f.run({ url: f.url, timeout_ms: 10 });
-    expect((queued.execution?.result as { content?: string })?.content).toBe('web_timeout');
+    expect(queued.execution?.result).toMatchObject({
+      content: 'web_timeout',
+      details: { code: 'web_timeout', stage: 'queue', resource: 'page' },
+    });
     expect(f.counts()).toEqual({ requests: 0, dns: 0 });
     const pending = f.run({ url: f.url, timeout_ms: 1200 });
     await started;
     const completed = await pending;
-    expect((completed.execution?.result as { content?: string })?.content).toBe('web_timeout');
+    expect(completed.execution?.result).toMatchObject({
+      content: 'web_timeout',
+      details: { code: 'web_timeout', stage: 'response_body', resource: 'page' },
+    });
     expect(completed.execution?.status).toBe('failed');
     await Promise.race([
       closed,

@@ -79,6 +79,7 @@ test('automatic proxy selection uses explicit environment before registered syst
       noProxy: 'localhost,.example.test',
     },
     recoverFakeIp: true,
+    recoverProxiedTeredoDns: true,
   });
   env.http_proxy = 'http://changed.test:80';
   expect(selected.proxy?.http).toBe('http://127.0.0.1:8080');
@@ -95,6 +96,12 @@ test('automatic proxy selection uses explicit environment before registered syst
   expect(
     (await resolveWebTransport({ proxy: 'http://manual.test:88' }, { env, systemProxy })).proxy,
   ).toEqual({ http: 'http://manual.test:88', https: 'http://manual.test:88' });
+  expect(
+    await resolveWebTransport(
+      { dns: { url: 'https://dns.example.test/dns-query', addresses: ['1.1.1.1'] } },
+      { env, systemProxy },
+    ),
+  ).not.toHaveProperty('recoverProxiedTeredoDns');
   expect(environmentWebProxy({ HTTP_PROXY: '', http_proxy: '', HTTPS_PROXY: '' })).toBeUndefined();
   for (const [proxy, code] of [
     ['socks5://localhost:7890', 'web_proxy_protocol_unsupported'],
@@ -207,7 +214,15 @@ test('enabled macOS SOCKS settings fail closed even alongside manual HTTP routes
           },
         },
       } as unknown as ToolContext);
-      expect(result).toEqual({ outcome: 'failed', content: 'web_proxy_protocol_unsupported' });
+      expect(result).toEqual({
+        outcome: 'failed',
+        content: 'web_proxy_protocol_unsupported',
+        details: {
+          code: 'web_proxy_protocol_unsupported',
+          stage: 'proxy_configuration',
+          resource: 'page',
+        },
+      });
       expect([admission, dns, audit]).toEqual([0, 0, 0]);
     } finally {
       await binding.dispose();

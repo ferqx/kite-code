@@ -339,6 +339,141 @@ test('automatic recovery is limited to an all-Fake-IP DNS answer and needs no re
     await f.close();
   }
 });
+test('initial robots and page share a single wire DNS resolution while a redirect resolves independently', async () => {
+  const f = await fixture();
+  try {
+    const network = createPinnedWebNetworkPort({
+      ...options(),
+      proxy: f.settings,
+      certificateAuthority: certificate,
+      recoverFakeIp: true,
+      resolveAddresses: async () => [{ address: '198.18.0.31', family: 4 }],
+    }).openRequest!();
+    const target = binding('https://fixture.test/body');
+    const audited: string[] = [];
+    const robots = await network.request(
+      { ...target, resource: 'robots', url: 'https://fixture.test/robots.txt' },
+      {
+        signal: signal(),
+        startTransport() {
+          expect(f.dnsRequests).toHaveLength(2);
+          expect(f.connects).toEqual(['1.1.1.1:443', '1.1.1.1:443']);
+          return signal();
+        },
+        beforeConnect: async () => {
+          audited.push('robots');
+        },
+      },
+    );
+    await robots.body.cancel();
+    const page = await network.request(target, {
+      signal: signal(),
+      beforeConnect: async () => {
+        audited.push('page');
+        expect(f.dnsRequests).toHaveLength(2);
+      },
+    });
+    expect(await new Response(page.body).text()).toBe('verified socket');
+    expect(audited).toEqual(['robots', 'page']);
+    expect(f.connects).toEqual(['1.1.1.1:443', '1.1.1.1:443', '8.8.8.8:443', '8.8.8.8:443']);
+    const redirect = await network.request(
+      { ...target, hop: 1, url: 'https://fixture.test/redirected' },
+      { signal: signal() },
+    );
+    await redirect.body.cancel();
+    expect(f.dnsRequests).toHaveLength(4);
+  } finally {
+    await f.close();
+  }
+});
+test('proxied Teredo DNS recovery verifies fresh addresses over the same exit before target audit and CONNECT', async () => {
+  const f = await fixture();
+  const base = {
+    ...options(),
+    proxy: f.settings,
+    certificateAuthority: certificate,
+    recoverProxiedTeredoDns: true,
+  };
+  const suspect = { address: '2001::1', family: 6 } as const;
+  const systemPublic = { address: '9.9.9.9', family: 4 } as const;
+  const target = binding('https://fixture.test/body?token=PRIVATE_QUERY');
+  const port = createPinnedWebNetworkPort({
+    ...base,
+    resolveAddresses: async () => [systemPublic, suspect],
+  });
+  try {
+    const response = await port.request(target, {
+      signal: signal(),
+      beforeConnect: async ({ addresses }) => {
+        expect(f.connects).toEqual(['1.1.1.1:443', '1.1.1.1:443']);
+        expect(addresses).toEqual([{ address: '8.8.8.8', family: 4 }]);
+      },
+    });
+    expect(await new Response(response.body).text()).toBe('verified socket');
+    expect(f.connects).toEqual(['1.1.1.1:443', '1.1.1.1:443', '8.8.8.8:443']);
+    expect(f.dnsRequests).toHaveLength(2);
+    for (const query of f.dnsRequests) {
+      expect(Buffer.from(query).includes(Buffer.from('\x07fixture\x04test\x00'))).toBe(true);
+      expect(Buffer.from(query).includes(Buffer.from('PRIVATE_QUERY'))).toBe(false);
+    }
+
+    const ordinary = createPinnedWebNetworkPort({
+      ...base,
+      resolveAddresses: async () => [systemPublic],
+    });
+    const normal = await ordinary.request(target, { signal: signal() });
+    await normal.body.cancel();
+    expect(f.connects.at(-1)).toBe('9.9.9.9:443');
+    expect(f.dnsRequests).toHaveLength(2);
+
+    const before = f.connects.length;
+    for (const overrides of [
+      { proxy: undefined },
+      { proxy: { ...f.settings, noProxy: 'fixture.test' } },
+      { proxy: { ...f.settings, noProxy: 'cloudflare-dns.com' } },
+      { proxy: { ...f.settings, http: 'http://127.0.0.1:1' }, url: 'http://fixture.test/body' },
+      { recoverProxiedTeredoDns: false },
+      { extra: { address: '10.0.0.1', family: 4 } },
+      { extra: { address: '::1', family: 6 } },
+      { extra: { address: '2001:db8::1', family: 6 } },
+      { extra: { address: '198.18.0.1', family: 4 } },
+      { extra: { address: '2001::2', family: 4 } },
+    ] satisfies (Partial<PinnedWebNetworkOptions> & {
+      extra?: { address: string; family: 4 | 6 };
+      url?: string;
+    })[]) {
+      const { extra, url, ...transport } = overrides;
+      const denied = createPinnedWebNetworkPort({
+        ...base,
+        ...transport,
+        resolveAddresses: async () => [systemPublic, suspect, ...(extra ? [extra] : [])],
+      });
+      await failure(
+        denied.request(url ? binding(url) : target, { signal: signal() }),
+        'web_destination_denied',
+      );
+    }
+    await failure(
+      port.request(binding('https://[2001::1]/'), { signal: signal() }),
+      'web_destination_denied',
+    );
+    expect(f.connects).toHaveLength(before);
+    expect(f.dnsRequests).toHaveLength(2);
+
+    f.setDns('10.0.0.1');
+    await failure(port.request(target, { signal: signal() }), 'web_destination_denied');
+    expect(f.connects.slice(before)).toEqual(['1.1.1.1:443', '1.1.1.1:443']);
+    f.setMode('dns-redirect');
+    await failure(port.request(target, { signal: signal() }), 'web_dns_unavailable');
+    expect(f.connects.slice(before + 2)).toEqual(['1.1.1.1:443']);
+    f.setMode('refuse');
+    await failure(port.request(target, { signal: signal() }), 'web_proxy_connect_failed');
+    expect(f.connects.slice(before + 3)).toEqual(['1.1.1.1:443']);
+    expect(f.requests.filter((path) => path.startsWith('fixture.test/'))).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+}, 15000);
 test('proxy refusal has no direct retry and abort releases a stalled CONNECT without disturbing a sibling', async () => {
   const f = await fixture();
   try {

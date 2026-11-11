@@ -21,7 +21,8 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
   const factory = createWebFetchBindingFactory({
     networkPort: options.unavailableReason
       ? {
-          async request() {
+          async request(_binding, { onStage }) {
+            onStage?.('proxy_configuration');
             throw new WebFetchError(options.unavailableReason!);
           },
         }
@@ -57,10 +58,12 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
       parser: 'passive-bounded-worker',
       completeByDefault: true,
       defaultTimeoutMs: factory.defaultTimeoutMs,
+      initialResolutionReuse: !options.unavailableReason,
       // Keep legacy custom-host snapshots stable when no transport was selected.
       ...(options.network.proxy ||
       options.network.dnsOverHttps ||
       options.network.recoverFakeIp ||
+      options.network.recoverProxiedTeredoDns ||
       options.network.certificateAuthority ||
       options.unavailableReason
         ? {
@@ -70,6 +73,7 @@ export function createWebFetchConfiguration(options: WebFetchConfigurationOption
                 ? structuredClone(options.network.dnsOverHttps)
                 : null,
               recoverFakeIp: options.network.recoverFakeIp === true,
+              ...(options.network.recoverProxiedTeredoDns ? { recoverProxiedTeredoDns: true } : {}),
               resolver: 'cloudflare-doh-wire-1',
               ...(options.network.certificateAuthority
                 ? {
