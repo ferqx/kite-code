@@ -1,6 +1,7 @@
 import type { Message } from '@kite-ai/client';
 import {
   InteractionCard,
+  isMcpSourceReview,
   ModelInputs,
   modelOutputTerminalObserved,
   PermissionGrantsPanel,
@@ -58,7 +59,7 @@ import type { DesktopEditor } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
-import { isOrdinaryNativeApproval, NativeApprovalGroup } from './native-approval-group';
+import { NativeApprovalGroup } from './native-approval-group';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
@@ -102,7 +103,11 @@ import { useNativeFileTargets } from './native-file-targets';
 import { confirmNativeFullPermission } from './native-full-permission-confirmation';
 import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
-import { nativeInputFailureMessage, nativeTextIntent } from './native-input';
+import {
+  nativeAskUserAwaitingAnswer,
+  nativeInputFailureMessage,
+  nativeTextIntent,
+} from './native-input';
 import { useNativeInputImages } from './native-input-images';
 import { useNativeInputQueue } from './native-input-queue';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
@@ -196,8 +201,7 @@ function savedNativeInput(
 export function nativeRootInteractionBlocksComposer(selection: NativeState['selection']): boolean {
   return !!selection?.interactions.some(
     (card) =>
-      ['approval', 'question', 'plan_review'].includes(card.kind) &&
-      !isOrdinaryNativeApproval(card) &&
+      (card.kind === 'plan_review' || isMcpSourceReview(card)) &&
       card.state === 'pending' &&
       card.originStoreId === selection.storeId &&
       card.sessionId === selection.session.id &&
@@ -251,6 +255,7 @@ type CachedComposer = NativeModelDisplay & {
   permission?: 'auto' | 'accept_edits' | 'full';
   active: boolean;
   stopping: boolean;
+  waitingForAskUser: boolean;
   sendLabel: string;
   queueItems?: NonNullable<NonNullable<SessionPageProps['composer']>['queue']>['items'];
   cacheMetrics?: NonNullable<SessionPageProps['composer']>['cacheMetrics'];
@@ -1538,6 +1543,11 @@ function NativeDesktopContent({
   ]);
   const choiceViewIntent = viewIntent.current;
   const activeInputRun = selection?.runs.find((run) => run.isActive);
+  const waitingForAskUser = nativeAskUserAwaitingAnswer(selection);
+  const waitingForAskUserRef = useRef(waitingForAskUser);
+  useLayoutEffect(() => {
+    waitingForAskUserRef.current = waitingForAskUser;
+  }, [waitingForAskUser]);
   const executionObservation = nativeExecutionObservation(state);
   const executionRuns = executionObservation?.runs ?? selection?.runs;
   const executionRecords = executionObservation?.executions ?? selection?.executions;
@@ -2616,7 +2626,7 @@ function NativeDesktopContent({
     return () => clearTimeout(timer);
   }, [noteSaveSignal]);
   function sendInput() {
-    if (!bridge || !selection || worktreeExitRead.current) return;
+    if (!bridge || !selection || worktreeExitRead.current || waitingForAskUserRef.current) return;
     const images = imageDrafts.get(imageScope(selection.storeId, selection.session.id));
     const files = imageDrafts.files(imageScope(selection.storeId, selection.session.id));
     const draftKey = imageScope(selection.storeId, selection.session.id);
@@ -2670,6 +2680,7 @@ function NativeDesktopContent({
         (draftCache.current.get(draftKey) !== submittedDraft && draftCache.current.has(draftKey))
       )
         throw Error('native_selection_changed');
+      if (waitingForAskUserRef.current) return;
       draftCache.current.set(draftKey, submittedDraft);
       const intent = {
         ...nativeTextIntent(
@@ -2942,6 +2953,7 @@ function NativeDesktopContent({
       permission: composerPermission,
       active: !!activeInputRun && !executionUnconfirmed,
       stopping: activeInputRun?.status === 'cancelling',
+      waitingForAskUser,
       sendLabel: currentSendLabel,
       queueItems: inputQueue.queue?.items,
       cacheMetrics: cacheMetrics.metrics,
@@ -2959,6 +2971,7 @@ function NativeDesktopContent({
     choiceIdentity,
     draft,
     activeInputRun,
+    waitingForAskUser,
     executionUnconfirmed,
     currentSendLabel,
     inputQueue.queue?.items,
@@ -5478,6 +5491,7 @@ function NativeDesktopContent({
               contextUsage: cachedComposer.contextUsage,
               metricsLoading: !cachedComposer.cacheMetrics && !cachedComposer.contextUsage,
               stopping: cachedComposer.stopping,
+              preferStop: cachedComposer.waitingForAskUser,
               disabled: false,
               readOnly: true,
               sessionLoading: true,
@@ -5622,6 +5636,7 @@ function NativeDesktopContent({
                     ((cacheMetrics.pending && !cacheMetrics.metrics) ||
                       (contextUsage.pending && !contextUsage.metrics)),
                   stopping: activeExecutionRun?.status === 'cancelling',
+                  preferStop: selection.workspaceUnavailable || waitingForAskUser,
                   cancelDisabled: cancelCurrentRunBusinessDisabled,
                   disabled: pending || inputQueue.busy,
                   readOnly: selected.current !== selection.session.id,
@@ -5664,6 +5679,7 @@ function NativeDesktopContent({
                       ? changeCurrentPermission
                       : undefined,
                   sendDisabled:
+                    waitingForAskUser ||
                     sendContentBlocked ||
                     (!localWorktreeExit && (!nextModelObserved || permissionFailed)) ||
                     historyState.phase === 'unavailable',

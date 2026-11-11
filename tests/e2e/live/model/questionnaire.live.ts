@@ -308,9 +308,9 @@ async function main() {
             await page.getByRole('radio').first().check();
             if (output) await page.screenshot({ path: `${output}.png` });
             await page.getByRole('button', { name: '下一题' }).click();
-            await page.getByRole('radio', { name: '自由回答', exact: true }).check();
+            await page.getByRole('radio', { name: '自定义输入', exact: true }).check();
             await page
-              .getByRole('textbox', { name: '自由回答' })
+              .getByRole('textbox', { name: '自定义输入' })
               .fill('  使用柔和的留白🙂\n保留原文  ');
             await page.getByRole('button', { name: '提交回答' }).click();
           } else await page.getByRole('button', { name: '取消回答', exact: true }).click();

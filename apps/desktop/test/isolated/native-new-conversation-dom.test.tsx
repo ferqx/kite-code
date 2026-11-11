@@ -1893,7 +1893,7 @@ test('an original pending input precedes its Run status and reply while saved us
   }
 });
 
-test('running Composer queues its exact input, and only the queued-row button sends guidance without changing the next draft', async () => {
+test('running Composer waits for ask_user, then queues exact input and sends guidance only from the queue', async () => {
   const run = {
     id: 'active-run',
     configuration: chatRunConfiguration(),
@@ -1917,6 +1917,41 @@ test('running Composer queues its exact input, and only the queued-row button se
     sourceIds: [run.originCommandId],
   } as Message;
   const f = fixture(true, true, 'accept_edits', { messages: [initial], runs: [run] });
+  const question: Interaction = {
+    id: 'waiting-question',
+    originStoreId: 'store',
+    sessionId: 'a',
+    presentationSessionId: 'a',
+    ancestry: ['a'],
+    runId: run.id,
+    executionId: 'waiting-question-execution',
+    attempt: 1,
+    kind: 'question',
+    definitionId: 'ask_user',
+    definitionVersion: '1',
+    inputDigest: 'input',
+    policyRevision: 'policy',
+    requiredRefs: [],
+    request: { schema: { type: 'string' } },
+    answer: null,
+    revision: '1',
+    acceptedDecisionRevision: null,
+    state: 'pending',
+  };
+  const waitingExecution: Execution = {
+    id: question.executionId,
+    sessionId: question.sessionId,
+    originStoreId: question.originStoreId,
+    runId: run.id,
+    kind: 'tool',
+    definitionId: question.definitionId,
+    definitionVersion: question.definitionVersion,
+    status: 'dispatching',
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  };
+  let questionPage: 'resolved' | 'pending' | 'omitted' = 'resolved';
   const bridge = f.dom.window.kiteNative! as NativeBridge;
   const request = bridge.request;
   let queued: Extract<NativeRequest, { method: 'submit' }> | undefined;
@@ -2008,6 +2043,13 @@ test('running Composer queues its exact input, and only the queued-row button se
             : [],
         selection: {
           ...value.selection,
+          ...(questionPage !== 'resolved'
+            ? {
+                runs: [{ ...run, status: 'waiting_interaction' as const }],
+                executions: [waitingExecution],
+                interactions: questionPage === 'pending' ? [question] : [],
+              }
+            : {}),
           canReadInputQueue: true,
           activeCommand: {
             id: run.originCommandId,
@@ -2027,6 +2069,34 @@ test('running Composer queues its exact input, and only the queued-row button se
     await f.click('Original A');
     const body = '独立问题 进度\n雪🙂';
     await f.edit(body, '当前会话私有草稿');
+    const editor = f.input('当前会话私有草稿') as HTMLTextAreaElement;
+    const action = () => editor.form?.querySelector<HTMLButtonElement>('.composer-actions button');
+    await f.until(() => action()?.disabled === false);
+    const originalAction = action();
+    for (const page of ['pending', 'omitted'] as const) {
+      questionPage = page;
+      await f.refreshFacts();
+      expect(action() === originalAction).toBe(true);
+      expect(action()?.getAttribute('aria-label')).toBe('停止任务');
+      expect(f.input('当前会话私有草稿') === editor).toBe(true);
+      expect(editor.readOnly).toBe(false);
+      expect(editor.value).toBe(body);
+      await act(async () => {
+        editor.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+        editor.form!.dispatchEvent(
+          new f.dom.window.Event('submit', { bubbles: true, cancelable: true }),
+        );
+      });
+      expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
+    }
+    questionPage = 'resolved';
+    await f.refreshFacts();
+    expect(action() === originalAction).toBe(true);
+    expect(action()?.getAttribute('aria-label')).toBe('排队后续输入');
+    expect(editor.value).toBe(body);
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(0);
     await f.click('排队后续输入');
     expect(queued?.intent).toMatchObject({
       kind: 'input.follow_up',
@@ -2755,6 +2825,10 @@ test('a pending interaction in a missing workspace retains the original Run stop
     await f.until(
       () => f.host.querySelector<HTMLButtonElement>('[aria-label="停止任务"]')?.disabled === false,
     );
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved A');
+    const action = f.host.querySelector('.composer-actions button');
+    expect(action?.getAttribute('aria-label')).toBe('停止任务');
+    expect(f.host.querySelectorAll('[aria-label="停止任务"]')).toHaveLength(1);
     await f.click('停止任务');
     expect(f.calls.find((call) => call.method === 'caller.prepare')).toMatchObject({
       sessionId: 'a',

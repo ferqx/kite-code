@@ -6,7 +6,12 @@ import { createRoot } from 'react-dom/client';
 import { verifyInteractionAnswerReceipt } from '../src/controller';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
-import { nextDesktopPresentation, prepareDesktopDom, promptValue } from './native-page-dom.fixture';
+import {
+  nextDesktopPresentation,
+  prepareDesktopDom,
+  promptValue,
+  setPromptText,
+} from './native-page-dom.fixture';
 
 test('Native page keeps original question drafts across sessions, missing pages and read failure; only the exact accepted answer clears its draft', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -63,7 +68,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     ]),
   );
   let selected = 'a',
-    omitted = false,
+    omitted = true,
     unavailable = false,
     posts = 0;
   let watcher: ((event: NativeEvent) => void) | undefined;
@@ -85,7 +90,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
           sessionId: selected,
           originCommandId: `work-${selected}`,
           originStoreId: 'store',
-          status: 'waiting_interaction',
+          status: cards[selected]!.state === 'pending' ? 'waiting_interaction' : 'running',
           isActive: true,
           createdAt: 1,
           finishedAt: null,
@@ -101,7 +106,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
           kind: 'tool',
           definitionId: 'ask_user',
           definitionVersion: '1',
-          status: 'dispatching',
+          status: cards[selected]!.state === 'pending' ? 'dispatching' : 'succeeded',
           result: null,
           resultRevision: '0',
           cancelRequestedAt: null,
@@ -191,7 +196,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     });
   const text = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自由回答"]')!;
   const mainInput = () =>
-    host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
+    host.querySelector<HTMLTextAreaElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
   const edit = async (value: string) =>
     act(async () => {
       text().value = value;
@@ -202,8 +207,22 @@ test('Native page keeps original question drafts across sessions, missing pages 
     await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Question A');
     await click('会话工具');
-    expect(mainInput() === null).toBe(true);
+    const mainDraft = '  main a\n雪🙂  ';
+    const editor = mainInput()!;
+    expect(promptValue(editor)).toBe(mainDraft);
+    editor.setSelectionRange(3, 6);
+    omitted = false;
+    await refresh();
+    expect(mainInput() === editor).toBe(true);
+    expect([editor.selectionStart, editor.selectionEnd]).toEqual([3, 6]);
     await edit('  original A\n雪🙂  ');
+    const updatedMainDraft = `${mainDraft}后续草稿`;
+    await act(async () => setPromptText(editor, updatedMainDraft));
+    expect(editor.value).toBe(updatedMainDraft);
+    expect(text().value).toBe('  original A\n雪🙂  ');
+    const action = editor.form!.querySelector('.composer-actions button')!;
+    expect(action.getAttribute('aria-label')).toBe('停止任务');
+    expect(host.querySelectorAll('button[aria-label="停止任务"]')).toHaveLength(1);
     await click('定时任务');
     expect(text()).toBeNull();
     expect(mainInput()).toBeNull();
@@ -223,7 +242,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     omitted = true;
     await refresh();
     expect(text()).toBeNull();
-    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
+    expect(promptValue(mainInput())).toBe(updatedMainDraft);
     unavailable = true;
     await refresh();
     omitted = unavailable = false;
@@ -231,7 +250,7 @@ test('Native page keeps original question drafts across sessions, missing pages 
     expect(text().value).toBe('  original A\n雪🙂  ');
     await click('提交回答');
     expect(posts).toBe(1);
-    expect(mainInput() === null).toBe(true);
+    expect(promptValue(mainInput())).toBe(updatedMainDraft);
     expect(submissions[0]!.intent.answer).toEqual({
       kind: 'question',
       answers: '  original A\n雪🙂  ',
@@ -286,7 +305,10 @@ test('Native page keeps original question drafts across sessions, missing pages 
       answer: original.intent.answer,
     };
     await click('Question A');
-    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
+    expect(promptValue(mainInput())).toBe(updatedMainDraft);
+    expect(host.querySelector('.composer-actions button')?.getAttribute('aria-label')).toBe(
+      '排队后续输入',
+    );
     expect(posts).toBe(1);
   } finally {
     await act(async () => root.unmount());

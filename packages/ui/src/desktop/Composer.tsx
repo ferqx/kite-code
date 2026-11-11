@@ -162,6 +162,8 @@ export interface ComposerProps {
   onSettings?: () => void;
   active: boolean;
   stopping: boolean;
+  /** Keep the active Run's stop action in the slot while main input cannot send. */
+  preferStop?: boolean;
   cancelDisabled?: boolean;
   disabled: boolean;
   model?: { readonly provider: string; readonly name: string };
@@ -492,6 +494,7 @@ export function Composer(props: ComposerProps) {
       !props.images?.length &&
       !props.files?.length &&
       !props.contextHasInput) ||
+      props.preferStop ||
       props.stopping);
   const cacheDescription =
     cacheHitPercentage === undefined

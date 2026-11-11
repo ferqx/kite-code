@@ -486,7 +486,9 @@ Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timin
 
 设置动作图标由 [SettingsActionIcon](src/desktop/SettingsActionIcon.tsx)统一使用共享图标库；[DropdownMenu](src/desktop/components/ui/dropdown-menu.tsx)公开普通菜单项和分隔线，Content 可指定 Portal container，使设置内的菜单留在所属 Dialog 的焦点及 Escape 边界内。宿主决定菜单内容与业务资格，公共组件不建立连接或授权。
 
-普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项说明以悬停／聚焦浮层展示完整原文，不推移翻页按钮；翻页和最终提交保留不同按钮身份，避免浏览器将末次翻页解释为提交。
+普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项标题和完整说明在可用宽度内同行或换行，单选通过 `aria-describedby` 引用说明。题头的原问题给单选组提供无障碍名称。题号按原字段校验标记已答或待答，翻页后聚焦题目并重置卡片内部滚动。鼠标点选“自定义输入”进入文本框，原生单选的键盘方向键仍留在选项组内。题号、翻页和最终提交各有独立按钮身份，避免浏览器将导航解释为提交。
+
+问卷与主输入同时显示时，底部区域保持 [Composer](src/desktop/Composer.tsx) 可用，并按会话高度预留阅读空间。超高的选项正文与问卷区域均可滚动。宿主可保持输入框可编辑并暂停发送，当前任务可停止时使用同一个按钮提供停止操作。带选项且允许自由回答的题目在最后显示“自定义输入”，该项沿原 schema 提交自由回答。
 
 结构化问题的可作答卡片使用共享选择行、推荐标记、紧凑说明按钮和同一操作栏；已知 `Cancel answering` 展示为“取消回答”，原 null 值保持。可作答卡不显示 kind/state、原请求或执行身份，原文和 choice 值仍用于提交与恢复；只读卡及 JSON fallback 保留原材料。对应样式由 [Desktop CSS](src/desktop/style.css)提供，深浅主题与窄窗共用。
 

@@ -263,42 +263,48 @@ try {
     assert.equal(await page.getByRole('button', { name: '停止原命令', exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: /^取消原申请/ }).count(), 0);
     assert.equal(await page.getByRole('button', { name: /^停止原 Job/ }).count(), 0);
-    assert.equal(await page.getByRole('textbox', { name: '当前会话私有草稿' }).count(), 0);
-    assert.equal(await page.getByRole('button', { name: '保留草稿', exact: true }).count(), 0);
+    assert.equal(await promptText(input), originalDraft);
+    const action = page.locator('.composer-actions button');
+    assert.equal(await action.count(), 1);
+    assert.equal(await action.getAttribute('aria-label'), '停止任务');
     return card;
   }
   const mainDraft = '  原主草稿🙂\n保留空格  ';
   const first = await start('Complete original Native questionnaire', mainDraft, 1);
   assert.equal(await page.getByRole('radio', { checked: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '提交回答', exact: true }).count(), 0);
-  await page.getByRole('button', { name: 'Alpha (Recommended)的说明', exact: true }).focus();
-  assert.match(
-    await page.getByRole('tooltip').innerText(),
-    /Full original description\nUnicode 尾部/,
-  );
+  const firstChoice = page.getByRole('radio', { name: 'Alpha (Recommended)', exact: true });
+  const description = await firstChoice.getAttribute('aria-describedby');
+  assert.ok(description);
+  const descriptionText = page.locator(`[id="${description}"]`);
+  assert.equal(await descriptionText.isVisible(), true);
+  assert.match(await descriptionText.innerText(), /Full original description\nUnicode 尾部/);
   await page.getByRole('button', { name: '下一题', exact: true }).click();
   await page.getByText('问题 2 / 3', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '下一题', exact: true }).click();
+  await page.getByRole('button', { name: '第 3 题，待回答', exact: true }).click();
   await page.getByText('问题 3 / 3', { exact: true }).waitFor();
+  assert.equal(await page.getByText('还有 3 题待答', { exact: true }).isVisible(), true);
   assert.equal(
     await page.getByRole('button', { name: '提交回答', exact: true }).isDisabled(),
     true,
   );
-  await page.getByRole('radio', { name: '自由回答', exact: true }).check();
-  await page.getByRole('textbox', { name: '自由回答', exact: true }).fill(' \n ');
+  await page.getByText('自定义输入', { exact: true }).click();
+  const custom = page.getByRole('textbox', { name: '自定义输入', exact: true });
+  assert.equal(await custom.evaluate((input) => input === input.ownerDocument.activeElement), true);
+  await custom.fill(' \n ');
   assert.equal(
     await page.getByRole('button', { name: '提交回答', exact: true }).isDisabled(),
     true,
   );
   assert.equal(await posts(), 0);
   const text = '  q3-o1🙂é\n保持 空格  ';
-  await page.getByRole('textbox', { name: '自由回答', exact: true }).fill(text);
+  await custom.fill(text);
   await select('Question B');
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor({ state: 'detached' });
   assert.equal(await page.getByRole('form', { name: 'Questionnaire' }).count(), 0);
   await select('Question A');
   assert.equal(
-    await page.getByRole('textbox', { name: '自由回答', exact: true }).inputValue(),
+    await page.getByRole('textbox', { name: '自定义输入', exact: true }).inputValue(),
     text,
   );
   assert.equal(await page.getByRole('button', { name: '下一题', exact: true }).count(), 0);

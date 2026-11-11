@@ -4,6 +4,44 @@ import type { InputRequest } from './input';
 import type { NativeSelection } from './native-bridge';
 import type { NativeModelChoice } from './native-model-picker';
 
+export function nativeAskUserAwaitingAnswer(selection: NativeSelection | undefined): boolean {
+  if (!selection) return false;
+  const { session, storeId } = selection;
+  if (
+    selection.interactions.some(
+      (card) =>
+        card.kind === 'question' &&
+        card.definitionId === 'ask_user' &&
+        card.state === 'pending' &&
+        card.originStoreId === storeId &&
+        card.sessionId === session.id &&
+        card.presentationSessionId === session.id,
+    )
+  )
+    return true;
+
+  // The pending page can omit a card while its original Run is still waiting.
+  const waitingRun = selection.runs.find(
+    (run) =>
+      run.isActive &&
+      run.status === 'waiting_interaction' &&
+      run.originStoreId === storeId &&
+      run.sessionId === session.id,
+  );
+  return (
+    !!waitingRun &&
+    selection.executions.some(
+      (execution) =>
+        execution.kind === 'tool' &&
+        execution.definitionId === 'ask_user' &&
+        execution.originStoreId === storeId &&
+        execution.sessionId === session.id &&
+        execution.runId === waitingRun.id &&
+        (execution.status === 'dispatching' || execution.status === 'running'),
+    )
+  );
+}
+
 /** A rejected original Command can fail before any Run exists. */
 export function nativeInputFailureMessage(commandId: string, reason?: string): DesktopMessage {
   const environment = reason === 'shell_asset_unavailable' || reason === 'native_asset_unavailable';

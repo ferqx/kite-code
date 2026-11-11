@@ -1673,15 +1673,23 @@ Skills 详情按名称、简介、独立滚动的 Markdown 正文及来源展示
 
 ## Native 普通问题与页面草稿
 
-普通问卷使用共享卡片：问题与进度分层展示，整行选项可选择，推荐项显示中文标记，说明按钮保持紧凑；取消与翻页／提交位于同一操作栏。默认作答区不显示 `question · pending`、执行 ID 或原请求 JSON，失败和未知答复仍保留中文状态及原命令查询。普通页不在输入框上方重复显示 `轮次：failed`；历史上下文来源错误显示可读原因，原代码保留在失败记录中。
+普通问卷使用[共享卡片](../../packages/ui/src/questionnaire.tsx)。题头包含题目、可切换的题号和末题待答数，完整选项说明随可用宽度排列。选项和自由输入区域限制高度并独立滚动，翻页和提交位于底部操作栏。会话底部区域根据可用高度收敛，给聊天正文留出阅读空间。默认作答区不显示 `question · pending`、执行 ID 或原请求 JSON，失败和未知答复仍保留中文状态及原命令查询。普通页不在输入框上方重复显示 `轮次：failed`；历史上下文来源错误显示可读原因，原代码保留在失败记录中。
 
-根 `desktop` 选择的 [Native renderer](src/native.tsx)实际消费共享 Questionnaire；默认 ask_user 的多题选择、自由输入、先浏览后一次提交和显式取消问卷均沿公共原 `interaction.answer`。取消只提交原 schema 的 null，后续 Model 在同一 Run 收到取消信息；所选会话存在 pending question 时，隐藏主输入表单及原命令、原申请或 active Job 的任务停止按钮。主输入草稿仍由页面原状态保留，回答或取消后的交互终态恢复原文；跨会话的未发送文本按原 Store／Session 页面缓存保留，已有私有草稿沿原读取链恢复。普通界面移除“保留草稿”，不新增自动持久保存。未知／失败回答保留原意图，只查询原 Command，不再次 POST。
+根 `desktop` 选择的 [Native renderer](src/native.tsx)消费共享 Questionnaire。普通问题等待期间保留同一会话的主输入表单和草稿。问卷通过原 `interaction.answer` 提交，取消回答提交原 schema 的 null，同一 Run 收到取消信息后继续。等待 `ask_user` 答案时，[主输入准入](src/native-input.ts)阻止发送，Composer 的同一个按钮在原任务可停止时提供 `command.cancel`。待决页暂时省略该卡，且原 Run 和 `ask_user` 执行仍在等候时，继续保留门禁。确认问卷结束后，主输入恢复现有发送准入，草稿等待用户手动发送。计划答复和 MCP 来源／凭据使用原交互呈现。跨会话未发送文本按原 Store／Session 页面缓存保留，已有私有草稿沿原读取链恢复。普通界面不提供显式保存按钮。未知／失败回答保留原意图，只查询原 Command，不再次 POST。
 
 renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定 Store/source/presentation Session/id/revision/inputDigest。切换会话、新建会话及待决后页替换不会搬移或清理原草稿；读取失败和卡片未出现在 bounded pending 页也不证明终态。Main 已核准确 accepted answer_saved 回执时只清原键，观察到同原卡的新 revision/inputDigest 或非 pending 状态时才清理对应旧键。关闭页面进程不保证未提交问卷草稿恢复，持久原 Answer journal 仍负责未知回执。
 
 隔离测试中的“保留草稿”只保存原Main私有主输入，不要求业务History已经完整读取，不向 dev／prod 显示。已受理的原保存版本被消费后，下一次显式保存先读取并核对同一草稿身份、范围、空正文、准确后继修订及Main已提交的原Command／修订消费凭据，再同步 CAS；不凭受理回执或空正文猜测修订，其他写入者保存非空或空正文均保留原冲突。凭据缺失或被有界缓存淘汰时保守保留冲突，普通重新进入会话可读取实际修订。读取不替换后续输入，切换视图或退出后的迟到成功／失败不继续保存或污染新视图；当前读取失败和实际保存失败仍显示。[发送与保存回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖立即／未知后确认、后续编辑、独立清空、保存竞争与迟到范围；[真实私有库回归](test/isolated/native-prompt-draft-store.test.ts)另核提交失败不发布消费凭据、冷读、保存失效和缓存上限。原保存调用显式不依赖History，原pending防重、generation／Session／revision CAS及迟到scope更新guard保持；发送／回答等原业务操作的门禁不变。[原完整读归属DOM](test/isolated/native-read-ownership-dom.test.tsx)核普通界面无按钮、无保存请求，显式测试模式仍在History GET held时保存准确原文，迟到A回执不改B草稿／修订且零业务提交。此前原macOS问答整窗口的全部流程／断言／10秒读取／45秒driver／120秒整例证据及原完整默认真实失败归[当时进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13统一回归发现的-native-私有草稿保存)。
 
-[页面 DOM](test/native-questionnaire-dom.test.tsx)核会话隔离、遗漏页／读取失败、未知一次答复、准确回执只清原草稿，以及 question 隐藏主输入并在终态恢复原文；[实际完整 Native 候选](test/isolated/native-questionnaire-bundle.test.ts)与 [Electron driver](test/native-questionnaire-electron.fixture.ts)核搬迁、删除构建源后的默认 Service／compatible Provider 窗口流程，末页主动提交前零 HTTP Answer、原 ID／文案和自由原文、问卷取消后原 Run 继续，以及所属 Service 真正退出后的冷 Store。该 fixture 仅暂存各原 Run 的首个 Provider 响应，沿既有“保留草稿”准备并读取准确主草稿后释放；实测答复／取消均隐藏主输入再恢复原文，没有新增 Model 或重答。首次发送等待实际 Renderer 权限与历史就绪，并核一次真实 form submit；[原 Native bundle driver](test/native-bundle-electron.fixture.ts)复用这项界面观察，原制品、独立审批与退出断言保持。实际运行结果与限制归 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不由组件或单个窗口测试推导全部 P5、三平台或签名发行资格。
+[页面 DOM](test/native-questionnaire-dom.test.tsx)核主输入节点和选区连续、两类草稿独立、会话隔离、遗漏页／读取失败、未知一次答复和准确回执只清原问卷草稿。[实际完整 Native 候选](test/isolated/native-questionnaire-bundle.test.ts)与 [Electron driver](test/native-questionnaire-electron.fixture.ts)核搬迁、删除构建源后的默认 Service／compatible Provider 窗口流程，末页主动提交前零 HTTP Answer、原 ID／文案和自由原文、问卷取消后原 Run 继续，以及所属 Service 真正退出后的冷 Store。该 fixture 仅暂存各原 Run 的首个 Provider 响应，沿既有“保留草稿”准备并读取准确主草稿后释放。此前 macOS 实测覆盖主输入暂时收起后的草稿恢复。当前 driver 改为核问卷与主输入并存。首次发送等待实际 Renderer 权限与历史就绪，并核一次真实 form submit；[原 Native bundle driver](test/native-bundle-electron.fixture.ts)复用这项界面观察，原制品、独立审批与退出断言保持。历史运行结果与限制归 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+2026-11-11，问卷样式首次验证在 Windows x64、Bun 1.4.4、Chrome 157，以 `c9d058572` 加本轮工作树运行隔离 Native 渲染器与生产编译样式。深浅主题各核 1200×850 和 470×560，逐步观察选择、题号跳转、键盘焦点、长内容滚动、草稿跨会话返回、提交失败后手动重试、未知回执只查原答复、确认和界面重挂。98 条画面状态记录核对待答时的单张卡片和当时主输入收起／草稿恢复。卡片展开、换题及收起时，上翻阅读的会话维持原位置，跟随最新的会话保持底部。过程与截图保存在本机 `.cache/questionnaire-ui-20261111/`。相关 UI 和 Native 回归共 9 项通过，两 workspace 类型检查通过。浏览器使用隔离测试桥，未复验安装版 Electron 或真实模型。
+
+同日首次验证问卷和主输入并存时，Windows x64 的隔离 Native 渲染器以 Chrome 157 和生产编译样式复验深浅主题各 1200×850、470×560。逐步核对问卷出现时保留主输入节点、焦点及选区，切会话后恢复两类草稿，回执未知只查询原答复，结束后继续编辑主输入。发送和停止复用同一按钮节点，提交停止后显示“正在停止”。当时的明确发送使用原 Run 的后续队列，明确停止使用原活动 Command，问卷保留独立提交入口。长草稿和原 JSON 表单通过问卷区域滚动继续操作。截图和过程记录保存在本机 `.cache/questionnaire-with-prompt-20261111/`。定向回归 22 项和两 workspace 类型检查通过。浏览器使用隔离测试桥，未复验安装版 Electron 或真实模型。
+
+同日增加 `ask_user` 待答发送门禁和末项“自定义输入”后，Windows x64 的隔离 Native 渲染器在 Chrome 157 复验深浅主题各 1200×850、470×560。输入和切换会话保留原草稿，待答、答复提交中及未知回执期间，Enter 和主表单提交均为零主输入请求。原答复结束后，同一按钮恢复发送，原草稿经明确操作才进入原 Run 的队列。待答期间用该按钮停止任务，核对原活动 Command、零问卷提交和草稿保留。浏览器另核最后一项、鼠标聚焦及原多行自定义值，过程记录在本机 `.cache/questionnaire-waiting-input-20261111/`。8 项定向回归和两 workspace 类型检查通过，本轮使用隔离测试桥，未复验安装版 Electron 或真实模型。
+
+同日调整问卷高度后，Windows x64 的隔离 Native 渲染器在 Chrome 157 复验深浅主题。同一份问卷的首题在 1200×850 窗口中从 343 px 降至 196 px，在 470×560 窗口中从 309 px 降至 203 px，聊天正文分别多出 149 px 和 109 px。窄窗末题的自定义输入、待答数和底部操作同屏可见。另核对长选项滚动、长主草稿下通过滚轮到达问卷操作、翻题焦点、原阅读位置及答复失败和未知回执的恢复。过程和截图在本机 `.cache/questionnaire-compact-20261111/`。5 项定向回归及 UI、Desktop 两个 workspace 类型检查通过。此次使用隔离测试桥，未复验安装版 Electron 或真实模型。
 
 ## Native 计划入口与完整审核
 

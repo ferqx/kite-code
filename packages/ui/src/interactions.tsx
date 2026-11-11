@@ -57,7 +57,8 @@ function PlainInteractionCard({
   attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
 }) {
   const disabled = !onAnswer || interaction.state !== 'pending' || submission !== undefined;
-  if (interaction.kind === 'approval' && !isMcpSourceReview(interaction) && renderApproval)
+  const mcpSourceReview = isMcpSourceReview(interaction);
+  if (interaction.kind === 'approval' && !mcpSourceReview && renderApproval)
     return renderApproval({
       interaction,
       disabled,
@@ -100,6 +101,9 @@ function PlainInteractionCard({
   return (
     <article
       className={structuredQuestion ? 'question-interaction' : undefined}
+      data-question-interaction={
+        interaction.kind === 'question' && !mcpSourceReview ? '' : undefined
+      }
       aria-label={structuredQuestion ? '补充问题' : `${interaction.kind} ${interaction.id}`}
     >
       {!structuredQuestion && (
@@ -122,7 +126,7 @@ function PlainInteractionCard({
               saved: '回答已保存，正在提交…',
               submitting: '正在提交回答…',
               accepted: '回答已提交，正在继续…',
-              unknown: '提交结果尚未确认，请查询本次提交。',
+              unknown: '回答提交结果尚未确认。',
               failed: '回答提交失败。',
             }[submission.phase]
           }
@@ -135,7 +139,7 @@ function PlainInteractionCard({
           {submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.
         </p>
       )}
-      {interaction.kind === 'approval' && !isMcpSourceReview(interaction) && (
+      {interaction.kind === 'approval' && !mcpSourceReview && (
         <div className="actions">
           {approvalOptions.map((option) => (
             <div key={option.optionId}>
@@ -172,7 +176,7 @@ function PlainInteractionCard({
           </Button>
         </div>
       )}
-      {isMcpSourceReview(interaction) ? (
+      {mcpSourceReview ? (
         <McpSourceReview
           key={`${interaction.id}/${interaction.revision}`}
           interaction={interaction}
@@ -192,7 +196,7 @@ function PlainInteractionCard({
           />
         )
       )}
-      {interaction.kind === 'plan_review' && !isMcpSourceReview(interaction) && (
+      {interaction.kind === 'plan_review' && !mcpSourceReview && (
         <PlanReviewPanel
           interaction={interaction}
           disabled={disabled}

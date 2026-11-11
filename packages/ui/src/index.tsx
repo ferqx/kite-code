@@ -215,6 +215,7 @@ export {
   type InteractionSubmission,
 } from './interactions';
 export { SafeMessageMarkdown } from './markdown';
+export { isMcpSourceReview } from './mcp-source-review';
 export {
   type ModelInputDirectory,
   type ModelInputIdentity,

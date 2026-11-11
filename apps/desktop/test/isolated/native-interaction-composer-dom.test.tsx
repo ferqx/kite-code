@@ -10,7 +10,7 @@ import type { NativeSelection } from '../../src/native-bridge';
 import { backgroundItem } from '../background-item.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('ordinary root and child approvals retain prompt and permission access; questions, plans and MCP remain exclusive', async () => {
+test('ordinary approvals and questions retain the prompt while plan and MCP decisions own the input area', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -119,12 +119,19 @@ test('ordinary root and child approvals retain prompt and permission access; que
   try {
     expect(nativeRootInteractionBlocksComposer(selection)).toBe(false);
     await render(selection, card);
-    expect(host.querySelector('[aria-label="parent input"]')).not.toBeNull();
+    const editor = host.querySelector('[aria-label="parent input"]');
+    expect(editor).not.toBeNull();
+    const question = { ...card, kind: 'question' as const, definitionId: 'ask_user' };
+    const waiting = { ...selection, interactions: [question] };
+    expect(nativeRootInteractionBlocksComposer(waiting)).toBe(false);
+    await render(waiting, question);
+    expect(host.querySelector('[aria-label="parent input"]') === editor).toBe(true);
     for (const other of [
-      { ...card, kind: 'question' as const },
       { ...card, kind: 'plan_review' as const },
       { ...card, request: { kind: 'mcp_source_approval' } },
       { ...card, request: { kind: 'mcp_credential_binding' } },
+      { ...question, definitionId: 'builtin.mcp.sources/mcp.source.approve' },
+      { ...question, definitionId: 'builtin.mcp.sources/mcp.credential.bind' },
     ]) {
       const exclusive = { ...selection, interactions: [other] };
       expect(nativeRootInteractionBlocksComposer(exclusive)).toBe(true);

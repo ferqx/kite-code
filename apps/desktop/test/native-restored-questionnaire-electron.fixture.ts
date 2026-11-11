@@ -321,10 +321,10 @@ try {
   await page.getByRole('radio', { name: `${facts.answers.q1} (Recommended)`, exact: true }).check();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
   await page.getByText('问题 2 / 2', { exact: true }).waitFor();
-  await page.getByRole('radio', { name: '自由回答', exact: true }).check();
-  await page.getByRole('textbox', { name: '自由回答', exact: true }).fill(facts.answers.q2);
+  await page.getByRole('radio', { name: '自定义输入', exact: true }).check();
+  await page.getByRole('textbox', { name: '自定义输入', exact: true }).fill(facts.answers.q2);
   assert.equal(
-    await page.getByRole('textbox', { name: '自由回答', exact: true }).inputValue(),
+    await page.getByRole('textbox', { name: '自定义输入', exact: true }).inputValue(),
     facts.answers.q2,
   );
   await page.getByRole('button', { name: '提交回答', exact: true }).click();

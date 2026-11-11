@@ -115,24 +115,32 @@ test('actual DOM browses unanswered original questions and submits all exact val
     const choose = async (name: string) =>
       act(async () => host.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!.click());
     const click = async (name: string) => act(async () => button(name).click());
-    expect(host.querySelector('fieldset')).not.toBeNull();
+    const questions = host.querySelector('fieldset')!;
+    const heading = host.querySelector('.questionnaire-header h3')!;
+    expect(questions.getAttribute('aria-labelledby')).toBe(heading.id);
     expect(host.querySelector('input:checked')).toBeNull();
+    expect(
+      [...host.querySelectorAll('input[type="radio"]')].at(-1)?.getAttribute('aria-label'),
+    ).toBe('自定义输入');
     expect(button('上一题')).toBeUndefined();
     expect(button('提交回答')).toBeUndefined();
-    expect(host.querySelector('form')!.textContent).not.toContain('Full original description');
+    const firstChoice = host.querySelector('input[aria-label="Alpha 推荐"]')!;
+    expect(
+      host.ownerDocument.getElementById(firstChoice.getAttribute('aria-describedby')!)!.textContent,
+    ).toBe('Full original description\nwith Unicode 尾部');
+    expect(host.querySelector('[aria-current="step"]')?.textContent).toBe('1');
+    await click('下一题');
     await act(async () =>
-      host.querySelector<HTMLButtonElement>('button[aria-label="Alpha 推荐的说明"]')!.focus(),
+      host.querySelector<HTMLButtonElement>('button[aria-label="第 3 题，待回答"]')!.click(),
     );
-    expect(host.querySelector('[role="tooltip"]')!.textContent).toContain(
-      'Full original description\nwith Unicode 尾部',
-    );
-    await click('下一题');
-    await click('下一题');
+    expect(host.querySelector('[aria-current="step"]')?.textContent).toBe('3');
+    expect(host.ownerDocument.activeElement?.textContent).toBe('q3 original question');
+    expect(host.querySelector('.questionnaire-incomplete')?.textContent).toBe('还有 3 题待答');
     expect(button('提交回答').disabled).toBe(true);
-    await choose('自由回答');
+    await choose('自定义输入');
     const text = '  q3-o1🙂é\n保持 空格  ';
     await act(async () => {
-      const input = host.querySelector('textarea')!;
+      const input = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自定义输入"]')!;
       input.value = text;
       input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     });
@@ -140,10 +148,12 @@ test('actual DOM browses unanswered original questions and submits all exact val
     await choose('q1-o1');
     await click('上一题');
     await choose('Alpha 推荐');
-    await click('下一题');
-    await click('下一题');
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('button[aria-label="第 3 题，已回答"]')!.click(),
+    );
     expect(host.querySelector('textarea')!.value).toBe(text);
     expect(button('提交回答').disabled).toBe(false);
+    expect(host.querySelector('.questionnaire-incomplete')).toBeNull();
     expect(answers).toHaveLength(0);
     await act(async () => {
       const input = host.querySelector('textarea')!;
@@ -184,6 +194,7 @@ test('actual DOM browses unanswered original questions and submits all exact val
     );
     expect(host.querySelector('textarea')!.value).toBe(text);
     expect(button('提交回答').disabled).toBe(true);
+    expect(host.querySelector('.question-submission')?.textContent).toBe('回答提交结果尚未确认。');
   });
 });
 

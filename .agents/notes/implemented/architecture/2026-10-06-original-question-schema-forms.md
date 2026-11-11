@@ -22,9 +22,9 @@ stdio 沿原 JSON 回答入口，先检查每个有限 schema 分支，避免把
 
 每卡步骤草稿绑定完整 interactionKey；返回上题保留后题草稿，revision 变化重新核对，最后一步才提交完整答案。原 controller、附件 reader、unknown 原命令查询与 caller journal 保持各自职责。
 
-Native 与 TUI 共用不依赖 Ink/Composer 的有限 schema parser，DOM 以步骤、单选和闭合自由输入呈现；未作答时允许查看后题，末页仍须明确提交。选项说明浮层不进入布局流，翻页与提交保不同按钮身份，防止失焦推移点击目标和浏览器复用末次翻页触发隐式提交。复杂输入保原 JSON fallback。
+Native 与 TUI 共用不依赖 Ink/Composer 的有限 schema parser，DOM 以步骤、单选和闭合自由输入呈现；未作答时允许查看后题，末页仍须明确提交。早期选项说明通过浮层避免推移点击目标，2026-11-11 起在可滚动的选项区域直接展示，题目和操作栏独立。翻页与提交保不同按钮身份，防止浏览器复用末次翻页触发隐式提交。复杂输入保原 JSON fallback。
 
-默认 ask_user 的根 oneOf 只含闭合题目 object 与 const:null，继续使用原 question answer；null 保存为 answered/answer_saved.cancelled:false，由 leaf 返回 succeeded 的取消信息 {cancelled:true}，同一原 Run 的 Model 继续。精确原 work signal 取消仍是另一条 cancelled 路径；不引入新 DTO、Interaction kind 或 UI business ID 特例。所选 Native 会话等待 question 时隐藏主输入表单及任务停止按钮，Root 的原主草稿状态继续保留，回答或取消后的交互终态恢复原文；跨会话主草稿仍使用既有明确保存入口，不改变其持久化合同。
+默认 ask_user 的根 oneOf 只含闭合题目 object 与 const:null，继续使用原 question answer；null 保存为 answered/answer_saved.cancelled:false，由 leaf 返回 succeeded 的取消信息 {cancelled:true}，同一原 Run 的 Model 继续。精确原 work signal 取消仍是另一条 cancelled 路径；不引入新 DTO、Interaction kind 或 UI business ID 特例。早期 Native 在待答时收起主输入，以免两个输入区域争夺操作。2026-11-11 按用户要求让两套表单同时可见。问卷出现时保留主输入的焦点、选区和草稿。ask_user 待答时暂停主输入发送，同一个按钮保留停止入口，待答结束后恢复发送。允许自由回答的末项显示“自定义输入”，答案仍沿原 schema。现行规则见[Native owner](../../../../apps/desktop/README.md#native-普通问题与页面草稿)。
 
 TUI 普通主区沿原 Ctrl+C 取消合同识别全真实 C 的批次，仍由原分支和 controller 固定目标及去重，辅助面板不扩展批次语义。主区保持独立 paste listener，普通卡片的 literal paste 留在原答案草稿，Composer 自有 paste 保原文本；原生纯 C 批次在 Composer 编辑前拒绝。该有限处理不生成其他控制组合的键盘路由，也不把粘贴内容当问卷取消或 work 取消。
 
