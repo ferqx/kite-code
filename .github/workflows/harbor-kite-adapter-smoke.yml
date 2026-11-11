@@ -1,0 +1,112 @@
+name: Harbor real Kite adapter smoke
+
+# One opt-in test branch. No pull_request, schedule, credentials or paid model.
+on:
+  push:
+    branches: [ci/harbor-kite-adapter-20261111]
+    paths:
+      - .github/workflows/harbor-kite-adapter-smoke.yml
+      - integrations/harbor/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harbor-kite-adapter-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  real-kite-local-provider:
+    if: github.repository == 'ferqx/kite-code' && github.ref == 'refs/heads/ci/harbor-kite-adapter-20261111'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      HARBOR_VERSION: 0.25.0
+      EVIDENCE: dist/harbor-kite-adapter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Require Docker and record exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE"
+          {
+            printf 'kite_commit=%s\nharbor_version=%s\n' "$GITHUB_SHA" "$HARBOR_VERSION"
+            printf 'product_baseline=a83387c6b1623f5b46264b21bf080b91d4ed349e\n'
+            printf 'run_id=%s\nrun_attempt=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            uname -a
+            docker version
+            docker compose version
+          } 2>&1 | tee "$EVIDENCE/preflight.log"
+          find integrations/harbor -type f -print0 | sort -z | xargs -0 sha256sum > "$EVIDENCE/input-sha256.txt"
+      - name: Install pinned Harbor without model credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/harbor-kite-venv"
+          "$RUNNER_TEMP/harbor-kite-venv/bin/python" -m pip install --disable-pip-version-check "harbor==$HARBOR_VERSION" 2>&1 | tee "$EVIDENCE/install.log"
+          "$RUNNER_TEMP/harbor-kite-venv/bin/python" -c "import importlib.metadata; assert importlib.metadata.version('harbor') == '0.25.0'"
+          "$RUNNER_TEMP/harbor-kite-venv/bin/python" -m pip freeze > "$EVIDENCE/packages.txt"
+          echo "$RUNNER_TEMP/harbor-kite-venv/bin" >> "$GITHUB_PATH"
+      - name: Test adapter and result checker
+        run: python -m unittest discover -s integrations/harbor -p 'test_*.py' -v
+      - name: Build only tracked source into a disposable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Docker receives a Git archive, never runner HOME, credentials or untracked files.
+          git archive --format=tar HEAD | docker build --progress=plain \
+            --file integrations/harbor/Dockerfile --build-arg "KITE_SOURCE_COMMIT=$GITHUB_SHA" \
+            --tag kite-harbor-smoke:local - 2>&1 | tee "$EVIDENCE/build.log"
+          docker image inspect kite-harbor-smoke:local > "$EVIDENCE/kite-image.json"
+      - name: Run real Kite and an independent negative control
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE/integrations/harbor"
+          docker events --since "$(date +%s)" --filter type=container --format '{{json .}}' > "$EVIDENCE/docker-events.jsonl" 2> "$EVIDENCE/docker-events.stderr" &
+          events_pid=$!
+          trap 'kill "$events_pid"' EXIT
+          # Separate fresh trial environments, no retries or model credentials.
+          for agent in kite nop; do
+            selector=nop
+            if [ "$agent" = kite ]; then selector=kite_agent:KiteAgent; fi
+            set +e
+            timeout --signal=TERM --kill-after=30s 10m harbor run \
+              --path integrations/harbor/tasks/kite-file-smoke \
+              --agent "$selector" --env docker \
+              --n-concurrent 1 --n-attempts 1 --max-retries 0 \
+              --job-name "$agent" --jobs-dir "$EVIDENCE/jobs" \
+              > "$EVIDENCE/harbor-$agent.log" 2>&1
+            code=$?
+            set -e
+            printf '%s\n' "$code" > "$EVIDENCE/$agent-process-exit-code.txt"
+            cat "$EVIDENCE/harbor-$agent.log"
+          done
+          sleep 1
+          kill "$events_pid"
+          if wait "$events_pid"; then exit 1; else test "$?" -eq 143; fi
+          trap - EXIT
+          for agent in kite nop; do
+            python integrations/harbor/check_smoke.py \
+              --job-dir "$EVIDENCE/jobs/$agent" --agent "$agent" \
+              --process-exit-code "$(cat "$EVIDENCE/$agent-process-exit-code.txt")" \
+              --task-dir integrations/harbor/tasks/kite-file-smoke \
+              --source-commit "$GITHUB_SHA" \
+              --docker-events "$EVIDENCE/docker-events.jsonl" \
+              --output "$EVIDENCE/check-$agent.json"
+          done
+      - name: Record images
+        if: always()
+        run: docker image ls --digests --no-trunc > "$EVIDENCE/docker-images.txt" 2>&1
+      - name: Retain raw logs and evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: harbor-kite-adapter-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/harbor-kite-adapter/
+          if-no-files-found: error
+          retention-days: 7

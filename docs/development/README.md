@@ -48,6 +48,8 @@
 
 追溯时区分静态 import、进程拓扑与请求/事件/提交时序；客户端缓存始终不能成为业务 authority。不得从旧计划、Note 状态或历史测试通过推导当前能力。
 
+[Harbor Kite adapter 实验](../../integrations/harbor/README.md)独立验证真实 CLI/Service 接线、原始轨迹与隔离验收；本地模型夹具不代表真实模型或发行资格。
+
 ## 文档与验证维护
 
 [Windows 工作树清理](worktree-safety.md)说明依赖联接风险、只读检查及归档前后文件保全。
