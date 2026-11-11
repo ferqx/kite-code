@@ -47,7 +47,11 @@ export function parseRobots(body: string): readonly RobotsRule[] {
     if (!hasAgents) continue;
     hasRules = true;
     if (!value.startsWith('/') || /[\t ]/.test(value)) continue;
-    const rule = { allow: field === 'allow', pattern: normalizePath(value) };
+    const rule = {
+      allow: field === 'allow',
+      // Only the final dollar is an anchor; other dollars match literal URL octets.
+      pattern: normalizePath(value).replace(/\$(?!$)/g, '%24'),
+    };
     if (appliesToProduct) specific.push(rule);
     else if (appliesToAll) wildcard.push(rule);
   }

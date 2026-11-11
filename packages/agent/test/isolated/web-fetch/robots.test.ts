@@ -44,6 +44,7 @@ test('robots matches specificity, query, wildcards, anchors and normalized URL o
     Disallow: /ab%63
     Disallow: /a%2Ab
     Disallow: /cost%24$
+    Disallow: /price$usd$
     Disallow: /search?literal=%2A%24$
     Disallow: /*.pdf$
     Disallow: /only$
@@ -60,6 +61,8 @@ test('robots matches specificity, query, wildcards, anchors and normalized URL o
     '/a*b',
     '/cost$',
     '/cost%24',
+    '/price$usd',
+    '/price%24usd',
     '/search?literal=*$',
     '/search?literal=%2a%24',
     '/docs/manual.pdf',
@@ -76,6 +79,8 @@ test('robots matches specificity, query, wildcards, anchors and normalized URL o
     '/abC',
     '/axxb',
     '/cost$more',
+    '/price$usd-more',
+    '/priceXusd',
     '/search?literal=*$&other=1',
     '/docs/manual.pdf?download=1',
     '/only?',

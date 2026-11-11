@@ -345,7 +345,7 @@ test('robots full rules, true redirect loop, per-hop denial and malformed input 
     (req, res) => {
       if (req.url === '/robots.txt') {
         res.end(
-          `User-agent: *\n${Array.from({ length: 120 }, (_, i) => `Disallow: /irrelevant${i}\n`).join('')}Disallow: /forbidden\nAllow: /forbidden/public$\nDisallow: /literal%2A%24$`,
+          `User-agent: *\n${Array.from({ length: 120 }, (_, i) => `Disallow: /irrelevant${i}\n`).join('')}Disallow: /forbidden\nAllow: /forbidden/public$\nDisallow: /literal%2A%24$\nDisallow: /price$usd$`,
         );
         return;
       }
@@ -376,12 +376,14 @@ test('robots full rules, true redirect loop, per-hop denial and malformed input 
     expect(JSON.stringify(robots.execution?.result)).not.toContain('PRIVATE_QUERY');
     expect(f.admissions).toEqual([`${f.url}/robots.txt`]);
     expect(f.counts()).toEqual({ requests: 1, dns: 1 });
-    const literal = await f.run({ url: `${f.url}/literal*$` });
-    expect(literal.execution?.result).toMatchObject({
-      outcome: 'failed',
-      details: { code: 'web_robots_denied', stage: 'robots' },
-    });
-    expect(f.counts()).toEqual({ requests: 1, dns: 1 });
+    for (const path of ['/literal*$', '/price$usd', '/price%24usd']) {
+      const literal = await f.run({ url: `${f.url}${path}` });
+      expect(literal.execution?.result).toMatchObject({
+        outcome: 'failed',
+        details: { code: 'web_robots_denied', stage: 'robots' },
+      });
+      expect(f.counts()).toEqual({ requests: 1, dns: 1 });
+    }
     const allowed = await f.run({ url: `${f.url}/forbidden/public#local` });
     expect(allowed.execution?.result).toMatchObject({
       outcome: 'succeeded',
