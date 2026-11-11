@@ -1,10 +1,17 @@
 import type { UserSkillCataloguePage } from '@kite-ai/client';
 import { Button, MessageContent, RightSidebar } from '@kite-ai/ui/desktop';
+import { ApplicationConfirmationDialog } from '@kite-ai/ui/desktop/confirmation';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NativeBridge, NativeSkillsScope } from './native-bridge';
 import { NativeSettingsListRow } from './native-settings-list-row';
+import { NativeSkillMarketplace } from './native-skill-marketplace';
 import { readNativeSkillCatalogue, readNativeSkillDocument } from './native-skills';
+import {
+  installedSkillIdPrefix,
+  isSkillMarketplaceUninstallSelection,
+  type SkillMarketplaceUninstallSelection,
+} from './skill-marketplace-contract';
 import './native-skills-settings.css';
 
 const safeError = (cause: unknown) => {
@@ -14,6 +21,30 @@ const safeError = (cause: unknown) => {
     : 'skill_catalogue_unavailable';
 };
 type SkillEntry = UserSkillCataloguePage['entries'][number];
+type SkillDetailPanel = { identity: string; kind: 'detail'; id: string };
+type SkillUninstall = {
+  panel: SkillDetailPanel;
+  selection: SkillMarketplaceUninstallSelection;
+  busy: boolean;
+  error?: string;
+};
+
+function uninstallError(code: string) {
+  switch (code) {
+    case 'invalid_native_request':
+      return '当前客户端尚未加载 Skills 卸载。请完全退出并重新启动客户端。';
+    case 'skill_marketplace_version_changed':
+      return '此 Skill 的文件已变化，请刷新目录后重新确认卸载。';
+    case 'skill_marketplace_unsafe_directory':
+      return '无法安全访问此 Skill 的目录，请检查用户 Skills 目录。';
+    case 'skill_marketplace_install_busy':
+    case 'skill_marketplace_mutation_busy':
+      return '另一个 Skills 操作正在进行，请稍后重试。';
+    default:
+      return '暂时无法将此 Skill 移到系统废纸篓，请重试。';
+  }
+}
+
 function SkillStatus({ entry }: { entry: SkillEntry }) {
   const label =
     entry.state === 'disabled'
@@ -36,6 +67,7 @@ const sourceLabel = ({ id, source }: SkillEntry) =>
       : source === null
         ? '未提供来源信息'
         : `个人 · ${source.origin === 'profile' ? 'Profile Skills' : source.origin === 'configured' ? '自定义位置' : source.origin}`;
+const descriptionLabel = (entry: SkillEntry) => entry.description?.trim() || '无描述';
 const reasonLabel: Record<
   Exclude<NonNullable<SkillEntry['reason']>, 'skill_capability_missing'>,
   string
@@ -92,10 +124,15 @@ export function NativeSkillsSettings({
       error?: string;
       busy: boolean;
     }>({ identity, busy: false });
-  const [detail, setDetail] = useState<{ identity: string; id: string }>();
+  const [panel, setPanel] = useState<SkillDetailPanel | { identity: string; kind: 'search' }>();
+  const [uninstall, setUninstall] = useState<SkillUninstall>();
+  const [uninstalled, setUninstalled] = useState<{ identity: string; slug: string }>();
+  const pendingUninstall = useRef(false);
   const origin = useRef<HTMLButtonElement | null>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
+  const searchButton = useRef<HTMLButtonElement>(null);
   const detailHeading = useRef<HTMLHeadingElement>(null);
+  const uninstallButton = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef(false);
   const readIdentity = `${identity}/${refresh}`,
     current = useRef(readIdentity);
@@ -104,10 +141,32 @@ export function NativeSkillsSettings({
   const error = view.identity === identity ? view.error : undefined;
   const busy = view.identity === identity && view.busy;
   const canRead = !!scope && available;
-  const detailId = canRead && detail?.identity === identity ? detail.id : undefined;
+  const selectedPanel = canRead && panel?.identity === identity ? panel : undefined;
+  const detail = selectedPanel?.kind === 'detail' ? selectedPanel : undefined;
+  const detailId = detail?.id;
+  const searchOpen = selectedPanel?.kind === 'search';
+  const active = useRef({ scope: canRead ? scope : undefined, panel: selectedPanel });
+  active.current = { scope: canRead ? scope : undefined, panel: selectedPanel };
   const entry =
     facts?.availability === 'available'
       ? facts.entries.find((value) => value.id === detailId)
+      : undefined;
+  const candidate = { skillId: entry?.id, skillVersion: entry?.version };
+  const uninstallSelection =
+    entry?.source?.scope === 'user' &&
+    entry.source.origin === '.kite-code' &&
+    isSkillMarketplaceUninstallSelection(candidate)
+      ? candidate
+      : undefined;
+  const detailUninstall =
+    uninstall &&
+    uninstall.panel === detail &&
+    uninstall.selection.skillVersion === uninstallSelection?.skillVersion
+      ? uninstall
+      : undefined;
+  const confirmation =
+    detailUninstall && !detailUninstall.busy && !detailUninstall.error
+      ? detailUninstall
       : undefined;
   const skillId = entry?.id,
     skillVersion = entry?.enabled ? entry.version : undefined,
@@ -212,32 +271,76 @@ export function NativeSkillsSettings({
     return () => abort.abort();
   }, [bridge, identity, readIdentity, canRead, scope]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: A new read scope discards the old detail even when skill IDs match.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new read scope discards the old panel even when skill IDs match.
   useEffect(() => {
-    setDetail(undefined);
+    setPanel(undefined);
+    setUninstall(undefined);
     origin.current = null;
     restoreFocus.current = false;
   }, [identity, canRead]);
 
   function close() {
     restoreFocus.current = true;
-    setDetail(undefined);
+    setPanel(undefined);
+  }
+
+  async function uninstallSkill() {
+    if (!scope || !confirmation || pendingUninstall.current || busy || error) return;
+    const submitted: SkillUninstall = { ...confirmation, busy: true, error: undefined };
+    const opener = origin.current;
+    pendingUninstall.current = true;
+    setUninstall(submitted);
+    try {
+      const reply = await bridge.request({
+        method: 'settings.skills.uninstall',
+        generation: scope.generation,
+        selection: submitted.selection,
+      });
+      if (
+        !reply ||
+        !('kind' in reply) ||
+        reply.kind !== 'settings.skills.uninstall' ||
+        !('result' in reply) ||
+        reply.result?.skillId !== submitted.selection.skillId ||
+        (reply.result.status !== 'uninstalled' && reply.result.status !== 'already-uninstalled')
+      )
+        throw Error('skill_marketplace_uninstall_failed');
+      if (active.current.scope !== scope) return;
+      setUninstall((old) => (old === submitted ? undefined : old));
+      setUninstalled({
+        identity,
+        slug: submitted.selection.skillId.slice(installedSkillIdPrefix.length),
+      });
+      if (active.current.panel === submitted.panel) {
+        origin.current = searchButton.current;
+        close();
+      } else if (!active.current.panel && opener?.ownerDocument.activeElement === opener) {
+        searchButton.current?.focus();
+      }
+      setRefresh((value) => value + 1);
+    } catch (cause) {
+      setUninstall((old) =>
+        old === submitted ? { ...submitted, busy: false, error: safeError(cause) } : old,
+      );
+    } finally {
+      pendingUninstall.current = false;
+    }
   }
   const closeCurrent = useRef(close);
   closeCurrent.current = close;
   useEffect(() => {
     if (editorControl)
       editorControl.current =
-        detailId && panelHost ? { close: () => closeCurrent.current() } : null;
+        (detailId || searchOpen) && panelHost ? { close: () => closeCurrent.current() } : null;
     if (detailId && panelHost) detailHeading.current?.focus();
-    if (!detailId && restoreFocus.current) {
+    if (!detailId && !searchOpen && restoreFocus.current) {
       restoreFocus.current = false;
       (origin.current?.isConnected ? origin.current : refreshButton.current)?.focus();
     }
     return () => {
       if (editorControl) editorControl.current = null;
     };
-  }, [detailId, panelHost, editorControl]);
+  }, [detailId, searchOpen, panelHost, editorControl]);
 
   return (
     <section
@@ -248,17 +351,33 @@ export function NativeSkillsSettings({
       <header className="settings-page-heading">
         <div>
           <h2>Skills</h2>
-          <p>查看内置和个人 Skills 的说明。</p>
+          <p>查看内置和个人 Skills，或搜索并安装更多 Skills。</p>
         </div>
-        <Button
-          ref={refreshButton}
-          className="provider-button provider-refresh"
-          type="button"
-          disabled={!canRead || busy}
-          onClick={() => setRefresh((value) => value + 1)}
-        >
-          刷新 Skills 目录
-        </Button>
+        <div className="provider-page-actions">
+          <Button
+            ref={refreshButton}
+            className="provider-button provider-refresh"
+            type="button"
+            disabled={!canRead || busy}
+            onClick={() => setRefresh((value) => value + 1)}
+          >
+            刷新 Skills 目录
+          </Button>
+          <Button
+            ref={searchButton}
+            className="provider-button provider-save"
+            type="button"
+            disabled={!canRead || !panelHost}
+            aria-expanded={searchOpen}
+            aria-controls={searchOpen ? panelId : undefined}
+            onClick={(event) => {
+              origin.current = event.currentTarget;
+              setPanel({ identity, kind: 'search' });
+            }}
+          >
+            搜索 Skills
+          </Button>
+        </div>
       </header>
       {!available ? (
         <p className="provider-notice" role="status">
@@ -291,14 +410,14 @@ export function NativeSkillsSettings({
                           key={item.id}
                           label={`查看 ${item.name || item.id} 详情`}
                           title={item.name || item.id}
-                          description={item.description ?? '摘要未记录'}
+                          description={descriptionLabel(item)}
                           metadata={`来源：${sourceLabel(item)}`}
                           selected={detailId === item.id}
                           controls={detailId === item.id ? panelId : undefined}
                           disabled={!panelHost}
                           onOpen={(event) => {
                             origin.current = event.currentTarget;
-                            setDetail({ identity, id: item.id });
+                            setPanel({ identity, kind: 'detail', id: item.id });
                           }}
                           status={<SkillStatus entry={item} />}
                         />
@@ -316,6 +435,19 @@ export function NativeSkillsSettings({
             </div>
           )}
         </>
+      )}
+      {canRead && (
+        <NativeSkillMarketplace
+          key={identity}
+          bridge={bridge}
+          generation={generation}
+          panelId={panelId}
+          panelHost={searchOpen ? panelHost : null}
+          uninstalled={uninstalled?.identity === identity ? uninstalled : undefined}
+          uninstalling={uninstall?.busy}
+          onClose={close}
+          onInstalled={() => setRefresh((value) => value + 1)}
+        />
       )}
       {detailId &&
         panelHost &&
@@ -349,9 +481,7 @@ export function NativeSkillsSettings({
                   {entry ? (
                     <div className="skill-detail-content">
                       <section>
-                        <p className="skill-detail-description">
-                          {entry.description ?? '摘要未记录'}
-                        </p>
+                        <p className="skill-detail-description">{descriptionLabel(entry)}</p>
                       </section>
                       <section
                         key={`${identity}/${entry.id}/${entry.version}`}
@@ -385,10 +515,67 @@ export function NativeSkillsSettings({
                   )}
                 </div>
                 <footer className="provider-editor-footer right-sidebar-editor-footer">
+                  {detailUninstall?.error && (
+                    <p
+                      className="provider-notice provider-notice-error skill-uninstall-error"
+                      role="alert"
+                    >
+                      {uninstallError(detailUninstall.error)}
+                    </p>
+                  )}
+                  {detailUninstall?.error === 'skill_marketplace_version_changed' ? (
+                    <Button
+                      className="provider-button"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setUninstall(undefined);
+                        setRefresh((value) => value + 1);
+                        detailHeading.current?.focus();
+                      }}
+                    >
+                      刷新目录
+                    </Button>
+                  ) : (
+                    detail &&
+                    uninstallSelection && (
+                      <Button
+                        ref={uninstallButton}
+                        className="provider-button provider-delete-link"
+                        type="button"
+                        disabled={busy || !!error || uninstall?.busy}
+                        onClick={() =>
+                          setUninstall({
+                            panel: detail,
+                            selection: uninstallSelection,
+                            busy: false,
+                          })
+                        }
+                      >
+                        {detailUninstall?.busy ? '正在卸载…' : '卸载'}
+                      </Button>
+                    )
+                  )}
                   <Button className="provider-button" type="button" onClick={close}>
                     关闭
                   </Button>
                 </footer>
+                <ApplicationConfirmationDialog
+                  kind="skill-uninstall"
+                  label={entry?.name || detailId}
+                  open={!!confirmation}
+                  confirmDisabled={busy || !!error || uninstall?.busy}
+                  onConfirm={() => void uninstallSkill()}
+                  onOpenChange={(open) => {
+                    if (!open) setUninstall((old) => (old === confirmation ? undefined : old));
+                  }}
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    if (active.current.panel !== detail) return;
+                    const trigger = uninstallButton.current;
+                    (trigger?.disabled ? detailHeading.current : trigger)?.focus();
+                  }}
+                />
               </div>
             </div>
           </RightSidebar>,

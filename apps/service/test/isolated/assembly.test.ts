@@ -1,5 +1,13 @@
 import { expect, spyOn, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Json, ToolContext } from '@kite-ai/agent/extensions';
@@ -7,6 +15,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { agentContractSource } from '@kite-ai/agent/sources';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
+import { discoverInstalledUserSkills } from '../../src/installed-user-skills';
 import * as skillSources from '../../src/skill-source';
 
 function fixture() {
@@ -87,6 +96,53 @@ test('Skill tools expose only knowledge selectors and original internal inputs r
     });
   } finally {
     factory.mockRestore();
+    await assembly?.dispose();
+    f.close();
+  }
+});
+
+test('managed Skill tools read only the frozen body and declared ordinary resources', async () => {
+  const f = fixture();
+  const userRoot = join(f.root, 'user');
+  const path = join(userRoot, 'skills', 'guide');
+  const file = join(path, 'SKILL.md');
+  mkdirSync(path, { recursive: true });
+  writeFileSync(file, 'Installed body. [guide](reference.md) [unsafe](link.md)');
+  writeFileSync(join(path, 'reference.md'), 'Packaged reference');
+  writeFileSync(join(userRoot, 'unrelated.md'), 'Outside the Skill');
+  linkSync(join(userRoot, 'unrelated.md'), join(path, 'link.md'));
+  let assembly: Awaited<ReturnType<typeof createWorkspaceAssembly>> | undefined;
+  try {
+    assembly = await createWorkspaceAssembly({
+      workspaceRoot: f.workspace,
+      profile: f.profile,
+      toolIds: ['skills.load', 'skills.resource'],
+      installedUserSkills: await discoverInstalledUserSkills(userRoot),
+    });
+    const tools = assembly.extensions.flatMap((extension) => extension.tools ?? []);
+    const load = tools.find((tool) => tool.id === 'skills.load')!;
+    const resource = tools.find((tool) => tool.id === 'skills.resource')!;
+    const context = { signal: new AbortController().signal } as ToolContext;
+    const id = 'user-skill.guide';
+    expect(await load.execute({ id }, context)).toMatchObject({ outcome: 'succeeded' });
+    expect(await resource.execute({ id, path: 'reference.md' }, context)).toMatchObject({
+      outcome: 'succeeded',
+      content: 'Packaged reference',
+    });
+    expect(await resource.execute({ id, path: 'link.md' }, context)).toMatchObject({
+      outcome: 'failed',
+      content: 'skill_resource_denied',
+    });
+    expect(await resource.execute({ id, path: 'unlisted.md' }, context)).toMatchObject({
+      outcome: 'failed',
+      content: 'skill_resource_not_declared',
+    });
+    writeFileSync(file, 'Updated body outside this Run');
+    expect(await load.execute({ id }, context)).toMatchObject({
+      outcome: 'failed',
+      content: 'skill_version_changed',
+    });
+  } finally {
     await assembly?.dispose();
     f.close();
   }

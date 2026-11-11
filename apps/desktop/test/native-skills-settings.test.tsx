@@ -3,8 +3,13 @@ import type { UserSkillCataloguePage } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { NativeBridge, NativeSkillsPage, NativeSkillsRequest } from '../src/native-bridge';
-import { NativeSkillsSettings } from '../src/native-skills-settings';
+import type {
+  NativeBridge,
+  NativeRequest,
+  NativeResult,
+  NativeSkillsPage,
+  NativeSkillsRequest,
+} from '../src/native-bridge';
 
 type GlobalView = { storeId?: string; canRead?: boolean; generation?: number };
 const entries: UserSkillCataloguePage['entries'] = Array.from({ length: 303 }, (_, index) => ({
@@ -54,20 +59,27 @@ async function fixture(
     editorControl: RefObject<{ close: () => void } | null>,
   ) => Promise<void>,
 ) {
-  const dom = new JSDOM('<main id="root"></main><div id="panel"></div>');
-  const prior = {
-    window: globalThis.window,
-    document: globalThis.document,
-    navigator: globalThis.navigator,
-    IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
-      .IS_REACT_ACT_ENVIRONMENT,
-  };
-  Object.assign(globalThis, {
+  const dom = new JSDOM('<!doctype html><main id="root"></main><div id="panel"></div>');
+  Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {} });
+  const prior = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries({
     window: dom.window,
     document: dom.window.document,
     navigator: dom.window.navigator,
+    Node: dom.window.Node,
+    NodeFilter: dom.window.NodeFilter,
+    HTMLElement: dom.window.HTMLElement,
+    HTMLInputElement: dom.window.HTMLInputElement,
+    HTMLButtonElement: dom.window.HTMLButtonElement,
+    MutationObserver: dom.window.MutationObserver,
+    CustomEvent: dom.window.CustomEvent,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
     IS_REACT_ACT_ENVIRONMENT: true,
-  });
+  })) {
+    prior.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  const { NativeSkillsSettings } = await import('../src/native-skills-settings');
   const host = dom.window.document.getElementById('root')!,
     panelHost = dom.window.document.getElementById('panel')!,
     root = createRoot(host);
@@ -96,7 +108,10 @@ async function fixture(
   } finally {
     await act(async () => root.unmount());
     dom.window.close();
-    Object.assign(globalThis, prior);
+    for (const [key, descriptor] of prior) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
   }
 }
 const bridgeOf = (request: (request: NativeSkillsRequest) => Promise<NativeSkillsPage | null>) =>
@@ -120,6 +135,331 @@ const openDetail = async (host: HTMLElement, name: string) =>
   act(async () =>
     host.querySelector<HTMLButtonElement>(`[aria-label="查看 ${name} 详情"]`)!.click(),
   );
+
+const button = (host: HTMLElement, label: string) =>
+  [...host.querySelectorAll('button')].find(
+    (value) => value.textContent === label || value.getAttribute('aria-label') === label,
+  )!;
+
+const enterKeyword = async (panel: HTMLElement, keyword: string) => {
+  const input = panel.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const window = input.ownerDocument.defaultView!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(
+      input,
+      keyword,
+    );
+    input.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+};
+
+test('Skills.sh search replaces the active detail, handles empty and failed results, and ignores superseded reads', async () =>
+  fixture(async (host, _root, render, panel, editorControl) => {
+    const calls: string[] = [];
+    let finishOld!: (value: NativeResult) => void;
+    let finishClosed!: (value: NativeResult) => void;
+    const bridge: NativeBridge = {
+      request: async (request: NativeRequest): Promise<NativeResult> => {
+        if (request.method === 'settings.skills.open') return result(request, entries.slice(0, 1));
+        if (request.method !== 'settings.skills.search') return null;
+        calls.push(request.query);
+        if (request.query === 'first')
+          return new Promise((resolve) => {
+            finishOld = resolve;
+          });
+        if (request.query === 'close')
+          return new Promise((resolve) => {
+            finishClosed = resolve;
+          });
+        if (request.query === 'react' && calls.length === 2)
+          throw Error('skill_marketplace_rate_limited');
+        if (request.query === 'claude')
+          throw Object.assign(Error('invalid_native_request'), { code: 'invalid_native_request' });
+        return { kind: 'settings.skills.search', results: [] };
+      },
+      watch: () => () => undefined,
+    };
+    await render(bridge);
+    await openDetail(host, 'Skill 0');
+    const opener = button(host, '搜索 Skills');
+    await act(async () => opener.click());
+    expect(panel.querySelectorAll('aside')).toHaveLength(1);
+    expect(panel.querySelector('aside')?.getAttribute('aria-label')).toBe('搜索 Skills');
+    expect(host.ownerDocument.activeElement).toBe(panel.querySelector('input'));
+    expect(opener.getAttribute('aria-controls')).toBe(panel.querySelector('aside')!.id);
+    expect(button(panel, '搜索').disabled).toBe(true);
+    await enterKeyword(panel, ' first ');
+    expect(calls).toEqual([]);
+    await act(async () => button(panel, '搜索').click());
+    expect(panel.querySelector('[aria-busy]')?.getAttribute('aria-busy')).toBe('true');
+    expect(button(panel, '搜索中…').getAttribute('aria-disabled')).toBe('true');
+    await enterKeyword(panel, 'react');
+    await act(async () => button(panel, '搜索').click());
+    expect(calls).toEqual(['first', 'react']);
+    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('请稍后重试');
+    await act(async () => button(panel, '搜索').click());
+    expect(calls).toEqual(['first', 'react', 'react']);
+    expect(panel.textContent).toContain('未找到相关 Skills');
+    await act(async () =>
+      finishOld({
+        kind: 'settings.skills.search',
+        results: [{ source: 'owner/repo', skillId: 'first', name: 'Late result', installs: 1 }],
+      }),
+    );
+    expect(panel.textContent).toContain('未找到相关 Skills');
+    expect(panel.textContent).not.toContain('Late result');
+    await enterKeyword(panel, 'claude');
+    await act(async () => button(panel, '搜索').click());
+    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('完全退出并重新启动');
+    expect(panel.querySelector('input')?.value).toBe('claude');
+    await enterKeyword(panel, 'close');
+    await act(async () => button(panel, '搜索').click());
+    await act(async () => editorControl.current!.close());
+    expect(host.ownerDocument.activeElement).toBe(opener);
+    expect(panel.textContent).toBe('');
+    await act(async () => opener.click());
+    await act(async () => finishClosed({ kind: 'settings.skills.search', results: [] }));
+    expect(panel.querySelector('input')?.value).toBe('');
+    expect(panel.textContent).not.toContain('未找到相关 Skills');
+  }));
+
+test('Skills.sh installation retries an explicit failure, refreshes on success and after close, and distinguishes a name collision', async () =>
+  fixture(async (host, _root, render, panel, editorControl) => {
+    const rows = [
+      { source: 'first/repo', skillId: 'react-skill', name: 'React Skill', installs: 21 },
+      { source: 'other/repo', skillId: 'react-skill', name: 'React Skill', installs: 3 },
+      { source: 'third/repo', skillId: 'second-skill', name: 'Second Skill', installs: 1 },
+    ];
+    const installed: UserSkillCataloguePage['entries'] = [];
+    const installs: string[] = [];
+    let refreshes = 0;
+    let finishInstall!: () => void;
+    const bridge: NativeBridge = {
+      request: async (request) => {
+        switch (request.method) {
+          case 'settings.skills.open':
+            refreshes++;
+            return result(request, [...installed]);
+          case 'settings.skills.search':
+            return { kind: 'settings.skills.search', results: rows };
+          case 'settings.skills.install': {
+            const { source, skillId } = request.selection;
+            installs.push(source);
+            if (installs.length === 1) throw Error('skill_marketplace_snapshot_unavailable');
+            if (source === 'other/repo')
+              return {
+                kind: 'settings.skills.install',
+                result: { status: 'already-installed', name: skillId },
+              };
+            await new Promise<void>((resolve) => {
+              finishInstall = resolve;
+            });
+            const name = rows.find((entry) => entry.source === source)!.name;
+            installed.push({
+              ...entries[0]!,
+              id: skillId,
+              name,
+              source: { scope: 'user', origin: '.kite-code' },
+            });
+            return {
+              kind: 'settings.skills.install',
+              result: { status: 'installed', name: skillId },
+            };
+          }
+          default:
+            return null;
+        }
+      },
+      watch: () => () => undefined,
+    };
+    await render(bridge);
+    const opener = button(host, '搜索 Skills');
+    await act(async () => opener.click());
+    await enterKeyword(panel, 'react');
+    await act(async () => button(panel, '搜索').click());
+    expect(panel.querySelectorAll('li')).toHaveLength(3);
+    await act(async () => button(panel, '安装 React Skill（first/repo）').click());
+    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('暂时无法下载此 Skill');
+    expect(refreshes).toBe(1);
+    const retry = button(panel, '重试安装 React Skill（first/repo）');
+    await act(async () => {
+      retry.focus();
+      retry.click();
+      retry.click();
+    });
+    expect(retry.textContent).toBe('安装中…');
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    const otherInstall = button(panel, '安装 Second Skill（third/repo）');
+    expect(otherInstall.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => otherInstall.click());
+    expect(installs).toEqual(['first/repo', 'first/repo']);
+    expect(host.querySelectorAll('li')).toHaveLength(0);
+    expect(installs).toEqual(['first/repo', 'first/repo']);
+    await act(async () => finishInstall());
+    expect(refreshes).toBe(2);
+    expect(retry.textContent).toBe('已安装');
+    expect(panel.querySelector('input')?.value).toBe('react');
+    expect(host.ownerDocument.activeElement).toBe(retry);
+    expect(host.textContent).toContain('React Skill');
+    await act(async () => button(panel, '安装 React Skill（other/repo）').click());
+    expect(button(panel, '已有同名 Skill React Skill（other/repo）')).toBeTruthy();
+    expect(refreshes).toBe(3);
+    await act(async () => button(panel, '安装 Second Skill（third/repo）').click());
+    await act(async () => editorControl.current!.close());
+    expect(panel.textContent).toBe('');
+    expect(host.ownerDocument.activeElement).toBe(opener);
+    await act(async () => finishInstall());
+    expect(refreshes).toBe(4);
+    expect(host.textContent).toContain('Second Skill');
+    expect(panel.textContent).toBe('');
+    expect(host.ownerDocument.activeElement).toBe(opener);
+  }));
+
+test('only an installed Skill can be confirmed for uninstall, and closing its detail keeps removal and reinstall in sync', async () =>
+  fixture(async (host, _root, render, panel, editorControl) => {
+    const document = host.ownerDocument;
+    const dialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]');
+    const remote = { source: 'owner/repo', skillId: 'example', name: 'Example', installs: 1 };
+    const managed: UserSkillCataloguePage['entries'][number] = {
+      ...entries[0]!,
+      id: 'user-skill.example',
+      name: remote.name,
+      source: { scope: 'user', origin: '.kite-code' },
+    };
+    const builtin = { ...entries[0]!, id: 'computer-use', name: 'computer-use', source: null };
+    const configured = { ...entries[0]!, id: 'user-skill.custom', name: 'Custom' };
+    const calls: Extract<NativeRequest, { method: 'settings.skills.uninstall' }>[] = [];
+    let installed = false;
+    let finishUninstall!: () => void;
+    let refreshes = 0;
+    const bridge: NativeBridge = {
+      request: async (request) => {
+        switch (request.method) {
+          case 'settings.skills.open':
+            refreshes++;
+            return result(request, [builtin, configured, ...(installed ? [managed] : [])]);
+          case 'settings.skills.search':
+            return { kind: 'settings.skills.search', results: [remote] };
+          case 'settings.skills.install':
+            installed = true;
+            return {
+              kind: 'settings.skills.install',
+              result: { status: 'installed', name: remote.skillId },
+            };
+          case 'settings.skills.uninstall':
+            calls.push(request);
+            if (calls.length === 1) {
+              managed.version = 'c'.repeat(64);
+              throw Error('skill_marketplace_version_changed');
+            }
+            await new Promise<void>((resolve) => {
+              finishUninstall = resolve;
+            });
+            installed = false;
+            return {
+              kind: 'settings.skills.uninstall',
+              result: { status: 'uninstalled', skillId: managed.id },
+            };
+          default:
+            return null;
+        }
+      },
+      watch: () => () => undefined,
+    };
+    await render(bridge);
+    for (const name of ['computer-use', 'Custom']) {
+      await openDetail(host, name);
+      expect(button(panel, '卸载')).toBeUndefined();
+    }
+
+    const search = button(host, '搜索 Skills');
+    await act(async () => search.click());
+    await enterKeyword(panel, 'example');
+    await act(async () => button(panel, '搜索').click());
+    await act(async () => button(panel, '安装 Example（owner/repo）').click());
+    expect(button(panel, '已安装 Example（owner/repo）')).toBeTruthy();
+    await openDetail(host, 'Example');
+    await act(async () => button(panel, '卸载').click());
+    expect(dialog()?.textContent).toContain('卸载「Example」？');
+    expect(dialog()?.textContent).toContain('该 Skill 及其配套文件将移到系统废纸篓。');
+    expect(panel.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(button(dialog()!, '取消'));
+    await act(async () => button(dialog()!, '取消').click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(calls).toHaveLength(0);
+    expect(document.activeElement === button(panel, '卸载')).toBe(true);
+
+    await act(async () => button(panel, '卸载').click());
+    await act(async () => {
+      dialog()!.dispatchEvent(
+        new document.defaultView!.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(dialog()).toBeNull();
+    expect(calls).toHaveLength(0);
+    expect(document.activeElement === button(panel, '卸载')).toBe(true);
+
+    await act(async () => button(panel, '卸载').click());
+    await act(async () => button(dialog()!, '确认卸载').click());
+    expect(calls[0]).toEqual({
+      method: 'settings.skills.uninstall',
+      generation: 1,
+      selection: { skillId: managed.id, skillVersion: 'a'.repeat(64) },
+    });
+    expect(panel.querySelector('[role="alert"]')?.textContent).toContain('请刷新目录');
+    expect(dialog()).toBeNull();
+    await act(async () => button(panel, '刷新目录').click());
+    expect(refreshes).toBe(3);
+
+    await act(async () => button(panel, '卸载').click());
+    const confirm = button(dialog()!, '确认卸载');
+    await act(async () => {
+      confirm.click();
+      confirm.click();
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.selection.skillVersion).toBe('c'.repeat(64));
+    expect(dialog()).toBeNull();
+    expect(button(panel, '正在卸载…').disabled).toBe(true);
+    await act(async () => editorControl.current!.close());
+    await openDetail(host, 'computer-use');
+    await act(async () => finishUninstall());
+    expect(refreshes).toBe(4);
+    expect(host.textContent).not.toContain('Example');
+    expect(panel.querySelector('aside')?.getAttribute('aria-label')).toBe('computer-use 详情');
+
+    await act(async () => search.click());
+    await enterKeyword(panel, 'example');
+    await act(async () => button(panel, '搜索').click());
+    await act(async () => button(panel, '安装 Example（owner/repo）').click());
+    await openDetail(host, 'Example');
+    await act(async () => button(panel, '卸载').click());
+    await act(async () => button(dialog()!, '确认卸载').click());
+    await act(async () => finishUninstall());
+    expect(panel.querySelector('aside')).toBeNull();
+    expect(host.ownerDocument.activeElement).toBe(search);
+    expect(host.textContent).not.toContain('Example');
+  }));
+
+test('Skills with empty or missing descriptions use the same fallback in the list and details', async () =>
+  fixture(async (host, _root, render, panel) => {
+    const rows = [null, '', '  \n  ', '第一行\n第二行'].map((description, index) => ({
+      ...entries[index]!,
+      description,
+    }));
+    await render(bridgeOf(async (request) => result(request, rows)));
+    for (const row of rows) {
+      const expected = row.description?.trim() || '无描述';
+      expect(button(host, `查看 ${row.name} 详情`).textContent).toContain(expected);
+      await openDetail(host, row.name!);
+      expect(panel.querySelector('.skill-detail-description')?.textContent).toBe(expected);
+    }
+  }));
 
 test('Skill details prioritize versioned Markdown, identify the builtin, and retire an old document without executing its content', async () =>
   fixture(async (host, _root, render, panelHost, editorControl) => {
@@ -294,7 +634,7 @@ test('Skills DOM publishes all fixed-revision pages with useful details and no i
       expect(panelHost.textContent).not.toContain(hidden);
     expect(panelHost.querySelectorAll('input, textarea, select')).toHaveLength(0);
     await openDetail(host, 'skill-301');
-    expect(panelHost.textContent).toContain('摘要未记录');
+    expect(panelHost.textContent).toContain('无描述');
     expect(panelHost.textContent).not.toContain('版本：');
     expect(panelHost.textContent).toContain('未提供来源信息');
     expect(panelHost.querySelector('.provider-badge')?.textContent).toBe('已禁用');
@@ -628,7 +968,7 @@ test.each([
   }));
 
 test('global Skills loads without any selection and never shows a Session prerequisite', async () =>
-  fixture(async (host, root, _render, panelHost, editorControl) => {
+  fixture(async (host, _root, render, panelHost) => {
     const calls: NativeSkillsRequest[] = [];
     const bridge = bridgeOf(async (request) => {
       calls.push(request);
@@ -636,17 +976,7 @@ test('global Skills loads without any selection and never shows a Session prereq
         ? null
         : result(request, entries.slice(0, 1));
     });
-    await act(async () =>
-      root.render(
-        <NativeSkillsSettings
-          bridge={bridge}
-          generation={1}
-          storeId="store"
-          panelHost={panelHost}
-          editorControl={editorControl}
-        />,
-      ),
-    );
+    await render(bridge);
     expect(host.querySelectorAll('li')).toHaveLength(1);
     expect(host.textContent).toContain('Skill 0');
     expect(host.textContent).not.toMatch(/选择会话|工作区/);

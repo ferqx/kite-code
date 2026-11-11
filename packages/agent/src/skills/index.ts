@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { parseDocument } from 'yaml';
 import {
   createKnowledgeReadScope,
   type KnowledgeFileAccess,
@@ -43,6 +44,18 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 function inside(root: string, path: string) {
   const part = relative(root, path);
   return part === '' || (part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part));
+}
+
+function skillDescription(front: string): string {
+  try {
+    // Read only a direct scalar. Converting the document to JS could expand aliases.
+    const value = parseDocument(front, { logLevel: 'silent', prettyErrors: false }).get(
+      'description',
+    );
+    return typeof value === 'string' ? value.trim().slice(0, 4096) : '';
+  } catch {
+    return '';
+  }
 }
 
 /** Knowledge only: import/factory performs no I/O and never executes referenced code. */
@@ -106,14 +119,7 @@ export function createSkillSource(options: SkillSourceOptions) {
         ?.trim()
         .replace(/^['"]|['"]$/g, '');
     const name = field('name') ?? relative(resolve(target, '..', '..'), resolve(target, '..'));
-    const description = (
-      field('description') ??
-      body
-        .replace(/^---[\s\S]*?---\s*/, '')
-        .split(/\r?\n/)
-        .find((line) => line.trim() && !line.startsWith('#')) ??
-      ''
-    ).slice(0, 4096);
+    const description = skillDescription(front);
     const requires = field('required-capabilities') ?? '';
     const requiredCapabilities = requires
       .replace(/^\[|\]$/g, '')

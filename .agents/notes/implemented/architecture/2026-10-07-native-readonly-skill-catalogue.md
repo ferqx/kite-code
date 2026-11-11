@@ -6,6 +6,8 @@ Status: implemented
 
 人的正文查看另采用[独立版本绑定预览](../feature/2026-11-04-native-skill-document-preview.md)；目录本身仍仅传元数据，本文的完整分页、只读、有限来源和独立执行权限取舍保持。
 
+[Skills.sh 搜索与安装](../feature/2026-11-12-native-skills-marketplace.md)增加 Kite 专用用户目录的发现。目录读取继续沿本决定的有界分页方式。
+
 ## Problem
 
 旧 Desktop 的 Skills 分类有名称、描述、来源和可用状态，迁移前正式 Native 缺少这一目录消费者。公共 Service 已提供可信配置目录和同 revision 分页；把完整集合塞入单次有限 IPC 会让传输预算限制完整目录，页面自行扫描文件又会复制可信来源规则。产品依据是[Desktop 手册](../../../../docs/handbook/clients/desktop/README.md)，当前实施范围见 [P5 方案](../../../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)。

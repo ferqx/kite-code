@@ -62,6 +62,7 @@ import { NativeRecovery } from './recovery';
 import type { ScheduledTaskRunner } from './scheduled-task-runner';
 import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
+import type { createSkillMarketplace } from './skill-marketplace';
 import { NativeToolMessages } from './tool-messages';
 import { invokeNativeTrace } from './trace-extensions';
 import { NativeTrajectory } from './trajectory';
@@ -142,6 +143,12 @@ export class NativeCaller {
   private readonly mcp: NativeMcpSettings;
   private readonly userMcp: NativeUserMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
+  private readonly skillMarketplace?: ReturnType<typeof createSkillMarketplace>;
+  private skillSearch?: AbortController;
+  private skillMutation?: {
+    abort: AbortController;
+    promise: Promise<unknown>;
+  };
   private readonly extensions: NativeExtensions;
   private readonly jobOutput: NativeJobOutputReads;
   private readonly workspaceChanges: NativeWorkspaceChanges;
@@ -207,6 +214,7 @@ export class NativeCaller {
     processes = new NativeProcessOwner(),
     nextGeneration = createNativeCallerGenerationOwner(),
     initialSelectionHint?: Readonly<{ storeId: string; sessionId: string }>,
+    skillMarketplace?: ReturnType<typeof createSkillMarketplace>,
   ) {
     this.nextGeneration = nextGeneration;
     this.initialSelectionHint = initialSelectionHint;
@@ -214,6 +222,7 @@ export class NativeCaller {
     this.client = client;
     this.emit = emit;
     this.privateData = privateData;
+    this.skillMarketplace = skillMarketplace;
     if (initialAdmission && initialAdmission.client !== client)
       throw new ClientError('connection_not_admitted');
     this.initialAdmission = initialAdmission?.consume;
@@ -741,6 +750,8 @@ export class NativeCaller {
     if (includeGlobalSettings) {
       this.userMcp.release();
       this.skills.release();
+      this.skillSearch?.abort();
+      this.skillSearch = undefined;
     }
     this.extensions.release();
     this.jobOutput.release();
@@ -1635,6 +1646,9 @@ export class NativeCaller {
         'settings.skills.next',
         'settings.skills.document',
         'settings.skills.document.close',
+        'settings.skills.search',
+        'settings.skills.install',
+        'settings.skills.uninstall',
         'jobOutput.open',
         'jobOutput.next',
         'jobOutput.close',
@@ -2021,6 +2035,46 @@ export class NativeCaller {
         this.skills.close(request.readId);
         result = null;
         break;
+      case 'settings.skills.search': {
+        if (!this.skillMarketplace) throw new ClientError('skill_marketplace_unavailable');
+        this.skillSearch?.abort();
+        const search = new AbortController();
+        this.skillSearch = search;
+        try {
+          const results = await this.skillMarketplace.search(request.query, search.signal);
+          if (search.signal.aborted) throw new ClientError('skill_marketplace_unavailable');
+          result = { kind: 'settings.skills.search', results };
+        } finally {
+          if (this.skillSearch === search) this.skillSearch = undefined;
+        }
+        break;
+      }
+      case 'settings.skills.install':
+      case 'settings.skills.uninstall': {
+        if (!this.skillMarketplace) throw new ClientError('skill_marketplace_unavailable');
+        const installing = request.method === 'settings.skills.install';
+        if (this.skillMutation)
+          throw new ClientError(
+            installing ? 'skill_marketplace_install_busy' : 'skill_marketplace_mutation_busy',
+          );
+        const abort = new AbortController();
+        const promise = installing
+          ? this.skillMarketplace.install(request.selection, abort.signal).then((result) => ({
+              kind: 'settings.skills.install' as const,
+              result,
+            }))
+          : this.skillMarketplace.uninstall(request.selection).then((result) => ({
+              kind: 'settings.skills.uninstall' as const,
+              result,
+            }));
+        this.skillMutation = { abort, promise };
+        try {
+          result = await promise;
+        } finally {
+          this.skillMutation = undefined;
+        }
+        break;
+      }
       case 'settings.userMcp.read':
         return this.userMcp.read();
       case 'settings.userMcp.close':
@@ -3047,6 +3101,8 @@ export class NativeCaller {
   }
   async close() {
     this.closed = true;
+    const skillMutation = this.skillMutation;
+    skillMutation?.abort.abort();
     this.detach();
     const stopped = this.processes.close();
     try {
@@ -3057,6 +3113,7 @@ export class NativeCaller {
       await this.disposeNetwork();
       await this.inputQueue.close();
       await this.settingsMutationTail;
+      if (skillMutation) await Promise.allSettled([skillMutation.promise]);
       await Promise.allSettled(this.creating.values());
       await this.conversation.close();
       this.input.disposeObserver();

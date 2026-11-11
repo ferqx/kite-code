@@ -6,10 +6,12 @@ import {
 } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import { isReadOnlyTaskTool, isRootOnlyTaskTool } from '@kite-ai/agent/task';
+import { readInstalledUserSkillBindings } from './installed-user-skills';
 
 export interface SkillSelection {
   readonly requested: readonly string[] | null;
   readonly resolvedIds: readonly string[];
+  readonly installed?: ReadonlyMap<string, string>;
 }
 function skillMarker(value: Json | undefined): SkillSelection {
   const strings = (items: Json | undefined) =>
@@ -37,11 +39,21 @@ export function readSkillSelection(configuration: Json | undefined): SkillSelect
     configuration && typeof configuration === 'object' && !Array.isArray(configuration)
       ? configuration.snapshot
       : undefined;
-  return skillMarker(
-    snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
-      ? snapshot.skillSelection
-      : undefined,
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot))
+    throw new AgentError('child_skill_selection_unavailable');
+  const marker = skillMarker(snapshot.skillSelection);
+  const saved = snapshot.configuration;
+  const installed = readInstalledUserSkillBindings(
+    typeof snapshot.roleId === 'string' &&
+      saved &&
+      typeof saved === 'object' &&
+      !Array.isArray(saved)
+      ? saved.configuration
+      : saved,
   );
+  if ([...installed.keys()].some((id) => !marker.resolvedIds.includes(id)))
+    throw new AgentError('child_skill_selection_unavailable');
+  return installed.size ? Object.freeze({ ...marker, installed }) : marker;
 }
 
 /** Trusted host declarations only. Files cannot register roles or grant capabilities. */

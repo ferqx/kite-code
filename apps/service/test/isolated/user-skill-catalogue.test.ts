@@ -187,6 +187,42 @@ test('user Skill document HTTP preview is authenticated, version bound and reado
     await expect(client.readUserSkillDocument(identity)).rejects.toMatchObject({
       code: 'skill_catalogue_changed',
     });
+    const beforeInstall = await client.listUserSkills({ storeId: 'owned-store' });
+    expect(beforeInstall.entries.find((entry) => entry.id === 'guide')?.description).toBe('');
+    const installedRoot = join(f.userRoot, 'skills');
+    f.skill(join(installedRoot, '.install-staging'), 'stage');
+    f.skill(join(installedRoot, 'computer-use'), 'forged builtin');
+    privateDirectory(join(installedRoot, 'incomplete'));
+    symlinkSync(
+      join(f.userRoot, 'guide'),
+      join(installedRoot, 'linked'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    expect(await client.listUserSkills({ storeId: 'owned-store' })).toEqual(beforeInstall);
+    const marketGuide = join(installedRoot, 'market-guide');
+    privateDirectory(marketGuide);
+    writeFileSync(
+      join(marketGuide, 'SKILL.md'),
+      '---\nname: market-guide\ndescription: >-\n  User installed guidance.\n  With a folded description.\n---\nPRIVATE_SKILL_BODY\n',
+    );
+    const afterInstall = await client.listUserSkills({ storeId: 'owned-store' });
+    expect(afterInstall.revision).not.toBe(beforeInstall.revision);
+    expect(afterInstall.entries).toHaveLength(beforeInstall.entries.length + 1);
+    const installed = afterInstall.entries.find((entry) => entry.id === 'user-skill.market-guide')!;
+    expect(installed).toMatchObject({
+      name: 'market-guide',
+      description: 'User installed guidance. With a folded description.',
+      source: { scope: 'user', origin: '.kite-code' },
+      state: 'available',
+    });
+    expect(
+      await client.readUserSkillDocument({
+        storeId: 'owned-store',
+        skillId: installed.id,
+        skillVersion: installed.version!,
+        revision: afterInstall.revision,
+      }),
+    ).toMatchObject({ body: expect.stringContaining('PRIVATE_SKILL_BODY') });
     expect(f.calls.every((call) => call === 'getMetadata')).toBe(true);
     expect(client.lastAppliedCursor).toBeUndefined();
   } finally {

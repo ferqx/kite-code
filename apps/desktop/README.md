@@ -1667,9 +1667,25 @@ Skills 详情按名称、简介、独立滚动的 Markdown 正文及来源展示
 
 正式 Native 全屏设置左侧的 Skills 分类是用户级全局目录，无需创建或选择 Session／Workspace，只展示用户配置及可信用户／Profile 位置的名称、摘要、来源及禁用或异常提示，不合并项目配置。[Main reader](electron/skill-catalogue-reads.ts) 封存实际 attach generation 与 Store，使用 `user_skill_catalogue` capability 和 `listUserSkills`；open 只接收 generation/read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭、连接或 Store 身份变化只中止所属读取。切换 Session、观察 epoch 更新和移除 Workspace 不释放用户目录。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Session、Workspace、路径或执行 authority。
 
-[完整读取](src/native-skills.ts)复用公共 Client 的闭合用户页 verifier，穷尽同 revision 后才发布，无总目录截断。目录列表与 MCP、提供商复用标题、列表行、状态标签和控件样式；条目详情通过 `panelHost` portal 到应用最右侧的共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)，`editorControl` 接入设置壳的分层 Escape。关闭恢复入口焦点，移除条目后回到刷新；身份或目录资格改变立即隐藏旧详情。Skills 仅展示已有状态，没有手动新增、编辑、安装、上传或启停写接口。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用；用户 JSONC 变坏、来源不可用或刷新失败时，保留同身份上次完整目录与详情并说明尚未确认最新状态，不发布新目录前缀。Store／attach 身份改变会清理旧读取和详情，普通会话切换不重开目录。来源只说明已准入的用户配置位置，缺字段说明未记录；目录页不预读正文；正文只按详情选择读取，不安装或激活 Workflow，不恢复旧 home 隐式扫描。实际 Run 的项目 Skill 选择、信任和执行目录仍走原 Service 合同。
+[完整读取](src/native-skills.ts)复用公共 Client 的闭合用户页 verifier，穷尽同 revision 后才发布，无总目录截断。目录列表与 MCP、提供商复用标题、列表行、状态标签和控件样式；条目详情通过 `panelHost` portal 到应用最右侧的共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)，`editorControl` 接入设置壳的分层 Escape。关闭恢复入口焦点，移除条目后回到刷新；身份或目录资格改变立即隐藏旧详情。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用；用户 JSONC 变坏、来源不可用或刷新失败时，保留同身份上次完整目录与详情并说明尚未确认最新状态，不发布新目录前缀。Store／attach 身份改变会清理旧读取和详情，普通会话切换不重开目录。来源只说明已准入的用户配置位置，缺字段说明未记录；目录页不预读正文；正文只按详情选择读取，项目 Skill 选择、信任和实际执行由 Service 负责。
 
 [Main/IPC 测试](test/native-skills-reads.test.ts)与[实际 DOM](test/native-skills-settings.test.tsx)验证无需会话、用户页完整分页、关闭、迟到响应、坏配置保旧事实和 Store／generation 隔离。[默认 Native 候选](test/isolated/native-skills-bundle.test.ts)与[Electron driver](test/native-skills-electron.fixture.ts)覆盖搬迁、删除构建源后的默认 Service／网络装配：306 项经 16 个真实同 revision 页完整展示，用户文件与配置刷新、项目坏 JSONC 隔离、两个 Session 切换后保持相同用户目录、分类关闭重开、冷启动与普通所属 Service 退出。全局设置读取阶段只发 GET；显式切换会话仍有原会话 reconcile，退出后独立公共冷 Store 无 Run/Execution 增长，Desktop DB7 的 model routes／configuration intents 保持零。关闭设置不停止执行。早期 Workspace 目录的取舍见[目录决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)，仅其只读、完整分页和独立执行授权理由继续适用于本页；当前原窗口复验、真实失败和完整默认范围归[PC 主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。本机 macOS 目录验证不代替完整 Skills/Workflow 或其他平台资格，仍按 [P5](../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)核对。
+
+### Skills.sh 搜索与用户安装
+
+[搜索面板](src/native-skills-settings.tsx)复用设置右栏，用户提交关键词后才搜索，明确点击结果行的安装操作后才下载。关闭面板或搜索被取代时撤销原结果的展示资格。安装完成后重读完整目录，文件安装和目录刷新分别反馈。
+
+`desktop:dev` 的界面热更新可能先显示新的 Skills 入口。旧 Main 拒绝搜索或安装请求时，面板提示完全退出并重新启动开发客户端。Main 更新按[开发热更新规则](#开发热更新与服务重载)生效。2026-11-12 在用户正在运行的 Main 产物中核实搜索和安装请求均未登记，以[设置 DOM](test/native-skills-settings.test.tsx)验证旧响应提示。相同的 `claude` 查询在新启动的隔离 macOS candidate 中显示 29 条结果。
+
+[Main 安装器](electron/skill-marketplace.ts)通过[有限 IPC](src/skill-marketplace-contract.ts)接收关键词或公开 GitHub 仓库及 Skill 标识。请求沿现有可信顶层 Renderer 与 attach generation 校验。网络目标固定为 Skills.sh，安装位置由 Main 固定在 `~/.kite-code/skills`，请求不携带本机路径、Workspace、会话或凭据。下载有文件数和字节预算；安装校验跨平台相对路径、写入暂存目录、独占预留目标，最后发布完整 `SKILL.md`。安装只写入普通文件，配套脚本的使用仍由任务权限决定。正常并发及重试保留已有内容；强制退出打断发布时，未完成目录不会作为已安装项展示，保留占位以避免覆盖未知文件。读取、正文和后续任务装配见 [Service owner](../service/README.md#同源-skill-知识目录)。
+
+用户安装项从详情发起卸载，沿[应用统一确认弹窗](../../packages/ui/src/desktop/confirmation.ts)确认。取消与 Esc 返回原卸载按钮，确认后详情显示进度和失败信息。Main 只接受用户安装项 ID 和已读正文版本，从固定根派生目标，核对普通目录及 `SKILL.md` 的身份与摘要后移入系统废纸篓或回收站。内置标识在请求准入和本地文件操作两层拒绝。安装和卸载互斥，文件变化后需刷新再确认；目标已不存在可重新读取目录。成功后重新读取目录并清理对应的搜索安装状态，以便再次安装。目录和详情对空描述统一显示“无描述”，元数据由[知识源](../../packages/agent/src/skills/README.md)解析。
+
+2026-11-12，macOS arm64 隔离打包窗口逐步核对深浅主题下确认弹窗的遮罩、默认焦点、取消和 Esc 归焦、确认后详情的进度，以及卸载完成后的目录和焦点。真实 `legal-writing` 文件的折叠描述显示正文，只有正文的测试 Skill 在列表和详情均显示“无描述”。截图和 trace 在 `.cache/skills-marketplace-verification/dialog-description-hKIv3E/`。桌面及共享确认组件 69 项、Agent 与 Service 技能回归 26 项通过。
+
+2026-11-12，本机 macOS arm64 隔离打包窗口用测试 Skill 核对确认、取消、移入系统废纸篓时的等待、一次注入的废纸篓失败与重试、目录刷新和焦点恢复。重装同一项后再卸载，冷启动仍保留内置技能并排除已卸载项。内置详情没有卸载入口，直接提交其伪造用户标识也被 IPC 拒绝。分阶段截图与 trace 在 `.cache/skills-marketplace-verification/uninstall-RWWmCu/`。Main 安装器、IPC 和设置 DOM 共 38 项通过。
+
+2026-11-12，本机 macOS arm64 上从 `cd872d7b1` 加本次变更构建 Native candidate。以隔离 HOME 从空设置目录真实搜索 Skills.sh，观察 `find-skills` 从等待到安装完成，完整目录随即出现唯一新条目，随后预览正文。冷开保留条目与文件原字节，重复安装显示同名占用。隔离窗口模拟 HTTP 429 后以真实请求重试；延迟 `anthropics/skills` 的 `pdf` 下载，关闭搜索面板后焦点返回入口，待发布完成才出现条目及配套文件。分阶段截图与 Playwright trace 归 `.cache/skills-marketplace-verification/native-final-YNN3I6/`。本轮 [Main 安装器](test/skill-marketplace.test.ts)、[IPC](test/native-skills-reads.test.ts)与[设置 DOM](test/native-skills-settings.test.tsx)共 33 项通过。原生验收覆盖 macOS 本机构建。
 
 ## Native 普通问题与页面草稿
 

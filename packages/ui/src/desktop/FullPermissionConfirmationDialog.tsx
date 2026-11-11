@@ -47,21 +47,13 @@ export type ApplicationConfirmationDialogProps = ConfirmationProps &
   (
     | { kind: 'full-permission'; language: 'zh' | 'en' }
     | { kind: 'workspace-removal'; label: string }
+    | { kind: 'skill-uninstall'; label: string }
   );
 
 /** Fixed presentation only; the caller owns admission and all business actions. */
 export function ApplicationConfirmationDialog(props: ApplicationConfirmationDialogProps) {
   const { open, onOpenChange, onConfirm, confirmDisabled, onCloseAutoFocus } = props;
-  const text =
-    props.kind === 'full-permission'
-      ? fullPermissionConfirmationCopy[props.language]
-      : {
-          title: `移除空间“${props.label}”？`,
-          description:
-            '将移除本地项目登记及全部会话列表，并请求停止运行中的任务。历史先保留；任务结束并过宽限期后，可在退出客户端后通过离线维护清理。未结束或结果未知的执行证据会继续保留。不会删除工作目录中的文件。',
-          cancel: '保留空间',
-          confirm: '移除空间',
-        };
+  const text = confirmationCopy(props);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="full-permission-dialog" onCloseAutoFocus={onCloseAutoFocus}>
@@ -96,6 +88,28 @@ export function ApplicationConfirmationDialog(props: ApplicationConfirmationDial
       </AlertDialogContent>
     </AlertDialog>
   );
+}
+
+function confirmationCopy(props: ApplicationConfirmationDialogProps) {
+  switch (props.kind) {
+    case 'full-permission':
+      return fullPermissionConfirmationCopy[props.language];
+    case 'workspace-removal':
+      return {
+        title: `移除空间“${props.label}”？`,
+        description:
+          '将移除本地项目登记及全部会话列表，并请求停止运行中的任务。历史先保留；任务结束并过宽限期后，可在退出客户端后通过离线维护清理。未结束或结果未知的执行证据会继续保留。不会删除工作目录中的文件。',
+        cancel: '保留空间',
+        confirm: '移除空间',
+      };
+    case 'skill-uninstall':
+      return {
+        title: `卸载「${props.label}」？`,
+        description: '该 Skill 及其配套文件将移到系统废纸篓。',
+        cancel: '取消',
+        confirm: '确认卸载',
+      };
+  }
 }
 
 /** Shared Web fallback for the permission-specific scope owner in Composer. */

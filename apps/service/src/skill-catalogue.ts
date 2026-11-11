@@ -24,6 +24,7 @@ import {
   type UserSkillDocumentQuerySchema,
   UserSkillDocumentSchema,
 } from './http/schema/skill-catalogue';
+import { discoverInstalledUserSkills } from './installed-user-skills';
 import type { PermissionManagementPort } from './permission-management';
 import { createConfiguredSkillSource } from './skill-source';
 import { type UserConfiguration, withoutProjectModels } from './user-configuration';
@@ -125,7 +126,7 @@ function paginate<Entry extends SkillCataloguePage['entries'][number]>(
     page.complete = false;
   }
 }
-/** Reads configured knowledge only; never resolves a Model, credential or executor. */
+/** Reads local knowledge only; never resolves a Model, credential or executor. */
 export function createDefaultSkillCatalogueSource(options: {
   defaults?: JsonObject;
   profile: ProfileSelection;
@@ -134,6 +135,7 @@ export function createDefaultSkillCatalogueSource(options: {
   allowedCapabilities?: readonly string[];
 }): SkillCatalogueSource {
   const profile = Object.freeze({ ...options.profile });
+  const userRoot = dirname(options.userConfiguration.path);
   const explicit = options.explicit;
   const allowedCapabilities = [...(options.allowedCapabilities ?? [])];
   const knowledgeScope = createKnowledgeReadScope();
@@ -189,6 +191,7 @@ export function createDefaultSkillCatalogueSource(options: {
       workspaceRoot: root,
       profile,
       skills: effective.skills,
+      installedUserSkills: await discoverInstalledUserSkills(userRoot),
       toolIds,
       allowedCapabilities,
     });
@@ -251,9 +254,10 @@ export function createDefaultSkillCatalogueSource(options: {
       effective.tools?.filter((tool) => tool.enabled !== false).map((tool) => tool.id) ?? [];
     const source = createConfiguredSkillSource({
       knowledgeScope,
-      userRoot: dirname(options.userConfiguration.path),
+      userRoot,
       profile,
       skills: effective.skills,
+      installedUserSkills: await discoverInstalledUserSkills(userRoot),
       toolIds,
       allowedCapabilities,
     });

@@ -69,6 +69,53 @@ test('Skill discovery is summary only; explicit body/resource identity and no sc
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Skill summaries read YAML string descriptions without borrowing body or alias content', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-skills-description-'));
+  const source = createSkillSource({ trustedRoots: [root], locations: [root] });
+  try {
+    const cases = [
+      [
+        'description: >\n  The first line of guidance.\n  The second line.',
+        'The first line of guidance. The second line.',
+      ],
+      [
+        'description: |+\n  First literal line.\n  Second literal line.\n',
+        'First literal line.\nSecond literal line.',
+      ],
+      [
+        'description: >- # keep paragraphs\n  Paragraph one.\n\n  Paragraph two.',
+        'Paragraph one.\nParagraph two.',
+      ],
+      ['description: "Quoted: # text"', 'Quoted: # text'],
+      ['metadata: [unterminated\ndescription: Existing summary', 'Existing summary'],
+      ['description: " > "', '>'],
+      ['description: >\n  ', ''],
+      ['description: "   "', ''],
+      ['description: null', ''],
+      ['description: [not, text]', ''],
+      ['other: &secret Not a description\ndescription: *secret', ''],
+      ['metadata:\n  description: nested text', ''],
+      ['description:\nother: different metadata', ''],
+      ['other: description omitted', ''],
+    ];
+    for (const [fields, expected] of cases) {
+      const body = `---\nname: guide\n${fields}\n---\n# Guide\nPrivate body paragraph.\n`;
+      writeFileSync(join(root, 'SKILL.md'), body);
+      const listed = await source.list();
+      expect(listed.errors).toEqual([]);
+      const entry = listed.entries[0]!;
+      expect(entry).toMatchObject({ name: 'guide', description: expected });
+      expect(await source.load({ id: entry.id })).toMatchObject({ description: expected, body });
+    }
+    writeFileSync(join(root, 'SKILL.md'), '# No frontmatter\nPrivate body paragraph.');
+    expect((await source.list()).entries[0]).toMatchObject({ description: '' });
+  } finally {
+    await source.dispose();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('Skills reject escaped paths and oversized/binary text locally, preserving other summaries', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-skills-bounds-'));
   const outside = mkdtempSync(join(tmpdir(), 'kite-skills-outside-'));

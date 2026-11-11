@@ -59,13 +59,15 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     { id: 'options', path: 'skill-000', options: { unsupported: true } },
     { id: 'pinned', path: 'skill-001', digest: 'f'.repeat(64) },
   );
-  const configPath = join(profile.profilePath, 'config.jsonc');
+  const userRoot = join(root, 'user');
+  privateDirectory(userRoot);
+  const configPath = join(userRoot, 'config.jsonc');
   const config = { skills, tools: [] };
   writeFileSync(configPath, JSON.stringify(config));
   let model = 0,
     vault = 0;
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: configPath,
     profile,
     credentialBackend: {
       kind: 'temporary',
@@ -230,6 +232,18 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       reason: 'duplicate_skill_location',
     });
     expect((await client.listAllSkills('w', { storeId })).entries).toEqual(all);
+    const installed = join(userRoot, 'skills', 'installed-guide');
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(join(installed, 'SKILL.md'), '---\nname: installed-guide\n---\nPrivate guide');
+    const withInstall = await client.listAllSkills('w', { storeId });
+    expect(withInstall.revision).not.toBe(first.revision);
+    expect(withInstall.entries).toHaveLength(all.length + 1);
+    expect(
+      withInstall.entries.find((entry) => entry.id === 'user-skill.installed-guide'),
+    ).toMatchObject({
+      name: 'installed-guide',
+      source: { scope: 'user', origin: '.kite-code' },
+    });
     timing('all_pages_complete');
     for (const hidden of [
       root,
@@ -249,16 +263,19 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       expect((await get(query)).status).toBe(400);
     expect((await get('storeId=wrong')).status).toBe(409);
     expect((await get(`storeId=${storeId}`, 'absent')).status).toBe(404);
-    expect((await get(`storeId=${storeId}&afterId=forged&revision=${first.revision}`)).status).toBe(
-      400,
-    );
+    expect(
+      (await get(`storeId=${storeId}&afterId=forged&revision=${withInstall.revision}`)).status,
+    ).toBe(400);
     writeFileSync(
       join(workspace, 'skill-100', 'SKILL.md'),
       '---\nname: Changed\ndescription: changed\n---\nchanged body',
     );
     expect(
-      (await get(`storeId=${storeId}&afterId=${first.nextAfterId}&revision=${first.revision}`))
-        .status,
+      (
+        await get(
+          `storeId=${storeId}&afterId=${first.nextAfterId}&revision=${withInstall.revision}`,
+        )
+      ).status,
     ).toBe(409);
     const fresh = await client.listSkills('w', { storeId, limit: 37 });
     writeFileSync(configPath, '{ malformed');

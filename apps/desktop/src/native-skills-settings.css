@@ -61,3 +61,46 @@
   margin: 0 0 8px;
   color: var(--muted-foreground);
 }
+
+.skills-settings .skill-uninstall-error {
+  flex-basis: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.skills-settings .skill-marketplace-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 0;
+}
+
+.skills-settings .skill-marketplace-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skills-settings .skill-marketplace-result button[aria-disabled="true"] {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+
+.skills-settings .skill-marketplace-install-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--destructive);
+}
+
+.skills-settings .skill-marketplace-empty {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.skills-settings .skill-marketplace-destination {
+  margin-inline-end: auto;
+  overflow-wrap: anywhere;
+}

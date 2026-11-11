@@ -104,6 +104,111 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+test('marketplace IPC accepts keywords, public repositories and versioned user skills without filesystem inputs', () => {
+  const search = { method: 'settings.skills.search' as const, generation: 1, query: 'react 性能' };
+  const install = {
+    method: 'settings.skills.install' as const,
+    generation: 1,
+    selection: { source: 'vercel-labs/skills', skillId: 'find-skills' },
+  };
+  expect(decodeNativeRequest(search)).toEqual(search);
+  expect(decodeNativeRequest(install)).toEqual(install);
+  const uninstall = {
+    method: 'settings.skills.uninstall' as const,
+    generation: 1,
+    selection: { skillId: 'user-skill.find-skills', skillVersion: 'a'.repeat(64) },
+  };
+  expect(decodeNativeRequest(uninstall)).toEqual(uninstall);
+  for (const selection of [
+    { ...uninstall.selection, skillId: 'computer-use' },
+    { ...uninstall.selection, skillId: 'user-skill.computer-use' },
+    { ...uninstall.selection, skillId: 'user-skill.../find-skills' },
+    { ...uninstall.selection, skillVersion: 'latest' },
+    { ...uninstall.selection, path: '/tmp/skills' },
+  ])
+    expect(() => decodeNativeRequest({ ...uninstall, selection })).toThrow(
+      'invalid_skill_marketplace_selection',
+    );
+  for (const query of ['', 'a', 'x'.repeat(101), 'react\nvue', ' react '])
+    expect(() => decodeNativeRequest({ ...search, query })).toThrow(
+      'invalid_skill_marketplace_query',
+    );
+  for (const selection of [
+    { ...install.selection, source: 'https://github.com/vercel-labs/skills' },
+    { ...install.selection, source: 'example/..' },
+    { ...install.selection, skillId: '../find-skills' },
+    { ...install.selection, skillId: 'aux' },
+    { ...install.selection, skillId: 'computer-use' },
+    { ...install.selection, path: '/tmp/skills' },
+  ])
+    expect(() => decodeNativeRequest({ ...install, selection })).toThrow(
+      'invalid_skill_marketplace_selection',
+    );
+  expect(() => decodeNativeRequest({ ...install, workspaceId: 'w' })).toThrow(
+    'invalid_native_request',
+  );
+});
+
+test('marketplace requests use the attached generation independently of workspace refresh', async () => {
+  const install = deferred<{ status: 'installed'; name: string }>();
+  const uninstall = deferred<{ status: 'uninstalled'; skillId: string }>();
+  const searches: { signal: AbortSignal; response: ReturnType<typeof deferred<[]>> }[] = [];
+  const caller = Object.assign(Object.create(NativeCaller.prototype), {
+    generation: 2,
+    closed: false,
+    controller: { snapshot: { workspaceUnavailable: true } },
+    refreshing: deferred<void>().promise,
+    skillMarketplace: {
+      search(_query: string, signal: AbortSignal) {
+        const response = deferred<[]>();
+        searches.push({ signal, response });
+        return response.promise;
+      },
+      install: () => install.promise,
+      uninstall: () => uninstall.promise,
+    },
+  }) as NativeCaller;
+  const search = { method: 'settings.skills.search' as const, generation: 2, query: 'find' };
+  const first = caller.invoke(search).catch((error: unknown) => error);
+  const second = caller.invoke({ ...search, query: 'search' });
+  expect(searches[0]?.signal.aborted).toBe(true);
+  searches[0]?.response.resolve([]);
+  expect(await first).toMatchObject({ code: 'skill_marketplace_unavailable' });
+  searches[1]?.response.resolve([]);
+  expect(await second).toEqual({ kind: 'settings.skills.search', results: [] });
+
+  const request = {
+    method: 'settings.skills.install' as const,
+    generation: 2,
+    selection: { source: 'vercel-labs/skills', skillId: 'find-skills' },
+  };
+  const installing = caller.invoke(request);
+  const removal = {
+    method: 'settings.skills.uninstall' as const,
+    generation: 2,
+    selection: { skillId: 'user-skill.find-skills', skillVersion: 'a'.repeat(64) },
+  };
+  await expect(caller.invoke(removal)).rejects.toMatchObject({
+    code: 'skill_marketplace_mutation_busy',
+  });
+  await expect(caller.invoke(request)).rejects.toMatchObject({
+    code: 'skill_marketplace_install_busy',
+  });
+  await expect(caller.invoke({ ...request, generation: 1 })).rejects.toMatchObject({
+    code: 'native_generation_changed',
+  });
+  const result = { status: 'installed', name: 'find-skills' } as const;
+  install.resolve(result);
+  expect(await installing).toEqual({ kind: 'settings.skills.install', result });
+  const removing = caller.invoke(removal);
+  await expect(caller.invoke(request)).rejects.toMatchObject({
+    code: 'skill_marketplace_install_busy',
+  });
+  const removed = { status: 'uninstalled', skillId: removal.selection.skillId } as const;
+  uninstall.resolve(removed);
+  expect(await removing).toEqual({ kind: 'settings.skills.uninstall', result: removed });
+});
+
 test('Main owns fixed-revision user pagination without a Session, Workspace or total cap', async () => {
   const calls: Parameters<AgentClient['listUserSkills']>[0][] = [];
   const reads = new NativeSkillCatalogueReads(

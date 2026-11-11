@@ -17,7 +17,7 @@ Native 普通启动和 `desktop:dev` 隐藏“会话工具”辅助侧栏及“�
 | 文件与会话恢复 | `/rewind` 会话/代码/两者三范围 | 原点、预览与结果只读 | `files` 三范围和原 intent 查回 | Files 三范围与持久原 intent |
 | Context 与压缩 | `/context`、`/compact`、`/compact reset` | 完整原调用上下文只读 | `context read/rewind/include/compact/reset` | Context/压缩面板 |
 | 模型与偏好 | `/model`、`/effort`、主题和语言 | 不修改配置 | 消费明确配置与 `--model` | 项目/用户模型配置与选择 |
-| MCP 与 Skills | `/skills` 目录、显式合格 Workflow；`/mcp` 安全详情和用户/项目启停，完整管理仍待闭合 | 只读 | 已配置能力与 `--skill`；不代表完整 MCP 管理 | 目录及已接线管理功能，完整资格按 owner |
+| MCP 与 Skills | `/skills` 目录、显式合格 Workflow；`/mcp` 安全详情和用户/项目启停，完整管理仍待闭合 | 只读 | 已配置能力与 `--skill`；不代表完整 MCP 管理 | 用户目录与正文、Skills.sh 搜索和安装、用户技能卸载、MCP 设置 |
 | 导出与诊断 | 已加载对话 Markdown 导出、`/status` | 日志、原模型输入/输出 | `trace`、状态选项与显式管理 JSON | 诊断及原 Model 完整正文；完整导出 UI 按计划核对 |
 | 未确认申请恢复 | 私有 journal，只查原 ID | 展示原状态 | 完整 caller/recovery/files intent，只查原 ID | 私有数据库与原请求分页，只查原 ID |
 

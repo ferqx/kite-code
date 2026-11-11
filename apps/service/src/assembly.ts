@@ -21,6 +21,7 @@ import {
   KnowledgeReadCleanupError,
   type SourceRequest,
 } from '@kite-ai/agent/sources';
+import type { InstalledUserSkill } from './installed-user-skills';
 import { createConfiguredSkillSource } from './skill-source';
 
 const fileIds = ['files.read', 'files.write', 'files.edit'];
@@ -43,10 +44,12 @@ export async function createWorkspaceAssembly(options: {
   toolIds: readonly string[];
   toolConfigurations?: readonly JsonObject[];
   skills?: readonly JsonObject[];
+  installedUserSkills?: readonly InstalledUserSkill[];
   /** Original per-Run selectors from the configured catalogue; never a path or capability. */
   selectedSkills?: readonly string[];
   /** Trusted parent binding fence: exact configured IDs, never name selectors. */
   inheritedSkillIds?: readonly string[];
+  inheritedInstalledSkills?: ReadonlyMap<string, string>;
   knownToolIds?: readonly string[];
   allowedCapabilities?: readonly string[];
   /** One trusted global builtin.files registration; this assembly keeps only its selection/facts. */
@@ -145,7 +148,14 @@ export async function createWorkspaceAssembly(options: {
           failSelected(id);
           throw new AgentError('skill_not_discovered');
         }
-        selected.add(matches[0]!.id);
+        const match = matches[0]!;
+        const inheritedDigest = options.inheritedInstalledSkills?.get(id);
+        if (
+          inheritedDigest !== undefined &&
+          (skillSource.installedBinding(match)?.id !== id || match.version !== inheritedDigest)
+        )
+          throw new AgentError('skill_version_changed');
+        selected.add(match.id);
       }
     } else if (options.selectedSkills !== undefined)
       for (const selector of options.selectedSkills) {
@@ -166,6 +176,8 @@ export async function createWorkspaceAssembly(options: {
     const selectedBindings = selectedEntries.map((entry) => ({
       id: configuredId(entry),
       sourceId: entry.id,
+      installed: skillSource.installedBinding(entry),
+      version: entry.version,
     }));
     const selectedIds = new Set(selectedBindings.map((entry) => entry.id));
     const loaded = new Set<string>();
@@ -181,7 +193,13 @@ export async function createWorkspaceAssembly(options: {
       }
       for (const original of selectedBindings) {
         const entry = current.entries.find((entry) => configuredId(entry) === original.id);
-        if (!entry || entry.id !== original.sourceId) throw new AgentError('skill_version_changed');
+        if (
+          !entry ||
+          entry.id !== original.sourceId ||
+          (original.installed &&
+            (!skillSource.installedBinding(entry) || entry.version !== original.version))
+        )
+          throw new AgentError('skill_version_changed');
       }
       return current.entries
         .filter((entry) => selected.has(entry.id))
@@ -426,9 +444,16 @@ export async function createWorkspaceAssembly(options: {
       toolIds: [...options.toolIds],
       sources,
       knowledgeScope: skillSource.knowledgeScope,
-      skillConfigurations: configured
-        .filter((entry) => selectedIds.has(String(entry.id)))
-        .map((entry): NamedConfiguration => ({ ...entry, id: String(entry.id) })),
+      skillConfigurations: [
+        ...configured
+          .filter((entry) => selectedIds.has(String(entry.id)))
+          .map((entry): NamedConfiguration => ({ ...entry, id: String(entry.id) })),
+        ...selectedBindings.flatMap(({ id, installed, version }): NamedConfiguration[] =>
+          installed
+            ? [{ id, path: installed.path, digest: version, options: { installedUserSkill: true } }]
+            : [],
+        ),
+      ],
       dispose,
       snapshotFacts: { ...snapshotFacts, digest: digest(JSON.stringify(snapshotFacts)) },
     };

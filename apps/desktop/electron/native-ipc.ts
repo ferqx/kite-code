@@ -37,6 +37,11 @@ import {
   nativeModelPreferenceChannel,
 } from '../src/native-model-preference-bridge';
 import { promptTextForSend } from '../src/prompt-text';
+import {
+  isSkillMarketplaceQuery,
+  isSkillMarketplaceSelection,
+  isSkillMarketplaceUninstallSelection,
+} from '../src/skill-marketplace-contract';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { nativeModelPreferences } from './model-preference';
 import type { NativeCaller } from './native-caller';
@@ -131,6 +136,9 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'settings.skills.document.close': ['readId'],
   'settings.skills.next': ['readId'],
   'settings.skills.close': ['readId'],
+  'settings.skills.search': ['query'],
+  'settings.skills.install': ['selection'],
+  'settings.skills.uninstall': ['selection'],
   'jobOutput.open': ['readId', 'executionId', 'viewSelection', 'historyEpoch'],
   'jobOutput.next': ['readId'],
   'jobOutput.close': ['readId'],
@@ -322,6 +330,15 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (method === 'settings.skills.search' && !isSkillMarketplaceQuery(input.query))
+    throw Error('invalid_skill_marketplace_query');
+  if (method === 'settings.skills.install' && !isSkillMarketplaceSelection(input.selection))
+    throw Error('invalid_skill_marketplace_selection');
+  if (
+    method === 'settings.skills.uninstall' &&
+    !isSkillMarketplaceUninstallSelection(input.selection)
+  )
+    throw Error('invalid_skill_marketplace_selection');
   if (method.startsWith('input.files.')) {
     if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.id))
       throw Error('invalid_native_request');

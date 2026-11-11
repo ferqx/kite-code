@@ -401,7 +401,7 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 
 默认全局登记 `@kite-ai/agent/files` 的 6 个 `files.*` Tool，每 Run 装配针对实际持久 Workspace root 选择这组定义，以及普通 version-1 `skills.load`/`skills.resource`。`effective.tools` 选择准确 ID；禁用项不在目录，未知 ID 拒绝新 Run，明确选择的 builtin version 必须匹配实际注册版本（`files.read@3`）。非空 Tool/Skill `options` 当前不支持，局部失败，不显示为未实际应用的 effective 设置。可信额外 Tool ID 只能经宿主 `knownToolIds` 提供，Runtime 仍核真实注册。配置不能提供 root、权限、Tool 实现或 capability grant。
 
-Skills 是明确 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。不发现 home/旧树或遍历任意目录；symlink 越界和重复物理位置局部不可用。可选 digest 固定 Skill 字节。摘要/版本/依赖事实进入 `skills.catalogue`；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
+显式配置的 Skills 使用 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。路径越界和重复物理位置局部不可用。用户安装目录按[同源知识目录](#同源-skill-知识目录)接入。可选 digest 固定 Skill 字节。摘要/版本/依赖事实进入 `skills.catalogue`；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
 
 默认 Run 的完整来源请求接入 `captureBatch`：项目来源按全部原定义/输入核实际目标，Skill catalogue及已加载正文仅在该检查点复用；下一检查点重新捕获。所选 MCP 来源继续对每个原请求执行现有 scope/read-set 核验，Workflow fork fence仍在捕获前检查。总唯一 source和冲突摘要门禁保持，不能按 Tool 名丢弃不同文件输入。[默认长任务](test/isolated/long-run-sources.test.ts)经正式 paired 装配、公开 Client和 compatible SDK 完成同 Run 的 257 次不同 Files读取，完整原指令进入 18 次实际请求，两次冷历史读取零重放；[公开长历史接续](test/isolated/long-run-resume.test.ts)另核 4096 次原效果后恢复同一 Run。两项证据不替代 installed客户端、真实 Provider或平台资格。
 
@@ -822,7 +822,7 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 2026-10-31 参数收窄验证：[装配](test/isolated/assembly.test.ts)与[paired SDK／HTTP](test/isolated/assembly-http.test.ts)核公开及内部 schema 均无该字段、无描述正常读取、多余字段零派发失败后继续，以及原输入在存储、后续模型历史和公开 GET 中保留。相关 Service／CLI／Builtin 8文件38项通过，Service／Agent／CLI类型、定向格式与文档检查通过；这些是本地受控 Provider 及真实 Service HTTP 证据，本轮未调用真实模型或操作用户客户端。
 
-[skill-source.ts](src/skill-source.ts)为 Workspace、全局用户目录和 Run 装配组合原配置知识与产品全局内置 `computer-use`。内置正文／资源来自 [Agent 不可变资产](../../packages/agent/src/skills/builtin.ts)，安装元数据始终存在，不以当前 Tool 选择作为是否安装的判断，也不依赖项目或用户 Skill 目录。没有配置项时，即使配置根尚不存在也不读取或创建它；不写用户配置、不扫描 home。安装事实不授予页面或代码执行权限：未选、禁用或缺少可用 `browser.execute` 时保留内置元数据，状态为 `unavailable`／`skill_capability_missing`；正文和资源加载仍交叉检查宿主允许集、实际 Tool 选择及调用者本次能力。可用项才进入默认 Run 知识绑定，显式选择缺依赖的内置项准确失败。
+[skill-source.ts](src/skill-source.ts)为 Workspace、全局用户目录和 Run 装配组合原配置知识与产品全局内置 `computer-use`。内置正文／资源来自 [Agent 不可变资产](../../packages/agent/src/skills/builtin.ts)，安装元数据始终存在，不以当前 Tool 选择作为是否安装的判断，也不依赖项目或用户 Skill 目录。读取目录无需创建配置根或改写用户配置。安装事实不授予页面或代码执行权限：未选、禁用或缺少可用 `browser.execute` 时保留内置元数据，状态为 `unavailable`／`skill_capability_missing`；正文和资源加载仍交叉检查宿主允许集、实际 Tool 选择及调用者本次能力。可用项才进入默认 Run 知识绑定，显式选择缺依赖的内置项准确失败。
 
 配置 Skill 继续沿原真实配置解析。禁用项不读文件；缺文件、路径越界、重复物理位置、digest 变化、不支持 options 与缺能力按配置 ID 标记局部不可用。默认 Run 只绑定实际可用项并保存相同配置子集，显式名称/ID选择基于全部已知条目消歧，不能因坏项而悄悄改选同名可用项。child 只在父快照准确 ID 范围内选择；父 `requested:null` 的默认项，在子目录明确标记 `skill_capability_missing` 时可省略，不给子角色补工具。显式选择、空数组、未知／禁用／损坏项和绑定后的 canonical 文件目标变化继续按准确原选择处理，冻结恢复不以新目录改写旧事实。单命令 requested 最多256项保持公开契约，默认解析出的 resolvedIds 不套此请求数量限制。[能力继承回归](test/isolated/child-skill-capability-inheritance.test.ts)核真实默认浏览器知识、分析角色的能力交集、普通 worker 保留、显式缺依赖与坏项拒绝；持久理由归[子配置修正](../../.agents/notes/implemented/bug-fix/2026-11-05-child-preparation-acceptance.md)。
 
@@ -832,11 +832,17 @@ reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport
 
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
 
-Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_skill_catalogue` capability。`GET /v1/config/user/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 返回闭合 `UserSkillCataloguePage`：固定 `scope:user`，不含 Session／Workspace 身份或 Workflow 投影，`source.scope` 也只接受 user。它仅合并 defaults、同一用户配置适配器与可信宿主 explicit，读取用户配置文件所在根及已有 Profile `skills` root 中明确配置的位置；不读取项目 JSONC、Workspace、trust 或项目指令，不扫描 home，也不创建隐藏 Session／Workspace。相对路径按用户配置目录解析，越界或 symlink 目标局部不可用。缺少配置且无用户 Skill 项时仍返回全局内置元数据，不创建目录；坏用户 JSONC 继续明确 unavailable。原 Workspace API 与 Run 的项目 Skill 选择、可信来源和执行规则保持。
+Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_skill_catalogue` capability。`GET /v1/config/user/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 返回闭合 `UserSkillCataloguePage`：固定 `scope:user`，不含 Session／Workspace 身份或 Workflow 投影，`source.scope` 也只接受 user。它合并 defaults、同一用户配置适配器与可信宿主 explicit，读取用户配置文件所在根及已有 Profile `skills` root 中明确配置的位置，并纳入下述专用安装目录；不读取项目 JSONC、Workspace、trust 或项目指令，不扫描 home，也不创建隐藏 Session／Workspace。相对路径按用户配置目录解析，越界或 symlink 目标局部不可用。缺少配置且无用户 Skill 项时仍返回全局内置元数据，不创建目录；坏用户 JSONC 继续明确 unavailable。Workspace API 保留其工作区信任门禁。
+
+[用户安装目录](src/installed-user-skills.ts)固定为用户配置文件所在目录的 `skills`，默认 `~/.kite-code/skills`。Service 只接纳直接子目录中的普通 `SKILL.md`，跳过暂存、未发布入口和链接。安装条目以 `user-skill.<slug>` 标识，来源为 `user/.kite-code`。显式配置优先保留原配置 ID 或原位置。对安装项的可信读取根限于该技能目录。用户目录、正文和可信 Workspace 目录共用现有 reader 与 revision 校验。
+
+新 Run 在原 Skill 选择前解析本机已发布条目，保存选中条目的配置 ID、路径和正文 digest。运行中读取、子任务与恢复按原绑定核对，旧记录沿原格式解析。安装和目录读取不生成业务 Command。模型读取和配套资源继续经过原任务权限与内容身份检查。桌面的网络和发布处理见 [Desktop owner](../desktop/README.md#skillssh-搜索与用户安装)。
+
+2026-11-12，本机 macOS arm64 上五个 Service 测试文件共 27 项通过。覆盖[用户 HTTP](test/isolated/user-skill-catalogue.test.ts)的目录刷新与版本绑定预览、[可信工作区 HTTP](test/isolated/skill-catalogue.test.ts)和[任务选择](test/isolated/skill-selection.test.ts)的同源发现、[装配](test/isolated/assembly.test.ts)的配套文件准入，以及[子任务能力继承](test/isolated/child-skill-capability-inheritance.test.ts)。受控 Provider 下根任务与子任务沿原绑定，后续安装不进入原任务恢复，原正文变化在读取凭据和调用 Provider 前拒绝。
 
 该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的用户／Workspace list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
 
-默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。全局内置项没有用户／项目配置位置，`source:null`；越界、非法或不能确定的配置位置也为 null。旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
+默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源描述目录类别，禁用的显式配置项不读取文件。全局内置项没有用户／项目配置位置，`source:null`；越界、非法或不能确定的配置位置也为 null。旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision。
 
 目录按配置ID排序，默认128KiB单页字节预算、可选正安全整数limit与不超过1MiB的byteLimit；预算只分页，不截总目录或单项字段，单项放不下明确413。revision涵盖原主体/Store/Workspace、信任身份与revision、Skill配置、能力及完整目录版本状态；后续页必须携原revision，实际变化（包括配置变坏）409，不将新目录拼进旧页。未见afterId拒绝，不猜下一位置。读取不提供与外部文件写者的原子事务，也不预订未来执行版本。
 

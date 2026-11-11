@@ -76,6 +76,10 @@ import type { NativeModelPreferenceBridge } from './native-model-preference-brid
 import type { NativeTraceRequest, NativeTraceResult } from './native-trace-bridge';
 import type { NativeTrajectoryFileBridge } from './native-trajectory-file-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
+import type {
+  NativeSkillMarketplaceRequest,
+  NativeSkillMarketplaceResult,
+} from './skill-marketplace-contract';
 import type { NativeSkillDocument, NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
   NativeContextUsagePage,
@@ -658,6 +662,7 @@ export type NativeRequest =
   | NativeFileChangeRequest
   | NativeBackgroundRequest
   | NativeSkillsRequest
+  | NativeSkillMarketplaceRequest
   | NativeJobOutputRequest
   | NativeUserMcpRequest
   | NativeMcpRequest
@@ -962,6 +967,7 @@ export type NativeResult =
   | NativeBackgroundResult
   | NativeSkillsPage
   | NativeSkillDocument
+  | NativeSkillMarketplaceResult
   | NativeJobOutputPage
   | NativeUserMcpResult
   | NativeMcpResult

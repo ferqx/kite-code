@@ -20,6 +20,8 @@ import {
   ipcMain,
   Menu,
   nativeTheme,
+  session,
+  shell,
   Tray,
   WebContentsView,
 } from 'electron';
@@ -67,6 +69,7 @@ import { ensureDesktopProfilePermissions } from './profile-permissions';
 import { canonicalProtectedPath } from './protected-path';
 import { settleDesktopQuit } from './quit-settlement';
 import { ScheduledTaskRunner } from './scheduled-task-runner';
+import { createSkillMarketplace } from './skill-marketplace';
 import { assertNativeSqliteEngine } from './sqlite-engine';
 import { registerNativeTrajectoryFileIpc } from './trajectory-file-ipc';
 import { NativeTrajectoryFiles } from './trajectory-files';
@@ -351,6 +354,12 @@ async function openCaller(): Promise<NativeCaller> {
       undefined,
       nextCallerGeneration,
       callerSelectionHint,
+      createSkillMarketplace({
+        userSkillRoot: join(homedir(), '.kite-code', 'skills'),
+        fetch: (url, init) =>
+          session.fromPartition('skills-marketplace', { cache: false }).fetch(url.href, init),
+        trashItem: (path) => shell.trashItem(path),
+      }),
     );
     scheduledTasks = new ScheduledTaskRunner(paired.client, privateData);
     caller.setScheduledTasks(scheduledTasks);

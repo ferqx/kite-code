@@ -85,6 +85,7 @@ import type { DesktopBrowserEndpoint } from './desktop-browser';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
 import { readHostState } from './host-read';
 import { createDefaultHostStatusSource } from './host-status';
+import { discoverInstalledUserSkills } from './installed-user-skills';
 import { createMcpConfiguration } from './mcp-configuration';
 import { createMcpManagement } from './mcp-management';
 import {
@@ -1092,6 +1093,15 @@ export function createDefaultProcessConfiguration(options: {
         browserTools.values(),
         mcp.tools.values(),
       ]);
+      const inheritedSkills = selection?.skillSelection;
+      const installedUserSkills =
+        skillSelection?.length === 0
+          ? []
+          : await discoverInstalledUserSkills(
+              dirname(userConfiguration.path),
+              inheritedSkills ? (inheritedSkills.installed ?? new Map()) : undefined,
+            );
+      signal?.throwIfAborted();
       const assembly = await createWorkspaceAssembly({
         workspaceRoot: root,
         profile: options.profile,
@@ -1100,8 +1110,10 @@ export function createDefaultProcessConfiguration(options: {
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
+        installedUserSkills,
         selectedSkills: skillSelection,
-        inheritedSkillIds: selection?.skillSelection?.resolvedIds,
+        inheritedSkillIds: inheritedSkills?.resolvedIds,
+        inheritedInstalledSkills: inheritedSkills?.installed,
         knownToolIds: [
           ...(options.knownToolIds ?? []),
           ...businessTools.keys(),

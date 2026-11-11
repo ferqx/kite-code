@@ -10,7 +10,7 @@ import { mcpCanonical } from '@kite-ai/agent/config';
 import type { Extension, Json, Permissions } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { readSkillSelection } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -96,9 +96,12 @@ async function fixture(runlessTools = false) {
       { id: 'beta', path: 'beta' },
     ],
   };
-  writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify(config));
+  const userRoot = join(root, 'user');
+  privateDirectory(userRoot);
+  const configPath = join(userRoot, 'config.jsonc');
+  writeFileSync(configPath, JSON.stringify(config));
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: configPath,
     profile,
     knownToolIds: ['fixture.delegate'],
     permissions: {
@@ -253,6 +256,8 @@ async function fixture(runlessTools = false) {
     host,
     base,
     config,
+    configPath,
+    userRoot,
     children,
     records,
     counts: () => ({ requests, credentialReads }),
@@ -374,6 +379,70 @@ test('per-Run root and child seal exact inherited IDs despite name collisions; p
   }
 }, 15000);
 
+test('managed user Skills are selected and inherited, and recovery binds the original installed version', async () => {
+  const f = await fixture();
+  const install = (slug: string, name: string) => {
+    const directory = join(f.userRoot, 'skills', slug);
+    mkdirSync(directory, { recursive: true });
+    const document = join(directory, 'SKILL.md');
+    writeFileSync(
+      document,
+      `---\nname: ${name}\ndescription: installed guidance\n---\nPrivate installed body`,
+    );
+    return document;
+  };
+  try {
+    const path = install('market-guide', 'Market Guide');
+    await f.runtime.submitCommand({
+      ...f.base,
+      commandId: 'installed-work',
+      request: { kind: 'run.start', content: 'delegate root', selectedSkills: ['Market Guide'] },
+    });
+    const command = await f.runtime.waitForCommand('installed-work');
+    expect(command.status).toBe('applied');
+    const children = await until(
+      async () => Promise.all(f.children.map((id) => f.store.getView(id))),
+      (views) => views.length === 1 && views[0]!.runs.some((run) => run.status === 'completed'),
+    );
+    const root = (await f.store.getView('s')).runs[0]!;
+    const original = readSkillSelection(root.configuration);
+    expect(original).toMatchObject({
+      requested: ['Market Guide'],
+      resolvedIds: ['user-skill.market-guide'],
+    });
+    expect(original.installed?.get('user-skill.market-guide')).toMatch(/^[a-f0-9]{64}$/);
+    expect(readSkillSelection(children[0]!.runs[0]!.configuration)).toEqual(original);
+    expect(
+      f.records
+        .filter(({ model }) => model === 'child')
+        .every(({ messages }) => JSON.stringify(messages).includes('user-skill.market-guide')),
+    ).toBe(true);
+
+    install('later', 'Later Skill');
+    const recovery = {
+      run: root,
+      command: (await f.store.getCommand(root.originCommandId))!,
+      session: (await f.store.getSession(root.sessionId))!,
+      workspace: (await f.store.getWorkspace('w'))!,
+      signal: AbortSignal.timeout(5000),
+    };
+    const reopened = await f.host.resolveRecoveryRunConfiguration!(recovery);
+    try {
+      expect(readSkillSelection({ snapshot: reopened.snapshot ?? null })).toEqual(original);
+    } finally {
+      await reopened.dispose?.();
+    }
+    const before = f.counts();
+    writeFileSync(path, 'different installed bytes');
+    await expect(f.host.resolveRecoveryRunConfiguration!(recovery)).rejects.toMatchObject({
+      code: 'skill_version_changed',
+    });
+    expect(f.counts()).toEqual(before);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
 test('empty and unavailable selectors persist original facts before credentials or Provider; startup selection is rejected', async () => {
   const f = await fixture();
   try {
@@ -409,7 +478,7 @@ test('empty and unavailable selectors persist original facts before credentials 
     expect(f.counts()).toEqual(before);
     expect(() =>
       createDefaultProcessConfiguration({
-        userConfigurationPath: f.profile.profilePath + '/config.jsonc',
+        userConfigurationPath: f.configPath,
         profile: f.profile,
         hostConfiguration: { selectedSkills: ['alpha'] },
       }),
@@ -860,10 +929,7 @@ test('real default Run and direct child keep 301 resolved Skills while unselecte
       '---\nname: Needs\ndescription: missing ability\nrequired-capabilities: unavailable.tool\n---\nprivate body',
     );
     skills.push({ id: 'needs', path: 'needs' });
-    writeFileSync(
-      join(f.profile.profilePath, 'config.jsonc'),
-      JSON.stringify({ ...f.config, skills }),
-    );
+    writeFileSync(f.configPath, JSON.stringify({ ...f.config, skills }));
     await f.runtime.submitCommand({
       ...f.base,
       commandId: 'explicit-bad',
