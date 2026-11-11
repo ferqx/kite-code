@@ -43,6 +43,9 @@ test('robots matches specificity, query, wildcards, anchors and normalized URL o
     Disallow: /some%2fpath
     Disallow: /ab%63
     Disallow: /a%2Ab
+    Disallow: /cost%24$
+    Disallow: /search?literal=%2A%24$
+    Disallow: /*.pdf$
     Disallow: /only$
   `);
   for (const path of [
@@ -54,6 +57,12 @@ test('robots matches specificity, query, wildcards, anchors and normalized URL o
     '/some%2Fpath',
     '/abc',
     '/a%2ab',
+    '/a*b',
+    '/cost$',
+    '/cost%24',
+    '/search?literal=*$',
+    '/search?literal=%2a%24',
+    '/docs/manual.pdf',
     '/only#fragment',
   ])
     expect(robotsAllows(rules, new URL(path, 'https://fixture.test'))).toBe(false);
@@ -65,7 +74,10 @@ test('robots matches specificity, query, wildcards, anchors and normalized URL o
     '/same',
     '/some/path',
     '/abC',
-    '/a*b',
+    '/axxb',
+    '/cost$more',
+    '/search?literal=*$&other=1',
+    '/docs/manual.pdf?download=1',
     '/only?',
   ])
     expect(robotsAllows(rules, new URL(path, 'https://fixture.test'))).toBe(true);

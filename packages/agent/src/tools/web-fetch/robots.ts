@@ -79,7 +79,9 @@ function matches(path: string, pattern: string): boolean {
 }
 
 export function robotsAllows(rules: readonly RobotsRule[], url: URL): boolean {
-  const path = normalizePath(url.href.slice(url.origin.length).split('#', 1)[0]!);
+  const path = normalizePath(url.href.slice(url.origin.length).split('#', 1)[0]!)
+    .replaceAll('*', '%2A')
+    .replaceAll('$', '%24');
   let best: RobotsRule | undefined;
   for (const rule of rules) {
     if (

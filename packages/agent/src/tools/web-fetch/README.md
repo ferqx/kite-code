@@ -24,6 +24,8 @@ URL 中的字面地址同样接受检查；private、loopback、link-local、met
 
 robots 检查对初始 URL 使用 [RFC 9309 的匹配规则](https://www.rfc-editor.org/rfc/rfc9309.html#section-2.2)，合并适用于 KiteCode 产品标识的组，仅在没有匹配组时采用通用组。规则对规范化的路径和查询部分匹配，支持 `*` 和结尾 `$`，最长匹配生效，同长优先 `Allow`。远端模式按字面片段匹配。拒绝结果使用 `details.code: web_robots_denied` 和 `details.origin`，可读内容说明该站点的规则及页面尚未请求，不回显路径、查询或规则原文。早期仅含错误码的历史结果沿通用失败说明呈现。
 
+规则以 `/` 开头，例如 `/*.pdf$`。URL 路径及查询中的字面 `*` 和 `$` 在比较时分别按 `%2A` 和 `%24` 匹配，规则里的未编码字符仍作通配符和结尾锚点。
+
 最多读取 500 KB 完整规则文本，没有固定 100 条规则裁剪；缓存为 5 分钟、200 个 origin，读取失败/超时采用宽松回退，取消仍向外传播。同 origin 请求在可取消的 500ms 域名队列等待；队列项会释放和移除，不设累计 hostname 预算。
 
 固定地址 port 在一次 Tool 调用内保留初始同源 robots 已验证的候选列表供正文初始请求使用一次，绑定原 URL、Execution、Session 和 Store。每次资源请求仍独立准入并在 socket 前持久审计；跳转、其他调用和解析失败均不复用。初始 robots 的准入与解析只消耗总时限，3 秒 robots 传输预算在已验证候选就绪后开始，覆盖 robots 连接、正文和后续 robots 跳转。没有请求 scope 的显式网络 port 沿原预算。已知失败的原结果保留错误码并记录 `details.stage` 和 `details.resource`，不回显 DNS 响应或请求 URL。
