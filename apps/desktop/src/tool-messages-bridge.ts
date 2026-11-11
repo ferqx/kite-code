@@ -132,7 +132,8 @@ export type NativeRunFact = Pick<
   | 'createdAt'
   | 'finishedAt'
   | 'reason'
->;
+> &
+  Partial<Pick<Run, 'originCommandId'>>;
 
 /** Display facts only; no result body, request payload, or control capability. */
 export type NativeToolExecution = Pick<
@@ -156,8 +157,28 @@ export type NativeToolExecution = Pick<
 };
 
 export function nativeRunFact(run: NativeRunFact): NativeRunFact {
-  const { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason } = run;
-  return { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason };
+  const {
+    id,
+    originStoreId,
+    originCommandId,
+    sessionId,
+    status,
+    isActive,
+    createdAt,
+    finishedAt,
+    reason,
+  } = run;
+  return {
+    id,
+    originStoreId,
+    originCommandId,
+    sessionId,
+    status,
+    isActive,
+    createdAt,
+    finishedAt,
+    reason,
+  };
 }
 
 export function nativeToolExecution(

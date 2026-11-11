@@ -330,9 +330,21 @@ export interface TuiLocalMessage {
   readonly submissionFailure?: { readonly commandId: string; readonly reason?: string };
 }
 
+export const tuiModelOutputReadKey = (message: Message) =>
+  JSON.stringify([message.sessionId, message.id, message.seq, message.outputBody]);
+
+interface TuiStartSubmission {
+  readonly scope: TuiDraftScope;
+  readonly commandId: string;
+  readonly content: string;
+  readonly draftVersion: number;
+  readonly displayGeneration: number;
+}
+
 export interface TuiState {
   /** Local UI commands and receipts; never public Runtime messages. */
   readonly localMessages: readonly TuiLocalMessage[];
+  readonly startSubmission?: TuiStartSubmission;
   readonly callers: ReadonlyMap<string, TuiCallerOutcome>;
   readonly callerUnavailable?: string;
   readonly callerReading?: string;
@@ -448,16 +460,18 @@ export interface TuiState {
   readonly draft: string;
   readonly planning: boolean;
   readonly loading: boolean;
+  readonly creatingSession?: boolean;
   readonly stale: boolean;
   readonly snapshotStale: boolean;
   readonly domains?: Readonly<Partial<Record<TuiReadDomain, TuiDomainState>>>;
-  readonly errorSource?: 'snapshot' | 'observation' | 'input';
+  readonly errorSource?: 'snapshot' | 'observation' | 'input' | 'output';
   readonly observationError?: string;
   readonly observationState: 'connecting' | 'ready' | 'unknown';
   readonly error?: string;
   readonly intent?: TuiIntent;
   readonly fullOutputs: ReadonlyMap<string, string>;
   readonly loadedOutputBodies: ReadonlyMap<string, ModelOutputSnapshot['output']>;
+  readonly outputReadFailures: ReadonlySet<string>;
   readonly attachment?: { interactionId: string; revision: string; content: string };
   readonly attachments: ReadonlyMap<string, string>;
 }
@@ -552,11 +566,14 @@ export class TuiController {
     observationState: 'connecting',
     fullOutputs: new Map(),
     loadedOutputBodies: new Map(),
+    outputReadFailures: new Set(),
     attachments: new Map(),
     jobStops: new Map(),
     callers: new Map(),
   };
   private listeners = new Set<() => void>();
+  private observedStartCommandId?: string;
+  private sessionCreation?: { sessionId: string | undefined; generation: number; draft: string };
   private displayClearGeneration = 0;
   private clearedDisplay?: {
     sessionId: string;
@@ -914,6 +931,82 @@ export class TuiController {
       );
     });
   }
+  private get currentStartSubmission() {
+    const start = this.value.startSubmission;
+    const scope = this.draftScope();
+    return start &&
+      scope?.storeId === start.scope.storeId &&
+      scope.sessionId === start.scope.sessionId &&
+      scope.workspaceId === start.scope.workspaceId
+      ? start
+      : undefined;
+  }
+  private hasRecordedStart(start: TuiStartSubmission) {
+    return this.value.snapshot?.messages.some(
+      (message) =>
+        message.role === 'user' &&
+        message.status === 'complete' &&
+        message.sessionId === start.scope.sessionId &&
+        !message.originMessage &&
+        (message.originCommandId === start.commandId ||
+          message.humanInput?.publicCommandId === start.commandId),
+    );
+  }
+  get pendingStartMessage() {
+    const start = this.currentStartSubmission;
+    return start &&
+      start.displayGeneration === this.displayGeneration &&
+      !this.hasRecordedStart(start)
+      ? start
+      : undefined;
+  }
+  get submittedRun() {
+    const start = this.currentStartSubmission;
+    return start && this.findSubmittedRun(start, this.value.snapshot);
+  }
+  private findSubmittedRun(start: TuiStartSubmission, snapshot?: TuiSnapshot) {
+    return snapshot?.view.runs.find(
+      (run) =>
+        run.sessionId === start.scope.sessionId &&
+        run.originStoreId === start.scope.storeId &&
+        (run.originCommandId === start.commandId || run.rootWorkCommandId === start.commandId),
+    );
+  }
+  get startingRun() {
+    const start = this.currentStartSubmission;
+    return (
+      !!start &&
+      this.observedStartCommandId !== start.commandId &&
+      !this.startOutcomeUnknown &&
+      !this.submittedRun
+    );
+  }
+  get startOutcomeUnknown() {
+    const start = this.currentStartSubmission;
+    return !!start && this.unknownIntents.has(start.commandId);
+  }
+  get composerDraft() {
+    const start = this.currentStartSubmission;
+    return start && (this.draftVersions.get(start.scope.sessionId) ?? 0) === start.draftVersion
+      ? ''
+      : this.value.draft;
+  }
+  finishStartPresentation(runId: string) {
+    const start = this.currentStartSubmission;
+    const run = this.submittedRun;
+    if (
+      start &&
+      run?.id === runId &&
+      !run.isActive &&
+      this.hasRecordedStart(start) &&
+      !this.startOutcomeUnknown &&
+      this.composerDraft === this.value.draft &&
+      !(
+        this.value.intent?.commandId === start.commandId && this.value.intent.phase === 'submitting'
+      )
+    )
+      this.publish({ startSubmission: undefined });
+  }
   /** Keep local-only UI receipts at their original position without inventing Runtime facts. */
   get visibleTranscript(): readonly (Message | TuiLocalMessage)[] {
     return this.transcript(this.visibleMessages);
@@ -1119,6 +1212,7 @@ export class TuiController {
       this.observationUnavailable('store_changed');
       return;
     }
+    const recovering = this.value.observationState === 'unknown';
     this.retireDomainReads();
     this.publish({
       observationState: 'ready',
@@ -1126,6 +1220,7 @@ export class TuiController {
       error: this.value.errorSource === 'observation' ? undefined : this.value.error,
       errorSource: this.value.errorSource === 'observation' ? undefined : this.value.errorSource,
     });
+    if (recovering) this.checkUnobservedStart();
   }
   async readFileCandidates(token?: FileToken) {
     this.fileRead?.abort();
@@ -1215,7 +1310,6 @@ export class TuiController {
   setDraft(draft: string) {
     if (draft !== this.value.draft) this.fileRecoveryRead?.abort();
     this.fileRead?.abort();
-    this.publish({ draft, fileCandidates: undefined });
     if (this.value.sessionId) {
       this.drafts.set(this.value.sessionId, draft);
       this.draftVersions.set(
@@ -1223,6 +1317,7 @@ export class TuiController {
         (this.draftVersions.get(this.value.sessionId) ?? 0) + 1,
       );
     }
+    this.publish({ draft, fileCandidates: undefined });
     const scope = this.draftScope();
     if (scope)
       try {
@@ -1231,9 +1326,56 @@ export class TuiController {
         this.draftUnavailable('tui_draft_storage_unavailable');
       }
   }
+  async createSession(create: () => Promise<string>) {
+    if (this.disposed || this.sessionCreation) return;
+    this.sessionCreation = {
+      sessionId: this.value.sessionId,
+      generation: this.generation,
+      draft: this.value.draft,
+    };
+    this.publish({ creatingSession: true });
+    try {
+      return await create();
+    } finally {
+      this.sessionCreation = undefined;
+      this.publish({ creatingSession: false });
+    }
+  }
+  async selectCreatedSession(sessionId: string, sourceId = this.value.sessionId) {
+    const creation = this.sessionCreation;
+    if (
+      this.value.sessionId !== sourceId ||
+      (creation && (creation.sessionId !== sourceId || creation.generation !== this.generation))
+    )
+      return;
+    const carriedDraft = creation?.draft === '' ? this.value.draft : '';
+    const scope = carriedDraft ? this.draftScope() : undefined;
+    const revision = scope && this.draftVersions.get(scope.sessionId);
+    await this.select(sessionId, carriedDraft ? { initialDraft: carriedDraft } : undefined);
+    if (
+      scope &&
+      this.value.sessionId === sessionId &&
+      this.value.snapshot?.view.session.id === sessionId &&
+      this.value.draft === carriedDraft &&
+      this.draftVersions.get(scope.sessionId) === revision
+    ) {
+      try {
+        if (this.port.drafts && !this.port.drafts.flush()) return;
+        this.port.drafts?.edit(scope, '');
+        this.drafts.set(scope.sessionId, '');
+        this.draftVersions.set(scope.sessionId, (revision ?? 0) + 1);
+      } catch {
+        this.draftUnavailable('tui_draft_storage_unavailable');
+      }
+    }
+  }
   async select(
     sessionId: string,
-    options: { preserveReconnectionReview?: boolean; reconcile?: boolean } = {},
+    options: {
+      preserveReconnectionReview?: boolean;
+      reconcile?: boolean;
+      initialDraft?: string;
+    } = {},
   ) {
     if (this.disposed) return;
     // An event refresh must not cancel the activation that is still reconciling
@@ -1278,6 +1420,7 @@ export class TuiController {
       snapshot: same ? this.value.snapshot : undefined,
       fullOutputs: same ? this.value.fullOutputs : new Map(),
       loadedOutputBodies: same ? this.value.loadedOutputBodies : new Map(),
+      outputReadFailures: same ? this.value.outputReadFailures : new Set(),
       attachment: same ? this.value.attachment : undefined,
       context: same ? this.value.context : undefined,
       managementRequests: same ? this.value.managementRequests : undefined,
@@ -1330,7 +1473,7 @@ export class TuiController {
       planning: same ? this.value.planning : false,
       chooserRequested: false,
       notice: same ? this.value.notice : undefined,
-      draft: this.drafts.get(sessionId) ?? '',
+      draft: this.drafts.get(sessionId) ?? options.initialDraft ?? '',
       loading: !same || !this.value.snapshot,
       domains: undefined,
       error: undefined,
@@ -1389,6 +1532,7 @@ export class TuiController {
       this.applySnapshot(snapshot, {
         same,
         restoreDraft: true,
+        initialDraft: options.initialDraft,
         reconciliationError,
         domains,
         snapshotStale: domains.execution?.phase !== 'fresh' || domains.admission?.phase !== 'fresh',
@@ -1397,6 +1541,7 @@ export class TuiController {
       // Read its current controls once the actual root/Workspace scope is known.
       if (!same) void this.refreshPermissions();
       activationCompleted = !reconciliationError;
+      if (selectingHistory) this.checkUnobservedStart();
       // An explicit history selection may carry accepted requests from the old
       // process. Resolve their original public IDs once; never submit them again.
       if (selectingHistory && this.port.callers) {
@@ -1460,8 +1605,62 @@ export class TuiController {
         ? tuiReadDomains
         : [];
     if (domains.length) void this.refresh(domains, change.cursor);
+    const start = this.currentStartSubmission;
+    if (
+      start &&
+      start.scope.sessionId === change.sessionId &&
+      start.commandId === change.objectId &&
+      ['command.rejected', 'command.needs_review'].includes(change.type)
+    )
+      void this.observeStartFailure(start);
     if (snapshot && permissionChangeAffectsSession(change, snapshot.view, this.port.storeId))
       void this.refreshPermissions(change);
+  }
+  private checkUnobservedStart() {
+    const start = this.currentStartSubmission;
+    if (start && !this.hasObservedStart(start)) void this.observeStartFailure(start);
+  }
+  private hasObservedStart(start: TuiStartSubmission) {
+    return this.observedStartCommandId === start.commandId || this.hasRecordedStart(start);
+  }
+  private async observeStartFailure(start: TuiStartSubmission) {
+    const generation = this.generation;
+    try {
+      const command = await this.port.getCommand(start.commandId, start.scope.sessionId);
+      if (
+        this.disposed ||
+        this.generation !== generation ||
+        this.currentStartSubmission !== start ||
+        this.hasObservedStart(start) ||
+        command.id !== start.commandId ||
+        command.sessionId !== start.scope.sessionId ||
+        command.originStoreId !== start.scope.storeId ||
+        command.kind !== 'run.start' ||
+        !['rejected', 'needs_review'].includes(command.status)
+      )
+        return;
+      this.recordRejectedInput(command);
+      if (
+        command.status === 'rejected' &&
+        !this.value.draft &&
+        (this.draftVersions.get(start.scope.sessionId) ?? 0) === start.draftVersion
+      )
+        this.setDraft(start.content);
+      const intent: TuiIntent = {
+        sessionId: command.sessionId,
+        commandId: command.id,
+        kind: command.kind,
+        phase: command.status === 'rejected' ? 'rejected' : 'unknown',
+      };
+      if (intent.phase === 'unknown') this.unknownIntents.set(command.id, intent);
+      else this.unknownIntents.delete(command.id);
+      this.publish({
+        ...(intent.phase === 'rejected' ? { startSubmission: undefined } : {}),
+        intent,
+      });
+    } catch {
+      // The notification alone does not establish a new disposition.
+    }
   }
   /** Automatic reads preserve selection, drafts, panels, and activation ownership. */
   refresh(domains: readonly TuiReadDomain[] = tuiReadDomains, cursor?: string): Promise<void> {
@@ -1665,6 +1864,7 @@ export class TuiController {
     options: {
       same?: boolean;
       restoreDraft?: boolean;
+      initialDraft?: string;
       snapshotStale?: boolean;
       reconciliationError?: string;
       domains?: TuiState['domains'];
@@ -1740,21 +1940,31 @@ export class TuiController {
       if (!this.value.fileRecovery?.intent) this.publish({ fileRecovery: undefined });
     }
     let draft = this.value.draft;
-    if (restoreDraft && this.port.drafts) {
+    if (restoreDraft && (this.port.drafts || options.initialDraft !== undefined)) {
       const scope = {
         storeId: this.port.storeId,
         workspaceId: snapshot.view.session.workspaceId,
         sessionId,
       };
       try {
-        if (!this.drafts.has(sessionId)) draft = this.port.drafts.read(scope);
-        else this.port.drafts.edit(scope, draft);
+        if (!this.drafts.has(sessionId)) {
+          const stored = this.port.drafts?.read(scope);
+          draft = stored || options.initialDraft || '';
+          if (!stored && options.initialDraft) this.port.drafts?.edit(scope, draft);
+        } else this.port.drafts?.edit(scope, draft);
         this.drafts.set(sessionId, draft);
       } catch {
         this.draftUnavailable('tui_draft_storage_unavailable');
       }
     }
     const historyChanged = !options.domain || options.domain === 'history';
+    const start = this.value.startSubmission;
+    if (
+      start?.scope.sessionId === sessionId &&
+      start.scope.workspaceId === snapshot.view.session.workspaceId &&
+      this.findSubmittedRun(start, snapshot)
+    )
+      this.observedStartCommandId = start.commandId;
     const fullOutputs = historyChanged
       ? new Map(
           [...this.value.fullOutputs].filter(([id]) => {
@@ -2301,7 +2511,13 @@ export class TuiController {
       const pending = this.unknownIntents.get(original.intent.request.commandId);
       if (pending && result.command && ['accepted', 'applied', 'rejected'].includes(result.phase)) {
         this.unknownIntents.delete(pending.commandId);
-        this.publish({ intent: { ...pending, phase: result.phase } });
+        this.publish({
+          ...(result.phase === 'rejected' &&
+          this.value.startSubmission?.commandId === pending.commandId
+            ? { startSubmission: undefined }
+            : {}),
+          intent: { ...pending, phase: result.phase },
+        });
         this.settleDraft(pending.commandId);
       }
       if (original.intent.request.kind === 'execution.cancel') {
@@ -5638,16 +5854,19 @@ export class TuiController {
       return;
     }
     if (command.kind === 'new') {
+      if (this.value.creatingSession) return;
+      consumeCommand();
       if (snapshot.messages.some((m) => m.role === 'user')) {
         try {
-          const generation = this.generation;
-          const id = await management.newSession();
-          if (!this.disposed && generation === this.generation) await this.select(id);
+          await this.createSession(async () => {
+            const id = await management.newSession();
+            if (!this.disposed && id !== this.value.sessionId) await this.selectCreatedSession(id);
+            return id;
+          });
         } catch {
           this.publish({ error: 'session_creation_unknown' });
         }
       }
-      consumeCommand();
       return;
     }
     if (command.kind === 'context') {
@@ -5726,10 +5945,17 @@ export class TuiController {
       message.contentFormat === 'unsupported'
     )
       return;
+    const readKey = tuiModelOutputReadKey(message);
+    const failures = new Set(this.value.outputReadFailures);
+    if (failures.delete(readKey)) this.publish({ outputReadFailures: failures });
     const originalSession = message.originMessage?.sessionId ?? message.sessionId;
     const originalRun = message.originMessage ? message.originMessage.runId : message.runId;
     if (!originalRun) {
-      this.publish({ error: 'tui_output_identity_mismatch' });
+      this.publish({
+        outputReadFailures: new Set(this.value.outputReadFailures).add(readKey),
+        errorSource: 'output',
+        error: 'tui_output_identity_mismatch',
+      });
       return;
     }
     const generation = this.generation,
@@ -5759,10 +5985,15 @@ export class TuiController {
       this.publish({
         fullOutputs: new Map(this.value.fullOutputs).set(message.id, output.output.content),
         loadedOutputBodies: new Map(this.value.loadedOutputBodies).set(message.id, output.output),
+        ...(this.value.errorSource === 'output' ? { error: undefined } : {}),
       });
     } catch (error) {
       if (!read.signal.aborted && generation === this.generation)
-        this.publish({ error: error instanceof Error ? error.message : 'output_failed' });
+        this.publish({
+          outputReadFailures: new Set(this.value.outputReadFailures).add(readKey),
+          errorSource: 'output',
+          error: error instanceof Error ? error.message : 'output_failed',
+        });
     } finally {
       this.reads.delete(read);
     }
@@ -5899,12 +6130,15 @@ export class TuiController {
   }
   private recordInputRejection(commandId: string, sessionId: string, reason?: string) {
     const original = this.submittedDrafts.get(commandId);
-    if (
-      !original?.request ||
-      original.scope.sessionId !== sessionId ||
-      this.value.sessionId !== sessionId
-    )
-      return;
+    const start = this.currentStartSubmission;
+    if (start?.commandId === commandId && this.hasRecordedStart(start)) return;
+    const content =
+      original?.scope.sessionId === sessionId
+        ? original.request?.content
+        : start?.commandId === commandId && start.scope.sessionId === sessionId
+          ? start.content
+          : undefined;
+    if (content === undefined || this.value.sessionId !== sessionId) return;
     const id = `rejected-input:${commandId}`;
     if (this.value.localMessages.some((message) => message.id === id)) return;
     this.publish({
@@ -5915,7 +6149,7 @@ export class TuiController {
           sessionId,
           afterMessageId: this.visibleMessages.at(-1)?.id ?? null,
           role: 'user',
-          content: original.request.content,
+          content,
           submissionFailure: { commandId, ...(reason ? { reason } : {}) },
         },
       ],
@@ -5931,6 +6165,13 @@ export class TuiController {
     if ((!concurrent && this.busy) || this.disposed) return;
     if (!concurrent) this.busy = true;
     this.publish({ intent: { sessionId, commandId, kind, phase: 'submitting' } });
+    const start =
+      this.value.startSubmission?.commandId === commandId ? this.value.startSubmission : undefined;
+    const startedUnknown = this.unknownIntents.has(commandId);
+    const updatedDisposition = () =>
+      start &&
+      (this.value.startSubmission !== start ||
+        (!startedUnknown && this.unknownIntents.has(commandId)));
     try {
       const command = await submit();
       if (
@@ -5943,6 +6184,8 @@ export class TuiController {
           command.kind !== kind)
       )
         throw new Error('tui_receipt_identity_mismatch');
+      // The original rejection event can be observed before its earlier POST receipt arrives.
+      if (updatedDisposition()) return;
       const savedAnswer = this.answerIntent;
       if (kind === 'interaction.answer') {
         const result = record(command.receipt) ? command.receipt : {};
@@ -5969,6 +6212,7 @@ export class TuiController {
         this.unknownIntents.set(commandId, { sessionId, commandId, kind, phase: 'unknown' });
       else this.unknownIntents.delete(commandId);
       this.publish({
+        ...(start && command.status === 'rejected' ? { startSubmission: undefined } : {}),
         intent: {
           sessionId,
           commandId,
@@ -5984,6 +6228,7 @@ export class TuiController {
         },
       });
     } catch (error) {
+      if (updatedDisposition()) return;
       if (
         error &&
         typeof error === 'object' &&
@@ -5993,6 +6238,7 @@ export class TuiController {
         if (kind === 'interaction.answer' && this.answerIntent?.request.commandId === commandId)
           this.answerIntent.phase = 'rejected';
         this.publish({
+          ...(start ? { startSubmission: undefined } : {}),
           intent: { sessionId, commandId, kind, phase: 'rejected' },
           error: error instanceof Error ? error.message : 'caller_prepare_failed',
           errorSource: this.value.localMessages.some(
@@ -6021,6 +6267,7 @@ export class TuiController {
     }
   }
   async send() {
+    if (this.value.creatingSession) return;
     if (this.value.draft.trim().startsWith('/')) {
       await this.routeCommand(this.value.draft);
       return;
@@ -6035,6 +6282,7 @@ export class TuiController {
       this.callerRestoring ||
       this.value.callerUnavailable ||
       this.pendingCaller() ||
+      this.value.creatingSession ||
       this.value.stale ||
       this.hasUnknownAnswer() ||
       this.pendingRecovery() ||
@@ -6127,6 +6375,16 @@ export class TuiController {
           }
         : {}),
     });
+    if (intent.kind === 'run.start')
+      this.publish({
+        startSubmission: {
+          scope: draftScope,
+          commandId,
+          content: draft,
+          draftVersion: observedDraftVersion,
+          displayGeneration: this.displayGeneration,
+        },
+      });
     await this.write(sessionId, commandId, intent.kind, () =>
       this.port.callers
         ? this.submitCaller(draftScope, intent)

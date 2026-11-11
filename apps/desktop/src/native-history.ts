@@ -154,11 +154,19 @@ export class NativeHistory {
       upperSeq = target.upperSeq,
       run = { readId: crypto.randomUUID(), canceled: false };
     this.wanted = undefined;
-    this.run = run;
     const incremental =
       this.cursor !== undefined &&
       target.cursor !== undefined &&
       BigInt(this.cursor) <= BigInt(target.cursor);
+    const lastReadMessage = this.state.messages.at(-1);
+    if (!incremental && lastReadMessage && BigInt(upperSeq) < BigInt(lastReadMessage.seq)) {
+      // A retained View can lag the message stream after reconnect. Its earlier
+      // boundary cannot replace messages already read from the same session.
+      this.revision = undefined;
+      this.publish('loading', this.state.highWaterSeq);
+      return;
+    }
+    this.run = run;
     if (!incremental) this.publish('loading');
     const scanned = new Map<string, Message>();
     let afterSeq = '0';

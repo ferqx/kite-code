@@ -555,7 +555,7 @@ Tools、Source修改／批准、强制重连、Auth、配置与冷配置七个�
 此[Auth完整文件](test/isolated/tui-mcp-auth-pty.test.ts)现沿[共享Bun驱动](test/fixtures/tui-mcp-auth-driver.ts)运行，唯一Python driver已退役，实际Service helper字节未改。60个原Bun expect、五个Auth Action的Review／Confirm与独立SDK Ask、两次DCR／PKCE／callback、token／refresh／revoke、零MCP RPC／Model及暖冷原查回保持；macOS最终1pass／101expects／18.25秒。最终源码复核补齐原retain语义：只有已核当前完整同Command／Store／Session明细才可用于无变化Enter的同ID等待，fresh画面立即覆盖；此次六次选择都等真实新画面，不称retained no-op分支资格。两次Ctrl+Q／EOF／exit0、三个Service正常收尾与ownedroot删除已确认；原10／12／6＋3／9秒driver清理／180秒整例保持。Windows用junction／USERPROFILE和私有IPC，异常真实树清理记normal=false；系统Vault／浏览器及Win/Linux原生资格不由本窗口推导。三个本轮移植的Python select／read-burst／1MiB raw窗改为共享异步PTY parser，trace512条、frame32768个UTF-16单元与终端screen仍有界，但运输资源实现不是逐字节等价，不据此放宽原RSS／完整观测门禁。
 
 
-[原普通 Ink 真实入口](test/isolated/tui-ink-host.test.ts)使用共享 POSIX／ConPTY 驱动、正式 `runTUIProcess`、默认 Service／Client、临时 Profile 与本机 compatible SSE；不开启测试诊断。从未信任工作区明确确认，核原 Header／Help、literal 用户 Markdown 与完整助手表格／代码／尾部，真实一次请求、SQLite 完整两份正文、唯一 Run completed 及 Ctrl+Q／所属 Service 退出。该新增场景本机 macOS 1pass／7外层业务断言，测试可交后续 Win/Linux Actions；配置可运行不等于实际三平台通过。
+[普通 Ink 真实入口](test/isolated/tui-ink-host.test.ts)使用正式 `runTUIProcess`、默认 Service／Client、临时 Profile 和本机 compatible SSE，保持普通界面。macOS arm64／Bun 1.4.4 的 80×24 PTY 分别暂停首个 POST、模型思考、正文和迟到的实时读取，逐帧核对用户回显、思考与完整回复接管、新草稿保留，以及整个过程的状态、警告和原生历史。冷重开核对原用户消息、回复和草稿；`/new` 在创建回执未到时保留新输入并禁止旧会话提交。[宿主](host/tui.tsx)先选定新会话，再异步刷新目录。真实 Service 保留唯一业务模型请求、SQLite 完整原文、独立名称发布和两次正常退出。该窗口的逐帧证据覆盖本机普通 TUI。
 
 MCP 目录自动认证观察使用独立 `readDirectory`，只在真实 target.loginAllowed 资格成立时读取安全状态。不具资格的未 challenge auto HTTP 返回有限 unavailable 分支，不探 Vault、不推断凭据存在性；显式 Auth／Remove 和冷原 ID 查回仍走原端口。协议装配及来源校验归 [Service](../service/README.md)；目录与原 credential 零读取门禁由真实终端用例保留。
 

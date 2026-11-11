@@ -36,6 +36,7 @@ import {
   type TuiController,
   type TuiSnapshot,
   terminalText,
+  tuiModelOutputReadKey,
 } from './controller';
 import { TuiExecutionPanel } from './execution-panel';
 import {
@@ -210,6 +211,7 @@ function displayModelOutputs(
     const execution = models[0]!;
     const live = snapshot.liveModelOutput;
     if (
+      message.status === 'incomplete' &&
       live &&
       !message.originMessage &&
       live.storeId === snapshot.storeId &&
@@ -271,6 +273,23 @@ function longQuestionMaterial(
 }
 const executionDisplayKey = (execution: Execution) =>
   JSON.stringify([execution.originStoreId, execution.sessionId, execution.id]);
+const titleJob = (execution: Execution) =>
+  execution.kind === 'job' &&
+  execution.runId === null &&
+  ['builtin.session-title/fallback', 'builtin.session-title/generate'].includes(
+    execution.definitionId,
+  );
+const isSessionTitleExecution = (execution: Execution, executions: readonly Execution[]) =>
+  titleJob(execution) ||
+  (execution.kind === 'model' &&
+    execution.runId === null &&
+    executions.some(
+      (parent) =>
+        parent.id === execution.parentExecutionId &&
+        parent.originStoreId === execution.originStoreId &&
+        parent.sessionId === execution.sessionId &&
+        titleJob(parent),
+    ));
 
 function verifiedModelContext(snapshot: TuiSnapshot | undefined) {
   const context = snapshot?.environment?.context;
@@ -307,8 +326,10 @@ function chromeFacts(
     nextEffort,
     // A transient optional catalogue failure does not invalidate the exact
     // recorded Model or erase native history. The next selection stays unknown.
-    modelName: current?.active ? current.modelName : (nextModelName ?? current?.modelName),
-    effort: current?.active || !nextModelName ? current?.effort : nextEffort,
+    modelName: current?.active
+      ? (current.modelName ?? nextModelName)
+      : (nextModelName ?? current?.modelName),
+    effort: (current?.active && current.modelName) || !nextModelName ? current?.effort : nextEffort,
     ...(state.permissions ? { permissionMode: state.permissions.mode.mode } : {}),
   };
 }
@@ -349,10 +370,13 @@ function TuiHistory({
   const { columns, rows } = useInkWindowSize();
   const { t, testDiagnostics } = useTuiPresentation();
   const { snapshot, models, permissions } = state;
-  const facts = useMemo(
-    () => chromeFacts({ snapshot, models, permissions }),
-    [snapshot, models, permissions],
-  );
+  const facts = useMemo(() => {
+    const facts = chromeFacts({ snapshot, models, permissions });
+    // The static header carries the selection; live Run model details belong in the footer.
+    return !testDiagnostics && facts.nextModelName
+      ? { ...facts, modelName: facts.nextModelName, effort: facts.nextEffort }
+      : facts;
+  }, [snapshot, models, permissions, testDiagnostics]);
   const scope = JSON.stringify([
     state.snapshot?.storeId,
     state.snapshot?.view.session.workspaceId,
@@ -373,6 +397,10 @@ function TuiHistory({
     [snapshot, state.loadedOutputBodies],
   );
   const executions = controller.visibleExecutions;
+  const pendingStart = controller.pendingStartMessage;
+  const submittedRunId = controller.submittedRun?.id;
+  const displayRefreshing = state.domains?.display?.phase === 'refreshing';
+  const startOutcomeUnknown = controller.startOutcomeUnknown;
   const localMessages = state.localMessages ?? [];
   const streams = useRef(new Map<string, InkModelStreamState>());
   const markdownStreams = useRef(new Map<string, MarkdownParseCache>());
@@ -380,6 +408,8 @@ function TuiHistory({
   const items: HistoryItem[] = useMemo(() => {
     void streamRender;
     const results = executions.filter((execution) => {
+      if (!testDiagnostics && isSessionTitleExecution(execution, snapshot?.view.executions ?? []))
+        return false;
       if (execution.kind === 'model')
         return (
           execution.status === 'failed' &&
@@ -421,6 +451,16 @@ function TuiHistory({
       }
     >();
     const currentStreams = new Set<string>();
+    const verifyingOriginalOutput = (message: Message) =>
+      !!submittedRunId &&
+      !message.originMessage &&
+      message.runId === submittedRunId &&
+      !!message.outputBody?.complete &&
+      message.outputBody.readAvailability !== 'unsupported' &&
+      message.contentFormat !== 'unsupported' &&
+      !!controller.port.readModelOutput &&
+      !state.fullOutputs.has(message.id) &&
+      !state.outputReadFailures.has(tuiModelOutputReadKey(message));
     const markdownIdentity = (message: Message) =>
       JSON.stringify([snapshot?.storeId, message.sessionId, message.runId, message.id]);
     const visibleMarkdown = new Set(messages.map(markdownIdentity));
@@ -443,8 +483,9 @@ function TuiHistory({
         // Producer completion settles the preview stream. Full-body reading
         // keeps its independent EOF, bytes and original-reference checks.
         complete:
-          body?.complete ??
-          (message.status === 'complete' && (message.outputBody?.complete ?? true)),
+          !verifyingOriginalOutput(message) &&
+          (body?.complete ??
+            (message.status === 'complete' && (message.outputBody?.complete ?? true))),
         firstOutput: message.firstOutput,
         toolCallCount: body?.complete
           ? body.toolCalls.length
@@ -532,6 +573,16 @@ function TuiHistory({
       if (execution.runId !== null || !snapshot) return execution;
       const parent = inkShellParent(execution, snapshot);
       return parent && inkShellCarrier(parent, snapshot)?.id === execution.id ? parent : execution;
+    };
+    const belongsToPending = (execution: Execution) => {
+      if (!pendingStart) return false;
+      const owner = callOwner(execution);
+      return (
+        owner.originStoreId === pendingStart.scope.storeId &&
+        owner.sessionId === pendingStart.scope.sessionId &&
+        ((submittedRunId !== undefined && owner.runId === submittedRunId) ||
+          owner.rootWorkCommandId === pendingStart.commandId)
+      );
     };
     const belongs = (message: Message, execution: Execution) => {
       // An ordinary Shell Job owns no Run row. Its verified foreground parent
@@ -716,6 +767,8 @@ function TuiHistory({
           );
         const body = loadedOutputs.get(message.id);
         const stream = streamViews.get(message.id);
+        const verifyingOutput = verifyingOriginalOutput(message);
+        const outputReadFailed = state.outputReadFailures.has(tuiModelOutputReadKey(message));
         const hideContent =
           !testDiagnostics &&
           (!!exploration?.suppressedNarrationMessageIds.has(message.id) ||
@@ -737,7 +790,9 @@ function TuiHistory({
               hideHeading={hideHeading}
               controller={controller}
               fullOutput={state.fullOutputs.get(message.id) ?? body?.content}
-              reasoning={item.reasoning}
+              verifyingOutput={verifyingOutput}
+              outputReadFailed={outputReadFailed}
+              reasoning={item.reasoning || stream?.reasoning}
               transcript={item}
               snapshot={snapshot}
               loadedOutputs={loadedOutputs}
@@ -773,6 +828,8 @@ function TuiHistory({
                   key: `message:${message.id}`,
                   mutable:
                     message.status === 'incomplete' ||
+                    verifyingOutput ||
+                    (message.runId === submittedRunId && !!model && displayRefreshing) ||
                     stream?.buffered ||
                     (!!model && executionLive(model)) ||
                     related.some(historyMutable),
@@ -782,6 +839,8 @@ function TuiHistory({
                     item,
                     state.fullOutputs.get(message.id),
                     body,
+                    verifyingOutput,
+                    outputReadFailed,
                     related,
                     timing,
                     model?.status,
@@ -893,7 +952,35 @@ function TuiHistory({
           ...localItems(message.id),
         ];
       }),
-      ...executionItems(results.filter((execution) => !placed.has(execution.id))),
+      ...executionItems(
+        results.filter((execution) => !placed.has(execution.id) && !belongsToPending(execution)),
+      ),
+      ...(!testDiagnostics && pendingStart
+        ? [
+            {
+              key: `pending-input:${pendingStart.commandId}`,
+              mutable: true,
+              version: JSON.stringify([pendingStart.content, startOutcomeUnknown]),
+              node: (
+                <Box flexDirection="column" marginBottom={1}>
+                  <UserMessageBlock
+                    content={terminalText(pendingStart.content)}
+                    columns={columns}
+                  />
+                  {startOutcomeUnknown && (
+                    <Text dimColor>
+                      {t('Outcome unknown')} ·{' '}
+                      {t('Checking the original request automatically in its Session')}
+                    </Text>
+                  )}
+                </Box>
+              ),
+            },
+          ]
+        : []),
+      ...executionItems(
+        results.filter((execution) => !placed.has(execution.id) && belongsToPending(execution)),
+      ),
       ...(state.mcpPromptSelections ?? []).map((selection) => ({
         key: `prompt:${selection.id}`,
         version: selection.command,
@@ -973,9 +1060,14 @@ function TuiHistory({
     messages,
     executions,
     state.fullOutputs,
+    state.outputReadFailures,
     loadedOutputs,
     state.attachments,
     state.mcpPromptSelections,
+    pendingStart,
+    submittedRunId,
+    displayRefreshing,
+    startOutcomeUnknown,
     localMessages,
     state.sessionId,
     card,
@@ -1127,6 +1219,8 @@ function TuiMessage({
   message,
   controller,
   fullOutput,
+  verifyingOutput,
+  outputReadFailed,
   reasoning,
   transcript,
   snapshot,
@@ -1147,6 +1241,8 @@ function TuiMessage({
   hideHeading?: boolean;
   controller: TuiController;
   fullOutput?: string;
+  verifyingOutput?: boolean;
+  outputReadFailed?: boolean;
   reasoning?: string;
   transcript: TuiTranscriptMessage;
   snapshot?: import('./controller').TuiSnapshot;
@@ -1191,7 +1287,7 @@ function TuiMessage({
         {!testDiagnostics &&
           !modelError &&
           message.status === 'incomplete' &&
-          !['planned', 'dispatching', 'running'].includes(modelStatus ?? '') && (
+          !['planned', 'dispatching', 'running', 'succeeded'].includes(modelStatus ?? '') && (
             <Text color="yellow">{t('Incomplete response')}</Text>
           )}
       </Box>
@@ -1261,9 +1357,13 @@ function TuiMessage({
         {message.outputBody && message.outputBody.toolCallCount > transcript.toolCalls.length && (
           <Text dimColor>{t('Tool calls not fully loaded; Ctrl+O reads verified full body')}</Text>
         )}
-        {message.outputBody && fullOutput === undefined && (
+        {message.outputBody && fullOutput === undefined && !verifyingOutput && (
           <Text>
-            {t('Recorded Model output preview only;')}{' '}
+            {t(
+              outputReadFailed
+                ? 'Could not read full reply.'
+                : 'Recorded Model output preview only;',
+            )}{' '}
             {message.outputBody.readAvailability === 'unsupported' ||
             message.contentFormat === 'unsupported'
               ? t('full read unsupported')
@@ -1412,7 +1512,9 @@ function TuiSessionView({
   const verifiedContext = verifiedModelContext(state.snapshot);
   const nextContext = chromeFacts(state).nextContext;
   const resultScope = JSON.stringify([controller.port.storeId, state.sessionId]);
-  const resultExecutions = controller.visibleExecutions.filter((item) => item.kind !== 'model');
+  const resultExecutions = controller.visibleExecutions.filter(
+    (item) => item.kind !== 'model' && (testDiagnostics || !titleJob(item)),
+  );
   const resultKeys = new Set(
     state.snapshot?.view.executions
       .filter((item) => item.kind !== 'model')
@@ -1586,6 +1688,64 @@ function TuiSessionView({
   const blockingPanel = state.panel;
   const fullReadAttempts = useRef(new Set<string>());
   const attachmentReadAttempts = useRef(new Set<string>());
+  const submittedRun = controller.submittedRun;
+  const finishedModel =
+    submittedRun?.status === 'completed'
+      ? state.snapshot?.view.executions
+          .filter(
+            (execution) =>
+              execution.kind === 'model' &&
+              execution.sessionId === submittedRun.sessionId &&
+              execution.originStoreId === submittedRun.originStoreId &&
+              execution.runId === submittedRun.id &&
+              execution.status === 'succeeded',
+          )
+          .at(-1)
+      : undefined;
+  const finishedMessage =
+    submittedRun?.status === 'completed'
+      ? state.snapshot?.messages
+          .filter(
+            (message) =>
+              message.role === 'assistant' &&
+              message.sessionId === submittedRun.sessionId &&
+              message.runId === submittedRun.id &&
+              !message.originMessage &&
+              (finishedModel
+                ? message.outputBody?.executionId === finishedModel.id ||
+                  message.sourceIds?.includes(finishedModel.id)
+                : (message.outputBody?.toolCallCount ?? message.toolCalls?.length ?? 0) === 0),
+          )
+          .at(-1)
+      : undefined;
+  const loadingReply =
+    submittedRun?.status === 'completed' &&
+    (finishedMessage
+      ? (finishedMessage.status === 'incomplete' &&
+          state.domains?.history?.phase !== 'unavailable') ||
+        (!!finishedMessage.outputBody?.complete &&
+          finishedMessage.outputBody.readAvailability !== 'unsupported' &&
+          finishedMessage.contentFormat !== 'unsupported' &&
+          !!controller.port.readModelOutput &&
+          !state.outputReadFailures.has(tuiModelOutputReadKey(finishedMessage)) &&
+          !state.fullOutputs.has(finishedMessage.id))
+      : state.domains?.history?.phase === 'refreshing');
+  const settledPresentationId =
+    submittedRun &&
+    !submittedRun.isActive &&
+    !loadingReply &&
+    state.domains?.display?.phase !== 'refreshing' &&
+    (submittedRun.status !== 'completed' || finishedMessage?.status === 'complete') &&
+    controller.composerDraft === state.draft &&
+    !(
+      state.intent?.commandId === state.startSubmission?.commandId &&
+      state.intent?.phase === 'submitting'
+    )
+      ? submittedRun.id
+      : undefined;
+  useEffect(() => {
+    if (settledPresentationId) controller.finishStartPresentation(settledPresentationId);
+  }, [controller, settledPresentationId]);
   useEffect(() => {
     if (testDiagnostics) return;
     const current = new Set<string>();
@@ -1597,7 +1757,7 @@ function TuiSessionView({
         message.contentFormat === 'unsupported'
       )
         continue;
-      const key = JSON.stringify([state.sessionId, message.id, message.seq, message.outputBody]);
+      const key = tuiModelOutputReadKey(message);
       current.add(key);
       if (
         !controller.port.readModelOutput ||
@@ -1610,7 +1770,7 @@ function TuiSessionView({
     }
     for (const key of fullReadAttempts.current)
       if (!current.has(key)) fullReadAttempts.current.delete(key);
-  }, [controller, state.snapshot, state.sessionId, state.loadedOutputBodies, testDiagnostics]);
+  }, [controller, state.snapshot, state.loadedOutputBodies, testDiagnostics]);
   useEffect(() => {
     if (testDiagnostics) return;
     const keys = new Set(
@@ -2211,17 +2371,21 @@ function TuiSessionView({
       run.sessionId === state.sessionId,
   );
   const activeLine =
-    !focused && executionReadable
-      ? hasPendingRootCancellation(state, controller.port.storeId) &&
-        !currentCancelling &&
-        running !== 'Cancelling'
-        ? ('Cancelling · cancellation requested' as const)
-        : currentCancelling || running === 'Cancelling'
-          ? ('Cancelling' as const)
-          : !childOwnsActivity && ['Working', 'Waiting for required result'].includes(running)
-            ? (running as 'Working' | 'Waiting for required result')
-            : undefined
-      : undefined;
+    !focused && loadingReply && !state.snapshot?.view.runs.some((run) => run.isActive)
+      ? ('Loading reply…' as const)
+      : !focused && executionReadable
+        ? hasPendingRootCancellation(state, controller.port.storeId) &&
+          !currentCancelling &&
+          running !== 'Cancelling'
+          ? ('Cancelling · cancellation requested' as const)
+          : currentCancelling || running === 'Cancelling'
+            ? ('Cancelling' as const)
+            : !childOwnsActivity && ['Working', 'Waiting for required result'].includes(running)
+              ? (running as 'Working' | 'Waiting for required result')
+              : controller.startingRun
+                ? ('Submitting…' as const)
+                : undefined
+        : undefined;
   const activeModel = (
     currentActivityVerified(state.snapshot) ? state.snapshot?.view.executions : undefined
   )
@@ -2249,7 +2413,9 @@ function TuiSessionView({
           {state.stale ? t(' · Stale') : ''}
         </Text>
       ) : (
-        state.loading && <Text dimColor>{t('Loading')}</Text>
+        (state.creatingSession || state.loading) && (
+          <Text dimColor>{t(state.creatingSession ? 'Creating conversation…' : 'Loading')}</Text>
+        )
       )}
       {testDiagnostics && state.snapshot && !currentActivityVerified(state.snapshot) && (
         <Text color="yellow">
@@ -2677,13 +2843,10 @@ function TuiSessionView({
           </Text>
         )}
       {testDiagnostics &&
-        ((!card && !cardChooser && !chooser) ||
-          state.intent?.kind === 'interaction.answer' ||
-          ['unknown', 'submitting', 'rejected'].includes(state.intent?.phase ?? '')) &&
         state.intent &&
-        (testDiagnostics ||
-          ['unknown', 'submitting', 'rejected'].includes(state.intent.phase) ||
-          state.intent.sessionId !== state.sessionId) && (
+        ((!card && !cardChooser && !chooser) ||
+          state.intent.kind === 'interaction.answer' ||
+          ['unknown', 'submitting', 'rejected'].includes(state.intent.phase)) && (
           <Text>
             {testDiagnostics || state.intent.sessionId !== state.sessionId ? (
               <>
@@ -2791,7 +2954,7 @@ function TuiSessionView({
           files={state.fileCandidates}
           fileScope={`${composerScope}:${state.loading}:${state.snapshotStale}`}
           onFileQuery={fileQuery}
-          value={state.draft}
+          value={testDiagnostics ? state.draft : controller.composerDraft}
           active={!card && !state.panel && !chooser && !cardChooser}
           label={
             state.planning
@@ -2807,11 +2970,14 @@ function TuiSessionView({
                 : t('New Run')
           }
           onChange={(text) => controller.setDraft(text)}
-          onSubmit={() => void controller.send()}
+          onSubmit={() => {
+            void controller.send();
+            if (!testDiagnostics) composer.sync(controller.composerDraft);
+          }}
           onEscape={() => void controller.cancel()}
           onEmptyEnter={() => {
             const current = controller.visibleExecutions
-              .filter((item) => item.kind !== 'model')
+              .filter((item) => item.kind !== 'model' && (testDiagnostics || !titleJob(item)))
               .at(-1);
             if (
               !tail ||

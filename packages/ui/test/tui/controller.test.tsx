@@ -216,6 +216,163 @@ test('active exact steer, idle start, unknown original lookup and precise cancel
   c.dispose();
   expect(f.cancels).toHaveLength(1);
 });
+for (const boundary of ['session return', 'reconnect'] as const) {
+  test(`a pre-Run rejection missed during ${boundary} is recovered from the original receipt`, async () => {
+    const f = fixture();
+    f.port.readSession = async (id) => ({ ...snapshot(id, false), messages: [] });
+    const reads: string[][] = [];
+    let status: Command['status'] = 'accepted';
+    f.port.getCommand = async (id, sessionId) => {
+      reads.push([id, sessionId]);
+      return {
+        ...command(id, sessionId),
+        kind: 'run.start',
+        status,
+        receipt: status === 'rejected' ? { reason: 'model_unavailable' } : null,
+      };
+    };
+    const c = new TuiController(f.port);
+    try {
+      await c.select('a');
+      c.observationReady('store');
+      c.setDraft('original input');
+      await c.send();
+      expect(c.state.draft).toBe('');
+      expect(c.startingRun).toBe(true);
+      expect(reads).toEqual([]);
+      if (boundary === 'session return') {
+        await c.select('b');
+        c.setDraft('other draft');
+        status = 'rejected';
+        c.changed({
+          cursor: '2',
+          sessionId: 'a',
+          objectId: 'id1',
+          type: 'command.rejected',
+          revision: '1',
+          payload: null,
+        });
+        expect(reads).toEqual([]);
+        expect(c.state.draft).toBe('other draft');
+        await c.select('a');
+      } else {
+        c.observationUnavailable('transport_lost');
+        status = 'rejected';
+        c.observationReady('store');
+      }
+      await Bun.sleep(0);
+      expect(reads).toEqual([['id1', 'a']]);
+      expect(c.startingRun).toBe(false);
+      expect(c.pendingStartMessage).toBeUndefined();
+      expect(c.state.intent).toMatchObject({ commandId: 'id1', phase: 'rejected' });
+      expect(c.state.draft).toBe('original input');
+      expect(c.visibleTranscript).toEqual([
+        expect.objectContaining({
+          content: 'original input',
+          submissionFailure: { commandId: 'id1', reason: 'model_unavailable' },
+        }),
+      ]);
+      expect(f.writes).toHaveLength(1);
+      if (boundary === 'session return') {
+        await c.select('b');
+        expect(c.state.draft).toBe('other draft');
+      }
+    } finally {
+      c.dispose();
+    }
+  });
+}
+
+test('a start disposition lookup ignores a later session and preserves a newer original draft', async () => {
+  const f = fixture();
+  f.port.readSession = async (id) => ({ ...snapshot(id, false), messages: [] });
+  let complete!: (receipt: Command) => void;
+  const receipt = new Promise<Command>((resolve) => {
+    complete = resolve;
+  });
+  let reads = 0;
+  f.port.getCommand = async (id, sessionId) => {
+    reads++;
+    return reads === 1
+      ? receipt
+      : { ...command(id, sessionId), kind: 'run.start', status: 'rejected' };
+  };
+  const c = new TuiController(f.port);
+  try {
+    await c.select('a');
+    c.setDraft('original input');
+    await c.send();
+    await c.select('b');
+    await c.select('a');
+    c.setDraft('newer original draft');
+    await c.select('b');
+    c.setDraft('other draft');
+    complete({ ...command('id1', 'a'), kind: 'run.start', status: 'rejected' });
+    await Bun.sleep(0);
+    expect(c.state.draft).toBe('other draft');
+    expect(c.state.intent?.phase).toBe('accepted');
+    expect(c.visibleTranscript).toEqual([]);
+    await c.select('a');
+    await Bun.sleep(0);
+    expect(reads).toBe(2);
+    expect(c.state.draft).toBe('newer original draft');
+    expect(c.state.intent?.phase).toBe('rejected');
+    expect(c.startingRun).toBe(false);
+    expect(f.writes).toHaveLength(1);
+  } finally {
+    c.dispose();
+  }
+});
+
+test('an accepted original keeps waiting and a late failure read cannot displace its observed Run', async () => {
+  const f = fixture();
+  let hasRun = false;
+  f.port.readSession = async (id) => {
+    const next = snapshot(id, hasRun);
+    if (hasRun) next.view.runs[0]!.originCommandId = 'id1';
+    return { ...next, messages: [] };
+  };
+  let complete!: (receipt: Command) => void;
+  const late = new Promise<Command>((resolve) => {
+    complete = resolve;
+  });
+  let reads = 0;
+  f.port.getCommand = async (id, sessionId) =>
+    ++reads === 1 ? { ...command(id, sessionId), kind: 'run.start' } : late;
+  const c = new TuiController(f.port);
+  try {
+    await c.select('a');
+    c.setDraft('original input');
+    await c.send();
+    await c.select('b');
+    await c.select('a');
+    await Bun.sleep(0);
+    expect(c.startingRun).toBe(true);
+    expect(c.state.intent?.phase).toBe('accepted');
+    c.changed({
+      cursor: '2',
+      sessionId: 'a',
+      objectId: 'id1',
+      type: 'command.needs_review',
+      revision: '1',
+      payload: null,
+    });
+    hasRun = true;
+    await c.refresh();
+    expect(c.submittedRun?.id).toBe('run');
+    complete({ ...command('id1', 'a'), kind: 'run.start', status: 'needs_review' });
+    await Bun.sleep(0);
+    expect(reads).toBe(2);
+    expect(c.startOutcomeUnknown).toBe(false);
+    expect(c.state.intent?.phase).toBe('accepted');
+    expect(c.visibleTranscript).toEqual([]);
+    expect(c.state.draft).toBe('');
+    expect(f.writes).toHaveLength(1);
+  } finally {
+    c.dispose();
+  }
+});
+
 test('input during original Run cancellation queues one exact follow-up and late acceptance preserves another Session draft', async () => {
   const f = fixture();
   f.port.readSession = async (id) => {

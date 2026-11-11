@@ -200,13 +200,17 @@ export interface Message {
   }[];
 }
 
-/** Host-confirmed state for the current or most recently settled presentation Turn. */
+/** Current Turn presentation, including local preparation before a Run exists. */
 export interface TurnActivity {
   readonly turnId: string;
+  /** Original submission identity, shared with the confirmed Turn's timing marker. */
+  readonly presentationKey?: string;
+  readonly responsePhase?: 'preparing' | 'thinking';
   readonly unavailable?: boolean;
   /** Suppresses live activity without changing the persisted Turn status. */
   readonly executionUnconfirmed?: boolean;
   readonly status:
+    | 'preparing'
     | 'queued'
     | 'running'
     | 'waiting'

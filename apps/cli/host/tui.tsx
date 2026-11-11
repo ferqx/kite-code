@@ -543,7 +543,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         },
         newSession: async () => {
           const notice = await createNew();
-          if (pendingNew || notice === 'Session creation unavailable')
+          if (
+            notice !== 'New Workspace Session selected' &&
+            notice !== 'Original Session creation applied'
+          )
             throw new CLIHostError('session_creation_unknown');
           return controller!.state.sessionId!;
         },
@@ -700,9 +703,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           if (!session) throw new CLIHostError('session_outcome_unknown');
           pendingNew = undefined;
           if (!ended && controller!.state.sessionId === sourceSessionId) {
-            await controller!.list();
-            if (controller!.state.sessionId === sourceSessionId)
-              await controller!.select(session.id);
+            await controller!.selectCreatedSession(session.id, sourceSessionId);
+            if (!ended) void controller!.list();
           }
           return 'Original Session creation applied';
         }
@@ -733,9 +735,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           throw new CLIHostError('workspace_identity_mismatch');
         pendingNew = undefined;
         if (!ended && controller!.state.sessionId === sourceSessionId) {
-          await controller!.list();
-          if (controller!.state.sessionId === sourceSessionId)
-            await controller!.select(result.session.id);
+          await controller!.selectCreatedSession(result.session.id, sourceSessionId);
+          if (!ended) void controller!.list();
         }
         return 'New Workspace Session selected';
       } catch {
@@ -760,7 +761,9 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       >
         <TerminalHost
           controller={controller}
-          onNew={createNew}
+          onNew={async () =>
+            (await controller!.createSession(createNew)) ?? 'Session creation already in progress'
+          }
           onQuit={requestQuit}
           shared={!!input.server}
           testDiagnostics={input.testDiagnostics}

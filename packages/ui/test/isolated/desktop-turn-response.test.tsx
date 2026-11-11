@@ -113,7 +113,7 @@ test('the same Turn split across entries owns its response only in the last entr
 });
 
 for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
-  test(`exact terminal ${status} suppresses stale unfinished text even with a stale active activity`, () => {
+  test(`exact terminal ${status} clears live response even with a stale active activity`, () => {
     for (const activity of [
       undefined,
       { turnId: 'run', status: 'running' as const },
@@ -123,7 +123,7 @@ for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
         expect(document.querySelector('.response-status')).toBeNull();
         expect(
           document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
-        ).toBe(status === 'failed' || status === 'aborted' ? 'true' : 'false');
+        ).toBe(status === 'cancelled' ? 'false' : 'true');
       });
   });
 
@@ -133,9 +133,18 @@ for (const status of ['completed', 'failed', 'cancelled'] as const)
       expect(document.querySelector('.response-status')).toBeNull();
       expect(
         document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded'),
-      ).toBe(status === 'failed' ? 'true' : 'false');
+      ).toBe(status === 'cancelled' ? 'false' : 'true');
     });
   });
+
+test('a completed Turn collapses an unfinished assistant prefix followed by tool work', () => {
+  inspect([assistant('unfinished'), tool, terminal('completed')], undefined, (document) => {
+    expect(document.querySelector('.response-status')).toBeNull();
+    expect(document.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+  });
+});
 
 test('unscoped legacy streaming keeps its original message response fallback', () => {
   inspect([{ ...assistant('legacy'), turnId: undefined }], undefined, (document) => {

@@ -74,6 +74,7 @@ function fixture(
     workspaceIds?: readonly ('w' | 'empty')[];
     holdDirectory?: boolean;
     firstHumanInput?: boolean;
+    deferFirstRun?: boolean;
     runs?: Run[];
     storeId?: string;
     contextSelectionId?: string;
@@ -649,7 +650,7 @@ function fixture(
       >;
       if (created && !sessions.some((item) => item.id === send.creation.sessionId))
         sessions.push(session(send.creation.sessionId));
-      if (phase === 'accepted') {
+      if (phase === 'accepted' && !options.deferFirstRun) {
         const runId = `${options.firstHumanInput ? 'processing-run' : 'first-run'}-${send.intent.commandId}`;
         runs.push({
           id: runId,
@@ -1718,6 +1719,10 @@ test('ordinary saved input takes over its local user message only with matching 
     ]) {
       await f.publishMessages([message], [unrelated]);
       expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+      const entries = [...f.host.querySelectorAll('[data-conversation-entry-key]')];
+      expect(
+        new Set(entries.map((entry) => entry.getAttribute('data-conversation-entry-key'))).size,
+      ).toBe(entries.length);
       expect(f.host.body.textContent).toContain('ordinary original input');
       expect(f.host.body.textContent).toContain('durable original input');
     }
@@ -4099,6 +4104,101 @@ for (const body of [
   });
 }
 
+test('the first reply status follows the original submission into the dispatched model and visible stream', async () => {
+  const executions: Execution[] = [];
+  const f = fixture(true, true, 'accept_edits', { deferFirstRun: true, executions });
+  const statuses = () => [...f.host.querySelectorAll('.agent-turn > .response-status')];
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('首条消息');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    const user = f.host.querySelector('.message.user')!;
+    const status = statuses()[0]!;
+    const expectStatus = (label: string) => {
+      expect(statuses()).toEqual([status]);
+      expect(status.textContent).toBe(label);
+      expect([...f.host.querySelectorAll('.message.user')]).toEqual([user]);
+      expect(
+        user.compareDocumentPosition(status) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
+    };
+    expectStatus('正在准备回复…');
+    f.holdSelection();
+    const sent = await f.resolve('accepted');
+    expectStatus('正在准备回复…');
+    await f.releaseSelection();
+    expectStatus('正在准备回复…');
+
+    const run: Run = {
+      id: 'first-run',
+      sessionId: sent.creation.sessionId,
+      originStoreId: 'store',
+      originCommandId: sent.intent.commandId,
+      isActive: true,
+      status: 'running',
+      configuration: chatRunConfiguration(),
+      createdAt: 1,
+      finishedAt: null,
+      reason: null,
+    };
+    const input: Message = {
+      id: 'saved-input',
+      sessionId: run.sessionId,
+      runId: run.id,
+      seq: '1',
+      role: 'user',
+      status: 'complete',
+      originCommandId: run.originCommandId,
+      content: sent.intent.content,
+    };
+    await f.publishMessages([input], [run]);
+    expectStatus('正在准备回复…');
+    executions.push({
+      id: 'first-model',
+      kind: 'model',
+      originStoreId: run.originStoreId,
+      sessionId: run.sessionId,
+      runId: run.id,
+      definitionId: 'model',
+      definitionVersion: '1',
+      status: 'dispatching',
+      result: null,
+      resultRevision: '0',
+      cancelRequestedAt: null,
+    });
+    await f.refreshFacts();
+    expectStatus('正在思考…');
+    expect(f.host.querySelector('.message.assistant')).toBeNull();
+    const reply: Message = {
+      id: 'first-reply',
+      sessionId: run.sessionId,
+      runId: run.id,
+      seq: '2',
+      role: 'assistant',
+      status: 'incomplete',
+      content: '首段正文',
+    };
+    await f.publishMessages([input, reply], [run]);
+    expectStatus('正在回复…');
+    const visibleReply = f.host.querySelector('.message.assistant .typeset-chat');
+    expect(visibleReply?.textContent).toBe('首段正文');
+    const terminal: Run = { ...run, status: 'completed', isActive: false, finishedAt: 2 };
+    // Run completion may arrive before the final saved message change.
+    await f.publishMessages([input, reply], [terminal]);
+    expect(statuses()).toHaveLength(0);
+    expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
+    expect(f.host.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe('open');
+    await f.publishMessages([input, { ...reply, status: 'complete' }], [terminal]);
+    expect(statuses()).toHaveLength(0);
+    expect(f.host.querySelectorAll('.agent-turn-final .message.assistant')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
 test('a saved first-created conversation waits for fresh grouping when its inactive caches are invalidated', async () => {
   const f = fixture(true);
   const bridge = f.dom.window.kiteNative! as NativeBridge;
@@ -5147,6 +5247,7 @@ test('first accepted input observes a later rejection before Run creation, keeps
     await f.refreshFacts();
     await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
     const failure = f.host.querySelector('.turn-failure[role="alert"]');
+    expect(f.host.querySelector('.response-status')).toBeNull();
     expect(failure?.getAttribute('aria-label')).toBe('本地执行环境尚未就绪，本轮未能启动');
     expect(failure?.textContent).toBe('原消息已保留。请在本地执行环境恢复后重新发送。');
     expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');

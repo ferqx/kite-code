@@ -955,9 +955,8 @@ for (const outcome of ['ready', 'read_failure', 'regressed', 'selection_changed'
       settled = false;
     const failure = new ClientError('ready_read_failed');
     const getView = connection.getView.bind(connection);
-    let views = 0;
     connection.getView = async (sessionId) => {
-      if (++views > 2 && outcome === 'read_failure') throw failure;
+      if (outcome === 'read_failure') throw failure;
       return getView(sessionId);
     };
     connection.observe = async (options) => {
@@ -972,7 +971,7 @@ for (const outcome of ['ready', 'read_failure', 'regressed', 'selection_changed'
         firstEntered.release();
         await first.promise;
       }
-      return connection.getView(sessionId);
+      return getView(sessionId);
     };
     const caller = new NativeCaller(connection, () => {});
     try {

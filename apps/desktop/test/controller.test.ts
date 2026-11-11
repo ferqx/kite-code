@@ -184,7 +184,7 @@ test('a retired missing-workspace trust read cannot publish into a later selecti
   expect(visible).toEqual(['new']);
 });
 
-test('session activation reconciles before publishing history while ordinary refresh remains read-only', async () => {
+test('session activation reuses the reconciled view while ordinary refresh remains read-only', async () => {
   const calls: string[] = [];
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['session_reconciliation'] },
@@ -204,7 +204,7 @@ test('session activation reconciles before publishing history while ordinary ref
     },
   });
   await controller.selectSession('root');
-  expect(calls).toEqual(['reconcile:root', 'read:root', 'publish:root']);
+  expect(calls).toEqual(['reconcile:root', 'publish:root']);
   calls.length = 0;
   await controller.refreshSession('root');
   expect(calls).toEqual(['read:root', 'publish:root']);

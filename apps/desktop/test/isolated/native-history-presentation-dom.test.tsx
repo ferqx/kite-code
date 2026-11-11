@@ -765,6 +765,9 @@ test('ordinary Native connection loss is visible while saved reading stays in pl
     expect(f.host.textContent).not.toContain('连接暂不可用');
     await f.setConnectionUnavailable(true);
     await f.until(() => !!f.host.textContent?.includes('连接暂不可用，当前状态待核实。'));
+    expect(f.host.querySelector('.session-header [role="status"]')?.textContent).toBe(
+      '连接暂不可用，当前状态待核实。',
+    );
     expect(f.host.querySelector('[data-message-id="final"]')).toBe(original);
     expect(f.host.textContent).toContain(final);
     expect(

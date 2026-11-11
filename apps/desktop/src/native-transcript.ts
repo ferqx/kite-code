@@ -332,6 +332,11 @@ export function desktopTranscript({
   const observed = new Map(
     runs.filter((run) => presentableRun(run, storeId, sessionId)).map((run) => [run.id, run]),
   );
+  const runsByCommand = new Map<string, string | null>();
+  for (const run of observed.values()) {
+    if (run.originStoreId !== storeId || !run.originCommandId) continue;
+    runsByCommand.set(run.originCommandId, runsByCommand.has(run.originCommandId) ? null : run.id);
+  }
   const identity = (runId: string) => JSON.stringify(['native-run', storeId, sessionId, runId]);
   const compressionIdentity = (runId: string, executionId: string) =>
     JSON.stringify(['native-compression', storeId, sessionId, runId, executionId]);
@@ -566,6 +571,12 @@ export function desktopTranscript({
     const turnId = identity(run.id);
     modeled.push({
       id: `native-run-timing:${turnId}`,
+      presentationKey:
+        run.originStoreId === storeId &&
+        run.originCommandId &&
+        runsByCommand.get(run.originCommandId) === run.id
+          ? run.originCommandId
+          : undefined,
       turnId,
       role: 'system',
       systemKind: 'turn_timing',

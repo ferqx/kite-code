@@ -1,12 +1,21 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { automaticTitleIdentity } from '../../../../packages/agent/src/business/session-title/state';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
@@ -33,6 +42,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
   const response = `**Original assistant heading**\n\n| Column | Value |\n| --- | --- |\n| Original table cell | Exact value |\n\n\`\`\`ts\nconsole.log("original assistant");\n\`\`\`\n\n${alignmentParagraph}\n\nEND_ORIGINAL_ASSISTANT_COMPLETE`;
   const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
   const titleRequests: (typeof requests)[number][] = [];
+  let closing = false;
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -55,8 +65,27 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
       requests.push(body);
       const frame = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'original', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+      const encoder = new TextEncoder();
       return new Response(
-        `${frame({ reasoning_content: 'Original private thinking' }, null)}${frame({ content: response }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+        new ReadableStream<Uint8Array>({
+          async start(stream) {
+            for (const [gate, text] of [
+              [
+                'release-reasoning',
+                frame({ reasoning_content: 'Original private thinking' }, null),
+              ],
+              [
+                'release-response',
+                `${frame({ content: response }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+              ],
+            ] as const) {
+              while (!closing && !existsSync(join(root, gate))) await Bun.sleep(5);
+              if (closing) return;
+              stream.enqueue(encoder.encode(text));
+            }
+            stream.close();
+          },
+        }),
         { headers: { 'content-type': 'text/event-stream' } },
       );
     },
@@ -95,7 +124,23 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
     const runner = join(root, 'ordinary-runner.ts');
     writeFileSync(
       runner,
-      `import{writeFileSync}from'node:fs';import{runTUIProcess}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui-main.ts')).href)};process.exitCode=await runTUIProcess({argv:['--workspace',${JSON.stringify(workspace)}],artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(servicePid)},String(pid))});`,
+      `import { existsSync, writeFileSync } from 'node:fs';
+import { runTUIProcess } from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui-main.ts')).href)};
+const fetchOriginal = globalThis.fetch;
+globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+  const path = new URL(String(args[0])).pathname;
+  if (args[1]?.method === 'POST' && typeof args[1].body === 'string' && JSON.parse(args[1].body).kind === 'run.start') {
+    while (!existsSync(${JSON.stringify(join(root, 'release-post'))})) await Bun.sleep(5);
+  }
+  if (path.endsWith('/model-output') && existsSync(${JSON.stringify(join(root, 'release-response'))})) {
+    while (!existsSync(${JSON.stringify(join(root, 'release-output-read'))})) await Bun.sleep(5);
+  }
+  if (path === '/v1/sessions' && args[1]?.method === 'POST' && existsSync(${JSON.stringify(join(root, 'hold-new-session'))})) {
+    while (!existsSync(${JSON.stringify(join(root, 'release-new-session'))})) await Bun.sleep(5);
+  }
+  return fetchOriginal(...args);
+}, { preconnect: fetchOriginal.preconnect });
+process.exitCode = await runTUIProcess({argv:process.argv[2] ? ['--thread',process.argv[2]] : ['--workspace',${JSON.stringify(workspace)}],artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(servicePid)},String(pid))});`,
     );
     const built = await compileFileRecoveryTUI(root, runner);
     if (!built.success) throw new AggregateError(built.logs, 'ordinary_tui_compile_failed');
@@ -136,6 +181,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
       'ordinary_ink_parity_driver_timeout',
     );
     if (code !== 0) console.error(stderr, '\nPTY transcript', transcript);
+    console.log(stdout.trim());
     expect(code).toBe(0);
     expect(stdout).toContain('ORDINARY_INK_PARITY_RUN_EXIT');
     expect(requests).toHaveLength(1);
@@ -151,9 +197,12 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
         id: string;
         title: string;
       }[];
-      expect(roots).toHaveLength(1);
-      const rootSession = roots[0]!;
+      expect(roots).toHaveLength(2);
+      const rootSession = roots.find((session) => session.title === 'Ink task')!;
       expect(rootSession.title).toBe('Ink task');
+      const newSession = roots.find((session) => session.id !== rootSession.id)!;
+      expect(newSession.title).toBe('');
+      expect(db.query('SELECT id FROM run WHERE session_id=?').all(newSession.id)).toEqual([]);
       expect(db.query('SELECT parent_id FROM session WHERE parent_id IS NOT NULL').all()).toEqual(
         [],
       );
@@ -215,13 +264,22 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
         kind: string;
         request_json: string;
       } | null;
-      expect(generateCommand?.kind).toBe('extension.invoke');
-      expect(JSON.parse(generateCommand!.request_json)).toEqual({
-        kind: 'extension.invoke',
+      expect(generateCommand?.kind).toBe('operation.job');
+      expect(JSON.parse(generateCommand!.request_json)).toMatchObject({
+        kind: 'operation.job',
         extensionId: 'builtin.session-title',
-        actionId: 'generate',
+        definitionId: 'builtin.session-title/generate',
         definitionVersion: '1',
-        input: { commandId: completedRun.origin_command_id, runId: completedRun.id },
+        input: { commandId: completedRun.origin_command_id },
+        parentExecutionId: actions.find(
+          (action) => action.adapter_id === 'builtin.session-title/fallback',
+        )!.id,
+        operationKey: automaticTitleIdentity(
+          completedRun.origin_store_id,
+          rootSession.id,
+          completedRun.origin_command_id,
+        ).operationKey,
+        cancellation: 'detached',
       });
       const models = db
         .query(
@@ -293,6 +351,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
       else driver.kill('SIGTERM');
       await ptyDeadline(driver.exited, 10000, 'ordinary_driver_cleanup_timeout');
     }
+    closing = true;
     provider.stop(true);
     rmSync(root, { recursive: true, force: true });
   }

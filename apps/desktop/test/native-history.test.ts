@@ -504,6 +504,52 @@ test('Native attach changes clear all snapshots while history epoch changes reta
   }
 });
 
+test('a reconnect cannot replace newer streamed messages with an older View boundary', async () => {
+  const user = { id: 'user', sessionId: 's', seq: '1', content: 'question' } as Message;
+  const reply = { id: 'reply', sessionId: 's', seq: '3', content: 'streamed prefix' } as Message;
+  const upperSequences: string[] = [];
+  const states: HistoryState[] = [];
+  let replyText = reply.content;
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      upperSequences.push(request.upperSeq!);
+      return {
+        messages: [
+          user,
+          ...(BigInt(request.upperSeq!) >= BigInt(reply.seq)
+            ? [{ ...reply, content: replyText }]
+            : []),
+        ],
+        highWaterSeq: request.upperSeq!,
+        nextAfterSeq: null,
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, (state) => states.push(state));
+  try {
+    reader.select(1, selection('s', '3'));
+    await until(() => reader.state.phase === 'complete');
+    const original = reader.state.messages[1];
+    reader.select(1, selection('s', '2'), 1);
+    expect(reader.state.phase).toBe('loading');
+    expect(reader.state.messages[1]).toBe(original);
+    expect(upperSequences).toEqual(['3']);
+    replyText = 'streamed prefix and continuation';
+    reader.select(1, selection('s', '4'), 1);
+    await until(() => reader.state.phase === 'complete');
+    expect(upperSequences).toEqual(['3', '4']);
+    expect(reader.state.messages.map((message) => message.content)).toEqual([
+      'question',
+      replyText,
+    ]);
+    expect(states.slice(2).every((state) => state.messages.length === 2)).toBe(true);
+  } finally {
+    reader.dispose();
+  }
+});
+
 test('Native Store or Session changes never retain the previous identity reading', async () => {
   for (const change of ['store', 'session'] as const) {
     let block = false;

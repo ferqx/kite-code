@@ -143,6 +143,42 @@ function fixture(active = false) {
     },
   };
 }
+test('Enter keeps a slash draft for the new session while creation is held', async () => {
+  const f = fixture();
+  let confirm!: (id: string) => void;
+  f.port.management!.newSession = () =>
+    new Promise<string>((resolve) => {
+      confirm = resolve;
+    });
+  const controller = f.controller;
+  try {
+    await controller.select('a');
+    controller.setDraft('/new');
+    const creating = controller.send();
+    expect(controller.state.creatingSession).toBe(true);
+    expect(controller.state.sessionId).toBe('a');
+    controller.setDraft('/session rename New title');
+    await controller.send();
+    expect(controller.state.draft).toBe('/session rename New title');
+    expect(f.writes).toEqual([]);
+    confirm('new');
+    await creating;
+    expect(controller.state.creatingSession).toBe(false);
+    expect(controller.state.sessionId).toBe('new');
+    expect(controller.state.draft).toBe('/session rename New title');
+    await controller.send();
+    expect(f.writes).toEqual([
+      expect.objectContaining({
+        kind: 'session.rename',
+        sessionId: 'new',
+        request: expect.objectContaining({ title: 'New title' }),
+      }),
+    ]);
+  } finally {
+    controller.dispose();
+  }
+});
+
 test('slash vocabulary preserves original menu tails and rejects unsupported management arguments', async () => {
   expect(parseTuiCommand('/resume other')).toEqual({ kind: 'resume' });
   expect(parseTuiCommand('/context x')).toEqual({ kind: 'context' });

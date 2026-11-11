@@ -8,7 +8,9 @@
 
 原真实终端场景经[统一 runner](../../../../scripts/run-unified-tui-system-tests.ts)逐整文件消费当前 UI／CLI Host／公共 Client／默认 Service。原参数与模型声明在[测试协议映射](../../../../tests/tui-system/harness/original-tool-contract.ts)准确转换，不生产旧 Runtime 事件或伪造结果；不导入历史 Store9/11／State26。原 Store9/11 旧格式转换不在 D08 范围；对应历史／维护旅程改验新 Store／Profile，State26 则保实际旧文件隔离反例。这是测试范围迁移，不是旧格式转换或兼容通过。完整执行证据及后置平台范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
-短暂观察刷新保留同会话的可操作快照；明确重选会话时只查询保存的原未知请求，不重发。主屏的后继输入、后台任务和取消各自绑定原 Run，连续取消不会误取消已接受的下一任务。当前 Run 的已确认取消与历史 unknown 并列展示，不把旧未知改写为成功。审核选择在 native 键到达时更新，快速方向键／Enter 使用当前原卡的明确选择，原 revision、附件与重复提交门禁仍有效。
+短暂观察刷新保留同会话的可操作快照；明确重选会话时查询保存的原未知请求，不重发。主屏的后继输入、后台任务和取消各自绑定原 Run，连续取消不会误取消已接受的下一任务。当前 Run 的已确认取消与历史 unknown 并列展示，不把旧未知改写为成功。审核选择在 native 键到达时更新，快速方向键／Enter 使用当前原卡的明确选择，原 revision、附件与重复提交门禁仍有效。
+
+如果首条输入已受理但尚未观察到原 Run 或原用户消息，切回原会话或事件流重连时，控制器只读取原提交回执。仍受理则继续等待，已拒绝则撤下提交状态并显示原失败。仅在原草稿未被更新时恢复原文，迟到的读取结果不能修改另一会话。[原回执回归](../../test/tui/controller.test.tsx)覆盖切回、重连和晚返回。
 
 [会话选择器](session-chooser.tsx)的删除确认在 80×24 终端保留完整危险说明与原目标，每个操作保留自身说明；移除重复的正文警告与按键段落，快捷键统一放在浮层 footer，使保留与删除选项都能显示。默认仍为保留，只有明确向下选择删除并 Enter 才提交，Esc／Ctrl+C 保留会话。组件边界由[选择器回归](../../test/tui/session-chooser.test.tsx)核验，真实小窗口流程归[正式 Terminal 入口](../../../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)。
 
@@ -39,6 +41,8 @@ Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认�
 原 `apps/kite-cli/src/tui` 的纯 UI 已迁入 [ink](ink/MarkdownBlock.tsx)：Markdown 的增量闭合缓存、代码语言框与高亮、表格边框和中英文宽度，用户原文背景块与 30 行首尾窗口，工具五行预览／Shell tail、文件 diff、Thinking 聚合、子任务树、ConcurrentSubAgent、计划步骤与压缩阶段。主题色板、语言目录、frame、选择行、搜索框和首次配置保留原展示算法；不导入旧 Runtime、provider、reducer 或旧客户端。
 
 [index](index.tsx)负责完整主屏消费。普通界面把完成内容一次写入终端原生历史，第一项仍变化的内容及其后续行留在动态区；列宽／会话／语言等语义变化才替换展示代次。长问题的完整材料进入原生历史，底部保留有限选择和输入窗口；编辑和观察状态变化不重发材料。主 composer 使用原双横线、❯、ghost 补全、命令说明／别名和 40 行光标窗口。Tab／右键优先补到共同前缀，只补全不提交；Enter 按当前准确候选补全并提交一次，文件目录仍在读取时不提交。历史保留本范围最近 500 条，候选上下在边界停留，折叠粘贴 Esc 清输入；候选包括实际合格 Workflow 和当前完整 MCP prompt 目录。
+
+空闲会话 `run.start` 在同 Store／Workspace／Session 用原 Command ID 展示动态用户回显。回显保留独立草稿版本，原持久用户记录按 Command 或公开人类输入身份接管；相同文字的独立输入保持各自归属。提交反馈随原 Run 接管，未知结果附在原输入上，仅核原请求。已保存的完整正文优先于活动前缀，正文读取失败按原消息版本保留。普通静态标题展示所选模型，实际运行模型随动态底栏更新。普通主屏省略内部命名任务及其无 Run 的模型执行，保留执行详情及会话名称事实。见[普通入口真 PTY 回归](../../../../apps/cli/test/isolated/tui-ink-host.test.ts)。
 
 [execution projection](execution-projection.tsx)只把已有公共事实转成原 renderer model。Tool input 来自同 Store／Session 的实际执行，或同 Run 唯一 callId／准确结果 sourceIds；正式短 builtin ID 须由冻结 Run 的 extension／definition／version 证明后才使用友好名称。MCP 代理名称只从同 Store／Session 的原 metadata snapshot／index 绑定与准确 definition/version 读取，再核 name hash；当前 Server label 还需 configDigest 匹配，历史使用 MCP 加真实工具名。只读聚合使用原冻结 `readOnlyDefinitions`；Shell 另需准确注册的 builtin/version、同 Scope／Run／原工作、唯一 carrier 和已保存终态结果中的呈现分类，不能从 UI 命令拼写或自定义 Tool 字段猜只读资格。分类由 Agent 的既有参数分析产生，只影响展示，不授文件或执行权限；取消、拒绝和未派发项不计已完成探索。并发使用同 Model 批次的 task／carrier 关系以及实际生命周期交叠。无证明者单列，失败、取消和 unknown 不折成成功。未知工具参数保留有界卡片预览及完整详情，Ctrl+E 可选中间卡片；准确 Job 才取得完整输出、child 阅读和停止入口。
 

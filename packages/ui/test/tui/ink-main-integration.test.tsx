@@ -61,6 +61,127 @@ const model: Execution = {
   childSessionId: null,
 };
 
+test('the first submission stays ahead of early execution facts and a failed reply read stays settled', async () => {
+  const request = 'Original pending input';
+  const run: SessionView['runs'][number] = {
+    id: 'run',
+    sessionId: 's',
+    originCommandId: 'original',
+    originStoreId: 'store',
+    status: 'running',
+    isActive: true,
+    createdAt: 1,
+    finishedAt: null,
+    reason: null,
+  };
+  const body = output({
+    content: 'Verified final reply',
+    reasoning: '',
+    toolCalls: [],
+    complete: true,
+  });
+  const reply: Message = {
+    id: 'reply',
+    seq: '2',
+    sessionId: 's',
+    runId: 'run',
+    role: 'assistant',
+    status: 'complete',
+    content: 'preview',
+    firstOutput: 'content',
+    sourceIds: ['model'],
+    outputBody: {
+      kind: 'model_output',
+      executionId: 'model',
+      complete: true,
+      contentBytes: body.contentBytes,
+      reasoningBytes: '0',
+      toolCallCount: 0,
+    },
+  };
+  const user: Message = {
+    id: 'input',
+    seq: '1',
+    sessionId: 's',
+    runId: 'run',
+    role: 'user',
+    status: 'complete',
+    content: request,
+    originCommandId: 'original',
+  };
+  let snapshot: TuiSnapshot = { storeId: 'store', view: view(), messages: [], interactions: [] };
+  let reads = 0;
+  const controller = new TuiController(
+    port(() => snapshot, {
+      submit: async () => ({
+        id: 'original',
+        sessionId: 's',
+        originStoreId: 'store',
+        kind: 'run.start',
+        status: 'accepted',
+        receipt: null,
+        cancelRequestedAt: null,
+      }),
+      readModelOutput: async () => {
+        if (++reads === 1) throw Error('original body read failed');
+        return body;
+      },
+    }),
+  );
+  await controller.select('s');
+  const app = render(<TuiSession controller={controller} />);
+  try {
+    controller.setDraft(request);
+    await controller.send();
+    await tick();
+    expect(app.lastFrame()).toContain('Submitting…');
+    const tool: Execution = {
+      ...model,
+      id: 'early',
+      kind: 'tool',
+      definitionId: 'early.tool',
+      rootWorkCommandId: 'original',
+    };
+    snapshot = { ...snapshot, view: { ...view([tool]), runs: [run] } };
+    await controller.refresh();
+    await tick();
+    const early = app.lastFrame()!;
+    expect(early).toContain('early.tool');
+    expect(early.indexOf(request)).toBeLessThan(early.indexOf('early.tool'));
+    snapshot = { ...snapshot, view: view() };
+    await controller.refresh();
+    await tick();
+    expect(app.lastFrame()).not.toContain('Submitting…');
+    snapshot = {
+      ...snapshot,
+      messages: [user, reply],
+      view: {
+        ...view([model]),
+        runs: [{ ...run, isActive: false, status: 'completed', finishedAt: 2 }],
+      },
+    };
+    await controller.refresh();
+    await tick();
+    expect(app.lastFrame()).toContain('Could not read full reply.');
+    expect(app.lastFrame()).not.toContain('Loading reply…');
+    expect(app.lastFrame()!.split(request)).toHaveLength(2);
+    await controller.select('s');
+    await tick();
+    expect(reads).toBe(1);
+    expect(app.lastFrame()).toContain('Could not read full reply.');
+    expect(app.lastFrame()).not.toContain('Loading reply…');
+    await controller.loadOutput(reply);
+    await tick();
+    expect(reads).toBe(2);
+    expect(app.lastFrame()).toContain('Verified final reply');
+    expect(app.lastFrame()).not.toContain('Could not read full reply.');
+  } finally {
+    app.unmount();
+    app.cleanup();
+    controller.dispose();
+  }
+});
+
 function output(body: ModelOutputSnapshot['output']): ModelOutputSnapshot {
   const bytes = Buffer.from(JSON.stringify(body));
   return {

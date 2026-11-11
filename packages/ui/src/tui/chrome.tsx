@@ -177,6 +177,8 @@ export function hasPendingRootCancellation(state: TuiState, storeId: string): bo
 }
 
 export type TuiActivity =
+  | 'Submitting…'
+  | 'Loading reply…'
   | 'Working'
   | 'Cancelling'
   | 'Cancelling · cancellation requested'
@@ -186,13 +188,14 @@ export type TuiActivity =
 export function TuiActivityLine({ activity }: { activity?: TuiActivity }) {
   const theme = useInkTheme();
   const { activityVerified } = useTuiPresentation();
+  const visible = !!activity && (activityVerified || activity === 'Loading reply…');
   const [frame, setFrame] = useState(0);
   useEffect(() => {
-    if (!activity || !activityVerified) return;
+    if (!visible) return;
     const timer = setInterval(() => setFrame((value) => (value + 1) % 4), 250);
     return () => clearInterval(timer);
-  }, [activity, activityVerified]);
-  return activity && activityVerified ? (
+  }, [visible]);
+  return visible && activity ? (
     <Text
       color={
         activity.startsWith('Cancelling') || activity === 'Retrying'

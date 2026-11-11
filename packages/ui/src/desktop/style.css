@@ -3932,6 +3932,10 @@ body {
 .kite-client
   :is(.tool-activity, .agent-turn-process)[data-restored-expanded="true"]
   > .collapsible-motion-content[data-state="open"]
+  > .collapsible-motion-reveal,
+.kite-client
+  .agent-turn-process[data-live="true"]
+  > .collapsible-motion-content[data-state="open"]
   > .collapsible-motion-reveal {
   transition: none;
 }

@@ -83,7 +83,9 @@ function isTurnFailure(message: Message): boolean {
 function isOngoingTurn(activity?: TurnActivity): boolean {
   return (
     !!activity &&
-    ['queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(activity.status)
+    ['preparing', 'queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(
+      activity.status,
+    )
   );
 }
 
@@ -925,6 +927,12 @@ export function Conversation({
         .filter((message) => message.systemKind === 'turn_timing' && message.turnId)
         .map((message) => [message.turnId!, message]),
     );
+    const turnEntryKey = (turnId: string) => {
+      const submission =
+        timingByTurn.get(turnId)?.presentationKey ??
+        (turnActivity?.turnId === turnId ? turnActivity.presentationKey : undefined);
+      return submission ? `turn:submission:${JSON.stringify(submission)}` : `turn:${turnId}`;
+    };
     const terminalByTurn = new Map(
       messages
         .filter((message) => message.systemKind === 'turn_terminal' && message.turnId)
@@ -994,8 +1002,8 @@ export function Conversation({
       entries.push({
         key: turnId
           ? seenTurnIds.has(turnId)
-            ? `turn:${turnId}:after:${message.presentationKey ?? message.id}`
-            : `turn:${turnId}`
+            ? `${turnEntryKey(turnId)}:after:${message.presentationKey ?? message.id}`
+            : turnEntryKey(turnId)
           : (message.presentationKey ?? message.id),
         turnId,
         groups: [group],
@@ -1005,13 +1013,11 @@ export function Conversation({
     flushUnscoped();
     if (
       turnActivity &&
-      ['queued', 'running', 'waiting', 'cancelling', 'recovery_required', 'cancelled'].includes(
-        turnActivity.status,
-      ) &&
+      (isOngoingTurn(turnActivity) || turnActivity.status === 'cancelled') &&
       !seenTurnIds.has(turnActivity.turnId)
     ) {
       entries.push({
-        key: `turn:${turnActivity.turnId}`,
+        key: turnEntryKey(turnActivity.turnId),
         turnId: turnActivity.turnId,
         groups: [],
       });
@@ -1163,7 +1169,10 @@ export function Conversation({
           );
       const aborted = terminalStatus === 'aborted';
       const runningTool = runningToolTurns.has(entry.turnId);
-      const thinking = thinkingTurns.has(entry.turnId);
+      const waitingForContent = processGroups.length === 0;
+      const thinking =
+        thinkingTurns.has(entry.turnId) ||
+        (waitingForContent && activity?.responsePhase === 'thinking');
       const completed =
         !failed &&
         !cancelled &&
@@ -1192,7 +1201,9 @@ export function Conversation({
       const responseLabel =
         active && thinking && !runningTool && (!activity || activity.status === 'running')
           ? '正在思考…'
-          : '正在回复…';
+          : waitingForContent && activity?.responsePhase === 'preparing'
+            ? '正在准备回复…'
+            : '正在回复…';
       const label = !lastTurnEntry
         ? '处理过程'
         : diagnostics &&
@@ -1223,11 +1234,19 @@ export function Conversation({
         failureGroups.length > 0 ||
         ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '') ||
         (!!finalGroup && !ongoing);
+      // Run completion and saved message updates arrive independently. Keep
+      // the readable process mounted until its final reply can take over.
+      const lastProcessMessage = processGroups.at(-1)?.[0];
+      const retainingReply =
+        completed &&
+        !finalReplyByTurn.has(entry.turnId) &&
+        lastProcessMessage?.role === 'assistant' &&
+        !lastProcessMessage.settled;
       // Settlement regroups the final reply outside the process. Start a new
       // container so the old process cannot repaint during its exit animation.
-      const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
+      const turnKey = `turn:${entry.turnId}:${settled && !retainingReply ? 'complete' : 'process'}`;
       const incompleteFailure = (failed || aborted) && !finalReplyByTurn.has(entry.turnId);
-      const open = !settled || (expanded[turnKey] ?? incompleteFailure);
+      const open = !settled || (expanded[turnKey] ?? (incompleteFailure || retainingReply));
       if (showProcess && open) openTurns.push(turnKey);
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
@@ -1279,6 +1298,7 @@ export function Conversation({
             >
               <div
                 className="agent-turn-process"
+                data-live={!settled || undefined}
                 data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
               >
                 <div className="agent-turn-summary-row">

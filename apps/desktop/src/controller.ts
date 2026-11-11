@@ -269,9 +269,12 @@ export class DesktopController {
     const activation = new AbortController();
     this.selectionRead = activation;
     let reconciliationError: unknown;
+    let reconciledView: SessionView | undefined;
     if (this.client.serverInfo?.capabilities?.includes('session_reconciliation')) {
       try {
-        await this.client.reconcileSessionState(sessionId, { signal: activation.signal });
+        reconciledView = await this.client.reconcileSessionState(sessionId, {
+          signal: activation.signal,
+        });
       } catch (error) {
         if (activation.signal.aborted || generation !== this.generation || this.disposed) return;
         reconciliationError = error;
@@ -279,7 +282,7 @@ export class DesktopController {
     }
     if (activation.signal.aborted || generation !== this.generation || this.disposed) return;
     this.activatingSelection = undefined;
-    const snapshot = await this.readSelection(this.selected, generation);
+    const snapshot = await this.readSelection(this.selected, generation, undefined, reconciledView);
     if (snapshot && reconciliationError) {
       this.options.onError?.(reconciliationError);
       throw reconciliationError;

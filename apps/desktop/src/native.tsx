@@ -849,6 +849,7 @@ function NativeDesktopContent({
         value &&
         'generation' in value &&
         value.selection &&
+        !value.backgroundUnavailable &&
         selected.current === value.selection.session.id &&
         !selectionRead.current?.holdPresentation &&
         parentHistoryVisible.current
@@ -1149,7 +1150,13 @@ function NativeDesktopContent({
         };
       }
       apply(value, preparedView);
-      if (value && 'generation' in value && value.selection && parentHistoryVisible.current)
+      if (
+        value &&
+        'generation' in value &&
+        value.selection &&
+        !value.backgroundUnavailable &&
+        parentHistoryVisible.current
+      )
         history.current?.select(current, value.selection, value.historyEpoch);
       if (value && 'generation' in value && !value.selection?.session.parentSessionId) {
         if (preparedDraft && 'error' in preparedDraft) throw preparedDraft.error;
@@ -1550,6 +1557,7 @@ function NativeDesktopContent({
         : directoryActivity.executionOwner
       : undefined;
   const executionUnconfirmed =
+    !!state?.backgroundUnavailable ||
     executionOwner === 'unheld' ||
     executionOwner === 'unknown' ||
     (!!executionObservation &&
@@ -1735,7 +1743,7 @@ function NativeDesktopContent({
   parentHistoryVisible.current = readingParent;
   useLayoutEffect(() => {
     const reading = selectionRead.current;
-    if (!readingParent) {
+    if (!readingParent || state?.backgroundUnavailable) {
       history.current?.close();
       return;
     }
@@ -3279,6 +3287,47 @@ function NativeDesktopContent({
     rejectedInputs,
     replyDisplayScope,
   ]);
+  const firstRun =
+    firstVisible &&
+    !preparing &&
+    runMessages.runs.find(
+      (run) =>
+        run.originStoreId === firstSubmission.creation.expectedStoreId &&
+        run.sessionId === firstSubmission.creation.sessionId &&
+        run.originCommandId === firstSubmission.commandId,
+    );
+  const confirmedFirstReply = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (firstRun && (!firstRun.isActive || !executionUnconfirmed))
+      confirmedFirstReply.current = firstInputIdentity;
+  }, [firstRun, firstInputIdentity, executionUnconfirmed]);
+  const pendingFirstReply =
+    firstVisible &&
+    confirmedFirstReply.current !== firstInputIdentity &&
+    (!firstSubmission.result || firstSubmission.result.phase === 'accepted') &&
+    !rejectedInputs.has(firstSubmission.commandId) &&
+    !state?.callerUnavailable &&
+    !state?.backgroundUnavailable &&
+    !directory?.unavailable &&
+    executionObservation?.phase !== 'unavailable' &&
+    historyState.phase !== 'unavailable' &&
+    (!transcript.turnActivity || (firstRun && executionUnconfirmed && !executionOwner)) &&
+    (!firstRun || firstRun.isActive)
+      ? firstSubmission.commandId
+      : undefined;
+  const firstModelDispatched =
+    firstRun &&
+    executionRecords?.some(
+      (execution) =>
+        execution.runId === firstRun.id &&
+        execution.originStoreId === firstRun.originStoreId &&
+        execution.sessionId === firstRun.sessionId &&
+        execution.kind === 'model' &&
+        execution.parentExecutionId == null &&
+        (execution.status === 'dispatching' ||
+          execution.status === 'running' ||
+          execution.status === 'succeeded'),
+    );
   const toolPresentation = useRef(new NativeToolPresentation());
   const messageModels = useMemo(() => {
     const models = preparing
@@ -4851,6 +4900,7 @@ function NativeDesktopContent({
           !!selection &&
           selected.current === selection.session.id &&
           !selection.viewLoading &&
+          !state?.backgroundUnavailable &&
           !directory?.unavailable &&
           historyState.phase === 'complete' &&
           !historyMetadataLoading,
@@ -4881,25 +4931,30 @@ function NativeDesktopContent({
       renderMessageAttachments={renderNativeAttachments}
       renderToolActivity={renderNativeTools}
       turnActivity={
-        preparing || !transcript.turnActivity
-          ? undefined
-          : {
-              ...transcript.turnActivity,
-              executionUnconfirmed,
-              // Read admission is revoked during scans; the last observed Run still owns its label.
-              unavailable: executionObservation
-                ? executionObservation.phase === 'unavailable'
-                : historyState.phase === 'unavailable' ||
-                  !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+        pendingFirstReply
+          ? {
+              turnId: transcript.turnActivity?.turnId ?? pendingFirstReply,
+              presentationKey: pendingFirstReply,
+              status: 'preparing',
+              responsePhase: 'preparing',
             }
+          : !preparing && transcript.turnActivity
+            ? {
+                ...transcript.turnActivity,
+                ...(firstRun && firstRun.id === activeExecutionRun?.id
+                  ? { responsePhase: firstModelDispatched ? 'thinking' : 'preparing' }
+                  : {}),
+                executionUnconfirmed,
+                // Read admission is revoked during scans; the last observed Run still owns its label.
+                unavailable: executionObservation
+                  ? executionObservation.phase === 'unavailable'
+                  : historyState.phase === 'unavailable' ||
+                    !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+              }
+            : undefined
       }
       notices={
         <>
-          {!preparing && state?.backgroundUnavailable && (
-            <p role="status" className="notice">
-              连接暂不可用，当前状态待核实。
-            </p>
-          )}
           {diagnostics && fileTargets.error && (
             <p role="alert">
               {fileTargets.error}{' '}
@@ -5211,6 +5266,15 @@ function NativeDesktopContent({
       scheduledTasks={scheduledTasksView ? scheduledTaskProps : undefined}
       headerActions={
         <>
+          {!preparing && state?.backgroundUnavailable && (
+            <span
+              role="status"
+              className="min-w-0 truncate text-xs text-muted-foreground"
+              title="连接暂不可用，当前状态待核实。"
+            >
+              连接暂不可用，当前状态待核实。
+            </span>
+          )}
           {!preparing && !scheduledTasksView && worktreeExitTarget.kind === 'source' && (
             <DesktopButton
               variant="ghost"
