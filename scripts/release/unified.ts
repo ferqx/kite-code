@@ -18,6 +18,7 @@ const options = {
     'sqlite-library',
     'desktop-only',
   ],
+  'windows-setup': ['directory', 'zstd-archive', 'bun', 'electron'],
   pack: ['product', 'directory', 'archive'],
   unpack: ['product', 'directory', 'archive', 'sha256'],
   verify: ['product', 'directory', 'source-commit', 'clean-source'],
@@ -30,6 +31,8 @@ const options = {
 } as const;
 const help = `Unified Agent release tooling
   build [--product terminal|native] [--directory <new-directory>] [--archive <new-archive>]
+  windows-setup [--directory <new-directory>] [--zstd-archive <zstd-1.5.7.tar.gz>]
+                [--bun <private-bun.exe>] [--electron <private-electron-dist>]
   verify|smoke [--product terminal|native] [--directory <candidate>]
   pack [--product terminal|native] [--directory <candidate>] --archive <new-archive>
   unpack [--product terminal|native] --archive <archive> --sha256 <SHA256> --directory <new-directory>
@@ -38,7 +41,7 @@ const help = `Unified Agent release tooling
 Default product: terminal. Build destinations: dist/unified-terminal and dist/unified-native.
 Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
 Native build additionally accepts --terminal <verified-terminal> and --electron <installed-dist>.
-For a Windows x64 desktop installer, build native with --desktop-only true.
+Windows x64 desktop installer: bun run release:windows-setup.
 Terminal build accepts --sqlite-library <reviewed macOS library>; the selected library is copied into the bundle.
 Verify additionally accepts --source-commit <40-hex-commit> and --clean-source true.
 Native register-cli --prefix <desktop> --cli-prefix <terminal>; unregister-cli --prefix <desktop>.
@@ -51,6 +54,10 @@ export async function runUnifiedRelease(
 ): Promise<unknown> {
   const { command, values } = parseReleaseArguments(argv, options);
   if (command === 'help') return { help };
+  if (command === 'windows-setup') {
+    const { buildWindowsSetup } = await import('./windows-setup/package');
+    return buildWindowsSetup(root, values);
+  }
   validateReleaseSourceArguments(values);
   const product = values.product ?? 'terminal';
   if (

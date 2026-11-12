@@ -43,6 +43,7 @@
     "prod:tui": "NODE_ENV=production bun run scripts/release/entrypoints/tui.ts",
     "release:terminal": "bun run scripts/release/terminal.ts",
     "release:build": "bun run scripts/release/unified.ts build",
+    "release:windows-setup": "bun run scripts/release/unified.ts windows-setup",
     "release:verify": "bun run scripts/release/unified.ts verify",
     "release:smoke": "bun run scripts/release/unified.ts smoke",
     "release:install": "bun run scripts/release/unified.ts install",

@@ -62,7 +62,7 @@ function updateEnvironment(env: Environment, updates: Environment): void {
   Object.assign(env, updates);
 }
 
-/** Development-only setup. The native builder still receives an explicit canonical compiler. */
+/** Source-build setup. The native builder still receives an explicit canonical compiler. */
 export function initializeDesktopBuildEnvironment(
   input: {
     env?: Environment;

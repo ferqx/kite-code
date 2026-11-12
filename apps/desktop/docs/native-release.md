@@ -51,6 +51,18 @@ Windows x64 桌面制品由同次构建封装 Service 和 Runner V7。包内 She
 
 安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。窗口显示解包、发布和旧版清理的实际阶段。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和[Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
 
+在仓库根目录运行以下命令，构建桌面专用制品，核对清单并生成 Windows x64 离线安装包。
+
+```powershell
+bun run release:windows-setup
+```
+
+命令从已安装的 MSVC x64 Build Tools 准备编译环境，从 `.cache/desktop-win-x64-setup/zstd-1.5.7.tar.gz` 读取 Zstandard 源归档，并在 `dist/windows-setup/` 下自动创建带时间戳的新目录，输出 `KiteDesktopSetup.exe`、SHA-256 文件和 Native 归档。
+
+Bun 和 Electron 优先使用 `.cache/desktop-win-x64-setup/inputs/` 下的私有构建输入。Bun 路径为 `bun-<当前 Bun 版本>/bin/bun.exe`，Electron 路径为 `electron-<仓库固定的 Electron 版本>/dist`。缺少对应缓存时使用当前 Bun 和项目安装的 Electron。选中的输入仍须通过原制品权限和完整性校验。
+
+需要分别运行构建和安装器步骤时，使用以下命令。
+
 ```powershell
 bun run release:build --product native --desktop-only true --directory <native-directory> --archive <native.tar.zst>
 .\scripts\release\windows-setup\build.ps1 -Archive <native.tar.zst> -Sha256 <SHA256> -ZstdArchive <zstd-1.5.7.tar.gz> -OutFile <KiteDesktopSetup.exe>
