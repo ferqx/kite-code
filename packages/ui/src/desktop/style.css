@@ -527,6 +527,9 @@ body {
     font-size: inherit;
     padding: 3px 6px;
   }
+  .nav-label .space-removal-results {
+    margin-inline-start: auto;
+  }
   .space-row {
     justify-content: flex-start;
     text-align: left;
@@ -2166,6 +2169,12 @@ body {
 }
 .sidebar-menu [role="menuitem"] {
   padding-inline: var(--select-padding-inline);
+}
+.sidebar-menu .space-removal-result-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sidebar-menu-label {
   padding: 6px var(--select-padding-inline);

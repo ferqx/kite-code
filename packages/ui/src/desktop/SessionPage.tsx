@@ -98,6 +98,8 @@ function useNavigationCallbacks(
       },
       addWorkspace: () => committed.current.props.actions.addWorkspace?.(),
       removeWorkspace: (id: string) => committed.current.props.actions.removeWorkspace?.(id),
+      lookupWorkspaceRemoval: (id: string) =>
+        committed.current.props.actions.lookupWorkspaceRemoval?.(id),
       workbench: () => committed.current.props.actions.workbench?.(),
       scheduledTasks: () => committed.current.props.actions.scheduledTasks?.(),
       settings: () => committed.current.props.actions.settings?.(),
@@ -113,6 +115,8 @@ function useNavigationCallbacks(
   const newWorkspaceSession = !!props.actions.newWorkspaceSession;
   const addWorkspace = !!props.actions.addWorkspace;
   const removeWorkspace = !!props.actions.removeWorkspace;
+  const workspaceRemovalResults = props.actions.workspaceRemovalResults;
+  const lookupWorkspaceRemoval = !!props.actions.lookupWorkspaceRemoval;
   const workbench = !!props.actions.workbench;
   const scheduledTasks = !!props.actions.scheduledTasks;
   const settings = !!props.actions.settings;
@@ -126,6 +130,8 @@ function useNavigationCallbacks(
       newWorkspaceSession: newWorkspaceSession ? callbacks.newWorkspaceSession : undefined,
       addWorkspace: addWorkspace ? callbacks.addWorkspace : undefined,
       removeWorkspace: removeWorkspace ? callbacks.removeWorkspace : undefined,
+      workspaceRemovalResults,
+      lookupWorkspaceRemoval: lookupWorkspaceRemoval ? callbacks.lookupWorkspaceRemoval : undefined,
       workbench: workbench ? callbacks.workbench : undefined,
       scheduledTasks: scheduledTasks ? callbacks.scheduledTasks : undefined,
       settings: settings ? callbacks.settings : undefined,
@@ -140,6 +146,8 @@ function useNavigationCallbacks(
       newWorkspaceSession,
       addWorkspace,
       removeWorkspace,
+      workspaceRemovalResults,
+      lookupWorkspaceRemoval,
       workbench,
       scheduledTasks,
       settings,

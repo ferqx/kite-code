@@ -1,6 +1,7 @@
 import {
   Add01Icon,
   AlarmClockIcon,
+  Clock01Icon,
   Delete02Icon,
   Folder01Icon,
   Folder02Icon,
@@ -362,6 +363,8 @@ export interface PageActions {
   newWorkspaceSession?: (workspaceId: string) => void;
   addWorkspace?: () => void;
   removeWorkspace?: (workspaceId: string) => void;
+  workspaceRemovalResults?: readonly { id: string; label: string }[];
+  lookupWorkspaceRemoval?: (id: string) => void;
   workbench?: () => void;
   scheduledTasks?: () => void;
   settings?: () => void;
@@ -434,6 +437,36 @@ export function Sidebar({
       )}
       <div className="nav-label">
         <span>空间</span>
+        {actions.lookupWorkspaceRemoval && !!actions.workspaceRemovalResults?.length && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="space-removal-results"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="查询空间移除结果"
+                title="查询空间移除结果"
+                disabled={props.mutationBusy}
+              >
+                <HugeiconsIcon icon={Clock01Icon} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="sidebar-menu" aria-label="查询空间移除结果">
+              <DropdownMenuLabel className="sidebar-menu-label">查看移除结果</DropdownMenuLabel>
+              {actions.workspaceRemovalResults.map((result) => (
+                <DropdownMenuItem
+                  key={result.id}
+                  aria-label={`查看 ${result.label} 的移除结果`}
+                  onSelect={() => actions.lookupWorkspaceRemoval?.(result.id)}
+                >
+                  <span className="space-removal-result-label" title={result.label}>
+                    {result.label}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {actions.addWorkspace && (
           <span className="sidebar-actions">
             <Button

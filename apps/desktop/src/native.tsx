@@ -114,7 +114,7 @@ import { readNativeInteractionAttachment } from './native-interaction-attachment
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
-import { humanReadableOperationError, NativeToast } from './native-message';
+import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
@@ -512,19 +512,35 @@ function NativeDesktopContent({
   }>();
   const planModes = useRef(new Map<string, boolean>());
   const errorSequence = useRef(0);
-  const [operationFailure, setOperationFailure] = useState<{
-    id: number;
-    message?: string;
-    operation?: string;
-  }>();
-  const setError = useCallback((message: string | undefined, operation?: string) => {
-    setOperationFailure(
-      message !== '' ? { id: ++errorSequence.current, message, operation } : undefined,
-    );
+  const [operationMessage, setOperationMessage] = useState<NativeToastProps['message']>();
+  const showOperationMessage = useCallback((text?: string) => {
+    setOperationMessage(text ? { id: ++errorSequence.current, text } : undefined);
   }, []);
-  const dismissOperationFailure = useCallback((id: number) => {
-    setOperationFailure((current) => (current?.id === id ? undefined : current));
+  const setError = useCallback(
+    (message: string | undefined, operation?: string) =>
+      showOperationMessage(
+        message === '' ? undefined : humanReadableOperationError(message, operation),
+      ),
+    [showOperationMessage],
+  );
+  const dismissOperationMessage = useCallback((id: number) => {
+    setOperationMessage((current) => (current?.id === id ? undefined : current));
   }, []);
+  const workspaceRemovalUnavailable = state?.workspaceRemovalUnavailable;
+  const removalUnavailableReported = useRef(false);
+  useEffect(() => {
+    if (startup !== 'ready' || workspaceRemovalUnavailable === undefined) return;
+    if (workspaceRemovalUnavailable && !removalUnavailableReported.current)
+      showOperationMessage('暂时无法确认空间移除结果。');
+    removalUnavailableReported.current = workspaceRemovalUnavailable;
+  }, [startup, workspaceRemovalUnavailable, showOperationMessage]);
+  const workspaceRemovalResults = useMemo(
+    () =>
+      state?.workspaceRemovalSubmissions?.flatMap(({ phase, commandId, label }) =>
+        phase === 'unknown' && commandId ? [{ id: commandId, label }] : [],
+      ),
+    [state?.workspaceRemovalSubmissions],
+  );
   const [failedReads, setFailedReads] = useState<{
     state?: string;
     directory?: string;
@@ -2267,10 +2283,22 @@ function NativeDesktopContent({
       value.kind !== 'workspace.removal' ||
       !('phase' in value) ||
       !('storeId' in value) ||
-      value.phase !== 'applied' ||
       value.storeId !== directory?.storeId
     )
       return;
+    if (value.phase === 'failed') {
+      showOperationMessage(
+        value.error === 'permission_denied'
+          ? '当前用户无权移除此空间。'
+          : '本地服务拒绝了此次移除。',
+      );
+      return;
+    }
+    if (value.phase === 'unknown') {
+      showOperationMessage('移除结果待确认。');
+      return;
+    }
+    if (value.phase !== 'applied') return;
     history.current?.evictStore(value.storeId);
     if (
       selection?.session.workspaceId === value.workspaceId ||
@@ -2314,11 +2342,13 @@ function NativeDesktopContent({
   }
   async function lookupWorkspaceRemoval(commandId: string) {
     if (!bridge) return;
+    const current = generation.current;
     const value = await bridge.request({
       method: 'workspace.removal.lookup',
-      generation: generation.current,
+      generation: current,
       commandId,
     });
+    if (generation.current !== current) return;
     await acceptWorkspaceRemoval(value).catch(() => {});
     await refresh().catch(() => {});
   }
@@ -4992,48 +5022,13 @@ function NativeDesktopContent({
               <DesktopButton onClick={toolMessages.retry}>重新核对工具状态</DesktopButton>
             </p>
           )}
-          {state?.workspaceRemovalUnavailable && <p role="alert">暂时无法确认空间移除结果。</p>}
-          {state?.workspaceRemovalSubmissions
-            ?.filter((r) => r.phase === 'unknown' || r.phase === 'failed')
-            .map((r) => (
-              <p role="status" key={r.commandId}>
-                空间“{r.label}”{r.phase === 'failed' ? '未移除' : '移除结果待确认'}。
-                {r.phase === 'failed' &&
-                  (r.error === 'permission_denied'
-                    ? '当前用户无权移除此空间。'
-                    : '本地服务拒绝了此次移除。')}
-                {r.phase === 'unknown' && r.commandId && (
-                  <DesktopButton
-                    onClick={() =>
-                      void report(
-                        () => lookupWorkspaceRemoval(r.commandId!),
-                        true,
-                        '查询移除空间的结果',
-                      )
-                    }
-                  >
-                    查看结果
-                  </DesktopButton>
-                )}
-              </p>
-            ))}
         </>
       }
       beforeConversation={
         <NativeToast
           container={settingsOpen ? (settingsToastHost ?? undefined) : undefined}
-          message={
-            operationFailure
-              ? {
-                  id: operationFailure.id,
-                  text: humanReadableOperationError(
-                    operationFailure.message,
-                    operationFailure.operation,
-                  ),
-                }
-              : undefined
-          }
-          onDismiss={dismissOperationFailure}
+          message={operationMessage}
+          onDismiss={dismissOperationMessage}
         />
       }
       loading={
@@ -5227,6 +5222,9 @@ function NativeDesktopContent({
         removeWorkspace: directory?.unavailable
           ? undefined
           : (id) => void report(() => removeWorkspace(id), true, '移除空间'),
+        workspaceRemovalResults,
+        lookupWorkspaceRemoval: (commandId) =>
+          void report(() => lookupWorkspaceRemoval(commandId), true, '查询移除结果'),
         settings: () => setSettingsOpen(true),
         scheduledTasks: () => {
           pageIntent.current++;

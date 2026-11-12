@@ -526,8 +526,8 @@ function fixture(
       workspaceRemovalUnavailable = unavailable;
       await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
     },
-    finishWorkspaceRemoval: async (phase: NativeWorkspaceRemoval['phase']) => {
-      const result: NativeWorkspaceRemoval = { ...workspaceRemovalSubmissions[0]!, phase };
+    finishWorkspaceRemoval: async (phase: NativeWorkspaceRemoval['phase'], error?: string) => {
+      const result: NativeWorkspaceRemoval = { ...workspaceRemovalSubmissions[0]!, phase, error };
       workspaceRemovalSubmissions = [result];
       await act(async () => releaseWorkspaceRemoval?.(result));
     },
@@ -5610,6 +5610,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
 for (const [code, message] of [
   ['workspace_not_found', '未找到所选项目，请重新选择。'],
   ['draft_storage_unavailable', '本地数据暂时无法读取或保存，请先查看当前状态。'],
+  ['workspace_storage_unavailable', '本地数据暂时无法读取或保存，请先查看当前状态。'],
   ['service_unavailable', '服务处理此操作时遇到问题，请先查看当前状态。'],
 ])
   test(`ordinary workspace removal reports ${code} once without sending or replacing the draft`, async () => {
@@ -5687,7 +5688,7 @@ test('an applied workspace removal is not relabelled or resubmitted when its dir
   }
 });
 
-test('workspace removal keeps normal progress silent and retains original unknown-result lookup', async () => {
+test('workspace removal keeps the conversation clear and retains the original lookup in the sidebar', async () => {
   const f = fixture(false, true, 'auto', { withoutSelection: true });
   try {
     await act(async () => f.root.render(<NativeDesktop />));
@@ -5717,12 +5718,25 @@ test('workspace removal keeps normal progress silent and retains original unknow
     expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
 
     await f.finishWorkspaceRemoval('unknown');
-    await f.until(() => text().includes('移除结果待确认'));
+    const resultTrigger = () =>
+      f.host.querySelector<HTMLButtonElement>('.nav-label [aria-label="查询空间移除结果"]');
+    await f.until(() => !!resultTrigger());
+    expect(notices()).toHaveLength(0);
+    expect(f.host.querySelector('main')?.textContent).not.toContain('移除结果待确认');
+    expect(f.host.querySelectorAll('.native-toast')).toHaveLength(1);
+    expect(f.host.querySelector('.native-toast')?.textContent).toContain('移除结果待确认');
     expect(f.input()).toBe(editor);
     expect(promptValue(editor)).toBe('保留草稿 雪🙂');
     expect(f.calls.filter((call) => call.method === 'workspace.removal.lookup')).toHaveLength(0);
-    await f.click('查看结果');
-    await f.until(() => !text().includes('移除结果待确认'));
+    await act(async () => {
+      resultTrigger()!.focus();
+      resultTrigger()!.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await f.click('查看 Workspace 的移除结果');
+    await f.until(() => !resultTrigger());
+    expect(f.host.querySelector('.native-toast')).toBeNull();
     expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'workspace.removal.lookup')).toEqual([
       { method: 'workspace.removal.lookup', generation: 1, commandId: 'remove-workspace' },
@@ -5733,7 +5747,7 @@ test('workspace removal keeps normal progress silent and retains original unknow
   }
 });
 
-test('workspace removal shows actionable failures without normal or completed-operation notices', async () => {
+test('workspace removal storage and rejection notices are temporary and are not repeated by refresh', async () => {
   const f = fixture(false, true, 'auto', { withoutSelection: true });
   const removal: NativeWorkspaceRemoval = {
     kind: 'workspace.removal',
@@ -5753,13 +5767,36 @@ test('workspace removal shows actionable failures without normal or completed-op
         0,
       );
     }
-    await f.publishWorkspaceRemovals([{ ...removal, phase: 'failed', error: 'permission_denied' }]);
-    await f.until(() => text().includes('当前用户无权移除此空间'));
-    expect(text()).toContain('未移除');
-    expect(text()).not.toContain('查看结果');
-    await f.publishWorkspaceRemovals([], true);
-    await f.until(() => text().includes('暂时无法确认空间移除结果'));
+    const rejected = { ...removal, phase: 'failed', error: 'permission_denied' } as const;
+    await f.publishWorkspaceRemovals([rejected], true);
+    await f.until(() => !!f.host.querySelector('.native-toast'));
+    expect(text()).not.toContain('当前用户无权移除此空间');
+    expect(f.host.querySelector('.native-toast')?.textContent).toContain(
+      '暂时无法确认空间移除结果',
+    );
+    expect(f.host.querySelector('main')?.textContent).not.toContain('暂时无法确认空间移除结果');
+    expect(f.host.querySelector('.space-removal-results')).toBeNull();
+    await f.click('关闭提示');
+    await f.publishWorkspaceRemovals([rejected], true);
+    expect(f.host.querySelector('.native-toast')).toBeNull();
     expect(f.calls.some((call) => call.method === 'workspace.remove')).toBe(false);
+    const more = f.host.querySelector<HTMLButtonElement>('.workspace-group .space-more')!;
+    await act(async () => {
+      more.focus();
+      more.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await f.click('移除 Workspace');
+    await f.finishWorkspaceRemoval('failed', 'permission_denied');
+    await f.until(() => !!f.host.querySelector('.native-toast'));
+    expect(f.host.querySelectorAll('.native-toast')).toHaveLength(1);
+    expect(f.host.querySelector('.native-toast')?.textContent).toContain('当前用户无权移除此空间');
+    expect(f.host.querySelector('main')?.textContent).not.toContain('当前用户无权移除此空间');
+    await f.click('关闭提示');
+    await f.publishWorkspaceRemovals([rejected], true);
+    expect(f.host.querySelector('.native-toast')).toBeNull();
+    expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
   } finally {
     await f.close();
   }

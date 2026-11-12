@@ -8,6 +8,7 @@ export function humanReadableOperationError(code: string | undefined, operation?
     case 'workspace_not_found':
       return '未找到所选项目，请重新选择。';
     case 'draft_storage_unavailable':
+    case 'workspace_storage_unavailable':
       return '本地数据暂时无法读取或保存，请先查看当前状态。';
     case 'service_unavailable':
       return '服务处理此操作时遇到问题，请先查看当前状态。';

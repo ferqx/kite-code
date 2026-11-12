@@ -507,7 +507,7 @@ Windows Mica 与 macOS Vibrancy 窗口的[启动样式](src/native-startup.css)�
 
 目录不可用无论来自本次目录 GET，还是 Main 状态观察中的 `directory.unavailable`，均由同一原作用域的后台只读恢复重新核实。确认同 Store、原观察作用域仍有效的目录恢复成功后，唤醒该作用域已有的其他只读恢复，沿原 key 和并发上限重新核实，不再额外等待旧退避档位；仍在途的同 key 读取不重复启动。原答复只查询已保存的 Command；确认该原答复回执后也唤醒同作用域已登记的目录恢复，不把缓存的 unknown 当作连接恢复，不因核实目录重新发送答案或工具。当前可见作用域的只读失败按 250／500／1000ms 退避并保持 1 秒上限，最多两项并发；这只影响原读取，不调用模型或重投答案。会话切换、隐藏、Store／generation 变化与退出仍撤销所属恢复。
 
-[可读错误映射](src/native-message.tsx)仅维护普通客户端实际可触发的三个错误码：移除前核实项目不存在、本地数据存储异常和Service未分类处理异常；其余普通业务异常使用中性兜底，不回显内部原因或推断业务成败。无producer、仅状态枚举、只有诊断展示或已有其他局部owner的条目都不作为全局别名。私有存储也承载配置与操作日志，不能一概称草稿失败。业务已有添加／移除空间的有效回执后，后续目录或状态刷新失败沿原读取恢复，不改报原业务失败或未知，亦不重发业务。分支初始读取、项目选择与刷新保持静默，普通目录无须Git，显式切换的安全检查留在所属结果。用户配置审批方式不经过工具审批；真实权限、Store／scope、CAS与启动失败门禁保持。明确退出无条件关闭界面，不再存在退出确认失败Toast或其IPC通知链。
+[可读错误映射](src/native-message.tsx)维护普通客户端实际可触发的三类错误：移除前核实项目不存在、本地数据存储异常和Service未分类处理异常；其余普通业务异常使用中性兜底，不回显内部原因或推断业务成败。无producer、仅状态枚举、只有诊断展示或已有其他局部owner的条目都不作为全局别名。私有存储也承载配置与操作日志，不能一概称草稿失败。业务已有添加／移除空间的有效回执后，后续目录或状态刷新失败沿原读取恢复，不改报原业务失败或未知，亦不重发业务。分支初始读取、项目选择与刷新保持静默，普通目录无须Git，显式切换的安全检查留在所属结果。用户配置审批方式不经过工具审批；真实权限、Store／scope、CAS与启动失败门禁保持。明确退出无条件关闭界面，不再存在退出确认失败Toast或其IPC通知链。
 
 2026-11-06，macOS arm64／Bun1.4.4，本轮按普通客户端实际Toast路径核对原43个映射，最终只保留项目记录不存在、本地数据存储异常和Service处理异常三个专门映射及中性兜底。五个完整DOM文件（Toast、首次会话／草稿、读取归属、窗口动作、恢复压缩输入）118项／2364断言通过，含普通客户端三类移除错误提示、诊断开关不新增Toast、原草稿CAS／同ID查询与恢复零重放。恢复测试改为等待真实Main选择及草稿读取，不再把Toast出现作为同步屏障；原业务与恢复断言保留。前轮Main Conversation／WorkspaceRemoval和Node私有数据18项／172断言的实现输入未变，复用其真实producer边界证据。沿现有隔离Native shell、普通生产样式与诊断关闭，实际观察三类普通空间移除错误的弹出、关闭及后台读取失败，93帧最多一条Toast，草稿与240px阅读位置保持、页面异常为空；受控bridge仅验证真实UI处理，不代证实际Service故障或安装包。过程证据在本机`.cache/toast-20261106/production-only-review.json`及`*-production.log`。Toast组件与CSS未改，复用前轮`error-audit-review.json`的设置Dialog归属、剩余约4秒退役和返回无复现，以及`review.json`的主题／宽度与分栏几何；已删除诊断映射的文案观察不再作为当前资格。退出控制器的变更及验证另归下方退出owner，不由上述浏览器夹具代证。
 
@@ -1275,11 +1275,11 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 空间批量移除
 
-普通客户端不显示移除的在途过程段落：本地忙碌状态与持久申请的 `submitting` 投影均不向 `SessionPage.notices` 插入文字，原操作禁用、主窗口自绘确认和目录更新保留。`unknown`／`failed` 及无法核实结果继续显示必要提示；“查看结果”只查原申请，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖等待／刷新期间无额外提示、输入节点与草稿保持、原 ID 查询、成功目录更新及失败边界。
+空间移除不在对话区插入常驻提示。显式操作的未知结果、拒绝及后台移除记录变为无法读取时，通过原非模态 Toast 临时呈现；同一次读取异常不会因刷新重复弹出。原申请未知时，「空间」旁显示查询图标；即使原空间不在目录中，也可从菜单选原空间查询结果，不重新提交。[Native DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)核等待与刷新、Toast 关闭与去重、草稿保持、原 ID 查询、成功目录更新和拒绝。
 
 原 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx) 的空间行将移除入口收进更多菜单，新对话与更多图标均为14px并沿原悬浮／键盘焦点显示；选择“移除空间”才调用原回调。[Main](electron/main.ts)通过主窗口所属的共享确认Overlay显示完整移除风险，默认和取消均为「保留空间」。renderer 只传当前目录的 Workspace ID；[Main port](electron/workspace-removal.ts) 固定实际 generation／Store／subject，在确认后重新核原 Workspace 名称与根，再将完整原申请先存入 Node 私有库并仅 POST 一次。当前选中目标移除成功才清其阅读页，其他空间的选择和草稿保持。重新添加同一目录创建新 Workspace 身份，原目录文件不删除。
 
-[Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确点击「查看结果」才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
+[Store 批量事务](../../packages/agent/src/storage/sqlite/workspace-removal.ts) 一次保存全部根及子 Session tombstone、停止边界和原 Workspace receipt，目录同时隐藏；它不逐条等待，不冒充资源停止。回复丢失／不可信则保存 unknown，重开只展示原申请，明确从侧栏菜单选择原空间才用原 Store／Workspace／Command GET；其他 Store／主体在 HTTP 前拒绝，不改绑、不自动再提交。可信 4xx 显示未移除。目录状态未核实或私有申请不能保存时拒绝新移除。
 
 首次保存移除申请在同一 FULL 事务惰性增加 `workspace_removal_intents`，私有 `user_version` 从 DB7 升至 DB8；没有移除申请的旧流程继续 DB7。闭合原申请最多128项／256KiB，只允许 submitting→unknown，不保存重发资格或当前路径。离线维护的 DB8／manifest v17 字节范围由 [maintenance owner](../../packages/agent/src/maintenance/README.md#desktop-db8-与-manifest-v17)负责。
 
