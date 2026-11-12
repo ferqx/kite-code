@@ -48,6 +48,8 @@ Terminal 与内含它的 Native 候选按目标复制 `agent-browser` 和 `tree-
 
 Native非development renderer的React／JSX模式由[builder](../../apps/desktop/scripts/build-native.ts)固定为production，不继承测试调用进程环境；显式测试诊断常量独立封存，普通dev／prod关闭要求保持，Vite开发服务器仍走原开发分支。原child-stream真实资产守卫与窗口门禁核开发栈不混入正式renderer，具体范围归[Native发行owner](../../apps/desktop/docs/native-release.md)。此修正不改变候选身份、完整库存或平台发布资格。
 
+Windows 桌面专用安装包的配套服务通过同一制品内的模块启动。Bun 构建时解析拆分文件的外部模块导入和 `require`，成品由私有映射定位包内文件。完整安装启动验证覆盖仓库外的目录。生产候选继续使用固定的本地 renderer，开发控制连接只在开发构建中启用。具体边界见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+
 `release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 默认包含完整 Terminal 和实际 Electron。Windows x64 桌面安装包选择 `--desktop-only true`，内嵌通过相对路径链接的本地服务及一份 Bun，安装包拒绝残留的 `node_modules`。旧候选仍按原清单验证供覆盖升级，具体边界归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
 
 候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.4。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。当前 fault-soak 与完整 blocked collection 同样要求1.4.4，原迭代、期限、source／receipt／资源拒绝门禁不变；历史1.4.2记录保留其原环境，不能替代新基线证据。

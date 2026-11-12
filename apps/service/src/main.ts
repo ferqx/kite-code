@@ -76,6 +76,7 @@ async function startupChannel(signal: AbortSignal): Promise<{
 /** Default model assembly is per Run; startup remains usable without model/config/credentials. */
 export async function runServiceProcess(options: ProcessServiceOptions = {}): Promise<void> {
   let service: Awaited<ReturnType<typeof assembleProcessService>> | undefined;
+  let parentWatch: Awaited<ReturnType<typeof startupChannel>> | undefined;
   const stop = new AbortController();
   const stopReason = new Error('service_stop_requested');
   let requestStop!: () => void;
@@ -90,7 +91,8 @@ export async function runServiceProcess(options: ProcessServiceOptions = {}): Pr
   process.on('SIGINT', requestStop);
   process.on('SIGTERM', requestStop);
   try {
-    const { startup, parentEnded, stopParentWatch } = await startupChannel(stop.signal);
+    parentWatch = await startupChannel(stop.signal);
+    const { startup, parentEnded } = parentWatch;
     stop.signal.throwIfAborted();
     service = await assembleProcessService(startup, options);
     if (!stop.signal.aborted) {
@@ -101,7 +103,6 @@ export async function runServiceProcess(options: ProcessServiceOptions = {}): Pr
     }
     await Promise.race([parentEnded, service.closedPromise, stopping]);
     await service.close();
-    await stopParentWatch();
   } catch (error) {
     if (error === stopReason && !service) return;
     if (error instanceof ProcessServiceCleanupError) await retainFailedProcess(error);
@@ -114,8 +115,14 @@ export async function runServiceProcess(options: ProcessServiceOptions = {}): Pr
       await service?.closedPromise;
     }
   } finally {
-    process.removeListener('SIGINT', requestStop);
-    process.removeListener('SIGTERM', requestStop);
+    // A failed assembly still owns the original stdin read. Leaving it open
+    // keeps the failed child alive while its parent is waiting for bootstrap.
+    try {
+      await parentWatch?.stopParentWatch();
+    } finally {
+      process.removeListener('SIGINT', requestStop);
+      process.removeListener('SIGTERM', requestStop);
+    }
   }
 }
 

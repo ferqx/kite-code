@@ -107,6 +107,60 @@ function lockAvailable(path: string) {
   }
 }
 
+test('a failed paired assembly exits while its original parent pipe is still open', async () => {
+  const data = fixture();
+  const main = new URL('../../src/main.ts', import.meta.url).href;
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      '--no-install',
+      '--eval',
+      `import { runServiceProcess } from ${JSON.stringify(main)};
+await runServiceProcess({
+  configure() {
+    console.error(JSON.stringify({ code: 'fixture_assembly_started' }));
+    throw Error('private fixture details');
+  },
+});`,
+    ],
+    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true },
+  );
+  const stdout = new Response(child.stdout).text();
+  const stderr = new Response(child.stderr).text();
+  try {
+    const { dataRoot, profile, profileAccessKey } = data.profile;
+    child.stdin.write(
+      `${JSON.stringify({
+        profile: { dataRoot, profile, profileAccessKey },
+        instanceId: 'failed-assembly',
+        buildId: 'fixture-build',
+        token: 't'.repeat(64),
+      })}\n`,
+    );
+    await child.stdin.flush();
+    // A parent awaiting bootstrap leaves its liveness pipe open.
+    await until(
+      () => child.exitCode,
+      (code) => code !== null,
+    );
+    expect(await child.exited).toBe(1);
+    expect(await stdout).toBe('');
+    expect(
+      (await stderr)
+        .trim()
+        .split(/\r?\n/u)
+        .map((line) => JSON.parse(line)),
+    ).toEqual([{ code: 'fixture_assembly_started' }, { code: 'service_process_failed' }]);
+    expect(existsSync(dataRoot)).toBe(false);
+  } finally {
+    if (child.exitCode === null) {
+      child.kill('SIGKILL');
+      await child.exited;
+    }
+    rmSync(data.root, { recursive: true, force: true });
+  }
+}, 10_000);
+
 test.each([
   'api',
   'capability',

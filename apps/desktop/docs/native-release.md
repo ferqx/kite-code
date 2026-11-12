@@ -45,6 +45,8 @@ bun run release:native uninstall --prefix /absolute/install/native
 
 Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档。构建包含桌面 Main、renderer 和本地服务。服务的工作区构建产物与第三方 JS bundle 位于 `terminal/code`，通过相对路径加载。Windows x64 原生绑定、辅助程序和 PDF 字体、WASM 等运行资源单独保留。安装包的生产入口拒绝含 `node_modules` 的归档。旧桌面包的清单仍可核验，以便升级和卸载。归档和安装后的程序树各含一份 `bun.exe`。小型 C 前门核对包内 Bun 和校验脚本的固定摘要，再用该 Bun 启动两跳证书校验。配套服务使用同一个可执行文件。
 
+桌面服务在 Bun 解析依赖时把保留的模块导入和 `require` 指向 `code/package.json` 的私有包内映射。映射目标都是制品中的相对路径，拆分文件可共享同一个模块。制品检查验证输出引用和文件存在性。[搬迁回归](../../../tests/isolated/unified-agent/windows-desktop-runtime.test.ts)核编译后从仓库外加载共享模块，完整安装验证从仓库外的正式入口观察 Service 握手和首屏。
+
 安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。窗口显示解包、发布和旧版清理的实际阶段。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和[Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
 
 ```powershell

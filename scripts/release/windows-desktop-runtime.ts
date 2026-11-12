@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   copyFileSync,
   existsSync,
@@ -9,75 +8,146 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire, isBuiltin } from 'node:module';
-import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 import ts from 'typescript';
+import {
+  windowsDesktopModulePlugin,
+  windowsDesktopModuleSpecifier,
+} from '../../packages/agent/scripts/windows-desktop-bundling';
 import { terminalBundledNotices } from './terminal-dependencies';
 
-function localSpecifier(importer: string, target: string): string {
-  const path = relative(dirname(importer), target).replaceAll('\\', '/');
-  return path.startsWith('.') ? path : `./${path}`;
+export function windowsDesktopModuleMap(
+  workspaces: readonly { name: string; exports: Record<string, string> }[],
+): ReadonlyMap<string, string> {
+  const modules = new Map([
+    ['jsdom', './vendor/jsdom.cjs'],
+    ['sharp', './vendor/sharp.cjs'],
+    ['@napi-rs/keyring', './vendor/keyring.cjs'],
+    ['pdfjs-dist/legacy/build/pdf.mjs', './vendor/pdf.mjs'],
+    ['web-tree-sitter', './vendor/tree-sitter.mjs'],
+    ['zod', './vendor/zod.mjs'],
+  ]);
+  for (const { name, exports } of workspaces)
+    for (const [subpath, path] of Object.entries(exports))
+      modules.set(
+        subpath === '.' ? name : `${name}${subpath.slice(1)}`,
+        `./${name}/${path.slice(2)}`,
+      );
+  return modules;
 }
 
-function bareModule(name: string): boolean {
-  return !name.startsWith('.') && !name.startsWith('bun:') && !isBuiltin(name);
+/** Use the workspace's existing build entries and resolve external modules in the bundler. */
+export async function buildWindowsDesktopWorkspace(
+  workspace: string,
+  args: readonly string[],
+  modules: ReadonlyMap<string, string>,
+): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args: [...args],
+    allowPositionals: true,
+    options: {
+      target: { type: 'string' },
+      packages: { type: 'string' },
+      outdir: { type: 'string' },
+      root: { type: 'string' },
+      external: { type: 'string', multiple: true, default: [] },
+      splitting: { type: 'boolean' },
+    },
+  });
+  const { target, packages, outdir, root, external, splitting } = values;
+  if (
+    (target !== 'bun' && target !== 'browser') ||
+    (packages !== 'bundle' && packages !== 'external') ||
+    !outdir ||
+    !positionals.length
+  )
+    throw Error('desktop_runtime_build_options_invalid');
+  const imports = [...modules.keys()].filter(
+    (name) =>
+      packages === 'external' || external.some((pkg) => name === pkg || name.startsWith(`${pkg}/`)),
+  );
+  const built = await Bun.build({
+    entrypoints: positionals.map((path) => resolve(workspace, path)),
+    outdir: resolve(workspace, outdir),
+    ...(root ? { root: resolve(workspace, root) } : {}),
+    target,
+    packages,
+    external,
+    splitting,
+    define: { __KITE_WINDOWS_DESKTOP_ASSETS__: 'true' },
+    plugins: [windowsDesktopModulePlugin(imports)],
+  });
+  if (!built.success)
+    throw new AggregateError(built.logs, 'desktop_runtime_workspace_build_failed');
 }
 
-/** Preserve the workspace bundles' shared chunks and asset-relative locations. */
-function linkWorkspaces(workspaces: readonly string[], modules: ReadonlyMap<string, string>) {
+/** Validate emitted code without rewriting it. Bun's import scan omits shared require aliases. */
+function verifyWindowsDesktopImports(
+  workspaces: readonly string[],
+  imports: Readonly<Record<string, string>>,
+): void {
   const scanner = new Bun.Transpiler({ loader: 'js' });
   for (const workspace of workspaces) {
     for (const name of readdirSync(workspace, { encoding: 'utf8', recursive: true })) {
       if (!name.endsWith('.js')) continue;
       const path = join(workspace, name);
       const source = readFileSync(path, 'utf8');
-      if (!scanner.scanImports(source).some((item) => bareModule(item.path))) continue;
+      const verify = (specifier: string) => {
+        if (
+          !specifier.startsWith('.') &&
+          !specifier.startsWith('bun:') &&
+          !isBuiltin(specifier) &&
+          !Object.hasOwn(imports, specifier)
+        )
+          throw Error(`desktop_runtime_module_unbundled:${name}:${specifier}`);
+      };
+      for (const item of scanner.scanImports(source)) verify(item.path);
       const file = ts.createSourceFile(
         path,
         source,
         ts.ScriptTarget.Latest,
-        true,
+        false,
         ts.ScriptKind.JS,
       );
-      const edits: { start: number; end: number; value: string }[] = [];
-      const replace = (node: ts.Node | undefined) => {
-        if (!node || !ts.isStringLiteralLike(node) || !bareModule(node.text)) return;
-        const target = modules.get(node.text);
-        if (!target) throw Error(`desktop_runtime_module_unbundled:${name}:${node.text}`);
-        edits.push({
-          start: node.getStart(file),
-          end: node.end,
-          value: JSON.stringify(localSpecifier(path, target)),
-        });
-      };
       const visit = (node: ts.Node) => {
-        if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-          replace(node.moduleSpecifier);
-        } else if (ts.isCallExpression(node)) {
+        if (ts.isCallExpression(node)) {
           const fn = node.expression;
+          const metaRequire =
+            ts.isPropertyAccessExpression(fn) &&
+            fn.name.text === 'require' &&
+            ts.isMetaProperty(fn.expression) &&
+            fn.expression.keywordToken === ts.SyntaxKind.ImportKeyword;
+          const specifier = node.arguments[0];
           if (
-            fn.kind === ts.SyntaxKind.ImportKeyword ||
-            (ts.isIdentifier(fn) && /^(?:__)?require$/u.test(fn.text))
+            specifier &&
+            ts.isStringLiteralLike(specifier) &&
+            (metaRequire || (ts.isIdentifier(fn) && /^(?:__)?require\d*$/u.test(fn.text)))
           )
-            replace(node.arguments[0]);
+            verify(specifier.text);
         }
         ts.forEachChild(node, visit);
       };
       visit(file);
-      let linked = source;
-      for (const { start, end, value } of edits.sort((a, b) => b.start - a.start))
-        linked = linked.slice(0, start) + value + linked.slice(end);
-      const unlinked = scanner.scanImports(linked).find((item) => bareModule(item.path));
-      if (unlinked) throw Error(`desktop_runtime_module_unbundled:${name}:${unlinked.path}`);
-      writeFileSync(path, linked);
-      const checksum = path.replace(/\.js$/u, '.sha256');
-      if (existsSync(checksum)) {
-        const sha = (text: string) => createHash('sha256').update(text).digest('hex');
-        if (readFileSync(checksum, 'utf8').trim() !== sha(source))
-          throw Error(`desktop_runtime_worker_checksum_invalid:${name}`);
-        writeFileSync(checksum, `${sha(linked)}\n`);
-      }
     }
   }
+}
+
+export function writeWindowsDesktopImports(
+  codeRoot: string,
+  workspaces: readonly string[],
+  modules: ReadonlyMap<string, string>,
+): void {
+  const imports = Object.fromEntries(
+    [...modules].map(([specifier, path]) => [windowsDesktopModuleSpecifier(specifier), path]),
+  );
+  for (const path of Object.values(imports))
+    if (!existsSync(join(codeRoot, path))) throw Error(`desktop_runtime_module_missing:${path}`);
+  verifyWindowsDesktopImports(workspaces, imports);
+  writeFileSync(
+    join(codeRoot, 'package.json'),
+    `${JSON.stringify({ type: 'module', imports }, null, 2)}\n`,
+  );
 }
 
 function replaceUpstream(
@@ -99,6 +169,7 @@ export async function buildWindowsDesktopRuntime(
   repository: string,
   root: string,
   workspaces: readonly string[],
+  modules: ReadonlyMap<string, string>,
 ) {
   const vendor = join(root, 'code/vendor');
   mkdirSync(vendor, { recursive: true });
@@ -277,25 +348,7 @@ export async function buildWindowsDesktopRuntime(
       else copy(source, asset);
     }
   }
-  const modules = new Map<string, string>([
-    ['jsdom', join(vendor, 'jsdom.cjs')],
-    ['sharp', join(vendor, 'sharp.cjs')],
-    ['@napi-rs/keyring', join(vendor, 'keyring.cjs')],
-    ['pdfjs-dist/legacy/build/pdf.mjs', join(vendor, 'pdf.mjs')],
-    ['web-tree-sitter', join(vendor, 'tree-sitter.mjs')],
-    ['zod', join(vendor, 'zod.mjs')],
-  ]);
-  for (const workspace of workspaces) {
-    const { name, exports } = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8')) as {
-      name: string;
-      exports: Record<string, string>;
-    };
-    for (const [subpath, file] of Object.entries(exports))
-      modules.set(subpath === '.' ? name : `${name}${subpath.slice(1)}`, join(workspace, file));
-    // The export table is build input for linking. Keep the package type and identity only.
-    writeFileSync(join(workspace, 'package.json'), `${JSON.stringify({ name, type: 'module' })}\n`);
-  }
-  linkWorkspaces(workspaces, modules);
+  writeWindowsDesktopImports(join(root, 'code'), workspaces, modules);
 
   const notices = [
     terminalBundledNotices({

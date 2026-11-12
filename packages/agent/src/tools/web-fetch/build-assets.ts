@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { windowsDesktopModulePlugin } from '../../../scripts/windows-desktop-bundling';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'tools/web-fetch');
 mkdirSync(destination, { recursive: true });
@@ -11,6 +12,7 @@ const build = await Bun.build({
   packages: 'bundle',
   // jsdom owns runtime CSS/DOM assets. Readability and Turndown/Domino are pure JS.
   external: ['jsdom'],
+  plugins: process.argv[3] === '--windows-desktop' ? [windowsDesktopModulePlugin(['jsdom'])] : [],
   naming: 'extractor-worker.js',
 });
 if (!build.success) throw new Error('web_parser_build_failed');

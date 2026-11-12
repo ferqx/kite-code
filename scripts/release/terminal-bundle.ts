@@ -40,6 +40,7 @@ import {
 } from '../../apps/service/src/runtime-assets';
 import { createTrustedAssets } from '../../apps/web/src/assets';
 import { agentBundledDependencies } from '../../packages/agent/scripts/bundled-dependencies';
+import { windowsDesktopModuleSpecifier } from '../../packages/agent/scripts/windows-desktop-bundling';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
 import { acquireFileLock } from '../../packages/agent/src/platform/locks';
 import { retainWindowsArtifactScope } from '../../packages/agent/src/platform/windows-artifact-scope';
@@ -58,7 +59,11 @@ import {
 import { buildTerminalSqliteEngine } from './sqlite-engine';
 import { copyTerminalDependencies, terminalBundledNotices } from './terminal-dependencies';
 import { rejectBundleOutput } from './terminal-paths';
-import { buildWindowsDesktopRuntime } from './windows-desktop-runtime';
+import {
+  buildWindowsDesktopRuntime,
+  buildWindowsDesktopWorkspace,
+  windowsDesktopModuleMap,
+} from './windows-desktop-runtime';
 import {
   installWindowsTerminalBundle,
   rollbackWindowsTerminalBundle,
@@ -338,16 +343,40 @@ export async function buildTerminalBundle(
   try {
     const root = realpathSync(destination),
       entries = desktop ? windowsDesktopRuntimeEntries : terminalBundleEntries(process.platform);
+    const excludedServiceSource = new Set([
+      './src/daemon.ts',
+      './src/daemon-main.ts',
+      './src/development-web.ts',
+    ]);
+    const desktopWorkers = new Set([
+      'src/tools/documents/build-assets.ts',
+      'src/tools/images/build-assets.ts',
+      'src/tools/web-fetch/build-assets.ts',
+    ]);
     const packages = workspaces
       .filter((source) => !desktop || !['packages/ui', 'apps/cli'].includes(source))
       .map((source) => {
         const path = join(repository, source),
           manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as Package;
+        const desktopService = desktop && manifest.name === '@kite-ai/service';
+        const exports = Object.fromEntries(
+          Object.entries(manifest.exports)
+            .filter(([, path]) => !desktopService || !excludedServiceSource.has(path))
+            .map(([key, path]) => {
+              if (typeof path !== 'string') error('workspace_export_unsupported');
+              const built = (
+                manifest.name === '@kite-ai/cli' ? path : path.replace(/^\.\/src\//, './')
+              ).replace(/\.tsx?$/, '.js');
+              if (desktop && !built.startsWith('./')) error('workspace_export_unsupported');
+              return [key, built];
+            }),
+        );
         return {
           name: manifest.name,
           source: path,
           destination: join(root, desktop ? 'code' : 'node_modules', manifest.name),
           manifest,
+          exports,
           bundledDependencies:
             manifest.name === '@kite-ai/ui'
               ? [...desktopBundledDependencies, ...tuiBundledDependencies]
@@ -362,14 +391,10 @@ export async function buildTerminalBundle(
                       : [],
         };
       });
+    const desktopModules = desktop ? windowsDesktopModuleMap(packages) : undefined;
     const buildWorkspace = async (item: (typeof packages)[number]) => {
       mkdirSync(item.destination, { recursive: true, mode: 0o700 });
       const desktopService = desktop && item.name === '@kite-ai/service';
-      const excludedServiceSource = new Set([
-        './src/daemon.ts',
-        './src/daemon-main.ts',
-        './src/development-web.ts',
-      ]);
       for (const segment of item.manifest.scripts.build.split(/\s*&&\s*/)) {
         const words = segment.trim().split(/\s+/);
         if (words.shift() !== 'bun') error('build_script_unsupported');
@@ -380,11 +405,13 @@ export async function buildTerminalBundle(
               ? item.destination
               : word.replace(/^--outdir=(?:\.\/)?dist(?=\/|$)/, `--outdir=${item.destination}`),
           );
-        if (desktop && item.name === '@kite-ai/agent') {
-          if (args[0] === 'build') args.push('--define', '__KITE_WINDOWS_DESKTOP_ASSETS__=true');
-          if (args[0] === 'src/tools/documents/build-assets.ts') args.push('--windows-desktop');
+        if (desktopModules && args[0] === 'build') {
+          await buildWindowsDesktopWorkspace(item.source, args.slice(1), desktopModules);
+        } else {
+          if (desktop && item.name === '@kite-ai/agent' && desktopWorkers.has(args[0]!))
+            args.push('--windows-desktop');
+          await run(runtime, args, item.source);
         }
-        await run(runtime, args, item.source);
       }
       verifyBundledDependencies(item.destination, item.bundledDependencies);
       if (item.name === '@kite-ai/agent') {
@@ -439,18 +466,9 @@ export async function buildTerminalBundle(
             .join('\n\n'),
         );
       }
-      const exports = Object.fromEntries(
-        Object.entries(item.manifest.exports)
-          .filter(([, path]) => !desktopService || !excludedServiceSource.has(path))
-          .map(([key, path]) => {
-            if (typeof path !== 'string') error('workspace_export_unsupported');
-            const built = (
-              item.name === '@kite-ai/cli' ? path : path.replace(/^\.\/src\//, './')
-            ).replace(/\.tsx?$/, '.js');
-            if (!existsSync(join(item.destination, built))) error('workspace_export_missing');
-            return [key, built];
-          }),
-      );
+      for (const path of Object.values(item.exports))
+        if (!existsSync(join(item.destination, path))) error('workspace_export_missing');
+      if (desktop) return;
       writeFileSync(
         join(item.destination, 'package.json'),
         JSON.stringify(
@@ -458,7 +476,7 @@ export async function buildTerminalBundle(
             name: item.name,
             version: item.manifest.version,
             type: 'module',
-            exports,
+            exports: item.exports,
             dependencies: item.manifest.dependencies
               ? Object.fromEntries(
                   Object.entries(item.manifest.dependencies).filter(
@@ -548,21 +566,23 @@ export async function buildTerminalBundle(
         if (!built.success)
           throw new AggregateError(built.logs, 'terminal_process_fixture_build_failed');
       }
+      const artifactAccess = '@kite-ai/agent/artifact-access';
       writeFileSync(
         join(folder, `${entry}.js`),
         `import {resolve} from 'node:path';
-import {acquireArtifactAccess} from '@kite-ai/agent/artifact-access';
+import {acquireArtifactAccess} from '${desktop ? windowsDesktopModuleSpecifier(artifactAccess) : artifactAccess}';
 import {${run}} from './${fixture ? fixtureEntry : `${entry}-implementation`}.js';
 export {${run}};
 if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta.dir,'../../..'),mode:'shared'});try{await ${run}();}finally{lease.release();}}
 `,
       );
     }
-    if (desktop) {
+    if (desktopModules) {
       await buildWindowsDesktopRuntime(
         repository,
         root,
         packages.map((item) => item.destination),
+        desktopModules,
       );
     } else {
       copyTerminalDependencies({

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { windowsDesktopModulePlugin } from '../../../scripts/windows-desktop-bundling';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'tools/images');
 mkdirSync(destination, { recursive: true });
@@ -10,6 +11,7 @@ const result = await Bun.build({
   target: 'bun',
   packages: 'bundle',
   external: ['sharp'],
+  plugins: process.argv[3] === '--windows-desktop' ? [windowsDesktopModulePlugin(['sharp'])] : [],
   naming: 'image-child.js',
 });
 if (!result.success) throw new Error('image_child_build_failed');
