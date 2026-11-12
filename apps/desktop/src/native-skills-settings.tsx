@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import type { NativeBridge, NativeSkillsScope } from './native-bridge';
 import { NativeSettingsListRow } from './native-settings-list-row';
 import { NativeSkillMarketplace } from './native-skill-marketplace';
+import { notifyNativeSkillMutation, watchNativeSkillMutations } from './native-skill-mutations';
 import { readNativeSkillCatalogue, readNativeSkillDocument } from './native-skills';
 import {
   installedSkillIdPrefix,
@@ -128,6 +129,13 @@ export function NativeSkillsSettings({
   const [uninstall, setUninstall] = useState<SkillUninstall>();
   const [uninstalled, setUninstalled] = useState<{ identity: string; slug: string }>();
   const pendingUninstall = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const origin = useRef<HTMLButtonElement | null>(null);
   const refreshButton = useRef<HTMLButtonElement>(null);
   const searchButton = useRef<HTMLButtonElement>(null);
@@ -147,6 +155,12 @@ export function NativeSkillsSettings({
   const searchOpen = selectedPanel?.kind === 'search';
   const active = useRef({ scope: canRead ? scope : undefined, panel: selectedPanel });
   active.current = { scope: canRead ? scope : undefined, panel: selectedPanel };
+  useEffect(() => {
+    if (!canRead || !scope) return;
+    return watchNativeSkillMutations(bridge, scope, () => {
+      if (active.current.scope === scope) setRefresh((value) => value + 1);
+    });
+  }, [bridge, scope, canRead]);
   const entry =
     facts?.availability === 'available'
       ? facts.entries.find((value) => value.id === detailId)
@@ -305,7 +319,8 @@ export function NativeSkillsSettings({
         (reply.result.status !== 'uninstalled' && reply.result.status !== 'already-uninstalled')
       )
         throw Error('skill_marketplace_uninstall_failed');
-      if (active.current.scope !== scope) return;
+      notifyNativeSkillMutation(bridge, scope);
+      if (!mounted.current || active.current.scope !== scope) return;
       setUninstall((old) => (old === submitted ? undefined : old));
       setUninstalled({
         identity,
@@ -317,8 +332,8 @@ export function NativeSkillsSettings({
       } else if (!active.current.panel && opener?.ownerDocument.activeElement === opener) {
         searchButton.current?.focus();
       }
-      setRefresh((value) => value + 1);
     } catch (cause) {
+      if (!mounted.current) return;
       setUninstall((old) =>
         old === submitted ? { ...submitted, busy: false, error: safeError(cause) } : old,
       );
@@ -446,7 +461,7 @@ export function NativeSkillsSettings({
           uninstalled={uninstalled?.identity === identity ? uninstalled : undefined}
           uninstalling={uninstall?.busy}
           onClose={close}
-          onInstalled={() => setRefresh((value) => value + 1)}
+          onInstalled={() => notifyNativeSkillMutation(bridge, scope)}
         />
       )}
       {detailId &&

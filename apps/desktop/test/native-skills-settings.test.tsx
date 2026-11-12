@@ -446,6 +446,141 @@ test('only an installed Skill can be confirmed for uninstall, and closing its de
     expect(host.textContent).not.toContain('Example');
   }));
 
+test.each([
+  'install',
+  'uninstall',
+] as const)('%s completion refreshes only the matching remounted Skills reader', async (operation) => {
+  for (const replacement of [
+    'same',
+    'generation',
+    'store',
+    'bridge',
+    'unavailable',
+    'unmounted',
+    'failure',
+  ] as const) {
+    await fixture(async (host, root, render, panel) => {
+      const remote = { source: 'owner/repo', skillId: 'example', name: 'Example', installs: 1 };
+      const managed: UserSkillCataloguePage['entries'][number] = {
+        ...entries[0]!,
+        id: 'user-skill.example',
+        name: 'Example',
+        source: { scope: 'user' as const, origin: '.kite-code' },
+      };
+      let installed = operation === 'uninstall';
+      let storeId = 'store';
+      let reads = 0;
+      let mutations = 0;
+      let finish!: () => void;
+      const bridge: NativeBridge = {
+        request: async (request) => {
+          if (request.method === 'settings.skills.open') {
+            reads++;
+            const reply = result(request, installed ? [managed] : []);
+            reply.scope.storeId = storeId;
+            reply.page.storeId = storeId;
+            return reply;
+          }
+          if (request.method === 'settings.skills.search')
+            return { kind: 'settings.skills.search', results: [remote] };
+          if (
+            request.method === 'settings.skills.install' ||
+            request.method === 'settings.skills.uninstall'
+          ) {
+            mutations++;
+            await new Promise<void>((resolve) => {
+              finish = resolve;
+            });
+            if (replacement === 'failure') throw Error('skill_marketplace_unavailable');
+            installed = operation === 'install';
+            return request.method === 'settings.skills.install'
+              ? {
+                  kind: 'settings.skills.install',
+                  result: { status: 'installed', name: remote.skillId },
+                }
+              : {
+                  kind: 'settings.skills.uninstall',
+                  result: { status: 'uninstalled', skillId: managed.id },
+                };
+          }
+          return null;
+        },
+        watch: () => () => undefined,
+      };
+      await render(bridge);
+      if (operation === 'install') {
+        await act(async () => button(host, '搜索 Skills').click());
+        await enterKeyword(panel, 'example');
+        await act(async () => button(panel, '搜索').click());
+        await act(async () => button(panel, '安装 Example（owner/repo）').click());
+      } else {
+        await openDetail(host, 'Example');
+        await act(async () => button(panel, '卸载').click());
+        const dialog = host.ownerDocument.querySelector<HTMLElement>('[role="alertdialog"]')!;
+        await act(async () => button(dialog, '确认卸载').click());
+      }
+      expect(mutations).toBe(1);
+      // Settings-category navigation destroys the page, without cancelling the Main mutation.
+      await act(async () => root.render(null));
+      storeId = replacement === 'store' ? 'other-store' : 'store';
+      const nextBridge = replacement === 'bridge' ? { ...bridge } : bridge;
+      if (replacement !== 'unmounted')
+        await render(nextBridge, {
+          storeId,
+          generation: replacement === 'generation' ? 2 : 1,
+          canRead: replacement !== 'unavailable',
+        });
+      const before = reads;
+      const focus = replacement === 'same' ? button(host, '搜索 Skills') : null;
+      await act(async () => focus?.focus());
+      await act(async () => finish());
+      expect(mutations).toBe(1);
+      expect(reads).toBe(before + (replacement === 'same' ? 1 : 0));
+      if (replacement === 'same') {
+        expect(host.querySelectorAll('li')).toHaveLength(operation === 'install' ? 1 : 0);
+        expect(panel.textContent).toBe('');
+        expect(host.ownerDocument.activeElement).toBe(focus);
+      }
+      if (replacement === 'unmounted') {
+        await render(bridge);
+        expect(reads).toBe(before + 1);
+        expect(host.querySelectorAll('li')).toHaveLength(operation === 'install' ? 1 : 0);
+      }
+    });
+  }
+});
+
+test('Skill mutation subscriptions are scoped, released and do not replay old completions', async () => {
+  const { notifyNativeSkillMutation, watchNativeSkillMutations } = await import(
+    '../src/native-skill-mutations'
+  );
+  const bridge = bridgeOf(async () => null);
+  const scope = { generation: 1, storeId: 'store' };
+  let calls = 0;
+  const stop = watchNativeSkillMutations(bridge, scope, () => {
+    calls++;
+  });
+  notifyNativeSkillMutation(bridge, { ...scope, generation: 2 });
+  notifyNativeSkillMutation(bridge, { ...scope, storeId: 'other' });
+  notifyNativeSkillMutation({ ...bridge }, scope);
+  expect(calls).toBe(0);
+  notifyNativeSkillMutation(bridge, scope);
+  expect(calls).toBe(1);
+  stop();
+  notifyNativeSkillMutation(bridge, scope);
+  expect(calls).toBe(1);
+  const stopNext = watchNativeSkillMutations(bridge, scope, () => {
+    calls++;
+  });
+  expect(calls).toBe(1);
+  stop(); // A repeated cleanup cannot remove a newer subscription.
+  notifyNativeSkillMutation(bridge, scope);
+  expect(calls).toBe(2);
+  stopNext();
+  notifyNativeSkillMutation(bridge, scope);
+  expect(calls).toBe(2);
+});
+
 test('Skills with empty or missing descriptions use the same fallback in the list and details', async () =>
   fixture(async (host, _root, render, panel) => {
     const rows = [null, '', '  \n  ', '第一行\n第二行'].map((description, index) => ({

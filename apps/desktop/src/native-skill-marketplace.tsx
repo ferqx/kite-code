@@ -69,7 +69,7 @@ type Search =
   | { status: 'complete'; results: readonly SkillMarketplaceResult[] }
   | { status: 'failed'; error: string };
 
-// Installation belongs to the settings page and can complete after its search panel closes.
+// Keep installation UI across panel dismissal; completion also notifies a remounted settings page.
 export function NativeSkillMarketplace({
   bridge,
   generation,
@@ -142,7 +142,7 @@ export function NativeSkillMarketplace({
       )
         throw Error('skill_marketplace_install_failed');
       update({ status: reply.result.status });
-      if (mounted.current) onInstalled();
+      onInstalled();
     } catch (cause) {
       update({ status: 'failed', error: installError(cause) });
     } finally {
