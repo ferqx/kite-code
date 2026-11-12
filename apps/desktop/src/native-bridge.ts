@@ -289,6 +289,16 @@ export type NativeConversationResult = {
 };
 export type NativeGrantFacts = { observationId: number; page: PermissionGrantPage };
 export type NativeRecommendedModel = { modelId: string; reasoningEffort?: NativeReasoningEffort };
+export type NativeShellPreference = 'auto' | 'git-bash' | 'powershell';
+export type NativeShellSettingsFacts = {
+  kind: 'settings.general.shell';
+  storeId: string;
+  preference: NativeShellPreference;
+  automatic: Exclude<NativeShellPreference, 'auto'> | null;
+  gitBashAvailable: boolean;
+  powerShellAvailable: boolean;
+};
+
 export type NativeModelSettingsFacts = {
   kind: 'settings.models';
   observationId: number;
@@ -669,6 +679,12 @@ export type NativeRequest =
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
   | { method: 'settings.general.models.read' | 'settings.general.models.close'; generation: number }
+  | { method: 'settings.general.shell.read'; generation: number }
+  | {
+      method: 'settings.general.shell.save';
+      generation: number;
+      preference: NativeShellPreference;
+    }
   | { method: 'settings.models.read'; generation: number; scope: 'user'; afterCommandId?: string }
   | { method: 'input.models.read' | 'conversation.models.read'; generation: number }
   | { method: 'conversation.branch'; generation: number; workspaceId: string }
@@ -981,6 +997,7 @@ export type NativeResult =
   | NativeRecoveryFacts
   | NativeRecoverySubmission
   | NativeModelSettingsFacts
+  | NativeShellSettingsFacts
   | NativeProviderSettingsFacts
   | NativeProviderSubmission
   | NativeModelSettingsSubmission

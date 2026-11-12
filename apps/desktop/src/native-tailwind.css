@@ -388,6 +388,9 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   flex-direction: column;
   gap: 3px;
 }
+.kite-client .settings-row > span:first-child > label {
+  margin: 0;
+}
 .kite-client .settings-row strong {
   font-size: 14px;
   font-weight: 400;

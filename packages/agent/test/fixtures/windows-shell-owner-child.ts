@@ -21,7 +21,6 @@ const job = await createWindowsShellJob({
   supervisorPath: assets.runner,
   shellExecutable: assets.shell,
   fullShellExecutable: assets.fullShell,
-  coreutilsPath: assets.coreutils,
   stateRoot: assets.stateRoot,
   executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
 });

@@ -106,7 +106,7 @@ const host = createDefaultProcessConfiguration({
     supervisorPath: assets.runner,
     bunExecutable: process.execPath,
     shellExecutable: assets.shell,
-    windows: { coreutilsPath: assets.coreutils, fullShellExecutable: assets.fullShell, stateRoot },
+    windows: { fullShellExecutable: assets.fullShell, stateRoot },
     host: {
       controlBase: control,
       protectedRoots: [profile.dataRoot, control],

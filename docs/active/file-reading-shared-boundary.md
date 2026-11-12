@@ -253,12 +253,9 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 
 - `msys2ToWindowsPath(path)` — 单个路径精确转换，`/d/foo` → `D:\foo`；PS-01 后只用于明确的兼容/测试边界，生产 filesystem operation 使用 runtime context 指示的原生路径
 - `normalizeMsys2PathsInText(text)` — 正则匹配全部 `/X/...` 模式并转换，用于 `shell.ts`
-- `normalizeMsys2DrivePathsInShellCommand(command)` — 只把 Windows shell token boundary 上的字面量
-  `/X/...` 前缀转换为保留正斜杠的 `X:/...`，供 restricted-token isksh adapter 使用；不转换 URL、
-  `/dev/null` 或相对路径
 - `canonicalPathForComparison(path)` / `isPathInsideWorkspace(workspace, target)` — 对已存在的最近祖先调用 `realpath`，再拼回尚未创建的后缀；Approval Policy、file 边界与 search 遍历共同使用，确保 macOS `/var` 与 `/private/var`、符号链接 workspace 等文件系统别名不会被误判为外部路径，同时仍能识别通过符号链接逃逸工作区的目标。
 
-前两个 MSYS2 转换函数均以 `process.platform !== "win32"` 短路，Linux/macOS 完全透传。
+上述两个 MSYS2 转换函数均以 `process.platform !== "win32"` 短路，Linux/macOS 完全透传。
 
 ## 跨平台行为
 

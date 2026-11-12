@@ -1015,6 +1015,27 @@ test('late worktree exit directory results cannot override a later explicit sess
   }
 });
 
+test('a late selection cannot take over the composer after opening a new conversation', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.until(() => !!f.input('当前会话私有草稿'));
+    f.holdSelection();
+    await f.click('Other B');
+    await f.until(() => f.calls.some((call) => call.method === 'select' && call.sessionId === 'b'));
+    await f.click('新对话');
+    await f.until(() => !!f.input());
+    await f.edit('为新会话输入的草稿');
+    await f.releaseSelection();
+    expect(!!f.input()).toBe(true);
+    expect(promptValue(f.input())).toBe('为新会话输入的草稿');
+    expect(!!f.input('当前会话私有草稿')).toBe(false);
+  } finally {
+    await f.releaseSelection();
+    await f.close();
+  }
+});
+
 test('a pending worktree exit directory read keeps the draft editable and restores the latest edit after returning', async () => {
   const f = worktreeNavigationFixture();
   try {

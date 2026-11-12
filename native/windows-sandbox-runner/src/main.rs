@@ -4,17 +4,24 @@ use kite_windows_runner::job;
 use kite_windows_runner::protected_paths::protected_deny_paths;
 use kite_windows_runner::protocol::*;
 use kite_windows_runner::restricted_token::{self, CapabilitySid};
-use kite_windows_runner::{
-    build_bash_command_line, build_busybox_sh_command_line, build_isksh_command_line, sha256_file,
-};
+use kite_windows_runner::{build_bash_command_line, build_powershell_command_line, sha256_reader};
+use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::os::windows::{
+    fs::{MetadataExt, OpenOptionsExt},
+    io::FromRawHandle,
+};
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
-use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
+use windows::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+};
+use windows::Win32::System::SystemInformation::{GetSystemDirectoryW, OSVERSIONINFOW};
 
 const WINDOWS_10_22H2_BUILD: u32 = 19_045;
 
@@ -169,60 +176,14 @@ fn run() -> i32 {
     }
     runner_debug("request frame decoded");
 
-    // Verify the manifest-selected runtime before executing anything. Do not
-    // probe the directory: an untrusted writable runtime root must never make
-    // the runner prefer a different executable.
-    let runtime_root = std::path::Path::new(&request.shell_runtime_root);
-    let (shell_path, shell_kind) = match request.shell_runtime {
-        ShellRuntime::Isksh => (runtime_root.join("isksh.exe"), ShellRuntime::Isksh),
-        ShellRuntime::Busybox => (runtime_root.join("busybox.exe"), ShellRuntime::Busybox),
-        ShellRuntime::Bash => (runtime_root.join("bash.exe"), ShellRuntime::Bash),
-    };
-    let actual_digest = match sha256_file(&shell_path.to_string_lossy()) {
-        Ok(digest) => digest,
-        Err(error) => {
-            eprintln!(
-                "kite-windows-runner: pinned shell runtime missing at {}: {error}",
-                shell_path.display()
-            );
-            return 3;
+    let shell = match validate_runtime(&request) {
+        Ok(shell) => shell,
+        Err((code, message)) => {
+            eprintln!("kite-windows-runner: {message}");
+            return code;
         }
     };
-    let expected_digest = request
-        .shell_runtime_digest
-        .strip_prefix("sha256:")
-        .unwrap_or(&request.shell_runtime_digest);
-    if actual_digest != expected_digest {
-        eprintln!(
-            "kite-windows-runner: vendored shell runtime digest mismatch: expected {}, got {}",
-            expected_digest, actual_digest
-        );
-        return 4;
-    }
     runner_debug("shell runtime digest verified");
-    let coreutils_path = runtime_root.join("coreutils.exe");
-    let actual_coreutils_digest = match sha256_file(&coreutils_path.to_string_lossy()) {
-        Ok(digest) => digest,
-        Err(error) => {
-            eprintln!(
-                "kite-windows-runner: pinned Coreutils runtime missing at {}: {error}",
-                coreutils_path.display()
-            );
-            return 3;
-        }
-    };
-    let expected_coreutils_digest = request
-        .coreutils_digest
-        .strip_prefix("sha256:")
-        .unwrap_or(&request.coreutils_digest);
-    if actual_coreutils_digest != expected_coreutils_digest {
-        eprintln!(
-            "kite-windows-runner: vendored Coreutils runtime digest mismatch: expected {}, got {}",
-            expected_coreutils_digest, actual_coreutils_digest
-        );
-        return 4;
-    }
-    runner_debug("coreutils digest verified");
 
     if !valid_invocation_name(&request.invocation_name) {
         eprintln!("kite-windows-runner: invalid trusted invocation name");
@@ -267,19 +228,75 @@ fn run() -> i32 {
         eprintln!("kite-windows-runner: GO did not bind supervisor acknowledgement");
         return 1;
     }
-    let result = execute_restricted_token_invocation(
-        &request,
-        &request.invocation_name,
-        &shell_path,
-        &coreutils_path,
-        shell_kind,
-        output_writer,
-    );
+    let result = execute_restricted_token_invocation(&request, shell, output_writer);
     if let Err(error) = result {
         eprintln!("kite-windows-runner: {error}");
         return 1;
     }
     0
+}
+
+struct PinnedExecutable {
+    path: PathBuf,
+    // Keep the checked bytes read-only and prevent file replacement until launch.
+    _pin: File,
+}
+
+fn pin_executable(
+    path: PathBuf,
+    digest: &str,
+    label: &str,
+) -> Result<PinnedExecutable, (i32, String)> {
+    let read_failed = |error| {
+        (
+            3,
+            format!(
+                "pinned {label} runtime missing at {}: {error}",
+                path.display()
+            ),
+        )
+    };
+    let pin = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ.0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(&path)
+        .map_err(read_failed)?;
+    let metadata = pin.metadata().map_err(read_failed)?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        return Err((3, format!("pinned {label} runtime identity invalid")));
+    }
+    let actual = sha256_reader(&pin).map_err(read_failed)?;
+    let expected = digest.strip_prefix("sha256:").unwrap_or(digest);
+    if actual != expected {
+        return Err((
+            4,
+            format!("{label} runtime digest mismatch: expected {expected}, got {actual}"),
+        ));
+    }
+    Ok(PinnedExecutable { path, _pin: pin })
+}
+
+fn validate_runtime(request: &InvocationRequest) -> Result<PinnedExecutable, (i32, String)> {
+    match (request.shell_runtime, request.shell_runtime_root.as_deref()) {
+        (ShellRuntime::Bash, Some(root)) if Path::new(root).is_absolute() => pin_executable(
+            Path::new(root).join("bash.exe"),
+            &request.shell_runtime_digest,
+            "Git Bash",
+        ),
+        (ShellRuntime::PowerShell, None) => {
+            let mut system = vec![0; 32768];
+            let length = unsafe { GetSystemDirectoryW(Some(&mut system)) } as usize;
+            if length == 0 || length >= system.len() {
+                return Err((3, "windows_system_directory_unavailable".to_string()));
+            }
+            let directory = String::from_utf16(&system[..length])
+                .map_err(|_| (3, "windows_system_directory_invalid".to_string()))?;
+            let path = Path::new(&directory).join(r"WindowsPowerShell\v1.0\powershell.exe");
+            pin_executable(path, &request.shell_runtime_digest, "PowerShell")
+        }
+        _ => Err((2, "shell runtime request invalid".to_string())),
+    }
 }
 
 /// RtlGetVersion is used instead of the manifest-sensitive GetVersionEx API,
@@ -482,12 +499,10 @@ impl Drop for DirectInvocationCleanup {
 }
 fn execute_restricted_token_invocation(
     request: &InvocationRequest,
-    name: &str,
-    shell_path: &std::path::Path,
-    coreutils_path: &std::path::Path,
-    shell_kind: ShellRuntime,
+    shell: PinnedExecutable,
     output_writer: ControlFrameWriter,
 ) -> Result<(), String> {
+    let name = &request.invocation_name;
     let direct = &request.direct_workspace;
     let approved_filesystem = matches!(request.filesystem_scope, FilesystemScope::FullAccess);
     // Listen before any ACL work or lock wait, including the first large Workspace.
@@ -506,8 +521,6 @@ fn execute_restricted_token_invocation(
     // with both complete filesystem and network scope bypasses restriction;
     // Schannel may remain unavailable under the restricted token.
 
-    materialize_coreutils_aliases(&request.runtime_root, coreutils_path)?;
-    runner_debug("coreutils aliases materialized");
     // A startup probe owns an empty temporary Workspace and supplies a
     // capability that is revoked after the probe. It deliberately has no
     // legacy protected-path DACL snapshots to recover after a crash. Normal
@@ -600,16 +613,13 @@ fn execute_restricted_token_invocation(
     } else {
         build_env_block(&request.env)
     };
-    let command_line = match shell_kind {
-        ShellRuntime::Isksh => {
-            build_isksh_command_line(&shell_path.to_string_lossy(), &request.command_line)
-        }
-        ShellRuntime::Busybox => {
-            build_busybox_sh_command_line(&shell_path.to_string_lossy(), &request.command_line)
-        }
-        ShellRuntime::Bash => {
-            build_bash_command_line(&shell_path.to_string_lossy(), &request.command_line)
-        }
+    let shell_path = shell
+        .path
+        .to_str()
+        .ok_or("shell runtime path invalid")?;
+    let command_line = match request.shell_runtime {
+        ShellRuntime::Bash => build_bash_command_line(shell_path, &request.command_line),
+        ShellRuntime::PowerShell => build_powershell_command_line(shell_path),
     };
     let child = if let Some(token) = token.as_ref() {
         let expected_capabilities = if approved_filesystem {
@@ -623,6 +633,7 @@ fn execute_restricted_token_invocation(
             token,
             expected_capabilities,
             job,
+            shell_path,
             &command_line,
             &request.cwd,
             &env_block,
@@ -633,6 +644,7 @@ fn execute_restricted_token_invocation(
     } else {
         restricted_token::spawn_current_user_in_job(
             job,
+            shell_path,
             &command_line,
             &request.cwd,
             &env_block,
@@ -642,6 +654,7 @@ fn execute_restricted_token_invocation(
         )
     }
     .map_err(|error| error.to_string())?;
+    drop(shell);
     runner_debug("restricted-token process launched");
 
     // The child inherited its write handles; close the parent's copies so the
@@ -649,7 +662,6 @@ fn execute_restricted_token_invocation(
     cleanup.forget_handles(&[stdin_read, stdin_write, stdout_write, stderr_write]);
     unsafe {
         let _ = CloseHandle(stdin_read);
-        let _ = CloseHandle(stdin_write);
         let _ = CloseHandle(stdout_write);
         let _ = CloseHandle(stderr_write);
     }
@@ -658,12 +670,28 @@ fn execute_restricted_token_invocation(
         drain_and_forward(stdout_read, OutboundKind::Stdout, output_writer.clone());
     let stderr_forwarder =
         drain_and_forward(stderr_read, OutboundKind::Stderr, output_writer.clone());
+    let script_writer = if matches!(request.shell_runtime, ShellRuntime::PowerShell) {
+        let mut input = unsafe { File::from_raw_handle(stdin_write.0) };
+        let script = request.command_line.clone();
+        Some(std::thread::spawn(move || {
+            writeln!(input, "{}", script.encode_utf16().count())?;
+            input.write_all(script.as_bytes())
+        }))
+    } else {
+        unsafe {
+            let _ = CloseHandle(stdin_write);
+        }
+        None
+    };
     let (timed_out, cancelled) =
         job::wait_for_process(child.process_handle(), cancel_event, request.timeout_ms)
             .map_err(|error| error.to_string())?;
     runner_debug("process wait returned");
     let cleanup_confirmed =
         job::terminate_job_and_confirm(job, 2_000).map_err(|error| error.to_string())?;
+    let script_sent = script_writer.is_none_or(|writer| {
+        (cleanup_confirmed || writer.is_finished()) && matches!(writer.join(), Ok(Ok(())))
+    });
     runner_debug("job cleanup confirmed");
     let (stdout_bytes, stdout_forced_closed) =
         join_forwarder(stdout_forwarder, stdout_read, "stdout")?;
@@ -701,6 +729,10 @@ fn execute_restricted_token_invocation(
         .err()
         .map(|error| error.code.to_string())
         .or_else(|| (!cleanup_confirmed).then(|| "process_tree_cleanup_unconfirmed".to_string()))
+        .or_else(|| {
+            (exit_code == 0 && !script_sent)
+                .then(|| "powershell_script_delivery_failed".to_string())
+        })
         .or_else(|| stdout_forced_closed.then(|| "stdout_forwarder_unconfirmed".to_string()))
         .or_else(|| stderr_forced_closed.then(|| "stderr_forwarder_unconfirmed".to_string()));
     let receipt = ExecutionReceipt {
@@ -763,137 +795,6 @@ fn can_use_current_user_network_token(
 ) -> bool {
     matches!(network_mode, NetworkMode::AllowAll)
         && matches!(filesystem_scope, FilesystemScope::FullAccess)
-}
-
-/// Microsoft Coreutils is one static multi-call executable. POSIX shells
-/// resolve utilities by their command name, so materialize a private copy plus
-/// hard-link aliases before the restricted child is launched. The source binary
-/// has already been manifest-verified; the directory lives under the unique
-/// invocation runtime and is never reused by a later invocation.
-const COREUTILS_ALIASES: &[&str] = &[
-    "[",
-    "arch",
-    "b2sum",
-    "base32",
-    "base64",
-    "basename",
-    "basenc",
-    "cat",
-    "cksum",
-    "comm",
-    "coreutils-manager",
-    "cp",
-    "csplit",
-    "cut",
-    "date",
-    "df",
-    "dirname",
-    "du",
-    "echo",
-    "env",
-    "expr",
-    "factor",
-    "false",
-    "find",
-    "fmt",
-    "fold",
-    "grep",
-    "head",
-    "hostname",
-    "join",
-    "link",
-    "ln",
-    "ls",
-    "md5sum",
-    "mkdir",
-    "mktemp",
-    "mv",
-    "nl",
-    "nproc",
-    "numfmt",
-    "od",
-    "paste",
-    "pathchk",
-    "pr",
-    "printenv",
-    "printf",
-    "ptx",
-    "pwd",
-    "readlink",
-    "realpath",
-    "rm",
-    "rmdir",
-    "seq",
-    "sha1sum",
-    "sha224sum",
-    "sha256sum",
-    "sha384sum",
-    "sha512sum",
-    "shuf",
-    "sleep",
-    "sort",
-    "split",
-    "stat",
-    "sum",
-    "tac",
-    "tail",
-    "tee",
-    "test",
-    "touch",
-    "tr",
-    "true",
-    "truncate",
-    "tsort",
-    "unexpand",
-    "uniq",
-    "unlink",
-    "uptime",
-    "wc",
-    "xargs",
-    "yes",
-];
-
-fn materialize_coreutils_aliases(
-    runtime_root: &str,
-    verified_coreutils: &std::path::Path,
-) -> Result<(), String> {
-    let tools_root = std::path::Path::new(runtime_root).join("kite-coreutils");
-    match std::fs::create_dir(&tools_root) {
-        Ok(()) => {}
-        Err(error)
-            if error.kind() == std::io::ErrorKind::AlreadyExists
-                && tools_root.is_dir()
-                && tools_root.join("coreutils.exe").is_file()
-                && COREUTILS_ALIASES
-                    .iter()
-                    .all(|alias| tools_root.join(format!("{alias}.exe")).is_file()) =>
-        {
-            return Ok(());
-        }
-        Err(error) => {
-            return Err(format!(
-                "coreutils_runtime_prepare_failed: cannot create {}: {error}",
-                tools_root.display()
-            ));
-        }
-    }
-    let private_binary = tools_root.join("coreutils.exe");
-    std::fs::copy(verified_coreutils, &private_binary).map_err(|error| {
-        format!(
-            "coreutils_runtime_prepare_failed: cannot copy {}: {error}",
-            private_binary.display()
-        )
-    })?;
-    for alias in COREUTILS_ALIASES {
-        let target = tools_root.join(format!("{alias}.exe"));
-        std::fs::hard_link(&private_binary, &target).map_err(|error| {
-            format!(
-                "coreutils_runtime_prepare_failed: cannot create {}: {error}",
-                target.display()
-            )
-        })?;
-    }
-    Ok(())
 }
 
 #[derive(Clone)]
@@ -1312,29 +1213,6 @@ mod tests {
         assert!(version_meets_windows_10_22h2_floor(10, 26_200));
         assert!(!version_meets_windows_10_22h2_floor(10, 19_044));
         assert!(!version_meets_windows_10_22h2_floor(6, 9_999));
-    }
-
-    #[test]
-    fn coreutils_aliases_are_private_hard_links_to_one_copy() {
-        let root = std::env::temp_dir().join(format!("kite-coreutils-test-{}", std::process::id()));
-        std::fs::create_dir(&root).unwrap();
-        let source = root.join("source-coreutils.exe");
-        std::fs::write(&source, b"fixture-coreutils").unwrap();
-        materialize_coreutils_aliases(&root.to_string_lossy(), &source).unwrap();
-        let tools = root.join("kite-coreutils");
-        assert_eq!(
-            std::fs::read(tools.join("coreutils.exe")).unwrap(),
-            b"fixture-coreutils"
-        );
-        assert_eq!(
-            std::fs::read(tools.join("cat.exe")).unwrap(),
-            b"fixture-coreutils"
-        );
-        assert_eq!(
-            std::fs::read(tools.join("sleep.exe")).unwrap(),
-            b"fixture-coreutils"
-        );
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

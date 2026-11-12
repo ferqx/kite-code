@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +22,12 @@ import type {
   NativeBackgroundChildOpen,
   NativeBackgroundPage,
 } from '../src/background-bridge';
-import { type NativeRequest, type NativeState, nativeChannel } from '../src/native-bridge';
+import {
+  type NativeRequest,
+  type NativeShellPreference,
+  type NativeState,
+  nativeChannel,
+} from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
@@ -2655,6 +2660,71 @@ test('main IPC denies foreign/subframe senders and closed or oversized requests 
   });
   expect(calls).toBe(1);
 });
+
+test('Shell settings IPC checks sender and generation without projecting conversation state', async () => {
+  const auth = authority();
+  const caller = new NativeCaller(client(), () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const state = spyOn(caller, 'state');
+    let handler!: (event: IpcMainInvokeEvent, value: unknown) => Promise<unknown>;
+    let window: BrowserWindow | undefined = auth.window;
+    let replaceOnAdmission = false;
+    const requests: (NativeShellPreference | undefined)[] = [];
+    const unregister = registerNativeIpc({
+      ipcMain: {
+        handle(_channel: string, value: typeof handler) {
+          handler = value;
+        },
+        removeHandler() {},
+      } as unknown as IpcMain,
+      window: () => window,
+      rendererUrl: auth.frame.url,
+      async caller() {
+        if (replaceOnAdmission) window = authority().window;
+        return caller;
+      },
+      async desktopShell(host, preference) {
+        expect(host).toBe(caller);
+        requests.push(preference);
+        return {
+          kind: 'settings.general.shell',
+          storeId: 'store',
+          preference: preference ?? 'auto',
+          automatic: 'git-bash',
+          gitBashAvailable: true,
+          powerShellAvailable: true,
+        };
+      },
+    });
+    try {
+      const read = { method: 'settings.general.shell.read', generation };
+      const save = { method: 'settings.general.shell.save', generation, preference: 'powershell' };
+      expect(await handler(auth.event, read)).toMatchObject({
+        ok: true,
+        value: { storeId: 'store', preference: 'auto' },
+      });
+      expect(await handler(auth.event, save)).toMatchObject({
+        ok: true,
+        value: { storeId: 'store', preference: 'powershell' },
+      });
+      expect(await handler(auth.event, { ...save, generation: generation + 1 })).toEqual({
+        ok: false,
+        code: 'native_generation_changed',
+      });
+      replaceOnAdmission = true;
+      expect(await handler(auth.event, save)).toEqual({ ok: false, code: 'native_sender_denied' });
+      expect(requests).toEqual([undefined, 'powershell']);
+      expect(state).not.toHaveBeenCalled();
+    } finally {
+      unregister();
+      state.mockRestore();
+    }
+  } finally {
+    await caller.close();
+  }
+});
+
 test('main-private drafts require exact selection/revision; detached or late generations cannot rebind; network disposal is not owned shutdown', async () => {
   const port = client(),
     events: number[] = [],

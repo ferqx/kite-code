@@ -297,6 +297,7 @@ async function openCaller(): Promise<NativeCaller> {
           }
         : {}),
       desktopBrowser: browserPageChannel?.startup,
+      ...(process.platform === 'win32' ? { windowsDesktop: true } : {}),
       profile,
       entrypoint: activeAssets.serviceEntrypoint,
       executable: activeAssets.bunExecutable,
@@ -870,6 +871,15 @@ void app
       window: () => window,
       rendererUrl,
       caller: openCaller,
+      ...(process.platform === 'win32'
+        ? {
+            desktopShell(host, preference) {
+              if (host !== caller || quitting || switchingService || !paired?.desktopShell)
+                throw Error('desktop_shell_settings_unavailable');
+              return paired.desktopShell(preference);
+            },
+          }
+        : {}),
       async confirmWorkspaceRemoval(label) {
         if (quitting || stoppingNativeProcess || exitAllowed) return false;
         return globalDialog.confirm(

@@ -658,7 +658,18 @@ export interface Store {
       title: string;
       subjectId: string;
     },
+    desktopShell?: import('./types').DesktopShellBackend,
   ): Promise<SessionRecord>;
+  readDesktopShellPreference(
+    expectedStoreId: string,
+  ): Promise<import('./types').DesktopShellPreference>;
+  saveDesktopShellPreference(
+    expectedStoreId: string,
+    preference: import('./types').DesktopShellPreference,
+  ): Promise<void>;
+  readSessionDesktopShell(
+    rootSessionId: string,
+  ): Promise<import('./types').DesktopShellBackend | null>;
   getSession(id: string): Promise<SessionRecord | null>;
   listSessions(options?: { limit?: number; afterId?: string }): Promise<SessionRecord[]>;
   /** Pure admission observation before automatic lifecycle reconciliation.
@@ -1197,6 +1208,7 @@ export interface Store {
       newSessionId: string;
       title: string;
     },
+    desktopShell?: import('./types').DesktopShellBackend,
   ): Promise<{
     command: CommandRecord;
     session: SessionRecord;

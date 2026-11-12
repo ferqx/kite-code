@@ -20,7 +20,7 @@ Linux 默认 Shell 已接 Bubblewrap／固定 C init／原 PID namespace 源码�
 
 Linux 实现与源码/mock 范围归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)；[三个原生 Shell 验收场景](../../packages/agent/test/isolated/jobs/linux-native-shell.test.ts)和[正式 Workflow 整例的 Linux 分支](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/apps/service/test/isolated/skill-workflow-profile-host.test.ts)未在本机 Linux 执行，user/mount/PID namespace、seccomp、pidfd、来源 mount／Bun 加载、实际全树与权限资格均未取得。Linux 分支缺 compiler／Bubblewrap 或真实失败必须失败，不能 availability skip。它们不改变下述 formal 门禁、空 production support set 或 RSS／完整观测门禁。
 
-Windows 默认 Job 已接无账户受限 Git Bash 和 Full；本机回归不解除安装及完整发布门禁，见 [Windows active](windows-shell-sandbox.md)。上述 Workflow verifier／补偿仅保历史证据，当前执行入口已退役。
+Windows Job 使用无账户受限令牌与原生 Job。桌面 Service 优先完整 Git Bash，明确未发现时选择系统 Windows PowerShell 5.1。安装及发布验证的实际范围见 [Windows active](windows-shell-sandbox.md)。上述 Workflow verifier／补偿保留历史证据。
 
 新[平台 probe](../../scripts/release/unified-platform-probe.ts)实际运行 Source 外的完整 candidate，核 Files、准确 SQLite、实际 PID、两个独立 SH、原 Run 及 cleanup；macOS 另核真实默认 Shell 的原 execution/output hash、全树停止和 cold 同结果/零重放。diagnostic 通过只证明列明范围；资源与跨平台仍缺资格，formal verifier 继续拒 `default_effectful_platform_not_qualified`，productionQualified/effectfulQualified 保持 false。新三 OS workflow 保 actual producer、原 head/clean-source、固定 Bun/actions 与失败上传；用户已确认 Win/Linux 验证留到重构完成后的 GitHub Actions，本机不再等待或安装这两个环境，也未 dispatch workflow。未在对应 OS 执行不取得其资格。
 
@@ -34,7 +34,7 @@ Linux stdio MCP 的同一正式 Source／connection Job／SDK Tool 已接[独立
 
 [transport workflow](../../.github/workflows/runtime-transport-qualification.yml)已接入这五项强制后端案例，并与 release 共用[预装 MSVC/SDK 准备](../../scripts/release/prepare-windows-native-ci.ts)；准确 source head、固定 x64 编译器、环境字节及准备早于消费由[CI反例](../../tests/integration/scripts/unified-ci.test.ts)和[纯准备合同](../../tests/isolated/unified-agent/windows-native-ci.test.ts)核验。缺后端、编译器或 ABI 在 Windows 上失败，只有非 Windows 平台条件才跳过其原生案例。这是接线与本机负例证据，仍不宣称实际 Windows syscall、Native 启动或三平台资格。
 
-正式 Shell 共用三策略与独立 filesystem/network 请求语义，macOS 的 Seatbelt 已实际验证；Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。平台 workflow 包含原/native Shell、共享审批/解析以及真实 `web_fetch` 准入测试，formal verifier 保留。Windows x64 的 Bun Service 已接原 V6 runner 与无账户 Git Bash，本机执行、审批及生命周期验证范围见 [Windows active](windows-shell-sandbox.md)。Bash AST 不为 PowerShell/cmd 提供识别资格，共享逻辑通过与平台 skip 不证明其他后端可用。各平台安装、RSS／完整观测和正式阶段门禁保持独立。
+正式 Shell 共用三策略与独立 filesystem/network 请求语义。macOS 的 Seatbelt 已实际验证，Linux 源码接到 Bubblewrap 与 C socket/socketpair filter。Windows x64 Service 使用 Runner V7，Git Bash 与 Windows PowerShell 5.1 分别使用对应语法解析器。平台 workflow 包含原/native Shell、共享审批/解析和真实 `web_fetch` 准入测试。执行、审批及生命周期验证范围见 [Windows active](windows-shell-sandbox.md)。各平台安装、RSS、完整观测和正式阶段门禁分别核验。
 
 TUI 的 Workspace 文件候选现分派到私有 POSIX FD／Windows HANDLE 只读端口；公共 scope、完整分页、实际 `.gitignore`、取消和不读候选正文保持。它不使用 Shell 执行权限，也不导出 Agent 的私有 Files I/O。[CLI owner](../../apps/cli/README.md#开发-tui-workspace-文件候选)记录实际平台范围；完整候选、目录记录和平台原生测试在 transport 中分别运行，早于 Shell 权限例。源码与本机 POSIX 结果不改变 Windows/Linux 原生、RSS、完整观测或正式阶段门禁。
 
@@ -152,7 +152,7 @@ render 后异步启动 probe。
 而不是 application startup 的 ephemeral preflight 模式；这样完整 Workspace admission 与 V3 legacy snapshot
 migration/ledger refresh 才是运行时同构证据。证据采集结束必须显式 repair 临时 Workspace 的 DACL snapshot/root ACE/ledger
 后再删除目录。`.github/workflows/platform-capability-probe.yml` 的 paths gate 同时覆盖 native source、
-vendored `isksh`、Windows sandbox 直接依赖的 App/Builtin/Host/SPI 文件和 release evidence scripts。
+当时的 Shell 构建输入、Windows sandbox 直接依赖的宿主文件和 release evidence scripts。
 
 backend 选中后，user command 一旦可能启动就绝不跨 environment replay。只有 typed
 `backend_unavailable + pre_dispatch + cleanupConfirmed` 证明 native 用户命令未启动且 abandonment 已 durable
@@ -168,18 +168,13 @@ physical Win10 behavior。该 baseline 不会让任一 Windows development backe
 
 ### native protocol 兼容性
 
-[Agent Note 0101](../../.agents/notes/implemented/bug-fix/2026-08-13-approved-invocation-native-guards-and-network-projection.md) 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
+[Agent Note 0101](../../.agents/notes/implemented/bug-fix/2026-08-13-approved-invocation-native-guards-and-network-projection.md) 将 native invocation protocol 提升到 V6。当时的 adapter 与 runner 以 manifest 内固定的
 `protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
 network `off | allow_all` 与 filesystem `read_only | workspace_write | full_access` sealed-scope projection，并删除 backend mode、AppContainer identity 与 staging
 字段。只有 `interactionMode=full` 且 backend 明确支持 `full_access + allow_all` scope 时才可使用当前登录用户 token；更窄 scope fail closed，非网络
 approved filesystem invocation 暂时携带 protocol compatibility SID，但按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md) 不安装 protected-path deny。
 V1-V5 runner 必须在 user script 前 fail closed。
-`windows-runner.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
-仓库当前 release pin 已由 canonical Windows build 固定为 0.8.3/V6 及其对应 binary digest；adapter
-仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
-生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
-当前 canonical digest 为
-`sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`。
+当前 Runner V7 随 Service 由同次 Windows 构建生成，制品清单封存实际 Runner 和配套文件的摘要。历史协议和旧摘要不得用于当前派发。现行边界归 [Windows Shell 沙箱](windows-shell-sandbox.md)。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，

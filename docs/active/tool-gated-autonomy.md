@@ -258,7 +258,7 @@ magic 文件、`git ls-files --exclude-from`与 `sort --random-source` 同样属
 这条只读证明同时依赖 executor 的 sanitized environment。SPI registry 只为重新通过同一
 classifier 的命令签发 Runtime-owned `policy_proven_read_only` 执行信任；模型参数、审批
 payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `/bin/sh`，并在进程
-启动前投影最小环境；Windows restricted-token 保留密封 runtime/Coreutils 前缀。两者都将
+启动前投影最小环境；Windows Git Bash 保留已校验的运行时和内置 `rg` 路径。两者都将
 继承 PATH 的每个绝对目录先 canonicalize，再删除相对/空条目、Workspace 目录、其子目录
 和指向这些 identity 的 symlink alias。因此 Workspace 中的同名 `ls`/`rg` 不能在静态分类后
 替换真实 executable；没有可用的可信 PATH 时命令查找按失败收敛，不回退 Workspace。

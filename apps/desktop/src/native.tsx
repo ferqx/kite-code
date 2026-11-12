@@ -2255,6 +2255,8 @@ function NativeDesktopContent({
     setNewModelRevision((value) => value + 1);
     rememberDraft();
     pageIntent.current++;
+    // The new preparation owns the composer before any older selection read settles.
+    viewIntent.current++;
     setScheduledTasksView(false);
     setToolsOpen(false);
     setAgentBrowserOpen(false);
@@ -6002,6 +6004,9 @@ function NativeDesktopContent({
                         revision={settingsRevision}
                         editor={editor}
                         onEditorChange={setEditor}
+                        windowsShell={
+                          nativeWindow && document.documentElement.dataset.platform === 'windows'
+                        }
                       />
                     ) : settingsPage === 'trace' ? (
                       directory?.storeId ? (

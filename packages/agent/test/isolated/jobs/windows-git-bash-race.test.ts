@@ -29,8 +29,8 @@ function installation() {
   pe.write('ntdll.dll\0', 768);
   write('git/cmd/git.exe', 'git');
   write('git/usr/bin/bash.exe', 'bash');
+  write('git/usr/bin/ls.exe', 'ls');
   write('git/usr/bin/msys-2.0.dll', pe);
-  write('coreutils.exe', 'coreutils');
   write('ktipc.dll', 'compatibility');
   return root;
 }

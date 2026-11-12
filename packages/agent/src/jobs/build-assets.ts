@@ -44,19 +44,14 @@ if (process.platform === 'win32') {
       'kite-windows-runner.exe',
       resolve(root, 'native/windows-sandbox-runner/target/release/kite-windows-runner.exe'),
     ],
-    ['coreutils.exe', resolve(root, 'vendor/isksh/coreutils.exe')],
     ['ktipc.dll', resolve(root, 'native/windows-msys-compat/target/release/ktipc.dll')],
   ] as const) {
     copyFileSync(source, resolve(output, name));
     files[name] = createHash('sha256').update(readFileSync(source)).digest('hex');
   }
-  copyFileSync(
-    resolve(root, 'vendor/isksh/LICENSE.coreutils'),
-    resolve(output, 'LICENSE.coreutils'),
-  );
   writeFileSync(
     resolve(output, 'manifest.json'),
-    `${JSON.stringify({ protocol: 6, runtime: 'git-bash-restricted-token', files }, null, 2)}\n`,
+    `${JSON.stringify({ protocol: 7, runtime: 'windows-restricted-token', files }, null, 2)}\n`,
   );
 }
 

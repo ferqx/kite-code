@@ -799,6 +799,14 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 [常规卡](src/native-general-settings.tsx)直接迁入原设置行，无论当前主会话、新对话准备页或项目，均读取用户级模型配置并核 Store/scope。显示配置 defaultModelId 的 Provider 与模型，不把临时下一轮选择或活动 Run 的冻结模型当作默认。常规卡通过封闭的 `settings.general.models.read/close` 使用独立只读 Main 观察，不能取得模型写入资格；切换/关闭只释放自身 GET，不覆盖或关闭提供商与模型的后台队列观察。迟到旧观察不显示；没有默认、读取失败与配置诊断分别表达。编辑继续进入提供商/模型分类。
 
+### Windows 集成终端 Shell
+
+Windows 的[集成终端 Shell](src/native-shell-settings.tsx)复用设置下拉组件，显示自动、Git Bash 与 Windows PowerShell 5.1 和已核实的可用性。Main 从根窗口和当前调用者代次接收封闭枚举，由原配套 Service 保存至当前 Store。界面在已确认后更新选中值，读取或保存异常在同一行提示。重开可读取实际保存状态。保存后由新会话创建时生效，具体绑定见 [Service owner](../service/README.md#默认-shell-装配)。
+
+打开新对话时同步撤销旧会话尚未完成的选择读取。先前读取即使在新草稿输入后才返回，也只属于原选择，不能接管准备页输入区。[新对话回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖该时序。
+
+2026-11-12 Windows x64，从[同一安装候选](docs/native-release.md#构建与安装)的隔离安装运行实际窗口，连续记录 93 次界面变化。在同一 Main 和 Service 中从自动切到 PowerShell，再切到 Git Bash。首次保存发生在原 Bash 命令结果之前，两个新建会话分别执行所选方言，原 Bash 与 PowerShell 会话各自继续执行。进程退出后从 SQLite 冷读五条已完成轮次和各会话绑定，重开窗口读回 Git Bash。独立无 Git 的 Profile 显示自动使用 PowerShell，Git Bash 禁用，新会话实际执行 PowerShell。三次窗口均正常退出，最终隔离安装已卸载，正式安装登记和快捷方式摘要一致。证据保存在本机 `.cache/shell-settings-win-20261112/installed-shell-settings-221d5e7b.json`。定向设置、准备页接管及 Store 回归七项 110 断言，Bash 检索集成与真实 PowerShell 策略回归两项 44 断言通过。
+
 2026-10-25，后台模型队列与常规页的租约冲突已通过生产 queue＋Main manager 精确复现：模型保存后的健康 flush 中，旧 General GET／close 覆盖或清空队列 observation，下一次开关在 POST 前被拒，恢复按钮普通 GET 后才重获资格。独立只读 manager 修复后，Main 配置／提供商30项／302断言、General与模型DOM45项／649断言、完整NativeDesktop82项／1705断言通过；并发 GET 用例确认 General close 不取消模型续读，封闭IPC拒绝注入scope、Store、写入或continuation authority。此路径不依赖未决journal或Service保存失败；不据此推定每一种重新读取提示都来自该冲突。同轮匿名生产UI／真实Main浏览器夹具在1100／550px深浅四组合通过，共12391次过程采样／2127帧，无页面错误；每组合常规read/close各1次，返回后台队列不增加普通模型GET，原5次串行POST继续完成。健康阶段2442次采样中恢复控件、alert及只读状态均为零，原未知、失败、foreign read-set和草稿读取断言保持。该证据不代表当前已运行的旧Main已热更新，也不代证安装版或真实用户配置操作。
 
 [原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)、[Main 文件端口](test/native-file-changes.test.ts)和原[源码外窗口](test/isolated/native-bundle.test.ts)核默认与临时选择分离、旧scope、预览／全文／关闭、准确路径／frame和首次／冷读；窗口只核可用路径按钮及真实缺失目标拒绝，不实际启动 OS 编辑器。输入、实际通过与旧错误见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原消息文件路径与常规摘要)，完整PC／installed全路径／其他平台和阶段退出仍按原条件核对。

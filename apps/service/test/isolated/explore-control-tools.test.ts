@@ -114,7 +114,6 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
               bunExecutable: process.execPath,
               shellExecutable: assets.shell,
               windows: {
-                coreutilsPath: assets.coreutils,
                 fullShellExecutable: assets.fullShell,
                 stateRoot: assets.stateRoot,
               },
@@ -148,15 +147,15 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
     const parentRequests: ModelRequest[] = [];
     let parentStep = 0;
     let childStep = 0;
-    let parentCursor = '0';
+    let parentCursor: string | undefined;
     const message = 'EXACT_EXPLORE_PARENT_MESSAGE';
     const parent: ModelAdapter = {
       async *stream(request) {
         parentRequests.push(request);
         const last = request.messages.filter((message) => message.role === 'tool').at(-1);
         if (last) {
-          const feedback = JSON.parse(last.content) as { next_seq?: string };
-          if (typeof feedback.next_seq === 'string') parentCursor = feedback.next_seq;
+          const feedback = JSON.parse(last.content) as { next_cursor?: string };
+          if (typeof feedback.next_cursor === 'string') parentCursor = feedback.next_cursor;
         }
         if (parentStep++ === 0)
           yield* call('spawn_agent', {
@@ -172,11 +171,16 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
               (execution) =>
                 execution.definitionId === 'task.spawn' && execution.status === 'failed',
             ) ||
-            (child &&
+            (parentCursor &&
+              child &&
               ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(child.status))
           )
             yield finish;
-          else yield* call('wait_agent_events', { wait_ms: 100, after_seq: parentCursor });
+          else
+            yield* call('wait_agent_events', {
+              wait_ms: 100,
+              ...(parentCursor === undefined ? {} : { cursor: parentCursor }),
+            });
         }
       },
     };
@@ -213,10 +217,7 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
               ? job
               : undefined;
           });
-          yield* call('shell_stop', {
-            shell_id: shellId,
-            command_id: 'stop-exact-explore-command',
-          });
+          yield* call('shell_stop', { shell_id: shellId });
         } else yield finish;
       },
     };

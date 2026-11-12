@@ -408,13 +408,8 @@ export function createDefaultPermissionConfiguration(options: {
         description,
         refine,
       });
-    const refineShell: RefineCapability = async (request, _view, policy) => {
-      const commandDigest = await shell.commandDigest(request);
-      return {
-        ...(await shell.describeRequest(request, policy)),
-        ...(commandDigest ? { commandDigest } : {}),
-      };
-    };
+    const refineShell: RefineCapability = (request, _view, policy) =>
+      shell.describeRequest(request, policy);
     const refineTask: RefineCapability = (request, view) =>
       view === 'ordinary' ? describeDefaultTask(request) : undefined;
     const describeRegistered = async (
@@ -442,6 +437,7 @@ export function createDefaultPermissionConfiguration(options: {
         policy !== undefined &&
         behavior?.grantOffers &&
         description.hardAllowed &&
+        !description.requiresApproval &&
         !description.safeRead &&
         !(behavior.autoReview === 'none' && policy?.mode === 'auto')
           ? await behavior.grantOffers(request)

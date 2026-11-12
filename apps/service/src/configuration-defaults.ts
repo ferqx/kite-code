@@ -18,6 +18,7 @@ export function ordinaryHostConfigurationDefaults(
   taskAvailable: boolean,
   browserAllowed = true,
   unifiedBrowser = false,
+  gitWorktreeAvailable = true,
 ) {
   return {
     ...defaultConfiguration,
@@ -29,7 +30,9 @@ export function ordinaryHostConfigurationDefaults(
         'files.view_images',
         'files.write',
         'files.edit',
-        ...(shellAvailable ? shellToolIds : []),
+        ...(shellAvailable
+          ? shellToolIds.filter((id) => id !== 'git.worktree' || gitWorktreeAvailable)
+          : []),
         'web_fetch',
         ...(browserAllowed
           ? unifiedBrowser

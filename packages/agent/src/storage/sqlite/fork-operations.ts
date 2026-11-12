@@ -4,6 +4,7 @@ import type { Store } from '../port';
 import { AgentError, type ContextSelection, type Json } from '../types';
 import { activeCompression, historyOnlyCompression } from './compression-operations';
 import { filter, pairBoundary, selected } from './context-selection-operations';
+import { bindDesktopShell } from './desktop-shell';
 import { applyNamespacePlan, validateNamespacePlan } from './fork-namespaces';
 import type { SqliteOperations } from './operations';
 
@@ -130,7 +131,11 @@ export function getMessageOrigin(
     return db.rollback(error);
   }
 }
-export function forkSession(db: SqliteOperations, input: Parameters<Store['forkSession']>[0]) {
+export function forkSession(
+  db: SqliteOperations,
+  input: Parameters<Store['forkSession']>[0],
+  desktopShell?: Parameters<Store['forkSession']>[1],
+) {
   validateNamespacePlan(input.namespacePlan);
   return db.tx(() => {
     db.identity(input.expectedStoreId);
@@ -227,6 +232,7 @@ export function forkSession(db: SqliteOperations, input: Parameters<Store['forkS
       input.title,
       selectionId,
     );
+    bindDesktopShell(db, input.expectedStoreId, input.newSessionId, desktopShell);
     applyNamespacePlan(db, input, String(upper));
     db.insertCommand(
       {

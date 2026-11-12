@@ -17,11 +17,11 @@ const object = (value: unknown): Record<string, Json> | null =>
 /** Dynamic Planning evidence for this exact mixed-action tool; never a static whitelist. */
 export async function readOnlyWorktreeBoundary(
   runtime: AgentRuntime | undefined,
-  options: ShellConfigurationOptions | undefined,
+  shellForSession: (rootSessionId: string) => Promise<ShellConfigurationOptions | undefined>,
   boundary: Readonly<PublicExecution>,
   input: Json,
 ): Promise<boolean> {
-  if (!runtime || !options) return false;
+  if (!runtime) return false;
   try {
     const execution = await runtime.getExecution(boundary.id);
     if (
@@ -84,6 +84,8 @@ export async function readOnlyWorktreeBoundary(
       savedAssets = object(savedShell?.assets);
     const workspace = await runtime.getWorkspace(session.workspaceId);
     if (!workspace || !savedAssets?.gitWorktree) return false;
+    const options = await shellForSession(session.rootSessionId);
+    if (!options) return false;
     const shell = await createShellConfiguration({
       workspaceRoot: fileURLToPath(workspace.rootUri),
       toolIds: ['git.worktree'],

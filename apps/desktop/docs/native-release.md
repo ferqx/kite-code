@@ -47,6 +47,8 @@ Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档�
 
 桌面服务在 Bun 解析依赖时把保留的模块导入和 `require` 指向 `code/package.json` 的私有包内映射。映射目标都是制品中的相对路径，拆分文件可共享同一个模块。制品检查验证输出引用和文件存在性。[搬迁回归](../../../tests/isolated/unified-agent/windows-desktop-runtime.test.ts)核编译后从仓库外加载共享模块，完整安装验证从仓库外的正式入口观察 Service 握手和首屏。
 
+Windows x64 桌面制品由同次构建封装 Service 和 Runner V7。包内 Shell 清单固定原生 Runner 及 Git Bash 所需辅助文件。Git Bash 使用本机完整安装，回退使用 Windows 自带的 PowerShell 5.1。两条路径的进程边界、权限和证据见 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
+
 安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。窗口显示解包、发布和旧版清理的实际阶段。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和[Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
 
 ```powershell
@@ -59,6 +61,12 @@ bun run release:build --product native --desktop-only true --directory <native-d
 安装和更新完成后，安装器为当前用户登记 Kite Desktop。小型 GUI 启动器位于所选目录的 `Kite Desktop.exe`，开始菜单和可选的桌面快捷方式都指向它。启动器以无窗口方式调用已安装的前门，Electron 启动时清理继承的 Crashpad 和日志环境。卸载按摘要短期暂存已安装的 Bun，以同一批原文件句柄检查摘要和移除程序文件。候选使用锁或 Windows 文件共享冲突使卸载短暂等待。占用持续时，界面提供退出应用提示和重试／取消。进程只向安装器交付固定阶段、成功回执和错误码，界面无需读取 Bun 异常详情。仅卸载所有者可以清理旧版已识别的 Crashpad 注册日志。卸载移除快捷方式和 Windows 登记，Profile 保留在安装目录外。持久取舍见[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
 
 关闭卸载完成窗口后，安装器将原启动器移到同卷私有目录。隐藏的清理进程等待原安装器退出后移除这份文件。原路径可立即用于下一次安装。
+
+2026-11-12 Windows x64 本机构建生成 220,193,792 字节的桌面安装 EXE，SHA-256 为 `c756c300fd05e11e27b41bec34297f12e0e3c736c696dc9a80f93c66734cf75f`。候选 `8fd91a51896815438e9fb6183ab9d738f0fe1c49ba90a3da07a7fc7881b6629e` 由正式校验器核对包内 Service 与 Runner V7。使用同一归档生成独立安装登记的验证安装器，测试路径位于仓库外。EXE 使用本地生产配置构建，签名与公开发布资格仍按正式发布门禁核验。
+
+同一候选在两个独立 Profile 启动真实桌面窗口。无 Git 的 PowerShell 组实际观察发送、工具运行、人工批准与拒绝、原 Job 停止以及下一条命令恢复。确认外部写入和联网分别在授权后才产生效果。完整 Git Bash 组实际运行中文管道和工作树查询。两组都从窗口菜单正常退出，核实原 Main 与 Service 死亡并冷读持久终态。卸载移除测试登记、启动器和快捷方式，保留两个测试 Profile，正式安装登记与快捷方式摘要一致。窗口过程和持久证据在本机 `.cache/powershell-fallback-a45ca81cf/installed-v7-0ada4db1.json`，原生权限矩阵归 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
+
+2026-11-12 集成终端 Shell 的本地未签名候选 `0ca18542297ec2b3d344d8ed9d96afabe9dcd292140bd8904bab8000bb44627e` 通过正式制品校验器。Windows x64 安装 EXE 为 220,323,328 字节，SHA-256 为 `585f3e1d4044bb12338f747bfb8f1801ff0558b7b974ff5b8f95418990e14bf8`。同一归档的验证安装器使用独立安装登记与 Profile。设置行为与窗口验证归 [Desktop owner](../README.md#windows-集成终端-shell)。
 
 ## Windows managed Native 当前实现
 

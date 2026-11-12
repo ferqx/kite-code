@@ -22,30 +22,28 @@ pub fn build_bash_command_line(bash_path: &str, command: &str) -> String {
     parts.join(" ")
 }
 
-/// Build the Windows command line for BusyBox-w32's native `sh -c` entrypoint.
-/// BusyBox is a static Win32 binary, so unlike MSYS bash it does not need a
-/// POSIX DLL or user-profile initialization inside the restricted child.
-pub fn build_busybox_sh_command_line(busybox_path: &str, command: &str) -> String {
-    [
-        quote_argument(busybox_path),
-        "sh".to_string(),
-        "-c".to_string(),
-        quote_argument(command),
-    ]
-    .join(" ")
-}
-
-/// Build the command line for isksh's non-interactive POSIX entrypoint.
-/// isksh is a native Windows shell and deliberately receives no startup file
-/// argument, so the adapter-owned HOME/runtime directory cannot cause a host
-/// profile to be loaded.
-pub fn build_isksh_command_line(isksh_path: &str, command: &str) -> String {
-    [
-        quote_argument(isksh_path),
-        "-c".to_string(),
-        quote_argument(command),
-    ]
-    .join(" ")
+/// The exact user script arrives over the owned pipe as UTF-8. This keeps its
+/// contents out of argv and supports scripts larger than the Win32 argv limit.
+pub fn build_powershell_command_line(path: &str) -> String {
+    const BOOTSTRAP: &str = r#"
+$encoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $encoding
+[Console]::OutputEncoding = $encoding
+$OutputEncoding = $encoding
+$env:PSModulePath = $PSHOME + '\Modules'
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$length = [int]::Parse([Console]::In.ReadLine(), [Globalization.CultureInfo]::InvariantCulture)
+$source = [Console]::In.ReadToEnd()
+if ($source.Length -ne $length) { throw 'Incomplete PowerShell script' }
+& ([scriptblock]::Create($source))
+if (!$?) { exit 1 }
+"#;
+    format!(
+        "{} -NoLogo -NoProfile -NonInteractive -OutputFormat Text -Command {}",
+        quote_argument(path),
+        quote_argument(BOOTSTRAP)
+    )
 }
 /// Quote one argument per the standard C runtime / CommandLineToArgvW rules:
 /// wrap in quotes when it contains whitespace or quotes; escape embedded
@@ -89,12 +87,11 @@ pub fn quote_argument(argument: &str) -> String {
 }
 
 /// Compute the SHA-256 (hex) of a file.
-pub fn sha256_file(path: &str) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
+pub fn sha256_reader(mut reader: impl Read) -> std::io::Result<String> {
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
-        let read = file.read(&mut buffer)?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
@@ -269,17 +266,9 @@ mod tests {
     }
 
     #[test]
-    fn busybox_command_line_selects_sh() {
-        let command = build_busybox_sh_command_line("C:\\runtime\\busybox.exe", "echo hello");
-        assert!(command.contains("busybox.exe sh -c"));
-        assert!(command.ends_with("\"echo hello\""));
-    }
-    #[test]
-    fn isksh_command_line_is_non_interactive() {
-        let command = build_isksh_command_line("C:\\runtime\\isksh.exe", "echo hello");
-        assert!(command.contains("isksh.exe -c \"echo hello\""));
-        assert!(!command.contains("--noprofile"));
-        assert!(!command.contains("--norc"));
+    fn powershell_command_line_starts_without_a_profile_or_user_arguments() {
+        let command = build_powershell_command_line("C:\\system directory\\powershell.exe");
+        assert!(command.starts_with("\"C:\\system directory\\powershell.exe\" -NoLogo -NoProfile -NonInteractive -OutputFormat Text -Command "));
     }
     #[test]
     fn build_command_line_contains_single_dash_c() {

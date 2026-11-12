@@ -4,8 +4,14 @@ import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Language, type Node, Parser } from 'web-tree-sitter';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
+import { ripgrepAsset } from '../jobs/ripgrep';
+import type { WindowsPowerShell } from '../jobs/windows-powershell';
 import { windowsDesktopAsset } from '../platform/windows-desktop-assets';
 import { AgentError } from '../storage/types';
+import {
+  createPowerShellCommandPolicy,
+  type PowerShellAssessment,
+} from './powershell-command-policy';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 let initialization: Promise<void> | undefined;
@@ -299,22 +305,40 @@ function scanDanger(
   }
 }
 
-/** Shared classification never launches a process or authorizes an execution scope. */
+/** Analyze syntax without invoking any command from the supplied script. */
 export async function createShellCommandPolicy(input: {
   cwd: string;
   shellExecutable: string;
+  powerShell?: WindowsPowerShell;
   signal?: AbortSignal;
 }): Promise<{
   assets: readonly { path: string; digest: string }[];
   classify(
     command: string,
     signal?: AbortSignal,
+    cwd?: string,
   ): Promise<{
     plainCommands: readonly (readonly string[])[] | null;
     readOnlyCommands: readonly (readonly string[])[] | null;
     hardDenied: string | null;
+    powerShell?: PowerShellAssessment;
   }>;
 }> {
+  if (input.powerShell) {
+    const policy = createPowerShellCommandPolicy(input.powerShell, input.cwd, ripgrepAsset());
+    return {
+      assets: policy.assets,
+      async classify(command, signal, cwd) {
+        const powerShell = await policy.assess(command, cwd, signal);
+        return {
+          plainCommands: null,
+          readOnlyCommands: null,
+          hardDenied: powerShell.denial,
+          powerShell,
+        };
+      },
+    };
+  }
   let assets: readonly { path: string; digest: string }[];
   let language: Language;
   try {
@@ -362,7 +386,7 @@ export async function createShellCommandPolicy(input: {
     : posix.isAbsolute(input.cwd)
       ? posix.resolve(input.cwd)
       : resolve(input.cwd);
-  const supported = ['bash', 'zsh', 'sh', 'dash', 'bash.exe', 'sh.exe', 'isksh.exe'].includes(
+  const supported = ['bash', 'zsh', 'sh', 'dash', 'bash.exe', 'sh.exe'].includes(
     basename(input.shellExecutable).toLowerCase(),
   );
   return {

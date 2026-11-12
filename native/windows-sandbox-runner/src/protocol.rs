@@ -10,8 +10,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Matches `WINDOWS_SANDBOX_PROTOCOL_VERSION` on the TypeScript side.
-pub const PROTOCOL_VERSION: u32 = 6;
+/// Matches the packaged Windows Shell adapter.
+pub const PROTOCOL_VERSION: u32 = 7;
 pub const HOST_PEER_ID: &str = "host";
 pub const RUNNER_PEER_ID: &str = "runner";
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -50,16 +50,12 @@ pub struct InvocationRequest {
     pub workspace_root: String,
     /// Invocation-private runtime directory (rw for the sandbox).
     pub runtime_root: String,
-    /// Root of the vendored Shell runtime (read+execute for the sandbox).
-    pub shell_runtime_root: String,
-    /// The fixed entrypoint of the release-pinned runtime. The runner never
-    /// probes this directory for a more-preferred executable.
+    /// Staged Git Bash directory. The system PowerShell entrypoint takes no path.
+    pub shell_runtime_root: Option<String>,
+    /// Fixed interpreter type. The runner never probes for an alternative.
     pub shell_runtime: ShellRuntime,
     /// Expected SHA-256 (hex, no prefix) of that runtime entrypoint.
     pub shell_runtime_digest: String,
-    /// Expected SHA-256 of the fixed Microsoft Coreutils multi-call binary in
-    /// `shell_runtime_root`.
-    pub coreutils_digest: String,
     /// Hard active-process limit for the Job Object.
     pub max_processes: u32,
     /// Positive execution timeout in milliseconds; explicit null means no timer.
@@ -93,8 +89,8 @@ pub enum FilesystemScope {
 #[serde(rename_all = "snake_case")]
 pub enum ShellRuntime {
     Bash,
-    Busybox,
-    Isksh,
+    #[serde(rename = "powershell")]
+    PowerShell,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -388,9 +384,8 @@ mod tests {
             "workspaceRoot": "C:\\workspace",
             "runtimeRoot": "C:\\runtime",
             "shellRuntimeRoot": "C:\\shell",
-            "shellRuntime": "busybox",
+            "shellRuntime": "bash",
             "shellRuntimeDigest": "digest",
-            "coreutilsDigest": "digest",
             "maxProcesses": 31,
             "timeoutMs": null,
             "networkMode": "off"

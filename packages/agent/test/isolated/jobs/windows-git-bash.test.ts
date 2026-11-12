@@ -25,21 +25,20 @@ assert.ok(source, 'a real installed MSYS image is required');
 const msys = readFileSync(source);
 const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-git-staging-')));
 const installation = join(root, 'git');
-const coreutils = join(root, 'coreutils.exe');
 const compatibility = join(root, 'ktipc.dll');
 const write = (path, bytes) => { mkdirSync(dirname(path), {recursive:true}); writeFileSync(path, bytes); };
 try {
   write(join(installation, 'cmd/git.exe'), 'launcher');
   write(join(installation, 'usr/bin/bash.exe'), 'bash');
+  write(join(installation, 'usr/bin/ls.exe'), 'ls');
   write(join(installation, 'usr/bin/msys-2.0.dll'), msys);
   write(join(installation, 'mingw64/bin/git.exe'), 'git');
   write(join(installation, 'mingw64/libexec/git-core/git-remote-http.exe'), 'helper');
   write(join(installation, 'etc/ssl/certs/ca-bundle.crt'), 'certificate');
-  write(coreutils, 'coreutils');
   write(compatibility, 'compatibility');
   Bun.which = command => { assert.equal(command, 'git'); return join(installation, 'cmd/git.exe'); };
   const state = join(root, 'state');
-  const staged = await stageWindowsGitBash(state, coreutils, compatibility);
+  const staged = await stageWindowsGitBash(state, compatibility);
   const runtime = join(dirname(staged.shell), '../..');
   const fullRuntime = join(dirname(staged.fullShell), '../..');
   const manifest = readFileSync(join(runtime, 'manifest.json'));
@@ -52,19 +51,19 @@ try {
     assert.equal(readFileSync(join(base, 'mingw64/bin/git.exe'), 'utf8'), 'git');
     assert.equal(readFileSync(join(base, 'mingw64/libexec/git-core/git-remote-http.exe'), 'utf8'), 'helper');
     assert.equal(readFileSync(join(base, 'etc/ssl/certs/ca-bundle.crt'), 'utf8'), 'certificate');
-    assert.equal(readFileSync(join(base, 'usr/bin/coreutils.exe'), 'utf8'), 'coreutils');
+    assert.equal(readFileSync(join(base, 'usr/bin/ls.exe'), 'utf8'), 'ls');
   }
-  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, compatibility), staged);
   rmSync(staged.fullShell);
-  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, compatibility), staged);
   assert.equal(readFileSync(staged.fullShell, 'utf8'), 'bash');
   for (const path of [staged.shell, staged.fullShell]) {
     writeFileSync(path, 'changed');
-    await assert.rejects(stageWindowsGitBash(state, coreutils, compatibility), /windows_git_bash_asset_changed/);
+    await assert.rejects(stageWindowsGitBash(state, compatibility), /windows_git_bash_asset_changed/);
     assert.equal(readFileSync(path, 'utf8'), 'changed');
     writeFileSync(path, 'bash');
   }
-  assert.deepEqual(await stageWindowsGitBash(state, coreutils, compatibility), staged);
+  assert.deepEqual(await stageWindowsGitBash(state, compatibility), staged);
   assert.deepEqual(readFileSync(join(runtime, 'manifest.json')), manifest);
   const verify = await captureWindowsGitBashRuntime(staged.shell, staged.fullShell);
   await verify(false); await verify(true);
@@ -74,9 +73,9 @@ try {
   const {createWindowsShellJob}=await import(${JSON.stringify(jobModule)});
   const control=join(root,'control');mkdirSync(control);
   const job=await createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:state,
-    supervisorPath:coreutils,shellExecutable:staged.shell,fullShellExecutable:staged.fullShell,
-    coreutilsPath:staged.coreutils,executionScope:()=>({filesystem:full?'full_access':'workspace_write',network:'none'})});
-  for (const base of [runtime, fullRuntime]) for (const name of ['usr/bin/msys-2.0.dll', 'usr/bin/ktipc.dll', 'mingw64/bin/git.exe', 'etc/ssl/certs/ca-bundle.crt']) {
+    supervisorPath:compatibility,shellExecutable:staged.shell,fullShellExecutable:staged.fullShell,
+    executionScope:()=>({filesystem:full?'full_access':'workspace_write',network:'none'})});
+  for (const base of [runtime, fullRuntime]) for (const name of ['usr/bin/ls.exe', 'usr/bin/msys-2.0.dll', 'usr/bin/ktipc.dll', 'mingw64/bin/git.exe', 'etc/ssl/certs/ca-bundle.crt']) {
     const path = join(base, name), original = readFileSync(path);
     writeFileSync(path, 'changed after capture');
     await assert.rejects(verify(base === fullRuntime), /windows_git_bash_asset_changed/);

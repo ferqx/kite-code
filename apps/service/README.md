@@ -610,6 +610,8 @@ Shell 请求描述按准确 kind／定义／版本限定，合法同名 Model �
 
 内置 rg 由 Agent 制品携带，通过固定资产及 Shell 子进程 PATH 提供，不依赖用户安装，也不在运行时下载。目录查看、文件查找和正文搜索统一使用 Shell；单条字面 rg／ls／pwd 可取得有限只读证明，这只影响普通免审路径，不限制分析角色只能使用这些命令。主会话计划批准前的硬约束保持。实际注册退役归[工具回归](test/isolated/tool-retirement.test.ts)，真实 Windows／Service／SQLite 检索、继承的角色权限与计划卡归[检索集成](test/isolated/shell-search-configuration.test.ts)，Windows 范围归[平台 active](../../docs/active/windows-shell-sandbox.md)。
 
+2026-11-12 Windows x64，四个真实 Bash 子 Job 在 V6 基线与 V7 候选均触及原夹具的 12 秒等待上限。将该分支的夹具预算设为 30 秒，并让固定模型从真实工具回执读取当前 `plan_ref` 后，V7 的[检索集成](test/isolated/shell-search-configuration.test.ts)通过 25 个断言，覆盖子角色继承范围、计划审阅前的只读检索、原两级外部写入审批和 SQLite 冷读。生产期限和原业务断言保持。
+
 [Windows 跨会话回归](test/isolated/shell-concurrency-configuration.test.ts)使用默认可信装配、实际 Runtime／SQLite／Bash和固定本地模型，核同工作区两个会话实际并行、有限 process 名额排队、单独取消不停止其他会话、Full／另一工作区及下一轮环境重置。原 Job 和双流分别绑定会话，但 Workspace 文件仍共享；不据该回归宣称文件竞争、Git 索引隔离或完整 Native 窗口验收。执行与启动耗时的当前边界归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。
 
 [校验调度回归](test/isolated/shell-verification-scheduling.test.ts)在隔离测试子进程保持 B 的实际资产读取未完成，核 A 的原 Native Job 仍能取消、释放的 process 名额允许 C 完成；取消 B 后须等待读取关闭，B 没有 native reference 或业务写入。读取暂停仅在隔离夹具启用，普通 dev／prod 没有新增诊断入口。该例验证真实默认配置、Runtime 和 SQLite 的跨会话因果顺序，不依靠速度阈值猜测并发。
@@ -631,7 +633,11 @@ Shell 请求描述按准确 kind／定义／版本限定，合法同名 Model �
 
 同轮相关18份完整测试文件143项通过；另两条既有断言失败分别是旧模型投影用例仍调用已退役的 `define_validation_checks`、Responses 400错误的请求次数预期3而实际8。前者替换为 Git HEAD 的修前模型工具模块、后者在隔离副本加载修前配置及模型工具模块，均复现同样失败，未改退役工具或 SDK 重试策略来通过本轮。缓存、分轮检查、来源／信任漂移、原 Run 封存、真实 Shell 清理等待与 unknown 的新断言通过；类型、八 workspace 构建、边界、测试归属及文档检查通过。上述两条旧断言仍保留，不把这份定向结果称为全仓测试通过。
 
-macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 运行根装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择 `createMacosHostShellJob` 的 Seatbelt/launchd coalition 后端。JSONC 仅选择 `shell.launch/read/wait/stop@1`，不能提供 executor、cwd、env、保护路径或执行资格；缺 host、资产、正确版本或平台仍局部拒绝，没有另一进程 fallback。Windows 已接原 V6 runner、无账户受限 Git Bash 及 Full；Linux 和完整发布资格沿原门禁，不能互借通过。
+macOS [ProcessService](src/process-service.ts)从实际选定 Terminal/Native runtimeAssets、当前 Bun、固定 `/bin/sh`、Profile/coordination 和宿主 PATH 装配可信 `shell.host`。[Agent Shell 工厂](../../packages/agent/src/permissions/shell.ts)为每个 Run 读取真实 Store Workspace，选择对应平台后端。JSONC 只选择现有工具，不能指定解释器或执行边界。
+
+Windows x64 桌面的自动选项在 Service 启动时校验 Runner V7 与包内资产，优先完整 Git Bash，只有明确未发现 Git Bash 才探测系统 Windows PowerShell 5.1。资产校验和运行环境准备失败沿原错误返回。Main 通过已准入的配套 Service [私有设置入口](src/desktop-shell.ts)读取选项并保存当前 Store 的偏好。每次设置请求使用同一份可用性结果；准备失败时保留原偏好，后续请求可以重试。新建和 Fork 在创建事务中读取偏好并封存实际后端。重试原创建返回原会话。子任务与后续轮次读取所属根会话的绑定，已有无绑定会话继续使用自动基线。普通 Terminal Service 使用 Git Bash。
+
+模型的 `shell_execute` 定义、规划只读证明、权限与 Git 工作树装配均使用实际会话后端。冷恢复核原 Shell 绑定与资产摘要。两条路径共享原 Job 和监督。显式后端不可用时，其会话不会换用其他解释器。Windows 当前执行范围见 [Windows active](../../docs/active/windows-shell-sandbox.md)，偏好、会话创建重试、Fork 与冷读的验证见[设置回归](test/isolated/desktop-shell-settings.test.ts)。
 
 Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要和scope接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows 受限与 Full 已接原 Job/HANDLE 后端；Linux实机、installed维护／版本链及全部资源门禁继续pending。
 

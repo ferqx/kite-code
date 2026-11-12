@@ -28,7 +28,6 @@ const job = await createWindowsShellJob({
   supervisorPath: runtime.runner,
   shellExecutable: runtime.shell,
   fullShellExecutable: runtime.fullShell,
-  coreutilsPath: runtime.coreutils,
   executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
 });
 const factoryMs = performance.now() - factoryAt;

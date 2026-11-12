@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import type { DesktopShellPreference } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
 import { z } from 'zod';
 import {
@@ -10,6 +11,7 @@ import {
   type SelectedProfile,
   startupLimitBytes,
 } from './bootstrap';
+import { desktopShellSettingsPath, desktopShellSettingsSchema } from './desktop-shell';
 import { schemas } from './http/schema';
 import type { RuntimeProtection } from './runtime-protection';
 import { parseServiceStartupDiagnostic, type ServiceStartupDiagnostic } from './startup-diagnostic';
@@ -47,6 +49,7 @@ export interface PairedServiceOptions {
   requiredCapabilities: readonly string[];
   capabilities?: string[];
   hostConfiguration?: Json;
+  windowsDesktop?: true;
   desktopBrowser?: { readonly endpoint: string; readonly token: string };
   runtimeProtection?: RuntimeProtection;
   startupTimeoutMs?: number;
@@ -134,6 +137,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
     token,
     capabilities: options.capabilities,
     hostConfiguration: options.hostConfiguration,
+    windowsDesktop: options.windowsDesktop,
     desktopBrowser: options.desktopBrowser,
     ...(options.runtimeProtection ? { runtimeProtection: options.runtimeProtection } : {}),
   });
@@ -366,6 +370,48 @@ export async function launchPairedService(options: PairedServiceOptions) {
       },
     });
     await deadline(client.connect(), options.startupTimeoutMs ?? 10000, 'connection_timeout');
+    const requestDesktopShell =
+      options.windowsDesktop && bootstrap.storeId
+        ? async (preference?: DesktopShellPreference) => {
+            if (closing) throw new PairedServiceError('service_draining');
+            const storeId = bootstrap.storeId!;
+            const url = new URL(desktopShellSettingsPath, endpoint);
+            if (preference === undefined) url.searchParams.set('storeId', storeId);
+            const response = await fetch(url, {
+              method: preference === undefined ? 'GET' : 'PUT',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              ...(preference !== undefined
+                ? { body: JSON.stringify({ expectedStoreId: storeId, preference }) }
+                : {}),
+              redirect: 'error',
+              signal: AbortSignal.timeout(20000),
+            });
+            if (!response.ok) {
+              const failure = (await response.json().catch(() => null)) as { code?: string } | null;
+              throw new PairedServiceError(
+                failure?.code === 'desktop_shell_backend_unavailable'
+                  ? failure.code
+                  : 'desktop_shell_settings_unavailable',
+              );
+            }
+            const result = desktopShellSettingsSchema.parse(await response.json());
+            if (result.storeId !== storeId)
+              throw new PairedServiceError('profile_identity_mismatch');
+            return result;
+          }
+        : undefined;
+    let desktopShellWrite = Promise.resolve();
+    const desktopShell = requestDesktopShell
+      ? (preference?: DesktopShellPreference) => {
+          const result = desktopShellWrite.then(() => requestDesktopShell(preference));
+          if (preference !== undefined)
+            desktopShellWrite = result.then(
+              () => {},
+              () => {},
+            );
+          return result;
+        }
+      : undefined;
     const stdoutTask = (async () => {
       try {
         while (true) {
@@ -381,6 +427,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
     return {
       client,
       bootstrap,
+      desktopShell,
       pid: child.pid,
       exited,
       get diagnostics() {

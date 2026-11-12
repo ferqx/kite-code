@@ -436,7 +436,6 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
         ...(windows
           ? {
               windows: {
-                coreutilsPath: windows.coreutils,
                 fullShellExecutable: windows.fullShell,
                 stateRoot: windows.stateRoot,
               },

@@ -12,9 +12,11 @@ Probe，或 Windows Full/fallback UI 状态时。
 
 ## 当前新图与Windows资格
 
-Git Bash 准备入口异步等待两套副本完整校验，最多8个文件并发，未修改映像只复用本次读取所得的源摘要。现存资产不覆盖，排他创建缺失文件；失败等待所有已开始的读写结算后拒绝返回。清单格式、完整源／目标内容核验、所选副本的逐次派发核验和协议6保持；不以元数据缓存、硬链接或共享 MSYS 映像缩减安全边界。实现、回归与本机耗时范围归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)和 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Windows x64 桌面 Service 启动时确定自动选项的解释器，优先完整 Git Bash，明确未发现才探测系统 Windows PowerShell 5.1。常规设置可明确选择其中一个解释器。新会话创建时封存实际选项，之后的轮次和子任务沿该会话。发现后发生的资产校验、权限、启动或身份异常沿原失败路径处理；设置请求在两种解释器的可用性确定后才保存偏好，准备失败后可再次请求。已派发命令的读取、取消和清理继续使用原 Job。Git 分支和工作树独立依据 Git 的可用性。制品内的 Service 和 Runner 同步使用 V7，模型使用 `shell_execute` 并取得实际方言。实现入口见 [桌面 Shell 设置](../../apps/service/README.md#默认-shell-装配)、[PowerShell Job](../../packages/agent/src/jobs/README.md#windows-桌面-powershell-回退)和 [Shell 审批](../../packages/agent/src/permissions/README.md)。
 
-Job 只有在 READY 核验与 GO 写入确认后进入 running；失败准入仍把原 handle 交回 Core，清理未知不会丢失停止能力或释放资源。确认未派发的准备失败不虚构进程 owner，正常释放资源。运行时以原 manifest 固定完整所选副本的文件摘要，每次派发重核，包括 MSYS／兼容 DLL 和 Git helper；资产漂移先于 native 创建失败。原 runner 的 ACL 账本同步、关闭写句柄后再原子发布；Windows 临时访问／共享冲突仅在200ms内重试原替换，持续失败仍保原账本并拒绝启动。连续替换、短冲突恢复与持续冲突零损坏由 [原生回归](../../native/windows-sandbox-runner/src/direct_workspace.rs)核验。协议6与runner0.8.3不变，权限范围不扩。
+Git Bash 准备入口异步等待两套副本完整校验，最多8个文件并发，未修改映像只复用本次读取所得的源摘要。现存资产不覆盖，排他创建缺失文件。失败等待所有已开始的读写结算后拒绝返回。所选副本每次派发前完整核验。常用命令来自该副本的 `usr/bin`，只读目录查询也固定使用同一副本的 `ls.exe`。构建与 Runner 使用当前 V7 的解释器路径及摘要，移除独立 Coreutils 资产与临时命令链接。实现、回归与本机耗时范围归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)和 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+
+Job 只有在 READY 核验与 GO 写入确认后进入 running。失败准入仍把原 handle 交回 Core，清理未知时保留停止能力与资源。确认未派发的准备失败正常释放资源。运行时以原 manifest 固定所选副本的完整文件摘要，每次派发重核。Runner 的 ACL 账本同步、关闭写句柄后再原子发布。Windows 临时访问或共享冲突仅在200ms内重试原替换，持续失败保留原账本并拒绝启动。连续替换、短冲突恢复与持续冲突零损坏由 [原生回归](../../native/windows-sandbox-runner/src/direct_workspace.rs)核验。
 
 派发前完整资产校验已改为有界、可取消的异步读取，主动交还事件循环；取消和失败等待已开始读取关闭，确认零业务派发后才结算。多会话共享读取名额但独立持有校验状态，B 的读取未完成不会阻止 A 取消或 C 执行。每条命令仍创建独立 Bash／Job，不复用活进程；资源上限、完整身份与 SHA 守卫及本机回归归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)，正式调度证据归 [Service](../../apps/service/README.md#默认-shell-装配)。
 
@@ -28,15 +30,19 @@ Job 只有在 READY 核验与 GO 写入确认后进入 running；失败准入仍
 
 当前执行宿主为 Windows x64 的 Bun Service；正式 Terminal／Native 客户端使用该宿主。Node 嵌入不宣告这一依赖 Bun FFI 的 Shell 能力，避免先提供定义再在派发时失败。工作区加联网范围仍保持受限令牌；依赖系统 Schannel 的工具可能保留该令牌的兼容性限制，不能自动升为完整文件范围。
 
-全部命令的统一环境路径、后台隐藏窗口、可取消的工作区准备及未完成权限传播恢复归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。取消准备不能把部分继承标为完成，也不能忽略本次临时 ACL 撤销失败；已有业务进程继续核原完整 Job。没有新增工具字段或配置开关，协议6、runner0.8.3、业务审批与未知结果合同保持。
+全部命令的统一环境路径、后台隐藏窗口、可取消的工作区准备及未完成权限传播恢复归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。取消准备不能把部分继承标为完成，也不能忽略本次临时 ACL 撤销失败。已有业务进程继续核原完整 Job。业务审批和未知结果沿用原合同。
 
 业务允许／拒绝只由统一权限与计划／角色上限决定。Tool 和真实 Job 按各自原身份授权；runner 只消费最终 markDispatching 接纳的父／子范围交集，不按默认范围覆盖批准，也不再安装独立命令拒绝脚本。范围外的 OS 访问失败、坏协议／资产身份及清理未知仍按执行事实报告，不构成新的业务审批。批准外部写入后，完整文件范围可实际执行；不因它位于 Workspace 外在 Shell 层再拒一次。
 
-[运行时准备](../../packages/agent/src/jobs/windows-git-bash.ts)从本机 Git for Windows 生成私有摘要闭包，保留原安装目录。MSYS 用户信号管道只接受 user／SYSTEM／Administrators，原 Workspace 限制 SID 不能通过；仓库独立的 [IPC 兼容层](../../native/windows-msys-compat/README.md)只为相关 MSYS 对象保留同登录会话权限，不改变令牌或文件范围。Full／完整文件范围使用未修改的独立 MSYS 副本，避免并发共享区冲突。制品内置 runner、兼容 DLL、Coreutils 与 rg；Git Bash 来自本机 Git，不在运行时下载。缺 Git、资产变化或无法确认原进程身份时失败，不回退其他解释器或普通 spawn。
+[运行时准备](../../packages/agent/src/jobs/windows-git-bash.ts)从本机 Git for Windows 生成私有摘要闭包。MSYS 用户信号管道的 [IPC 支持](../../native/windows-msys-compat/README.md)在工作区限制 SID 下保留同登录会话的必要权限。完整文件范围使用未修改的独立 MSYS 副本，避免并发共享区冲突。制品内置 Runner、Git Bash 所需的辅助文件和 rg。PowerShell 由 Windows 提供并直接进入相同的令牌、ACL 和 Job 路径。联网范围独立于文件范围。`network:none` 的环境约束和已知联网意图检查属于本次交付，系统级断网需独立验证 AppContainer。
 
 生命周期与其他平台共用普通 Job：准备／READY 后由原 owner 放行 GO，READY 最多等待5秒，超时后的迟到 READY 不再放行。持续排空双流，取消作用于原 Job；根退出后清理剩余后代。正常 ended 须原 runner 回执、外层 Job 空树、进程 wait、句柄关闭和 temp 清理均确认。GO 前取消有原空树和未派发证明；关闭未知继续保原 owner 和 binding，不回收成成功。宿主 EOF／强杀由 kill-on-close 清整个嵌套 Job；冷读取只保原结果，不用 PID 重建控制或重放。
 
 [实际 Windows Shell](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)已核空 ambient PATH 的内置 rg、中文／空格文件、fork／管道、Git 子 Shell、受限与 Full 并发、写范围收窄、环境离线与准确联网范围、启动取消、后台后代取消、宿主 EOF／强杀与原 HANDLE 死亡。[真实 Service／SQLite](../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读子 Agent、计划前检索和原审批卡、外部写入批准前零效果／批准后实际写入、重复命令及冷只读零重放。原 [Job owner 回归](../../packages/agent/test/isolated/jobs/windows-owned-child.test.ts)保关闭失败／unknown 合同。此范围是本机 Windows 开发验证，不代表完整安装、签名或全部平台发布资格。
+
+2026-11-12 在 Windows x64／Bun 1.4.4，以同一正式桌面候选的包内 Service 和 Runner V7 核实三组进程 PATH。完整 Git Bash 组使用 Bash，无 Git 组用 PowerShell，只有独立 Git 时 PowerShell 与工作树列表均可用。模型工具收到实际方言，三组实际使用内置 rg 返回中文。两组有 Git 的工作树列表返回测试仓库的 `refs/heads/main`。包内 Runner 直接启动 PowerShell 的复验覆盖只读临时写、工作区写、联网许可不扩大写范围、批准外部写、中文双流、大脚本、原后代取消与超时、摘要变化和 V6 请求拒绝。日志在本机 `.cache/powershell-fallback-a45ca81cf/` 的 `packaged-service-v7.log` 和 `direct-v7-final.log`。目录联接及工作目录与写范围分离由 [Windows Job 回归](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)核对，别名与已知效果由 [真实 AST 回归](../../packages/agent/test/isolated/permissions/powershell-command-policy.test.ts)核对。
+
+2026-11-12 在 Windows x64／Git for Windows 2.53.0.windows.1 上验证随附命令。原生回归核实际命令来源、中文路径、管道、工作区与完整范围、取消和清理。新桌面候选通过完整清单核验，隔离安装实际观察两条 Git Bash 命令从提交、运行到各自的结果，退出后读回两个完成记录；同一制品在无 Git 的 PATH 下使用系统 PowerShell 读取中文文件。界面过程与结果保于本机 `.cache/windows-stock-git-bash-20261112/installed-shell-settings-6ae9aaa5.json`。
 
 Windows stdio MCP 继续使用同一[原 Job／HANDLE owner](../../packages/agent/src/platform/process/windows-owned-child.ts)，其 [transport](../../packages/agent/src/mcp/README.md#windows-stdio-所属-job)边界独立。Windows Files 的原 HANDLE 端口亦不由 Shell 取代，见 [Files owner](../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)。旧 Runtime、State writer、Workflow 执行和旧调用方不恢复。
 
@@ -83,8 +89,7 @@ runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，�
 checkout/Cargo cache 路径并清除 PE 时间戳；
 重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
-相关：[Agent Note 0074](../../.agents/notes/implemented/process/2026-08-08-windows-10-api-compatibility-baseline.md)、[Agent Note 0077](../../.agents/notes/implemented/simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0079](../../.agents/notes/implemented/architecture/2026-08-08-windows-managed-restricted-token-sandbox.md) 至 [Agent Note 0089](../../.agents/notes/implemented/feature/2026-08-08-windows-online-loopback-proxy-inheritance.md)、[Agent Note 0097](../../.agents/notes/implemented/feature/2026-08-13-brokered-git-capability.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)，
-`release/platform-capabilities/windows-runner.json`。
+相关：[Agent Note 0074](../../.agents/notes/implemented/process/2026-08-08-windows-10-api-compatibility-baseline.md)、[Agent Note 0077](../../.agents/notes/implemented/simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0079](../../.agents/notes/implemented/architecture/2026-08-08-windows-managed-restricted-token-sandbox.md) 至 [Agent Note 0089](../../.agents/notes/implemented/feature/2026-08-08-windows-online-loopback-proxy-inheritance.md)、[Agent Note 0097](../../.agents/notes/implemented/feature/2026-08-13-brokered-git-capability.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)。
 
 ## SAQ-10 当前 contract
 
@@ -106,7 +111,7 @@ Full 正交：Planning + Full 可直接执行但仍保留 Plan lifecycle。只�
 
 ## 当前 backend 选择
 
-Windows 只有以下 runtime outcome：
+旧架构的 V6 Windows runtime 使用以下 outcome：
 
 | outcome | 选择条件 | Workspace 模型 | assurance 与 Full |
 | --- | --- | --- | --- |
@@ -121,7 +126,7 @@ AppContainer backend、`KITE_WINDOWS_APPCONTAINER_EXPERIMENTAL` 选择逻辑、p
 staging、repository copy、预算 Worker 和 reconciliation 已由 [Agent Note 0088](../../.agents/notes/implemented/simplification/2026-08-08-remove-windows-appcontainer-backend.md) 删除。设置旧环境变量不会改变
 backend。该移除不降低 production 能力，因为实验路径从未取得 production qualification。
 
-RM-13 的物理所有权不改变 protocol V6 或当前 fallback：runner manifest、transport preparation、
+RM-13 保留了当时的 protocol V6 和 fallback 规则。runner manifest、transport preparation、
 protected-path/network/resource 语义位于 `packages/builtin-runtime/src/sandbox/`，通用异步进程创建、POSIX
 supervisor、output drain 与 process-tree cleanup 位于 `packages/runtime-host/src/`，唯一 App composition 位于
 `apps/kite-service/src/sandbox/`。已删除的 `src/core/sandbox/**` 和 protocol/Core 旧路径不得恢复为兼容导出或
@@ -169,7 +174,7 @@ runner 只使用 manifest 固定的 POSIX runtime 与最小 environment allowlis
 可通过 invocation runtime/PATH 暴露，但不会复制 repository。默认 command language 仍为 POSIX/Bash，
 也可显式调用 cmd.exe、pwsh 或 powershell.exe。
 
-Windows standalone candidate 会将 runner manifest、固定 runner 与 `vendor/isksh` runtime 保留在 immutable
+Windows standalone candidate 曾将固定 Runner 与配套工具保留在 immutable
 managed candidate root。v2 managed-install marker 与唯一 `active` regular-file pointer 绑定当前 candidate；stable
 launcher 将其启动时的 candidate root 显式 pin 给 child process，running process 不重新读取 pointer。Runner resolver
 只接受 marker、pointer、`.candidate-id` 与 candidate `manifest.json` identity 完全一致的 candidate，并对 launcher、
@@ -177,7 +182,7 @@ marker、pointer、candidate root、runner manifest、runner 与 Shell/Coreutils
 regular-file 检查；缺失、替换或 digest 不一致使 backend 不可用，不会加载未固定的 host runner，也不会回退 cwd、PATH
 或 ambient home。真实 Windows ACL/write-through 与三平台 candidate/process qualification 仍待 hosted/真实证据。
 
-## protocol V6 与 manifest V1
+## 历史 V6 协议
 
 adapter 与 runner 必须要求 native invocation `protocolVersion=6`。V6 只描述 direct
 `windows_restricted_token` invocation，携带 development network `off | allow_all` 与 filesystem
@@ -188,12 +193,7 @@ approved-filesystem guard 保护。V6 继承 V5
 删除的 backend mode、AppContainer identity 与 staging 字段；任何 V1-V5 runner 都在 user script 前
 fail closed。
 
-`windows-runner.json` 的 V1 仍表示 manifest schema/file naming，不是 invocation protocol。
-新 runner pin 必须固定 protocol V6、runner 0.8.3+、binary digest、Windows baseline 与 vendored runtime
-digest。历史 0.8.3/V6 构建固定的 binary digest 为
-`sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`；当前构建 pin 见[manifest](../../release/platform-capabilities/windows-runner.json)。后续任何 native
-runner 变更都必须重新运行同一可复现构建并提交新的 digest，不能只改 protocol、版本或 manifest 文本，
-也不能复用旧 binary digest。
+当前构建从同次原生输出生成制品内 Shell 清单和各资产摘要。Service 与 Runner 共同校验 V7。旧协议或旧制品的摘要不用于 V7 派发。构建与安装的制品身份由 [Native owner](../../apps/desktop/docs/native-release.md)维护。
 Windows candidate 的 standalone resolver 还必须把 `@kite-ai/builtin-runtime/sandbox` 及其他 workspace public
 exports 直接映射到仓库 source，禁止经过 `node_modules/@kite-ai/*` symlink；否则 Windows Bun standalone 可能因反斜杠
 pretty path 崩溃，导致已验证 runner 无法进入候选包。release test 从 package exports 机械验证该闭包。
@@ -266,7 +266,7 @@ runner build/Cargo/protocol、Local Provider 及成功 command dispatch conforma
 startup probe 的 ephemeral Workspace SID，因此完整 Workspace read/write/execute 与 V3 legacy protected
 snapshot migration 结论必须经过真实 ledger/DACL 刷新路径。probe Workspace 创建后立即固定 canonical identity，采集与 finally repair 必须共用该值，
 不能让 Windows 8.3/长路径 alias 分裂 ledger。probe Workspace 仍是临时目录；采集结束时先调用 runner repair 恢复 snapshot、撤销 root ACE
-并删除 ledger，再删除临时目录。资格 workflow 的 paths gate 必须覆盖 native runner、`vendor/isksh`、
+并删除 ledger，再删除临时目录。资格 workflow 的 paths gate 必须覆盖 native runner、当前 Shell 构建输入、
 Windows adapter 使用的 App composition、Builtin sandbox、Host lifecycle、SPI contract 以及 evidence scripts，不能让这些依赖单独变更而跳过原生
 E2E/probe。
 
@@ -297,6 +297,6 @@ config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过 mode
 
 ## Git Worktree worker 的新增范围
 
-`builtin.shell/git.worktree@1` 沿既有 `shell.command@1` 运行固定 Bun worker，不增加 Job/Runtime 或平台协议版本。首次解释器前应用环境允许集合与 `--no-env-file --config=<absolute>`，封存 Bun/Git/worker/config/空 hooks 及摘要，start 前重核；仅准确固定 list 为只读。Full 不扩大该 worker 的原申请，network 固定 none。Windows 仍沿原 Git Bash/native Job监管和读取/离线实际边界，不据网络参数声称新增系统级断网。
+`builtin.shell/git.worktree@1` 沿 `shell.command@1` 运行固定 Bun worker。启动前核对 Bun/Git/worker/config/空 hooks 及摘要，使用 `--no-env-file --config=<absolute>` 和独立环境。仅准确固定的 list 为只读。Full 保留该 worker 的原申请，network 固定 none。Windows Git Bash 与 PowerShell 都使用所属 Native Job。PowerShell 仅转换匹配原操作身份的 worker 命令，审批和历史仍使用原调用身份。
 
 2026-11-06，本次新 worker 已在 macOS arm64／Bun1.4.4／Git2.54.0 验证真实三个 action、launchd 启动保护和发行资产搬迁后的实际Job；Linux和Windows本次未有对应实机环境，原平台的普通Shell证据不授予该新worker的监管、Windows reparse或完整发行资格。具体算法和不支持配置由 [Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)维护，Windows删除仍遵循[只读清理门禁](../development/worktree-safety.md)。

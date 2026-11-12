@@ -4327,7 +4327,7 @@ export class AgentRuntime {
   getMessageOrigin(input: Parameters<Store['getMessageOrigin']>[0]) {
     return this.options.store.getMessageOrigin(input);
   }
-  async forkSession(input: PublicForkInput) {
+  async forkSession(input: PublicForkInput, desktopShell?: Parameters<Store['forkSession']>[1]) {
     if (
       Object.keys(input).some(
         (key) =>
@@ -4345,16 +4345,16 @@ export class AgentRuntime {
     )
       throw new AgentError('invalid_fork');
     if (await this.options.store.getCommand(input.commandId))
-      return this.options.store.forkSession(input);
+      return this.options.store.forkSession(input, desktopShell);
     const namespacePlan = await prepareNamespaceFork(this.options.store, this.extensions, input, {
       readModelInput: (scope) => this.readModelInput(scope),
       readModelOutput: (scope) => this.readModelOutput(scope),
       readArtifact: (scope) => this.readArtifact(scope),
     });
-    return this.options.store.forkSession({
-      ...input,
-      ...(namespacePlan ? { namespacePlan } : {}),
-    });
+    return this.options.store.forkSession(
+      { ...input, ...(namespacePlan ? { namespacePlan } : {}) },
+      desktopShell,
+    );
   }
   async includeResult(input: Parameters<Store['includeResult']>[0]) {
     const result = await this.options.store.includeResult(input);
@@ -4370,8 +4370,11 @@ export class AgentRuntime {
   listWorkspaces(options?: Parameters<Store['listWorkspaces']>[0]) {
     return this.options.store.listWorkspaces(options);
   }
-  createSession(input: Parameters<Store['createSession']>[0]) {
-    return this.options.store.createSession(input);
+  createSession(
+    input: Parameters<Store['createSession']>[0],
+    desktopShell?: Parameters<Store['createSession']>[1],
+  ) {
+    return this.options.store.createSession(input, desktopShell);
   }
   listBackgroundExecutions(input: Parameters<Store['listBackgroundExecutions']>[0]) {
     return this.options.store.listBackgroundExecutions(input);

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type AfterTurnPolicy,
@@ -175,6 +175,7 @@ function readServiceRecoverySnapshot(snapshot: Json | undefined) {
       webSnapshot: snapshot.web ?? null,
       browserSnapshot: snapshot.browser ?? null,
       browserSnapshotPresent: Object.hasOwn(snapshot, 'browser'),
+      shellSnapshot: snapshot.shell,
       modelTransportSnapshot: snapshot.modelTransport ?? null,
       ...(Object.hasOwn(snapshot, 'readOnlyTaskSource')
         ? { readOnlyTaskSource: snapshot.readOnlyTaskSource }
@@ -314,6 +315,8 @@ export function createDefaultProcessConfiguration(options: {
   compressor?: ContextCompressor;
   /** Explicit qualified host Shell assets/environment; JSONC cannot provide these. */
   shell?: ShellConfigurationOptions;
+  /** Paired Windows Desktop only. Resolve the Store's pinned root-session backend. */
+  shellForSession?: (rootSessionId: string) => Promise<ShellConfigurationOptions | undefined>;
   /** Trusted per-hop network policy/admission; JSONC can only select the ordinary Tool. */
   webFetch?: WebFetchConfigurationOptions;
   /** Trusted browser assets and host ceiling; JSONC may only select existing Tool IDs. */
@@ -361,6 +364,10 @@ export function createDefaultProcessConfiguration(options: {
   });
   const browserTools = new Map((browser.extension.tools ?? []).map((tool) => [tool.id, tool]));
   const shellOptions = options.shell ? structuredClone(options.shell) : undefined;
+  const shellForSession = (rootSessionId: string) =>
+    options.shellForSession
+      ? options.shellForSession(rootSessionId)
+      : Promise.resolve(shellOptions);
   const afterTurn = options.afterTurn
     ? Object.freeze({ authorize: options.afterTurn.authorize.bind(options.afterTurn) })
     : undefined;
@@ -382,12 +389,15 @@ export function createDefaultProcessConfiguration(options: {
         : {}),
     });
   const task = createTaskConfiguration(childRoles);
+  const gitWorktreeAvailable = (shell: ShellConfigurationOptions | undefined) =>
+    shell?.windows?.kind !== 'powershell' || !!shell.windows.gitExecutable;
   const configurationDefaults = options.ordinaryHostTools
     ? ordinaryHostConfigurationDefaults(
         options.shell !== undefined,
         task.extension !== undefined,
         browser.available,
         options.desktopBrowser !== undefined,
+        gitWorktreeAvailable(shellOptions),
       )
     : defaultConfiguration;
   const planning = createPlanningValidation(
@@ -399,30 +409,50 @@ export function createDefaultProcessConfiguration(options: {
       if (!execution) throw new AgentError('execution_scope_unavailable');
       return execution.input;
     },
-    async (input) => {
+    async (input, execution) => {
       if (
-        !shellOptions ||
         !input ||
         typeof input !== 'object' ||
         Array.isArray(input) ||
         typeof input.command !== 'string'
       )
         return false;
+      const session =
+        options.shellForSession || shellOptions?.windows?.kind === 'powershell'
+          ? await policyRuntime?.getSession(execution.sessionId)
+          : undefined;
+      const sessionShell = options.shellForSession
+        ? session && (await shellForSession(session.rootSessionId))
+        : shellOptions;
+      if (!sessionShell) return false;
+      const powerShell =
+        sessionShell.windows?.kind === 'powershell' ? sessionShell.windows.powerShell : undefined;
+      let workspace = options.profile.profilePath;
+      let workdir: string | undefined;
+      if (powerShell) {
+        const selected = session && (await policyRuntime?.getWorkspace(session.workspaceId));
+        if (!selected) return false;
+        workspace = realpathSync.native(fileURLToPath(selected.rootUri));
+        if (typeof input.workdir === 'string') {
+          const path = resolve(workspace, input.workdir);
+          if (path.startsWith('\\\\')) return false;
+          workdir = realpathSync.native(path);
+        }
+      }
       const policy = await createShellCommandPolicy({
-        cwd: options.profile.profilePath,
-        shellExecutable: shellOptions.shellExecutable,
+        cwd: workspace,
+        shellExecutable: sessionShell.shellExecutable,
+        powerShell,
       });
-      const result = await policy.classify(input.command);
+      const result = await policy.classify(input.command, undefined, workdir);
+      if (result.powerShell) return result.powerShell.readOnly;
       return (
         !result.hardDenied &&
-        readOnlySearchCommand(
-          result,
-          shellOptions.shellExecutable,
-          shellOptions.windows?.coreutilsPath,
-        ) !== undefined
+        readOnlySearchCommand(result, sessionShell.shellExecutable) !== undefined
       );
     },
-    (execution, input) => readOnlyWorktreeBoundary(policyRuntime, shellOptions, execution, input),
+    (execution, input) =>
+      readOnlyWorktreeBoundary(policyRuntime, shellForSession, execution, input),
   );
   const askUser = createAskUserExtension();
   const executionEvidence = createExecutionEvidenceExtension({
@@ -849,13 +879,16 @@ export function createDefaultProcessConfiguration(options: {
         typeof recovery.browserSnapshot === 'object' &&
         !Array.isArray(recovery.browserSnapshot) &&
         recovery.browserSnapshot.execution === undefined;
+      const runShellOptions = await shellForSession(session.rootSessionId);
       const runDefaults =
-        options.ordinaryHostTools && options.desktopBrowser && (legacyBrowser || legacyRecovery)
+        options.ordinaryHostTools &&
+        (options.shellForSession || (options.desktopBrowser && (legacyBrowser || legacyRecovery)))
           ? ordinaryHostConfigurationDefaults(
-              options.shell !== undefined,
+              runShellOptions !== undefined,
               task.extension !== undefined,
               browser.available,
-              false,
+              !!options.desktopBrowser && !legacyBrowser && !legacyRecovery,
+              gitWorktreeAvailable(runShellOptions),
             )
           : configurationDefaults;
       const effective = resolveConfiguration({
@@ -1074,7 +1107,7 @@ export function createDefaultProcessConfiguration(options: {
       const shell = await createShellConfiguration({
         workspaceRoot: root,
         toolIds,
-        options: shellOptions,
+        options: runShellOptions,
         signal: recovery?.signal,
         worktreeHost: createWorktreeHost(() => policyRuntime),
       });
@@ -1221,6 +1254,11 @@ export function createDefaultProcessConfiguration(options: {
         if (recovery) {
           const matches = {
             configuration: snapshot.digest === recovery.digest,
+            shell:
+              !options.shellForSession ||
+              recovery.shellSnapshot === undefined ||
+              planningSnapshotDigest(shell.snapshot as unknown as Json) ===
+                planningSnapshotDigest(recovery.shellSnapshot),
             transport:
               recovery.modelTransportSnapshot === null ||
               planningSnapshotDigest(modelTransport.snapshot) ===

@@ -31,6 +31,8 @@ export const privateStartupSchema = z.strictObject({
   token: z.string().min(32).max(256),
   capabilities: z.array(z.string().min(1).max(128)).max(64).optional(),
   hostConfiguration: z.json().optional(),
+  /** Windows Desktop's paired host only. The renderer cannot supply startup fields. */
+  windowsDesktop: z.literal(true).optional(),
   /** Main-owned ephemeral page endpoint; private paired stdin only, never JSONC/HTTP/model input. */
   desktopBrowser: z
     .strictObject({

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentRuntime } from '@kite-ai/agent';
@@ -12,6 +13,60 @@ import {
   ProcessServiceCleanupError,
   type ProcessServiceOptions,
 } from '../../src/process-service';
+
+test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
+  'Windows desktop assembly propagates Shell preparation failures before opening the Store',
+  () => {
+    const root = temporaryDirectory('kite-desktop-shell-startup-');
+    const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
+    const startup = {
+      profile: {
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        profileAccessKey: profile.profileAccessKey,
+      },
+      instanceId: 'shell-startup',
+      buildId: 'fixture',
+      token: 'a'.repeat(64),
+      windowsDesktop: true,
+    };
+    const code = `
+import { mock } from 'bun:test';
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+const jobs = await import('@kite-ai/agent/jobs/shell');
+const failure = Error('windows_shell_asset_changed');
+const choices = [];
+mock.module('@kite-ai/agent/jobs/shell', () => ({
+  ...jobs,
+  async windowsShellAssets(_stateRoot, preference) {
+    choices.push(preference);
+    throw failure;
+  },
+}));
+const { assembleProcessService } = await import(${JSON.stringify(new URL('../../src/process-service.ts', import.meta.url).href)});
+await assert.rejects(async () => {
+  const service = await assembleProcessService(${JSON.stringify(startup)});
+  await service.close();
+}, (error) => error === failure);
+assert.deepEqual(choices, ['auto']);
+assert.equal(existsSync(${JSON.stringify(profile.databasePath)}), false);
+`;
+    try {
+      const child = spawnSync(process.execPath, ['--eval', code], {
+        cwd: import.meta.dir,
+        encoding: 'utf8',
+        timeout: 10000,
+        windowsHide: true,
+      });
+      expect(child.error).toBeUndefined();
+      expect(child.status, child.stderr).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  15000,
+);
 
 for (const unavailable of [false, true])
   test(`common process assembly preserves selected identity and ${unavailable ? 'unavailable diagnostics' : 'cold Store'} without Model calls`, async () => {
@@ -175,10 +230,12 @@ for (const failedCleanup of [false, true])
           resources: {
             artifacts?: { close(): Promise<void> };
             store?: { close(): Promise<void> };
+            workspaceSerialLocks?: { close(): Promise<void> };
           };
         };
         await retained.resources.artifacts?.close();
         await retained.resources.store?.close();
+        await retained.resources.workspaceSerialLocks?.close();
       }
       rmSync(root, { recursive: true, force: true });
     }

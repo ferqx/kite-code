@@ -700,7 +700,7 @@ export class NativeCaller {
   private changed() {
     if (!this.closed) this.emit({ generation: this.generation, kind: 'changed' });
   }
-  private check(generation: number) {
+  assertGeneration(generation: number) {
     if (this.closed || generation !== this.generation)
       throw new ClientError('native_generation_changed');
   }
@@ -819,7 +819,7 @@ export class NativeCaller {
             ...(item.worktreeSource ? { worktreeSource: item.worktreeSource } : {}),
           }))
         : await this.client.listAllSessions({ signal: abort.signal });
-      this.check(generation);
+      this.assertGeneration(generation);
       abort.signal.throwIfAborted();
       if (epoch !== this.directoryEpoch || this.client.serverInfo?.storeId !== storeId)
         throw new ClientError('directory_identity_conflict');
@@ -1558,20 +1558,20 @@ export class NativeCaller {
     perform: (editor: DesktopEditor, target: string) => Promise<void>,
   ) {
     await this.drainRefresh();
-    this.check(request.generation);
+    this.assertGeneration(request.generation);
     this.availableWorkspaceScope(this.selected ?? '');
     await this.fileChanges.open(request.changeId, request.editor, perform);
-    this.check(request.generation);
+    this.assertGeneration(request.generation);
   }
   async openMessageFile(
     request: Extract<NativeRequest, { method: 'messageFile.open' }>,
     perform: (editor: DesktopEditor, target: string) => Promise<void>,
   ) {
     await this.drainRefresh();
-    this.check(request.generation);
+    this.assertGeneration(request.generation);
     this.availableWorkspaceScope(this.selected ?? '');
     await this.fileChanges.openMessageFile(request, perform);
-    this.check(request.generation);
+    this.assertGeneration(request.generation);
   }
   async invoke(request: NativeRequest): Promise<NativeResult> {
     if (request.method === 'attach') {
@@ -1592,7 +1592,7 @@ export class NativeCaller {
       this.selected = undefined;
       this.activation = undefined;
       await this.startObservation();
-      this.check(generation);
+      this.assertGeneration(generation);
       const initialSelectionHint = this.initialSelectionHint;
       this.initialSelectionHint = undefined;
       const selectionHint = previousSelection ?? initialSelectionHint;
@@ -1605,7 +1605,7 @@ export class NativeCaller {
         try {
           return await this.invoke({ method: 'select', generation, sessionId: restoreSelection });
         } catch (error) {
-          this.check(generation);
+          this.assertGeneration(generation);
           if (!(error instanceof ClientError) || error.code !== 'session_not_found') throw error;
           this.selected = undefined;
           this.detachedSelection = undefined;
@@ -1678,7 +1678,7 @@ export class NativeCaller {
       ].includes(request.method)
     )
       await this.drainRefresh();
-    this.check(request.generation);
+    this.assertGeneration(request.generation);
     const generation = request.generation;
     const background =
       'surface' in request && request.surface === 'environment'
@@ -1859,19 +1859,19 @@ export class NativeCaller {
         if (!tasks) throw new ClientError('scheduled_tasks_unavailable');
         if (request.method === 'scheduled.save')
           await this.serializeSettingsMutation(async () => {
-            this.check(generation);
+            this.assertGeneration(generation);
             this.providers.assertSchedulingAllowed();
             return tasks.save(request.input, request.operation);
           });
         else if (request.method === 'scheduled.toggle')
           await this.serializeSettingsMutation(async () => {
-            this.check(generation);
+            this.assertGeneration(generation);
             if (request.enabled) this.providers.assertSchedulingAllowed();
             return tasks.toggle(request.id, request.enabled);
           });
         else if (request.method === 'scheduled.delete')
           await this.serializeSettingsMutation(async () => {
-            this.check(generation);
+            this.assertGeneration(generation);
             return tasks.delete(request.id);
           });
         else if (request.method === 'scheduled.runNow') await tasks.runNow(request.id);
@@ -2281,6 +2281,9 @@ export class NativeCaller {
         this.generalConfiguration.release();
         result = null;
         break;
+      case 'settings.general.shell.read':
+      case 'settings.general.shell.save':
+        throw new ClientError('desktop_shell_settings_unavailable');
       case 'settings.models.read':
         result = await this.configuration.read(request.afterCommandId);
         break;
@@ -2313,7 +2316,7 @@ export class NativeCaller {
         break;
       case 'settings.providers.save':
         result = await this.serializeSettingsMutation(async () => {
-          this.check(generation);
+          this.assertGeneration(generation);
           return this.providers.submit(request.observationId, request.operation, request.secret);
         });
         break;
@@ -2370,7 +2373,7 @@ export class NativeCaller {
         if (retry) {
           // A lost IPC reply or failed read does not authorize replaying activation's POST.
           const check = () => {
-            this.check(generation);
+            this.assertGeneration(generation);
             if (
               this.activation !== previous ||
               this.selected !== request.sessionId ||
@@ -2818,7 +2821,7 @@ export class NativeCaller {
               if (this.observer) this.scheduleSelectionRefresh(this.observer.signal);
             }
           }
-          this.check(generation);
+          this.assertGeneration(generation);
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
             throw new ClientError('native_selection_changed');
         }
@@ -2830,7 +2833,7 @@ export class NativeCaller {
             request.sessionId,
             request.imageIds,
           );
-          this.check(generation);
+          this.assertGeneration(generation);
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
             throw new ClientError('native_selection_changed');
           intent = { ...request.intent, images };
@@ -2842,7 +2845,7 @@ export class NativeCaller {
             request.sessionId,
             request.fileIds,
           );
-          this.check(generation);
+          this.assertGeneration(generation);
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
             throw new ClientError('native_selection_changed');
           intent = { ...intent, files };
@@ -2869,7 +2872,7 @@ export class NativeCaller {
             request.sessionId,
             intent.modelId,
           );
-        this.check(generation);
+        this.assertGeneration(generation);
         if (originalSelection !== this.selection || this.selected !== request.sessionId)
           throw new ClientError('native_selection_changed');
         result = inputMetadata(
@@ -3063,7 +3066,7 @@ export class NativeCaller {
         result = await this.grants.lookup(request.commandId);
         break;
     }
-    this.check(generation);
+    this.assertGeneration(generation);
     return result;
   }
   detach() {
@@ -3128,9 +3131,9 @@ export class NativeCaller {
     snapshot: import('@kite-ai/trajectory').TrajectorySnapshot,
     includeEvidence: boolean,
   ): Promise<void> {
-    this.check(generation);
+    this.assertGeneration(generation);
     await this.trajectory.export(path, snapshot, includeEvidence);
-    this.check(generation);
+    this.assertGeneration(generation);
   }
   private acceptWorkspaceRemoval(result: import('../src/native-bridge').NativeWorkspaceRemoval) {
     if (result.phase !== 'applied' || result.storeId !== this.client.serverInfo?.storeId) return;
@@ -3153,9 +3156,9 @@ export class NativeCaller {
     workspaceId: string,
     confirm: (label: string) => Promise<boolean>,
   ) {
-    this.check(generation);
+    this.assertGeneration(generation);
     const result = await this.workspaceRemoval.remove(workspaceId, confirm);
-    this.check(generation);
+    this.assertGeneration(generation);
     this.acceptWorkspaceRemoval(result);
     return result;
   }
@@ -3163,18 +3166,18 @@ export class NativeCaller {
     generation: number,
     workspace: Omit<CreateWorkspaceRequest, 'expectedStoreId'>,
   ) {
-    this.check(generation);
+    this.assertGeneration(generation);
     const existing = (await this.client.listAllWorkspaces()).find(
       (w) => w.rootUri === workspace.rootUri,
     );
-    this.check(generation);
+    this.assertGeneration(generation);
     const result =
       existing ??
       (await this.client.createWorkspace({
         ...workspace,
         expectedStoreId: this.client.serverInfo!.storeId!,
       }));
-    this.check(generation);
+    this.assertGeneration(generation);
     return result;
   }
   async hasActiveWork(signal?: AbortSignal) {

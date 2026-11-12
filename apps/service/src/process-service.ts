@@ -14,9 +14,11 @@ import { McpStdioPortError, mcpStdioGuardianAsset, mcpStdioLinuxAssets } from '@
 import { type ProfileSelection, selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import type { DesktopShellPreference } from '@kite-ai/agent/storage';
 import { readSessionLogs } from '@kite-ai/agent/storage';
 import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } from './bootstrap';
 import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
+import { createDesktopShellEnvironments } from './desktop-shell';
 import { startService } from './index';
 import { assertMcpSourceStdioAssetsClosed } from './mcp-source-configuration';
 import { windowsRuntimePinCloseUnknown } from './native-runtime-assets';
@@ -192,10 +194,27 @@ export async function assembleProcessService(
     }
   }
   let configuration: Awaited<ReturnType<ConfigureProcessHost>>;
+  let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  let desktopShell: ReturnType<typeof createDesktopShellEnvironments> | undefined;
+  const windowsDesktop =
+    !configure && startup.windowsDesktop && process.platform === 'win32' && process.arch === 'x64';
   try {
     const shell = configure
       ? undefined
-      : await measureServiceStartup('shell_runtime', () => packagedShellAssets(selected));
+      : await measureServiceStartup('shell_runtime', () =>
+          packagedShellAssets(
+            selected,
+            windowsDesktop ||
+              startup.runtimeProtection?.kind === 'native.candidate' ||
+              startup.desktopBrowser !== undefined
+              ? 'auto'
+              : 'git-bash',
+          ),
+        );
+    if (windowsDesktop)
+      desktopShell = createDesktopShellEnvironments(shell, (backend) =>
+        packagedShellAssets(selected, backend),
+      );
     configuration = await measureServiceStartup('configuration', async () => {
       const configured = configure
         ? await configure(startup, hostContext)
@@ -209,6 +228,14 @@ export async function assembleProcessService(
             ...(options.credentialBackend ? { credentialBackend: options.credentialBackend } : {}),
             runtimeAssets,
             shell,
+            ...(desktopShell
+              ? {
+                  shellForSession(rootSessionId: string) {
+                    if (!store) throw new AgentError('desktop_shell_state_unavailable');
+                    return desktopShell!.forSession(store, rootSessionId);
+                  },
+                }
+              : {}),
           });
       return options.decorateConfiguration
         ? await options.decorateConfiguration(configured)
@@ -235,7 +262,6 @@ export async function assembleProcessService(
     ...runtimeConfiguration
   } = configuration;
   let runtime: ReturnType<typeof createRuntime> | undefined;
-  let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let artifacts: ReturnType<typeof createArtifactStore> | undefined;
   let workspaceSerialLocks: ReturnType<typeof createWorkspaceSerialLocks> | undefined;
   let trace: ProfileTraceRuntime | undefined;
@@ -338,6 +364,7 @@ export async function assembleProcessService(
         diagnosticSource,
         skillCatalogue,
         userMcpManagement: userMcpManagement?.(runtime),
+        ...(runtime && store && desktopShell ? { desktopShell: desktopShell.settings(store) } : {}),
         sessionLogs: store
           ? (query, observer) => readSessionLogs(store!, query, observer)
           : undefined,
@@ -403,6 +430,7 @@ function packagedMcpSourceAssets() {
 
 async function packagedShellAssets(
   profile: ProfileSelection,
+  preference: DesktopShellPreference,
 ): Promise<ShellConfigurationOptions | undefined> {
   if (!['darwin', 'linux', 'win32'].includes(process.platform)) return;
   if (process.platform === 'win32' && !process.versions.bun) return;
@@ -410,7 +438,7 @@ async function packagedShellAssets(
   let windows: Awaited<ReturnType<typeof windowsShellAssets>> | undefined;
   try {
     if (process.platform === 'win32')
-      windows = await windowsShellAssets(join(profile.profilePath, 'windows-sandbox'));
+      windows = await windowsShellAssets(join(profile.profilePath, 'windows-sandbox'), preference);
     supervisorPath =
       windows?.runner ??
       (process.platform === 'linux' ? linuxShellInitAsset() : shellSupervisorAsset());
@@ -422,6 +450,7 @@ async function packagedShellAssets(
         'linux_shell_init_asset_unavailable',
         'windows_shell_asset_unavailable',
         'windows_git_bash_unavailable',
+        'windows_powershell_unavailable',
       ].includes(error.message)
     )
       throw error;
@@ -439,7 +468,9 @@ async function packagedShellAssets(
   return {
     platform: process.platform as 'linux' | 'darwin' | 'win32',
     configurationId: windows
-      ? 'default.windows-host-shell-v1'
+      ? windows.windows.kind === 'powershell'
+        ? 'default.windows-powershell-5.1'
+        : 'default.windows-host-shell-v1'
       : process.platform === 'linux'
         ? 'default.linux-host-shell-v1'
         : 'default.macos-host-shell-v1',
@@ -447,15 +478,7 @@ async function packagedShellAssets(
     supervisorPath,
     bunExecutable: process.execPath,
     shellExecutable: windows?.shell ?? '/bin/sh',
-    ...(windows
-      ? {
-          windows: {
-            coreutilsPath: windows.coreutils,
-            fullShellExecutable: windows.fullShell,
-            stateRoot: windows.stateRoot,
-          },
-        }
-      : {}),
+    ...(windows ? { windows: windows.windows } : {}),
     ...(bubblewrap ? { linux: { bubblewrapPath: realpathSync.native(bubblewrap) } } : {}),
     host: {
       controlBase: profile.coordinationPath,

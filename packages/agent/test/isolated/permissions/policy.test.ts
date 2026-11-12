@@ -14,6 +14,45 @@ import {
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 
+test('uncertain effects require this call’s human approval in every mode', async () => {
+  const capability = {
+    kind: 'tool' as const,
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+  };
+  for (const mode of ['accept_edits', 'auto', 'full'] as const) {
+    const permissions = createPermissionPolicy({
+      readPolicy: () => ({
+        mode,
+        workspaceTrust: true,
+        revision: 'workspace',
+        allowed: [capability],
+      }),
+      describeCapability: () => ({
+        ...capability,
+        revision: 'powershell',
+        hardAllowed: true,
+        safeRead: false,
+        effects: ['process', 'unknown'],
+        executionScope: { filesystem: 'workspace_write', network: 'none' },
+        autoReview: 'check',
+        requiresApproval: true,
+      }),
+    });
+    const decision = await permissions.authorize({
+      ...capability,
+      sessionId: 's',
+      runId: 'r',
+      executionId: 'e',
+      input: { command: '& ./script.ps1' },
+      signal: new AbortController().signal,
+    });
+    expect(decision).toMatchObject({ allowed: false, reason: 'approval_required' });
+    expect(decision.check).toBeUndefined();
+    expect(decision.approval?.options?.map((option) => option.kind)).toEqual(['once']);
+  }
+});
+
 test('capability refinement receives this authorization policy without a second control read', async () => {
   const request: AuthorizationRequest = {
     kind: 'tool',

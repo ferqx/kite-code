@@ -94,8 +94,7 @@ try {
   const { stageWindowsGitBash, captureWindowsGitBashRuntime } = await import(
     pathToFileURL(modulePath).href
   );
-  const prepare = () =>
-    stageWindowsGitBash(join(root, 'state'), join(root, 'coreutils.exe'), join(root, 'ktipc.dll'));
+  const prepare = () => stageWindowsGitBash(join(root, 'state'), join(root, 'ktipc.dll'));
   const first = prepare();
   let second: ReturnType<typeof prepare> | undefined;
   if (failure === 'same-process') {

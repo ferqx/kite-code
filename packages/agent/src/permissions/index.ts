@@ -48,6 +48,8 @@ export interface CapabilityDescription extends CapabilityIdentity {
   readonly worktreeAuthorization?: { readonly configurationIdentity: string };
   /** Trusted default-host review contract; absent preserves custom and historical policies. */
   readonly autoReview?: 'check' | 'none';
+  /** Trusted classification requires an exact human decision for this call. */
+  readonly requiresApproval?: true;
   readonly reviewBehavior?: ToolBehaviorBinding;
   readonly grantOffers?: readonly GrantCandidate[];
   readonly grantBehavior?: { readonly contractRef: string; readonly configurationDigest: string };
@@ -163,6 +165,7 @@ function validDescription(description: CapabilityDescription) {
     (description.autoReview === undefined ||
       description.autoReview === 'check' ||
       description.autoReview === 'none') &&
+    (description.requiresApproval === undefined || description.requiresApproval === true) &&
     (description.reviewBehavior === undefined ||
       (!!toolBehaviorBinding(description.reviewBehavior) &&
         matches(description.reviewBehavior.capability, description))) &&
@@ -232,6 +235,7 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.internalRecordOnly ?? null,
           ...(description.approvalExempt ? [description.approvalExempt] : []),
           ...(description.autoReview ? [description.autoReview] : []),
+          ...(description.requiresApproval ? ['requires_approval'] : []),
           ...(description.worktreeAuthorization ? [description.worktreeAuthorization] : []),
         ],
       }),
@@ -255,6 +259,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
     if (
       !facts?.policy.workspaceTrust ||
       !facts.description?.hardAllowed ||
+      facts.description.requiresApproval ||
       !facts.policy.allowed.some((entry) => sameCapability(entry, capability))
     )
       return null;
@@ -408,7 +413,8 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       if (!policy.workspaceTrust) return deny('workspace_untrusted');
       if (description.approvalExempt === 'builtin.browser')
         return { ...offerProof, allowed: true, revision: boundRevision };
-      if (policy.mode === 'full') return { ...offerProof, allowed: true, revision: boundRevision };
+      if (!description.requiresApproval && policy.mode === 'full')
+        return { ...offerProof, allowed: true, revision: boundRevision };
       const safeRead =
         description.safeRead && description.effects.every((effect) => effect === 'read');
       const workspaceEdit = description.effects.every(
@@ -418,12 +424,13 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
         description.executionScope?.filesystem === 'workspace_write' &&
         description.executionScope.network === 'none';
       if (
-        safeRead ||
-        description.internalRecordOnly === true ||
-        (policy.mode === 'accept_edits' && (workspaceEdit || scopedWorkspace))
+        !description.requiresApproval &&
+        (safeRead ||
+          description.internalRecordOnly === true ||
+          (policy.mode === 'accept_edits' && (workspaceEdit || scopedWorkspace)))
       )
         return { ...offerProof, allowed: true, revision: boundRevision };
-      if (policy.mode === 'auto') {
+      if (!description.requiresApproval && policy.mode === 'auto') {
         if (description.autoReview === 'none')
           return { ...offerProof, allowed: true, revision: boundRevision };
         const riskOnly = description.autoReview === 'check';

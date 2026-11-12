@@ -18,6 +18,8 @@ import {
   type WindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../platform/process/windows-owned-child';
+import { privateDirectory } from '../platform/windows-path-security';
+import type { DesktopShellPreference } from '../storage/types';
 import {
   launchIdentity,
   launchIdentityAsync,
@@ -26,12 +28,17 @@ import {
   verifyLaunchIdentitiesAsync,
 } from './launch-identity';
 import { ripgrepAsset } from './ripgrep';
-import type { TrustedWorkerLaunchResolver } from './shell';
+import type { TrustedWorkerLaunch } from './shell';
 import type { HostShellExecutionScopeResolver } from './shell-scope';
-import { captureWindowsGitBashRuntime, stageWindowsGitBash } from './windows-git-bash';
+import {
+  captureWindowsGitBashRuntime,
+  stageWindowsGitBash,
+  WindowsGitBashUnavailable,
+} from './windows-git-bash';
+import { discoverWindowsPowerShell, type WindowsPowerShell } from './windows-powershell';
 
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-const protocol = 6;
+const protocol = 7;
 const maximumFrame = 16 * 1024 * 1024;
 const capabilitySid = () =>
   `S-1-5-21-${Array.from({ length: 4 }, () => randomBytes(4).readUInt32LE()).join('-')}`;
@@ -45,8 +52,24 @@ const canonical = (value: unknown): string =>
           .join(',')}}`
       : JSON.stringify(value);
 
+export type WindowsShellBackend =
+  | { kind?: 'bash'; fullShellExecutable: string }
+  | {
+      kind: 'powershell';
+      powerShell: WindowsPowerShell;
+      gitExecutable?: string;
+      fullShellExecutable?: never;
+    };
+
 /** Installed assets only. Source callers must explicitly select their built fixture. */
-export async function windowsShellAssets(stateRoot: string) {
+export async function windowsShellAssets(
+  stateRoot: string,
+  preference: DesktopShellPreference = 'git-bash',
+): Promise<{
+  runner: string;
+  shell: string;
+  windows: WindowsShellBackend & { stateRoot: string };
+}> {
   if (process.platform !== 'win32' || !import.meta.url.endsWith('.js'))
     throw Error('windows_shell_asset_unavailable');
   const module = dirname(fileURLToPath(import.meta.url));
@@ -57,17 +80,43 @@ export async function windowsShellAssets(stateRoot: string) {
   const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
   if (
     manifest.protocol !== protocol ||
-    manifest.runtime !== 'git-bash-restricted-token' ||
-    Object.keys(manifest.files).sort().join(',') !==
-      'coreutils.exe,kite-windows-runner.exe,ktipc.dll'
+    manifest.runtime !== 'windows-restricted-token' ||
+    Object.keys(manifest.files).sort().join(',') !== 'kite-windows-runner.exe,ktipc.dll'
   )
-    throw Error('windows_shell_asset_unavailable');
+    throw Error('windows_shell_asset_invalid');
   for (const [file, hash] of Object.entries(manifest.files))
     if (digest(join(root, file)) !== hash) throw Error('windows_shell_asset_changed');
-  return {
-    runner: join(root, 'kite-windows-runner.exe'),
-    ...(await stageWindowsGitBash(stateRoot, join(root, 'coreutils.exe'), join(root, 'ktipc.dll'))),
+  const runner = join(root, 'kite-windows-runner.exe');
+  const powerShellAssets = async (gitExecutable?: string) => {
+    const powerShell = await discoverWindowsPowerShell();
+    privateDirectory(stateRoot);
+    return {
+      runner,
+      shell: powerShell.executable.canonical,
+      windows: { kind: 'powershell' as const, stateRoot, powerShell, gitExecutable },
+    };
   };
+  if (preference === 'powershell') {
+    const git = Bun.which('git');
+    return powerShellAssets(
+      git && isAbsolute(git) && /^git\.exe$/i.test(basename(git)) ? git : undefined,
+    );
+  }
+  try {
+    const bash = await stageWindowsGitBash(stateRoot, join(root, 'ktipc.dll'));
+    return {
+      runner,
+      shell: bash.shell,
+      windows: {
+        kind: 'bash',
+        stateRoot,
+        fullShellExecutable: bash.fullShell,
+      },
+    };
+  } catch (error) {
+    if (preference !== 'auto' || !(error instanceof WindowsGitBashUnavailable)) throw error;
+    return powerShellAssets(error.gitExecutable);
+  }
 }
 interface State {
   queue: { event: JobEvent; bytes: number }[];
@@ -78,35 +127,47 @@ interface State {
   ended: boolean;
   cancel: () => Promise<StopConfirmation>;
 }
-export interface WindowsShellOptions {
+export type WindowsShellOptions = WindowsShellBackend & {
   cwd: string;
+  workspaceRoot?: string;
   env: Readonly<Record<string, string>>;
   supervisorPath: string;
   shellExecutable: string;
-  fullShellExecutable: string;
-  coreutilsPath: string;
   stateRoot: string;
   controlBase: string;
-  executionScope: HostShellExecutionScopeResolver;
+  executionScope: (context: JobContext) =>
+    | ReturnType<HostShellExecutionScopeResolver>
+    | {
+        filesystem: 'read_only';
+        network: 'none';
+      };
   maxQueuedBytes?: number;
-  trustedWorkerLaunch?: TrustedWorkerLaunchResolver;
-}
+  trustedWorkerLaunch?: (
+    command: string,
+    context: JobContext,
+  ) => (TrustedWorkerLaunch & { readonly powerShellCommand?: string }) | undefined;
+};
 /** Live native Job/HANDLE owner; durable references never reconstruct a process from a PID. */
 export async function createWindowsShellJob(
   input: WindowsShellOptions,
   signal?: AbortSignal,
 ): Promise<JobDefinition> {
   const options = { ...input, env: { ...input.env } };
+  const workspaceRoot = options.workspaceRoot ?? options.cwd;
+  const powerShell = options.kind === 'powershell' ? options.powerShell : undefined;
+  const search = ripgrepAsset();
   if (
     process.platform !== 'win32' ||
     process.arch !== 'x64' ||
     !process.versions.bun ||
     ![
       options.cwd,
+      workspaceRoot,
       options.supervisorPath,
       options.shellExecutable,
-      options.fullShellExecutable,
-      options.coreutilsPath,
+      ...(options.kind === 'powershell'
+        ? [options.powerShell.executable.canonical, options.powerShell.engine.canonical]
+        : [options.fullShellExecutable]),
       options.stateRoot,
       options.controlBase,
     ].every(isAbsolute)
@@ -116,23 +177,26 @@ export async function createWindowsShellJob(
     [
       options.supervisorPath,
       options.shellExecutable,
-      options.coreutilsPath,
-      options.fullShellExecutable,
-      join(dirname(options.fullShellExecutable), 'coreutils.exe'),
+      options.kind === 'powershell' ? search : options.fullShellExecutable,
     ],
     (path, signal) => launchIdentityAsync(path, true, signal),
     signal,
   );
   const roots = await mapAssetVerification(
-    [options.cwd, options.controlBase],
+    [...new Set([options.cwd, workspaceRoot, options.controlBase])],
     (path, signal) => launchIdentityAsync(path, false, signal),
     signal,
   );
-  const verifyRuntime = await captureWindowsGitBashRuntime(
-    options.shellExecutable,
-    options.fullShellExecutable,
-    signal,
-  );
+  const verifyRuntime =
+    options.kind === 'powershell'
+      ? undefined
+      : await captureWindowsGitBashRuntime(
+          options.shellExecutable,
+          options.fullShellExecutable,
+          signal,
+        );
+  if (powerShell && assets[1]!.canonical !== powerShell.executable.canonical)
+    throw Error('windows_powershell_asset_invalid');
   const states = new WeakMap<JobHandle, State>();
   const get = (handle: JobHandle) => {
     const state = states.get(handle);
@@ -142,8 +206,7 @@ export async function createWindowsShellJob(
   return {
     id: 'shell.command',
     version: '1',
-    description:
-      'Git Bash with unelevated write-restricted filesystem access and owned Job supervision',
+    description: `${powerShell ? 'Windows PowerShell 5.1' : 'Git Bash'} with unelevated write-restricted filesystem access and owned Job supervision`,
     resources: { slot: 'process' },
     inputSchema: {
       type: 'object',
@@ -152,7 +215,7 @@ export async function createWindowsShellJob(
       additionalProperties: false,
     },
     async start(value, context: JobContext) {
-      const { scope, shell, coreutils, searchDirectory, command, trusted } = await (async () => {
+      const { scope, shell, command, trusted } = await (async () => {
         try {
           context.signal.throwIfAborted();
           if (
@@ -165,17 +228,23 @@ export async function createWindowsShellJob(
             value.command.length > 262144
           )
             throw Error('invalid_shell_input');
-          await verifyLaunchIdentitiesAsync([...assets, ...roots], context.signal);
+          await verifyLaunchIdentitiesAsync(
+            [
+              ...assets,
+              ...roots,
+              ...(powerShell ? [powerShell.executable, powerShell.engine] : []),
+            ],
+            context.signal,
+          );
           const scope = options.executionScope(context);
-          await verifyRuntime(scope.filesystem === 'full_access', context.signal);
+          await verifyRuntime?.(scope.filesystem === 'full_access', context.signal);
           context.signal.throwIfAborted();
-          const shell = scope.filesystem === 'full_access' ? assets[3]! : assets[1]!;
-          const coreutils = scope.filesystem === 'full_access' ? assets[4]! : assets[2]!;
-          if (basename(shell.canonical).toLowerCase() !== 'bash.exe')
+          const fullBash = !powerShell && scope.filesystem === 'full_access';
+          const shell = fullBash ? assets[2]! : assets[1]!;
+          if (!powerShell && basename(shell.canonical).toLowerCase() !== 'bash.exe')
             throw Error('windows_git_bash_required');
-          const searchDirectory = dirname(ripgrepAsset());
           const trusted = options.trustedWorkerLaunch?.(value.command, context);
-          return { scope, shell, coreutils, searchDirectory, command: value.command, trusted };
+          return { scope, shell, command: value.command, trusted };
         } catch (error) {
           throw new JobStartError(
             undefined,
@@ -191,22 +260,40 @@ export async function createWindowsShellJob(
       const inheritedPath = Object.hasOwn(env, 'PATH')
         ? env.PATH
         : Object.entries(env).find(([name]) => name.toUpperCase() === 'PATH')?.[1];
-      for (const name of Object.keys(env)) if (name.toUpperCase() === 'PATH') delete env[name];
+      const replaced = new Set(['PATH', 'TEMP', 'TMP', 'TMPDIR', 'BASH_ENV', 'ENV']);
+      if (powerShell)
+        for (const key of [
+          'SYSTEMROOT',
+          'WINDIR',
+          'COMSPEC',
+          'PATHEXT',
+          'PSMODULEPATH',
+          'RIPGREP_CONFIG_PATH',
+        ])
+          replaced.add(key);
+      for (const name of Object.keys(env)) if (replaced.has(name.toUpperCase())) delete env[name];
       Object.assign(env, {
         TEMP: temp,
         TMP: temp,
         HOME: env.HOME ?? env.USERPROFILE ?? temp,
         PATH: [
-          searchDirectory,
-          join(temp, 'kite-coreutils'),
-          dirname(shell.canonical),
-          join(dirname(shell.canonical), '../../mingw64/bin'),
+          dirname(search),
+          ...(powerShell
+            ? [powerShell.systemDirectory]
+            : [dirname(shell.canonical), join(dirname(shell.canonical), '../../mingw64/bin')]),
           inheritedPath ?? '',
         ].join(';'),
       });
-      delete env.BASH_ENV;
-      delete env.ENV;
-      env.TMPDIR = temp.replaceAll('\\', '/');
+      if (powerShell)
+        Object.assign(env, {
+          SystemRoot: dirname(powerShell.systemDirectory),
+          windir: dirname(powerShell.systemDirectory),
+          ComSpec: join(powerShell.systemDirectory, 'cmd.exe'),
+          PATHEXT: '.COM;.EXE;.BAT;.CMD',
+          PSModulePath: join(dirname(shell.canonical), 'Modules'),
+          TMPDIR: temp,
+        });
+      else env.TMPDIR = temp.replaceAll('\\', '/');
       if (scope.network === 'none') {
         // The approved offline scope supplies conventional application hints.
         // Commands are never replaced by failing stubs or a second policy.
@@ -220,8 +307,11 @@ export async function createWindowsShellJob(
           NPM_CONFIG_OFFLINE: 'true',
           CARGO_NET_OFFLINE: 'true',
         };
-        for (const [key, value] of Object.entries(defaults))
-          if (!Object.keys(env).some((name) => name.toUpperCase() === key)) env[key] = value;
+        for (const [key, value] of Object.entries(defaults)) {
+          const inherited = Object.keys(env).find((name) => name.toUpperCase() === key);
+          if (powerShell && inherited) delete env[inherited];
+          if (powerShell || !inherited) env[key] = value;
+        }
       }
       const request = {
         version: protocol,
@@ -232,16 +322,15 @@ export async function createWindowsShellJob(
             : {}),
         },
         invocationName: invocation,
-        commandLine: command,
+        commandLine: powerShell ? (trusted?.powerShellCommand ?? command) : command,
         cwd: options.cwd,
         env,
         filesystemScope: scope.filesystem,
-        workspaceRoot: options.cwd,
+        workspaceRoot,
         runtimeRoot: temp,
-        shellRuntimeRoot: dirname(shell.canonical),
-        shellRuntime: 'bash',
+        shellRuntime: powerShell ? 'powershell' : 'bash',
         shellRuntimeDigest: `sha256:${shell.digest}`,
-        coreutilsDigest: `sha256:${coreutils.digest}`,
+        ...(!powerShell ? { shellRuntimeRoot: dirname(shell.canonical) } : {}),
         maxProcesses: 64,
         timeoutMs: null,
         networkMode: scope.network === 'none' ? 'off' : 'allow_all',

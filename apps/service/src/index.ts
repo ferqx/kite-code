@@ -2,6 +2,12 @@ import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import { Hono } from 'hono';
 import type { z } from 'zod';
 import type { ConfigurationManagementPort } from './configuration-management';
+import {
+  type DesktopShellSettingsPort,
+  desktopShellSaveSchema,
+  desktopShellSettingsPath,
+  desktopShellSettingsSchema,
+} from './desktop-shell';
 import { type HostStatusSource, unavailableHostStatus } from './host-status';
 import {
   apiSchemas,
@@ -58,6 +64,8 @@ export interface ServiceOptions {
   /** Trusted host release after confirmed Runtime/resource drain, before the listener closes. */
   afterResourceClose?: () => Promise<void>;
   configurationManagement?: ConfigurationManagementPort;
+  /** The original Windows Desktop paired caller; no public settings or configuration endpoint. */
+  desktopShell?: DesktopShellSettingsPort;
   userMcpManagement?: UserMcpManagementPort;
   permissionManagement?: PermissionManagementPort;
   diagnosticSource?: HostStatusSource;
@@ -1384,6 +1392,22 @@ export async function startService(options: ServiceOptions) {
   });
   app.get('/health/live', (context) => context.json({ status: closing ? 'draining' : 'live' }));
   app.get('/v1/server', async (context) => context.json(await serverInfo()));
+  if (options.desktopShell) {
+    const settings = options.desktopShell;
+    app.on(['GET', 'PUT'], desktopShellSettingsPath, async (context) => {
+      context.header('cache-control', 'no-store');
+      if (context.req.header('origin') !== undefined) throw new HttpFailure('invalid_origin', 403);
+      const query = new URL(context.req.url).searchParams;
+      if (context.req.method === 'GET') {
+        const storeId = desktopShellSettingsSchema.shape.storeId.safeParse(query.get('storeId'));
+        if (!storeId.success || query.size !== 1) throw new HttpFailure('invalid_request', 400);
+        return context.json(await settings.read(storeId.data));
+      }
+      if (query.size) throw new HttpFailure('invalid_request', 400);
+      const input = await readBusinessBody(context.req.raw, desktopShellSaveSchema, 1024);
+      return context.json(await settings.save(input.expectedStoreId, input.preference));
+    });
+  }
   const userMcp = () => {
     if (!options.userMcpManagement) throw new HttpFailure('user_mcp_settings_unavailable', 503);
     return options.userMcpManagement;
@@ -1825,7 +1849,9 @@ export async function startService(options: ServiceOptions) {
       options.maxBodyBytes ?? 1024 * 1024,
     );
     return context.json(
-      schemas.Session.parse(await runtime.createSession({ ...request, subjectId })),
+      schemas.Session.parse(
+        await runtime.createSession({ ...request, subjectId }, options.desktopShell?.automatic),
+      ),
       201,
     );
   });
@@ -1995,11 +2021,10 @@ export async function startService(options: ServiceOptions) {
     const request = await readBusinessBody(context.req.raw, schemas.ForkSessionRequest, 4096);
     return context.json(
       ForkSessionResponseSchema.parse(
-        await runtime.forkSession({
-          ...request,
-          sourceSessionId: context.req.param('id'),
-          subjectId,
-        }),
+        await runtime.forkSession(
+          { ...request, sourceSessionId: context.req.param('id'), subjectId },
+          options.desktopShell?.automatic,
+        ),
       ),
     );
   });

@@ -9,8 +9,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { AuthorizationRequest } from '../../../src/extensions';
 import { ripgrepAsset } from '../../../src/jobs/ripgrep';
 import { createShellConfiguration } from '../../../src/permissions/shell';
@@ -22,11 +23,13 @@ import {
 
 const scope = { filesystem: 'workspace_write', network: 'none' } as const;
 const signal = () => new AbortController().signal;
+const windows = process.platform === 'win32';
+const rgCommand = windows ? 'rg.exe' : 'rg';
 const texts = ['#!/bin/sh\ncat -- "$1"\n', '#!/bin/sh\nrm -rf -- /home/user\n'];
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-risk-facts-')));
   const rg = ripgrepAsset();
-  const shell = process.platform === 'win32' ? Bun.which('bash')! : '/bin/sh';
+  const shell = windows ? Bun.which('bash')! : '/bin/sh';
   return { root, rg, shell, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 async function preparer(
@@ -37,9 +40,9 @@ async function preparer(
   return createShellRiskPreparer({
     cwd: f.root,
     rgPath: f.rg,
-    interpreterPaths: [realpathSync(f.shell)],
+    interpreterPaths: [await realpath(f.shell)],
     env: options.env ?? {
-      PATH: `${dirname(f.rg)}${process.platform === 'win32' ? ';' : ':'}${dirname(f.shell)}`,
+      PATH: `${dirname(f.rg)}${windows ? ';' : ':'}${dirname(f.shell)}`,
     },
     protectedPaths: options.protectedPaths ?? [],
     binding: { fixture: 'fixed' },
@@ -69,11 +72,12 @@ test('rg facts consume attached, equals and next-token values before recognizing
     for (const [command, invokes] of examples) {
       const parsed = await policy.classify(command);
       const facts = ripgrepRiskFacts(parsed.plainCommands![0]!);
-      expect(facts.availability, command).toBe('available');
-      expect((facts.configuredPreprocessors as unknown[]).length > 0, command).toBe(invokes);
-      expect((facts.tokens as unknown[]).length, command).toBe(parsed.plainCommands![0]!.length);
+      if (facts.availability !== 'available') throw Error(`${command}: ${facts.reason}`);
+      expect(facts.configuredPreprocessors.length > 0, command).toBe(invokes);
+      expect(facts.tokens.length, command).toBe(parsed.plainCommands![0]!.length);
     }
     const attached = ripgrepRiskFacts(['rg', '-e--', '--pre', './filter', 'input.txt']);
+    if (attached.availability !== 'available') throw Error(attached.reason);
     expect(attached.optionTerminatorIndex).toBeNull();
     expect(attached.consumedOptionValues).toContainEqual({
       optionIndex: 1,
@@ -100,7 +104,7 @@ test('real bundled rg identity and unchanged argv yield equal facts while entry 
   const f = fixture();
   try {
     const review = await preparer(f);
-    const command = 'rg -e-- --pre ./filter input.txt';
+    const command = `${rgCommand} -e-- --pre ./filter input.txt`;
     writeFileSync(join(f.root, 'filter'), texts[0]!);
     const low = await review.prepare(command, scope, signal());
     writeFileSync(join(f.root, 'filter'), texts[1]!);
@@ -117,7 +121,11 @@ test('real bundled rg identity and unchanged argv yield equal facts while entry 
         hash: createHash('sha256').update(texts[1]!).digest('hex'),
       },
     ]);
-    const literal = await review.prepare('rg -e -- -- --pre=./filter input.txt', scope, signal());
+    const literal = await review.prepare(
+      `${rgCommand} -e -- -- --pre=./filter input.txt`,
+      scope,
+      signal(),
+    );
     expect(literal.material.directScripts).toEqual([]);
     expect(literal.reusable).toBe(true);
     expect(readFileSync(join(f.root, 'filter'), 'utf8')).toBe(texts[1]!);
@@ -129,10 +137,14 @@ test('real bundled rg identity and unchanged argv yield equal facts while entry 
 test('custom rg, ambient config and dynamic Shell do not acquire verified program semantics or cache reuse', async () => {
   const f = fixture();
   try {
-    writeFileSync(join(f.root, process.platform === 'win32' ? 'rg.exe' : 'rg'), texts[0]!);
-    chmodSync(join(f.root, process.platform === 'win32' ? 'rg.exe' : 'rg'), 0o700);
+    writeFileSync(join(f.root, rgCommand), texts[0]!);
+    chmodSync(join(f.root, rgCommand), 0o700);
     const custom = await preparer(f, { env: { PATH: f.root } });
-    const unknown = await custom.prepare('rg -e -- --pre ./filter input.txt', scope, signal());
+    const unknown = await custom.prepare(
+      `${rgCommand} -e -- --pre ./filter input.txt`,
+      scope,
+      signal(),
+    );
     expect(unknown.material.commandFacts).toMatchObject({
       availability: 'unavailable',
       reason: 'program_semantics_unverified',
@@ -142,9 +154,10 @@ test('custom rg, ambient config and dynamic Shell do not acquire verified progra
       env: { PATH: dirname(f.rg), RIPGREP_CONFIG_PATH: join(f.root, 'config') },
     });
     expect(
-      (await configured.prepare('rg -e x input.txt', scope, signal())).material.commandFacts,
+      (await configured.prepare(`${rgCommand} -e x input.txt`, scope, signal())).material
+        .commandFacts,
     ).toMatchObject({ availability: 'unavailable', reason: 'ambient_rg_configuration' });
-    const dynamic = await custom.prepare('rg "$PATTERN" input.txt', scope, signal());
+    const dynamic = await custom.prepare(`${rgCommand} "$PATTERN" input.txt`, scope, signal());
     expect(dynamic.material.commandFacts).toMatchObject({
       availability: 'unavailable',
       reason: 'not_single_literal_invocation',
@@ -158,15 +171,22 @@ test('custom rg, ambient config and dynamic Shell do not acquire verified progra
 test('script capture is bounded, protected, nonrecursive, cancelable and never executes code', async () => {
   const f = fixture();
   const other = fixture();
+  const outsideScript = join(other.root, 'outside.sh');
+  const link = windows ? 'link' : 'link.sh';
+  const alias = join(other.root, 'workspace-alias');
   try {
     writeFileSync(join(f.root, 'script.sh'), '#!/bin/sh\nprintf executed > marker\n');
     writeFileSync(join(f.root, 'protected.sh'), 'PRIVATE MUST NOT APPEAR');
-    writeFileSync(join(other.root, 'outside.sh'), 'OUTSIDE MUST NOT APPEAR');
+    writeFileSync(outsideScript, 'OUTSIDE MUST NOT APPEAR');
     writeFileSync(join(f.root, 'large.sh'), 'x'.repeat(65537));
-    symlinkSync(join(other.root, 'outside.sh'), join(f.root, 'link.sh'));
-    symlinkSync(f.root, join(other.root, 'workspace-alias'), 'dir');
+    symlinkSync(
+      windows ? other.root : outsideScript,
+      join(f.root, link),
+      windows ? 'junction' : 'file',
+    );
+    symlinkSync(f.root, alias, windows ? 'junction' : 'dir');
     const review = await preparer(f, {
-      protectedPaths: [join(other.root, 'workspace-alias', 'protected.sh')],
+      protectedPaths: [join(alias, 'protected.sh')],
     });
     const captured = await review.prepare('./script.sh', scope, signal());
     expect(captured.material.directScripts).toMatchObject([{ complete: true }]);
@@ -175,8 +195,8 @@ test('script capture is bounded, protected, nonrecursive, cancelable and never e
       './missing.sh',
       './protected.sh',
       './large.sh',
-      './link.sh',
-      join(other.root, 'outside.sh'),
+      windows ? './link/outside.sh' : './link.sh',
+      `'${outsideScript.replaceAll("'", "'\\''")}'`,
     ]) {
       const result = await review.prepare(command, scope, signal());
       expect(result.material.directScripts, command).toMatchObject([
@@ -186,7 +206,8 @@ test('script capture is bounded, protected, nonrecursive, cancelable and never e
       expect(result.reusable).toBe(false);
     }
     expect(
-      (await review.prepare('sh script.sh', scope, signal())).material.directScripts,
+      (await review.prepare(`${basename(f.shell)} script.sh`, scope, signal())).material
+        .directScripts,
     ).toMatchObject([{ path: 'script.sh', complete: true }]);
     expect(
       (await review.prepare('python3 -c "print(1)"', scope, signal())).material.directScripts,
@@ -199,6 +220,8 @@ test('script capture is bounded, protected, nonrecursive, cancelable and never e
       'shell_review_entry_changed',
     );
   } finally {
+    rmSync(join(f.root, link), { force: true });
+    rmSync(alias, { force: true });
     f.close();
     other.close();
   }

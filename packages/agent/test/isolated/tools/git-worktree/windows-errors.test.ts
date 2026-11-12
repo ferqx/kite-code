@@ -33,6 +33,10 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   reason: 'stop',
   usage: { inputTokens: 0, outputTokens: 0 },
 };
+const worktreeCall = (id: string, input: Json): ModelEvent[] => [
+  { type: 'tool_call', id, name: 'git_worktree', arguments: JSON.stringify(input) },
+  { ...finish, reason: 'tool_calls' },
+];
 const object = (value: unknown) => value as Record<string, Json>;
 
 function environment(home: string) {
@@ -180,7 +184,6 @@ process.stdout.write(JSON.stringify(frame)+'\\n');
         supervisorPath: shell.runner,
         shellExecutable: shell.shell,
         fullShellExecutable: shell.fullShell,
-        coreutilsPath: shell.coreutils,
         stateRoot: shell.stateRoot,
         executionScope(context) {
           const accepted = hostExecutionScope(context);
@@ -221,32 +224,17 @@ process.stdout.write(JSON.stringify(frame)+'\\n');
         ? { action: 'list' }
         : {
             action: 'create',
-            key: 'original-error-intent',
             path: join(workspace, 'never-created'),
-            permissions: scope,
+            filesystem: scope.filesystem,
           };
-      const modelCall: ModelEvent[] = [
-        {
-          type: 'tool_call',
-          id: 'original-call',
-          name: 'git_worktree',
-          arguments: JSON.stringify(input),
-        },
-        { ...finish, reason: 'tool_calls' },
-      ];
-      const replay = !readonlyCase && mode !== 'authorization_denied';
-      const model = createFixedModel([
-        modelCall,
-        [finish],
-        ...(replay ? [modelCall, [finish]] : []),
-      ]);
+      let model = createFixedModel([worktreeCall('original-call', input), [finish]]);
       const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
       const authorizations: AuthorizationRequest[] = [];
       const extension = createShellExtension({ job, gitWorktree: { configuration } });
       const runtime = createRuntime({
         store,
         modelId: 'fixed',
-        model,
+        model: { stream: (request, options) => model.stream(request, options) },
         processConcurrency: 1,
         modelConcurrency: 1,
         extensions: [
@@ -440,31 +428,41 @@ process.stdout.write(JSON.stringify(frame)+'\\n');
               expect(object(object(tool.result).details).failure).toMatchObject({
                 exitCode: expect.any(Number),
               });
-            if (replay) {
+            if (!readonlyCase) {
               const original = structuredClone(record);
-              await run('replay');
+              const operationRef = object(object(tool.result).details).operation_ref;
+              expect(operationRef).toEqual(expect.stringMatching(/^gw_/));
+              model = createFixedModel([
+                worktreeCall('observe-call', { action: 'observe', operation_ref: operationRef! }),
+                [finish],
+              ]);
+              await run('observe');
               expect(dispatched).toHaveLength(1);
               const after = await store.listExecutions('s');
               expect(
                 after.filter((entry) => entry.kind === 'job').map((entry) => entry.id),
               ).toEqual([execution.id]);
-              const replayed = after
-                .filter((entry) => entry.kind === 'tool')
-                .find((entry) => entry.id !== tool.id)!;
-              expect(replayed.result).toMatchObject({
-                outcome: 'failed',
+              const observation = after.find(
+                (entry) => entry.kind === 'tool' && entry.id !== tool.id,
+              );
+              expect(observation?.result).toMatchObject({
+                outcome: 'succeeded',
                 details: {
-                  code,
-                  failure: { category },
-                  replayed: true,
-                  observedAt: object(object(tool.result).details).observedAt,
+                  action: 'observe',
+                  operation_ref: operationRef,
+                  original_execution_id: tool.id,
+                  phase: 'completed',
+                  jobs: [{ phase: 'prepare', execution: { id: execution.id } }],
                 },
               });
+              expect(object(object(observation?.result).details).original_result).toEqual(
+                original.stableResult,
+              );
               expect(
                 (
                   await store.listExtensionRecords({ extensionId: 'builtin.shell', sessionId: 's' })
-                )[0]!.value,
-              ).toEqual(original);
+                ).map(({ value }) => value),
+              ).toEqual([original]);
             }
           }
         }

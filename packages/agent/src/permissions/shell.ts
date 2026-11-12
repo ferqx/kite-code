@@ -21,10 +21,12 @@ import type {
 } from '../extensions';
 import { JobStartError } from '../extensions';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
+import type { WindowsShellBackend } from '../jobs/windows-shell';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import type { GitWorktreeHost } from '../tools/git-worktree';
 import {
+  buildPowerShellWorkerCommand,
   digest,
   type GitWorktreeConfiguration,
   parseGitWorktreeRequest,
@@ -33,6 +35,7 @@ import {
 import { shellToolCapability as describe } from './capabilities';
 import { dispatchScopeLeaves } from './dispatch-scope';
 import type { CapabilityDescription, PermissionPolicySnapshot } from './index';
+import { type PowerShellAssessment, powerShellScopeDenial } from './powershell-command-policy';
 import { createShellCommandPolicy } from './shell-command-policy';
 import { shellExplorationPresentation } from './shell-presentation';
 import { createShellRiskPreparer, type ShellRiskSnapshot } from './shell-risk-facts';
@@ -50,11 +53,7 @@ export interface ShellConfigurationOptions {
   readonly maxQueuedBytes?: number;
   /** Linux supervisorPath is the packaged native init, plus this verified launcher. */
   readonly linux?: { readonly bubblewrapPath: string };
-  readonly windows?: {
-    readonly coreutilsPath: string;
-    readonly stateRoot: string;
-    readonly fullShellExecutable: string;
-  };
+  readonly windows?: WindowsShellBackend & { readonly stateRoot: string };
   /** Default host boundary; Linux requires it, explicit macOS legacy assembly may omit it. */
   readonly host?: {
     readonly controlBase: string;
@@ -182,18 +181,27 @@ export async function inspectShellAssets(
     [options.shellExecutable, true],
   ];
   if (options.linux) paths.push([options.linux.bubblewrapPath, true]);
-  if (options.windows)
+  if (options.windows?.kind === 'powershell') {
+    if (options.shellExecutable !== options.windows.powerShell.executable.canonical)
+      throw new AgentError('windows_powershell_asset_invalid');
+    paths.push([options.windows.powerShell.engine.canonical, false]);
+  } else if (options.windows)
     paths.push(
-      [options.windows.coreutilsPath, true],
       [options.windows.fullShellExecutable, true],
-      [`${dirname(options.windows.fullShellExecutable)}/coreutils.exe`, true],
       [`${dirname(options.shellExecutable)}/../../manifest.json`, true],
     );
-  return mapAssetVerification(
+  const assets = await mapAssetVerification(
     paths,
     ([path, executable], signal) => asset(path, executable, signal),
     signal,
   );
+  if (
+    options.windows?.kind === 'powershell' &&
+    (assets[2]?.digest !== options.windows.powerShell.executable.digest ||
+      assets[3]?.digest !== options.windows.powerShell.engine.digest)
+  )
+    throw new AgentError('shell_asset_changed');
+  return assets;
 }
 function assertShellConfiguration(options: ShellConfigurationOptions) {
   if (
@@ -401,7 +409,11 @@ async function worktreeAssets(
       throw new AgentError('worktree_asset_changed');
     const candidates =
       options.platform === 'win32'
-        ? [join(dirname(options.windows!.fullShellExecutable), '../../mingw64/bin/git.exe')]
+        ? options.windows?.kind === 'powershell'
+          ? options.windows.gitExecutable
+            ? [options.windows.gitExecutable]
+            : []
+          : [join(dirname(options.windows!.fullShellExecutable!), '../../mingw64/bin/git.exe')]
         : options.platform === 'darwin'
           ? await macosGitCandidates()
           : ['/usr/bin/git', '/bin/git'];
@@ -505,6 +517,8 @@ export async function createShellConfiguration(input: {
     };
   if (!input.options) throw new AgentError('shell_unavailable');
   const options = structuredClone(input.options);
+  const powerShell =
+    options.windows?.kind === 'powershell' ? options.windows.powerShell : undefined;
   assertShellConfiguration(options);
   try {
     const cwd = await realpath(input.workspaceRoot);
@@ -512,11 +526,11 @@ export async function createShellConfiguration(input: {
     const assets = await inspectShellAssets(options, input.signal);
     const [supervisor, bun, shell, extra] = assets;
     const bubblewrap = options.platform === 'linux' ? extra : undefined;
-    const coreutils = options.platform === 'win32' ? extra : undefined;
     if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
     const commandPolicy = await createShellCommandPolicy({
       cwd,
       shellExecutable: shell.path,
+      powerShell,
       signal: input.signal,
     });
     const searchAsset = await asset(ripgrepAsset(), true, input.signal);
@@ -562,50 +576,43 @@ export async function createShellConfiguration(input: {
       sanitizedEnvironment: !!host && !/zsh/i.test(shell.path),
       classify: (command: string) => commandPolicy.classify(command),
       rewritten: async (command: string) =>
-        readOnlySearchCommand(
-          await commandPolicy.classify(command),
-          shell.path,
-          coreutils?.path,
-        ) !== undefined,
+        readOnlySearchCommand(await commandPolicy.classify(command), shell.path) !== undefined,
     };
     const riskPreparer = createShellRiskPreparer(riskOptions);
     const executionDirectory = async (workdir?: string) => {
-      const path = workdir === undefined ? cwd : await realpath(resolve(cwd, workdir));
+      const requested = workdir === undefined ? cwd : resolve(cwd, workdir);
+      if (powerShell && workdir !== undefined && requested.startsWith('\\\\'))
+        throw new AgentError('shell_workdir_unavailable');
+      const path = workdir === undefined ? cwd : await realpath(requested);
       const stat = await lstat(path);
       if (!stat.isDirectory()) throw new AgentError('shell_workdir_unavailable');
       return { path, dev: String(stat.dev), ino: String(stat.ino) };
     };
-    async function commandDigest(
-      request: AuthorizationRequest,
-      capturedDirectory?: Awaited<ReturnType<typeof executionDirectory>>,
-    ): Promise<string | undefined> {
-      const worktreeCall = worktreeRequest(request);
-      if (worktreeCall && worktree?.profile)
-        return createHash('sha256')
-          .update(
-            JSON.stringify({
-              namespace: 'builtin.shell.git-worktree-permission',
-              version: 1,
-              kind: request.kind,
-              definitionId: request.definitionId,
-              definitionVersion: request.definitionVersion,
-              input: request.input,
-              configuration: worktree.configuration,
-              assets: worktree.assets,
-              launchProfile: worktree.profile,
-              host: options.host ?? null,
-            }),
-          )
-          .digest('hex');
-      const value = commandRequest(request, !!host);
-      if (!value) return undefined;
-      let directory: Awaited<ReturnType<typeof executionDirectory>>;
-      try {
-        directory = capturedDirectory ?? (await executionDirectory(value.workdir));
-      } catch {
-        request.signal.throwIfAborted();
-        return undefined;
-      }
+    function worktreeCommandDigest(request: AuthorizationRequest) {
+      if (!worktree?.profile) return undefined;
+      return createHash('sha256')
+        .update(
+          JSON.stringify({
+            namespace: 'builtin.shell.git-worktree-permission',
+            version: 1,
+            kind: request.kind,
+            definitionId: request.definitionId,
+            definitionVersion: request.definitionVersion,
+            input: request.input,
+            configuration: worktree.configuration,
+            assets: worktree.assets,
+            launchProfile: worktree.profile,
+            host: options.host ?? null,
+          }),
+        )
+        .digest('hex');
+    }
+    function digestShellCommand(
+      request: Pick<AuthorizationRequest, 'kind' | 'definitionId' | 'definitionVersion'>,
+      value: NonNullable<ReturnType<typeof commandRequest>>,
+      directory: Awaited<ReturnType<typeof executionDirectory>>,
+      powerShellFacts?: PowerShellAssessment,
+    ) {
       // A logical ensure key selects a new operation; it does not change this command's
       // authority. All execution semantics and private environment values remain hashed.
       return createHash('sha256')
@@ -629,6 +636,7 @@ export async function createShellConfiguration(input: {
             env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
             assets,
             parserAssets: commandPolicy.assets,
+            ...(powerShellFacts ? { powerShellFacts, searchAsset } : {}),
             ...(options.host ? { host: options.host } : {}),
             graceMs: options.graceMs ?? 200,
             maxQueuedBytes: options.maxQueuedBytes ?? 256 * 1024,
@@ -636,7 +644,24 @@ export async function createShellConfiguration(input: {
         )
         .digest('hex');
     }
+    async function commandDigest(request: AuthorizationRequest): Promise<string | undefined> {
+      if (worktreeRequest(request) && worktree?.profile) return worktreeCommandDigest(request);
+      const value = commandRequest(request, !!host);
+      if (!value) return undefined;
+      let directory: Awaited<ReturnType<typeof executionDirectory>>;
+      try {
+        directory = await executionDirectory(value.workdir);
+      } catch {
+        request.signal.throwIfAborted();
+        return undefined;
+      }
+      const assessment = powerShell
+        ? (await commandPolicy.classify(value.command, request.signal, directory.path)).powerShell
+        : undefined;
+      return digestShellCommand(request, value, directory, assessment);
+    }
     const riskSnapshots = new Map<string, readonly ShellRiskSnapshot[]>();
+    const readOnlyPowerShellJobs = new Set<string>();
     const workerScopes = new Map<
       string,
       { filesystem: 'workspace_write' | 'full_access'; network: 'none' }
@@ -661,10 +686,17 @@ export async function createShellConfiguration(input: {
       supervisorPath: supervisor.path,
       bunExecutable: bun.path,
       shellExecutable: shell.path,
-      trustedWorkerLaunch: (command: string) =>
-        worktree?.profile && parseWorkerCommand(command, worktree.configuration)
-          ? worktree.profile
-          : undefined,
+      trustedWorkerLaunch: (command: string) => {
+        if (!worktree?.profile) return;
+        const worker = parseWorkerCommand(command, worktree.configuration);
+        if (!worker) return;
+        return powerShell
+          ? {
+              ...worktree.profile,
+              powerShellCommand: buildPowerShellWorkerCommand(worktree.configuration, worker),
+            }
+          : worktree.profile;
+      },
       ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
       ...(options.maxQueuedBytes !== undefined ? { maxQueuedBytes: options.maxQueuedBytes } : {}),
       ...(bubblewrap
@@ -672,16 +704,22 @@ export async function createShellConfiguration(input: {
         : {}),
     };
     const makeJob = async (directory = cwd) =>
-      options.platform === 'win32' && coreutils && host
+      options.platform === 'win32' && options.windows && host
         ? await createWindowsShellJob(
             {
               ...jobOptions,
+              ...options.windows,
               cwd: directory,
+              workspaceRoot: cwd,
               controlBase: host.controlBase,
-              coreutilsPath: coreutils.path,
-              fullShellExecutable: options.windows!.fullShellExecutable,
-              stateRoot: options.windows!.stateRoot,
-              executionScope,
+              executionScope: (context) => {
+                const scope = executionScope(context);
+                return scope.filesystem === 'workspace_write' &&
+                  scope.network === 'none' &&
+                  readOnlyPowerShellJobs.has(context.executionId)
+                  ? { filesystem: 'read_only', network: 'none' }
+                  : scope;
+              },
             },
             input.signal,
           )
@@ -707,6 +745,9 @@ export async function createShellConfiguration(input: {
     const handleOwners = new WeakMap<JobHandle, JobDefinition>();
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
+      ...(options.platform === 'win32'
+        ? { dialect: powerShell ? ('powershell' as const) : ('git-bash' as const) }
+        : {}),
       ...(worktree
         ? {
             gitWorktree: {
@@ -717,6 +758,7 @@ export async function createShellConfiguration(input: {
         : {}),
       async classifyPresentation(command) {
         const classified = await commandPolicy.classify(command);
+        if (classified.powerShell?.readOnly) return 'exploration';
         return classified.hardDenied
           ? 'standalone'
           : shellExplorationPresentation(classified.plainCommands);
@@ -801,13 +843,25 @@ export async function createShellConfiguration(input: {
               'permissions' in value
             )
               throw new AgentError('invalid_shell_arguments');
-            const classified = await commandPolicy.classify(command, context.signal);
-            context.signal.throwIfAborted();
-            const search = readOnlySearchCommand(classified, shell.path, coreutils?.path);
             const parsed = parseShellCommandInput(value, 'job', !!host);
             if (!parsed) throw new AgentError('invalid_shell_arguments');
             const directory = await executionDirectory(parsed.workdir);
             const selectedJob = parsed.workdir === undefined ? job : await makeJob(directory.path);
+            const classified = await commandPolicy.classify(
+              command,
+              context.signal,
+              directory.path,
+            );
+            if (classified.powerShell) {
+              const denial = powerShellScopeDenial(classified.powerShell, executionScope(context));
+              if (denial) throw new AgentError(denial);
+            }
+            const fullShell = options.windows?.fullShellExecutable;
+            const searchShell =
+              fullShell && executionScope(context).filesystem === 'full_access'
+                ? fullShell
+                : shell.path;
+            const search = readOnlySearchCommand(classified, searchShell);
             // Compare with the final Store-accepted authorization, not a later policy read.
             // This detects observed directory changes; it does not pin an OS directory handle.
             if (host || context.dispatchAuthorization) {
@@ -818,18 +872,11 @@ export async function createShellConfiguration(input: {
                 currentDirectory.ino !== directory.ino
               )
                 throw new AgentError('shell_workdir_changed');
-              const digest = await commandDigest(
-                {
-                  kind: 'job',
-                  sessionId: context.sessionId,
-                  runId: null,
-                  executionId: context.executionId,
-                  definitionId: 'shell.command',
-                  definitionVersion: '1',
-                  input: value,
-                  signal: context.signal,
-                },
+              const digest = digestShellCommand(
+                { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
+                parsed,
                 directory,
+                classified.powerShell,
               );
               const leaves = [
                 ...dispatchScopeLeaves(
@@ -839,7 +886,6 @@ export async function createShellConfiguration(input: {
               ];
               if (
                 !context.dispatchAuthorization?.revision ||
-                !digest ||
                 !leaves.length ||
                 leaves.some(({ namespace, data }) => {
                   const capability = data.capability;
@@ -860,6 +906,7 @@ export async function createShellConfiguration(input: {
 
             context.signal.throwIfAborted();
             dispatched = true;
+            if (classified.powerShell?.readOnly) readOnlyPowerShellJobs.add(context.executionId);
             try {
               const handle = await selectedJob.start({ command: search ?? command }, context);
               handleOwners.set(handle, selectedJob);
@@ -868,6 +915,8 @@ export async function createShellConfiguration(input: {
               if (error instanceof JobStartError && error.handle)
                 handleOwners.set(error.handle, selectedJob);
               throw error;
+            } finally {
+              readOnlyPowerShellJobs.delete(context.executionId);
             }
           } catch (error) {
             if (!dispatched)
@@ -900,7 +949,9 @@ export async function createShellConfiguration(input: {
         platform: options.platform,
         qualification:
           options.platform === 'win32'
-            ? 'windows_unelevated_git_bash_job'
+            ? powerShell
+              ? 'windows_unelevated_powershell_job'
+              : 'windows_unelevated_git_bash_job'
             : options.platform === 'linux'
               ? options.host?.protectedFiles?.length
                 ? 'linux_owned_pid_namespace_bubblewrap_private_directories'
@@ -915,7 +966,6 @@ export async function createShellConfiguration(input: {
           bun,
           shell,
           ...(bubblewrap ? { bubblewrap } : {}),
-          ...(coreutils ? { coreutils } : {}),
           parser: [...commandPolicy.assets],
           ripgrep: searchAsset,
           ...(worktree
@@ -997,8 +1047,13 @@ export async function createShellConfiguration(input: {
         )
           return { hardAllowed: false, denialReason: 'invalid_worktree_arguments' };
         if (worktreeCall) {
+          const commandDigest = worktreeCommandDigest(request);
           if (!host && worktreeCall.action !== 'list')
-            return { hardAllowed: false, denialReason: 'worktree_permission_denied' };
+            return {
+              commandDigest,
+              hardAllowed: false,
+              denialReason: 'worktree_permission_denied',
+            };
           if (!worktree?.profile)
             return {
               hardAllowed: false,
@@ -1008,7 +1063,7 @@ export async function createShellConfiguration(input: {
             await worktree.verify(request.signal);
           } catch {
             request.signal.throwIfAborted();
-            return { hardAllowed: false, denialReason: 'worktree_asset_changed' };
+            return { commandDigest, hardAllowed: false, denialReason: 'worktree_asset_changed' };
           }
           const parsed =
             request.kind === 'tool'
@@ -1022,8 +1077,13 @@ export async function createShellConfiguration(input: {
                   network: 'none' as const,
                 });
           if (scope.network !== 'none')
-            return { hardAllowed: false, denialReason: 'worktree_permission_denied' };
+            return {
+              commandDigest,
+              hardAllowed: false,
+              denialReason: 'worktree_permission_denied',
+            };
           return {
+            commandDigest,
             // Only the verified Tool is Auto-exempt. Its frozen internal Jobs
             // derive the original decision through Store, never command text alone.
             autoReview: request.kind === 'tool' && policy?.mode === 'auto' ? 'none' : undefined,
@@ -1064,12 +1124,34 @@ export async function createShellConfiguration(input: {
           request.signal.throwIfAborted();
           return { hardAllowed: false, denialReason: 'shell_workdir_unavailable' };
         }
-        const classified = await commandPolicy.classify(value.command);
+        const classified = await commandPolicy.classify(
+          value.command,
+          request.signal,
+          directory.path,
+        );
+        const ps = classified.powerShell;
+        const scope =
+          policy?.mode === 'full'
+            ? { filesystem: 'full_access', network: 'internet' }
+            : value.executionScope;
+        const denial = ps ? powerShellScopeDenial(ps, scope) : classified.hardDenied;
         return {
-          ...(readOnlySearchCommand(classified, shell.path, coreutils?.path) &&
+          commandDigest: digestShellCommand(request, value, directory, ps),
+          ...((ps?.readOnly || readOnlySearchCommand(classified, shell.path)) &&
           value.executionScope.filesystem === 'workspace_write' &&
           value.executionScope.network === 'none'
             ? { safeRead: true, effects: ['read'] as const }
+            : {}),
+          ...(ps && !ps.readOnly
+            ? {
+                effects: [
+                  'process' as const,
+                  ...(ps.uncertain ? ['unknown' as const] : []),
+                  ...(ps.network ? ['network' as const] : []),
+                  ...(ps.outsideWrite ? ['external' as const] : []),
+                ],
+                ...(ps.uncertain ? { requiresApproval: true as const } : {}),
+              }
             : {}),
           ...(host
             ? {
@@ -1090,11 +1172,11 @@ export async function createShellConfiguration(input: {
               }),
             )
             .digest('hex'),
-          hardAllowed: classified.hardDenied === null,
-          ...(classified.hardDenied ? { denialReason: 'shell_command_hard_denied' } : {}),
+          hardAllowed: denial === null,
+          ...(denial ? { denialReason: ps ? denial : 'shell_command_hard_denied' } : {}),
         };
       },
-      commandDigest: (request: AuthorizationRequest) => commandDigest(request),
+      commandDigest,
     };
   } catch (error) {
     input.signal?.throwIfAborted();

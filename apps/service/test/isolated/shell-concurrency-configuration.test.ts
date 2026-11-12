@@ -61,7 +61,6 @@ test.skipIf(process.platform !== 'win32')(
         bunExecutable: process.execPath,
         shellExecutable: assets.shell,
         windows: {
-          coreutilsPath: assets.coreutils,
           fullShellExecutable: assets.fullShell,
           stateRoot,
         },

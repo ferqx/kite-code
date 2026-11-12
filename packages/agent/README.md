@@ -112,6 +112,8 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 - [执行资源](src/execution/resources.ts)发布冻结总容量，经 `ToolContext.resourceCapacity` 可信注入；它不是当前空闲量或授权。统一 Browser 入口须 process 总容量至少 2，不足时在代码／Browser Job 创建前准确返回 `browser_resource_capacity_unavailable`；有容量时仍受原审批、资源与取消边界约束。
 - [进程只读观察入口](src/process-observation.ts)：可信宿主在实际启动后显式读取原 PID 的 PPID、微秒出生和 kernel 状态；import 不加载 native 库，冷 decoder 不观察当前进程。观察不授予 spawn、信号、后代枚举或所有权，具体交接由 Shell／MCP／Service OAuth owner 保存。
 - [SQLite 入口](src/sqlite.ts)：显式打开新 profile、一个专用 Worker；macOS 的解析／Store 原 Worker 收尾通过[平台 owner](src/platform/README.md)等待原 Mach 权终态和准确释放，再交接原锁。具体字段和事务由[基线迁移](src/storage/migrations/0001-baseline.sql)、[具名操作](src/storage/sqlite/operations.ts)维护；三端与完整资源门禁仍按进度保留。
+
+Windows 桌面 [Shell 偏好和会话绑定](src/storage/sqlite/desktop-shell.ts)使用私有宿主记录。偏好按 Store 保存，实际后端在原会话创建或 Fork 事务内写入。该绑定随原根会话读取，与模型输入、公开扩展记录及 Fork 扩展快照隔离。恢复为新 Store 时按新 Store 读取默认偏好，已保存的会话绑定随数据保留。后端和权限验证归 [Service owner](../../apps/service/README.md#默认-shell-装配)。
 - [Store 目录](src/storage/README.md)：原 Store 与实际 root 创建主体的有限 keyset 分页；Workspace 保持认证 profile 范围，空 Workspace 不依赖 Session 才可见。
 - [唯一 Loop](src/loop.ts)：只使用模型/输入/执行契约；工具参数只有在完整模型响应保存后才能派发。
 - [模型工具表面](src/model-tools.README.md)：leaf 用纯 `ToolDefinition.model` 声明公开名称与字段，UnifiedExecution 在任意 ModelAdapter 边界统一投影、校验并转回原内部输入；内部定义身份与权限继续准确绑定，完整baseline和操作key由宿主管理。历史只记录原公开名称及精简字段映射，Inspector 使用封存的实际工具表面，不从今天目录重建；具体名称表、opaque JSON 与隐藏工具边界归该 owner。

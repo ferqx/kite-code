@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-12 部分替代：[Windows 桌面 PowerShell 回退](2026-11-12-windows-desktop-powershell-fallback.md)更新桌面的解释器选择和内部 Runner V7。下文保留原 V6 实施记录，以及仍适用的工具退役、完整 Git Bash 和无账户权限取舍。
+
 2026-11-05 部分替代：[Full 外部修改决定](2026-11-05-full-mode-external-file-mutations.md)允许最终有效 Full 权限下的 `write_file/edit_file` 直接处理外部绝对路径，并为安全可编辑目标提供完整读取基线。下文“外部修改使用 Shell”和“外部读取不生成基线”仅保留为此前范围及当前非 Full／普通只读路径的说明；Workflow、专用外部工具、检索与验证工具的退役决定和历史恢复边界继续有效，不恢复旧工具或 alias。
 
 同日后续：用户在完成替代评估后确认继续移除三个模型检索工具和五个验证工具，并一起退役专用验证机制。`request_plan_review` 保留，普通目录／文件／正文检索改走 Shell，客户端封装固定 rg。当前默认数量为有 Shell 时16项、无 Shell 时11项；下文“先保留检索”和19／14项记录前一阶段的取舍，已被本次后续确认替代。MCP 用途结论仍适用。Windows 无账户受限 Git Bash 与 Full 均已接原 V6 runner，边界与本机验证归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。

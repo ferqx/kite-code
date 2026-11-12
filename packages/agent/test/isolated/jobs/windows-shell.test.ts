@@ -13,9 +13,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  privateDirectory,
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../../tests/fixtures/test-filesystem';
@@ -23,6 +24,7 @@ import type { JobContext, ToolResult } from '../../../src/extensions';
 import { JobStartError } from '../../../src/extensions';
 import { withBundledRipgrep } from '../../../src/jobs/ripgrep';
 import { msysCompatibilityImage } from '../../../src/jobs/windows-git-bash';
+import { discoverWindowsPowerShell } from '../../../src/jobs/windows-powershell';
 import { createWindowsShellJob } from '../../../src/jobs/windows-shell';
 import { retainWindowsOwnedProcessObservation } from '../../../src/platform/process/windows-owned-child';
 import { windowsShellFixture } from '../../fixtures/windows-shell-runtime';
@@ -45,7 +47,7 @@ import {join} from 'node:path';
 const root=mkdtempSync(join(tmpdir(),'kite-windows-admission-'));
 const control=join(root,'control');mkdirSync(control);
 writeFileSync(join(root,'runner.exe'),'fixture');
-const files=['bash.exe','coreutils.exe','msys-2.0.dll','ktipc.dll'].map(name=>({name:'usr/bin/'+name,
+const files=['bash.exe','ls.exe','msys-2.0.dll','ktipc.dll'].map(name=>({name:'usr/bin/'+name,
  sourceSha256:createHash('sha256').update('fixture').digest('hex'),sha256:createHash('sha256').update('fixture').digest('hex')}));
 for(const base of [root,join(root,'full')]){mkdirSync(join(base,'usr/bin'),{recursive:true});for(const file of files)writeFileSync(join(base,file.name),'fixture');}
 writeFileSync(join(root,'manifest.json'),JSON.stringify({identity:createHash('sha256').update(JSON.stringify(files)).digest('hex'),files}));
@@ -65,7 +67,7 @@ mock.module(${JSON.stringify(ownerModule)},()=>({
   async endStdin(){},
   async stop(){if(stopCalls++===0){
    const payload={invocationName:request.invocationName,runtimeValidated:true};
-   const body=Buffer.from(JSON.stringify({type:'ready',version:6,invocationId:request.invocationName,
+   const body=Buffer.from(JSON.stringify({type:'ready',version:7,invocationId:request.invocationName,
     peerId:'runner',sequence:0,payloadBase64:Buffer.from(JSON.stringify(payload)).toString('base64')}));
    lateFrame=Buffer.alloc(body.length+4);lateFrame.writeUInt32LE(body.length);body.copy(lateFrame,4);
    unblock();finish(1);
@@ -77,7 +79,7 @@ try{
  const {createWindowsShellJob}=await import(${JSON.stringify(jobModule)});
  const job=await createWindowsShellJob({cwd:root,controlBase:control,env:{},stateRoot:root,
   supervisorPath:join(root,'runner.exe'),shellExecutable:join(root,'usr/bin/bash.exe'),
-  fullShellExecutable:join(root,'full/usr/bin/bash.exe'),coreutilsPath:join(root,'usr/bin/coreutils.exe'),
+  fullShellExecutable:join(root,'full/usr/bin/bash.exe'),
   executionScope:()=>({filesystem:'workspace_write',network:'none'})});
  const started=Date.now();
  let resolved=false;
@@ -116,6 +118,95 @@ test('MSYS compatibility refuses arbitrary or truncated files without changing t
   }
 });
 native(
+  'Windows PowerShell directly owns UTF-8 output, filesystem scope and the original Job',
+  async () => {
+    const root = temporaryDirectory('kite-windows-powershell-');
+    try {
+      const workspace = join(root, '中文 工作区');
+      const outside = join(root, 'outside');
+      const controlBase = join(root, 'control');
+      const stateRoot = join(root, 'sandbox');
+      for (const directory of [workspace, outside, controlBase, stateRoot])
+        privateDirectory(directory);
+      const link = join(workspace, 'linked');
+      symlinkSync(outside, link, 'junction');
+      const powerShell = await discoverWindowsPowerShell();
+      const run = async (
+        command: string,
+        filesystem: 'read_only' | 'workspace_write' | 'full_access',
+        cwd = workspace,
+      ) => {
+        const job = await createWindowsShellJob({
+          kind: 'powershell',
+          powerShell,
+          cwd,
+          workspaceRoot: workspace,
+          controlBase,
+          stateRoot,
+          shellExecutable: powerShell.executable.canonical,
+          supervisorPath: resolve(
+            import.meta.dir,
+            '../../../dist/platform/process/windows-shell/kite-windows-runner.exe',
+          ),
+          env: { PATH: powerShell.systemDirectory, USERPROFILE: root },
+          executionScope: () => ({ filesystem, network: 'none' }),
+        });
+        const context = {
+          executionId: crypto.randomUUID(),
+          sessionId: 'powershell',
+          signal: AbortSignal.timeout(8000),
+        };
+        const handle = await job.start({ command }, context as JobContext);
+        let result: ToolResult | undefined;
+        let output = '';
+        for await (const event of job.observe(handle)) {
+          if (event.type === 'output' && event.stream === 'stdout') output += event.content;
+          if (event.type === 'terminal') result = event.result;
+        }
+        await job.dispose(handle);
+        expect(result?.details).toMatchObject({ cleanupConfirmed: true, processTreeStopped: true });
+        expect(readdirSync(controlBase)).toEqual([]);
+        return { result, output };
+      };
+      const wrote = await run(
+        "Set-Content -LiteralPath '中文.txt' -Value '你好' -Encoding utf8; rg.exe --no-config '你好' '中文.txt'",
+        'workspace_write',
+      );
+      expect(wrote.result?.outcome).toBe('succeeded');
+      expect(wrote.output).toContain('你好');
+      const read = await run(
+        "Get-Content -LiteralPath '中文.txt'; Set-Content -LiteralPath 'blocked.txt' -Value blocked",
+        'read_only',
+      );
+      expect(read.result?.outcome).toBe('failed');
+      expect(read.output).toContain('你好');
+      expect(existsSync(join(workspace, 'blocked.txt'))).toBeFalse();
+      const junction = await run(
+        "Set-Content -LiteralPath 'linked\\blocked.txt' -Value blocked",
+        'workspace_write',
+      );
+      expect(junction.result?.outcome).toBe('failed');
+      const relocated = await run(
+        "Set-Content -LiteralPath 'blocked.txt' -Value blocked",
+        'workspace_write',
+        outside,
+      );
+      expect(relocated.result?.outcome).toBe('failed');
+      expect(existsSync(join(outside, 'blocked.txt'))).toBeFalse();
+      const approved = await run(
+        "Set-Content -LiteralPath 'approved.txt' -Value allowed",
+        'full_access',
+        outside,
+      );
+      expect(approved.result?.outcome).toBe('succeeded');
+      expect(readFileSync(join(outside, 'approved.txt'), 'utf8').trim()).toBe('allowed');
+    } finally {
+      removeTemporaryDirectory(root);
+    }
+  },
+  25000,
+);
+native(
   'Windows unelevated Git Bash runs bundled rg, forks and pipelines with empty ambient PATH while external writes require Full',
   async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-windows-shell-')));
@@ -150,7 +241,6 @@ native(
         supervisorPath: join(built, 'kite-windows-runner.exe'),
         shellExecutable: runtime.shell,
         fullShellExecutable: runtime.fullShell,
-        coreutilsPath: runtime.coreutils,
         stateRoot: runtime.stateRoot,
         executionScope: () => ({
           filesystem: full ? 'full_access' : 'workspace_write',
@@ -200,7 +290,6 @@ native(
         supervisorPath: runtime.runner,
         shellExecutable: runtime.shell,
         fullShellExecutable: runtime.fullShell,
-        coreutilsPath: runtime.coreutils,
         stateRoot: runtime.stateRoot,
         executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
       });
@@ -218,13 +307,26 @@ native(
       expect(readdirSync(control)).toEqual([]);
       expect(existsSync(join(cwd, 'cancelled.txt'))).toBe(false);
       const ordinary = await execute(
-        'set -e -o pipefail; rg --no-config --version; rg --no-config bundled-rg-needle source.txt; for i in 1 2 3; do printf "%s\\n" "$i"; done | sed -n 2p; printf workspace-write > written.txt',
+        [
+          'set -e -o pipefail',
+          'for tool in ls cp mv head wc; do test "$(type -P "$tool")" -ef "/usr/bin/$tool.exe"; done',
+          'rg --no-config --version',
+          'rg --no-config bundled-rg-needle source.txt',
+          'cp -- source.txt "中文 copy.txt"',
+          'mv -- "中文 copy.txt" "中文 result.txt"',
+          'ls -- "中文 result.txt"',
+          'test "$(head -n 1 "中文 result.txt" | wc -l)" -eq 1',
+          'for i in 1 2 3; do printf "%s\\n" "$i"; done | sed -n 2p',
+          'printf workspace-write > written.txt',
+        ].join('\n'),
       );
       expect(ordinary.result?.outcome, ordinary.output + JSON.stringify(ordinary.result)).toBe(
         'succeeded',
       );
       expect(ordinary.output).toContain('ripgrep');
       expect(ordinary.output).toContain('bundled-rg-needle');
+      expect(ordinary.output).toContain('中文 result.txt');
+      expect(readFileSync(join(cwd, '中文 result.txt'), 'utf8')).toBe('bundled-rg-needle\n');
       expect(readFileSync(join(cwd, 'written.txt'), 'utf8')).toBe('workspace-write');
       expect(ordinary.result?.details).toMatchObject({
         cleanupConfirmed: true,
@@ -245,7 +347,7 @@ native(
       expect(repo.output).toContain('git-child-shell');
       expect(existsSync(join(cwd, '.git', 'HEAD'))).toBe(true);
       const full = await execute(
-        'cat private/secret.txt; cat ../external.txt; printf full-write > ../outside.txt',
+        'set -e; test "$(type -P cat)" -ef /usr/bin/cat.exe; cat private/secret.txt; cat ../external.txt; printf full-write > ../outside.txt',
         true,
       );
       expect(full.result?.outcome).toBe('succeeded');
@@ -383,7 +485,6 @@ native(
           supervisorPath: join(built, 'kite-windows-runner.exe'),
           shellExecutable: shell,
           fullShellExecutable: runtime.fullShell,
-          coreutilsPath: runtime.coreutils,
           stateRoot: runtime.stateRoot,
           executionScope: () => ({ filesystem, network }),
         });
@@ -470,7 +571,6 @@ native(
         supervisorPath: runtime.runner,
         shellExecutable: runtime.shell,
         fullShellExecutable: runtime.fullShell,
-        coreutilsPath: runtime.coreutils,
         executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
       });
       const context = () =>
@@ -545,7 +645,6 @@ native(
       supervisorPath: join(built, 'kite-windows-runner.exe'),
       shellExecutable: runtime.shell,
       fullShellExecutable: runtime.fullShell,
-      coreutilsPath: runtime.coreutils,
       stateRoot: runtime.stateRoot,
       executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
     });

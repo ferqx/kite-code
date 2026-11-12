@@ -124,7 +124,7 @@ for (const scenario of ['cancel-during-cleanup', 'cleanup-unknown'] as const)
  if(armed&&!heldPath&&dirname(path)===control){heldPath=path;if(scenario==='cleanup-unknown')throw Error('fixture_cleanup_unknown');await held;}
  return await original.rmdir(path,...args);}}));
  const{createWindowsShellJob}=await import(${JSON.stringify(jobModule)}),{windowsShellFixture}=await import(${JSON.stringify(runtimeModule)}),{retainWindowsOwnedProcessObservation}=await import(${JSON.stringify(processModule)});
- const assets=await windowsShellFixture();const job=await createWindowsShellJob({cwd,controlBase:control,stateRoot,env:{SystemRoot:process.env.SystemRoot,PATH:''},supervisorPath:assets.runner,shellExecutable:assets.shell,fullShellExecutable:assets.fullShell,coreutilsPath:assets.coreutils,executionScope:()=>({filesystem:'workspace_write',network:'none'})});
+ const assets=await windowsShellFixture();const job=await createWindowsShellJob({cwd,controlBase:control,stateRoot,env:{SystemRoot:process.env.SystemRoot,PATH:''},supervisorPath:assets.runner,shellExecutable:assets.shell,fullShellExecutable:assets.fullShell,executionScope:()=>({filesystem:'workspace_write',network:'none'})});
  const abort=new AbortController();const handle=await job.start({command:'printf owned > "$TMPDIR/owned"; sleep 0.2; printf completed'},{executionId:crypto.randomUUID(),sessionId:'cleanup',signal:abort.signal});
  const observation=retainWindowsOwnedProcessObservation(handle.reference.supervisorPid);armed=true;
  const events=[];let terminal=false;const observing=(async()=>{for await(const event of job.observe(handle)){events.push(event);if(event.type==='terminal')terminal=true;}})();

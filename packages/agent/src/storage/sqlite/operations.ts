@@ -79,6 +79,12 @@ import {
   verifyCompressionModel,
 } from './compression-operations';
 import { callContextSelection } from './context-selection-operations';
+import {
+  bindDesktopShell,
+  readDesktopShellPreference,
+  readSessionDesktopShell,
+  saveDesktopShellPreference,
+} from './desktop-shell';
 import { readDirectory } from './directory';
 import { assertDispatchReadSet } from './dispatch-read-set';
 import { readExecutionEvidence } from './execution-evidence';
@@ -1275,7 +1281,7 @@ export class SqliteOperations {
         });
       case 'createSession':
         return this.tx(() => {
-          this.identity(input.expectedStoreId);
+          const storeId = this.identity(input.expectedStoreId);
           const request = {
             kind: 'session.create',
             workspaceId: input.workspaceId,
@@ -1306,10 +1312,25 @@ export class SqliteOperations {
             input.title,
             randomUUID(),
           );
+          bindDesktopShell(
+            this,
+            storeId,
+            input.sessionId,
+            args[1] as Parameters<Store['createSession']>[1],
+          );
           this.insertCommand(input, request, digest, 'applied', { sessionId: input.sessionId });
           this.event(input.sessionId, input.sessionId, 'session.created');
           return this.session(this.row('SELECT * FROM session WHERE id=?', input.sessionId)!);
         });
+      case 'readDesktopShellPreference':
+        return readDesktopShellPreference(this, String(args[0]));
+      case 'saveDesktopShellPreference':
+        return saveDesktopShellPreference(
+          this,
+          ...(args as Parameters<Store['saveDesktopShellPreference']>),
+        );
+      case 'readSessionDesktopShell':
+        return readSessionDesktopShell(this, String(args[0]));
       case 'getSession': {
         const row = this.row('SELECT * FROM session WHERE id=?', String(args[0]));
         return row ? this.session(row) : null;
@@ -1780,7 +1801,7 @@ export class SqliteOperations {
           args[0] as Parameters<Store['closeAutomaticSessionTitle']>[0],
         );
       case 'forkSession':
-        return forkSession(this, args[0] as Parameters<Store['forkSession']>[0]);
+        return forkSession(this, ...(args as Parameters<Store['forkSession']>));
       case 'prepareForkReadonlySources':
         return prepareForkReadonlySources(
           this,

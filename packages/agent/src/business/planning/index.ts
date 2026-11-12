@@ -291,7 +291,7 @@ export function createPlanningValidation(
   inputOptions: PlanningOptions = {},
   planFiles?: PlanFiles,
   readExecutionInput?: (executionId: string) => Promise<Json>,
-  isReadOnlyShell?: (input: Json) => Promise<boolean>,
+  isReadOnlyShell?: (input: Json, execution: Readonly<PublicExecution>) => Promise<boolean>,
   isReadOnlyGitWorktree?: (execution: Readonly<PublicExecution>, input: Json) => Promise<boolean>,
 ) {
   if (Object.keys(inputOptions).some((key) => !['completionGuidance', 'requirePlan'].includes(key)))
@@ -326,7 +326,7 @@ export function createPlanningValidation(
     )
       return false;
     const input = await readExecutionInput(actual.id);
-    return (await digest(input)) === actual.inputDigest && (await isReadOnlyShell(input));
+    return (await digest(input)) === actual.inputDigest && (await isReadOnlyShell(input, actual));
   }
   async function isGitWorktreeList(
     read: ConditionReadContext,

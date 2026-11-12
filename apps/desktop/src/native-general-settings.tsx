@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
 import type { NativeBridge, NativeModelSettingsFacts, NativeSelection } from './native-bridge';
 import { NativeSettingsSelect } from './native-settings-select';
+import { NativeShellSettings } from './native-shell-settings';
 
 /** Retained General card; reads the configuration default, not a temporary next-Run choice. */
 export function NativeGeneralSettings({
@@ -12,6 +13,7 @@ export function NativeGeneralSettings({
   revision,
   editor,
   onEditorChange,
+  windowsShell,
 }: {
   bridge: NativeBridge;
   generation: number;
@@ -20,6 +22,7 @@ export function NativeGeneralSettings({
   revision: number;
   editor: DesktopEditor;
   onEditorChange: (editor: DesktopEditor) => void;
+  windowsShell?: boolean;
 }) {
   const fieldId = useId();
   const identity = JSON.stringify([
@@ -76,10 +79,14 @@ export function NativeGeneralSettings({
       <header className="settings-page-heading">
         <div>
           <h2>常规</h2>
-          <p>管理文件打开方式，查看当前默认模型。</p>
+          <p>
+            {windowsShell
+              ? '管理文件打开方式和集成终端，查看当前默认模型。'
+              : '管理文件打开方式，查看当前默认模型。'}
+          </p>
         </div>
       </header>
-      <h3 className="settings-group-heading">文件与模型</h3>
+      <h3 className="settings-group-heading">{windowsShell ? '文件、模型与终端' : '文件与模型'}</h3>
       <div className="settings-card">
         <label className="settings-row" htmlFor={`${fieldId}-field-1`}>
           <span>
@@ -118,6 +125,14 @@ export function NativeGeneralSettings({
                 : ''}
           </span>
         </div>
+        {windowsShell && (
+          <NativeShellSettings
+            key={`${generation}:${storeId}`}
+            bridge={bridge}
+            generation={generation}
+            storeId={storeId}
+          />
+        )}
       </div>
       {state.identity === identity && state.error && <p role="alert">{state.error}</p>}
       {facts?.errors.map((code) => (

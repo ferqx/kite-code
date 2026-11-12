@@ -19,6 +19,8 @@ import {
   type NativeReply,
   type NativeRequest,
   type NativeResult,
+  type NativeShellPreference,
+  type NativeShellSettingsFacts,
   type NativeStartupReply,
   type NativeThemePreference,
   type NativeWindowAppearance,
@@ -167,6 +169,8 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'interactions.close': ['viewGeneration'],
   'settings.general.models.read': [],
   'settings.general.models.close': [],
+  'settings.general.shell.read': [],
+  'settings.general.shell.save': ['preference'],
   'settings.models.read': ['scope', 'afterCommandId'],
   'input.models.read': [],
   'conversation.models.read': [],
@@ -329,6 +333,13 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   )
     throw Error('invalid_native_request');
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
+    throw Error('invalid_native_request');
+  if (
+    method === 'settings.general.shell.save' &&
+    input.preference !== 'auto' &&
+    input.preference !== 'git-bash' &&
+    input.preference !== 'powershell'
+  )
     throw Error('invalid_native_request');
   if (method === 'settings.skills.search' && !isSkillMarketplaceQuery(input.query))
     throw Error('invalid_skill_marketplace_query');
@@ -1359,6 +1370,10 @@ export function registerNativeIpc(options: {
   caller: () => Promise<NativeCaller>;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
   openEditor?: (editor: DesktopEditor, path: string) => Promise<void>;
+  desktopShell?: (
+    caller: NativeCaller,
+    preference?: NativeShellPreference,
+  ) => Promise<NativeShellSettingsFacts>;
   pickWorkspace?: (
     generation: number,
     caller: NativeCaller,
@@ -1372,7 +1387,17 @@ export function registerNativeIpc(options: {
       // Recheck sender after startup/admission awaits; a replaced frame cannot submit work.
       assertNativeSender(event, options.window(), options.rendererUrl);
       let value: NativeResult;
-      if (request.method === 'workspace.pick') {
+      if (
+        request.method === 'settings.general.shell.read' ||
+        request.method === 'settings.general.shell.save'
+      ) {
+        if (!options.desktopShell) throw Error('desktop_shell_settings_unavailable');
+        caller.assertGeneration(request.generation);
+        value = await options.desktopShell(
+          caller,
+          request.method === 'settings.general.shell.save' ? request.preference : undefined,
+        );
+      } else if (request.method === 'workspace.pick') {
         if (!options.pickWorkspace) throw Error('native_host_operation_unavailable');
         const picked = await options.pickWorkspace(request.generation, caller);
         value = picked ? { kind: 'workspace.picked', workspaceId: picked.workspaceId } : null;

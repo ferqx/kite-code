@@ -96,11 +96,16 @@ async function scenario(kind: string) {
         describe: () => ({ effects: ['process', 'unknown'], safeRead: false }),
         async describeRequest(request: AuthorizationRequest) {
           hit('shell', request);
-          return { effects: ['read'], safeRead: true, hardAllowed: true, ...shellIdentity };
+          return {
+            effects: ['read'],
+            safeRead: true,
+            hardAllowed: true,
+            commandDigest: 'a'.repeat(64),
+            ...shellIdentity,
+          };
         },
-        commandDigest(request: AuthorizationRequest) {
-          hit('shell', request);
-          return 'a'.repeat(64);
+        commandDigest() {
+          throw Error('independent_command_digest_in_authorization');
         },
         async prepareRiskReview() {
           throw Error('review_preparation_forbidden_in_metadata_fixture');
@@ -463,7 +468,7 @@ async function scenario(kind: string) {
           safeRead: true,
           commandDigest: 'a'.repeat(64),
         });
-        expect(calls).toEqual(['shell', 'shell']);
+        expect(calls).toEqual(['shell']);
         for (const mismatch of [
           { kind: 'model' as const },
           { definitionId: 'different-capability' },

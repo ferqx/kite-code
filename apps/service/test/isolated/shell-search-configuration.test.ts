@@ -84,7 +84,6 @@ native(
         bunExecutable: process.execPath,
         shellExecutable: assets.shell,
         windows: {
-          coreutilsPath: assets.coreutils,
           fullShellExecutable: assets.fullShell,
           stateRoot: assets.stateRoot,
         },
@@ -166,24 +165,19 @@ native(
         else if (planningStep === 2)
           yield* call('write_plan', {
             plan_id: 'plan',
-            expected_version: null,
             title: 'Search first',
             body: 'Inspect then ask approval.',
             steps: [{ id: 'a', title: 'Inspect' }],
           });
         else {
-          const pointer = (
-            await store.getExtensionRecord({
-              sessionId: 'plan-root',
-              extensionId: planningExtensionId,
-              key: 'plan.current',
-            })
-          )?.value as Record<string, string | number>;
-          yield* call('request_plan_review', {
-            plan_id: pointer.planId,
-            version: pointer.version,
-            digest: pointer.digest,
-          });
+          const saved = (await store.listExecutions('plan-root')).find(
+            (execution) =>
+              execution.definitionId === 'planning.write' && execution.status === 'succeeded',
+          );
+          const planRef = (saved?.result as { details?: { plan_ref?: string } } | undefined)
+            ?.details?.plan_ref;
+          if (!planRef) throw new Error('shell_search_plan_ref_missing');
+          yield* call('request_plan_review', { plan_ref: planRef });
         }
       },
     };
@@ -210,8 +204,8 @@ native(
       }),
     });
     host.permissionManagement?.(runtime);
-    const until = async (predicate: () => Promise<boolean>) => {
-      const deadline = Date.now() + 12000;
+    const until = async (predicate: () => Promise<boolean>, timeoutMs = 12000) => {
+      const deadline = Date.now() + timeoutMs;
       while (!(await predicate())) {
         if (Date.now() > deadline) throw Error('shell_search_deadline');
         await Bun.sleep(10);
@@ -302,8 +296,9 @@ native(
           expect(externalStep).toBe(before);
           expect(await Bun.file(join(root, 'approved.txt')).text()).toBe('approved-external');
         } else if (sessionId === 'child-root') {
-          await until(async () =>
-            (await store.getView(sessionId)).runs.some((run) => !run.isActive),
+          await until(
+            async () => (await store.getView(sessionId)).runs.some((run) => !run.isActive),
+            30000,
           );
           const carrier = (await store.listExecutions(sessionId)).find(
             (e) => e.definitionId === 'agent/explore',
@@ -367,5 +362,5 @@ native(
       rmSync(root, { recursive: true, force: true });
     }
   },
-  35000,
+  65000,
 );

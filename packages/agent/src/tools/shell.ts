@@ -23,6 +23,7 @@ export interface ShellToolsOptions {
   readonly job: JobDefinition;
   /** Only trusted scope-aware host assembly registers this optional request. */
   readonly permissionsSchema?: Json;
+  readonly dialect?: 'git-bash' | 'powershell';
   readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
   readonly gitWorktree?: GitWorktreeToolOptions;
 }
@@ -77,6 +78,12 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
   const scopeGuidance = options.permissionsSchema
     ? ' filesystem and network are independent requested scopes, not authorization results. Omitted filesystem requests workspace_write; omitted network requests none. network:internet includes localhost, 127.0.0.1, ::1, LAN and Internet access. Risk approval does not grant networking to a network:none request. filesystem:full_access requests outside-workspace writes; it does not select Full approval mode or remove protected-path restrictions. In Request Approval and Auto, policy must authorize the requested scope. Ordinary Full sets its effective scope by mode; hard ceilings still apply. A failed command is never automatically rerun with wider permissions.'
     : '';
+  const dialectGuidance =
+    options.dialect === 'powershell'
+      ? ' The command language is Windows PowerShell 5.1. Use PowerShell cmdlets and Windows paths, for example Get-ChildItem -Name, Get-Content -LiteralPath and rg.exe --files. Use PowerShell 5.1 statement and pipeline syntax. Supply -UseBasicParsing for Invoke-WebRequest and request internet scope for network commands.'
+      : options.dialect === 'git-bash'
+        ? ' The command language is Git Bash on Windows.'
+        : '';
   const schema = (foreground: boolean) => ({
     ...object(
       {
@@ -85,7 +92,12 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           description:
             'A new unique key for each new execution. Do not reuse an earlier key for a different command or a new execution. To recover an earlier result, use shell_read with that key instead of running it again.',
         },
-        command: { type: 'string', minLength: 1, maxLength: 262144 },
+        command: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 262144,
+          ...(dialectGuidance ? { description: dialectGuidance.trim() } : {}),
+        },
         workdir: {
           type: 'string',
           minLength: 1,
@@ -248,7 +260,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command. Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
+        description: `Execute one supervised command.${dialectGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
@@ -287,7 +299,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         id: 'shell.launch',
         model: { name: 'shell_launch', snakeCase: true, hidden: true },
         version: '1',
-        description: `Start one supervised command. Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
+        description: `Start one supervised command.${dialectGuidance} Create Git worktrees only with git_worktree, never through Shell or scripts. Acceptance is not completion. execution_id identifies the original Tool call for evidence and plan progress; shell_id is its compact handle for shell_read, shell_wait and shell_stop. Copy returned identities exactly.${scopeGuidance}`,
         inputSchema: schema(false),
         async execute(input, context) {
           const launched = await launch(input, context, 'launch');

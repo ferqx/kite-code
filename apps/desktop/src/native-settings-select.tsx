@@ -10,7 +10,7 @@ export function NativeSettingsSelect({
 }: Omit<ComponentProps<typeof SelectTrigger>, 'children' | 'value' | 'onChange'> & {
   value: string;
   onValueChange: (value: string) => void;
-  options: readonly { value: string; label: string }[];
+  options: readonly { value: string; label: string; disabled?: boolean }[];
 }) {
   const [container, setContainer] = useState<HTMLElement | null>(null);
   const triggerRef = useCallback(
@@ -30,7 +30,8 @@ export function NativeSettingsSelect({
       value={value}
       onValueChange={(next) => {
         // Updating a form's hidden select can emit an empty value while options change.
-        if (options.some((option) => option.value === next)) onValueChange(next);
+        if (options.some((option) => option.value === next && !option.disabled))
+          onValueChange(next);
       }}
       disabled={props.disabled}
     >
@@ -39,7 +40,7 @@ export function NativeSettingsSelect({
       </SelectTrigger>
       <SelectContent container={container}>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}
           </SelectItem>
         ))}

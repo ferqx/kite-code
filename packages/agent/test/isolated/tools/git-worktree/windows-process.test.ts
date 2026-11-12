@@ -198,7 +198,6 @@ windows(
           supervisorPath: runtime.runner,
           shellExecutable: runtime.shell,
           fullShellExecutable: runtime.fullShell,
-          coreutilsPath: runtime.coreutils,
           stateRoot: runtime.stateRoot,
           executionScope: () => ({ filesystem: 'workspace_write', network: 'none' }),
           trustedWorkerLaunch: (candidate) =>

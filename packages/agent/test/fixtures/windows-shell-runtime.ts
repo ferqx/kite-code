@@ -11,10 +11,6 @@ export async function windowsShellFixture() {
   return {
     built,
     runner: join(built, 'kite-windows-runner.exe'),
-    ...(await stageWindowsGitBash(
-      stateRoot,
-      join(built, 'coreutils.exe'),
-      join(built, 'ktipc.dll'),
-    )),
+    ...(await stageWindowsGitBash(stateRoot, join(built, 'ktipc.dll'))),
   };
 }

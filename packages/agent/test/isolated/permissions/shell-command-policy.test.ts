@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
 import { createShellCommandPolicy, readOnlySearchCommand } from '@kite-ai/agent/permissions/shell';
@@ -188,7 +188,12 @@ test('literal read-only && chains rewrite every leaf and preserve failure short-
     };
     const success = await run('pwd && ls input.txt && rg -n needle input.txt');
     expect(success.exit, success.error).toBe(0);
-    expect(success.output).toBe(`${root.replaceAll('\\', '/')}\ninput.txt\n1:needle\n`);
+    const [reportedRoot, ...output] = success.output.split('\n');
+    if (process.platform === 'win32') {
+      expect(reportedRoot).toStartWith('/');
+      expect(reportedRoot).toEndWith(`/${basename(root)}`);
+    } else expect(reportedRoot).toBe(root);
+    expect(output.join('\n')).toBe('input.txt\n1:needle\n');
     expect(success.command).toContain('--no-config');
     const failure = await run('rg absent input.txt && pwd && rg needle input.txt');
     expect(failure.exit).toBe(1);

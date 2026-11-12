@@ -17,6 +17,8 @@ import {
   verifyLaunchIdentitiesAsync,
 } from './launch-identity';
 
+const gitBashFiles = ['bash.exe', 'ls.exe', 'msys-2.0.dll'];
+
 /** Keep file I/O bounded, and settle every in-flight write before reporting failure. */
 async function prepareFiles<T>(items: readonly T[], prepare: (item: T) => Promise<void>) {
   let next = 0;
@@ -86,11 +88,7 @@ export async function captureWindowsGitBashRuntime(
     names.add(file.name.toLowerCase());
     files.push({ name: file.name, sha256: file.sha256, sourceSha256: file.sourceSha256 });
   }
-  if (
-    !['bash.exe', 'coreutils.exe', 'msys-2.0.dll', 'ktipc.dll'].every((name) =>
-      names.has(`usr/bin/${name}`),
-    )
-  )
+  if (![...gitBashFiles, 'ktipc.dll'].every((name) => names.has(`usr/bin/${name}`)))
     throw Error('windows_git_bash_asset_invalid');
   return async (full, signal) => {
     await verifyLaunchIdentitiesAsync(roots, signal);
@@ -163,25 +161,39 @@ export function msysCompatibilityImage(input: Uint8Array): Buffer {
     throw Error('windows_msys_compatibility_image_invalid');
   }
 }
-/** Copy the installed Git Bash DLL closure to an immutable, content-addressed runtime.
- * Git Bash is supplied by Git for Windows; the client only redistributes rg and its own helper.
- */
-export async function stageWindowsGitBash(
-  stateRoot: string,
-  coreutils: string,
-  compatibility: string,
-) {
+export class WindowsGitBashUnavailable extends Error {
+  readonly gitExecutable?: string;
+  constructor(gitExecutable?: string) {
+    super('windows_git_bash_unavailable');
+    this.gitExecutable = gitExecutable;
+  }
+}
+
+/** Copy Git for Windows to an immutable, content-addressed runtime. */
+export async function stageWindowsGitBash(stateRoot: string, compatibility: string) {
   if (process.platform !== 'win32' || process.arch !== 'x64' || !isAbsolute(stateRoot))
     throw Error('windows_shell_unqualified');
   const git = Bun.which('git');
-  if (!git) throw Error('windows_git_bash_unavailable');
-  const gitParent = dirname(realpathSync.native(git));
-  const installation = [dirname(gitParent), dirname(dirname(gitParent))].find((root) =>
-    existsSync(join(root, 'usr/bin/bash.exe')),
-  );
-  if (!installation) throw Error('windows_git_bash_unavailable');
+  if (!git) throw new WindowsGitBashUnavailable();
+  const gitExecutable = realpathSync.native(git);
+  const gitParent = dirname(gitExecutable);
+  const installation = [dirname(gitParent), dirname(dirname(gitParent))].find((root) => {
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(join(root, 'usr/bin/bash.exe'));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+    if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
+    return true;
+  });
+  if (!installation) throw new WindowsGitBashUnavailable(gitExecutable);
   const source = join(installation, 'usr/bin');
-  if (!existsSync(join(source, 'bash.exe'))) throw Error('windows_git_bash_unavailable');
+  for (const name of gitBashFiles) {
+    const stat = lstatSync(join(source, name));
+    if (!stat.isFile() || stat.isSymbolicLink()) throw Error('windows_git_bash_asset_invalid');
+  }
   const collect = (directory: string): string[] => {
     if (!existsSync(directory)) return [];
     const result: string[] = [];
@@ -196,11 +208,7 @@ export async function stageWindowsGitBash(
   };
   const paths = [
     ...readdirSync(source)
-      .filter(
-        (name) =>
-          /\.(dll|exe)$/i.test(name) &&
-          !['coreutils.exe', 'ktipc.dll'].includes(name.toLowerCase()),
-      )
+      .filter((name) => /\.(dll|exe)$/i.test(name) && name.toLowerCase() !== 'ktipc.dll')
       .sort()
       .map((name) => join(source, name)),
     ...[
@@ -211,7 +219,6 @@ export async function stageWindowsGitBash(
       'usr/lib',
       'etc/ssl',
     ].flatMap((path) => collect(join(installation, path))),
-    coreutils,
     compatibility,
   ];
   const files = paths.map((path) => {
@@ -222,11 +229,9 @@ export async function stageWindowsGitBash(
     return {
       source: realpathSync.native(path),
       name:
-        path === coreutils
-          ? 'usr/bin/coreutils.exe'
-          : path === compatibility
-            ? 'usr/bin/ktipc.dll'
-            : relative(installation, path).replaceAll('\\', '/'),
+        path === compatibility
+          ? 'usr/bin/ktipc.dll'
+          : relative(installation, path).replaceAll('\\', '/'),
       sourceSha256,
       sha256: path.toLowerCase().endsWith('msys-2.0.dll')
         ? createHash('sha256').update(msysCompatibilityImage(original)).digest('hex')
@@ -302,7 +307,6 @@ export async function stageWindowsGitBash(
     return {
       shell: join(bin, 'bash.exe'),
       fullShell: join(runtime, 'full/usr/bin/bash.exe'),
-      coreutils: join(bin, 'coreutils.exe'),
       stateRoot,
     };
   } finally {

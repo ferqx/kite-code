@@ -1076,6 +1076,7 @@ fn validate_environment_block(block: &[u16]) -> RestrictedTokenResult<()> {
 pub fn spawn_restricted_suspended_verified(
     token: &RestrictedToken,
     capabilities: &[CapabilitySid],
+    executable: &str,
     command_line: &str,
     cwd: &str,
     env_block: &[u16],
@@ -1089,6 +1090,7 @@ pub fn spawn_restricted_suspended_verified(
             "a valid restricted token is required",
         ));
     }
+    let application = wide(executable)?;
     let mut command = wide(command_line)?;
     let cwd = wide(cwd)?;
     validate_environment_block(env_block)?;
@@ -1130,7 +1132,7 @@ pub fn spawn_restricted_suspended_verified(
     unsafe {
         CreateProcessAsUserW(
             token.handle,
-            None,
+            PCWSTR(application.as_ptr()),
             PWSTR(command.as_mut_ptr()),
             None,
             None,
@@ -1214,6 +1216,7 @@ pub fn spawn_restricted_in_job(
     token: &RestrictedToken,
     capabilities: &[CapabilitySid],
     job: HANDLE,
+    executable: &str,
     command_line: &str,
     cwd: &str,
     env_block: &[u16],
@@ -1230,6 +1233,7 @@ pub fn spawn_restricted_in_job(
     let mut process = spawn_restricted_suspended_verified(
         token,
         capabilities,
+        executable,
         command_line,
         cwd,
         env_block,
@@ -1257,6 +1261,7 @@ pub fn spawn_restricted_in_job(
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_current_user_in_job(
     job: HANDLE,
+    executable: &str,
     command_line: &str,
     cwd: &str,
     env_block: &[u16],
@@ -1270,6 +1275,7 @@ pub fn spawn_current_user_in_job(
             "Job handle is invalid",
         ));
     }
+    let application = wide(executable)?;
     let mut command = wide(command_line)?;
     let cwd = wide(cwd)?;
     validate_environment_block(env_block)?;
@@ -1308,7 +1314,7 @@ pub fn spawn_current_user_in_job(
     let environment = (!env_block.is_empty()).then_some(env_block.as_ptr().cast::<c_void>());
     unsafe {
         CreateProcessW(
-            None,
+            PCWSTR(application.as_ptr()),
             PWSTR(command.as_mut_ptr()),
             None,
             None,

@@ -511,7 +511,6 @@ try {
       ...(assets
         ? {
             windows: {
-              coreutilsPath: assets.coreutils,
               fullShellExecutable: assets.fullShell,
               stateRoot: assets.stateRoot,
             },

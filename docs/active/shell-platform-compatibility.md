@@ -18,7 +18,7 @@
 读取时机：
 
 - 修改 Shell 工具的 `buildShellInvocation`、`findSystemBash`、`findBashBinary` 或 bash 选择策略。
-- 修改 vendored MSYS2 的内容或布局。
+- 修改当前 Windows Git Bash／PowerShell 的发现、分析或原生派发。
 - Shell 命令在 Windows 上报 exit code 127 或其他异常错误。
 - 新增 shell 相关的平台适配代码。
 
@@ -80,49 +80,9 @@ Windows runner 不得安装第二层 protected-path deny。canonical Workspace m
 approval，模型异常或 circuit breaker 也升级真人审批。
 2026-11-06 用户调整普通 Shell 路径政策：默认不再额外 deny／mask Kite 的 Host-control base、Profile、配置、认证或整个运行目录。原控制身份、私有目录权限、准确进程监督、取消与 unknown 继续验证；自定义显式限制和 confined 模式保原合同。Linux native 运行验证必需的准确执行 binary RO 挂载保持，不能据路径政策变化取消原 executable identity/digest 检查。
 
-Windows 命令语言候选顺序（只在已获准的 native/test execution 内使用）：
+当前 Windows 从 Git 定位完整 Git Bash。桌面自动选择仅在该入口明确未发现时采用系统 Windows PowerShell 5.1。用户可以在常规设置中为之后创建的会话明确指定一个解释器。每个会话封存实际选择，WSL 桩不参与发现，资产和进程错误由原路径结算。运行范围见 [Windows Shell 沙箱](windows-shell-sandbox.md)。
 
-1. 系统 Git for Windows Bash（通过 where git 推导 ../bin/bash.exe）；
-2. Vendored MSYS2 Bash（vendor/msys2/usr/bin/bash.exe）；
-3. cmd.exe；
-4. pwsh / Windows PowerShell。
-
-macOS/Linux 使用同一候选解析器：优先 Bash 与配置的 POSIX Shell，再接受宿主已安装的
-cmd/PowerShell，最后使用 /bin/sh。只有解释器进程无法启动时才尝试下一个候选；解释器已启动后，
-用户命令的非零退出、timeout 或 cancel 不得重放。 Windows 取消使用 Job Object 终止整棵进程树。Job 绑定前已经启动的 descendants 需要单独记录并仅在 Job 强制终止后补扫；Job 绑定后创建的进程已经由 `TerminateJobObject` 处理，不得再次逐个等待确认，否则会把已完成的取消拖入无意义的 per-process 等待。取消结果仍需报告 `processCleanup`，但正常路径应在进程树退出后立即返回，不把清理等待暴露为下一条 prompt 的额外停顿。
-
-macOS/Linux 的 Bash、配置 POSIX Shell 与 `/bin/sh` 均以非 login 的 `-c` 启动。Prepared sandbox 在创建外层 Shell 时即使用 hardened environment；Host fallback 从继承环境移除 `BASH_ENV` 与 `ENV`，preamble 也移除二者以约束后继子 Shell。执行器保留已经投影给 Service 的工具链环境，但不读取用户 profile/rc 或非交互启动注入文件；这些文件中的命令不属于已审批 Shell invocation，读取失败也不得作为 stderr 混入工具结果。
-
-默认命令语言仍为 Bash/POSIX。需要 cmd 或 PowerShell 语义时必须在命令中显式调用解释器；从
-Windows Git Bash 调用 cmd 使用 cmd.exe //d //c ...，PowerShell 使用
-pwsh -NoProfile -Command ... 或 powershell.exe -NoProfile -Command ...。
-
-## 2. WSL 桩排除（关键安全规则）
-
-**Windows 10+ 在 `%SystemRoot%\System32\bash.exe` 放了一个 WSL 入口桩。**
-该桩需要 Hyper-V，未启用时报 `HCS_E_HYPERV_NOT_INSTALLED`。
-
-**强制规则**：
-
-- 选择系统 bash 时，**优先通过 `git` 路径推导**（`<git>/../bin/bash.exe` 或 `<git>/../usr/bin/bash.exe`），不依赖 `Bun.which("bash")`
-- 仅在 git 不可用时，才使用 `Bun.which("bash")`，且**必须排除 `SystemRoot` 下的路径**
-- 判断逻辑：路径转小写 + 正斜杠后调用 `isWslStubPath()` 检查
-
-## 3. vendored MSYS2 的 DLL 依赖
-
-Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-intl-8.dll`、`msys-pcre-1.dll` 等共 15 个）。如果新增或升级 coreutils，**必须用 `ldd` 检查所有新增 .exe 的 DLL 依赖，确保 DLL 已复制到 `vendor/msys2/usr/bin/`**。可从 Git for Windows 的 `/usr/bin/` 获取缺失的 DLL。
-
-## 4. 测试必须 mock 环境依赖
-
-`findSystemBash` 的核心逻辑（`gatherSystemBashCandidates`、`isWslStubPath`）是纯函数，不依赖文件系统或 PATH。**必须 mock `which` 函数**覆盖以下场景：
-
-- 无 git、无 bash → 返回 null
-- git 安装在不同路径 → 推导候选正确
-- bash 在 `SystemRoot` 下 → 标记为 WSL 桩
-- bash 在其他路径 → 不误判
-- 大小写、正反斜杠变体 → 正确识别
-
-**禁止仅依赖真实环境测试**——开发者的终端通常有 Git Bash，会掩盖 WSL 桩问题。
+Shell 以非交互方式启动并隔离 Profile 或启动脚本。命令一旦派发，非零退出、超时、取消与未知结果均沿原 Job 结算。Windows Job 终止范围以其原成员和实际清理证据为准。macOS 和 Linux 的解释器选择、运行环境及原生监督归 [Jobs owner](../../packages/agent/src/jobs/README.md)。
 
 ## 5. 集成测试与 production composition 分层
 
@@ -150,26 +110,16 @@ DACL snapshot，只保留完整 Workspace root capability。最多等待 30 秒�
 初始化串行化，也不会因旧的 2 秒等待窗口误报 ledger busy。ledger 写入使用原子替换，ready marker 只能在
 ACL 操作全部成功后提交。
 
-POSIX runtime 继续由 manifest 固定。verified Bun executable 可在可用时通过受控 child PATH 提供；
-这只是 runtime resolution，不是 repository copy，也不自动授予 Full/network authority。裸
-npm/npx/pnpm/pnpx/yarn/yarnpkg/corepack 在 restricted child 中固定转发到 Windows `.cmd` shim，避免
-POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim；adapter 显式经 `cmd.exe /d /c` 承载
-batch shim，不能让 isksh 直接启动 `.cmd` 并把 `C:\Program Files` 等 PATH identity 拆词。command 可以显式调用 bash、cmd.exe、
-pwsh 或 powershell.exe。
+Git Bash 使用从完整安装准备的私有运行时。PowerShell 使用固定系统程序和原生 Windows 路径。
+两条路径的运行时身份、子进程环境和 PATH 规则见 [Jobs owner](../../packages/agent/src/jobs/README.md)。
 
 Shell read-only classifier 不产生 Policy allow。只有 invocation 已按当前 mode 获得授权，且 Builtin frozen
 catalog entry 与 Pipeline 重新证明命令只读后，Runtime 才签发内部 hardened execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
-执行，Windows restricted-token 继续使用密封 shell runtime/Coreutils；二者的继承
+执行，Windows restricted-token 使用当前选择的解释器和已核验资产；这些执行路径的继承
 PATH 条目均必须为 Workspace 外可 canonicalize 的绝对目录。相对条目、空条目、
 Workspace 子目录与 symlink alias 被删除；无沙箱 development fallback 也消费同一最小
 环境，不能因 backend 不可用而恢复 Workspace executable replacement。其他已获批 Shell 仍保留用户工具链和
 Homebrew/项目 PATH 语义。该 execution trust 只约束如何执行，不跳过 Accept Edits/Auto/Full 的授权判断。
-
-isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restricted-token adapter 在送入 runner
-前仅转换 shell token boundary 上的字面量 `/x/...` 盘符前缀为 native executable 可接受的 `X:/...`；
-引号、其余参数与 POSIX shell syntax 保持不变，URL、`/dev/null` 和相对路径不得转换。审批、receipt 与
-Tool Result 的 `command` 继续保存用户/模型提交的原始命令，不保存 adapter prelude。变量展开后才产生的
-`/x/...` 不属于该静态兼容层；调用方应使用字面量 POSIX drive path 或 `X:/...` mixed path。
 
 Shell Tool Policy 与 macOS/Linux 共用逐调用模式治理：精确 `node|npm|pnpm|yarn|bun --version|-v`、明确网络
 命令、`node script.js`、`npm run build` 和未知脚本都按当前 phase/mode facts 处理；baseline 内 direct，扩 scope 才进入
@@ -209,11 +159,7 @@ Workspace token 对外部路径没有 capability allow，写访问仍被拒绝�
 non-zero exit、timeout、cancel、runner、Job 或 ACL cleanup failure 都不得在其他
 Bash/cmd/PowerShell 上 replay。
 
-[Agent Note 0088](../../.agents/notes/implemented/simplification/2026-08-08-remove-windows-appcontainer-backend.md) 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
-direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固定在
-`release/platform-capabilities/windows-runner.json`。
-本次 native source 语义变化必须由 canonical Windows 构建重新生成 runner 与 manifest digest；旧 pin
-不能证明 V3 ledger migration 或完整 Workspace admission。
+[Agent Note 0088](../../.agents/notes/implemented/simplification/2026-08-08-remove-windows-appcontainer-backend.md) 记录了历史 AppContainer 与 repository staging 的取舍。当前 Windows 制品使用同次构建的 Runner V7 和制品清单，受限令牌和目录账本仍需实机验证。Windows 网络范围的当前语义归 [Windows Shell 沙箱](windows-shell-sandbox.md)。
 
 ## 7. 超时必须终止整棵进程树
 
@@ -241,7 +187,7 @@ stdout/stderr reader 必须持续 drain 子进程管道，以跨 chunk `TextDeco
 
 ## Git Worktree worker 的新增范围
 
-`builtin.shell/git.worktree@1` 沿既有 `shell.command@1` 运行固定 Bun worker，不增加 Job/Runtime 或平台协议版本。首次解释器前应用环境允许集合与 `--no-env-file --config=<absolute>`，封存 Bun/Git/worker/config/空 hooks 及摘要，start 前重核；仅准确固定 list 为只读。Full 不扩大该 worker 的原申请，network 固定 none。Windows 仍沿原 Git Bash/native Job监管和读取/离线实际边界，不据网络参数声称新增系统级断网。
+`builtin.shell/git.worktree@1` 沿 `shell.command@1` 运行固定 Bun worker。首次解释器前应用环境允许集合与 `--no-env-file --config=<absolute>`，封存 Bun/Git/worker/config/空 hooks 及摘要并在启动前重核。仅准确固定 list 为只读。Full 保持该 worker 的原范围，network 固定 none。Windows 监管归 [Windows Shell 沙箱](windows-shell-sandbox.md)。
 
 2026-11-06，本次新 worker 已在 macOS arm64／Bun1.4.4／Git2.54.0 验证真实三个 action、launchd 启动保护和发行资产搬迁后的实际Job；Linux和Windows本次未有对应实机环境，原平台的普通Shell证据不授予该新worker的监管、Windows reparse或完整发行资格。具体算法和不支持配置由 [Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)维护，Windows删除仍遵循[只读清理门禁](../development/worktree-safety.md)。
 

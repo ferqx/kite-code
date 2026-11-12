@@ -62,22 +62,15 @@ function readOnlyRipgrepArguments(args: readonly string[]) {
 export function readOnlySearchCommand(
   classification: { readonly readOnlyCommands: readonly (readonly string[])[] | null },
   shellExecutable: string,
-  coreutilsPath?: string,
 ) {
   const commands = classification.readOnlyCommands;
   if (!commands?.length) return;
-  const rewritten = commands.map((command) =>
-    readOnlySearchLeaf(command, shellExecutable, coreutilsPath),
-  );
+  const rewritten = commands.map((command) => readOnlySearchLeaf(command, shellExecutable));
   if (rewritten.some((command) => command === undefined)) return;
   return rewritten.join(' && ');
 }
 
-function readOnlySearchLeaf(
-  command: readonly string[],
-  shellExecutable: string,
-  coreutilsPath?: string,
-) {
+function readOnlySearchLeaf(command: readonly string[], shellExecutable: string) {
   const [name, ...args] = command;
   const rg = ripgrepAsset();
   if (name === 'rg' || name === 'rg.exe' || name === rg) {
@@ -86,16 +79,12 @@ function readOnlySearchLeaf(
   }
   if (name === 'pwd' && args.length === 0) return 'pwd';
   if (name === 'ls') {
-    if (process.platform === 'win32' && !/(?:isksh|bash|sh)\.exe$/i.test(shellExecutable)) return;
+    if (process.platform === 'win32' && !/(?:bash|sh)\.exe$/i.test(shellExecutable)) return;
     const executable =
       process.platform === 'win32'
-        ? realpathSync.native(coreutilsPath ?? join(dirname(shellExecutable), 'coreutils.exe'))
+        ? join(dirname(shellExecutable), 'ls.exe')
         : realpathSync.native('/bin/ls');
-    return [
-      quote(executable.replaceAll('\\', '/')),
-      ...(process.platform === 'win32' ? ['ls'] : []),
-      ...args.map(quote),
-    ].join(' ');
+    return [quote(executable.replaceAll('\\', '/')), ...args.map(quote)].join(' ');
   }
   return undefined;
 }

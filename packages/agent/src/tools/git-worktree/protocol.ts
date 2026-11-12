@@ -543,6 +543,19 @@ export function buildWorkerCommand(
   configuration: GitWorktreeConfiguration,
   request: WorktreeRequest,
 ): string {
+  return workerArguments(configuration, request).map(shellQuote).join(' ');
+}
+
+/** The original internal operation remains Bash-quoted for durable matching. */
+export function buildPowerShellWorkerCommand(
+  configuration: GitWorktreeConfiguration,
+  request: WorktreeRequest,
+): string {
+  const args = workerArguments(configuration, request);
+  return `& ${args.map((value) => `'${value.replaceAll("'", "''")}'`).join(' ')}`;
+}
+
+function workerArguments(configuration: GitWorktreeConfiguration, request: WorktreeRequest) {
   if (
     !validateRequest(request) ||
     request.configurationId !== configuration.configurationId ||
@@ -563,9 +576,7 @@ export function buildWorkerCommand(
     `--config=${configuration.configPath}`,
     configuration.workerPath,
     Buffer.from(body).toString('base64url'),
-  ]
-    .map(shellQuote)
-    .join(' ');
+  ];
 }
 export function parseWorkerCommand(
   command: string,

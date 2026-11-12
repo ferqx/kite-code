@@ -7,6 +7,7 @@ import type {
   NativeModelSettingsFacts,
   NativeRequest,
   NativeSelection,
+  NativeShellSettingsFacts,
 } from '../../src/native-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -79,6 +80,113 @@ const facts: NativeModelSettingsFacts = {
     },
   ],
 };
+
+test('General keeps the Windows Shell choice through failed preparation and updates it on confirmed retry', async () => {
+  const f = fixture(),
+    requests: NativeRequest[] = [];
+  let settings: NativeShellSettingsFacts = {
+    kind: 'settings.general.shell',
+    storeId: 'store',
+    preference: 'auto',
+    automatic: 'powershell',
+    gitBashAvailable: false,
+    powerShellAvailable: true,
+  };
+  let saving = Promise.withResolvers<void>();
+  let failInitialRead = true;
+  const bridge = {
+    async request(request: NativeRequest) {
+      requests.push(request);
+      if (request.method === 'settings.general.models.read') return facts;
+      if (request.method === 'settings.general.shell.read') {
+        if (failInitialRead) {
+          failInitialRead = false;
+          throw Error('windows_shell_asset_changed');
+        }
+        return settings;
+      }
+      if (request.method === 'settings.general.shell.save') {
+        await saving.promise;
+        settings = { ...settings, preference: request.preference };
+        return settings;
+      }
+      return null;
+    },
+  } as NativeBridge;
+  const render = (windowsShell: boolean) =>
+    act(async () =>
+      f.root.render(
+        <NativeGeneralSettings
+          bridge={bridge}
+          generation={1}
+          storeId="store"
+          revision={0}
+          editor="vscode"
+          onEditorChange={() => {}}
+          windowsShell={windowsShell}
+        />,
+      ),
+    );
+  try {
+    await render(false);
+    expect(f.host.textContent).not.toContain('集成终端 Shell');
+    expect(requests.some(({ method }) => method.startsWith('settings.general.shell.'))).toBe(false);
+    await render(true);
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toBe('暂时无法读取集成终端设置。');
+    const retry = [...f.host.querySelectorAll('button')].find(
+      (button) => button.textContent === '重新读取',
+    )!;
+    await act(async () => retry.click());
+    const select = f.host.querySelector('[role="combobox"][aria-label="集成终端 Shell"]')!;
+    expect(select.textContent).toBe('自动（推荐）');
+    expect(f.host.textContent).toContain('仅对新会话生效');
+    async function choosePowerShell() {
+      await act(async () =>
+        select.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+        ),
+      );
+      const options = [...f.dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')];
+      expect(options.map((option) => option.textContent)).toEqual([
+        '自动（推荐）',
+        'Git Bash（不可用）',
+        'Windows PowerShell 5.1',
+      ]);
+      expect(options[1]?.getAttribute('aria-disabled')).toBe('true');
+      await act(async () =>
+        options[2]!.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        ),
+      );
+      expect(select.textContent).toBe('自动（推荐）');
+      expect(f.host.querySelector('[role="status"]')?.textContent).toBe('正在保存…');
+    }
+    const read: NativeRequest = { method: 'settings.general.shell.read', generation: 1 };
+    const save: NativeRequest = {
+      method: 'settings.general.shell.save',
+      generation: 1,
+      preference: 'powershell',
+    };
+    const shellRequests = () =>
+      requests.filter(({ method }) => method.startsWith('settings.general.shell.'));
+    await choosePowerShell();
+    await act(async () => saving.reject(Error('windows_shell_asset_changed')));
+    expect(select.textContent).toBe('自动（推荐）');
+    expect(f.host.querySelector('[role="status"]')?.textContent).toBeUndefined();
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toBe('未确认这次选择，请重试。');
+    expect(shellRequests()).toEqual([read, read, save, read]);
+
+    saving = Promise.withResolvers<void>();
+    await choosePowerShell();
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toBeUndefined();
+    await act(async () => saving.resolve());
+    expect(select.textContent).toBe('Windows PowerShell 5.1');
+    expect(f.host.querySelector('[role="status"]')?.textContent).toBeUndefined();
+    expect(shellRequests()).toEqual([read, read, save, read, save]);
+  } finally {
+    await f.close();
+  }
+});
 
 test('retained General card reads the accurate configuration default and never shows a late other-Workspace or temporary choice', async () => {
   const f = fixture(),

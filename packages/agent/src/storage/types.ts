@@ -45,6 +45,9 @@ export interface WorkspaceRemoval {
   outcome: 'workspace_removed';
   stopConfirmed: false;
 }
+export type DesktopShellBackend = 'git-bash' | 'powershell' | 'unavailable';
+export type DesktopShellPreference = 'auto' | Exclude<DesktopShellBackend, 'unavailable'>;
+
 export interface SessionRecord {
   id: string;
   workspaceId: string;
