@@ -4,8 +4,8 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../maintenance/files';
+import { desktopAsset } from '../../platform/desktop-assets';
 import { createOwnedWorker } from '../../platform/process/owned-worker';
-import { windowsDesktopAsset } from '../../platform/windows-desktop-assets';
 import { AgentError } from '../../storage/types';
 import { createWorkspaceFiles } from '../files';
 
@@ -164,9 +164,8 @@ export function pdfAssets() {
     ),
   );
   const checksum = worker.replace(/\.js$/, '.sha256');
-  const desktop = windowsDesktopAsset('assets/pdf');
-  if (desktop)
-    return { worker, checksum, dependencies: [desktop, windowsDesktopAsset('code/vendor')!] };
+  const desktop = desktopAsset('assets/pdf');
+  if (desktop) return { worker, checksum, dependencies: [desktop, desktopAsset('code/vendor')!] };
   const require = createRequire(import.meta.url);
   const parser = require.resolve('pdfjs-dist/package.json');
   const canvas = require.resolve('@napi-rs/canvas/package.json');

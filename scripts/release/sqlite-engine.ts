@@ -17,11 +17,12 @@ import { pathToFileURL } from 'node:url';
 import type { SqliteEngineManifest } from '@kite-ai/agent/sqlite-engine';
 import type { TerminalBundleManifest } from '@kite-ai/service/runtime-assets';
 import {
+  desktopSqliteEngineRoot,
   parseSqliteReleaseIdentity,
   type SqliteReleaseIdentity,
   terminalSqliteEngineRoot,
-  windowsDesktopSqliteEngineRoot,
 } from '@kite-ai/service/sqlite-release-assets';
+import type { MacosTerminalSigning } from './macos-dmg/terminal-signing';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function probe(executable: string, args: string[], cwd: string) {
@@ -73,10 +74,11 @@ export async function buildTerminalSqliteEngine(input: {
   executable: string;
   library?: string;
   desktopOnly?: true;
+  macosSigning?: MacosTerminalSigning;
 }): Promise<TerminalBundleManifest['sqlite']> {
   const engineRoot = join(
     input.root,
-    input.desktopOnly ? windowsDesktopSqliteEngineRoot : terminalSqliteEngineRoot,
+    input.desktopOnly ? desktopSqliteEngineRoot : terminalSqliteEngineRoot,
   );
   mkdirSync(engineRoot, { recursive: true, mode: 0o700 });
   let manifest: SqliteEngineManifest;
@@ -105,8 +107,12 @@ export async function buildTerminalSqliteEngine(input: {
     const library = join(engineRoot, 'libsqlite3.dylib');
     copyFileSync(source, library);
     chmodSync(library, 0o644);
-    const bytes = readFileSync(library);
+    let bytes = readFileSync(library);
     if (sha(bytes) !== sha(readFileSync(source))) throw Error('sqlite_release_library_changed');
+    if (input.macosSigning) {
+      input.macosSigning.sign(library, 'code');
+      bytes = readFileSync(library);
+    }
     const actual = JSON.parse(
       await probe(input.executable, ['-e', memoryProbe, '--', library], input.root),
     );

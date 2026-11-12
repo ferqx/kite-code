@@ -5,11 +5,11 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { desktopAsset } from '../../platform/desktop-assets';
 import {
   startWindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../../platform/process/windows-owned-child';
-import { windowsDesktopAsset } from '../../platform/windows-desktop-assets';
 import { AgentError, type Json } from '../../storage/types';
 import { imageInputBytes, imageOutputBytes, imageTimeoutMs } from './format';
 
@@ -28,9 +28,8 @@ export function imageAssets(): ImageAssets {
     ),
   );
   const checksum = child.replace(/\.js$/, '.sha256');
-  const desktop = windowsDesktopAsset('assets/sharp');
-  if (desktop)
-    return { child, checksum, dependencies: [desktop, windowsDesktopAsset('code/vendor')!] };
+  const desktop = desktopAsset('assets/sharp');
+  if (desktop) return { child, checksum, dependencies: [desktop, desktopAsset('code/vendor')!] };
   const dependencies = new Set<string>();
   const visit = (manifest: string) => {
     const root = dirname(manifest);

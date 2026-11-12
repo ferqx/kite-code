@@ -111,6 +111,13 @@ export function patchMacosElectronRuntime(input: {
   return patchCopiedRuntime(sourceInput(input.sourceDist), input.targetDist);
 }
 
+/** A distribution signature changes the Framework bytes but must preserve the reviewed payload. */
+export function fingerprintPatchedMacosElectron(dist: string): MacosElectronResize {
+  const bytes = readFileSync(join(canonical(dist), macosElectronResize.framework));
+  verifyMacosElectronFramework(bytes, 'patched');
+  return Object.freeze({ frameworkSha256: sha(bytes) });
+}
+
 function patchCopiedRuntime(
   { source, snapshot }: ReturnType<typeof sourceInput>,
   targetDist: string,

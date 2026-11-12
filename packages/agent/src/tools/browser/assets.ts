@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, sep } from 'node:path';
-import { windowsDesktopAsset } from '../../platform/windows-desktop-assets';
+import { desktopAsset } from '../../platform/desktop-assets';
 
 export const agentBrowserVersion = '0.39.4';
 const require = createRequire(import.meta.url);
@@ -37,7 +37,7 @@ export function agentBrowserExecutableName(): string | undefined {
 function installedAssets() {
   try {
     const manifest = realpathSync(
-      windowsDesktopAsset('assets/agent-browser/package.json') ??
+      desktopAsset('assets/agent-browser/package.json') ??
         require.resolve('agent-browser/package.json'),
     );
     if (statSync(manifest).size > 65536) throw unavailable();

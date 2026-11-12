@@ -5,10 +5,10 @@ import type { WindowsInstallationRemoval } from '@kite-ai/agent/artifact-access'
 import { verifySqliteEngineAsset } from '@kite-ai/agent/sqlite-engine';
 import { createAssetFileHasher } from './asset-file-hash';
 import {
+  desktopSqliteEngineRoot,
   parseSqliteReleaseIdentity,
   type SqliteReleaseIdentity,
   terminalSqliteEngineRoot,
-  windowsDesktopSqliteEngineRoot,
 } from './sqlite-release-assets';
 export class TerminalRuntimeAssetError extends Error {
   readonly code: string;
@@ -38,9 +38,14 @@ interface RuntimeBundleManifest {
   }[];
   readonly links: readonly { readonly path: string; readonly target: string }[];
 }
+const desktopServiceEntrypoint = 'code/@kite-ai/service/main.js';
 export const windowsDesktopRuntimeEntries = Object.freeze({
   runtime: 'runtime/bun.exe',
-  service: 'code/@kite-ai/service/main.js',
+  service: desktopServiceEntrypoint,
+} as const);
+export const macosDesktopRuntimeEntries = Object.freeze({
+  runtime: 'runtime/bun',
+  service: desktopServiceEntrypoint,
 } as const);
 const legacyWindowsDesktopRuntimeEntries = Object.freeze({
   runtime: 'runtime/bun.exe',
@@ -49,6 +54,10 @@ const legacyWindowsDesktopRuntimeEntries = Object.freeze({
 export interface WindowsDesktopRuntimeManifest extends RuntimeBundleManifest {
   readonly entries: typeof windowsDesktopRuntimeEntries | typeof legacyWindowsDesktopRuntimeEntries;
 }
+interface MacosDesktopRuntimeManifest extends RuntimeBundleManifest {
+  readonly entries: typeof macosDesktopRuntimeEntries;
+}
+export type DesktopRuntimeManifest = MacosDesktopRuntimeManifest | WindowsDesktopRuntimeManifest;
 export interface TerminalBundleManifest extends RuntimeBundleManifest {
   readonly entries: {
     readonly runtime: string;
@@ -59,7 +68,7 @@ export interface TerminalBundleManifest extends RuntimeBundleManifest {
     readonly tui: 'entrypoints/tui.js';
   };
 }
-export type EmbeddedRuntimeManifest = TerminalBundleManifest | WindowsDesktopRuntimeManifest;
+export type EmbeddedRuntimeManifest = TerminalBundleManifest | DesktopRuntimeManifest;
 export interface VerifiedTerminalRuntimeBundle<
   T extends EmbeddedRuntimeManifest = TerminalBundleManifest,
 > {
@@ -82,8 +91,8 @@ export function terminalEmptyAssetDirectories(
   });
 }
 function sqliteEngineRoot(entries: EmbeddedRuntimeManifest['entries']): string {
-  return entries.service === windowsDesktopRuntimeEntries.service
-    ? windowsDesktopSqliteEngineRoot
+  return entries.service === desktopServiceEntrypoint
+    ? desktopSqliteEngineRoot
     : terminalSqliteEngineRoot;
 }
 export interface TerminalRuntimeProtection {
@@ -214,17 +223,23 @@ export function parseTerminalBundleManifest(
     fail('terminal_manifest_invalid');
   }
   const desktop = embedded && closed(value.entries, ['runtime', 'service']);
-  if (desktop && value.target.platform !== 'win32') fail('terminal_manifest_invalid');
-  const rawEntries = value.entries as Record<string, unknown>;
-  const entries = desktop
-    ? rawEntries.service === legacyWindowsDesktopRuntimeEntries.service
-      ? legacyWindowsDesktopRuntimeEntries
-      : windowsDesktopRuntimeEntries
-    : terminalBundleEntries(value.target.platform);
+  const rawEntries = value.entries;
+  let entries: EmbeddedRuntimeManifest['entries'];
+  if (!desktop) entries = terminalBundleEntries(value.target.platform);
+  else if (value.target.platform === 'win32')
+    entries =
+      rawEntries.service === legacyWindowsDesktopRuntimeEntries.service
+        ? legacyWindowsDesktopRuntimeEntries
+        : windowsDesktopRuntimeEntries;
+  else if (value.target.platform === 'darwin' && value.target.arch === 'arm64')
+    entries = macosDesktopRuntimeEntries;
+  else fail('terminal_manifest_invalid');
+  const bundledDesktop = entries.service === desktopServiceEntrypoint;
   const files = value.files;
   if (
     !closed(rawEntries, Object.keys(entries)) ||
-    Object.entries(entries).some(([key, path]) => rawEntries[key] !== path)
+    Object.entries(entries).some(([key, path]) => rawEntries[key] !== path) ||
+    (bundledDesktop && value.links.length !== 0)
   )
     fail('terminal_manifest_invalid');
   const paths = new Set<string>();
@@ -291,12 +306,11 @@ export function parseTerminalBundleManifest(
     desktop &&
     files.some(
       (file) =>
-        (entries.service === windowsDesktopRuntimeEntries.service &&
-          /(?:^|\/)node_modules(?:\/|$)/iu.test(file.path)) ||
-        /^(?:entrypoints|web|windows-frontdoor|(?:code|node_modules)\/@kite-ai\/(?:cli|ui))(?:\/|$)/u.test(
+        (bundledDesktop && /(?:^|\/)node_modules(?:\/|$)/iu.test(file.path)) ||
+        /^(?:entrypoints|web|windows-frontdoor|(?:code|node_modules)\/@kite-ai\/(?:cli|ui))(?:\/|$)/iu.test(
           file.path,
         ) ||
-        /^(?:code|node_modules)\/@kite-ai\/service\/(?:daemon(?:-main)?|development-web)\.js$/u.test(
+        /^(?:code|node_modules)\/@kite-ai\/service\/(?:daemon(?:-main)?|development-web)\.js$/iu.test(
           file.path,
         ),
     )

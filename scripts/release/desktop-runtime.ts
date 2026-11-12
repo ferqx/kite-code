@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -12,12 +13,13 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { parseArgs } from 'node:util';
 import ts from 'typescript';
 import {
-  windowsDesktopModulePlugin,
-  windowsDesktopModuleSpecifier,
-} from '../../packages/agent/scripts/windows-desktop-bundling';
+  desktopModulePlugin,
+  desktopModuleSpecifier,
+} from '../../packages/agent/scripts/desktop-bundling';
+import { agentBrowserExecutableName } from '../../packages/agent/src/tools/browser/assets';
 import { terminalBundledNotices } from './terminal-dependencies';
 
-export function windowsDesktopModuleMap(
+export function desktopModuleMap(
   workspaces: readonly { name: string; exports: Record<string, string> }[],
 ): ReadonlyMap<string, string> {
   const modules = new Map([
@@ -38,7 +40,7 @@ export function windowsDesktopModuleMap(
 }
 
 /** Use the workspace's existing build entries and resolve external modules in the bundler. */
-export async function buildWindowsDesktopWorkspace(
+export async function buildDesktopWorkspace(
   workspace: string,
   args: readonly string[],
   modules: ReadonlyMap<string, string>,
@@ -75,15 +77,15 @@ export async function buildWindowsDesktopWorkspace(
     packages,
     external,
     splitting,
-    define: { __KITE_WINDOWS_DESKTOP_ASSETS__: 'true' },
-    plugins: [windowsDesktopModulePlugin(imports)],
+    define: { __KITE_DESKTOP_ASSETS__: 'true' },
+    plugins: [desktopModulePlugin(imports)],
   });
   if (!built.success)
     throw new AggregateError(built.logs, 'desktop_runtime_workspace_build_failed');
 }
 
 /** Validate emitted code without rewriting it. Bun's import scan omits shared require aliases. */
-function verifyWindowsDesktopImports(
+function verifyDesktopImports(
   workspaces: readonly string[],
   imports: Readonly<Record<string, string>>,
 ): void {
@@ -133,17 +135,17 @@ function verifyWindowsDesktopImports(
   }
 }
 
-export function writeWindowsDesktopImports(
+export function writeDesktopImports(
   codeRoot: string,
   workspaces: readonly string[],
   modules: ReadonlyMap<string, string>,
 ): void {
   const imports = Object.fromEntries(
-    [...modules].map(([specifier, path]) => [windowsDesktopModuleSpecifier(specifier), path]),
+    [...modules].map(([specifier, path]) => [desktopModuleSpecifier(specifier), path]),
   );
   for (const path of Object.values(imports))
     if (!existsSync(join(codeRoot, path))) throw Error(`desktop_runtime_module_missing:${path}`);
-  verifyWindowsDesktopImports(workspaces, imports);
+  verifyDesktopImports(workspaces, imports);
   writeFileSync(
     join(codeRoot, 'package.json'),
     `${JSON.stringify({ type: 'module', imports }, null, 2)}\n`,
@@ -164,13 +166,20 @@ function replaceUpstream(
   return source.replaceAll(pattern, () => replacement);
 }
 
-/** Bundle the remaining JS against the lockfile and copy only the Windows x64 runtime assets. */
-export async function buildWindowsDesktopRuntime(
+/** Bundle the remaining JS against the lockfile and copy only the host runtime assets. */
+export async function buildDesktopRuntime(
   repository: string,
   root: string,
   workspaces: readonly string[],
   modules: ReadonlyMap<string, string>,
 ) {
+  const windows = process.platform === 'win32' && process.arch === 'x64';
+  const macos = process.platform === 'darwin' && process.arch === 'arm64';
+  if (!windows && !macos) throw Error('desktop_runtime_platform_unsupported');
+  const target = `${process.platform}-${process.arch}`;
+  const napiTarget = windows ? `${target}-msvc` : target;
+  const browserExecutable = agentBrowserExecutableName();
+  if (!browserExecutable) throw Error('desktop_runtime_platform_unsupported');
   const vendor = join(root, 'code/vendor');
   mkdirSync(vendor, { recursive: true });
   const installed = realpathSync(join(repository, 'node_modules'));
@@ -193,18 +202,19 @@ export async function buildWindowsDesktopRuntime(
 
   const pdf = dirname(require.resolve('pdfjs-dist/package.json'));
   const canvas = require.resolve('@napi-rs/canvas');
-  const canvasNative = dependency(createRequire(canvas).resolve('@napi-rs/canvas-win32-x64-msvc'));
+  const canvasNative = dependency(createRequire(canvas).resolve(`@napi-rs/canvas-${napiTarget}`));
   const sharp = require.resolve('sharp');
-  const sharpPackage = createRequire(sharp).resolve('@img/sharp-win32-x64/package');
+  const sharpPlatform = `sharp-${target}`;
+  const sharpPackage = createRequire(sharp).resolve(`@img/${sharpPlatform}/package`);
   const sharpVersion = (
     JSON.parse(readFileSync(dependency(sharpPackage), 'utf8')) as { version: string }
   ).version;
   const sharpNative = dependency(
-    join(dirname(sharpPackage), 'lib', `sharp-win32-x64-${sharpVersion}.node`),
+    join(dirname(sharpPackage), 'lib', `${sharpPlatform}-${sharpVersion}.node`),
   );
   const keyring = require.resolve('@napi-rs/keyring');
   const keyringNative = dependency(
-    createRequire(keyring).resolve('@napi-rs/keyring-win32-x64-msvc'),
+    createRequire(keyring).resolve(`@napi-rs/keyring-${napiTarget}`),
   );
   const browser = dirname(require.resolve('agent-browser/package.json'));
   const treeSitter = dirname(require.resolve('web-tree-sitter/tree-sitter.wasm'));
@@ -213,18 +223,24 @@ export async function buildWindowsDesktopRuntime(
   const jsdomRoot = dirname(jsdom);
   const pdfMain = join(pdf, 'legacy/build/pdf.mjs');
 
-  for (const file of ['package.json', 'LICENSE', 'bin/agent-browser-win32-x64.exe'])
+  for (const file of ['package.json', 'LICENSE', `bin/${browserExecutable}`])
     copy(join(browser, file), `agent-browser/${file}`);
+  if (macos) chmodSync(join(root, 'assets/agent-browser/bin', browserExecutable), 0o755);
   copy(join(treeSitter, 'tree-sitter.wasm'), 'shell/tree-sitter.wasm');
   copy(join(grammar, 'tree-sitter-bash.wasm'), 'shell/tree-sitter-bash.wasm');
-  for (const file of [canvasNative, join(dirname(canvasNative), 'icudtl.dat')])
-    copy(file, `pdf/${basename(file)}`);
-  for (const file of [
-    sharpNative,
-    join(dirname(sharpNative), 'libvips-42.dll'),
-    join(dirname(sharpNative), 'libvips-cpp-8.18.7.dll'),
-  ])
-    copy(file, `sharp/${basename(file)}`);
+  copy(canvasNative, `pdf/${basename(canvasNative)}`);
+  const sharpAsset = windows ? 'sharp' : `sharp/${sharpPlatform}/lib`;
+  copy(sharpNative, `${sharpAsset}/${basename(sharpNative)}`);
+  if (windows) {
+    copy(join(dirname(canvasNative), 'icudtl.dat'), 'pdf/icudtl.dat');
+    for (const library of ['libvips-42.dll', 'libvips-cpp-8.18.7.dll'])
+      copy(join(dirname(sharpNative), library), `sharp/${library}`);
+  } else {
+    const libvipsPlatform = `sharp-libvips-${target}`;
+    const library = createRequire(sharpPackage).resolve(`@img/${libvipsPlatform}/binary`);
+    // The addon searches this relative path via its existing LC_RPATH.
+    copy(library, `sharp/${libvipsPlatform}/lib/${basename(library)}`);
+  }
   copy(keyringNative, `credentials/${basename(keyringNative)}`);
 
   const bundle = async (
@@ -243,7 +259,7 @@ export async function buildWindowsDesktopRuntime(
       plugins: transforms.size
         ? [
             {
-              name: 'windows-desktop-runtime',
+              name: 'desktop-runtime',
               setup(build) {
                 build.onLoad({ filter: /\.(?:mjs|cjs|js)$/u }, (args) => {
                   const transform = transforms.get(args.path.toLowerCase());
@@ -306,7 +322,7 @@ export async function buildWindowsDesktopRuntime(
     sharp,
     join(vendor, 'sharp.cjs'),
     'cjs',
-    transforms([[join(dirname(sharp), 'sharp.cjs'), () => nativeLoader(sharpNative, 'sharp')]]),
+    transforms([[join(dirname(sharp), 'sharp.cjs'), () => nativeLoader(sharpNative, sharpAsset)]]),
   );
   await bundle(
     canvas,
@@ -348,7 +364,7 @@ export async function buildWindowsDesktopRuntime(
       else copy(source, asset);
     }
   }
-  writeWindowsDesktopImports(join(root, 'code'), workspaces, modules);
+  writeDesktopImports(join(root, 'code'), workspaces, modules);
 
   const notices = [
     terminalBundledNotices({

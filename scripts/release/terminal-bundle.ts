@@ -31,16 +31,17 @@ import {
 } from '../../apps/cli/host/terminal-artifact';
 import { serviceBundledDependencies } from '../../apps/service/bundled-dependencies';
 import {
+  type DesktopRuntimeManifest,
   type EmbeddedRuntimeManifest,
+  macosDesktopRuntimeEntries,
   terminalEmptyAssetDirectories,
   type VerifiedTerminalRuntimeBundle,
   verifyEmbeddedRuntimeBundle,
-  type WindowsDesktopRuntimeManifest,
   windowsDesktopRuntimeEntries,
 } from '../../apps/service/src/runtime-assets';
 import { createTrustedAssets } from '../../apps/web/src/assets';
 import { agentBundledDependencies } from '../../packages/agent/scripts/bundled-dependencies';
-import { windowsDesktopModuleSpecifier } from '../../packages/agent/scripts/windows-desktop-bundling';
+import { desktopModuleSpecifier } from '../../packages/agent/scripts/desktop-bundling';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
 import { acquireFileLock } from '../../packages/agent/src/platform/locks';
 import { retainWindowsArtifactScope } from '../../packages/agent/src/platform/windows-artifact-scope';
@@ -56,14 +57,11 @@ import {
   compileWindowsVerifier,
   copyWindowsSystemExecutable,
 } from './build-windows-terminal-launcher';
+import { buildDesktopRuntime, buildDesktopWorkspace, desktopModuleMap } from './desktop-runtime';
+import { type MacosTerminalSigning, signMacosTerminalCode } from './macos-dmg/terminal-signing';
 import { buildTerminalSqliteEngine } from './sqlite-engine';
 import { copyTerminalDependencies, terminalBundledNotices } from './terminal-dependencies';
 import { rejectBundleOutput } from './terminal-paths';
-import {
-  buildWindowsDesktopRuntime,
-  buildWindowsDesktopWorkspace,
-  windowsDesktopModuleMap,
-} from './windows-desktop-runtime';
 import {
   installWindowsTerminalBundle,
   rollbackWindowsTerminalBundle,
@@ -291,6 +289,7 @@ interface BuildTerminalBundleInput {
   repositoryRoot?: string;
   bunExecutable?: string;
   sqliteLibrary?: string;
+  macosSigning?: MacosTerminalSigning;
   /** Fixed test composition, baked before fingerprinting; production callers leave this absent. */
   processHostFixture?: 'native-mcp-loopback' | 'native-extension-reference';
   /** Public certificate only, embedded in that fixture and therefore in the candidate digest. */
@@ -299,7 +298,7 @@ interface BuildTerminalBundleInput {
 /** Build a closed, relocatable runtime from the locked installed dependencies. */
 export function buildTerminalBundle(
   input: BuildTerminalBundleInput & { desktopOnly: true },
-): Promise<VerifiedTerminalRuntimeBundle<WindowsDesktopRuntimeManifest>>;
+): Promise<VerifiedTerminalRuntimeBundle<DesktopRuntimeManifest>>;
 export function buildTerminalBundle(
   input: BuildTerminalBundleInput,
 ): Promise<VerifiedTerminalBundle>;
@@ -307,14 +306,16 @@ export async function buildTerminalBundle(
   input: BuildTerminalBundleInput & { desktopOnly?: true },
 ): Promise<VerifiedTerminalRuntimeBundle<EmbeddedRuntimeManifest>> {
   const desktop = input.desktopOnly === true;
+  const macosArm64 = process.platform === 'darwin' && process.arch === 'arm64';
+  const windowsX64 = process.platform === 'win32' && process.arch === 'x64';
   if (
     desktop &&
-    (process.platform !== 'win32' ||
-      process.arch !== 'x64' ||
+    ((!windowsX64 && !macosArm64) ||
       input.processHostFixture !== undefined ||
       input.sqliteLibrary !== undefined)
   )
     error('desktop_runtime_inputs_invalid');
+  if (input.macosSigning && !macosArm64) error('macos_signing_requires_macos_arm64');
   const repository = realpathSync(input.repositoryRoot ?? resolve(import.meta.dir, '../..'));
   if (
     input.processHostFixture !== undefined &&
@@ -341,8 +342,12 @@ export async function buildTerminalBundle(
   if (process.platform === 'win32') privateDirectory(destination);
   else mkdirSync(destination, { mode: 0o700 });
   try {
-    const root = realpathSync(destination),
-      entries = desktop ? windowsDesktopRuntimeEntries : terminalBundleEntries(process.platform);
+    const root = realpathSync(destination);
+    const entries = desktop
+      ? macosArm64
+        ? macosDesktopRuntimeEntries
+        : windowsDesktopRuntimeEntries
+      : terminalBundleEntries(process.platform);
     const excludedServiceSource = new Set([
       './src/daemon.ts',
       './src/daemon-main.ts',
@@ -391,7 +396,7 @@ export async function buildTerminalBundle(
                       : [],
         };
       });
-    const desktopModules = desktop ? windowsDesktopModuleMap(packages) : undefined;
+    const desktopModules = desktop ? desktopModuleMap(packages) : undefined;
     const buildWorkspace = async (item: (typeof packages)[number]) => {
       mkdirSync(item.destination, { recursive: true, mode: 0o700 });
       const desktopService = desktop && item.name === '@kite-ai/service';
@@ -406,10 +411,10 @@ export async function buildTerminalBundle(
               : word.replace(/^--outdir=(?:\.\/)?dist(?=\/|$)/, `--outdir=${item.destination}`),
           );
         if (desktopModules && args[0] === 'build') {
-          await buildWindowsDesktopWorkspace(item.source, args.slice(1), desktopModules);
+          await buildDesktopWorkspace(item.source, args.slice(1), desktopModules);
         } else {
           if (desktop && item.name === '@kite-ai/agent' && desktopWorkers.has(args[0]!))
-            args.push('--windows-desktop');
+            args.push('--desktop');
           await run(runtime, args, item.source);
         }
       }
@@ -570,7 +575,7 @@ export async function buildTerminalBundle(
       writeFileSync(
         join(folder, `${entry}.js`),
         `import {resolve} from 'node:path';
-import {acquireArtifactAccess} from '${desktop ? windowsDesktopModuleSpecifier(artifactAccess) : artifactAccess}';
+import {acquireArtifactAccess} from '${desktop ? desktopModuleSpecifier(artifactAccess) : artifactAccess}';
 import {${run}} from './${fixture ? fixtureEntry : `${entry}-implementation`}.js';
 export {${run}};
 if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta.dir,'../../..'),mode:'shared'});try{await ${run}();}finally{lease.release();}}
@@ -578,7 +583,7 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
       );
     }
     if (desktopModules) {
-      await buildWindowsDesktopRuntime(
+      await buildDesktopRuntime(
         repository,
         root,
         packages.map((item) => item.destination),
@@ -607,12 +612,18 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
       mkdirSync(join(root, 'runtime'), { mode: 0o700 });
       copyFileSync(runtime, join(root, entries.runtime));
     }
-    chmodSync(join(root, entries.runtime), 0o755);
+    const executable = join(root, entries.runtime);
+    chmodSync(executable, 0o755);
+    if (input.macosSigning) {
+      const agent = join(root, desktop ? 'code' : 'node_modules', '@kite-ai/agent');
+      signMacosTerminalCode(root, executable, agent, input.macosSigning);
+    }
     const sqlite = await buildTerminalSqliteEngine({
       root,
-      executable: join(root, entries.runtime),
+      executable,
       ...(desktop ? { desktopOnly: true as const } : {}),
       ...(input.sqliteLibrary ? { library: input.sqliteLibrary } : {}),
+      ...(input.macosSigning ? { macosSigning: input.macosSigning } : {}),
     });
     if (!desktop) {
       mkdirSync(join(root, 'entrypoints'), { mode: 0o700 });

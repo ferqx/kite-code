@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import type { MacosTerminalSigning } from './macos-dmg/terminal-signing';
 import {
   assertReleaseSource,
   parseReleaseArguments,
@@ -42,6 +43,10 @@ Checksums establish integrity, not publisher authenticity. Installation preserve
 export async function runNativeRelease(
   argv: readonly string[],
   root = repositoryRoot,
+  buildOptions: {
+    macosSignElectron?: (app: string) => void;
+    macosTerminalSigning?: MacosTerminalSigning;
+  } = {},
 ): Promise<unknown> {
   const { command, values } = parseReleaseArguments(argv, options);
   if (command === 'help') return { help };
@@ -63,9 +68,11 @@ export async function runNativeRelease(
   switch (command) {
     case 'build': {
       const desktop = values['desktop-only'] === 'true';
+      const macosArm64 = process.platform === 'darwin' && process.arch === 'arm64';
+      const windowsX64 = process.platform === 'win32' && process.arch === 'x64';
       if (
         values['desktop-only'] !== undefined &&
-        (!desktop || process.platform !== 'win32' || process.arch !== 'x64' || values.terminal)
+        (!desktop || (!windowsX64 && !macosArm64) || values.terminal)
       )
         throw Error('native_desktop_release_arguments_invalid');
       const { buildNativeCandidate } = await import('../../apps/desktop/scripts/build-native');
@@ -82,6 +89,9 @@ export async function runNativeRelease(
           terminalRoot,
           electronDist: resolve(electron),
           outdir: directory,
+          ...(buildOptions.macosSignElectron
+            ? { macosSignElectron: buildOptions.macosSignElectron }
+            : {}),
           ...(process.platform === 'win32'
             ? {
                 windowsBuildPort: (await import('./windows-native-build'))
@@ -92,15 +102,31 @@ export async function runNativeRelease(
         return { root: bundle.root, candidateId: bundle.digest };
       };
       if (!desktop) return build(resolve(values.terminal ?? join(root, 'dist/unified-terminal')));
-      const { mkdirSync, realpathSync, rmSync } = await import('node:fs');
+      const { mkdirSync, mkdtempSync, realpathSync, rmSync } = await import('node:fs');
+      const { buildTerminalBundle } = await import('./terminal-bundle');
+      mkdirSync(dirname(directory), { recursive: true });
+      const parent = realpathSync.native(dirname(directory));
+      if (macosArm64) {
+        const work = mkdtempSync(join(parent, '.kite-desktop-runtime-'));
+        try {
+          const terminal = await buildTerminalBundle({
+            destination: join(work, 'runtime'),
+            repositoryRoot: root,
+            desktopOnly: true,
+            ...(buildOptions.macosTerminalSigning
+              ? { macosSigning: buildOptions.macosTerminalSigning }
+              : {}),
+          });
+          return await build(terminal.root);
+        } finally {
+          rmSync(work, { recursive: true, force: true });
+        }
+      }
       const { privateDirectory, defaultWindowsPathSecurity } = await import(
         '../../packages/agent/src/platform/windows-path-security'
       );
-      const { buildTerminalBundle } = await import('./terminal-bundle');
       // Build beside the requested candidate, under the same admitted directory.
       // Windows' per-user Temp can inherit grants outside this artifact scope.
-      mkdirSync(dirname(directory), { recursive: true });
-      const parent = realpathSync.native(dirname(directory));
       const work = join(parent, `kite-desktop-runtime-${randomUUID()}`);
       privateDirectory(work);
       const terminal = await buildTerminalBundle({

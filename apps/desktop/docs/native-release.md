@@ -43,6 +43,20 @@ bun run release:native uninstall --prefix /absolute/install/native
 
 `.tar.zst` 与 `.tar.gz` 都使用[同一归档校验和安装入口](../../cli/docs/terminal-release.md#制品闭包与身份)。内含 Terminal 按目标交付原生依赖。
 
+### macOS DMG
+
+在 Apple Silicon Mac 上用 Bun 和 Xcode 工具链执行 `bun run release:macos-dmg`。命令构建桌面专用 Native 候选，再生成 `dist/macos-dmg/` 下带时间戳的 `KiteDesktop-arm64.dmg` 及 SHA-256 文件。用 `--directory <新目录>` 选择输出位置。也可用 `bun run release:build --product native --desktop-only true --directory <候选目录>` 单独构建，再用 `--native <候选目录>` 封装。DMG 构建入口仅接受桌面专用候选。从源码构建时可用 `--electron <原始 Electron 分发目录>` 指定固定 Electron 输入。
+
+Mac App Store 之外的分发可以使用钥匙串中的 Developer ID Application 证书及私钥和已有 `notarytool` profile。给同一构建命令传入 `--signing-identity <证书 SHA-1>` 和 `--notary-profile <钥匙串 profile 名称>`。签名制品从源码构建，Terminal 先签署暂存 Mach-O 再生成各级清单，Electron 在应用 resize 修正后签署并重新核对 Framework 摘要。构建最后签署 `.app` 和 DMG，取得 Apple 的 `Accepted` 后附加公证票据，校验票据和 Gatekeeper，再生成最终文件摘要。最终签名制品仍需实测 Finder 生命周期。公开发行门禁见[发布边界](../../../docs/active/release-control.md)。
+
+映像的 Finder 窗口并排显示 `Kite Desktop.app` 和指向 `/Applications` 的快捷方式。应用包包含桌面 Main、renderer、Electron、配套服务和一份 Bun。服务的工作区代码和第三方 JS 通过 `terminal/code` 下的私有模块映射加载，macOS arm64 原生绑定、SQLite、辅助程序、字体、CMap 和 WASM 随各自的消费方打包。制品不含 `node_modules`、CLI/TUI 或独立 Terminal Web 入口。构建从包内 Mach-O 的 arm64 部署目标计算 `LSMinimumSystemVersion`。启动器从 `Contents/Resources/native` 启动包内 Electron，Native 启动继续核对候选完整性和使用锁。由同一 macOS 用户安装和运行，运行时复用包内预先创建的使用锁文件。
+
+退出 Kite Desktop 后通过 Finder 替换旧应用或将应用移到废纸篓。Profile `~/.kite-code/unified-agent`、Electron 用户数据及工作区路径位于应用包外。Finder 负责文件操作，应用使用锁仍由运行时管理。曾安装独立安装器预览版的用户可通过原 DMG 卸载后再拖入新应用。用户操作见 [桌面手册](../../../docs/handbook/clients/desktop/README.md#在-macos-上安装更新和卸载)。
+
+2026-11-12 在 Apple Silicon、macOS 27.2.1 上，打开桌面专用 DMG 后 Finder 自动显示图标视图。[DMG 实机验收](../../../tests/fixtures/unified-agent/macos-dmg.qualification.ts)通过 Finder Apple Events 将旧完整 DMG 的应用复制到 `/Applications`，在隔离 Profile 保存一条会话和模型回复。退出后用桌面专用 DMG 替换应用，冷启动时会话、消息及回复各显示一次，模型请求总计一次。Finder 将应用移到废纸篓并确认目标位置已移除，再用桌面专用 DMG 独立安装、冷启动并卸载。新映像与安装包核对了桌面服务入口及无 `node_modules`、CLI/TUI、独立 Terminal Web 入口的制品布局。更新及两次卸载前后，Core、桌面数据库、Profile 元数据、用户配置、Electron 模型偏好和外部工作区文件的 SHA-256 与文件身份一致。复验制品声明最低 macOS 15.0，由随包的 SQLite 决定。本机证据在 `dist/macos-desktop-only/evidence/macos-dmg-n6jq48/report.json`。
+
+当前制品为 macOS arm64 本地候选。桌面专用布局已通过临时 ad-hoc 构建、应用签名深度校验及 DMG 签名校验。首版完整候选的 ad-hoc 演练还验证了 Finder 生命周期。该演练为无 Team ID 的测试库临时关闭库校验，Developer ID 路径保留库校验。Developer ID、公证、最终签名制品复验和公开发行资格沿 [发布边界](../../../docs/active/release-control.md) 单独核验。安装边界取舍见 [Agent Note](../../../.agents/notes/implemented/feature/2026-11-12-macos-drag-dmg.md)。
+
 Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档。构建包含桌面 Main、renderer 和本地服务。服务的工作区构建产物与第三方 JS bundle 位于 `terminal/code`，通过相对路径加载。Windows x64 原生绑定、辅助程序和 PDF 字体、WASM 等运行资源单独保留。安装包的生产入口拒绝含 `node_modules` 的归档。旧桌面包的清单仍可核验，以便升级和卸载。归档和安装后的程序树各含一份 `bun.exe`。小型 C 前门核对包内 Bun 和校验脚本的固定摘要，再用该 Bun 启动两跳证书校验。配套服务使用同一个可执行文件。
 
 桌面服务在 Bun 解析依赖时把保留的模块导入和 `require` 指向 `code/package.json` 的私有包内映射。映射目标都是制品中的相对路径，拆分文件可共享同一个模块。制品检查验证输出引用和文件存在性。[搬迁回归](../../../tests/isolated/unified-agent/windows-desktop-runtime.test.ts)核编译后从仓库外加载共享模块，完整安装验证从仓库外的正式入口观察 Service 握手和首屏。

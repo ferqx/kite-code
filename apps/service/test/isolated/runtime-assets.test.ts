@@ -18,6 +18,8 @@ import { dirname, join } from 'node:path';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { fixtureTerminalSqlite } from '../../../../tests/fixtures/unified-agent/sqlite-engine-fixture';
 import {
+  type DesktopRuntimeManifest,
+  macosDesktopRuntimeEntries,
   parseTerminalBundleManifest,
   parseTerminalRuntimeProtection,
   type TerminalBundleManifest,
@@ -28,39 +30,45 @@ import {
   windowsDesktopRuntimeEntries,
   windowsTerminalRuntimeConfigFiles,
 } from '../../src/runtime-assets';
-import {
-  reviewedSqliteSources,
-  windowsDesktopSqliteEngineRoot,
-} from '../../src/sqlite-release-assets';
+import { desktopSqliteEngineRoot, reviewedSqliteSources } from '../../src/sqlite-release-assets';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-test('Windows embedded desktop runtime excludes standalone client entries', () => {
+function desktopManifest(
+  target: DesktopRuntimeManifest['target'],
+  entries: DesktopRuntimeManifest['entries'],
+) {
   const sha256 = 'b'.repeat(64);
-  const manifest = {
+  return {
     version: 1,
     apiMajor: 1,
-    target: { platform: 'win32', arch: 'x64' },
+    target,
     bunVersion: '1.4.4',
     sqlite: {
       driver: 'bun:sqlite',
-      linkage: 'builtin',
+      linkage: target.platform === 'win32' ? 'builtin' : 'dynamic',
       version: '3.53.2',
       sourceId: reviewedSqliteSources['3.53.2'],
       manifestSha256: sha256,
     },
     productVersion: '0.1.0',
     source: { commit: 'a'.repeat(40), dirty: true },
-    entries: windowsDesktopRuntimeEntries,
+    entries,
     files: [
-      ...Object.values(windowsDesktopRuntimeEntries),
-      ...windowsTerminalRuntimeConfigFiles,
-      `${windowsDesktopSqliteEngineRoot}/engine-selection.json`,
-      `${windowsDesktopSqliteEngineRoot}/engine-manifest.json`,
-    ].map((path) => ({ path, size: 1, sha256, mode: path === 'runtime/bun.exe' ? 493 : 420 })),
+      ...Object.values(entries),
+      ...(target.platform === 'win32' ? windowsTerminalRuntimeConfigFiles : []),
+      `${desktopSqliteEngineRoot}/engine-selection.json`,
+      `${desktopSqliteEngineRoot}/engine-manifest.json`,
+    ].map((path) => ({ path, size: 1, sha256, mode: path === entries.runtime ? 493 : 420 })),
     links: [],
   };
-  expect(parseTerminalBundleManifest(manifest, true).entries).toEqual(windowsDesktopRuntimeEntries);
+}
+
+test('Windows embedded runtime retains verification of the previous desktop layout', () => {
+  const manifest = desktopManifest(
+    { platform: 'win32', arch: 'x64' },
+    windowsDesktopRuntimeEntries,
+  );
   const previousService = 'node_modules/@kite-ai/service/main.js';
   expect(
     parseTerminalBundleManifest(
@@ -75,12 +83,20 @@ test('Windows embedded desktop runtime excludes standalone client entries', () =
       true,
     ).entries.service,
   ).toBe(previousService);
+});
+
+test.each([
+  ['Windows', desktopManifest({ platform: 'win32', arch: 'x64' }, windowsDesktopRuntimeEntries)],
+  ['macOS', desktopManifest({ platform: 'darwin', arch: 'arm64' }, macosDesktopRuntimeEntries)],
+] as const)('%s embedded desktop runtime excludes standalone clients and dependency directories', (_, manifest) => {
+  expect(parseTerminalBundleManifest(manifest, true).entries).toEqual(manifest.entries);
   expect(() => parseTerminalBundleManifest(manifest)).toThrow('terminal_manifest_invalid');
   for (const path of [
     'web/manifest.json',
     'entrypoints/tui.js',
     'windows-frontdoor/terminal-verifier.exe',
-    'node_modules/@kite-ai/cli/host/index.js',
+    'code/@kite-ai/cli/host/index.js',
+    'code/@kite-ai/ui/tui.js',
     'assets/node_modules/vendor/index.js',
     'code/@kite-ai/service/daemon-main.js',
   ]) {
@@ -88,12 +104,31 @@ test('Windows embedded desktop runtime excludes standalone client entries', () =
       parseTerminalBundleManifest(
         {
           ...manifest,
-          files: [...manifest.files, { path, size: 1, sha256, mode: 420 }],
+          files: [...manifest.files, { path, size: 1, sha256: 'a'.repeat(64), mode: 420 }],
         },
         true,
       ),
     ).toThrow('terminal_manifest_invalid');
   }
+  expect(() =>
+    parseTerminalBundleManifest(
+      { ...manifest, links: [{ path: 'node_modules/first', target: 'second' }] },
+      true,
+    ),
+  ).toThrow('terminal_manifest_invalid');
+});
+
+test('macOS desktop manifest requires an Apple Silicon target and macOS executable', () => {
+  const target = { platform: 'darwin', arch: 'arm64' };
+  expect(() =>
+    parseTerminalBundleManifest(desktopManifest(target, windowsDesktopRuntimeEntries), true),
+  ).toThrow('terminal_manifest_invalid');
+  expect(() =>
+    parseTerminalBundleManifest(
+      desktopManifest({ ...target, arch: 'x64' }, macosDesktopRuntimeEntries),
+      true,
+    ),
+  ).toThrow('terminal_manifest_invalid');
 });
 
 function fixture() {

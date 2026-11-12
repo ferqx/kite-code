@@ -38,7 +38,10 @@ import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/de
 import type { MacosElectronResize } from '../electron/macos-electron-resize';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
 import { buildWindowsAccess } from './build-windows-access';
-import { patchMacosElectronRuntime } from './macos-electron-runtime';
+import {
+  fingerprintPatchedMacosElectron,
+  patchMacosElectronRuntime,
+} from './macos-electron-runtime';
 import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 import { probeNativeSqliteEngine } from './sqlite-engine';
 
@@ -207,11 +210,14 @@ export async function buildNativeCandidate(input: {
   electronDist: string;
   outdir: string;
   windowsBuildPort?: WindowsNativeCandidateBuildPort;
+  macosSignElectron?: (app: string) => void;
   /** Explicit renderer diagnostics for automated fixture candidates only. */
   testDiagnostics?: boolean;
 }) {
   if (process.platform === 'win32' && !input.windowsBuildPort)
     throw Error('native_windows_build_port_required');
+  if (input.macosSignElectron && (process.platform !== 'darwin' || process.arch !== 'arm64'))
+    throw Error('native_macos_signing_target_invalid');
   if (!isAbsolute(input.outdir) || existsSync(input.outdir))
     throw Error('native_outdir_must_be_new_absolute');
   const terminal = (
@@ -296,10 +302,14 @@ export async function buildNativeCandidate(input: {
       copyWindowsNativeTerminal(terminal, join(root, 'terminal'));
     } else copy(terminal.root, join(root, 'terminal'));
     copy(electron, join(root, 'electron'));
-    const macosResize =
+    let macosResize =
       process.platform === 'darwin' && process.arch === 'arm64'
         ? patchMacosElectronRuntime({ sourceDist: electron, targetDist: join(root, 'electron') })
         : null;
+    if (input.macosSignElectron) {
+      input.macosSignElectron(join(root, 'electron/Electron.app'));
+      macosResize = fingerprintPatchedMacosElectron(join(root, 'electron'));
+    }
     const electronVersion = readFileSync(join(electron, 'version'), 'utf8').trim();
     const entries = nativeBundleEntries(process.platform);
     const sqlite = await probeNativeSqliteEngine({

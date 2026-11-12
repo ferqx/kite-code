@@ -45,4 +45,4 @@ export function assertSqliteReleaseIdentity(
 }
 
 export const terminalSqliteEngineRoot = 'node_modules/@kite-ai/agent/storage/engine';
-export const windowsDesktopSqliteEngineRoot = 'code/@kite-ai/agent/storage/engine';
+export const desktopSqliteEngineRoot = 'code/@kite-ai/agent/storage/engine';

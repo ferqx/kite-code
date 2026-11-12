@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-[运行时构建](../../../../scripts/release/terminal-bundle.ts)从锁定的生产依赖构建桌面配套服务。[Windows 桌面链接器](../../../../scripts/release/windows-desktop-runtime.ts)保留工作区共享 chunk 和原资源相对位置，链接工作区产物并打包剩余 JS 依赖。原生绑定按 Windows x64 明确选取，字体、CMap 和 WASM 随消费它们的能力交付。新候选的清单禁止 `node_modules`，旧候选沿原布局核验以支持替换。C 前门通过内置摘要核对固定 JS 校验器和唯一的 Bun，并保留原两跳创建证书。
+[运行时构建](../../../../scripts/release/terminal-bundle.ts)从锁定的生产依赖构建桌面配套服务。[桌面链接器](../../../../scripts/release/desktop-runtime.ts)保留工作区共享 chunk 和原资源相对位置，链接工作区产物并打包剩余 JS 依赖。原生绑定按 Windows x64 明确选取，字体、CMap 和 WASM 随消费它们的能力交付。新候选的清单禁止 `node_modules`，旧候选沿原布局核验以支持替换。C 前门通过内置摘要核对固定 JS 校验器和唯一的 Bun，并保留原两跳创建证书。模块链接方式也用于 [macOS DMG](2026-11-12-macos-drag-dmg.md)。
 
 Bun 的拆分文件可使用从共享文件导入的 `__require`，静态导入扫描无法找到这类调用。桌面构建在编译器解析依赖时将外部模块名指向制品内的私有映射，映射表随同代码封存，构建后只验证引用。这样共享文件和调用者能解析到同一模块。仓库父目录上的开发依赖曾掩盖未解析的调用。正式安装验证使用仓库外、没有祖先 `node_modules` 的目录，观察实际桌面与配套 Service 的启动和退出。
 

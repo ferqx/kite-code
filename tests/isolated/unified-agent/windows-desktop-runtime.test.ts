@@ -4,9 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
-  buildWindowsDesktopWorkspace,
-  writeWindowsDesktopImports,
-} from '../../../scripts/release/windows-desktop-runtime';
+  buildDesktopWorkspace,
+  writeDesktopImports,
+} from '../../../scripts/release/desktop-runtime';
 
 test('the desktop compiler resolves imports and shared requires within the portable artifact', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-desktop-link-'));
@@ -32,7 +32,7 @@ test('the desktop compiler resolves imports and shared requires within the porta
 const imported = await import("@kite-ai/agent/artifact-access");
 console.log(required.proof === imported.proof);`,
     );
-    await buildWindowsDesktopWorkspace(
+    await buildDesktopWorkspace(
       source,
       [
         './nested/main.ts',
@@ -46,7 +46,7 @@ console.log(required.proof === imported.proof);`,
       ],
       modules,
     );
-    writeWindowsDesktopImports(code, [service], modules);
+    writeDesktopImports(code, [service], modules);
     const result = spawnSync(process.execPath, ['--no-env-file', '--no-install', entry], {
       cwd: root,
       env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },

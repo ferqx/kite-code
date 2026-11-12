@@ -18,6 +18,7 @@ const options = {
     'sqlite-library',
     'desktop-only',
   ],
+  'macos-dmg': ['directory', 'native', 'electron', 'signing-identity', 'notary-profile'],
   'windows-setup': ['directory', 'zstd-archive', 'bun', 'electron'],
   pack: ['product', 'directory', 'archive'],
   unpack: ['product', 'directory', 'archive', 'sha256'],
@@ -31,6 +32,8 @@ const options = {
 } as const;
 const help = `Unified Agent release tooling
   build [--product terminal|native] [--directory <new-directory>] [--archive <new-archive>]
+  macos-dmg [--directory <new-directory>] [--native <verified-native> | --electron <installed-dist>]
+            [--signing-identity <Developer-ID-SHA1> --notary-profile <keychain-profile>]
   windows-setup [--directory <new-directory>] [--zstd-archive <zstd-1.5.7.tar.gz>]
                 [--bun <private-bun.exe>] [--electron <private-electron-dist>]
   verify|smoke [--product terminal|native] [--directory <candidate>]
@@ -54,6 +57,10 @@ export async function runUnifiedRelease(
 ): Promise<unknown> {
   const { command, values } = parseReleaseArguments(argv, options);
   if (command === 'help') return { help };
+  if (command === 'macos-dmg') {
+    const { buildMacosDmg } = await import('./macos-dmg/package');
+    return buildMacosDmg(root, values);
+  }
   if (command === 'windows-setup') {
     const { buildWindowsSetup } = await import('./windows-setup/package');
     return buildWindowsSetup(root, values);

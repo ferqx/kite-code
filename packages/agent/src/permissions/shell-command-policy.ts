@@ -6,7 +6,7 @@ import { Language, type Node, Parser } from 'web-tree-sitter';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
 import { ripgrepAsset } from '../jobs/ripgrep';
 import type { WindowsPowerShell } from '../jobs/windows-powershell';
-import { windowsDesktopAsset } from '../platform/windows-desktop-assets';
+import { desktopAsset } from '../platform/desktop-assets';
 import { AgentError } from '../storage/types';
 import {
   createPowerShellCommandPolicy,
@@ -344,11 +344,11 @@ export async function createShellCommandPolicy(input: {
   try {
     input.signal?.throwIfAborted();
     const runtime = await realpath(
-      windowsDesktopAsset('assets/shell/tree-sitter.wasm') ??
+      desktopAsset('assets/shell/tree-sitter.wasm') ??
         fileURLToPath(import.meta.resolve('web-tree-sitter/tree-sitter.wasm')),
     );
     const grammar = await realpath(
-      windowsDesktopAsset('assets/shell/tree-sitter-bash.wasm') ??
+      desktopAsset('assets/shell/tree-sitter-bash.wasm') ??
         join(
           dirname(fileURLToPath(import.meta.resolve('tree-sitter-bash/package.json'))),
           'tree-sitter-bash.wasm',
