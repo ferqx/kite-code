@@ -1,16 +1,28 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
 // Failed native closes remain strongly owned even if acquisition could not return a port.
 const pendingReleases = new Set<() => void>();
-const removalRoots = new WeakMap<WindowsInstallationRemoval, string>();
+const removalReaders = new WeakMap<
+  WindowsInstallationRemoval,
+  {
+    root: string;
+    read(path: string): WindowsRemovalEntry | undefined;
+  }
+>();
 
 /** Acquisition failed while an original DELETE-purpose HANDLE is still unconfirmed. */
 export class WindowsInstallationRemovalAcquireUnknownError extends AggregateError {
   constructor(error: unknown, cleanup: unknown) {
     super([error, cleanup], 'windows_installation_removal_acquire_unknown');
   }
+}
+
+/** Windows refused a DELETE-purpose open because another process still holds a file. */
+export class WindowsInstallationFilesInUseError extends Error {
+  readonly code = 'windows_installation_files_in_use';
 }
 
 export interface WindowsInstallationInventoryEntry {
@@ -22,14 +34,34 @@ export interface WindowsInstallationRemoval {
   remove(): void;
   release(): void;
 }
+interface WindowsRemovalEntry {
+  readonly directory: boolean;
+  readonly size: bigint;
+  readonly identity: string;
+  sha256(): string;
+}
+
 /** Internal identity proof for read-only whole-asset verification under original DELETE handles. */
+export function windowsInstallationRemovalReader(
+  owner: WindowsInstallationRemoval,
+  candidateRoot: string,
+) {
+  const reader = removalReaders.get(owner);
+  if (
+    !reader ||
+    (candidateRoot !== reader.root && !candidateRoot.startsWith(reader.root + sep)) ||
+    !reader.read(candidateRoot)?.directory
+  )
+    throw Error('windows_installation_removal_unknown');
+  return (path: string) =>
+    path === candidateRoot || path.startsWith(candidateRoot + sep) ? reader.read(path) : undefined;
+}
+
 export function assertWindowsInstallationRemoval(
   owner: WindowsInstallationRemoval,
   candidateRoot: string,
 ): void {
-  const root = removalRoots.get(owner);
-  if (!root || (candidateRoot !== root && !candidateRoot.startsWith(root + sep)))
-    throw Error('windows_installation_removal_unknown');
+  windowsInstallationRemovalReader(owner, candidateRoot);
   owner.verify();
 }
 
@@ -79,6 +111,8 @@ export function retainWindowsInstallationRemoval(input: {
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },
     SetFileInformationByHandle: { args: ['u64', 'u32', 'ptr', 'u32'], returns: 'bool' },
     GetFileAttributesW: { args: ['ptr'], returns: 'u32' },
+    ReadFile: { args: ['u64', 'ptr', 'u32', 'ptr', 'ptr'], returns: 'bool' },
+    SetFilePointerEx: { args: ['u64', 'i64', 'ptr', 'u32'], returns: 'bool' },
     GetLastError: { args: [], returns: 'u32' },
     CloseHandle: { args: ['u64'], returns: 'bool' },
   });
@@ -89,10 +123,14 @@ export function retainWindowsInstallationRemoval(input: {
     handle: bigint | number;
     identity: string;
     content: string;
+    size: bigint;
     marked: boolean;
     closed: boolean;
   };
   const held: Held[] = [];
+  const originals = new Map<string, Held>();
+  const readBuffer = new Uint8Array(256 * 1024);
+  const readCount = new Uint32Array(1);
   let released = false;
   let attempted = false;
   let removed = false;
@@ -112,6 +150,7 @@ export function retainWindowsInstallationRemoval(input: {
       fail();
     return {
       identity: [28, 44, 48].map((offset) => value.getUint32(offset, true)).join(':'),
+      size: (BigInt(value.getUint32(32, true)) << 32n) | BigInt(value.getUint32(36, true)),
       // Directory size/write time legitimately changes as original children are removed.
       content:
         entry.kind === 'file'
@@ -131,14 +170,18 @@ export function retainWindowsInstallationRemoval(input: {
     // outside the removal root retain ordinary no-delete pins and are never deleted.
     const handle = kernel.symbols.CreateFileW(
       ptr(wide(path)),
-      relative === null ? 0x200a0 : 0x30080,
+      relative === null ? 0x200a0 : kind === 'file' ? 0x80030080 : 0x30080,
       relative === null ? 3 : 1,
       null,
       3,
       0x02200000,
       0,
     );
-    if (!handle || BigInt(handle) === 18446744073709551615n) fail();
+    if (!handle || BigInt(handle) === 18446744073709551615n) {
+      if ([32, 33].includes(kernel.symbols.GetLastError()))
+        throw new WindowsInstallationFilesInUseError('windows_installation_files_in_use');
+      fail();
+    }
     const entry: Held = {
       path,
       relative,
@@ -146,6 +189,7 @@ export function retainWindowsInstallationRemoval(input: {
       handle,
       identity: '',
       content: '',
+      size: 0n,
       marked: false,
       closed: false,
     };
@@ -153,7 +197,9 @@ export function retainWindowsInstallationRemoval(input: {
     const original = metadata(entry);
     entry.identity = original.identity;
     entry.content = original.content;
+    entry.size = original.size;
     verifyEntry(entry);
+    if (relative !== null) originals.set(path, entry);
   };
   const inventory = () => {
     const actual = new Map<string, 'file' | 'directory'>([['', 'directory']]);
@@ -216,23 +262,52 @@ export function retainWindowsInstallationRemoval(input: {
     for (const entry of held) verifyEntry(entry);
     inventory();
   };
+  const read = (path: string): WindowsRemovalEntry | undefined => {
+    if (released || attempted) fail();
+    const entry = originals.get(path);
+    if (!entry || entry.closed) return undefined;
+    return {
+      directory: entry.kind === 'directory',
+      size: entry.size,
+      identity: entry.identity,
+      sha256() {
+        if (released || attempted || entry.closed || entry.kind !== 'file') fail();
+        if (!kernel.symbols.SetFilePointerEx(entry.handle, 0, null, 0)) fail();
+        const hash = createHash('sha256');
+        let remaining = entry.size;
+        while (remaining > 0n) {
+          const wanted =
+            remaining < BigInt(readBuffer.length) ? Number(remaining) : readBuffer.length;
+          if (!kernel.symbols.ReadFile(entry.handle, ptr(readBuffer), wanted, ptr(readCount), null))
+            fail();
+          const count = readCount[0] ?? 0;
+          if (!count || count > wanted) fail();
+          hash.update(readBuffer.subarray(0, count));
+          remaining -= BigInt(count);
+        }
+        if (
+          !kernel.symbols.ReadFile(entry.handle, ptr(readBuffer), 1, ptr(readCount), null) ||
+          readCount[0] !== 0
+        )
+          fail();
+        return hash.digest('hex');
+      },
+    };
+  };
   const port: WindowsInstallationRemoval = Object.freeze({
     verify,
     remove() {
       if (removed) return;
       if (released) fail();
       if (!attempted) verify();
+      else for (const entry of held) if (entry.relative === null) verifyEntry(entry);
       attempted = true;
       pendingReleases.add(release);
-      const entries = held
-        .filter((entry) => entry.relative !== null)
-        .sort((a, b) => {
-          const depth = (path: string) => (path ? path.split('/').length : 0);
-          return depth(b.relative!) - depth(a.relative!) || b.relative!.localeCompare(a.relative!);
-        });
-      for (const entry of entries) {
+      const entries = [...originals.values()]
+        .map((entry) => ({ entry, depth: entry.relative ? entry.relative.split('/').length : 0 }))
+        .sort((a, b) => b.depth - a.depth);
+      for (const { entry } of entries) {
         if (entry.closed) continue;
-        for (const parent of held.filter((item) => item.relative === null)) verifyEntry(parent);
         if (!entry.marked) {
           verifyEntry(entry);
           if (entry.kind === 'directory' && readdirSync(entry.path).length !== 0) fail();
@@ -250,6 +325,6 @@ export function retainWindowsInstallationRemoval(input: {
     },
     release,
   });
-  removalRoots.set(port, root);
+  removalReaders.set(port, { root, read });
   return port;
 }

@@ -9,6 +9,7 @@ import {
   startWindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../../platform/process/windows-owned-child';
+import { windowsDesktopAsset } from '../../platform/windows-desktop-assets';
 import { AgentError, type Json } from '../../storage/types';
 import { imageInputBytes, imageOutputBytes, imageTimeoutMs } from './format';
 
@@ -26,6 +27,10 @@ export function imageAssets(): ImageAssets {
       import.meta.url,
     ),
   );
+  const checksum = child.replace(/\.js$/, '.sha256');
+  const desktop = windowsDesktopAsset('assets/sharp');
+  if (desktop)
+    return { child, checksum, dependencies: [desktop, windowsDesktopAsset('code/vendor')!] };
   const dependencies = new Set<string>();
   const visit = (manifest: string) => {
     const root = dirname(manifest);
@@ -44,7 +49,7 @@ export function imageAssets(): ImageAssets {
     }
   };
   visit(createRequire(import.meta.url).resolve('sharp/package.json'));
-  return { child, checksum: child.replace(/\.js$/, '.sha256'), dependencies: [...dependencies] };
+  return { child, checksum, dependencies: [...dependencies] };
 }
 
 export class ImageProcessCleanupError extends AgentError {

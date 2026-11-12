@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../maintenance/files';
 import { createOwnedWorker } from '../../platform/process/owned-worker';
+import { windowsDesktopAsset } from '../../platform/windows-desktop-assets';
 import { AgentError } from '../../storage/types';
 import { createWorkspaceFiles } from '../files';
 
@@ -162,6 +163,10 @@ export function pdfAssets() {
       import.meta.url,
     ),
   );
+  const checksum = worker.replace(/\.js$/, '.sha256');
+  const desktop = windowsDesktopAsset('assets/pdf');
+  if (desktop)
+    return { worker, checksum, dependencies: [desktop, windowsDesktopAsset('code/vendor')!] };
   const require = createRequire(import.meta.url);
   const parser = require.resolve('pdfjs-dist/package.json');
   const canvas = require.resolve('@napi-rs/canvas/package.json');
@@ -174,7 +179,7 @@ export function pdfAssets() {
       /* Other platforms' optional native assets are not installed. */
     }
   }
-  return { worker, checksum: worker.replace(/\.js$/, '.sha256'), dependencies };
+  return { worker, checksum, dependencies };
 }
 let active = 0;
 const waiters = new Set<() => void>();

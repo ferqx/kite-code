@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -11,7 +12,7 @@ import {
 
 const repositoryRoot = resolve(import.meta.dir, '../..');
 const options = {
-  build: ['directory', 'terminal', 'electron'],
+  build: ['directory', 'terminal', 'electron', 'desktop-only'],
   pack: ['directory', 'archive'],
   unpack: ['archive', 'sha256', 'directory'],
   verify: ['directory', 'source-commit', 'clean-source'],
@@ -24,15 +25,16 @@ const options = {
   'unregister-cli': ['prefix'],
 } as const;
 const help = `Native candidate tooling (native platform only)
-  build [--directory <new-directory>] [--terminal <verified-terminal>] [--electron <installed-dist>]
-  pack [--directory <candidate>] --archive <new-tar.gz>
-  unpack --archive <tar.gz> --sha256 <SHA256> --directory <new-directory>
+  build [--directory <new-directory>] [--terminal <verified-terminal>] [--electron <installed-dist>] [--desktop-only true]
+  pack [--directory <candidate>] --archive <new-archive>
+  unpack --archive <archive> --sha256 <SHA256> --directory <new-directory>
   verify|smoke|launch [--directory <candidate>]
-  install --archive <tar.gz> --sha256 <SHA256> --prefix <managed-directory> [--cli-prefix <independent-terminal>]
+  install --archive <archive> --sha256 <SHA256> --prefix <managed-directory> [--cli-prefix <independent-terminal>]
   rollback|uninstall --prefix <managed-directory>
   register-cli --prefix <desktop> --cli-prefix <terminal>
   unregister-cli --prefix <desktop>
 Defaults: dist/unified-native, dist/unified-terminal, installed Electron dist.
+Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
 Verify additionally accepts --source-commit <40-hex-commit> and --clean-source true.
 Checksums establish integrity, not publisher authenticity. Installation preserves profile data.
 `;
@@ -60,6 +62,12 @@ export async function runNativeRelease(
   const value = (key: string) => requiredReleaseValue(values, key);
   switch (command) {
     case 'build': {
+      const desktop = values['desktop-only'] === 'true';
+      if (
+        values['desktop-only'] !== undefined &&
+        (!desktop || process.platform !== 'win32' || process.arch !== 'x64' || values.terminal)
+      )
+        throw Error('native_desktop_release_arguments_invalid');
       const { buildNativeCandidate } = await import('../../apps/desktop/scripts/build-native');
       const electron =
         values.electron ??
@@ -69,18 +77,44 @@ export async function runNativeRelease(
           ),
           'dist',
         );
-      const bundle = await buildNativeCandidate({
-        terminalRoot: resolve(values.terminal ?? join(root, 'dist/unified-terminal')),
-        electronDist: resolve(electron),
-        outdir: directory,
-        ...(process.platform === 'win32'
-          ? {
-              windowsBuildPort: (await import('./windows-native-build'))
-                .windowsNativeCandidateBuildPort,
-            }
-          : {}),
+      const build = async (terminalRoot: string) => {
+        const bundle = await buildNativeCandidate({
+          terminalRoot,
+          electronDist: resolve(electron),
+          outdir: directory,
+          ...(process.platform === 'win32'
+            ? {
+                windowsBuildPort: (await import('./windows-native-build'))
+                  .windowsNativeCandidateBuildPort,
+              }
+            : {}),
+        });
+        return { root: bundle.root, candidateId: bundle.digest };
+      };
+      if (!desktop) return build(resolve(values.terminal ?? join(root, 'dist/unified-terminal')));
+      const { mkdirSync, realpathSync, rmSync } = await import('node:fs');
+      const { privateDirectory, defaultWindowsPathSecurity } = await import(
+        '../../packages/agent/src/platform/windows-path-security'
+      );
+      const { buildTerminalBundle } = await import('./terminal-bundle');
+      // Build beside the requested candidate, under the same admitted directory.
+      // Windows' per-user Temp can inherit grants outside this artifact scope.
+      mkdirSync(dirname(directory), { recursive: true });
+      const parent = realpathSync.native(dirname(directory));
+      const work = join(parent, `kite-desktop-runtime-${randomUUID()}`);
+      privateDirectory(work);
+      const terminal = await buildTerminalBundle({
+        destination: join(work, 'runtime'),
+        desktopOnly: true,
       });
-      return { root: bundle.root, candidateId: bundle.digest };
+      const result = await build(terminal.root);
+      const security = defaultWindowsPathSecurity()!;
+      security.verifyDirectory(work);
+      if (realpathSync.native(work) !== work) throw Error('native_desktop_build_scratch_unknown');
+      for (const file of terminal.manifest.files)
+        security.verifyPath(join(terminal.root, file.path));
+      rmSync(work, { recursive: true });
+      return result;
     }
     case 'verify': {
       const { verifyNativeRuntimeBundle } = await import('@kite-ai/service/native-runtime-assets');
@@ -216,42 +250,19 @@ export async function runNativeRelease(
       return { root: bundle.root, candidateId: bundle.digest };
     }
     case 'install': {
+      if (process.platform === 'win32') {
+        const { installWindowsNativeBundle } = await import('./windows-native-install');
+        return installWindowsNativeBundle({
+          archivePath: value('archive'),
+          sha256: value('sha256'),
+          prefix: value('prefix'),
+          ...(values['cli-prefix'] ? { cliPrefix: values['cli-prefix'] } : {}),
+        });
+      }
       const { mkdtempSync, realpathSync, rmSync } = await import('node:fs');
       const { tmpdir } = await import('node:os');
-      const { unpackNativeBundle, createWindowsNativeArchiveScratch } = await import(
-        './native-archive'
-      );
+      const { unpackNativeBundle } = await import('./native-archive');
       const { installNativeBundle } = await import('./native-install');
-      if (process.platform === 'win32') {
-        const scratch = createWindowsNativeArchiveScratch(value('prefix'));
-        let failure: { error: unknown } | undefined;
-        let installed: ReturnType<typeof installNativeBundle> | undefined;
-        try {
-          const bundle = unpackNativeBundle({
-            archivePath: value('archive'),
-            sha256: value('sha256'),
-            destination: scratch.destination,
-          });
-          scratch.accept(bundle);
-          installed = installNativeBundle({
-            bundleRoot: bundle.root,
-            prefix: value('prefix'),
-            ...(values['cli-prefix'] ? { cliPrefix: values['cli-prefix'] } : {}),
-          });
-        } catch (error) {
-          failure = { error };
-        }
-        try {
-          scratch.release();
-        } catch (cleanup) {
-          throw new AggregateError(
-            failure ? [failure.error, cleanup] : [cleanup],
-            'native_install_scratch_close_unknown',
-          );
-        }
-        if (failure) throw failure.error;
-        return installed;
-      }
       const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-unpack-')));
       try {
         const bundle = unpackNativeBundle({

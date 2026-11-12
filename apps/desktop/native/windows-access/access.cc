@@ -637,11 +637,17 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
   check(p_napi_get_value_double(env, property(env, installed, "version"), &version));
   need(version == 2 && argument(env, property(env, installed, "root")) == prefix);
   auto bootstrap = property(env, installed, "bootstrap"); keys(env, bootstrap, {L"candidateId", L"files"});
-  need(hashValue(argument(env, property(env, bootstrap, "candidateId"))));
-  auto frontdoors = property(env, bootstrap, "files"); need(arrayLength(env, frontdoors) == 4);
-  const wchar_t* names[] = {L"kite.exe", L"kite-tui.exe", L"kite-desktop.exe", L"native-verifier.exe"};
+  const auto bootstrapId = argument(env, property(env, bootstrap, "candidateId"));
+  need(hashValue(bootstrapId));
+  auto frontdoors = property(env, bootstrap, "files");
+  const auto frontdoorCount = arrayLength(env, frontdoors);
+  const bool desktopOnly = frontdoorCount == 2;
+  need(frontdoorCount == 4 || (desktopOnly && bootstrapId == id));
+  const wchar_t* nativeNames[] = {L"kite.exe", L"kite-tui.exe", L"kite-desktop.exe", L"native-verifier.exe"};
+  const wchar_t* desktopNames[] = {L"kite-desktop.exe", L"native-verifier.js"};
+  const auto names = desktopOnly ? desktopNames : nativeNames;
   lease.pin(prefix + L"\\bin", false, true);
-  for (uint32_t i = 0; i < 4; ++i) {
+  for (uint32_t i = 0; i < frontdoorCount; ++i) {
     auto file = element(env, frontdoors, i); keys(env, file, {L"name", L"size", L"sha256"});
     need(argument(env, property(env, file, "name")) == names[i]); double size;
     check(p_napi_get_value_double(env, property(env, file, "size"), &size));
@@ -650,7 +656,12 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
     const auto bytes = readFile(lease.pinFile(prefix + L"\\bin\\" + names[i], true), 512 * 1048576);
     need(bytes.size() == size && digestBytes(bytes) == hash);
   }
-  originalBroker(lease, prefix + L"\\bin\\native-verifier.exe");
+  const auto broker = desktopOnly ? root + L"\\terminal\\runtime\\bun.exe" : prefix + L"\\bin\\native-verifier.exe";
+  originalBroker(lease, broker);
+  // The broker holds the full candidate throughout startup. Consume its bounded
+  // handoff before the independent scan, and return only after both locks verify.
+  certificate(lease, launcherPipe, L"kite-native-launch-", "KITELCH1", lease.broker.value, prefix + L"\\bin\\kite-desktop.exe", false);
+  certificate(lease, mainPipe, L"kite-native-main-", "KITEMAI1", GetCurrentProcess(), broker, true);
   const auto length = arrayLength(env, files); need(length > 0 && length <= 65536);
   std::set<std::wstring> paths, directories;
   HANDLE nativeManifest = INVALID_HANDLE_VALUE;
@@ -674,16 +685,24 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
   auto declared = property(env, json(env, nativeManifest, 8 * 1048576), "directories");
   const auto directoryCount = arrayLength(env, declared); need(directoryCount <= 65536);
   std::set<std::wstring> emptyPaths;
+  const auto pinEmptyDirectory = [&](const std::wstring& path) {
+    need(emptyPaths.insert(path).second && !paths.count(path) && !directories.count(path));
+    auto ancestor = parent(path);
+    while (ancestor != root) { need(ancestor.size() > root.size()); if (directories.insert(ancestor).second) lease.pin(ancestor, false, true); ancestor = parent(ancestor); }
+    lease.pin(path, false, true); lease.entries.back().empty = true; lease.verifyEmpty(path);
+  };
   for (uint32_t i = 0; i < directoryCount; ++i) {
     auto relative = argument(env, element(env, declared, i));
     need(relative.rfind(L"electron/", 0) == 0 && relative.back() != L'/' && relative.find(L"//") == std::wstring::npos &&
       relative.find(L'\\') == std::wstring::npos && relative.find(L':') == std::wstring::npos && relative.find(L'\0') == std::wstring::npos);
     std::replace(relative.begin(), relative.end(), L'/', L'\\');
-    const auto path = canonical(root + L"\\" + relative);
-    need(emptyPaths.insert(path).second && !paths.count(path) && !directories.count(path));
-    auto ancestor = parent(path);
-    while (ancestor != root) { need(ancestor.size() > root.size()); if (directories.insert(ancestor).second) lease.pin(ancestor, false, true); ancestor = parent(ancestor); }
-    lease.pin(path, false, true); lease.entries.back().empty = true; lease.verifyEmpty(path);
+    pinEmptyDirectory(canonical(root + L"\\" + relative));
+  }
+  // Terminal v1 declares the Worktree files. Its empty hooks directory is derived from those exact admitted files.
+  for (const auto* layout : {L"code", L"node_modules"}) {
+    const auto worktree = root + L"\\terminal\\" + layout + L"\\@kite-ai\\agent\\tools\\git-worktree";
+    if (paths.count(worktree + L"\\worker.js") && paths.count(worktree + L"\\empty-bunfig.toml") && paths.count(worktree + L"\\manifest.json"))
+      pinEmptyDirectory(worktree + L"\\empty-hooks");
   }
   lease.candidateRoot = root;
   lease.candidateFiles = std::move(paths);
@@ -697,8 +716,6 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
     if (GetLastError() == ERROR_LOCK_VIOLATION) throw std::runtime_error("owner_busy"); need(false);
   }
   lease.innerAcquired = true; lease.verify();
-  certificate(lease, launcherPipe, L"kite-native-launch-", "KITELCH1", lease.broker.value, prefix + L"\\bin\\kite-desktop.exe", false);
-  certificate(lease, mainPipe, L"kite-native-main-", "KITEMAI1", GetCurrentProcess(), prefix + L"\\bin\\native-verifier.exe", true);
   need(WaitForSingleObject(lease.broker.value, 0) == WAIT_TIMEOUT); lease.broker.close();
 }
 static std::wstring profileKey(const std::wstring& root, const std::wstring& profile) {

@@ -529,7 +529,8 @@ export async function buildWindowsTerminalLauncher(
     verifierPath: string;
     verifierSha256: string;
     verifierSize: number;
-    kind?: 'native';
+    kind?: 'native' | 'desktop';
+    desktopRuntime?: { sha256: string; size: number };
   },
   compiler = process.env.KITE_WINDOWS_MSVC,
 ) {
@@ -549,8 +550,18 @@ export async function buildWindowsTerminalLauncher(
     input.verifierSize > 512 * 1048576
   )
     throw Error('windows_terminal_launcher_input_invalid');
+  const desktop = input.kind === 'desktop';
+  if (
+    desktop !== Boolean(input.desktopRuntime) ||
+    (input.desktopRuntime &&
+      (!/^[a-f0-9]{64}$/.test(input.desktopRuntime.sha256) ||
+        !Number.isSafeInteger(input.desktopRuntime.size) ||
+        input.desktopRuntime.size <= 0 ||
+        input.desktopRuntime.size > 512 * 1048576))
+  )
+    throw Error('windows_terminal_launcher_input_invalid');
   const verifier = readFileSync(input.verifierPath);
-  systemImportSearch(verifier, true);
+  if (!desktop) systemImportSearch(verifier, true);
   if (
     verifier.length !== input.verifierSize ||
     createHash('sha256').update(verifier).digest('hex') !== input.verifierSha256
@@ -594,7 +605,14 @@ export async function buildWindowsTerminalLauncher(
         '/DUNICODE',
         '/D_UNICODE',
         '/D_WIN32_WINNT=0x0A00',
-        ...(input.kind === 'native' ? ['/DKITE_NATIVE_LAUNCHER'] : []),
+        ...(input.kind ? ['/DKITE_NATIVE_LAUNCHER'] : []),
+        ...(input.desktopRuntime
+          ? [
+              '/DKITE_DESKTOP_LAUNCHER',
+              `/DKITE_DESKTOP_RUNTIME_SHA256="${input.desktopRuntime.sha256}"`,
+              `/DKITE_DESKTOP_RUNTIME_SIZE=${input.desktopRuntime.size}ULL`,
+            ]
+          : []),
         `/DKITE_TERMINAL_VERIFIER_SHA256="${input.verifierSha256}"`,
         `/DKITE_TERMINAL_VERIFIER_SIZE=${input.verifierSize}ULL`,
         join(import.meta.dir, 'native/terminal-launcher.cc'),
@@ -692,20 +710,16 @@ export async function buildWindowsTerminalLauncher(
     )
       throw Error('windows_terminal_launcher_verifier_changed');
     const security = defaultWindowsPathSecurity()!;
-    security.copyPrivateFile(output, join(input.outdir, 'kite.exe'));
-    security.copyPrivateFile(output, join(input.outdir, 'kite-tui.exe'));
-    if (input.kind === 'native')
-      security.copyPrivateFile(output, join(input.outdir, 'kite-desktop.exe'));
+    const launchers = desktop ? ['kite-desktop.exe'] : ['kite.exe', 'kite-tui.exe'];
+    if (input.kind === 'native') launchers.push('kite-desktop.exe');
+    for (const launcher of launchers)
+      security.copyPrivateFile(output, join(input.outdir, launcher));
     succeeded = true;
     result = Object.freeze({
       root: realpathSync(input.outdir),
       verifierSha256: input.verifierSha256,
       verifierSize: input.verifierSize,
-      launchers: Object.freeze(
-        input.kind === 'native'
-          ? (['kite.exe', 'kite-tui.exe', 'kite-desktop.exe'] as const)
-          : (['kite.exe', 'kite-tui.exe'] as const),
-      ),
+      launchers: Object.freeze(launchers),
     });
   } catch (error) {
     failed = true;

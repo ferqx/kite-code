@@ -16,6 +16,7 @@ const admissions = new WeakMap<
   {
     root: string;
     id: string;
+    serviceEntrypoint: string;
     borrowers: Set<object>;
     closed: boolean;
     lease: ReturnType<ReturnType<typeof loadWindowsAccess>['candidateShared']>;
@@ -37,7 +38,7 @@ export function retainWindowsNativePairedArtifact(
     proof.manifestSha256 !== state.id ||
     actual.buildId !== `native-${state.id}` ||
     actual.executable !== join(state.root, 'terminal/runtime/bun.exe') ||
-    actual.entrypoint !== join(state.root, 'terminal/node_modules/@kite-ai/service/main.js')
+    actual.entrypoint !== state.serviceEntrypoint
   )
     unavailable();
   access.verify();
@@ -84,6 +85,7 @@ export function parseWindowsNativeHandoff(argv: readonly string[]): WindowsNativ
 }
 export function acquireWindowsNativeCandidate(input: {
   root: string;
+  serviceEntrypoint: string;
   windowsAsset: { path: string; sha256: string };
   files: readonly (readonly [string, string, string])[];
   handoff: WindowsNativeHandoff;
@@ -99,7 +101,14 @@ export function acquireWindowsNativeCandidate(input: {
     input.handoff,
   );
   // The native factory has already verified both certificates, original files and independent SH.
-  const state = { root: input.root, id, borrowers: new Set<object>(), closed: false, lease };
+  const state = {
+    root: input.root,
+    id,
+    serviceEntrypoint: input.serviceEntrypoint,
+    borrowers: new Set<object>(),
+    closed: false,
+    lease,
+  };
   const access = Object.freeze({
     close() {
       if (state.closed) return;

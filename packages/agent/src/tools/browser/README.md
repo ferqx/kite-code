@@ -9,6 +9,7 @@
 - 兼容 `browser.snapshot` 获取该 Session 已拥有浏览器的当前 generation／seq／元素引用；`browser.navigate`、`browser.click`、`browser.fill`、`browser.scroll` 操作准确目标，`browser.close` 请求关闭。统一入口在宿主内生成这些内部身份，不要求模型维护代次、seq 或幂等 key。
 - 原生适配支持 Linux x64／arm64、Bun 下的 PID namespace，以及 macOS x64／arm64、Bun 下的独占 launchd resource coalition。Linux 需要 bubblewrap 和原生 init；macOS 复用固定 stdio guardian 资产，以独立 Browser 身份运行。独立浏览器路径还需系统 Chrome／Chromium 和宿主预查；Native 共享页复用 Main 的 Electron 页面。Windows 仍明确 unavailable，不降级为只杀命令行或进程组。Linux 实现与 macOS 本轮实测分别取得各自范围的证据，不相互代证。
 - 独立浏览器默认仅定位固定版本的已安装原生包、受支持系统 Chrome／Chromium 和原进程监督资产。缺失不使应用启动崩溃，也不自动下载浏览器、运行 npx 或开启外部调试端口。可信 Service 可禁用本能力；JSONC 不能供应运行时路径、策略或原始参数。
+- 发行包复用运行时的 `agent-browser` 可执行文件选择，按目标平台、架构和 Linux libc 交付对应二进制。资源与许可见 [Terminal 制品闭包](../../../../../apps/cli/docs/terminal-release.md#制品闭包与身份)。
 
 可选原子模型入口只使用 `page_ref/element_ref`：open 返回页面引用；snapshot 返回当前页面及元素引用；navigate/scroll/close/request_human 复制 page_ref，click/fill 复制 element_ref。引用封装当前 Store/Session/Run、准确 browserId/代次和元素 seq，原 controller 继续核新鲜度及控制权；跨范围或无效引用在原生输入前明确失败，不改投最新页面。人工继续的原结果提供新代次 page_ref，必须重新 snapshot。默认 Native 模型目录仍使用统一入口；其封闭内部调用保显式 key/代次合同，独立纯模型 Schema 拒绝模型填写这些内部字段。
 

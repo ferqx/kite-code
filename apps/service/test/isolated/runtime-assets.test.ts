@@ -25,9 +25,77 @@ import {
   terminalEmptyAssetDirectories,
   verifyTerminalRuntimeBundle,
   verifyTerminalRuntimeProtection,
+  windowsDesktopRuntimeEntries,
+  windowsTerminalRuntimeConfigFiles,
 } from '../../src/runtime-assets';
+import {
+  reviewedSqliteSources,
+  windowsDesktopSqliteEngineRoot,
+} from '../../src/sqlite-release-assets';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+test('Windows embedded desktop runtime excludes standalone client entries', () => {
+  const sha256 = 'b'.repeat(64);
+  const manifest = {
+    version: 1,
+    apiMajor: 1,
+    target: { platform: 'win32', arch: 'x64' },
+    bunVersion: '1.4.4',
+    sqlite: {
+      driver: 'bun:sqlite',
+      linkage: 'builtin',
+      version: '3.53.2',
+      sourceId: reviewedSqliteSources['3.53.2'],
+      manifestSha256: sha256,
+    },
+    productVersion: '0.1.0',
+    source: { commit: 'a'.repeat(40), dirty: true },
+    entries: windowsDesktopRuntimeEntries,
+    files: [
+      ...Object.values(windowsDesktopRuntimeEntries),
+      ...windowsTerminalRuntimeConfigFiles,
+      `${windowsDesktopSqliteEngineRoot}/engine-selection.json`,
+      `${windowsDesktopSqliteEngineRoot}/engine-manifest.json`,
+    ].map((path) => ({ path, size: 1, sha256, mode: path === 'runtime/bun.exe' ? 493 : 420 })),
+    links: [],
+  };
+  expect(parseTerminalBundleManifest(manifest, true).entries).toEqual(windowsDesktopRuntimeEntries);
+  const previousService = 'node_modules/@kite-ai/service/main.js';
+  expect(
+    parseTerminalBundleManifest(
+      {
+        ...manifest,
+        entries: { ...manifest.entries, service: previousService },
+        files: manifest.files.map((file) => ({
+          ...file,
+          path: file.path.replace(/^code\//u, 'node_modules/'),
+        })),
+      },
+      true,
+    ).entries.service,
+  ).toBe(previousService);
+  expect(() => parseTerminalBundleManifest(manifest)).toThrow('terminal_manifest_invalid');
+  for (const path of [
+    'web/manifest.json',
+    'entrypoints/tui.js',
+    'windows-frontdoor/terminal-verifier.exe',
+    'node_modules/@kite-ai/cli/host/index.js',
+    'assets/node_modules/vendor/index.js',
+    'code/@kite-ai/service/daemon-main.js',
+  ]) {
+    expect(() =>
+      parseTerminalBundleManifest(
+        {
+          ...manifest,
+          files: [...manifest.files, { path, size: 1, sha256, mode: 420 }],
+        },
+        true,
+      ),
+    ).toThrow('terminal_manifest_invalid');
+  }
+});
+
 function fixture() {
   const root = realpathSync(temporaryDirectory('kite-runtime-closure-'));
   const entries = terminalBundleEntries(process.platform);

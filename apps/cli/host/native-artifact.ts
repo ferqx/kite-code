@@ -1,11 +1,12 @@
 import { join } from 'node:path';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
-import { parseCLIServiceArtifact } from './index';
+import { parseCLIServiceArtifact } from './service-artifact';
 
 /** Exact embedded Terminal plus the entire original Native closure, never a PATH backend. */
 export function selectNativeTerminalArtifact(root: string) {
   const bundle = verifyNativeRuntimeBundle(root);
   const terminal = bundle.terminal;
+  if (!('daemon' in terminal.manifest.entries)) throw Error('native_terminal_unavailable');
   const files = new Map(terminal.manifest.files.map((file) => [file.path, file]));
   const artifact = parseCLIServiceArtifact({
     entrypoint: join(terminal.root, terminal.manifest.entries.service),

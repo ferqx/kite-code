@@ -25,6 +25,26 @@ test('Windows DELETE acquisition unknown retains every original EX while ordinar
   subprocess(installerScript('removal'));
 });
 
+test('Windows uninstall identifies an in-use candidate and releases all acquired locks before retry', () => {
+  subprocess(installerScript('busy'));
+});
+
+test('Windows Setup reports only closed error codes to the native dialog', () => {
+  const code = `
+import { reportSetupFailure } from ${JSON.stringify(modulePath('scripts/release/windows-setup/failure.ts'))};
+reportSetupFailure(Object.assign(Error('private file path'),{code:'native_windows_candidate_in_use'}));
+reportSetupFailure(Error('var bundled = private data'));
+reportSetupFailure(Error('windows_installation_removal_unknown'));
+`;
+  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  expect(child.status).toBe(0);
+  expect(child.stderr.trim().split(/\r?\n/u)).toEqual([
+    'KITE_SETUP_FAILURE native_windows_candidate_in_use',
+    'KITE_SETUP_FAILURE operation_failed',
+    'KITE_SETUP_FAILURE windows_installation_removal_unknown',
+  ]);
+});
+
 test('Windows Native rollback preflights the same-nonce Terminal before publication', () => {
   subprocess(installerScript('registration'));
 });
@@ -33,7 +53,7 @@ test('Windows Native completed publication with unknown original HANDLE close re
   subprocess(installerScript('move'));
 });
 
-function installerScript(scenario: 'selection' | 'removal' | 'registration' | 'move') {
+function installerScript(scenario: 'selection' | 'removal' | 'registration' | 'move' | 'busy') {
   return `
 import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
@@ -44,6 +64,7 @@ Object.defineProperty(process, 'platform', { value: 'win32' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
 mock.module('node:path', () => ({ ...path, ...path.posix }));
 const { WindowsInstallationRemovalAcquireUnknownError } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))});
+const { LockBusyError } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))});
 const a = 'a'.repeat(64), b = 'b'.repeat(64);
 const regions = new Set(), events = [], scratchEntries = new Set(), transferHandles = new Set();
 const owned = { terminalPrefix: '/terminal', nativePrefix: '/owned-registration', nonce: 'c'.repeat(32), candidateId: a, version: 1 };
@@ -63,8 +84,12 @@ mock.module('node:fs', () => ({ ...fs,
   },
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))}, () => ({
+  LockBusyError,
+  acquireInheritedSharedFileLock() { throw Error('unexpected-inherited-lock'); },
+  attachLockResource() { throw Error('unexpected-lock-resource'); },
   acquireFileLock(path, kind) {
     assert.equal(kind, 'exclusive');
+    if (mode === 'busy' && path.endsWith('-use-' + b)) throw new LockBusyError('Lock is busy.');
     assert.equal(regions.has(path), false);
     regions.add(path); events.push('acquire:' + path);
     let closed = false;
@@ -72,6 +97,7 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))
   },
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-coordination.ts'))}, () => ({
+  deriveNativeWindowsUseKeys() { throw Error('unexpected-native-use-keys'); },
   windowsInstallationCoordination(prefix) {
     return { prefix, root: prefix + '-coord', selectionLockPath: prefix + '-selection',
       candidateLockPath: id => prefix + '-use-' + id, verify() {},
@@ -98,6 +124,10 @@ mock.module(${JSON.stringify(modulePath('apps/cli/host/windows-native-installati
 }));
 mock.module(${JSON.stringify(modulePath('apps/service/src/runtime-assets.ts'))}, () => ({ retainWindowsTerminalRuntimeFiles() {} }));
 mock.module(${JSON.stringify(modulePath('apps/service/src/native-runtime-assets.ts'))}, () => ({ retainWindowsNativeRuntimeFiles() {}, verifyNativeRuntimeBundle(root) { return { digest: root.endsWith(b) ? b : a }; } }));
+mock.module(${JSON.stringify(modulePath('scripts/release/native-archive.ts'))}, () => ({
+  createWindowsNativeArchiveScratch() { throw Error('unexpected-archive-scratch'); },
+  unpackNativeBundle() { throw Error('unexpected-archive-input'); },
+}));
 mock.module(${JSON.stringify(modulePath('apps/cli/host/cli-registration.ts'))}, () => ({
   OWNED_CLI_REGISTRATION_FILE: '.cli-registration.json',
   readCLIRegistration() { return mode === 'registration' ? owned : undefined; }, sameCLIRegistration: (a,b) => a === b,
@@ -115,6 +145,7 @@ mock.module(${JSON.stringify(modulePath('scripts/release/cli-registration.ts'))}
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))}, () => ({
   WindowsInstallationRemovalAcquireUnknownError,
+  windowsInstallationRemovalReader() { throw Error('unexpected-removal-reader'); },
   retainWindowsInstallationRemoval() { if(mode === 'move') return { remove() { events.push('scratch-removed'); scratchEntries.clear(); }, release() { events.push('scratch-close'); } }; throw mode === 'unknown' ? unknown : primary; },
 }));
 const { rollbackWindowsNativeBundle, uninstallWindowsNativeBundle } = await import(${JSON.stringify(modulePath('scripts/release/windows-native-install.ts'))});
@@ -136,6 +167,10 @@ if (mode === 'move') {
   });
   assert.deepEqual([...regions], [prefix + '-selection']);
   assert.deepEqual(events, ['acquire:' + prefix + '-selection', 'frontdoor-close', 'coord-close:' + prefix]);
+} else if (mode === 'busy') {
+  assert.throws(() => uninstallWindowsNativeBundle('/owned-busy'), error => error.code === 'native_windows_candidate_in_use');
+  assert.equal(regions.size, 0);
+  assert.ok(events.includes('close:/owned-busy-use-' + a));
 } else {
   mode = 'ordinary';
   assert.throws(() => uninstallWindowsNativeBundle('/owned-ordinary'), error => error === primary);

@@ -11,7 +11,8 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { agentBrowserExecutableName } from '../../packages/agent/src/tools/browser/assets';
 
 export interface TerminalWorkspacePackage {
   name: string;
@@ -341,27 +342,51 @@ export function copyTerminalDependencies(input: {
     }
   }
   const result: TerminalDependencyCopy = { packages: [], links: [] };
-  const copy = (source: string, target: string, root: string, ancestors: Set<string>) => {
-    const canonical = realpathSync(source);
-    if (!inside(root, canonical)) fail('asset_escape');
-    const stat = lstatSync(canonical);
-    if (stat.isDirectory()) {
-      if (ancestors.has(canonical)) fail('asset_cycle');
-      const next = new Set(ancestors);
-      next.add(canonical);
-      mkdirSync(target, { recursive: true, mode: 0o755 });
-      for (const name of readdirSync(canonical).sort()) {
-        if (name === 'node_modules') continue;
-        copy(join(canonical, name), join(target, name), root, next);
-      }
-    } else if (stat.isFile()) {
-      // Directory recursion has already created the parent; Windows CopyFile
-      // also preserves the source read-only attribute without a chmod rewrite.
-      if (process.platform !== 'win32')
-        mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
-      copyFileSync(canonical, target);
-      if (process.platform !== 'win32') chmodSync(target, stat.mode & 0o777);
-    } else fail('asset_invalid');
+  const copyPackage = (node: Node, packageTarget: string) => {
+    const browserBin =
+      node.manifest.name === 'agent-browser' ? join(packageTarget, 'bin') : undefined;
+    const browserExecutable = browserBin ? agentBrowserExecutableName() : undefined;
+    const bashPrebuilds =
+      node.manifest.name === 'tree-sitter-bash' ? join(packageTarget, 'prebuilds') : undefined;
+    const targetPlatform = `${process.platform}-${process.arch}`;
+    const copy = (source: string, target: string, ancestors: Set<string>) => {
+      const canonical = realpathSync(source);
+      if (!inside(node.source, canonical)) fail('asset_escape');
+      const stat = lstatSync(canonical);
+      if (stat.isDirectory()) {
+        if (ancestors.has(canonical)) fail('asset_cycle');
+        const next = new Set(ancestors);
+        next.add(canonical);
+        mkdirSync(target, { recursive: true, mode: 0o755 });
+        for (const name of readdirSync(canonical).sort()) {
+          if (name === 'node_modules') continue;
+          if (
+            target === bashPrebuilds &&
+            name !== targetPlatform &&
+            /^(?:darwin|linux|win32)-(?:arm64|x64)$/.test(name)
+          )
+            continue;
+          copy(join(canonical, name), join(target, name), next);
+        }
+      } else if (stat.isFile()) {
+        if (
+          browserBin &&
+          dirname(target) === browserBin &&
+          basename(target) !== browserExecutable &&
+          /^agent-browser-(?:darwin|linux(?:-musl)?|win32)-(?:arm64|x64)(?:\.exe)?$/.test(
+            basename(target),
+          )
+        )
+          return;
+        // Directory recursion has already created the parent; Windows CopyFile
+        // also preserves the source read-only attribute without a chmod rewrite.
+        if (process.platform !== 'win32')
+          mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
+        copyFileSync(canonical, target);
+        if (process.platform !== 'win32') chmodSync(target, stat.mode & 0o777);
+      } else fail('asset_invalid');
+    };
+    copy(node.source, packageTarget, new Set());
   };
   if (input.dependencyLayout === 'materialized') {
     type Placement = { node: Node; target: string };
@@ -391,7 +416,7 @@ export function copyTerminalDependencies(input: {
     const place = (placement: Placement) => {
       if (!inside(destination, placement.target) || existsSync(placement.target))
         fail('destination_exists');
-      copy(placement.node.source, placement.target, placement.node.source, new Set());
+      copyPackage(placement.node, placement.target);
       if (!readFileSync(join(placement.target, 'package.json')).equals(placement.node.bytes))
         fail('content_changed');
       result.packages.push({
@@ -473,7 +498,7 @@ export function copyTerminalDependencies(input: {
   for (const node of pending) {
     if (workspaces.get(node.manifest.name) === node) continue;
     if (existsSync(node.destination)) fail('destination_exists');
-    copy(node.source, node.destination, node.source, new Set());
+    copyPackage(node, node.destination);
     if (!readFileSync(join(node.destination, 'package.json')).equals(node.bytes))
       fail('content_changed');
     result.packages.push({

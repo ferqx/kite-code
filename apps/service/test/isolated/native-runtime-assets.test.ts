@@ -137,14 +137,17 @@ test('Node-safe full Native closure relocates with exact inner proof, fixed coor
         buildId: `native-${actual.digest}`,
       }).root,
     ).toBe(moved);
+    const entries = actual.terminal.manifest.entries;
+    if (!('daemon' in entries))
+      throw Error('The combined-runtime fixture requires a daemon entry.');
     const daemon = {
-      entrypoint: join(actual.terminal.root, actual.terminal.manifest.entries.daemon),
+      entrypoint: join(actual.terminal.root, entries.daemon),
       executable: join(actual.terminal.root, actual.terminal.manifest.entries.runtime),
       buildId: `native-${actual.digest}`,
     };
     expect(verifyNativeRuntimeProtection(proof, daemon).root).toBe(moved);
     for (const identity of [
-      { ...daemon, entrypoint: join(actual.terminal.root, actual.terminal.manifest.entries.cli) },
+      { ...daemon, entrypoint: join(actual.terminal.root, entries.cli) },
       { ...daemon, executable: join(moved, actual.manifest.entries.electron) },
       { ...daemon, buildId: `terminal-${actual.terminal.digest}` },
     ])

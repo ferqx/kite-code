@@ -187,6 +187,7 @@ const acquireFormalWindowsAccess = () => {
     });
   const lease = acquireWindowsNativeCandidate({
     root: formalAssets.candidateRoot,
+    serviceEntrypoint: formalAssets.serviceEntrypoint,
     windowsAsset,
     files: formalAssets.windowsCandidateFiles,
     handoff: windowsHandoff,

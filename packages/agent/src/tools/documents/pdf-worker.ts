@@ -1,9 +1,12 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { getDocument, VerbosityLevel, version } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { windowsDesktopAsset } from '../../platform/windows-desktop-assets';
 
 // Only trusted local package assets and transferred source bytes are accepted.
-const assets = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
+const assets =
+  windowsDesktopAsset('assets/pdf') ??
+  dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
 const fontWarning =
   /^Warning: (?:getFontFileType:|Font(?: |Family)|loadFont -|Error during font loading:|TT:|Type1Font:|Type3 font |TrueType Collection |Failed to (?:parse|compile) font|translateFont - fetching |buildFontPaths -|ensureStateFont:)/;
 globalThis.fetch = Object.assign(

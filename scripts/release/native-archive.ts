@@ -36,6 +36,7 @@ import {
   privateDirectory,
 } from '../../packages/agent/src/platform/windows-path-security';
 import { retainWindowsPrivateFileRemoval } from '../../packages/agent/src/platform/windows-private-file-removal';
+import { releaseArchiveBytes } from './archive-compression';
 import { readCandidateArchiveFiles } from './terminal-archive';
 import { rejectBundleOutput } from './terminal-paths';
 
@@ -96,6 +97,13 @@ export function createWindowsNativeArchiveScratch(prefix: string) {
           ),
         ],
       );
+    },
+    publishTo(target: string) {
+      if (released || !inventory || removal) throw Error('native_archive_scratch_unknown');
+      defaultWindowsPathSecurity()!.movePrivateEntry(destination, target);
+      // The candidate has moved as one original directory on the same volume.
+      // Only the now-empty scratch directory remains under this owner.
+      inventory = [];
     },
     release() {
       if (released) return;
@@ -172,7 +180,7 @@ export async function packNativeBundle(input: { bundleRoot: string; archivePath:
       files[file.path] = bytes;
     }
     if (readBundle().digest !== bundle.digest) fail();
-    const bytes = await new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes(),
+    const bytes = await releaseArchiveBytes(files, archivePath),
       sha256 = hash(bytes);
     // Awaiting compression cannot silently change which source closure was selected.
     if (readBundle().digest !== bundle.digest) fail();
@@ -273,7 +281,7 @@ export function unpackNativeBundle(input: {
     terminalBytes = files.get('terminal/terminal-manifest.json');
   if (!nativeBytes || !terminalBytes) fail();
   const manifest = parseNativeBundleManifest(JSON.parse(text(nativeBytes))),
-    terminal = parseTerminalBundleManifest(JSON.parse(text(terminalBytes)));
+    terminal = parseTerminalBundleManifest(JSON.parse(text(terminalBytes)), true);
   if (hash(terminalBytes) !== manifest.terminalManifestSha256) fail();
   const expected = [
     ...manifest.files,

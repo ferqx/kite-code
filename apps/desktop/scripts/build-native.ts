@@ -24,11 +24,12 @@ import {
   windowsNativeElectronResources,
 } from '@kite-ai/service/native-runtime-assets';
 import {
-  readTerminalRuntimeBundleContent,
+  type EmbeddedRuntimeManifest,
+  readEmbeddedRuntimeBundleContent,
   retainWindowsTerminalRuntimeFiles,
   terminalEmptyAssetDirectories,
   type VerifiedTerminalRuntimeBundle,
-  verifyTerminalRuntimeBundle,
+  verifyEmbeddedRuntimeBundle,
 } from '@kite-ai/service/runtime-assets';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -42,7 +43,10 @@ import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 import { probeNativeSqliteEngine } from './sqlite-engine';
 
 /** The v1 file inventory omits fixed empty assets; preserve them in file-only copies. */
-export function copyWindowsNativeTerminal(terminal: VerifiedTerminalRuntimeBundle, target: string) {
+export function copyWindowsNativeTerminal(
+  terminal: VerifiedTerminalRuntimeBundle<EmbeddedRuntimeManifest>,
+  target: string,
+) {
   privateDirectory(target);
   defaultWindowsPathSecurity()!.copyPrivateArtifactFiles(terminal.root, target, [
     'terminal-manifest.json',
@@ -179,7 +183,7 @@ export interface WindowsNativeCandidateBuildPort {
   copyElectronExecutable(source: string, target: string): void;
   buildFrontdoors(
     root: string,
-    runtime: string,
+    terminal: VerifiedTerminalRuntimeBundle<EmbeddedRuntimeManifest>,
     resources: { pins: WindowsNativeBuildResource[]; locks: WindowsNativeBuildResource[] },
   ): Promise<void>;
 }
@@ -211,7 +215,7 @@ export async function buildNativeCandidate(input: {
   if (!isAbsolute(input.outdir) || existsSync(input.outdir))
     throw Error('native_outdir_must_be_new_absolute');
   const terminal = (
-      process.platform === 'win32' ? readTerminalRuntimeBundleContent : verifyTerminalRuntimeBundle
+      process.platform === 'win32' ? readEmbeddedRuntimeBundleContent : verifyEmbeddedRuntimeBundle
     )(input.terminalRoot),
     electron = realpathSync(input.electronDist);
   if (
@@ -265,7 +269,7 @@ export async function buildNativeCandidate(input: {
       pendingWindowsNativeBuilds.add(resources);
       resources.locks.push(acquireArtifactAccess({ root: terminal.root, mode: 'shared' }));
       resources.pins.push(retainWindowsTerminalRuntimeFiles(terminal.root));
-      if (verifyTerminalRuntimeBundle(terminal.root).digest !== terminal.digest)
+      if (verifyEmbeddedRuntimeBundle(terminal.root).digest !== terminal.digest)
         throw Error('native_terminal_source_changed');
       const electronFiles: string[] = [],
         emptyElectronDirectories: string[] = [];
@@ -303,7 +307,7 @@ export async function buildNativeCandidate(input: {
       root,
       electronVersion,
     });
-    if (verifyTerminalRuntimeBundle(join(root, 'terminal')).digest !== terminal.digest)
+    if (verifyEmbeddedRuntimeBundle(join(root, 'terminal')).digest !== terminal.digest)
       throw Error('native_terminal_copy_mismatch');
     await buildNativeApp(
       { kind: 'candidate' },
@@ -313,11 +317,7 @@ export async function buildNativeCandidate(input: {
       macosResize,
     );
     if (process.platform === 'win32') {
-      await input.windowsBuildPort!.buildFrontdoors(
-        root,
-        join(terminal.root, terminal.manifest.entries.runtime),
-        resources,
-      );
+      await input.windowsBuildPort!.buildFrontdoors(root, terminal, resources);
       defaultWindowsPathSecurity()!.writePrivateFile(
         join(root, '.use-terminal.lock'),
         new Uint8Array(),

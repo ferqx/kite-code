@@ -4,10 +4,11 @@ import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
 import type { WindowsInstallationRemoval } from '@kite-ai/agent/artifact-access';
 import { createAssetFileHasher } from './asset-file-hash';
 import {
-  readTerminalRuntimeBundleContent,
+  type EmbeddedRuntimeManifest,
+  readEmbeddedRuntimeBundleContent,
   type retainWindowsTerminalRuntimeFiles,
   type VerifiedTerminalRuntimeBundle,
-  verifyTerminalRuntimeBundle,
+  verifyEmbeddedRuntimeBundle,
 } from './runtime-assets';
 import { parseSqliteReleaseIdentity, type SqliteReleaseIdentity } from './sqlite-release-assets';
 
@@ -67,7 +68,7 @@ export interface VerifiedNativeRuntimeBundle {
   readonly root: string;
   readonly manifest: NativeBundleManifest;
   readonly digest: string;
-  readonly terminal: VerifiedTerminalRuntimeBundle;
+  readonly terminal: VerifiedTerminalRuntimeBundle<EmbeddedRuntimeManifest>;
 }
 const sha = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const hash = (value: unknown): value is string =>
@@ -308,12 +309,15 @@ function nativeRuntimeBundleContent(
       (process.platform !== 'win32' && (stat.mode & 0o777) !== 420)
     )
       fail('native_bundle_unavailable');
-    if (removal) {
-      if (process.platform !== 'win32') fail('native_target_mismatch');
-      const { assertWindowsInstallationRemoval } =
-        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
-      assertWindowsInstallationRemoval(removal, root);
-    } else if (!contentOnly && process.platform === 'win32')
+    const removing =
+      removal &&
+      (() => {
+        if (process.platform !== 'win32') fail('native_target_mismatch');
+        const { windowsInstallationRemovalReader } =
+          require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+        return windowsInstallationRemovalReader(removal, root);
+      })();
+    if (!removal && !contentOnly && process.platform === 'win32')
       windowsFiles = retainedFiles?.outer ?? retainWindowsNativeRuntimeFiles(root);
     const bytes = readFileSync(manifestPath);
     let json: unknown;
@@ -330,8 +334,8 @@ function nativeRuntimeBundleContent(
     if (!lstatSync(terminalPath).isDirectory() || lstatSync(terminalPath).isSymbolicLink())
       fail('native_bundle_path_alias');
     const terminal = contentOnly
-      ? readTerminalRuntimeBundleContent(terminalPath)
-      : verifyTerminalRuntimeBundle(terminalPath, removal, retainedFiles?.terminal);
+      ? readEmbeddedRuntimeBundleContent(terminalPath)
+      : verifyEmbeddedRuntimeBundle(terminalPath, removal, retainedFiles?.terminal);
     if (
       terminal.digest !== manifest.terminalManifestSha256 ||
       terminal.manifest.target.platform !== manifest.target.platform ||
@@ -357,8 +361,53 @@ function nativeRuntimeBundleContent(
       for (const name of readdirSync(directory)) {
         const path = prefix ? `${prefix}/${name}` : name;
         if (path === 'native-manifest.json' || path === 'terminal') continue;
-        const absolute = join(directory, name),
-          stat = lstatSync(absolute, { bigint: true });
+        const absolute = join(directory, name);
+        if (removing) {
+          const original = removing(absolute);
+          if (!original) fail('native_bundle_identity_mismatch');
+          if (original.directory) {
+            if (declaredEmpty.has(path)) {
+              if (readdirSync(absolute).length !== 0) fail('native_bundle_identity_mismatch');
+              actualEmpty.add(path);
+            } else {
+              if (!directories.has(path)) fail('native_bundle_identity_mismatch');
+              walk(absolute, path);
+            }
+          } else {
+            const file = files.get(path);
+            // Earlier Windows launches could leave Crashpad's registration error
+            // beside the executable. Only the original DELETE owner can remove it.
+            if (
+              !file &&
+              path === 'electron/debug.log' &&
+              original.size > 0n &&
+              original.size <= 65536n
+            ) {
+              const text = readFileSync(absolute, 'utf8').trimEnd();
+              if (
+                text
+                  .split(/\r?\n/u)
+                  .every((line) =>
+                    /^\[\d{4}\/\d{6}\.\d{3}:ERROR:third_party\\crashpad\\crashpad\\util\\win\\registration_protocol_win\.cc:\d+\] (?:CreateFile|TransactNamedPipe): .*\(0x[0-9a-fA-F]{1,8}\)$/u.test(
+                      line,
+                    ),
+                  )
+              )
+                continue;
+            }
+            if (
+              !file ||
+              original.size !== BigInt(file.size) ||
+              original.sha256() !== file.sha256 ||
+              identities.has(original.identity)
+            )
+              fail('native_bundle_identity_mismatch');
+            identities.add(original.identity);
+            actual.add(path);
+          }
+          continue;
+        }
+        const stat = lstatSync(absolute, { bigint: true });
         if (stat.isSymbolicLink()) {
           const link = links.get(path),
             target = realpathSync(absolute),
@@ -427,11 +476,6 @@ function nativeRuntimeBundleContent(
       pkg.main !== 'main.cjs'
     )
       fail('native_app_identity_mismatch');
-    if (removal) {
-      const { assertWindowsInstallationRemoval } =
-        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
-      assertWindowsInstallationRemoval(removal, root);
-    }
     windowsFiles?.verify();
     result = Object.freeze({ root, manifest, digest: sha(bytes), terminal });
   } catch (error) {
@@ -461,12 +505,13 @@ export function verifyNativeRuntimeProtection(
 ): VerifiedNativeRuntimeBundle {
   const selected = parseNativeRuntimeProtection(proof),
     bundle = verifyNativeRuntimeBundle(selected.root, undefined, retainedFiles);
+  const { entries } = bundle.terminal.manifest;
+  const entry = realpathSync(actual.entrypoint);
   if (
     bundle.digest !== selected.manifestSha256 ||
     actual.buildId !== `native-${bundle.digest}` ||
-    ![bundle.terminal.manifest.entries.service, bundle.terminal.manifest.entries.daemon].some(
-      (entry) => realpathSync(actual.entrypoint) === join(bundle.terminal.root, entry),
-    ) ||
+    (entry !== join(bundle.terminal.root, entries.service) &&
+      !('daemon' in entries && entry === join(bundle.terminal.root, entries.daemon))) ||
     realpathSync(actual.executable) !==
       join(bundle.terminal.root, bundle.terminal.manifest.entries.runtime)
   )

@@ -13,12 +13,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { SqliteEngineManifest } from '@kite-ai/agent/sqlite-engine';
 import type { TerminalBundleManifest } from '@kite-ai/service/runtime-assets';
 import {
   parseSqliteReleaseIdentity,
   type SqliteReleaseIdentity,
   terminalSqliteEngineRoot,
+  windowsDesktopSqliteEngineRoot,
 } from '@kite-ai/service/sqlite-release-assets';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -70,8 +72,12 @@ export async function buildTerminalSqliteEngine(input: {
   root: string;
   executable: string;
   library?: string;
+  desktopOnly?: true;
 }): Promise<TerminalBundleManifest['sqlite']> {
-  const engineRoot = join(input.root, terminalSqliteEngineRoot);
+  const engineRoot = join(
+    input.root,
+    input.desktopOnly ? windowsDesktopSqliteEngineRoot : terminalSqliteEngineRoot,
+  );
   mkdirSync(engineRoot, { recursive: true, mode: 0o700 });
   let manifest: SqliteEngineManifest;
   let identity: SqliteReleaseIdentity;
@@ -139,7 +145,11 @@ export async function buildTerminalSqliteEngine(input: {
       input.executable,
       [
         '-e',
-        "import {initializeDefaultSqliteEngine} from '@kite-ai/agent/sqlite-engine'; process.stdout.write(JSON.stringify(initializeDefaultSqliteEngine())+'\\n');",
+        `import {initializeDefaultSqliteEngine} from ${JSON.stringify(
+          input.desktopOnly
+            ? pathToFileURL(join(input.root, 'code/@kite-ai/agent/sqlite-engine.js')).href
+            : '@kite-ai/agent/sqlite-engine',
+        )}; process.stdout.write(JSON.stringify(initializeDefaultSqliteEngine())+'\\n');`,
       ],
       input.root,
     ),

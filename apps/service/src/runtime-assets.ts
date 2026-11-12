@@ -8,6 +8,7 @@ import {
   parseSqliteReleaseIdentity,
   type SqliteReleaseIdentity,
   terminalSqliteEngineRoot,
+  windowsDesktopSqliteEngineRoot,
 } from './sqlite-release-assets';
 export class TerminalRuntimeAssetError extends Error {
   readonly code: string;
@@ -18,7 +19,7 @@ export class TerminalRuntimeAssetError extends Error {
   }
 }
 
-export interface TerminalBundleManifest {
+interface RuntimeBundleManifest {
   readonly version: 1;
   readonly apiMajor: 1;
   readonly target: { readonly platform: string; readonly arch: string };
@@ -29,14 +30,6 @@ export interface TerminalBundleManifest {
   };
   readonly productVersion: string;
   readonly source: { readonly commit: string; readonly dirty: boolean };
-  readonly entries: {
-    readonly runtime: string;
-    readonly service: 'node_modules/@kite-ai/service/main.js';
-    readonly daemon: 'node_modules/@kite-ai/service/daemon-main.js';
-    readonly webManifest: 'web/manifest.json';
-    readonly cli: 'entrypoints/cli.js';
-    readonly tui: 'entrypoints/tui.js';
-  };
   readonly files: readonly {
     readonly path: string;
     readonly size: number;
@@ -45,22 +38,53 @@ export interface TerminalBundleManifest {
   }[];
   readonly links: readonly { readonly path: string; readonly target: string }[];
 }
-export interface VerifiedTerminalRuntimeBundle {
+export const windowsDesktopRuntimeEntries = Object.freeze({
+  runtime: 'runtime/bun.exe',
+  service: 'code/@kite-ai/service/main.js',
+} as const);
+const legacyWindowsDesktopRuntimeEntries = Object.freeze({
+  runtime: 'runtime/bun.exe',
+  service: 'node_modules/@kite-ai/service/main.js',
+} as const);
+export interface WindowsDesktopRuntimeManifest extends RuntimeBundleManifest {
+  readonly entries: typeof windowsDesktopRuntimeEntries | typeof legacyWindowsDesktopRuntimeEntries;
+}
+export interface TerminalBundleManifest extends RuntimeBundleManifest {
+  readonly entries: {
+    readonly runtime: string;
+    readonly service: 'node_modules/@kite-ai/service/main.js';
+    readonly daemon: 'node_modules/@kite-ai/service/daemon-main.js';
+    readonly webManifest: 'web/manifest.json';
+    readonly cli: 'entrypoints/cli.js';
+    readonly tui: 'entrypoints/tui.js';
+  };
+}
+export type EmbeddedRuntimeManifest = TerminalBundleManifest | WindowsDesktopRuntimeManifest;
+export interface VerifiedTerminalRuntimeBundle<
+  T extends EmbeddedRuntimeManifest = TerminalBundleManifest,
+> {
   readonly root: string;
-  readonly manifest: TerminalBundleManifest;
+  readonly manifest: T;
   readonly digest: string;
 }
 /** Fixed empty installation assets, derived from the authenticated v1 file closure. */
 export function terminalEmptyAssetDirectories(
   manifest: Pick<TerminalBundleManifest, 'files'>,
 ): string[] {
-  const directory = 'node_modules/@kite-ai/agent/tools/git-worktree';
   const files = new Set(manifest.files.map((file) => file.path));
-  return ['worker.js', 'empty-bunfig.toml', 'manifest.json'].every((name) =>
-    files.has(`${directory}/${name}`),
-  )
-    ? [`${directory}/empty-hooks`]
-    : [];
+  return ['code', 'node_modules'].flatMap((root) => {
+    const directory = `${root}/@kite-ai/agent/tools/git-worktree`;
+    return ['worker.js', 'empty-bunfig.toml', 'manifest.json'].every((name) =>
+      files.has(`${directory}/${name}`),
+    )
+      ? [`${directory}/empty-hooks`]
+      : [];
+  });
+}
+function sqliteEngineRoot(entries: EmbeddedRuntimeManifest['entries']): string {
+  return entries.service === windowsDesktopRuntimeEntries.service
+    ? windowsDesktopSqliteEngineRoot
+    : terminalSqliteEngineRoot;
 }
 export interface TerminalRuntimeProtection {
   readonly kind: 'terminal.candidate';
@@ -132,7 +156,15 @@ function inside(root: string, path: string) {
   return path.startsWith(root + sep);
 }
 /** Closed unsigned integrity metadata. This does not establish publisher authenticity. */
-export function parseTerminalBundleManifest(value: unknown): TerminalBundleManifest {
+export function parseTerminalBundleManifest(value: unknown): TerminalBundleManifest;
+export function parseTerminalBundleManifest(
+  value: unknown,
+  embedded: true,
+): EmbeddedRuntimeManifest;
+export function parseTerminalBundleManifest(
+  value: unknown,
+  embedded = false,
+): EmbeddedRuntimeManifest {
   if (
     !closed(value, [
       'version',
@@ -165,7 +197,7 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
     typeof value.source.commit !== 'string' ||
     !/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(value.source.commit) ||
     typeof value.source.dirty !== 'boolean' ||
-    !closed(value.entries, ['runtime', 'service', 'daemon', 'webManifest', 'cli', 'tui']) ||
+    !record(value.entries) ||
     !Array.isArray(value.files) ||
     !Array.isArray(value.links)
   )
@@ -181,10 +213,19 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
   } catch {
     fail('terminal_manifest_invalid');
   }
-  const entries = terminalBundleEntries(value.target.platform);
+  const desktop = embedded && closed(value.entries, ['runtime', 'service']);
+  if (desktop && value.target.platform !== 'win32') fail('terminal_manifest_invalid');
   const rawEntries = value.entries as Record<string, unknown>;
+  const entries = desktop
+    ? rawEntries.service === legacyWindowsDesktopRuntimeEntries.service
+      ? legacyWindowsDesktopRuntimeEntries
+      : windowsDesktopRuntimeEntries
+    : terminalBundleEntries(value.target.platform);
   const files = value.files;
-  if (Object.entries(entries).some(([key, path]) => rawEntries[key] !== path))
+  if (
+    !closed(rawEntries, Object.keys(entries)) ||
+    Object.entries(entries).some(([key, path]) => rawEntries[key] !== path)
+  )
     fail('terminal_manifest_invalid');
   const paths = new Set<string>();
   for (const item of value.files) {
@@ -227,6 +268,7 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
   if (!files.some((item) => item.path === entries.runtime && item.mode === 493))
     fail('terminal_manifest_invalid');
   if (
+    !desktop &&
     terminalHostEntrypoints.some(
       (path) => !files.some((item) => item.path === path && item.mode === 420),
     )
@@ -236,24 +278,38 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
     value.target.platform === 'win32' &&
     (value.target.arch !== 'x64' ||
       value.links.length !== 0 ||
-      windowsTerminalFrontdoorFiles.some(
-        (path) => !files.some((item) => item.path === path && item.mode === 493),
-      ) ||
+      (!desktop &&
+        windowsTerminalFrontdoorFiles.some(
+          (path) => !files.some((item) => item.path === path && item.mode === 493),
+        )) ||
       windowsTerminalRuntimeConfigFiles.some(
         (path) => !files.some((item) => item.path === path && item.mode === 420),
       ))
   )
     fail('terminal_manifest_invalid');
   if (
+    desktop &&
+    files.some(
+      (file) =>
+        (entries.service === windowsDesktopRuntimeEntries.service &&
+          /(?:^|\/)node_modules(?:\/|$)/iu.test(file.path)) ||
+        /^(?:entrypoints|web|windows-frontdoor|(?:code|node_modules)\/@kite-ai\/(?:cli|ui))(?:\/|$)/u.test(
+          file.path,
+        ) ||
+        /^(?:code|node_modules)\/@kite-ai\/service\/(?:daemon(?:-main)?|development-web)\.js$/u.test(
+          file.path,
+        ),
+    )
+  )
+    fail('terminal_manifest_invalid');
+  const engineRoot = sqliteEngineRoot(entries);
+  if (
     !['engine-selection.json', 'engine-manifest.json'].every((name) =>
-      files.some(
-        (item) => item.path === `${terminalSqliteEngineRoot}/${name}` && item.mode === 420,
-      ),
+      files.some((item) => item.path === `${engineRoot}/${name}` && item.mode === 420),
     ) ||
     !files.some(
       (item) =>
-        item.path === `${terminalSqliteEngineRoot}/engine-manifest.json` &&
-        item.sha256 === sqlite.manifestSha256,
+        item.path === `${engineRoot}/engine-manifest.json` && item.sha256 === sqlite.manifestSha256,
     )
   )
     fail('terminal_manifest_invalid');
@@ -269,7 +325,7 @@ export function parseTerminalBundleManifest(value: unknown): TerminalBundleManif
     entries,
     files: Object.freeze(value.files.map((item) => Object.freeze({ ...item }))),
     links: Object.freeze(value.links.map((item) => Object.freeze({ ...item }))),
-  }) as TerminalBundleManifest;
+  }) as EmbeddedRuntimeManifest;
 }
 /** Exact native file ownership, independently retained by each actual Windows consumer. */
 const windowsTerminalFileReaders = new WeakMap<
@@ -308,6 +364,7 @@ export function retainWindowsTerminalRuntimeFiles(root: string): {
     pins.push(retainWindowsCandidateFiles(root, ['terminal-manifest.json']));
     const manifest = parseTerminalBundleManifest(
       JSON.parse(readFileSync(join(root, 'terminal-manifest.json'), 'utf8')),
+      true,
     );
     if (manifest.target.platform !== 'win32' || manifest.target.arch !== process.arch)
       fail('terminal_target_mismatch');
@@ -356,20 +413,43 @@ export function verifyTerminalRuntimeBundle(
   removal?: WindowsInstallationRemoval,
   retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
 ): VerifiedTerminalRuntimeBundle {
-  return terminalRuntimeBundleContent(bundleRoot, removal, false, retainedFiles);
+  return terminalRuntimeBundleContent(
+    bundleRoot,
+    removal,
+    false,
+    retainedFiles,
+    false,
+  ) as VerifiedTerminalRuntimeBundle;
+}
+export function verifyEmbeddedRuntimeBundle(
+  bundleRoot: string,
+  removal?: WindowsInstallationRemoval,
+  retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
+) {
+  return terminalRuntimeBundleContent(bundleRoot, removal, false, retainedFiles, true);
 }
 /** Complete content/hash/inventory only. No ACL, native file pin or usage authority. */
 export function readTerminalRuntimeBundleContent(
   bundleRoot: string,
 ): VerifiedTerminalRuntimeBundle {
-  return terminalRuntimeBundleContent(bundleRoot, undefined, true);
+  return terminalRuntimeBundleContent(
+    bundleRoot,
+    undefined,
+    true,
+    undefined,
+    false,
+  ) as VerifiedTerminalRuntimeBundle;
+}
+export function readEmbeddedRuntimeBundleContent(bundleRoot: string) {
+  return terminalRuntimeBundleContent(bundleRoot, undefined, true, undefined, true);
 }
 function terminalRuntimeBundleContent(
   bundleRoot: string,
   removal: WindowsInstallationRemoval | undefined,
   contentOnly: boolean,
-  retainedFiles?: ReturnType<typeof retainWindowsTerminalRuntimeFiles>,
-): VerifiedTerminalRuntimeBundle {
+  retainedFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined,
+  embedded: boolean,
+): VerifiedTerminalRuntimeBundle<EmbeddedRuntimeManifest> {
   let windowsFiles: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined;
   try {
     const root = realpathSync(bundleRoot);
@@ -383,13 +463,17 @@ function terminalRuntimeBundleContent(
       lstatSync(manifestPath).nlink !== 1
     )
       fail('terminal_bundle_unavailable');
-    if (removal) {
-      if (process.platform !== 'win32') fail('terminal_target_mismatch');
-      const { assertWindowsInstallationRemoval } =
-        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
-      assertWindowsInstallationRemoval(removal, root);
-    } else if (!contentOnly && process.platform === 'win32')
+    const removing =
+      removal &&
+      (() => {
+        if (process.platform !== 'win32') fail('terminal_target_mismatch');
+        const { windowsInstallationRemovalReader } =
+          require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
+        return windowsInstallationRemovalReader(removal, root);
+      })();
+    if (!removal && !contentOnly && process.platform === 'win32')
       windowsFiles = retainedFiles ?? retainWindowsTerminalRuntimeFiles(root);
+    const retainedReader = windowsFiles && windowsTerminalFileReaders.get(windowsFiles)!;
     const bytes = readFileSync(manifestPath);
     let json: unknown;
     try {
@@ -397,7 +481,9 @@ function terminalRuntimeBundleContent(
     } catch {
       fail('terminal_manifest_invalid');
     }
-    const manifest = parseTerminalBundleManifest(json);
+    const manifest = embedded
+      ? parseTerminalBundleManifest(json, true)
+      : parseTerminalBundleManifest(json);
     if (manifest.target.platform !== process.platform || manifest.target.arch !== process.arch)
       fail('terminal_target_mismatch');
     const fileHash = createAssetFileHasher(),
@@ -418,11 +504,12 @@ function terminalRuntimeBundleContent(
         const path = prefix ? `${prefix}/${name}` : name;
         if (path === 'terminal-manifest.json') continue;
         const absolute = join(directory, name);
-        if (windowsFiles) {
+        if (retainedReader || removing) {
           // The same original handles already checked kind, exact final path,
           // no reparse, single link and full 64-bit identity/size. Keep every
           // inventory and byte hash check; reverify all original stamps/ACLs below.
-          const object = windowsTerminalFileReaders.get(windowsFiles)!.read(absolute);
+          const original = removing?.(absolute);
+          const object = original ?? retainedReader?.read(absolute);
           if (!object) fail('terminal_bundle_identity_mismatch');
           if (object.directory) {
             if (!directories.has(path)) fail('terminal_bundle_identity_mismatch');
@@ -432,7 +519,7 @@ function terminalRuntimeBundleContent(
             if (
               !file ||
               object.size !== BigInt(file.size) ||
-              windowsTerminalFileReaders.get(windowsFiles)!.hash(absolute) !== file.sha256
+              (original ? original.sha256() : retainedReader!.hash(absolute)) !== file.sha256
             )
               fail('terminal_bundle_identity_mismatch');
             if (identities.has(object.identity)) fail('terminal_bundle_path_alias');
@@ -487,7 +574,7 @@ function terminalRuntimeBundleContent(
       [...expected.keys(), ...links.keys()].some((path) => !actual.has(path))
     )
       fail('terminal_bundle_identity_mismatch');
-    const engineRoot = join(root, terminalSqliteEngineRoot);
+    const engineRoot = join(root, sqliteEngineRoot(manifest.entries));
     const selection = JSON.parse(readFileSync(join(engineRoot, 'engine-selection.json'), 'utf8'));
     if (
       !closed(selection, ['version', 'manifestSha256']) ||
@@ -507,11 +594,6 @@ function terminalRuntimeBundleContent(
     )
       fail('terminal_sqlite_engine_mismatch');
     windowsFiles?.verify();
-    if (removal) {
-      const { assertWindowsInstallationRemoval } =
-        require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
-      assertWindowsInstallationRemoval(removal, root);
-    }
     return Object.freeze({ root, manifest, digest: digest(bytes) });
   } catch (error) {
     if (error instanceof TerminalRuntimeAssetError) throw error;

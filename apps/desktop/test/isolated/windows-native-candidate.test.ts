@@ -39,8 +39,9 @@ mock.module(${JSON.stringify(access)},()=>({
 }));
 const {acquireWindowsNativeCandidate,retainWindowsNativePairedArtifact}=await import(${JSON.stringify(native)});
 const id='a'.repeat(64),root=resolve('owned-prefix','releases',id);
-const owner=acquireWindowsNativeCandidate({root,windowsAsset:{path:'fixed',sha256:id},files:[],handoff:{launcherPipe:'fixed',mainPipe:'fixed'}});
-const proof={kind:'native.candidate',root,manifestSha256:id},actual={entrypoint:join(root,'terminal/node_modules/@kite-ai/service/main.js'),executable:join(root,'terminal/runtime/bun.exe'),buildId:'native-'+id};
+const serviceEntrypoint=join(root,'terminal/code/@kite-ai/service/main.js');
+const owner=acquireWindowsNativeCandidate({root,serviceEntrypoint,windowsAsset:{path:'fixed',sha256:id},files:[],handoff:{launcherPipe:'fixed',mainPipe:'fixed'}});
+const proof={kind:'native.candidate',root,manifestSha256:id},actual={entrypoint:serviceEntrypoint,executable:join(root,'terminal/runtime/bun.exe'),buildId:'native-'+id};
 for(const fake of [{...owner},{close(){},verify(){}}])assert.throws(()=>retainWindowsNativePairedArtifact(fake,proof,actual),/bootstrap_unqualified/);
 for(const [p,a] of [[{...proof,root:root+'-other'},actual],[{...proof,manifestSha256:'b'.repeat(64)},actual],[{...proof,kind:'terminal.candidate'},actual],[proof,{...actual,buildId:'native-other'}],[proof,{...actual,entrypoint:join(root,'terminal/entrypoints/cli.js')}],[proof,{...actual,executable:join(root,'external-bun.exe')}]])assert.throws(()=>retainWindowsNativePairedArtifact(owner,p,a),/bootstrap_unqualified/);
 assert.equal(verifies,0);

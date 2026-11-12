@@ -30,7 +30,14 @@ import {
   verifyTerminalBundle,
 } from '../../apps/cli/host/terminal-artifact';
 import { serviceBundledDependencies } from '../../apps/service/bundled-dependencies';
-import { terminalEmptyAssetDirectories } from '../../apps/service/src/runtime-assets';
+import {
+  type EmbeddedRuntimeManifest,
+  terminalEmptyAssetDirectories,
+  type VerifiedTerminalRuntimeBundle,
+  verifyEmbeddedRuntimeBundle,
+  type WindowsDesktopRuntimeManifest,
+  windowsDesktopRuntimeEntries,
+} from '../../apps/service/src/runtime-assets';
 import { createTrustedAssets } from '../../apps/web/src/assets';
 import { agentBundledDependencies } from '../../packages/agent/scripts/bundled-dependencies';
 import { acquireArtifactAccess } from '../../packages/agent/src/artifact-access';
@@ -51,11 +58,16 @@ import {
 import { buildTerminalSqliteEngine } from './sqlite-engine';
 import { copyTerminalDependencies, terminalBundledNotices } from './terminal-dependencies';
 import { rejectBundleOutput } from './terminal-paths';
+import { buildWindowsDesktopRuntime } from './windows-desktop-runtime';
 import {
   installWindowsTerminalBundle,
   rollbackWindowsTerminalBundle,
   uninstallWindowsTerminalBundle,
 } from './windows-terminal-install';
+import {
+  windowsNativeVerifierChecksumPath,
+  windowsTerminalVerifierPath,
+} from './windows-verifier-assets';
 
 export { verifyTerminalBundle };
 
@@ -269,8 +281,7 @@ async function inventory(root: string) {
     links: links.sort((a, b) => a.path.localeCompare(b.path)),
   };
 }
-/** Build a closed, relocatable native terminal bundle using only locked installed dependencies. */
-export async function buildTerminalBundle(input: {
+interface BuildTerminalBundleInput {
   destination: string;
   repositoryRoot?: string;
   bunExecutable?: string;
@@ -279,7 +290,26 @@ export async function buildTerminalBundle(input: {
   processHostFixture?: 'native-mcp-loopback' | 'native-extension-reference';
   /** Public certificate only, embedded in that fixture and therefore in the candidate digest. */
   processHostFixtureCertificate?: string;
-}): Promise<VerifiedTerminalBundle> {
+}
+/** Build a closed, relocatable runtime from the locked installed dependencies. */
+export function buildTerminalBundle(
+  input: BuildTerminalBundleInput & { desktopOnly: true },
+): Promise<VerifiedTerminalRuntimeBundle<WindowsDesktopRuntimeManifest>>;
+export function buildTerminalBundle(
+  input: BuildTerminalBundleInput,
+): Promise<VerifiedTerminalBundle>;
+export async function buildTerminalBundle(
+  input: BuildTerminalBundleInput & { desktopOnly?: true },
+): Promise<VerifiedTerminalRuntimeBundle<EmbeddedRuntimeManifest>> {
+  const desktop = input.desktopOnly === true;
+  if (
+    desktop &&
+    (process.platform !== 'win32' ||
+      process.arch !== 'x64' ||
+      input.processHostFixture !== undefined ||
+      input.sqliteLibrary !== undefined)
+  )
+    error('desktop_runtime_inputs_invalid');
   const repository = realpathSync(input.repositoryRoot ?? resolve(import.meta.dir, '../..'));
   if (
     input.processHostFixture !== undefined &&
@@ -307,39 +337,53 @@ export async function buildTerminalBundle(input: {
   else mkdirSync(destination, { mode: 0o700 });
   try {
     const root = realpathSync(destination),
-      entries = terminalBundleEntries(process.platform);
-    const packages = workspaces.map((source) => {
-      const path = join(repository, source),
-        manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as Package;
-      return {
-        name: manifest.name,
-        source: path,
-        destination: join(root, 'node_modules', manifest.name),
-        manifest,
-        bundledDependencies:
-          manifest.name === '@kite-ai/ui'
-            ? [...desktopBundledDependencies, ...tuiBundledDependencies]
-            : manifest.name === '@kite-ai/agent'
-              ? agentBundledDependencies
-              : manifest.name === '@kite-ai/ai'
-                ? aiBundledDependencies
-                : manifest.name === '@kite-ai/service'
-                  ? serviceBundledDependencies
-                  : manifest.name === '@kite-ai/cli'
-                    ? cliBundledDependencies
-                    : [],
-      };
-    });
+      entries = desktop ? windowsDesktopRuntimeEntries : terminalBundleEntries(process.platform);
+    const packages = workspaces
+      .filter((source) => !desktop || !['packages/ui', 'apps/cli'].includes(source))
+      .map((source) => {
+        const path = join(repository, source),
+          manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as Package;
+        return {
+          name: manifest.name,
+          source: path,
+          destination: join(root, desktop ? 'code' : 'node_modules', manifest.name),
+          manifest,
+          bundledDependencies:
+            manifest.name === '@kite-ai/ui'
+              ? [...desktopBundledDependencies, ...tuiBundledDependencies]
+              : manifest.name === '@kite-ai/agent'
+                ? agentBundledDependencies
+                : manifest.name === '@kite-ai/ai'
+                  ? aiBundledDependencies
+                  : manifest.name === '@kite-ai/service'
+                    ? serviceBundledDependencies
+                    : manifest.name === '@kite-ai/cli'
+                      ? cliBundledDependencies
+                      : [],
+        };
+      });
     const buildWorkspace = async (item: (typeof packages)[number]) => {
       mkdirSync(item.destination, { recursive: true, mode: 0o700 });
+      const desktopService = desktop && item.name === '@kite-ai/service';
+      const excludedServiceSource = new Set([
+        './src/daemon.ts',
+        './src/daemon-main.ts',
+        './src/development-web.ts',
+      ]);
       for (const segment of item.manifest.scripts.build.split(/\s*&&\s*/)) {
         const words = segment.trim().split(/\s+/);
         if (words.shift() !== 'bun') error('build_script_unsupported');
-        const args = words.map((word) =>
-          word === 'dist' || word === './dist'
-            ? item.destination
-            : word.replace(/^--outdir=(?:\.\/)?dist(?=\/|$)/, `--outdir=${item.destination}`),
-        );
+        const args = words
+          .filter((word) => !desktopService || !excludedServiceSource.has(word))
+          .map((word) =>
+            word === 'dist' || word === './dist'
+              ? item.destination
+              : word.replace(/^--outdir=(?:\.\/)?dist(?=\/|$)/, `--outdir=${item.destination}`),
+          );
+        if (desktop && item.name === '@kite-ai/agent') {
+          if (args[0] === 'build') args.push('--define', '__KITE_WINDOWS_DESKTOP_ASSETS__=true');
+          if (args[0] === 'src/tools/documents/build-assets.ts') args.push('--windows-desktop');
+        }
         await run(runtime, args, item.source);
       }
       verifyBundledDependencies(item.destination, item.bundledDependencies);
@@ -396,14 +440,16 @@ export async function buildTerminalBundle(input: {
         );
       }
       const exports = Object.fromEntries(
-        Object.entries(item.manifest.exports).map(([key, path]) => {
-          if (typeof path !== 'string') error('workspace_export_unsupported');
-          const built = (
-            item.name === '@kite-ai/cli' ? path : path.replace(/^\.\/src\//, './')
-          ).replace(/\.tsx?$/, '.js');
-          if (!existsSync(join(item.destination, built))) error('workspace_export_missing');
-          return [key, built];
-        }),
+        Object.entries(item.manifest.exports)
+          .filter(([, path]) => !desktopService || !excludedServiceSource.has(path))
+          .map(([key, path]) => {
+            if (typeof path !== 'string') error('workspace_export_unsupported');
+            const built = (
+              item.name === '@kite-ai/cli' ? path : path.replace(/^\.\/src\//, './')
+            ).replace(/\.tsx?$/, '.js');
+            if (!existsSync(join(item.destination, built))) error('workspace_export_missing');
+            return [key, built];
+          }),
       );
       writeFileSync(
         join(item.destination, 'package.json'),
@@ -460,7 +506,8 @@ export async function buildTerminalBundle(input: {
       ['main', 'runServiceProcess'],
       ['daemon-main', 'runDaemonProcess'],
     ] as const) {
-      const folder = join(root, 'node_modules/@kite-ai/service');
+      if (desktop && entry === 'daemon-main') continue;
+      const folder = dirname(join(root, entries.service));
       renameSync(join(folder, `${entry}.js`), join(folder, `${entry}-implementation.js`));
       const fixture = entry === 'main' ? input.processHostFixture : undefined;
       const fixtureEntry =
@@ -511,12 +558,20 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
 `,
       );
     }
-    copyTerminalDependencies({
-      repositoryRoot: repository,
-      destination: join(root, 'node_modules'),
-      workspacePackages: packages,
-      ...(process.platform === 'win32' ? { dependencyLayout: 'materialized' as const } : {}),
-    });
+    if (desktop) {
+      await buildWindowsDesktopRuntime(
+        repository,
+        root,
+        packages.map((item) => item.destination),
+      );
+    } else {
+      copyTerminalDependencies({
+        repositoryRoot: repository,
+        destination: join(root, 'node_modules'),
+        workspacePackages: packages,
+        ...(process.platform === 'win32' ? { dependencyLayout: 'materialized' as const } : {}),
+      });
+    }
     if (process.platform === 'win32') {
       privateDirectory(join(root, 'runtime'));
       copyWindowsSystemExecutable(runtime, join(root, entries.runtime));
@@ -536,75 +591,82 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
     const sqlite = await buildTerminalSqliteEngine({
       root,
       executable: join(root, entries.runtime),
+      ...(desktop ? { desktopOnly: true as const } : {}),
       ...(input.sqliteLibrary ? { library: input.sqliteLibrary } : {}),
     });
-    mkdirSync(join(root, 'entrypoints'), { mode: 0o700 });
-    for (const name of ['cli', 'tui']) {
-      const build = await Bun.build({
-        entrypoints: [join(repository, `scripts/release/entrypoints/terminal-${name}.ts`)],
-        target: 'bun',
-        packages: 'external',
-        outdir: join(root, 'entrypoints'),
-        naming: `${name}.js`,
-      });
-      if (!build.success) throw new AggregateError(build.logs, 'terminal_entrypoint_build_failed');
-    }
-    for (const name of ['standard-cli', 'standard-tui', 'native-cli', 'native-tui']) {
-      const build = await Bun.build({
-        entrypoints: [join(repository, `scripts/release/entrypoints/${name}.ts`)],
-        target: 'bun',
-        packages: 'external',
-        outdir: join(root, 'entrypoints'),
-        naming: `${name}.js`,
-      });
-      if (!build.success) throw new AggregateError(build.logs, 'terminal_entrypoint_build_failed');
-    }
-    if (process.platform === 'win32') {
-      const folder = join(root, 'windows-frontdoor');
-      privateDirectory(folder);
-      const verifierPath = join(folder, 'terminal-verifier.exe');
-      const compileRoot = join(root, `.windows-verifier-${randomUUID()}`);
-      privateDirectory(compileRoot);
-      const compiledPath = join(compileRoot, 'terminal-verifier.exe');
-      await compileWindowsVerifier({
-        runtime: join(root, entries.runtime),
-        entrypoint: join(
-          repository,
-          'scripts/release/entrypoints/windows-terminal-verifier-main.ts',
-        ),
-        outfile: compiledPath,
-      });
-      copyWindowsSystemExecutable(compiledPath, verifierPath);
-      rmSync(compileRoot, { recursive: true, force: false });
-      const bytes = readFileSync(verifierPath);
-      const launchers = await buildWindowsTerminalLauncher({
-        outdir: join(root, `.windows-launcher-${randomUUID()}`),
-        verifierPath,
-        verifierSha256: sha(bytes),
-        verifierSize: bytes.length,
-      });
-      for (const name of launchers.launchers)
-        defaultWindowsPathSecurity()!.copyPrivateFile(
-          join(launchers.root, name),
-          join(folder, name),
+    if (!desktop) {
+      mkdirSync(join(root, 'entrypoints'), { mode: 0o700 });
+      for (const name of ['cli', 'tui']) {
+        const build = await Bun.build({
+          entrypoints: [join(repository, `scripts/release/entrypoints/terminal-${name}.ts`)],
+          target: 'bun',
+          packages: 'external',
+          outdir: join(root, 'entrypoints'),
+          naming: `${name}.js`,
+        });
+        if (!build.success)
+          throw new AggregateError(build.logs, 'terminal_entrypoint_build_failed');
+      }
+      for (const name of ['standard-cli', 'standard-tui', 'native-cli', 'native-tui']) {
+        const build = await Bun.build({
+          entrypoints: [join(repository, `scripts/release/entrypoints/${name}.ts`)],
+          target: 'bun',
+          packages: 'external',
+          outdir: join(root, 'entrypoints'),
+          naming: `${name}.js`,
+        });
+        if (!build.success)
+          throw new AggregateError(build.logs, 'terminal_entrypoint_build_failed');
+      }
+      if (process.platform === 'win32') {
+        const folder = join(root, 'windows-frontdoor');
+        privateDirectory(folder);
+        const verifierPath = join(root, windowsTerminalVerifierPath);
+        const compileRoot = join(root, `.windows-verifier-${randomUUID()}`);
+        privateDirectory(compileRoot);
+        const compiledPath = join(compileRoot, 'terminal-verifier.exe');
+        await compileWindowsVerifier({
+          runtime: join(root, entries.runtime),
+          entrypoint: join(repository, 'scripts/release/entrypoints/windows-verifier-main.ts'),
+          outfile: compiledPath,
+        });
+        copyWindowsSystemExecutable(compiledPath, verifierPath);
+        rmSync(compileRoot, { recursive: true, force: false });
+        const bytes = readFileSync(verifierPath);
+        const verifierSha256 = sha(bytes);
+        defaultWindowsPathSecurity()!.writePrivateFile(
+          join(root, windowsNativeVerifierChecksumPath),
+          Buffer.from(`${verifierSha256}\n`),
         );
-      rmSync(launchers.root, { recursive: true, force: false });
+        const launchers = await buildWindowsTerminalLauncher({
+          outdir: join(root, `.windows-launcher-${randomUUID()}`),
+          verifierPath,
+          verifierSha256,
+          verifierSize: bytes.length,
+        });
+        for (const name of launchers.launchers)
+          defaultWindowsPathSecurity()!.copyPrivateFile(
+            join(launchers.root, name),
+            join(folder, name),
+          );
+        rmSync(launchers.root, { recursive: true, force: false });
+      }
+      const web = await Bun.build({
+        entrypoints: [join(repository, 'apps/web/src/browser.tsx')],
+        target: 'browser',
+        format: 'esm',
+        minify: true,
+        splitting: false,
+      });
+      if (!web.success || web.outputs.length !== 1) throw Error('terminal_web_build_failed');
+      const { assets, manifest: webManifest } = await createTrustedAssets(
+        await web.outputs[0]!.text(),
+      );
+      mkdirSync(join(root, 'web'), { mode: 0o700 });
+      for (const [path, asset] of assets)
+        writeFileSync(join(root, 'web', path.slice(1)), asset.content);
+      writeFileSync(join(root, 'web/manifest.json'), JSON.stringify(webManifest, null, 2));
     }
-    const web = await Bun.build({
-      entrypoints: [join(repository, 'apps/web/src/browser.tsx')],
-      target: 'browser',
-      format: 'esm',
-      minify: true,
-      splitting: false,
-    });
-    if (!web.success || web.outputs.length !== 1) throw Error('terminal_web_build_failed');
-    const { assets, manifest: webManifest } = await createTrustedAssets(
-      await web.outputs[0]!.text(),
-    );
-    mkdirSync(join(root, 'web'), { mode: 0o700 });
-    for (const [path, asset] of assets)
-      writeFileSync(join(root, 'web', path.slice(1)), asset.content);
-    writeFileSync(join(root, 'web/manifest.json'), JSON.stringify(webManifest, null, 2));
     if (existsSync(join(repository, 'LICENSE')))
       copyFileSync(join(repository, 'LICENSE'), join(root, 'LICENSE'));
     const source = {
@@ -614,9 +676,9 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
     const productVersion = (
       JSON.parse(readFileSync(join(repository, 'package.json'), 'utf8')) as { version: string }
     ).version;
-    const manifest: TerminalBundleManifest = {
-      version: 1,
-      apiMajor: 1,
+    const manifest = {
+      version: 1 as const,
+      apiMajor: 1 as const,
       target: { platform: process.platform, arch: process.arch },
       bunVersion,
       sqlite,
@@ -629,7 +691,7 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
     writeFileSync(join(root, 'terminal-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', {
       mode: 0o644,
     });
-    return verifyTerminalBundle(root);
+    return desktop ? verifyEmbeddedRuntimeBundle(root) : verifyTerminalBundle(root);
   } catch (cause) {
     if (
       !(

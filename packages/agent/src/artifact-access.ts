@@ -12,6 +12,10 @@ import {
   deriveNativeWindowsUseKeys,
   windowsInstallationCoordination,
 } from './platform/windows-installation-coordination';
+import {
+  windowsDesktopFrontdoorNames,
+  windowsNativeFrontdoorNames,
+} from './platform/windows-native-frontdoors';
 import { defaultWindowsPathSecurity } from './platform/windows-path-security';
 
 /** Failed admissions keep their exact resources until native closure is confirmed. */
@@ -53,7 +57,6 @@ export function acquireArtifactAccess(input: {
     )
       throw Error('artifact_access_invalid');
     const bootstrap = Reflect.get(marker, 'bootstrap');
-    const names = ['kite.exe', 'kite-tui.exe', 'kite-desktop.exe', 'native-verifier.exe'];
     if (
       !bootstrap ||
       typeof bootstrap !== 'object' ||
@@ -62,10 +65,17 @@ export function acquireArtifactAccess(input: {
       typeof Reflect.get(bootstrap, 'candidateId') !== 'string' ||
       !/^[a-f0-9]{64}$/.test(Reflect.get(bootstrap, 'candidateId')) ||
       !Array.isArray(Reflect.get(bootstrap, 'files')) ||
-      Reflect.get(bootstrap, 'files').length !== names.length
+      ![windowsDesktopFrontdoorNames.length, windowsNativeFrontdoorNames.length].includes(
+        Reflect.get(bootstrap, 'files').length,
+      )
     )
       throw Error('artifact_access_invalid');
-    for (const [index, file] of Reflect.get(bootstrap, 'files').entries()) {
+    const files = Reflect.get(bootstrap, 'files');
+    const names =
+      files.length === windowsDesktopFrontdoorNames.length
+        ? windowsDesktopFrontdoorNames
+        : windowsNativeFrontdoorNames;
+    for (const [index, file] of files.entries()) {
       if (
         !file ||
         typeof file !== 'object' ||
@@ -181,4 +191,5 @@ export { retainWindowsCandidateFiles } from './platform/windows-candidate-files'
 export {
   assertWindowsInstallationRemoval,
   type WindowsInstallationRemoval,
+  windowsInstallationRemovalReader,
 } from './platform/windows-installation-removal';

@@ -44,9 +44,11 @@ macOS arm64 的新开发应用与Native候选在独立副本内应用固定Elect
 
 完整候选只物化生成 exports 真正需要的解析边。当前唯一内联的核心图标依赖归[UI build owner](../../packages/ui/README.md#原桌面展示层)：其他 external／peer、原 exports／CSS与准确许可保持，builder拒绝残留该包的外部引用。复制器不能以内联声明跳过 peer、optional或workspace；新闭包的全部文件仍纳入原manifest和每次独立完整校验。此构建收束不改变三次准入、双使用锁或平台完成约束。
 
+Terminal 与内含它的 Native 候选按目标复制 `agent-browser` 和 `tree-sitter-bash` 的原生文件。两类制品可用 `.tar.zst` 的长距离匹配压缩，以同一 SHA、解压边界和闭合 tar 规则准入。具体范围和验证归 [Terminal owner](../../apps/cli/docs/terminal-release.md#制品闭包与身份)。
+
 Native非development renderer的React／JSX模式由[builder](../../apps/desktop/scripts/build-native.ts)固定为production，不继承测试调用进程环境；显式测试诊断常量独立封存，普通dev／prod关闭要求保持，Vite开发服务器仍走原开发分支。原child-stream真实资产守卫与窗口门禁核开发栈不混入正式renderer，具体范围归[Native发行owner](../../apps/desktop/docs/native-release.md)。此修正不改变候选身份、完整库存或平台发布资格。
 
-`release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
+`release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 默认包含完整 Terminal 和实际 Electron。Windows x64 桌面安装包选择 `--desktop-only true`，内嵌通过相对路径链接的本地服务及一份 Bun，安装包拒绝残留的 `node_modules`。旧候选仍按原清单验证供覆盖升级，具体边界归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
 
 候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.4。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。当前 fault-soak 与完整 blocked collection 同样要求1.4.4，原迭代、期限、source／receipt／资源拒绝门禁不变；历史1.4.2记录保留其原环境，不能替代新基线证据。
 
@@ -119,6 +121,10 @@ Native 卸载在安装 EX 内先核封闭结构和两层真实目录，再取得
 Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。双方闭合 nonce/active 与完整物理树复核，POSIX standard 前门实际 spawn Native 内 Bun/CLI/TUI/Service；Windows source 转交 Native C 前门，并以内部 expected candidate 拒绝登记读取与实际准入之间的版本漂移。升级/回滚只更新原持有者登记，卸载以原 nonce CAS 撤销。独立前门恢复 Terminal；已缓存且删除的 Native-bin 路径需要父 shell 的 hash刷新/新 shell。详见[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
 
 Windows managed Native 安装／切换／撤销源码现已接入同一正式 release caller：closed v2 marker 绑定四个稳定 `bin/*.exe`，active 只选择完整不可变候选。C 前门在 Bun 初始化前清除五个注入键，compiled verifier 持原 C 创建证书、outer／inner 全部原文件与自身双 SH，再创建 Electron；Main 在窗口／Profile／SQLite／Service 之前独立核两跳实际创建证书、原进程 FILETIME／完整 bytes 与自身双 SH。PPID 和后置摘要均不单独授予加载权。完整归档采用私有原 HANDLE copy／Flush／write-through，卸载以全部 candidate 双 EX 与完整 original DELETE owner 删除管理树，Profile 留在外部；登记关闭未知保同次调用全部 prefix EX。真实 MSVC／Electron PE、实际窗口、维护恢复和 Win/Linux 完整资格仍待重构后验收，原严格 DLL import／delay-load 拒绝与缺 handoff 的 Main guard 保持，准确范围归[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
+
+Windows x64 Native 与内含 Terminal 共享一次编译的校验器制品。Windows 安装 marker 和已安装映像名继续沿原契约，资产来源与旧候选兼容见 [Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
+
+Windows x64 离线 EXE 消费桌面专用 Native 归档，装配一个 Bun、本地服务和桌面窗口。安装器支持选择目录及原目录更新，登记当前用户的 Windows 应用和卸载入口。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
 正常卸载独立 Terminal 不阻止 Native 自带入口及后续升级。隐式历史登记目标已不存在时，升级仅锁 Native，并保留历史反向登记；不重建前门或自动重新登记。显式目标与仍存在的隐式目标保持原完整验证、双 prefix 锁和 nonce CAS。
 

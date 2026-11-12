@@ -14,7 +14,8 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { agentBrowserExecutableAsset } from '../../../packages/agent/src/tools/browser/assets';
 import { desktopBundledDependencies } from '../../../packages/ui/scripts/bundled-dependencies';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
 
@@ -291,13 +292,15 @@ test('an unrepresentable same-name version-shadowing cycle fails instead of chan
 }, 20000);
 
 test(
-  'the complete installed materialized graph keeps every resolution edge and original asset while sharing real common ancestors',
+  'the complete installed materialized graph preserves resolution and copies the assets for the target',
   () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-actual-materialized-')));
     try {
       const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
       const destination = join(root, 'node_modules');
       const workspacePackages = [
+        'packages/trajectory',
+        'packages/trace-extension-sdk',
         'packages/ai',
         'packages/agent',
         'packages/client',
@@ -375,14 +378,45 @@ test(
           else expect(readFileSync(actual!)).toEqual(readFileSync(original));
         }
       }
+      const selectedBrowser = basename(agentBrowserExecutableAsset());
+      const bashTarget = `${process.platform}-${process.arch}`;
+      const browser = result.packages.find((row) => row.name === 'agent-browser')!;
+      const bash = result.packages.find((row) => row.name === 'tree-sitter-bash')!;
+      expect(readdirSync(join(destination, browser.destination, 'bin')).sort()).toEqual(
+        [selectedBrowser, 'agent-browser.js'].sort(),
+      );
+      expect(readdirSync(join(destination, bash.destination, 'prebuilds'))).toEqual([bashTarget]);
+      const omitted = new Map([
+        [
+          'agent-browser',
+          new Set(
+            readdirSync(join(browser.source, 'bin'))
+              .filter((file) => file !== selectedBrowser && file !== 'agent-browser.js')
+              .map((file) => join('bin', file)),
+          ),
+        ],
+        [
+          'tree-sitter-bash',
+          new Set(
+            readdirSync(join(bash.source, 'prebuilds'))
+              .filter((directory) => directory !== bashTarget)
+              .map((directory) => join('prebuilds', directory)),
+          ),
+        ],
+      ]);
       for (const placement of result.packages) {
         const target = join(destination, placement.destination);
         const assets = (relative: string) => {
+          if (omitted.get(placement.name)?.has(relative)) {
+            expect(existsSync(join(target, relative))).toBe(false);
+            return;
+          }
           const source = realpathSync(join(placement.source, relative));
           if (lstatSync(source).isDirectory()) {
             for (const name of readdirSync(source))
               if (name !== 'node_modules') assets(join(relative, name));
-          } else expect(readFileSync(join(target, relative))).toEqual(readFileSync(source));
+          } else
+            expect(readFileSync(join(target, relative)).equals(readFileSync(source))).toBe(true);
         };
         assets('');
       }

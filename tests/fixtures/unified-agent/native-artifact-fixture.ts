@@ -11,11 +11,19 @@ import {
   type TerminalBundleManifest,
   terminalBundleEntries,
 } from '@kite-ai/service/runtime-assets';
+import {
+  windowsNativeVerifierChecksumPath,
+  windowsTerminalVerifierPath,
+} from '../../../scripts/release/windows-verifier-assets';
 import { privateDirectory } from '../test-filesystem';
 
 import { fixtureNativeSqlite, fixtureTerminalSqlite } from './sqlite-engine-fixture';
 export const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-export function finiteNativeFixture(parent: string, name = 'candidate') {
+export function finiteNativeFixture(
+  parent: string,
+  name = 'candidate',
+  windowsVerifier: 'legacy' | 'shared' | 'bad-checksum' = 'legacy',
+) {
   const root = join(parent, name),
     terminal = join(root, 'terminal');
   privateDirectory(terminal);
@@ -28,12 +36,22 @@ export function finiteNativeFixture(parent: string, name = 'candidate') {
     writeFileSync(join(terminal, path), bytes, { mode });
     innerFiles.push({ path, size: bytes.length, sha256: hash(bytes), mode });
   }
+  const sqlite = fixtureTerminalSqlite(terminal, innerFiles);
+  if (process.platform === 'win32' && windowsVerifier !== 'legacy') {
+    const verifier = innerFiles.find((file) => file.path === windowsTerminalVerifierPath)!;
+    const path = windowsNativeVerifierChecksumPath;
+    const bytes = Buffer.from(
+      `${windowsVerifier === 'shared' ? verifier.sha256 : '0'.repeat(64)}\n`,
+    );
+    writeFileSync(join(terminal, path), bytes);
+    innerFiles.push({ path, size: bytes.length, sha256: hash(bytes), mode: 420 });
+  }
   const inner: TerminalBundleManifest = {
     version: 1,
     apiMajor: 1,
     target: { platform: process.platform, arch: process.arch },
     bunVersion: Bun.version,
-    sqlite: fixtureTerminalSqlite(terminal, innerFiles),
+    sqlite,
     productVersion: '0.1.0',
     source: { commit: 'a'.repeat(40), dirty: true },
     entries: innerEntries,
@@ -54,7 +72,7 @@ export function finiteNativeFixture(parent: string, name = 'candidate') {
           'app/kite.exe',
           'app/kite-tui.exe',
           'app/kite-desktop.exe',
-          'app/native-verifier.exe',
+          ...(windowsVerifier === 'legacy' ? ['app/native-verifier.exe'] : []),
           ...windowsNativeElectronResources,
         ]
       : []),

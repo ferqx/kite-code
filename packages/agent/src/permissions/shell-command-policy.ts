@@ -4,6 +4,7 @@ import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Language, type Node, Parser } from 'web-tree-sitter';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
+import { windowsDesktopAsset } from '../platform/windows-desktop-assets';
 import { AgentError } from '../storage/types';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -319,13 +320,15 @@ export async function createShellCommandPolicy(input: {
   try {
     input.signal?.throwIfAborted();
     const runtime = await realpath(
-      fileURLToPath(import.meta.resolve('web-tree-sitter/tree-sitter.wasm')),
+      windowsDesktopAsset('assets/shell/tree-sitter.wasm') ??
+        fileURLToPath(import.meta.resolve('web-tree-sitter/tree-sitter.wasm')),
     );
     const grammar = await realpath(
-      join(
-        dirname(fileURLToPath(import.meta.resolve('tree-sitter-bash/package.json'))),
-        'tree-sitter-bash.wasm',
-      ),
+      windowsDesktopAsset('assets/shell/tree-sitter-bash.wasm') ??
+        join(
+          dirname(fileURLToPath(import.meta.resolve('tree-sitter-bash/package.json'))),
+          'tree-sitter-bash.wasm',
+        ),
     );
     const [runtimeBytes, grammarBytes] = await mapAssetVerification(
       [runtime, grammar],

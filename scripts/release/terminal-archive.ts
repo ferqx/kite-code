@@ -14,7 +14,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { gunzipSync } from 'node:zlib';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   readWindowsTerminalRuntimeFile,
@@ -29,6 +28,7 @@ import {
   defaultWindowsPathSecurity,
   privateDirectory,
 } from '../../packages/agent/src/platform/windows-path-security';
+import { decompressReleaseArchive, releaseArchiveBytes } from './archive-compression';
 import { rejectBundleOutput } from './terminal-paths';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -138,7 +138,7 @@ export function readCandidateArchiveFiles(input: {
   if (!/^[a-f0-9]{64}$/.test(input.sha256) || hash(bytes) !== input.sha256) fail();
   const maxOutputLength = input.maxUnpackedBytes ?? 1024 * 1024 * 1024;
   if (!Number.isSafeInteger(maxOutputLength) || maxOutputLength < 1) fail();
-  return regularFiles(gunzipSync(bytes, { maxOutputLength }));
+  return regularFiles(decompressReleaseArchive(bytes, maxOutputLength));
 }
 /** Archive stores regular bytes and integrity-checked relative-link declarations, never external links. */
 export async function packTerminalBundle(input: { bundleRoot: string; archivePath: string }) {
@@ -172,7 +172,7 @@ export async function packTerminalBundle(input: { bundleRoot: string; archivePat
     }
     if (process.platform === 'win32') privateDirectory(dirname(archivePath));
     else mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
-    const bytes = await new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes();
+    const bytes = await releaseArchiveBytes(files, archivePath);
     if (pinned && verifyTerminalBundle(bundle.root, pinned).digest !== bundle.digest) fail();
     const sha256 = hash(bytes);
     const created: string[] = [];

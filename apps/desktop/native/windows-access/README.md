@@ -2,6 +2,10 @@
 
 候选 factory 把原 manifest SHA 绑定实际候选 ID，独立核每份原文件的完整 SHA；原 owner 每次 verify 还重新枚举准确文件、祖先目录及声明空目录，拒绝未知、缺项、改类型或 reparse。初始 Node 完整内容／语义验证保留，Main 后续只复用自身 genuine owner 的持续 read/no-write/no-delete pin、原 identity、有效 ACL、闭合库存和双 SH；配套 Service 仍独立完整准入。构建使用静态 CRT 与 `/O2`，不新增运行期入口或测试 export。新增活句柄期间创建未知子项的[真实原实现反例](../../test/isolated/windows-node-access.test.ts)使用独立 C++ 测试制品，不绕过正式 factory 的父进程／证书门禁。
 
+内含 Terminal 的 v1 清单以 `worker.js`、`empty-bunfig.toml` 和 `manifest.json` 三份已核 Worktree 资产声明 `empty-hooks`。Main 的原生 factory 依这三个准确路径取得该目录的原对象，校验它为空，并把它加入每次闭合枚举。复制与物化范围见 [Native owner](../../docs/native-release.md#windows-managed-native-当前实现)。
+
+Main 核实原 broker 映像后，在独立的完整文件扫描之前读取两跳证书。整个扫描期间保留原 broker 进程对象，父校验器继续持完整候选的文件与使用权。Main 的 factory 完成文件、闭合库存和自己的两层使用锁校验后才返回可用 owner。
+
 本地 DOS 输入仍先按原规则拒绝设备/UNC、相对、dot、歧义后缀与非法组件。内部文件 API 使用 extended-length 前缀，支持完整 npm 清单和私有 Profile 的长路径，不依赖 Electron manifest 或机器注册表；最终路径仍去除系统前缀后逐字核原 canonical 路径。命名管道证书不经过该适配，ACL、FileID、reparse/单链接、共享和关闭门禁保持。真实长路径与设备输入反例进入[原 Node-API 测试](../../test/isolated/windows-node-access.test.ts)，理由归[原对象决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)。
 
 原 HANDLE 的 owner/DACL 现以 `GetKernelObjectSecurity` 读取 self-relative descriptor，逐项保留原 SID、DACL/control、ACE 与有效 grant 策略。C 前门、Node-API 与 Bun 采用相同查询语义；继承标志的高层展示差异不能授予额外权利，实时 ACL 变化仍由原对象/当前探针拒绝。Main 的独立 SH、完整内容核验和原资源关闭门禁保持，取舍归[闭包成本决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。

@@ -23,12 +23,13 @@ const options = {
 } as const;
 const help = `Terminal candidate tooling (native platform only)
   build --directory <new-directory> [--sqlite-library <reviewed-macOS-library>]
-  pack --directory <bundle> --archive <new-tar.gz>
-  unpack --archive <tar.gz> --sha256 <expected-sha256> --directory <new-directory>
+  pack --directory <bundle> --archive <new-archive>
+  unpack --archive <archive> --sha256 <expected-sha256> --directory <new-directory>
   verify --directory <bundle>
-  install --archive <tar.gz> --sha256 <expected-sha256> --prefix <managed-directory>
+  install --archive <archive> --sha256 <expected-sha256> --prefix <managed-directory>
   rollback --prefix <managed-directory>
   uninstall --prefix <managed-directory>
+Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
 Checksums establish integrity, not publisher authenticity. Installation does not stop services.
 `;
 

@@ -156,8 +156,7 @@ struct Hash {
   }
   ~Hash() { if (hash) BCryptDestroyHash(hash); if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0); }
 };
-static void verifyBytes(const Pin& file) {
-  const unsigned long long expectedSize = KITE_TERMINAL_VERIFIER_SIZE;
+static void verifyBytes(const Pin& file, unsigned long long expectedSize, const char* expected) {
   LARGE_INTEGER size{};
   need(GetFileSizeEx(file.handle.value, &size) && size.QuadPart >= 0 && static_cast<unsigned long long>(size.QuadPart) == expectedSize);
   Hash hash;
@@ -173,11 +172,25 @@ static void verifyBytes(const Pin& file) {
   need(total == expectedSize);
   unsigned char digest[32];
   need(BCryptFinishHash(hash.hash, digest, sizeof(digest), 0) == 0);
-  const char* expected = KITE_TERMINAL_VERIFIER_SHA256;
   need(std::string(expected).size() == 64);
   const char* hex = "0123456789abcdef";
   for (size_t i = 0; i < 32; ++i) need(expected[2*i] == hex[digest[i] >> 4] && expected[2*i+1] == hex[digest[i] & 15]);
 }
+#ifdef KITE_DESKTOP_LAUNCHER
+static std::wstring selectedDesktop(const Pin& active) {
+  unsigned char bytes[67];
+  DWORD count = 0;
+  need(ReadFile(active.handle.value, bytes, sizeof(bytes), &count, nullptr) &&
+    count == 66 && bytes[64] == '\n' && bytes[65] == '\n');
+  std::wstring id;
+  for (size_t i = 0; i < 64; ++i) {
+    const unsigned char value = bytes[i];
+    need((value >= '0' && value <= '9') || (value >= 'a' && value <= 'f'));
+    id.push_back(value);
+  }
+  return id;
+}
+#endif
 // MSVC argv rules: double every backslash before a quote and before the closing quote.
 static std::wstring quoted(const std::wstring& argument) {
   std::wstring result = L"\"";
@@ -225,7 +238,10 @@ int wmain(int argc, wchar_t** argv) {
     const auto bin = parent(executable), root = parent(bin);
     need(bin.substr(bin.find_last_of(L'\\') + 1) == L"bin");
     const auto name = executable.substr(executable.find_last_of(L'\\') + 1);
-#ifdef KITE_NATIVE_LAUNCHER
+#ifdef KITE_DESKTOP_LAUNCHER
+    need(name == L"kite-desktop.exe" && argc == 1);
+    const auto verifierPath = bin + L"\\native-verifier.js";
+#elif defined(KITE_NATIVE_LAUNCHER)
     need(name == L"kite.exe" || name == L"kite-tui.exe" || name == L"kite-desktop.exe");
     const auto helperPath = bin + L"\\native-verifier.exe";
 #else
@@ -239,16 +255,43 @@ int wmain(int argc, wchar_t** argv) {
       ancestors.emplace_back(path, true, policy, ancestors.size() < 2);
       if (parent(path) == path) break;
     }
-    Pin self(executable, false, policy, true), helper(helperPath, false, policy, true);
-    verifyBytes(helper);
+    Pin self(executable, false, policy, true);
+#ifdef KITE_DESKTOP_LAUNCHER
+    Pin active(root + L"\\active", false, policy, true);
+    const auto selected = selectedDesktop(active);
+    const auto releases = root + L"\\releases";
+    const auto candidate = releases + L"\\" + selected;
+    const auto terminal = candidate + L"\\terminal";
+    const auto runtime = terminal + L"\\runtime";
+    for (const auto& path : {releases, candidate, terminal, runtime})
+      ancestors.emplace_back(path, true, policy, true);
+    const auto helperPath = runtime + L"\\bun.exe";
+    Pin verifier(verifierPath, false, policy, true);
+    verifyBytes(verifier, KITE_TERMINAL_VERIFIER_SIZE, KITE_TERMINAL_VERIFIER_SHA256);
+    verifier.verify(policy, true);
+#endif
+    Pin helper(helperPath, false, policy, true);
+#ifdef KITE_DESKTOP_LAUNCHER
+    verifyBytes(helper, KITE_DESKTOP_RUNTIME_SIZE, KITE_DESKTOP_RUNTIME_SHA256);
+#else
+    verifyBytes(helper, KITE_TERMINAL_VERIFIER_SIZE, KITE_TERMINAL_VERIFIER_SHA256);
+#endif
     for (size_t i = 0; i < ancestors.size(); ++i) ancestors[i].verify(policy, i < 2);
     self.verify(policy, true);
     helper.verify(policy, true);
-    std::wstring command = quoted(helperPath) + L" " + quoted(name == L"kite.exe" ? L"cli" : name == L"kite-tui.exe" ? L"tui" : L"desktop") + L" " + quoted(root);
+    std::wstring command = quoted(helperPath);
+#ifdef KITE_DESKTOP_LAUNCHER
+    command += L" --no-env-file --no-install " + quoted(L"--config=\\\\.\\NUL") + L" " +
+      quoted(L"--tsconfig-override=\\\\.\\NUL") + L" " + quoted(verifierPath);
+#endif
+    command += L" " + quoted(name == L"kite.exe" ? L"cli" : name == L"kite-tui.exe" ? L"tui" : L"desktop") + L" " + quoted(root);
 #ifdef KITE_NATIVE_LAUNCHER
     // Strong native owner remains alive through the actual helper exit.
     auto* certificate = new NativeBootstrapCertificate(policy.sid);
     command += L" " + quoted(certificate->path);
+#endif
+#ifdef KITE_DESKTOP_LAUNCHER
+    command += L" " + quoted(L"--kite-native-candidate=" + selected);
 #endif
     for (int i = 1; i < argc; ++i) command += L" " + quoted(argv[i]);
     need(command.size() < 32767);
@@ -275,7 +318,11 @@ int wmain(int argc, wchar_t** argv) {
     startup.lpAttributeList = attributes.list;
     PROCESS_INFORMATION child{};
     need(CreateProcessW(helperPath.c_str(), command.data(), nullptr, nullptr, TRUE,
-      EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &startup.StartupInfo, &child));
+      EXTENDED_STARTUPINFO_PRESENT
+#ifdef KITE_DESKTOP_LAUNCHER
+      | CREATE_NO_WINDOW
+#endif
+      , nullptr, nullptr, &startup.StartupInfo, &child));
     Handle process(child.hProcess), thread(child.hThread);
 #ifdef KITE_NATIVE_LAUNCHER
     try { certificate->bind(process.value); }

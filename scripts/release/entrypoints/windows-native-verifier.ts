@@ -72,11 +72,17 @@ export async function runWindowsNativeVerifier(
   argv: readonly string[],
   expectedCandidateId?: string,
 ): Promise<number> {
+  const executable = realpathSync(process.execPath);
+  const desktopRuntime = executable !== join(prefix, 'bin', 'native-verifier.exe');
   if (
     process.platform !== 'win32' ||
     process.arch !== 'x64' ||
     !['cli', 'tui', 'desktop'].includes(kind) ||
-    realpathSync(process.execPath) !== join(prefix, 'bin', 'native-verifier.exe') ||
+    (desktopRuntime &&
+      (kind !== 'desktop' ||
+        !expectedCandidateId ||
+        executable !==
+          join(prefix, 'releases', expectedCandidateId, 'terminal/runtime/bun.exe'))) ||
     argv.some(
       (arg) => arg.startsWith('--kite-native-handoff') || arg.startsWith('--kite-native-candidate'),
     ) ||
@@ -98,7 +104,13 @@ export async function runWindowsNativeVerifier(
     const selection = acquireFileLock(coordination.selectionLockPath, 'shared');
     resources.push(selection);
     coordination.verify();
-    const frontdoor = retainWindowsNativeFrontdoor(readWindowsNativeInstallation(prefix));
+    const marker = readWindowsNativeInstallation(prefix);
+    if (
+      desktopRuntime !== (marker.bootstrap.files.length === 2) ||
+      (desktopRuntime && marker.bootstrap.candidateId !== expectedCandidateId)
+    )
+      throw Error('native_windows_frontdoor_invalid');
+    const frontdoor = retainWindowsNativeFrontdoor(marker);
     resources.push(frontdoor);
     const certificate = await retainWindowsNativeLaunchCertificate(
       prefix,
@@ -125,6 +137,8 @@ export async function runWindowsNativeVerifier(
     });
     if (bundle.digest !== id || readManagedCLIActive(prefix) !== id)
       throw Error('native_windows_selection_changed');
+    if (desktopRuntime === 'cli' in bundle.terminal.manifest.entries)
+      throw Error('native_windows_frontdoor_invalid');
     frontdoor.verify();
     certificate.verify();
     outerFiles.verify();
@@ -134,6 +148,19 @@ export async function runWindowsNativeVerifier(
     coordination.release();
     const env = { ...process.env };
     for (const key of environmentKeys) delete env[key];
+    if (kind === 'desktop') {
+      // A desktop launched by another Chromium app must start its own Crashpad
+      // handler. A stale inherited pipe can log beside electron.exe before Main.
+      const chromiumEnvironment = new Set([
+        'CHROME_CRASHPAD_PIPE_NAME',
+        'CHROME_CRASHPAD_SERVER_URL',
+        'CHROME_LOG_FILE',
+        'ELECTRON_ENABLE_LOGGING',
+        'ELECTRON_LOG_FILE',
+      ]);
+      for (const key of Object.keys(env))
+        if (chromiumEnvironment.has(key.toUpperCase())) delete env[key];
+    }
     const handoff = kind === 'desktop' ? createWindowsNativeMainHandoff() : undefined;
     if (handoff) resources.push({ release: () => handoff.close() });
     process.on('SIGINT', ignoreInterrupt);

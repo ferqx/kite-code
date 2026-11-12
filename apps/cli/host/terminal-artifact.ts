@@ -8,7 +8,7 @@ import {
   terminalBundleEntries,
   verifyTerminalRuntimeBundle,
 } from '@kite-ai/service/runtime-assets';
-import { CLIHostError, type CLIServiceArtifact, parseCLIServiceArtifact } from './index';
+import { CLIHostError, type CLIServiceArtifact, parseCLIServiceArtifact } from './service-artifact';
 
 export { type TerminalBundleManifest, terminalBundleEntries };
 export interface VerifiedTerminalBundle {

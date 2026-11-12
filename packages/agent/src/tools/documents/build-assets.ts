@@ -10,6 +10,8 @@ const result = await Bun.build({
   target: 'bun',
   packages: 'bundle',
   external: ['pdfjs-dist'],
+  define:
+    process.argv[3] === '--windows-desktop' ? { __KITE_WINDOWS_DESKTOP_ASSETS__: 'true' } : {},
   naming: 'pdf-worker.js',
 });
 if (!result.success) throw new Error('pdf_worker_build_failed');

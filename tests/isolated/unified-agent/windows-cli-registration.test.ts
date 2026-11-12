@@ -95,7 +95,7 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-pri
     return owner;
   },
 }));
-mock.module('@kite-ai/service/native-runtime-assets', () => ({ verifyNativeRuntimeBundle(root) { assert.equal(root,n+'/releases/'+a); return {digest:a}; } }));
+mock.module('@kite-ai/service/native-runtime-assets', () => ({ verifyNativeRuntimeBundle(root) { assert.equal(root,n+'/releases/'+a); return {digest:a,terminal:{manifest:{entries:{cli:'entrypoints/cli.js'}}}}; } }));
 mock.module(${JSON.stringify(modulePath('apps/cli/host/terminal-artifact.ts'))}, () => ({ verifyTerminalBundle(root) { assert.equal(root,t+'/releases/'+b); return {digest:b}; } }));
 const reader = await import(${JSON.stringify(modulePath('apps/cli/host/cli-registration.ts'))});
 const api = await import(${JSON.stringify(modulePath('scripts/release/cli-registration.ts'))});

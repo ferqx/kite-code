@@ -144,16 +144,21 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       // The program must run from its embedded section after the source is gone.
       rmSync(entrypoint);
       expect(await execute(standalone, [], cwd)).toBe('WINDOWS_EAGER_IMPORTS_OK');
+      const sharedVerifier = join(root, 'compile/shared-verifier.exe');
+      await compileWindowsVerifier({
+        runtime,
+        entrypoint: resolve(
+          import.meta.dir,
+          '../../../scripts/release/entrypoints/windows-verifier-main.ts',
+        ),
+        outfile: sharedVerifier,
+      });
+      expect(await execute(sharedVerifier, [], cwd, 1)).toBe('windows_shared_verifier_invalid');
+      const expectedVerifier = sealWindowsSystemImportSearch(readFileSync(sharedVerifier));
       for (const kind of ['terminal', 'native']) {
-        const helper = join(root, `compile/${kind}-verifier.exe`);
-        await compileWindowsVerifier({
-          runtime,
-          entrypoint: resolve(
-            import.meta.dir,
-            `../../../scripts/release/entrypoints/windows-${kind}-verifier-main.ts`,
-          ),
-          outfile: helper,
-        });
+        const helper = join(root, `standalone/${kind}-verifier.exe`);
+        copyWindowsSystemExecutable(sharedVerifier, helper);
+        expect(readFileSync(helper).equals(expectedVerifier)).toBe(true);
         expect(await execute(helper, [], cwd, 1)).toBe(`${kind}_windows_frontdoor_invalid`);
       }
       expect(createHash('sha256').update(readFileSync(input)).digest('hex')).toBe(digest);

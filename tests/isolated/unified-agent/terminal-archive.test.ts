@@ -197,6 +197,33 @@ test('actual Bun archive roundtrip stores no symlink entries and reconstructs on
     f.close();
   }
 });
+test('Zstandard stores the same Terminal closure and rejects incomplete or oversized frames before extraction', async () => {
+  const f = fixture();
+  try {
+    const archivePath = join(f.root, 'bundle.tar.zst');
+    const packed = await packTerminalBundle({ bundleRoot: f.bundleRoot, archivePath });
+    const bytes = readFileSync(archivePath);
+    expect(bytes.readUInt32LE(0)).toBe(0xfd2fb528);
+    const input = { archivePath, destination: f.destination, sha256: packed.sha256 };
+    expect(() => unpackTerminalBundle({ ...input, maxUnpackedBytes: 1 })).toThrow();
+    expect(existsSync(f.destination)).toBe(false);
+    const invalidPath = join(f.root, 'invalid.tar.zst');
+    for (const invalid of [bytes.subarray(0, -1), Buffer.concat([bytes, bytes])]) {
+      writeFileSync(invalidPath, invalid);
+      expect(() =>
+        unpackTerminalBundle({ ...input, archivePath: invalidPath, sha256: hash(invalid) }),
+      ).toThrow('terminal_archive_invalid');
+      expect(existsSync(f.destination)).toBe(false);
+    }
+    const extracted = unpackTerminalBundle(input);
+    expect(extracted.candidateId).toBe(packed.candidateId);
+    expect(readFileSync(join(extracted.root, 'terminal-manifest.json'))).toEqual(
+      readFileSync(join(f.bundleRoot, 'terminal-manifest.json')),
+    );
+  } finally {
+    f.close();
+  }
+});
 test('checksum and authenticated content tampering reject before destination exists', async () => {
   const f = fixture();
   try {

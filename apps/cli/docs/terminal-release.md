@@ -49,7 +49,7 @@ bun run release:terminal uninstall --prefix /absolute/install/kite-terminal
 
 ## 制品闭包与身份
 
-[构建器](../../../scripts/release/terminal-bundle.ts)从六个 workspace 的 build 生成 AI、Agent、Client、UI、Service、CLI，固定实际 Bun 文件，加入 Agent SQLite Worker、迁移、Shell/MCP 监督资源、Web extractor 和 Web 静态资产。workspace 的 exports 指向实际 JS。CLI/TUI 入口引用公开 CLI 子路径，保留 package-local npm 解析位置。
+[构建器](../../../scripts/release/terminal-bundle.ts)从八个 workspace 的 build 生成 Trajectory、Trace SDK、AI、Agent、Client、UI、Service、CLI，固定实际 Bun 文件，加入 Agent SQLite Worker、迁移、Shell/MCP 监督资源、Web extractor 和 Web 静态资产。workspace 的 exports 指向实际 JS。CLI/TUI 入口引用公开 CLI 子路径，保留 package-local npm 解析位置。
 
 Windows 同次候选最多并发构建两个 workspace；每个包只读取源码／已安装依赖，并写入自己的准确 outdir，同一包内的 build segments 保持串行。任一失败后不再领取其他包，等待全部在途包及其原子进程退出后才执行原失败清理；退出结果未知返回 `terminal_build_close_unconfirmed` 并保留候选。POSIX 仍逐包构建。许可全文、残余 import 扫描、exports、完整库存和 SHA／原生权限 verifier 均不跳过，也不复用旧候选。真实子进程[顺序与失败回归](../../../tests/isolated/unified-agent/terminal-workspace-build.test.ts)核最多两包、六份独立原输出、逐包段顺序，以及一包失败后原兄弟包完成、所有原进程确实退出才清理。
 
@@ -63,6 +63,8 @@ Windows 候选测试由现有私有目录夹具创建 `root/build/candidate`；�
 
 Windows 文件复制复用目录递归已创建的父目录，由原生 CopyFile 保留源只读属性，不再逐文件重复创建同一父目录或改写 POSIX mode；包根、目录与链接分支的创建和拒绝检查保持，最终原生 ACL／对象身份／全部 SHA 验证保持。POSIX 原路径不变。本机600个实际依赖文件、共4.34 MB的两轮正反序对照中，原复制为695／728毫秒，去掉两项重复操作后为453／469毫秒；3,600份目标逐一核完整 SHA、mode 和原生私有权限，只读与可写源的 Windows 文件属性也一致。这是局部成本证据，不能代替完整候选的原90秒门禁。
 
+发行构建按目标平台和架构物化多平台包的原生资产。`agent-browser` 使用与运行时相同的可执行文件选择，Linux 还按 glibc 或 musl 选择。`tree-sitter-bash` 复制当前目标的 `prebuilds`，同时保留 Shell 策略使用的 WASM。原 npm 入口、manifest、许可和其余资源按原图复制。Native 随内含 Terminal 交付同一闭包，[物化回归](../../../tests/isolated/unified-agent/terminal-dependency-materialization.test.ts)核对目标目录和保留文件的原字节。浏览器运行资格见 [Browser owner](../../../packages/agent/src/tools/browser/README.md#范围与可用性)。
+
 共享 UI 的 Desktop 产物已内联唯一的 `@hugeicons/core-free-icons`；builder扫描全部生成 JS，拒绝残留该包或子路径的外部引用，然后从生成 UI manifest 与该 workspace 的复制边中移除这条已内联普通依赖。peer、optional、workspace 不能借此跳过；其他 npm 包若真正依赖它仍按原图复制。UI exports、其他解析边和原许可证继续保留，详见[UI build owner](../../../packages/ui/README.md#原桌面展示层)。新闭包的每个实际文件仍由同一完整 verifier 核验，未添加运行时豁免或内容缓存。
 
 UI 的 [bundled 声明](../../../packages/ui/scripts/bundled-dependencies.ts)另补 `github-slugger`、`lowlight`、`mermaid`：它们已在实际 Desktop JS 内联，移除的是多余 npm 复制边。候选 [Markdown 资产验证](../test/fixtures/terminal-markdown-assets.ts)扫描全部生成 JS，核三包没有残余外部 import，并检查各包原 manifest、许可／通知全文及 Desktop 许可文件的准确字节。KaTeX 仍按外部依赖物化，CSS 与其全部引用字体逐字核对；不因图减小省略这些资源或 native／PDF 依赖。
@@ -72,6 +74,8 @@ manifest 中声明的裸 npm 名称必须按包自己的实际解析位置复制
 [完整选择器](../host/terminal-artifact.ts)核对闭合 manifest、native platform/arch、每个文件大小/SHA256/mode、目录祖先与链接实际目标。未知文件、空目录、外部 hardlink、循环或外部 symlink、缺失资源与篡改均拒绝。manifest 的 source commit/dirty 是构建诊断；完整制品身份由 manifest 和它约束的字节给出。清单及 archive sidecar 均未签名，完整性不能等同发布者身份或生产资格。
 
 [归档器](../../../scripts/release/terminal-archive.ts)只写普通 tar 文件，POSIX 链接以 manifest 声明保存。解包先核明确传入的 archive SHA，再拒绝 traversal、真实 tar link、重复路径、坏 PAX 与文件/链接祖先冲突；POSIX 重建已核对的内部链接后再次完整验证；Windows 清单与解包均拒绝链接，并以当前 SID 私有 DACL 新建对象。默认解压字节上限 1 GiB，API 可明确指定其他正整数；这是外部归档输入边界，不是 Agent 执行额度。归档/sidecar 使用排他创建，拒绝覆盖既有文件或链接。归档与安装输出不能位于输入候选内部，包括现存祖先别名。
+
+`--archive` 可选择 `.tar.zst` 或 `.tar.gz`。Zstandard 的长距离匹配可复用相隔较远的相同字节，适用于 Bun 运行时与 standalone 校验器中的公共代码。安装和解包按压缩头识别格式，Zstandard 要求一个完整帧和不超过 128 MiB 的窗口。两种压缩都进入同一 tar 解析、默认 1 GiB 解压上限和完整清单校验。[归档回归](../../../tests/isolated/unified-agent/terminal-archive.test.ts)覆盖字节回读、截断、串联帧及输出上限。
 
 ## POSIX 安装生命周期
 
@@ -97,7 +101,7 @@ Windows x64 的 [安装 owner](../../../scripts/release/windows-terminal-install
 
 第一阶段使用静态 CRT；[builder](../../../scripts/release/build-windows-terminal-launcher.ts)仍要求闭合系统 DLL import、无 delay import 与 `DependentLoadFlags=0x800`。候选 Bun 与 compiled helper 在原完整 pin 下读取；对新 console 副本，builder 可将经严格验证的 RVA v2 delay descriptors 转为普通 import descriptors，再封闭已有 LoadConfig 字段。转换只复用原 delay descriptor 的只读非执行存储；原 IAT／INT 地址、代码、节布局、文件长度和 Bun 嵌入程序保持不变。bound／unload 状态、未知属性、路径或重复 DLL、别名／重叠／重定位冲突、空间不足、缺字段均拒绝；转换后的 delay directory 必须为空。原 Bun 不修改，不能修复任意既有 ACL 或补造 LoadConfig。这一静态 import 搜索约束要求 Windows 10 RS1+，不宣称动态 DLL 或发布者已获资格，依据 [Microsoft 编译器合同](https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag?view=msvc-170)。真实 Bun 1.4.2 的11组 delay imports 可按该形状转换；长期取舍归[构建决定](../../../.agents/notes/implemented/bug-fix/2026-10-16-windows-bun-eager-system-imports.md)。
 
-`compileWindowsVerifier` 通过已封闭且持续 pin 的候选私有 Bun 子进程编译固定 verifier source，关闭配置自动加载，等待真实进程关闭后核输出权限，再物化新 helper。Bun 1.4.2 实际编译会沿用编译进程 executable 的权限，仅传 `compile.executablePath` 不能保证私有输出；构建器不事后放宽或修补它。实际 standalone 的 `import.meta.main` 为 false，因此固定 [Terminal executable entry](../../../scripts/release/entrypoints/windows-terminal-verifier-main.ts)在顶层显式调用原 verifier，避免生成静默返回0的空入口；可导入 verifier 的原 guard 和业务准入保持。Native 使用对应独立 entry。C 编译中间文件另置私有子目录，复制输出不改变正在 pin 的源目录库存。
+`compileWindowsVerifier` 通过已封闭且持续 pin 的候选私有 Bun 子进程编译固定 verifier source，关闭配置自动加载，等待真实进程关闭后核输出权限，再物化新 helper。Bun 1.4.2 实际编译会沿用编译进程 executable 的权限，仅传 `compile.executablePath` 不能保证私有输出；构建器不事后放宽或修补它。实际 standalone 的 `import.meta.main` 为 false，因此[共享 executable entry](../../../scripts/release/entrypoints/windows-verifier-main.ts)按固定安装映像名显式调用 Terminal 或 Native verifier。Terminal 构建生成一份 `windows-frontdoor/terminal-verifier.exe` 和绑定它的 `native-verifier.sha256`，两者纳入完整清单。独立 Terminal 安装仍以 `bin/terminal-verifier.exe` 为前门进程。内含该 Terminal 的 Native 构建和安装复用同一校验器字节，范围见 [Native owner](../../desktop/docs/native-release.md#windows-managed-native-当前实现)。C 编译中间文件另置私有子目录，复制输出不改变正在 pin 的源目录库存。
 
 固定运行参数将路径绑定为 `--config=<包内空配置>` 和 `--tsconfig-override=<包内配置>`；Bun 的可选 `--config` 值若拆为两个 argv，会把 TOML 当作入口并静默返回0。实际回归必须断言应用正文执行且 cwd 恶意 preload 未执行，退出0本身不构成成功。两个完整 verifier 用 BigInt 的 `dev/ino` 比较文件身份，避免真实 NTFS 64位文件 ID 在 Number 精度范围外被误判为重复；single-link、完整 hash／库存、ACL 和原 HANDLE 检查保持。
 

@@ -30,9 +30,9 @@ macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-elect
 
 ```sh
 bun run release:build --directory /absolute/output/terminal
-bun run release:build --product native --terminal /absolute/output/terminal --directory /absolute/output/native --archive /absolute/output/native.tar.gz
+bun run release:build --product native --terminal /absolute/output/terminal --directory /absolute/output/native --archive /absolute/output/native.tar.zst
 bun run release:verify --product native --directory /absolute/output/native
-bun run release:install --product native --archive /absolute/output/native.tar.gz --sha256 <SHA256> --prefix /absolute/install/native --cli-prefix /absolute/install/terminal
+bun run release:install --product native --archive /absolute/output/native.tar.zst --sha256 <SHA256> --prefix /absolute/install/native --cli-prefix /absolute/install/terminal
 bun run release:native register-cli --prefix /absolute/install/native --cli-prefix /absolute/install/terminal
 bun run release:native unregister-cli --prefix /absolute/install/native
 bun run release:native rollback --prefix /absolute/install/native
@@ -40,6 +40,23 @@ bun run release:native uninstall --prefix /absolute/install/native
 ```
 
 目标 Terminal prefix 必须已经是同一管理工具的合法独立安装；`--cli-prefix` 可省略，明确 register-cli 也可在安装后执行。构建、归档和解包目标必须不存在。安装只接受明确归档 SHA 与 prefix，不修改 PATH、shell 配置、用户 Profile 或应用数据。POSIX 保原实现；Windows x64 已接入正式安装、版本选择、登记与保数据卸载的源码，实际原生资格尚未取得，范围见下节。
+
+`.tar.zst` 与 `.tar.gz` 都使用[同一归档校验和安装入口](../../cli/docs/terminal-release.md#制品闭包与身份)。内含 Terminal 按目标交付原生依赖。
+
+Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档。构建包含桌面 Main、renderer 和本地服务。服务的工作区构建产物与第三方 JS bundle 位于 `terminal/code`，通过相对路径加载。Windows x64 原生绑定、辅助程序和 PDF 字体、WASM 等运行资源单独保留。安装包的生产入口拒绝含 `node_modules` 的归档。旧桌面包的清单仍可核验，以便升级和卸载。归档和安装后的程序树各含一份 `bun.exe`。小型 C 前门核对包内 Bun 和校验脚本的固定摘要，再用该 Bun 启动两跳证书校验。配套服务使用同一个可执行文件。
+
+安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。窗口显示解包、发布和旧版清理的实际阶段。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和[Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
+
+```powershell
+bun run release:build --product native --desktop-only true --directory <native-directory> --archive <native.tar.zst>
+.\scripts\release\windows-setup\build.ps1 -Archive <native.tar.zst> -Sha256 <SHA256> -ZstdArchive <zstd-1.5.7.tar.gz> -OutFile <KiteDesktopSetup.exe>
+```
+
+安装窗口通过当前用户的安装登记和旧开始菜单快捷方式识别已安装位置。发现已有安装时沿用所选目录。带 `client` 子目录的旧安装和桌面专用安装在核实旧程序树后准备新版，确认新版发布后移除旧树。更早直接安装在所选目录的版本先验证新归档，再清理旧文件并创建新版目录。新安装支持编辑路径或浏览磁盘。目录选择沿[原目录决定](../../../.agents/notes/implemented/feature/2026-11-11-windows-setup-location.md)，当前布局归[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
+
+安装和更新完成后，安装器为当前用户登记 Kite Desktop。小型 GUI 启动器位于所选目录的 `Kite Desktop.exe`，开始菜单和可选的桌面快捷方式都指向它。启动器以无窗口方式调用已安装的前门，Electron 启动时清理继承的 Crashpad 和日志环境。卸载按摘要短期暂存已安装的 Bun，以同一批原文件句柄检查摘要和移除程序文件。候选使用锁或 Windows 文件共享冲突使卸载短暂等待。占用持续时，界面提供退出应用提示和重试／取消。进程只向安装器交付固定阶段、成功回执和错误码，界面无需读取 Bun 异常详情。仅卸载所有者可以清理旧版已识别的 Crashpad 注册日志。卸载移除快捷方式和 Windows 登记，Profile 保留在安装目录外。持久取舍见[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
+
+关闭卸载完成窗口后，安装器将原启动器移到同卷私有目录。隐藏的清理进程等待原安装器退出后移除这份文件。原路径可立即用于下一次安装。
 
 ## Windows managed Native 当前实现
 
@@ -50,6 +67,8 @@ bun run release:native uninstall --prefix /absolute/install/native
 随后只补 bundled 原 manifest 许可来源的 r23 构建及完整校验候选为 `a7f3f3f24136de32437e2b3012d8c82e9de162904f2af06bbeaee7ce6ed61e97`，inner 为 Terminal `9f594260a611c2c5742785daa46cf7a681711fadcce7f5885e5f340e073c7025`。官方73份输入原哈希保持；当前 r23 没有第三冷窗口或维护恢复通过证据，原失败与门禁继续保留。
 
 [Windows installer](../../../scripts/release/windows-native-install.ts)复用明确 archive/prefix 的用户入口。format=2 marker 固定首次候选的四个稳定文件：`bin/kite.exe`、`kite-tui.exe`、`kite-desktop.exe`、`native-verifier.exe`。后续安装及 rollback 只切 current/previous，bootstrap A 保持；运行中的 A 持原 outer/inner 使用权，新启动核当前候选。两个 use 键分别为候选 ID 与 `SHA256(ID + NUL + "terminal")`，均位于 prefix 外同一私有协调 namespace，不与 Profile 交叠。
+
+Windows x64 的新 Native 构建以同次 Terminal 的共享校验器 SHA 和大小绑定 C 前门。`native-verifier.sha256` 与可执行文件的清单记录必须匹配，首次安装从已核内层复制同一字节到 `bin/native-verifier.exe`。旧候选从原 `app/native-verifier.exe` 安装，使用未声明共享校验器的旧 Terminal 构建时也生成该独立资产。升级和回退继续使用首次安装的稳定前门与精确字节，Main 的创建证书仍绑定实际 `bin/native-verifier.exe` 进程。取舍见[共享 Windows 校验器决定](../../../.agents/notes/implemented/simplification/2026-11-11-shared-windows-verifier.md)。
 
 [Root release build port](../../../scripts/release/windows-native-build.ts)负责固定 compiled verifier 与静态 C 前门，Desktop builder 只通过明确 typed port 调用。源 Terminal 与 Electron 完整原文件 pin 覆盖复制和所有构建 await；Windows 拒绝 links，以私有原 HANDLE 创建／写入／flush，并核全部文件、空目录及实际 SQLite 引擎。Terminal 的 v1 文件库存不记录空目录，[构建复制入口](../scripts/build-native.ts)在私有文件复制后，按已封存的 Worktree 三文件闭包重建准确空 hooks 目录，再交原 verifier；[复制回归](../test/isolated/native-terminal-copy.test.ts)直接调用同一入口，并用真实完整性校验验证缺目录拒绝、重建后摘要一致和非空 hooks 拒绝，Windows 安全 API 替身不授原生构建资格。新副本的 Electron EXE/DLL 使用 APPDIR/System32 静态 import 搜索；固定 Bun/helper/C 使用 System32。构建新副本时可将严格受限的 RVA v2 delay imports 转为普通 imports，包含实际 GUI Electron；最终仍必须无 delay directory，未知形状、bound／unload、PE不完整或不合格 loader 字段拒绝。Electron 仅另接受准确系统 basename `winspool.drv`／`bthprops.cpl`，不允许任意DRV/CPL、路径或 console 模式豁免。verifier 由持续 pin 的私有候选 Bun 子进程编译，输出权限继续严格复验，转换和私有编译合同归 [Terminal owner](../../cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。原 publisher 文件不修改，SHA 仍只提供完整性。
 

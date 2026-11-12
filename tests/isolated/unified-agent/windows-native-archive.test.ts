@@ -67,7 +67,7 @@ mock.module('@kite-ai/service/native-runtime-assets',()=>({
   retainWindowsNativeRuntimeFiles:p=>retain('files:'+p),
   verifyNativeRuntimeBundle:p=>{if(p===dest){assert.equal(files.get(dest+'/app/payload').length,payload.length);assert.ok(files.get(dest+'/app/payload').equals(payload));assert.ok(directories.has(dest+'/electron/empty'));}return verified(p);},
 }));
-mock.module('@kite-ai/service/runtime-assets',()=>({parseTerminalBundleManifest:value=>value,retainWindowsTerminalRuntimeFiles:p=>retain('files:'+p),readWindowsTerminalRuntimeFile(owner,path){assert.ok(retained.has(owner.name));assert.ok(owner.name.startsWith('files:'));const bytes=files.get(owner.name.slice('files:'.length)+'/'+path);assert.ok(bytes);return Buffer.from(bytes);}}));
+mock.module('@kite-ai/service/runtime-assets',()=>({parseTerminalBundleManifest:value=>value,terminalEmptyAssetDirectories:()=>[],retainWindowsTerminalRuntimeFiles:p=>retain('files:'+p),readWindowsTerminalRuntimeFile(owner,path){assert.ok(retained.has(owner.name));assert.ok(owner.name.startsWith('files:'));const bytes=files.get(owner.name.slice('files:'.length)+'/'+path);assert.ok(bytes);return Buffer.from(bytes);}}));
 mock.module(${JSON.stringify(modulePath('scripts/release/terminal-archive.ts'))},()=>({readCandidateArchiveFiles:()=>archiveFiles}));
 mock.module(${JSON.stringify(modulePath('scripts/release/terminal-paths.ts'))},()=>({rejectBundleOutput(){}}));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))},()=>({retainWindowsInstallationRemoval({root,inventory}){return{

@@ -4,11 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { windowsInstallationCoordination } from '../../../packages/agent/src/platform/windows-installation-coordination';
+import { packNativeBundle } from '../../../scripts/release/native-archive';
 import {
   installNativeBundle,
   rollbackNativeBundle,
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
+import { installWindowsNativeBundle } from '../../../scripts/release/windows-native-install';
+import { windowsTerminalVerifierPath } from '../../../scripts/release/windows-verifier-assets';
 import { finiteNativeFixture } from '../../fixtures/unified-agent/native-artifact-fixture';
 import {
   directoryAlias,
@@ -70,6 +73,47 @@ test('finite Native managed install preserves lock0600 and closed launcher, roll
     rmSync(parent, { recursive: true, force: true });
   }
 });
+test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
+  'Native installs the shared verifier from Terminal and preserves either bootstrap across selection changes',
+  async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-shared-verifier-')));
+    try {
+      const shared = finiteNativeFixture(parent, 'shared', 'shared');
+      const legacy = finiteNativeFixture(parent, 'legacy');
+      const invalid = finiteNativeFixture(parent, 'invalid', 'bad-checksum');
+      const rejected = join(parent, 'rejected');
+      expect(() => installNativeBundle({ bundleRoot: invalid, prefix: rejected })).toThrow(
+        'windows_shared_verifier_invalid',
+      );
+      expect(existsSync(join(rejected, 'active'))).toBe(false);
+      for (const [first, second, verifierPath] of [
+        [shared, legacy, `terminal/${windowsTerminalVerifierPath}`],
+        [legacy, shared, 'app/native-verifier.exe'],
+      ] as const) {
+        const prefix = `${first}-installed`;
+        const initial = installNativeBundle({ bundleRoot: first, prefix });
+        const helper = join(prefix, 'bin/native-verifier.exe');
+        const original = readFileSync(join(first, verifierPath));
+        const marker = join(prefix, '.kite-native-install.json');
+        const originalMarker = readFileSync(marker);
+        expect(readFileSync(helper)).toEqual(original);
+        expectReleaseMode(helper, 0o755);
+        const archivePath = join(parent, second === shared ? 'shared.tar.zst' : 'legacy.tar.zst');
+        const archive = await packNativeBundle({ bundleRoot: second, archivePath });
+        const updated = installWindowsNativeBundle({ archivePath, sha256: archive.sha256, prefix });
+        expect(updated.previousCandidateId).toBe(initial.candidateId);
+        expect(readFileSync(helper)).toEqual(original);
+        expect(readFileSync(marker)).toEqual(originalMarker);
+        expect(rollbackNativeBundle(prefix).candidateId).toBe(initial.candidateId);
+        expect(readFileSync(helper)).toEqual(original);
+        expect(readFileSync(marker)).toEqual(originalMarker);
+        uninstallNativeBundle(prefix);
+      }
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  },
+);
 test('Native uninstall rejects a live inner holder before reading corrupted candidate content and releases its outer lease', () => {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-busy-')));
   try {

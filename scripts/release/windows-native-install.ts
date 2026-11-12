@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import {
   OWNED_CLI_REGISTRATION_FILE,
@@ -13,14 +13,13 @@ import {
   type WindowsNativeInstallationMarker,
   windowsNativeFrontdoorNames,
 } from '../../apps/cli/host/windows-native-installation';
-import { createAssetFileHasher } from '../../apps/service/src/asset-file-hash';
 import {
   retainWindowsNativeRuntimeFiles,
   type VerifiedNativeRuntimeBundle,
   verifyNativeRuntimeBundle,
 } from '../../apps/service/src/native-runtime-assets';
 import { retainWindowsTerminalRuntimeFiles } from '../../apps/service/src/runtime-assets';
-import { acquireFileLock } from '../../packages/agent/src/platform/locks';
+import { acquireFileLock, LockBusyError } from '../../packages/agent/src/platform/locks';
 import {
   type WindowsInstallationCoordination,
   windowsInstallationCoordination,
@@ -29,7 +28,9 @@ import {
   retainWindowsInstallationRemoval,
   type WindowsInstallationInventoryEntry,
   WindowsInstallationRemovalAcquireUnknownError,
+  windowsInstallationRemovalReader,
 } from '../../packages/agent/src/platform/windows-installation-removal';
+import { windowsDesktopFrontdoorNames } from '../../packages/agent/src/platform/windows-native-frontdoors';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
@@ -40,9 +41,11 @@ import {
   unregisterNativeCLIWhileLocked,
   verifyCLIRegistrationTargetWhileLocked,
 } from './cli-registration';
+import { createWindowsNativeArchiveScratch, unpackNativeBundle } from './native-archive';
 import type { InstalledNativeBundle } from './native-install';
 import { rejectBundleOutput } from './terminal-paths';
 import { copyWindowsCandidate } from './windows-candidate-copy';
+import { sharedWindowsNativeVerifier } from './windows-verifier-assets';
 
 const pattern = /^[a-f0-9]{64}$/;
 const markerName = '.kite-native-install.json';
@@ -199,8 +202,20 @@ function publishSelection(
 ) {
   publish(owner, join(root, 'active'), Buffer.from(`${current}\n${previous ?? ''}\n`));
 }
+function nativeFrontdoorFile(
+  bundle: Pick<VerifiedNativeRuntimeBundle, 'manifest' | 'terminal'>,
+  name: string,
+) {
+  const outer = bundle.manifest.files.find((file) => file.path === `app/${name}`);
+  if (outer?.mode === (name === 'native-verifier.js' ? 420 : 493)) return outer;
+  if (!outer && name === 'native-verifier.exe') {
+    const shared = sharedWindowsNativeVerifier(bundle.terminal.manifest);
+    if (shared) return { ...shared, path: `terminal/${shared.path}` };
+  }
+  denied('frontdoor_unavailable');
+}
 function bootstrap(
-  bundle: Pick<VerifiedNativeRuntimeBundle, 'digest' | 'manifest'>,
+  bundle: Pick<VerifiedNativeRuntimeBundle, 'digest' | 'manifest' | 'terminal'>,
   root: string,
 ): WindowsNativeInstallationMarker {
   return parseWindowsNativeInstallationMarker(
@@ -209,9 +224,11 @@ function bootstrap(
       root,
       bootstrap: {
         candidateId: bundle.digest,
-        files: windowsNativeFrontdoorNames.map((name) => {
-          const file = bundle.manifest.files.find((file) => file.path === `app/${name}`);
-          if (file?.mode !== 493) denied('frontdoor_unavailable');
+        files: ('cli' in bundle.terminal.manifest.entries
+          ? windowsNativeFrontdoorNames
+          : windowsDesktopFrontdoorNames
+        ).map((name) => {
+          const file = nativeFrontdoorFile(bundle, name);
           return { name, size: file.size, sha256: file.sha256 };
         }),
       },
@@ -254,15 +271,29 @@ function inventory(root: string): WindowsInstallationInventoryEntry[] {
   return entries;
 }
 /** Windows-only managed owner. Coordination and application data are outside its deletion root. */
-export function installWindowsNativeBundle(input: {
-  bundleRoot: string;
-  prefix: string;
-  cliPrefix?: string;
-}): InstalledNativeBundle {
+export function installWindowsNativeBundle(
+  input: (
+    | {
+        bundleRoot: string;
+      }
+    | {
+        archivePath: string;
+        sha256: string;
+        /** Setup pins this manifest to the exact embedded archive at build time. */
+        embeddedCandidateId?: string;
+        onUnpack?: () => void;
+        onPublish?: () => void;
+      }
+  ) & {
+    prefix: string;
+    cliPrefix?: string;
+  },
+): InstalledNativeBundle {
   platform();
-  const bundle = verifyNativeRuntimeBundle(input.bundleRoot);
+  const sourceBundle =
+    'bundleRoot' in input ? verifyNativeRuntimeBundle(input.bundleRoot) : undefined;
   const requested = resolve(input.prefix);
-  rejectBundleOutput(bundle.root, requested);
+  if (sourceBundle) rejectBundleOutput(sourceBundle.root, requested);
   const owned = existsSync(join(requested, markerName))
     ? readCLIRegistration(requested, true)
     : undefined;
@@ -272,12 +303,73 @@ export function installWindowsNativeBundle(input: {
   return underSelection(requested, target, (owner) => {
     const { coordination } = owner;
     const security = defaultWindowsPathSecurity()!;
-    const source = retainWindowsNativeRuntimeFiles(bundle.root);
-    owner.retain(source);
-    const innerSource = retainWindowsTerminalRuntimeFiles(join(bundle.root, 'terminal'));
-    owner.retain(innerSource);
-    if (verifyNativeRuntimeBundle(bundle.root).digest !== bundle.digest)
-      denied('candidate_changed');
+    let stage: ReturnType<typeof createWindowsNativeArchiveScratch> | undefined;
+    let source: ReturnType<typeof retainWindowsNativeRuntimeFiles> | undefined;
+    let innerSource: ReturnType<typeof retainWindowsTerminalRuntimeFiles> | undefined;
+    let bundle: VerifiedNativeRuntimeBundle;
+    if ('archivePath' in input) {
+      const id = input.embeddedCandidateId;
+      const present =
+        id && pattern.test(id) ? join(coordination.prefix, 'releases', id) : undefined;
+      if (present && existsSync(present)) {
+        if (hash(readFileSync(input.archivePath)) !== input.sha256) denied('archive_changed');
+        const root = coordination.prefix;
+        if (!owned && !target && existsSync(join(root, markerName))) {
+          const marker = installed(root);
+          const active = selection(root);
+          if (
+            marker.bootstrap.files.length === windowsDesktopFrontdoorNames.length &&
+            active &&
+            active.current === id &&
+            active.previous === null &&
+            candidates(root).length === 1
+          ) {
+            const outer = retainWindowsNativeRuntimeFiles(present);
+            owner.retain(outer);
+            const terminal = retainWindowsTerminalRuntimeFiles(join(present, 'terminal'));
+            owner.retain(terminal);
+            bundle = verifyNativeRuntimeBundle(present, undefined, { outer, terminal });
+            if (
+              bundle.digest !== id ||
+              JSON.stringify(bootstrap(bundle, root)) !== JSON.stringify(marker)
+            )
+              denied('bootstrap_changed');
+            owner.retain(retainWindowsNativeFrontdoor(marker));
+            coordination.verify();
+            return {
+              root,
+              candidateId: bundle.digest,
+              releaseRoot: present,
+              previousCandidateId: null,
+            };
+          }
+        }
+        bundle = verifyNativeRuntimeBundle(present);
+        if (bundle.digest !== id) denied('candidate_changed');
+      } else {
+        input.onUnpack?.();
+        stage = createWindowsNativeArchiveScratch(coordination.prefix);
+        owner.retain(stage);
+        try {
+          bundle = unpackNativeBundle({ ...input, destination: stage.destination });
+        } catch (error) {
+          if (error instanceof AggregateError && error.message === 'native_archive_close_unknown')
+            owner.keep();
+          throw error;
+        }
+        stage.accept(bundle);
+        if (id && bundle.digest !== id) denied('candidate_changed');
+      }
+      input.onPublish?.();
+    } else {
+      bundle = sourceBundle!;
+      source = retainWindowsNativeRuntimeFiles(bundle.root);
+      owner.retain(source);
+      innerSource = retainWindowsTerminalRuntimeFiles(join(bundle.root, 'terminal'));
+      owner.retain(innerSource);
+      if (verifyNativeRuntimeBundle(bundle.root).digest !== bundle.digest)
+        denied('candidate_changed');
+    }
     privateDirectory(coordination.prefix, security);
     const root = realpathSync(coordination.prefix);
     if (root !== coordination.prefix) denied('install_identity_mismatch');
@@ -294,6 +386,18 @@ export function installWindowsNativeBundle(input: {
     const old = selection(root);
     privateDirectory(join(root, 'releases'), security);
     const ids = candidates(root);
+    const desktop = !('cli' in bundle.terminal.manifest.entries);
+    if (
+      desktop &&
+      (target ||
+        (old &&
+          (old.current !== bundle.digest ||
+            old.previous ||
+            ids.some((id) => id !== bundle.digest))))
+    )
+      denied('desktop_setup_replacement_required');
+    if (old && desktop !== (marker.bootstrap.files.length === windowsDesktopFrontdoorNames.length))
+      denied('desktop_setup_replacement_required');
     if (old) {
       if (!ids.includes(old.current) || (old.previous && !ids.includes(old.previous)))
         denied('active_invalid');
@@ -304,19 +408,25 @@ export function installWindowsNativeBundle(input: {
     }
     const releaseRoot = join(root, 'releases', bundle.digest);
     if (!existsSync(releaseRoot)) {
-      const stage = scratch(owner);
-      copyWindowsCandidate(bundle.root, inventory(bundle.root), stage, owner);
-      if (verifyNativeRuntimeBundle(stage.root).digest !== bundle.digest)
-        denied('candidate_changed');
-      source.verify();
-      innerSource.verify();
-      transfer(owner, () => security.movePrivateEntry(stage.root, releaseRoot));
+      if (stage) {
+        const archiveStage = stage;
+        transfer(owner, () => archiveStage.publishTo(releaseRoot));
+      } else if (source && innerSource) {
+        const copy = scratch(owner);
+        copyWindowsCandidate(bundle.root, inventory(bundle.root), copy, owner);
+        if (verifyNativeRuntimeBundle(copy.root).digest !== bundle.digest)
+          denied('candidate_changed');
+        source.verify();
+        innerSource.verify();
+        transfer(owner, () => security.movePrivateEntry(copy.root, releaseRoot));
+      } else denied('candidate_changed');
     }
     security.verifyDirectory(releaseRoot);
-    if (verifyNativeRuntimeBundle(releaseRoot).digest !== bundle.digest)
-      denied('candidate_changed');
+    const published = verifyNativeRuntimeBundle(releaseRoot);
+    if (published.digest !== bundle.digest) denied('candidate_changed');
     const bootstrapRoot = join(root, 'releases', marker.bootstrap.candidateId);
-    const original = verifyNativeRuntimeBundle(bootstrapRoot);
+    const original =
+      bootstrapRoot === releaseRoot ? published : verifyNativeRuntimeBundle(bootstrapRoot);
     if (JSON.stringify(bootstrap(original, root)) !== JSON.stringify(marker))
       denied('bootstrap_changed');
     privateDirectory(join(root, 'bin'), security);
@@ -324,20 +434,20 @@ export function installWindowsNativeBundle(input: {
       const target = join(root, 'bin', file.name);
       if (!existsSync(target)) {
         if (old) denied('bootstrap_changed');
-        transfer(owner, () =>
-          security.copyPrivateFile(join(bootstrapRoot, 'app', file.name), target),
-        );
+        const sourcePath = join(bootstrapRoot, nativeFrontdoorFile(original, file.name).path);
+        transfer(owner, () => security.copyPrivateFile(sourcePath, target));
       }
     }
     const frontdoor = retainWindowsNativeFrontdoor(marker);
     owner.retain(frontdoor);
-    source.verify();
-    innerSource.verify();
+    source?.verify();
+    innerSource?.verify();
     frontdoor.verify();
     coordination.verify();
     const previousCandidateId =
       old?.current === bundle.digest ? old.previous : (old?.current ?? null);
-    publishSelection(owner, root, bundle.digest, previousCandidateId);
+    if (old?.current !== bundle.digest)
+      publishSelection(owner, root, bundle.digest, previousCandidateId);
     if (target && (input.cliPrefix || sameCLIRegistration(owned, readCLIRegistration(target))))
       registerNativeCLIWhileLocked({ nativePrefix: root, terminalPrefix: target }, owner.locks);
     return { root, candidateId: bundle.digest, releaseRoot, previousCandidateId };
@@ -376,12 +486,44 @@ export function rollbackWindowsNativeBundle(prefix: string): InstalledNativeBund
     return { root, candidateId: old.previous, releaseRoot, previousCandidateId: old.current };
   });
 }
-export function uninstallWindowsNativeBundle(prefix: string): void {
+export function uninstallWindowsNativeBundle(prefix: string, removing?: () => void): void {
+  withWindowsNativeRemoval(prefix, (remove) => remove(), removing);
+}
+
+export class WindowsNativeCandidateInUseError extends Error {
+  readonly code = 'native_windows_candidate_in_use';
+  constructor(cause: LockBusyError) {
+    super(cause.message, { cause });
+  }
+}
+
+/** Keep the old application admitted and locked while a separate destination is verified. */
+export function replaceWindowsNativeBundle(
+  prefix: string,
+  install: () => InstalledNativeBundle,
+  removing?: () => void,
+): InstalledNativeBundle {
+  return withWindowsNativeRemoval(
+    prefix,
+    (remove) => {
+      const installed = install();
+      remove();
+      return installed;
+    },
+    removing,
+  );
+}
+
+function withWindowsNativeRemoval<T>(
+  prefix: string,
+  run: (remove: () => void) => T,
+  removing?: () => void,
+): T {
   platform();
   const requested = resolve(prefix);
   const owned = readCLIRegistration(requested, true);
   const target = owned && existsSync(owned.terminalPrefix) ? owned.terminalPrefix : undefined;
-  underSelection(requested, target, (owner) => {
+  return underSelection(requested, target, (owner) => {
     const { coordination } = owner;
     const root = coordination.prefix;
     const marker = installed(root);
@@ -396,14 +538,19 @@ export function uninstallWindowsNativeBundle(prefix: string): void {
       denied('active_invalid');
     if (!sameCLIRegistration(owned, readCLIRegistration(root, true)))
       throw Error('cli_registration_changed');
-    for (const id of ids) {
-      owner.retain(acquireFileLock(coordination.candidateLockPath(id), 'exclusive'));
-      owner.retain(
-        acquireFileLock(
-          coordination.candidateLockPath(hash(Buffer.from(`${id}\0terminal`))),
-          'exclusive',
-        ),
-      );
+    try {
+      for (const id of ids) {
+        owner.retain(acquireFileLock(coordination.candidateLockPath(id), 'exclusive'));
+        owner.retain(
+          acquireFileLock(
+            coordination.candidateLockPath(hash(Buffer.from(`${id}\0terminal`))),
+            'exclusive',
+          ),
+        );
+      }
+    } catch (error) {
+      if (error instanceof LockBusyError) throw new WindowsNativeCandidateInUseError(error);
+      throw error;
     }
     // DELETE-capable original objects are retained from the outset. Ordinary SH pins
     // have all exited; no release/reopen or path-recursive deletion handoff is used.
@@ -431,28 +578,35 @@ export function uninstallWindowsNativeBundle(prefix: string): void {
     }
     // Verification uses the same exact DELETE-purpose originals; a second ordinary
     // deny-delete pin would be incompatible with those original Windows handles.
-    const fileHash = createAssetFileHasher();
+    const originals = windowsInstallationRemovalReader(removal, root);
     for (const file of marker.bootstrap.files) {
-      const path = join(root, 'bin', file.name),
-        stat = lstatSync(path);
-      if (!stat.isFile() || stat.size !== file.size || fileHash(path, file.size) !== file.sha256)
+      const original = originals(join(root, 'bin', file.name));
+      if (
+        !original ||
+        original.directory ||
+        original.size !== BigInt(file.size) ||
+        original.sha256() !== file.sha256
+      )
         denied('bootstrap_changed');
     }
     if (
       readdirSync(join(root, 'bin')).sort().join(',') !==
-      [...windowsNativeFrontdoorNames].sort().join(',')
+      marker.bootstrap.files
+        .map((file) => file.name)
+        .sort()
+        .join(',')
     )
       denied('install_unknown_entry');
-    removal.verify();
-    coordination.verify();
-    // The registration owner deletes only its external forward record; the Native
-    // reverse record remains inside these original DELETE handles until full removal.
-    unregisterNativeCLIWhileLocked(root, owner.locks, removal);
-    removal.verify();
-    // A partial deletion keeps the exact native owner and all real external EX.
-    owner.keep();
-    removal.remove();
-    removal.release();
-    owner.confirmed();
+    return run(() => {
+      coordination.verify();
+      // The reverse record stays inside the original DELETE handles until full removal.
+      if (owned) unregisterNativeCLIWhileLocked(root, owner.locks, removal);
+      removing?.();
+      // A partial deletion keeps the exact native owner and all real external EX.
+      owner.keep();
+      removal.remove();
+      removal.release();
+      owner.confirmed();
+    });
   });
 }

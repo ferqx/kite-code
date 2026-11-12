@@ -361,11 +361,10 @@ export function registerNativeCLIWhileLocked(
     throw Error('cli_registration_already_owned');
   const before = observedRegistration(terminalPrefix, locks);
   const candidateId = active(nativePrefix, locks);
-  if (
-    observeWindows(nativePrefix, locks, () =>
-      verifyNativeRuntimeBundle(join(nativePrefix, 'releases', candidateId)),
-    ).digest !== candidateId
-  )
+  const candidate = observeWindows(nativePrefix, locks, () =>
+    verifyNativeRuntimeBundle(join(nativePrefix, 'releases', candidateId)),
+  );
+  if (candidate.digest !== candidateId || !('cli' in candidate.terminal.manifest.entries))
     throw Error('cli_registration_candidate_invalid');
   const independent = active(terminalPrefix, locks);
   if (
