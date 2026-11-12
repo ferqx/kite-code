@@ -25,6 +25,7 @@ let originalThread: unknown;
 let parserInputs = 0,
   terminationAttempts = 0,
   modelCalls = 0;
+let followUpToolMessages: { role: string; tool_call_id?: string; content: string }[] = [];
 const failure = Object.assign(Error('fixture original extractor terminate rejected'), {
   code: 'fixture_original_terminate_failed',
 });
@@ -72,8 +73,9 @@ const provider = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
-    await request.json();
+    const { messages } = (await request.json()) as { messages: typeof followUpToolMessages };
     const first = modelCalls++ === 0;
+    if (modelCalls === 2) followUpToolMessages = messages.filter((row) => row.role === 'tool');
     const delta = first
       ? {
           tool_calls: [
@@ -85,7 +87,7 @@ const provider = Bun.serve({
             },
           ],
         }
-      : { content: 'unexpected next Model' };
+      : { content: 'The original web fetch outcome is unknown.' };
     const chunk = (value: unknown, finish: string | null) =>
       `data: ${JSON.stringify({ id: 'fixed-local', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta: value, finish_reason: finish }] })}\n\n`;
     return new Response(
@@ -242,6 +244,7 @@ try {
       parserInputs,
       terminationAttempts,
       modelCalls,
+      followUpToolMessages,
       storedView,
       metadata,
       command,

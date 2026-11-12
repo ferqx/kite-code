@@ -36,6 +36,7 @@ interface Receipt {
   parserInputs: number;
   terminationAttempts: number;
   modelCalls: number;
+  followUpToolMessages: { role: string; tool_call_id?: string; content: string }[];
   sameClose: boolean;
   metadata: Awaited<ReturnType<Store['getMetadata']>>;
   storedView: Awaited<ReturnType<Store['getView']>>;
@@ -121,6 +122,7 @@ test('default Service retains a real web parser cleanup failure until explicit o
     else expect(report.originalThread).toBeNull();
     expect(report.execution).toMatchObject({
       kind: 'tool',
+      callId: 'original-web',
       originCommandId: 'work',
       status: 'outcome_unknown',
       result: { outcome: 'outcome_unknown', content: 'worker_exit_unconfirmed' },
@@ -130,7 +132,27 @@ test('default Service retains a real web parser cleanup failure until explicit o
         (message) => message.role === 'user' && message.content === report.input,
       ),
     ).toBe(true);
-    expect(report.modelCalls).toBe(1);
+    expect(report.modelCalls).toBe(2);
+    expect(report.followUpToolMessages).toEqual([
+      {
+        role: 'tool',
+        tool_call_id: 'original-web',
+        content: expect.stringContaining('Outcome unknown.'),
+      },
+    ]);
+    expect(report.followUpToolMessages[0]!.content).not.toContain('ORIGINAL');
+    expect(report.storedView.runs).toEqual([
+      expect.objectContaining({
+        id: report.execution!.runId,
+        status: 'completed',
+        isActive: false,
+      }),
+    ]);
+    expect(report.storedView.executions.filter((row) => row.kind === 'model')).toEqual([
+      expect.objectContaining({ runId: report.execution!.runId, originCommandId: 'work' }),
+      expect.objectContaining({ runId: report.execution!.runId, originCommandId: 'work' }),
+    ]);
+    expect(report.storedView.executions.filter((row) => row.kind === 'tool')).toHaveLength(1);
     expect(report.sameClose).toBe(true);
     expect(report.error).toMatchObject({ code: 'shutdown_cleanup_unconfirmed' });
     expect(report.runtimeError).toMatchObject({ code: 'shutdown_cleanup_unconfirmed' });

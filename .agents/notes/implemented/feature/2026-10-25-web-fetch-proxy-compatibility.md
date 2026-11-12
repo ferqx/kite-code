@@ -16,6 +16,8 @@ Status: implemented
 
 真实 TUN 加代理时观察到 robots 预检在 HTTPS DNS 尚未取得目标地址前耗尽 3 秒，随后正文为同一主机再做一次查询。初始同源 robots 与正文现在只在同一次 Tool Execution 内共用已通过全量检查的地址，robots 传输计时从初始解析完成后开始。未采用共享 DNS 缓存或延长整个调用时限，因为复用应局限于同一已授权工作，且跳转需要独立地址证据。两次 socket 各自保留准入和持久审计，复用行为随原 Web 快照封存。
 
+2026-11-12 补充 macOS 混合设置。ClashX Meta 会同时登记 HTTP(S) 和 SOCKS，先检查 SOCKS 曾导致可用的手动 CONNECT 入口被整体拒绝。现在优先使用按目标协议登记的 HTTP(S) 入口；混合设置只有一个已登记的 HTTP(S) 入口时两个协议共用。按协议单独选择但让缺失的一侧直连会改变用户已登记的出口。让两侧共用已登记的 CONNECT 入口与显式代理语义一致。仅 SOCKS 仍明确失败。
+
 ## Alternatives considered
 
 - 手工配置每个域名的 Fake-IP 排除：可作运维绕行，不能满足默认自适应需求。

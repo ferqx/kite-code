@@ -163,71 +163,36 @@ test('registered Windows and macOS manual settings are parsed without PAC execut
   expect(() => macWebProxy('ProxyAutoConfigEnable : 1')).toThrow('web_proxy_pac_unsupported');
 });
 
-test('enabled macOS SOCKS settings fail closed even alongside manual HTTP routes', async () => {
-  const socks = 'SOCKSEnable : 1\n SOCKSProxy : proxy.test\n SOCKSPort : 1080';
+test('automatic macOS discovery prefers registered HTTP and HTTPS routes over SOCKS', async () => {
   const http = 'HTTPEnable : 1\n HTTPProxy : proxy.test\n HTTPPort : 8080';
-  const https = 'HTTPSEnable : 1\n HTTPSProxy : proxy.test\n HTTPSPort : 8080';
-  for (const output of [
-    socks,
-    `${socks}\n${http}`,
-    `${socks}\n${https}`,
-    `${socks}\n${http}\n${https}`,
-  ]) {
-    expect(() => macWebProxy(output)).toThrow('web_proxy_protocol_unsupported');
-    const { unavailableReason, ...transport } = await resolveWebTransport(undefined, {
+  const https = 'HTTPSEnable : 1\n HTTPSProxy : secure.test\n HTTPSPort : 8081';
+  const socks = 'SOCKSEnable : 1\n SOCKSProxy : socks.test\n SOCKSPort : 1080';
+  const exceptions = 'ExceptionsList : <array> {\n 0 : *.example.test\n}';
+  expect(
+    await resolveWebTransport(undefined, {
       env: {},
-      systemProxy: async () => macWebProxy(output),
-    });
-    expect(unavailableReason).toBe('web_proxy_protocol_unsupported');
-    let admission = 0,
-      dns = 0,
-      audit = 0;
-    const configuration = createWebFetchConfiguration({
-      unavailableReason,
-      network: {
-        ...transport,
-        policy: { mode: 'public' },
-        admitHop: async () => {
-          admission++;
-          return { allowed: true, revision: 'fixture' };
-        },
-        resolveAddresses: async () => {
-          dns++;
-          throw new Error('unexpected_network_resolution');
-        },
-      },
-      extractor: { extract: async () => ({ title: '', content: 'unused' }) },
-    });
-    expect(configuration.snapshot.transport?.unavailableReason).toBe(unavailableReason);
-    const binding = configuration.bind();
-    try {
-      // This synthetic dispatched Tool context performs no Core, OS discovery or socket I/O.
-      const result = await binding.extension.tools![0]!.execute({ url: 'https://fixture.test' }, {
-        executionId: 'e',
-        sessionId: 's',
-        signal: AbortSignal.timeout(2000),
-        getExecution: async () => ({ originStoreId: 'store' }),
-        records: {
-          write: async () => {
-            audit++;
-            throw new Error('unexpected_network_audit');
-          },
-        },
-      } as unknown as ToolContext);
-      expect(result).toEqual({
-        outcome: 'failed',
-        content: 'web_proxy_protocol_unsupported',
-        details: {
-          code: 'web_proxy_protocol_unsupported',
-          stage: 'proxy_configuration',
-          resource: 'page',
-        },
-      });
-      expect([admission, dns, audit]).toEqual([0, 0, 0]);
-    } finally {
-      await binding.dispose();
-    }
-  }
+      systemProxy: async () => macWebProxy(`${socks}\n${http}\n${https}\n${exceptions}`),
+    }),
+  ).toEqual({
+    proxy: {
+      http: 'http://proxy.test:8080',
+      https: 'http://secure.test:8081',
+      noProxy: '*.example.test',
+    },
+    recoverFakeIp: true,
+    recoverProxiedTeredoDns: true,
+  });
+  expect(macWebProxy(`${socks}\n${http}`)).toEqual({
+    http: 'http://proxy.test:8080',
+    https: 'http://proxy.test:8080',
+    noProxy: '',
+  });
+  expect(macWebProxy(`${socks}\n${https}`)).toEqual({
+    http: 'http://secure.test:8081',
+    https: 'http://secure.test:8081',
+    noProxy: '',
+  });
+  expect(() => macWebProxy(`${socks}\n${http}\n HTTPSEnable : 1`)).toThrow('web_proxy_invalid');
   expect(macWebProxy('SOCKSEnable : 0\n SOCKSProxy : stale.test\n SOCKSPort : 1080')).toEqual({
     noProxy: '',
   });
@@ -235,4 +200,61 @@ test('enabled macOS SOCKS settings fail closed even alongside manual HTTP routes
     http: 'http://proxy.test:8080',
     noProxy: '',
   });
+});
+
+test('macOS SOCKS-only settings fail the dispatched Tool before network activity', async () => {
+  const socks = 'SOCKSEnable : 1\n SOCKSProxy : proxy.test\n SOCKSPort : 1080';
+  const { unavailableReason, ...transport } = await resolveWebTransport(undefined, {
+    env: {},
+    systemProxy: async () => macWebProxy(socks),
+  });
+  expect(unavailableReason).toBe('web_proxy_protocol_unsupported');
+  let admission = 0,
+    dns = 0,
+    audit = 0;
+  const configuration = createWebFetchConfiguration({
+    unavailableReason,
+    network: {
+      ...transport,
+      policy: { mode: 'public' },
+      admitHop: async () => {
+        admission++;
+        return { allowed: true, revision: 'fixture' };
+      },
+      resolveAddresses: async () => {
+        dns++;
+        throw new Error('unexpected_network_resolution');
+      },
+    },
+    extractor: { extract: async () => ({ title: '', content: 'unused' }) },
+  });
+  expect(configuration.snapshot.transport?.unavailableReason).toBe(unavailableReason);
+  const binding = configuration.bind();
+  try {
+    // This synthetic dispatched Tool context performs no Core, OS discovery or socket I/O.
+    const result = await binding.extension.tools![0]!.execute({ url: 'https://fixture.test' }, {
+      executionId: 'e',
+      sessionId: 's',
+      signal: AbortSignal.timeout(2000),
+      getExecution: async () => ({ originStoreId: 'store' }),
+      records: {
+        write: async () => {
+          audit++;
+          throw new Error('unexpected_network_audit');
+        },
+      },
+    } as unknown as ToolContext);
+    expect(result).toEqual({
+      outcome: 'failed',
+      content: 'web_proxy_protocol_unsupported',
+      details: {
+        code: 'web_proxy_protocol_unsupported',
+        stage: 'proxy_configuration',
+        resource: 'page',
+      },
+    });
+    expect([admission, dns, audit]).toEqual([0, 0, 0]);
+  } finally {
+    await binding.dispose();
+  }
 });
