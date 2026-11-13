@@ -1,6 +1,6 @@
 # Native 候选、安装与独立 CLI 注册
 
-本页负责完整 Native 物化、归档、使用锁和安装注册。构建后的候选包含实际 Electron、完整新 Terminal、main/preload/renderer 与目录/框架链接；它不从运行环境搜索 Service、Bun、CLI 或 npm。根入口已切换，整体 V1.3、签名与三平台发布仍未完成。
+本页负责 Native 物化、归档、使用锁和安装注册。候选包含实际 Electron、main/preload/renderer 与包内 Bun、Service 和运行资源。macOS arm64 和 Windows x64 默认生成桌面专用候选，`--terminal` 可显式嵌入已验证的完整 Terminal。Linux 继续使用完整 Terminal。整体 V1.3、签名与三平台发布仍未完成。
 
 本轮会话 PDF 能力的 parser／Canvas／字体／CMap／WASM 由内含 Terminal 的同次依赖闭包交付，准确版本与剩余资格见[Terminal 构建说明](../../cli/docs/terminal-release.md#构建与操作)。隔离浏览器里的 Native 页面和 Main reader 通过不等于完整 Electron 制品或各平台的原生解析资产通过；旧窗口／安装证据不自动覆盖新增闭包。
 
@@ -22,7 +22,9 @@ Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../n
 
 ## 构建与安装
 
-根 `npm run desktop` 需要先生成默认 Terminal 和Native候选：`npm run release:build`、`npm run release:build -- --product native`。缺外层路径或内嵌Terminal时，launch保原双使用锁／完整验证顺序，失败返回 `native_bundle_unavailable` 和准备命令，已取得的锁仍在finally释放。日常开发使用 `npm run build` 后 `npm run desktop:dev`，由独立development profile与每次新建应用目录承载源码调整；不将该开发入口算作完整候选或发行资格。
+macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 可独立构建桌面候选。Windows 使用已准备的 x64 MSVC 和满足现有 ACL 准入的 Bun、Electron 与输出目录，离线安装包构建见下文。macOS 用 `bun run desktop` 启动默认候选，Windows 使用已安装的桌面前门。Linux 先执行 `bun run release:build` 准备 `dist/unified-terminal`，再构建 Native 并启动。启动核对两层完整性和使用权。日常开发使用 `bun run build` 后 `bun run desktop:dev`，并使用独立 development profile。
+
+CLI/TUI 由 `bun run release:build` 构建的独立 Terminal 提供。下面的组合包示例用 `--terminal` 显式选择完整 Terminal，供组合安装和 `register-cli` 使用。
 
 macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。
 
@@ -39,7 +41,7 @@ bun run release:native rollback --prefix /absolute/install/native
 bun run release:native uninstall --prefix /absolute/install/native
 ```
 
-目标 Terminal prefix 必须已经是同一管理工具的合法独立安装；`--cli-prefix` 可省略，明确 register-cli 也可在安装后执行。构建、归档和解包目标必须不存在。安装只接受明确归档 SHA 与 prefix，不修改 PATH、shell 配置、用户 Profile 或应用数据。POSIX 保原实现；Windows x64 已接入正式安装、版本选择、登记与保数据卸载的源码，实际原生资格尚未取得，范围见下节。
+`--cli-prefix` 仅用于组合包，目标必须已经是同一管理工具的合法独立 Terminal 安装。组合包安装后也可明确执行 `register-cli`。构建、归档和解包目标必须不存在。安装使用明确的归档 SHA 与 prefix，用户 Profile 和应用数据保存在安装目录外。Windows x64 的原生验证范围见下节。
 
 `.tar.zst` 与 `.tar.gz` 都使用[同一归档校验和安装入口](../../cli/docs/terminal-release.md#制品闭包与身份)。内含 Terminal 按目标交付原生依赖。
 
@@ -63,7 +65,7 @@ Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档�
 
 Windows x64 桌面制品由同次构建封装 Service 和 Runner V7。包内 Shell 清单固定原生 Runner 及 Git Bash 所需辅助文件。Git Bash 使用本机完整安装，回退使用 Windows 自带的 PowerShell 5.1。两条路径的进程边界、权限和证据见 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
 
-安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。窗口显示解包、发布和旧版清理的实际阶段。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和[Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
+安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。[Win32 安装窗口](../../../scripts/release/windows-setup/location-dialog.cc)用准备、校验、写入、移除和收尾对应的进度区间显示总进度。区间内由实际计数推进，字节、文件或条目数单独显示。等待或重试保留已达到的进度。应用登记、快捷方式及清理处理完毕后，直接切换到结果页，隐藏百分比和进度条。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和 [Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
 
 在仓库根目录运行以下命令，构建桌面专用制品，核对清单并生成 Windows x64 离线安装包。
 
@@ -86,7 +88,21 @@ bun run release:build --product native --desktop-only true --directory <native-d
 
 安装和更新完成后，安装器为当前用户登记 Kite Desktop。小型 GUI 启动器位于所选目录的 `Kite Desktop.exe`，开始菜单和可选的桌面快捷方式都指向它。启动器以无窗口方式调用已安装的前门，Electron 启动时清理继承的 Crashpad 和日志环境。卸载按摘要短期暂存已安装的 Bun，以同一批原文件句柄检查摘要和移除程序文件。候选使用锁或 Windows 文件共享冲突使卸载短暂等待。占用持续时，界面提供退出应用提示和重试／取消。进程只向安装器交付固定阶段、成功回执和错误码，界面无需读取 Bun 异常详情。仅卸载所有者可以清理旧版已识别的 Crashpad 注册日志。卸载移除快捷方式和 Windows 登记，Profile 保留在安装目录外。持久取舍见[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
 
-关闭卸载完成窗口后，安装器将原启动器移到同卷私有目录。隐藏的清理进程等待原安装器退出后移除这份文件。原路径可立即用于下一次安装。
+显示卸载完成前，卸载器将原启动器移到同卷私有目录并启动清理进程。清理进程在卸载窗口关闭、原进程退出后移除该文件。原路径可用于下一次安装。
+
+首次安装按欢迎、安装位置、快捷方式、进度和完成推进。在选项页之间返回时保留路径与勾选状态，目录使用失败时返回安装位置。目录页的应用文件大小来自候选归档，可用空间取自目标目录或最近的现有上级目录。更新直接显示确认页，以文本展示检测到的安装目录。同名 Windows 登记与旧版可识别安装均沿原目录更新。更新仅调整仍存在的 Kite 桌面快捷方式，已移除的快捷方式保持缺失。安装和更新完成后，只有勾选「立即打开 Kite」并点击「完成」才启动桌面应用。
+
+2026-11-12 Windows x64 隔离验证包使用独立安装登记。验证日志记录了安装解包、校验 645 个文件、写入和发布，以及文件占用时等待、释放后重新核验并移除 717 个条目。随后在原路径重新安装并卸载，验证登记已清理。桌面锁屏期间只核对了安装完成页的控件文本，仍需在解锁后观察窗口的完整阶段切换。
+
+2026-11-13 在 Windows x64 使用独立登记实跑首装、原目录更新和卸载。核对了首装选项、更新确认、更新取消、安装与卸载进度和完成页。更新后开始菜单入口可查，手动移除的桌面快捷方式保持缺失。截图验证包在实际计数出现时短暂停留，拍到校验 189 / 645 个文件，以及应用文件被占用、释放后移除 717 / 717 个条目。卸载完成后核对了独立登记、快捷方式和启动器的移除。本机截图在 `dist/windows-setup-ui-20261113/screenshots`。
+
+同日换用分步向导后，另核对欢迎、安装位置、快捷方式、返回保留选择、更新确认与取消。隔离制品实跑首装和卸载，截图捕获校验 181 / 645 个文件与移除 439 / 717 个条目，随后均进入各自的完成页。新布局的本机截图在 `dist/windows-setup-wizard-20261113/screenshots`。
+
+进度条改为按当前操作计量后，在 Windows x64 隔离制品重跑首装和卸载。校验 181 / 645、写入 41 / 647、移除 480 / 717 时的条形分别约为 28%、6%、67%。校验计数来自清单中的文件，写入计数另含两份清单文件，文件经刷盘和关闭才计入。持有共享使用权时显示等待，释放后恢复并进入卸载完成页。截图位于 `dist/windows-setup-progress-20261113/screenshots`，隔离截图包延长了真实进度的停留时间。
+
+改用总进度后，同日在 Windows x64 隔离制品重跑。首装依次捕获校验 40%、写入 75%、登记与快捷方式配置 95%、完成 100%。卸载在文件占用时保持 10%，释放后实际移除 437 / 717 时为 62%，收尾为 98%，完成为 100%。关闭完成页后核对独立登记、活动候选、启动器和快捷方式已移除。截图位于 `dist/windows-setup-overall-20261113/screenshots`，截图包只延长真实阶段和计数的停留时间。
+
+移除完成页进度后，同日在 Windows x64 隔离包重跑安装和卸载。分别观察到 95% 登记及 98% 卸载收尾直接切换到结果页，结果页的截图和控件树均无进度条或百分比。截图位于 `dist/windows-setup-result-20261113/screenshots`。
 
 2026-11-12 Windows x64 本机构建生成 220,193,792 字节的桌面安装 EXE，SHA-256 为 `c756c300fd05e11e27b41bec34297f12e0e3c736c696dc9a80f93c66734cf75f`。候选 `8fd91a51896815438e9fb6183ab9d738f0fe1c49ba90a3da07a7fc7881b6629e` 由正式校验器核对包内 Service 与 Runner V7。使用同一归档生成独立安装登记的验证安装器，测试路径位于仓库外。EXE 使用本地生产配置构建，签名与公开发布资格仍按正式发布门禁核验。
 
@@ -158,7 +174,9 @@ Node main 持 outer/inner 两个 SH，继承 Bun helper 只关闭副本，不对
 
 双 prefix 以固定顺序持安装 EX，0600 封闭 metadata 保存 terminalPrefix/nativePrefix/candidateId/nonce。标准独立前门在持有 Terminal SH 后复核双方原 nonce、Native active 与双 root SH，再执行 Native 内 Bun 和固定 CLI/TUI，配套 Service 同属该闭包。读取不授予其他 Profile 或任意可执行入口。坏登记、nonce 漂移或 active 漂移拒绝，不自动回退。
 
-Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal 前门也可选择该 Native。安装更新只更新自己仍拥有的登记，卸载以 nonce CAS 撤销，不能抹掉后来另一个 Native 的登记。独立前门仍存在时，标准命令恢复该 Terminal。若父 shell 已缓存 Native-bin-first 的路径，删除后该缓存真实返回 127；用户执行 `hash -r` 或打开新 shell 后恢复 PATH 查找。安装器无法清除父 shell 缓存，不留未经用户授权的 stub，不修改 PATH/RC。
+组合 Native 提供 `kite`、`kite-tui` 和 `kite-desktop`，桌面专用 Native 提供桌面前门。安装更新只更新自己仍拥有的登记，卸载沿原 nonce 撤销。已有登记的组合安装切到桌面专用包时，macOS managed 安装先撤销其原登记，再切换 `active` 并移除 Native 的终端前门。Windows 使用桌面离线安装器的替换路径，旧安装清理时撤销原登记。独立 Terminal 前门继续提供 `kite`、`kite-tui` 和 `kite maintenance`。如果 shell 缓存了已移除的 Native 路径，执行 `hash -r` 或打开新 shell，并通过独立 Terminal 的 `bin` 使用这些命令。macOS managed 安装回退到组合候选时恢复 Native 的终端前门，重新登记需显式执行 `register-cli`。
+
+[登记迁移验证](../../../tests/fixtures/unified-agent/native-terminal-split.qualification.ts)消费独立 Terminal、组合 Native 和默认桌面 Native 三份真实制品。Windows x64 本机以 Bun 1.4.4 验证从已有登记的组合安装切换到桌面专用包，升级前后的 `kite` 均完成任务，独立 `kite-tui` 在 ConPTY 中读取原会话、输入并完成新任务、正常退出和冷重开。三个请求各执行一次。`kite maintenance backup` 和 `inspect` 核同一 Store，Profile 数据库字节保持一致。发布 CI 在 macOS arm64 和 Windows x64 执行该验证，macOS 的切换及双向回退仍待运行。
 
 独立 Terminal 正常卸载后，Native 的反向登记只保留历史归属。省略 `--cli-prefix` 的升级在旧目标已不存在时仅持 Native 安装 EX，继续完整核候选和发布 active；不会锁定或重建旧 Terminal，也不会自动登记后来重建的目录。仍存在的隐式目标以及所有显式目标继续完整验证、固定顺序持锁和 nonce CAS；无效目标拒绝，不能据目录缺失放宽明确登记。Native 回退和卸载保留同一可选前门边界。
 

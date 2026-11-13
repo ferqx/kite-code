@@ -34,7 +34,9 @@ const help = `Native candidate tooling (native platform only)
   rollback|uninstall --prefix <managed-directory>
   register-cli --prefix <desktop> --cli-prefix <terminal>
   unregister-cli --prefix <desktop>
-Defaults: dist/unified-native, dist/unified-terminal, installed Electron dist.
+Default output: dist/unified-native. macOS arm64 and Windows x64 build the desktop runtime by default.
+Use --terminal to embed a complete Terminal. Other targets retain dist/unified-terminal as the default input.
+The default Electron input is the installed Electron dist.
 Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
 Verify additionally accepts --source-commit <40-hex-commit> and --clean-source true.
 Checksums establish integrity, not publisher authenticity. Installation preserves profile data.
@@ -67,14 +69,15 @@ export async function runNativeRelease(
   const value = (key: string) => requiredReleaseValue(values, key);
   switch (command) {
     case 'build': {
-      const desktop = values['desktop-only'] === 'true';
       const macosArm64 = process.platform === 'darwin' && process.arch === 'arm64';
       const windowsX64 = process.platform === 'win32' && process.arch === 'x64';
+      const desktopSupported = macosArm64 || windowsX64;
       if (
         values['desktop-only'] !== undefined &&
-        (!desktop || (!windowsX64 && !macosArm64) || values.terminal)
+        (values['desktop-only'] !== 'true' || !desktopSupported || values.terminal !== undefined)
       )
         throw Error('native_desktop_release_arguments_invalid');
+      const desktop = desktopSupported && values.terminal === undefined;
       const { buildNativeCandidate } = await import('../../apps/desktop/scripts/build-native');
       const electron =
         values.electron ??
@@ -87,6 +90,7 @@ export async function runNativeRelease(
       const build = async (terminalRoot: string) => {
         const bundle = await buildNativeCandidate({
           terminalRoot,
+          requireTerminal: !desktop,
           electronDist: resolve(electron),
           outdir: directory,
           ...(buildOptions.macosSignElectron
@@ -102,11 +106,12 @@ export async function runNativeRelease(
         return { root: bundle.root, candidateId: bundle.digest };
       };
       if (!desktop) return build(resolve(values.terminal ?? join(root, 'dist/unified-terminal')));
-      const { mkdirSync, mkdtempSync, realpathSync, rmSync } = await import('node:fs');
+      const { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } = await import('node:fs');
       const { buildTerminalBundle } = await import('./terminal-bundle');
-      mkdirSync(dirname(directory), { recursive: true });
-      const parent = realpathSync.native(dirname(directory));
+      const outputParent = dirname(directory);
       if (macosArm64) {
+        mkdirSync(outputParent, { recursive: true });
+        const parent = realpathSync.native(outputParent);
         const work = mkdtempSync(join(parent, '.kite-desktop-runtime-'));
         try {
           const terminal = await buildTerminalBundle({
@@ -125,6 +130,8 @@ export async function runNativeRelease(
       const { privateDirectory, defaultWindowsPathSecurity } = await import(
         '../../packages/agent/src/platform/windows-path-security'
       );
+      if (!existsSync(outputParent)) privateDirectory(outputParent);
+      const parent = realpathSync.native(outputParent);
       // Build beside the requested candidate, under the same admitted directory.
       // Windows' per-user Temp can inherit grants outside this artifact scope.
       const work = join(parent, `kite-desktop-runtime-${randomUUID()}`);

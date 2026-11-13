@@ -207,6 +207,7 @@ function windowsBuildCloseUnknown(error: unknown): boolean {
 /** Formal candidate uses the existing complete terminal closure and installed Electron dist. */
 export async function buildNativeCandidate(input: {
   terminalRoot: string;
+  requireTerminal?: boolean;
   electronDist: string;
   outdir: string;
   windowsBuildPort?: WindowsNativeCandidateBuildPort;
@@ -221,9 +222,11 @@ export async function buildNativeCandidate(input: {
   if (!isAbsolute(input.outdir) || existsSync(input.outdir))
     throw Error('native_outdir_must_be_new_absolute');
   const terminal = (
-      process.platform === 'win32' ? readEmbeddedRuntimeBundleContent : verifyEmbeddedRuntimeBundle
-    )(input.terminalRoot),
-    electron = realpathSync(input.electronDist);
+    process.platform === 'win32' ? readEmbeddedRuntimeBundleContent : verifyEmbeddedRuntimeBundle
+  )(input.terminalRoot);
+  if (input.requireTerminal && !('cli' in terminal.manifest.entries))
+    throw Error('native_combined_requires_terminal');
+  const electron = realpathSync(input.electronDist);
   if (
     process.platform === 'win32' &&
     windowsNativeElectronResources.some((path) => {

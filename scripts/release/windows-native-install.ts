@@ -283,6 +283,9 @@ export function installWindowsNativeBundle(
         embeddedCandidateId?: string;
         onUnpack?: () => void;
         onPublish?: () => void;
+        onArchiveFileChecked?: (completed: number, total: number) => void;
+        onArchiveWrite?: () => void;
+        onArchiveFileWritten?: (completed: number, total: number) => void;
       }
   ) & {
     prefix: string;
@@ -370,6 +373,8 @@ export function installWindowsNativeBundle(
       if (verifyNativeRuntimeBundle(bundle.root).digest !== bundle.digest)
         denied('candidate_changed');
     }
+    const desktop = !('cli' in bundle.terminal.manifest.entries);
+    if (desktop && input.cliPrefix !== undefined) throw Error('cli_registration_candidate_invalid');
     privateDirectory(coordination.prefix, security);
     const root = realpathSync(coordination.prefix);
     if (root !== coordination.prefix) denied('install_identity_mismatch');
@@ -386,7 +391,6 @@ export function installWindowsNativeBundle(
     const old = selection(root);
     privateDirectory(join(root, 'releases'), security);
     const ids = candidates(root);
-    const desktop = !('cli' in bundle.terminal.manifest.entries);
     if (
       desktop &&
       (target ||
@@ -486,8 +490,18 @@ export function rollbackWindowsNativeBundle(prefix: string): InstalledNativeBund
     return { root, candidateId: old.previous, releaseRoot, previousCandidateId: old.current };
   });
 }
-export function uninstallWindowsNativeBundle(prefix: string, removing?: () => void): void {
-  withWindowsNativeRemoval(prefix, (remove) => remove(), removing);
+interface RemovalProgress {
+  onVerify?: () => void;
+  onFileHashed?: () => void;
+  onEntryRemoved?: (completed: number, total: number) => void;
+}
+
+export function uninstallWindowsNativeBundle(
+  prefix: string,
+  removing?: () => void,
+  progress?: RemovalProgress,
+): void {
+  withWindowsNativeRemoval(prefix, (remove) => remove(), removing, progress);
 }
 
 export class WindowsNativeCandidateInUseError extends Error {
@@ -502,6 +516,7 @@ export function replaceWindowsNativeBundle(
   prefix: string,
   install: () => InstalledNativeBundle,
   removing?: () => void,
+  progress?: RemovalProgress,
 ): InstalledNativeBundle {
   return withWindowsNativeRemoval(
     prefix,
@@ -511,6 +526,7 @@ export function replaceWindowsNativeBundle(
       return installed;
     },
     removing,
+    progress,
   );
 }
 
@@ -518,6 +534,7 @@ function withWindowsNativeRemoval<T>(
   prefix: string,
   run: (remove: () => void) => T,
   removing?: () => void,
+  progress?: RemovalProgress,
 ): T {
   platform();
   const requested = resolve(prefix);
@@ -556,12 +573,17 @@ function withWindowsNativeRemoval<T>(
     // have all exited; no release/reopen or path-recursive deletion handoff is used.
     let removal: ReturnType<typeof retainWindowsInstallationRemoval>;
     try {
-      removal = retainWindowsInstallationRemoval({ root, inventory: inventory(root) });
+      removal = retainWindowsInstallationRemoval({
+        root,
+        inventory: inventory(root),
+        onFileHashed: progress?.onFileHashed,
+      });
     } catch (error) {
       if (error instanceof WindowsInstallationRemovalAcquireUnknownError) owner.keep();
       throw error;
     }
     owner.retain(removal);
+    progress?.onVerify?.();
     if (
       JSON.stringify(readWindowsNativeInstallation(root)) !== JSON.stringify(marker) ||
       JSON.stringify(selection(root)) !== JSON.stringify(old)
@@ -604,7 +626,7 @@ function withWindowsNativeRemoval<T>(
       removing?.();
       // A partial deletion keeps the exact native owner and all real external EX.
       owner.keep();
-      removal.remove();
+      removal.remove(progress?.onEntryRemoved);
       removal.release();
       owner.confirmed();
     });

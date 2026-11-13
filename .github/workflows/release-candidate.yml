@@ -128,6 +128,18 @@ jobs:
         name: Actual installed Linux Native real code upgrade and cold rollback
         shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/linux-native-cross-version.log "{0}"
         run: xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts
+      - if: runner.os == 'macOS' || runner.os == 'Windows'
+        name: Build the default desktop Native candidate
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/native-desktop-build.log "{0}"
+        run: bun run release:build --product native --directory dist/unified-desktop
+      - if: runner.os == 'macOS' || runner.os == 'Windows'
+        name: Verify registered CLI, TUI and maintenance after switching to desktop Native
+        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/native-terminal-split.log "{0}"
+        run: >-
+          bun run tests/fixtures/unified-agent/native-terminal-split.qualification.ts
+          "--terminal=${{ github.workspace }}/dist/unified-terminal"
+          "--native=${{ github.workspace }}/dist/unified-native"
+          "--desktop=${{ github.workspace }}/dist/unified-desktop"
       - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
       - name: Actual relocated candidate Files, assets, default capability and lifetime probe
         shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/platform-probe.log "{0}"

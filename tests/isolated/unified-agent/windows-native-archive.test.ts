@@ -52,7 +52,7 @@ mock.module('node:fs',()=>({...fs,
 const security={
   writePrivateFile(){throw Error('8MiB private writer cannot hold Native artifacts');},
   writePrivateArtifactFile(p,bytes){assert.equal(files.has(p),false);files.set(p,Buffer.from(bytes));events.push('write:'+p);if(scenario==='unknown')throw primary;},
-  writePrivateArtifactFiles(root,entries){assert.equal(root,dest);for(const [relative,bytes] of entries){assert.equal(path.posix.isAbsolute(relative),false);assert.equal(relative.split('/').includes('..'),false);const filename=path.posix.join(root,relative);let parent=path.posix.dirname(filename);while(!directories.has(parent)){directories.add(parent);parent=path.posix.dirname(parent);}security.writePrivateArtifactFile(filename,bytes);}},
+  writePrivateArtifactFiles(root,entries,onFileWritten){assert.equal(root,dest);for(const [relative,bytes] of entries){assert.equal(path.posix.isAbsolute(relative),false);assert.equal(relative.split('/').includes('..'),false);const filename=path.posix.join(root,relative);let parent=path.posix.dirname(filename);while(!directories.has(parent)){directories.add(parent);parent=path.posix.dirname(parent);}security.writePrivateArtifactFile(filename,bytes);onFileWritten?.();}},
   syncPrivateFile(p){assert.ok(files.has(p));events.push('flush:'+p);},
 };
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-path-security.ts'))},()=>({
@@ -81,8 +81,23 @@ Bun.Archive=class{
 };
 const {packNativeBundle,unpackNativeBundle}=await import(${JSON.stringify(modulePath('scripts/release/native-archive.ts'))});
 if(scenario==='unpack'){
-  const result=unpackNativeBundle({archivePath:'/archive',sha256:'a'.repeat(64),destination:dest});
+  const progress=[];
+  const observe={
+    onArchiveFileChecked(completed,total){progress.push([completed,total]);},
+    onArchiveWrite(){progress.push('write');},
+    onArchiveFileWritten(completed,total){
+      assert.equal([...files.keys()].filter(file=>file.startsWith(dest+'/')).length,completed);
+      progress.push([completed,total]);
+    },
+  };
+  archiveFiles.set('terminal/main.js',Buffer.from('bad'));
+  assert.throws(()=>unpackNativeBundle({archivePath:'/archive',sha256:'a'.repeat(64),destination:'/corrupt',...observe}),/native_archive_invalid/);
+  assert.deepEqual(progress.splice(0),[[0,2],[1,2]]);
+  assert.equal(directories.has('/corrupt'),false);
+  archiveFiles.set('terminal/main.js',Buffer.from('end'));
+  const result=unpackNativeBundle({archivePath:'/archive',sha256:'a'.repeat(64),destination:dest,...observe});
   assert.equal(result.root,dest);assert.equal(files.get(dest+'/app/payload').length,9*1024*1024+17);
+  assert.deepEqual(progress,[[0,2],[1,2],[2,2],'write',[0,4],[1,4],[2,4],[3,4],[4,4]]);
   assert.equal(events.some(event=>event==='original-tree-delete'),false);
   const changed={...manifest,links:[{path:'app/link',target:'payload'}]};archiveFiles.set('native-manifest.json',Buffer.from(JSON.stringify(changed)));
   const before=events.length;

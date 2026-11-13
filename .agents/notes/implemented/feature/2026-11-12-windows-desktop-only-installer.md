@@ -18,7 +18,9 @@ Bun 的拆分文件可使用从共享文件导入的 `__require`，静态导入�
 
 占用交互沿用 Windows 安装器常见的检测、退出提示及重试／取消。VS Code 的安装脚本使用应用运行检测，Inno Setup 定义了安装和卸载遇到运行实例的退出提示。Kite 用已有的候选使用锁识别运行或退出中的应用，用 Windows 共享错误识别其他文件占用。卸载只重试移除前的占用失败，其他错误传递有长度和字符限制的代码。 [VS Code 安装脚本](https://github.com/microsoft/vscode/blob/main/build/win32/code.iss) [Inno Setup AppMutex](https://jrsoftware.org/ishelp/topic_setup_appmutex.htm)
 
-卸载完成窗口关闭后才发起启动器清理。原启动器移入同卷私有目录，清理进程用 PID 和创建时间等待原进程退出，再删除移走的启动器。安装位置可供下一次安装直接使用。
+卸载完成页在成功安排启动器清理后显示。原启动器移入同卷私有目录，清理进程用 PID 和创建时间等待原进程退出，再删除移走的启动器。安装位置可供下一次安装直接使用。
+
+首次安装沿欢迎、目录、快捷方式、进度和完成五个页面。欢迎页和完成页共用 Kite 插图，目录和快捷方式各有说明与导航，返回时保留已填选项。更新确认页展示原目录，桌面快捷方式只在仍有 Kite 管理的原链接时更新目标，尊重用户手动删除。安装或更新完成后，勾选「立即打开 Kite」并点击「完成」才启动应用。总进度为各项操作分配区间，有总量的操作按真实计数在区间内推进，当前计数独立显示。候选复用、升级替换和占用重试的工作量不同，已经显示的总进度保持单向。总进度只在执行期间显示，收尾结束后由结果页呈现结果及下一步操作。进度记录用于界面展示，结果仍由配套进程的退出状态和原收据确定。参考 [Microsoft 安装界面指南](https://learn.microsoft.com/en-us/windows/win32/uxguide/exper-setup)和 [Firefox 离线安装流程](https://support.mozilla.org/en-US/kb/custom-installation-firefox-on-windows)。
 
 ## Alternatives considered
 

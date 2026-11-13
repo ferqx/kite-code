@@ -8,6 +8,8 @@ Desktop 安装需要让标准 `kite` / `kite-tui` 选择它自己的 CLI、Bun �
 
 本决定覆盖新 POSIX 安装与本机 macOS 验证；当前产品和 shell cache 限制见 [Native owner](../../../../apps/desktop/docs/native-release.md)。
 
+[桌面默认构建决定](2026-11-12-native-desktop-default-and-terminal-registration.md)更新了 macOS arm64 和 Windows x64 的默认布局及切换时的登记处理。本文的完整 Terminal 交付和标准命令转发继续适用于显式组合制品。
+
 ## Decision
 
 Native 包含真实 Electron、main/preload/renderer 和完整新 Terminal。outer 与 inner 独立完整核验、分别持 SH；Main、配对 Service 与共享 Daemon 各自保留两 root 使用权。服务私有 proof 只接受已核 inner 清单的 service/daemon，均固定包内 Bun、Native build 和 outer digest；遗漏 daemon 会使正确 Native 共享启动被拒绝，接受任意入口则破坏准确进程身份。2026-10-06 已补齐该 daemon 校验，不去掉 proof 或改用仅保护 inner 的 Terminal 身份。Node 传给 Bun 的 inherited descriptor 副本只 close，不执行共享描述的 UNLOCK，原 owner 与最后持有者退出分别验证。

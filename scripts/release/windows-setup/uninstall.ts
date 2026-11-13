@@ -4,16 +4,23 @@ import {
   WindowsNativeCandidateInUseError,
 } from '../windows-native-install';
 import { reportSetupFailure } from './failure';
+import { setupProgress } from './progress';
 
 try {
   const prefix = process.argv[2];
   if (!prefix || process.argv.length !== 3) throw Error('native_setup_arguments_invalid');
-  console.log('KITE_SETUP_PHASE verify');
+  const progress = setupProgress();
+  progress.phase('verify');
+  let hashed = 0;
   const deadline = performance.now() + 5_500;
   let waiting = false;
   for (;;) {
     try {
-      uninstallWindowsNativeBundle(prefix, () => console.log('KITE_SETUP_PHASE remove'));
+      uninstallWindowsNativeBundle(prefix, () => progress.phase('remove'), {
+        onVerify: () => progress.phase('verify'),
+        onFileHashed: () => progress.count('verify', ++hashed),
+        onEntryRemoved: (completed, total) => progress.count('remove', completed, total),
+      });
       break;
     } catch (error) {
       // These failures occur before file removal and confirm that acquisition was unwound.
@@ -25,7 +32,7 @@ try {
         performance.now() >= deadline
       )
         throw error;
-      if (!waiting) console.log('KITE_SETUP_PHASE wait');
+      if (!waiting) progress.phase('wait');
       waiting = true;
       await Bun.sleep(350);
     }

@@ -2082,7 +2082,7 @@ prepared/submitting/pending/unknown 重开后只能查询原 Command 和准确�
 
 ## 完整 Native 发行边界
 
-根 `release:build --product native` / `release:native` 使用[Native 构建器](scripts/build-native.ts)，物化实际 Electron、完整新 Terminal、main/preload/renderer 与准确目录/框架链接。主进程同时持 outer 和 inner 两个 artifact SH；一次性 Bun helper 只关闭继承的 descriptor 副本，不解锁 Node 原 owner。Service 独立持这两个 root 的使用权，不能由窗口关闭推导已释放。
+根 `release:build --product native` 和 `release:native` 使用 Native 构建器，物化实际 Electron、main/preload/renderer、包内运行时与准确目录及框架链接。macOS arm64 与 Windows x64 默认使用桌面专用运行时，显式 `--terminal` 和 Linux 默认使用完整 Terminal。主进程同时持外层和内层两个 artifact SH。一次性 Bun helper 关闭继承的 descriptor 副本，Node 主进程继续持有原使用权。Service 独立持这两个 root 的使用权，确认自身资源清理后释放。见 [Native 构建器](scripts/build-native.ts)和 [Native 发行说明](docs/native-release.md#构建与安装)。
 
 归档、双 root 卸载、独立 CLI 注册和 shell cache 的当前产品边界见[Native 制品 owner](docs/native-release.md)。Node 私有 UI 数据库在选 Profile 前测量并核对 manifest 的实际 `node:sqlite`；它与 Bun Worker 是独立引擎。当前本机 Electron 44.3.0 / Node 24.20.0 使用 SQLite 3.53.4，Bun Terminal 使用包内 3.51.3；版本与 sourceId 分别固定。类型、纯版本 smoke 与窗口生命周期是不同证据。Linux arm64 已取得[原完整安装生命周期的有限资格](docs/native-release.md#linux-arm64-安装生命周期)，两次实际窗口均保 Chromium sandbox；Linux x64/Windows、正式签名和完整发布仍待验证。
 

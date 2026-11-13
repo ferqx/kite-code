@@ -51,7 +51,7 @@ $linkOptions = @('/nologo', '/MACHINE:X64', '/SUBSYSTEM:WINDOWS', '/DYNAMICBASE'
   '/NXCOMPAT', '/HIGHENTROPYVA', '/MANIFEST:NO')
 $objects = @('setup.obj', 'location-dialog.obj', 'shell-integration.obj', 'zstddeclib.obj')
 $libraries = @('kernel32.lib', 'user32.lib', 'advapi32.lib', 'bcrypt.lib', 'shell32.lib',
-  'ole32.lib', 'uuid.lib')
+  'ole32.lib', 'uuid.lib', 'gdi32.lib', 'comctl32.lib')
 
 Push-Location -LiteralPath $work
 try {
@@ -70,7 +70,7 @@ try {
   if ($LASTEXITCODE) { throw 'Zstandard decoder compilation failed.' }
   & cl.exe /nologo /c /MT /O2 /utf-8 /std:c++17 /EHsc /W4 @defines "/I$zstdInclude" "/I$work" (Join-Path $PSScriptRoot 'setup.cc') (Join-Path $PSScriptRoot 'location-dialog.cc') (Join-Path $PSScriptRoot 'shell-integration.cc')
   if ($LASTEXITCODE) { throw 'Windows setup compilation failed.' }
-  & rc.exe /nologo /fo maintenance.res maintenance.rc
+  & rc.exe /nologo /fo maintenance.res /i $PSScriptRoot maintenance.rc
   if ($LASTEXITCODE) { throw 'Windows desktop maintenance resource compilation failed.' }
   & link.exe @linkOptions /OUT:maintenance.exe @objects maintenance.res @libraries
   if ($LASTEXITCODE) { throw 'Windows desktop maintenance linking failed.' }

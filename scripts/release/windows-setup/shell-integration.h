@@ -21,6 +21,6 @@ bool isRootDesktopHost(const std::wstring& path, const std::wstring& prefix);
 std::optional<DesktopRegistration> readDesktopRegistration();
 std::wstring discoverDesktopLocation();
 bool registerDesktop(const DesktopRegistration& desktop, const wchar_t* version);
-bool applyDesktopShortcuts(const DesktopRegistration& desktop);
+bool applyDesktopShortcuts(const DesktopRegistration& desktop, bool upgrade);
 bool unregisterDesktop(const DesktopRegistration& desktop);
 bool removeDesktopShortcuts(const DesktopRegistration& desktop);

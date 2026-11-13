@@ -204,7 +204,7 @@ Linux 分支的[源码外公共 Store reader](../../../tests/fixtures/unified-ag
 
 ## 发布引擎与双发行包选择
 
-`release:build` 默认生成 `dist/unified-terminal`，`release:build --product native` 生成完整 Native。`release:verify --source-commit <40位提交> --clean-source true` 核实际源提交及 clean 事实；参数在任何制品/Profile I/O 前验证，dirty-source 候选不能称正式发布。
+`release:build` 默认生成 `dist/unified-terminal`，供独立 CLI/TUI 使用。`release:build --product native` 构建桌面候选，显式 `--terminal` 可组合交付，默认布局和平台范围见 [Native 发行说明](../../desktop/docs/native-release.md#构建与安装)。`release:verify --source-commit <40位提交> --clean-source true` 核实际源提交及 clean 事实，参数在任何制品或 Profile I/O 前验证。正式发布要求源码干净。
 
 Terminal manifest 的 `sqlite` 固定 driver、linkage、实际 version/sourceId 与 engine manifest SHA。macOS builder 从明确 `--sqlite-library` 或有限构建依赖位置复制已审查库，验证实际引擎和仅系统动态依赖；安装运行只选择包内库。Linux/Windows 固定 Bun 实际 builtin 引擎，未知 sourceId 或未证明 WAL 修复拒绝构建资格，不按版本大小或“最新”放行。当前本机包内库为 SQLite 3.51.3；Node/Electron 私有库单独绑定。selection 缺失、损坏、篡改和第一 Database 后迟设置均拒绝；不存在资产的开发模式只提供 unqualified 诊断。
 

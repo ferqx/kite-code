@@ -149,6 +149,20 @@ function launcher(name: 'desktop' | 'cli' | 'tui' = 'desktop') {
   const electron = nativeBundleEntries(process.platform).electron;
   return `#!/bin/sh\nset -eu\nunset NODE_PATH NODE_OPTIONS BUN_OPTIONS ELECTRON_RUN_AS_NODE\nroot=$(CDPATH= cd -P -- "\${0%/*}/.." && pwd)\nIFS= read -r candidate < "$root/active"\ncase "$candidate" in ''|*[!0-9a-f]*) echo native_active_invalid >&2; exit 1;; esac\n[ "\${#candidate}" -eq 64 ] || exit 1\n${name === 'desktop' ? `exec "$root/releases/$candidate/${electron}" "$root/releases/$candidate/app" "$@"` : `exec "$root/releases/$candidate/terminal/runtime/bun" "$root/releases/$candidate/terminal/entrypoints/native-${name}.js" "$@"`}\n`;
 }
+const terminalLaunchers = [
+  ['kite', 'cli'],
+  ['kite-tui', 'tui'],
+] as const;
+function addTerminalLaunchers(root: string) {
+  for (const [file, name] of terminalLaunchers) {
+    const path = join(root, 'bin', file);
+    if (!present(path)) durable(path, launcher(name), 0o755);
+  }
+}
+function removeTerminalLaunchers(root: string) {
+  for (const [file] of terminalLaunchers) rmSync(join(root, 'bin', file), { force: true });
+  syncDirectory(join(root, 'bin'));
+}
 function copy(source: string, destination: string) {
   const stat = lstatSync(source);
   if (stat.isSymbolicLink()) symlinkSync(readlinkSync(source), destination);
@@ -181,16 +195,17 @@ function inventory(root: string, verifyContent = true) {
     fail('install_unknown_entry');
   const selection = active(root);
   directory(join(root, 'bin'));
+  const bin = readdirSync(join(root, 'bin'));
+  const launchers = [...terminalLaunchers, ['kite-desktop', 'desktop']] as const;
   if (
-    readdirSync(join(root, 'bin')).sort().join(',') !==
-    ['kite', 'kite-desktop', 'kite-tui'].sort().join(',')
+    !bin.includes('kite-desktop') ||
+    bin.some((file) => !launchers.some(([known]) => known === file))
   )
     fail('install_unknown_entry');
-  for (const [file, name] of [
-    ['kite', 'cli'],
-    ['kite-tui', 'tui'],
-    ['kite-desktop', 'desktop'],
-  ] as const) {
+  const hasTerminalLaunchers = terminalLaunchers.every(([file]) => bin.includes(file));
+  if (process.platform === 'linux' && !hasTerminalLaunchers) fail('install_unknown_entry');
+  for (const [file, name] of launchers) {
+    if (!bin.includes(file)) continue;
     regular(join(root, 'bin', file), 0o755);
     if (text(join(root, 'bin', file)) !== launcher(name)) fail('launcher_changed');
   }
@@ -202,18 +217,25 @@ function inventory(root: string, verifyContent = true) {
     (selection.previous && !candidates.includes(selection.previous))
   )
     fail('active_invalid');
+  let previousUsesTerminal = false;
   for (const name of entries) {
     if (pattern.test(name)) {
       const candidate = join(root, 'releases', name);
       directory(candidate);
       directory(join(candidate, 'terminal'));
-      if (verifyContent && verifyNativeRuntimeBundle(candidate).digest !== name)
-        fail('candidate_changed');
+      if (verifyContent) {
+        const bundle = verifyNativeRuntimeBundle(candidate);
+        if (bundle.digest !== name) fail('candidate_changed');
+        const usesTerminal = 'cli' in bundle.terminal.manifest.entries;
+        if (name === selection.current && usesTerminal && !hasTerminalLaunchers)
+          fail('install_unknown_entry');
+        if (name === selection.previous) previousUsesTerminal = usesTerminal;
+      }
     } else if (/^\.use-[a-f0-9]{64}\.lock$/.test(name) && candidates.includes(name.slice(5, -5))) {
       if (regular(join(root, 'releases', name), 0o600).size !== 0) fail('install_file_unsafe');
     } else fail('install_unknown_entry');
   }
-  return { selection, candidates };
+  return { selection, candidates, previousUsesTerminal, hasTerminalLaunchers };
 }
 function platform() {
   if (!['darwin', 'linux'].includes(process.platform)) fail('install_platform_unsupported');
@@ -239,6 +261,9 @@ export function installNativeBundle(input: {
     leases.push(acquireArtifactAccess({ root: join(source, 'terminal'), mode: 'shared' }));
     const bundle = verifyNativeRuntimeBundle(source),
       root = resolve(input.prefix);
+    const usesTerminal = 'cli' in bundle.terminal.manifest.entries;
+    if (!usesTerminal && input.cliPrefix !== undefined)
+      throw Error('cli_registration_candidate_invalid');
     rejectBundleOutput(source, root);
     createDirectory(root);
     const existing = present(join(root, marker));
@@ -264,12 +289,7 @@ export function installNativeBundle(input: {
         durable(join(root, marker), `${JSON.stringify({ version: 1, root })}\n`);
         mkdirSync(join(root, 'releases'), { mode: 0o700 });
         mkdirSync(join(root, 'bin'), { mode: 0o700 });
-        for (const [file, name] of [
-          ['kite', 'cli'],
-          ['kite-tui', 'tui'],
-          ['kite-desktop', 'desktop'],
-        ] as const)
-          durable(join(root, 'bin', file), launcher(name), 0o755);
+        durable(join(root, 'bin', 'kite-desktop'), launcher(), 0o755);
       }
       const releaseRoot = join(root, 'releases', bundle.digest);
       if (!present(releaseRoot)) {
@@ -289,8 +309,13 @@ export function installNativeBundle(input: {
         fail('candidate_changed');
       const previousCandidateId =
         previous?.current === bundle.digest ? previous.previous : (previous?.current ?? null);
+      if (usesTerminal) addTerminalLaunchers(root);
+      // The independent frontdoor must stop forwarding before active can name a desktop runtime.
+      else if (owned) unregisterNativeCLIWhileLocked(root, locks);
       durable(join(root, 'active'), `${bundle.digest}\n${previousCandidateId ?? ''}\n`);
+      if (!usesTerminal) removeTerminalLaunchers(root);
       if (
+        usesTerminal &&
         registrationTarget &&
         (input.cliPrefix || sameCLIRegistration(owned, readCLIRegistration(registrationTarget)))
       )
@@ -327,11 +352,14 @@ export function rollbackNativeBundle(prefix: string): InstalledNativeBundle {
         ? owned.terminalPrefix
         : undefined;
     if (registrationTarget) verifyCLIRegistrationTargetWhileLocked(registrationTarget, locks);
-    const { selection } = inventory(root);
+    const { selection, previousUsesTerminal } = inventory(root);
     if (!selection.previous) fail('previous_unavailable');
     const releaseRoot = join(root, 'releases', selection.previous);
+    if (previousUsesTerminal) addTerminalLaunchers(root);
+    else if (owned) unregisterNativeCLIWhileLocked(root, locks);
     durable(join(root, 'active'), `${selection.previous}\n${selection.current}\n`);
-    if (registrationTarget)
+    if (!previousUsesTerminal) removeTerminalLaunchers(root);
+    if (previousUsesTerminal && registrationTarget)
       registerNativeCLIWhileLocked(
         { nativePrefix: root, terminalPrefix: registrationTarget },
         locks,
@@ -371,10 +399,15 @@ export function uninstallNativeBundle(prefix: string): void {
       uses.push(acquireArtifactAccess({ root: candidate, mode: 'exclusive' }));
       uses.push(acquireArtifactAccess({ root: join(candidate, 'terminal'), mode: 'exclusive' }));
     }
-    for (const id of original.candidates)
-      if (verifyNativeRuntimeBundle(join(root, 'releases', id)).digest !== id)
-        fail('candidate_changed');
+    let currentUsesTerminal = false;
+    for (const id of original.candidates) {
+      const bundle = verifyNativeRuntimeBundle(join(root, 'releases', id));
+      if (bundle.digest !== id) fail('candidate_changed');
+      if (id === original.selection.current)
+        currentUsesTerminal = 'cli' in bundle.terminal.manifest.entries;
+    }
     const checked = inventory(root, false);
+    if (currentUsesTerminal && !checked.hasTerminalLaunchers) fail('install_unknown_entry');
     if (
       checked.selection.current !== original.selection.current ||
       checked.selection.previous !== original.selection.previous ||

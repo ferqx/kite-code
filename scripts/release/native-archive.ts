@@ -273,6 +273,9 @@ export function unpackNativeBundle(input: {
   sha256: string;
   destination: string;
   maxUnpackedBytes?: number;
+  onArchiveFileChecked?: (completed: number, total: number) => void;
+  onArchiveWrite?: () => void;
+  onArchiveFileWritten?: (completed: number, total: number) => void;
 }) {
   const destination = resolve(input.destination);
   if (lstatSync(destination, { throwIfNoEntry: false })) throw Error('native_destination_exists');
@@ -288,9 +291,12 @@ export function unpackNativeBundle(input: {
     ...terminal.files.map((file) => ({ ...file, path: `terminal/${file.path}` })),
   ];
   if (files.size !== expected.length + 2) fail();
+  let checked = 0;
+  input.onArchiveFileChecked?.(0, expected.length);
   for (const file of expected) {
     const bytes = files.get(file.path);
     if (!bytes || bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
+    input.onArchiveFileChecked?.(++checked, expected.length);
   }
   const links = [
     ...manifest.links,
@@ -312,6 +318,11 @@ export function unpackNativeBundle(input: {
       parent = posix.dirname(parent);
     }
   }
+  input.onArchiveWrite?.();
+  let written = 0;
+  const onFileWritten = input.onArchiveFileWritten;
+  onFileWritten?.(0, files.size);
+  const countWritten = onFileWritten ? () => onFileWritten(++written, files.size) : undefined;
   if (process.platform === 'win32') {
     privateDirectory(dirname(destination));
     privateDirectory(destination);
@@ -326,7 +337,7 @@ export function unpackNativeBundle(input: {
     const modes = new Map(expected.map((file) => [file.path, file.mode]));
     if (process.platform === 'win32') {
       try {
-        defaultWindowsPathSecurity()!.writePrivateArtifactFiles(destination, files);
+        defaultWindowsPathSecurity()!.writePrivateArtifactFiles(destination, files, countWritten);
         windowsCreated.push(...closedWindowsTree([...files.keys()], []));
       } catch (error) {
         windowsUnknown = true;
@@ -348,6 +359,7 @@ export function unpackNativeBundle(input: {
         } finally {
           closeSync(fd);
         }
+        countWritten?.();
       }
     for (const directory of [
       ...manifest.directories,

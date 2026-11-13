@@ -29,7 +29,11 @@ export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   writePrivateFile(path: string, bytes: Uint8Array): void;
   writeScopeFile(path: string, bytes: Uint8Array): void;
   writePrivateArtifactFile(path: string, bytes: Uint8Array): void;
-  writePrivateArtifactFiles(root: string, files: ReadonlyMap<string, Uint8Array>): void;
+  writePrivateArtifactFiles(
+    root: string,
+    files: ReadonlyMap<string, Uint8Array>,
+    onFileWritten?: () => void,
+  ): void;
   copyPrivateArtifactFiles(sourceRoot: string, targetRoot: string, files: readonly string[]): void;
   copyPrivateFile(source: string, target: string): void;
   createDirectory(path: string): void;
@@ -455,6 +459,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     root: string,
     paths: readonly string[],
     provide: (path: string, output: bigint | number, held: Held[]) => void,
+    onFileWritten?: () => void,
   ) => {
     root = resolve(root);
     windowsArtifactRelativeFiles(paths);
@@ -510,6 +515,7 @@ function createNativeWindowsPathSecurity(): Implementation {
           throw Error('windows_path_security_close_failed');
         }
         held.splice(held.indexOf(entry), 1);
+        onFileWritten?.();
       }
       for (const entry of held)
         verifyHandle(
@@ -626,18 +632,23 @@ function createNativeWindowsPathSecurity(): Implementation {
         if (actual.getUint32(32, true) || actual.getUint32(36, true) !== bytes.length) fail();
       });
     },
-    writePrivateArtifactFiles(root, files) {
+    writePrivateArtifactFiles(root, files, onFileWritten) {
       const paths = windowsArtifactRelativeFiles([...files.keys()]);
       for (const path of paths) {
         const bytes = files.get(path);
         if (!(bytes instanceof Uint8Array) || bytes.length > 1024 * 1024 * 1024) fail();
       }
-      artifactBatch(root, paths, (path, output) => {
-        const bytes = files.get(path)!;
-        writeChunks(output, bytes);
-        const written = info(output);
-        if (written.getUint32(32, true) || written.getUint32(36, true) !== bytes.length) fail();
-      });
+      artifactBatch(
+        root,
+        paths,
+        (path, output) => {
+          const bytes = files.get(path)!;
+          writeChunks(output, bytes);
+          const written = info(output);
+          if (written.getUint32(32, true) || written.getUint32(36, true) !== bytes.length) fail();
+        },
+        onFileWritten,
+      );
     },
     copyPrivateArtifactFiles(sourceRoot, targetRoot, files) {
       const paths = windowsArtifactRelativeFiles(files);

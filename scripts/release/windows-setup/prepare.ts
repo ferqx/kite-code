@@ -80,6 +80,7 @@ writeFileSync(
     `constexpr wchar_t expectedCandidate[] = L"${candidateId}";`,
     `constexpr size_t runtimeOffset = ${offset};`,
     `constexpr size_t runtimeSize = ${runtime.length};`,
+    `constexpr uint64_t installedPayloadBytes = ${[...files.values()].reduce((size, file) => size + file.byteLength, 0)}ULL;`,
     '',
   ].join('\n'),
 );
@@ -91,7 +92,8 @@ const icon = resolve(import.meta.dir, '../../../apps/desktop/app-icon.ico');
 writeFileSync(
   join(work, 'maintenance.rc'),
   [
-    '#include <winres.h>',
+    '#pragma code_page(65001)',
+    '#include "location-dialog.rc"',
     `1 RT_MANIFEST ${JSON.stringify(join(import.meta.dir, 'setup.manifest'))}`,
     `10 ICON ${JSON.stringify(icon)}`,
     `105 RCDATA ${JSON.stringify(uninstall)}`,

@@ -31,7 +31,7 @@ export interface WindowsInstallationInventoryEntry {
 }
 export interface WindowsInstallationRemoval {
   verify(): void;
-  remove(): void;
+  remove(onProgress?: (completed: number, total: number) => void): void;
   release(): void;
 }
 interface WindowsRemovalEntry {
@@ -71,6 +71,7 @@ export function assertWindowsInstallationRemoval(
 export function retainWindowsInstallationRemoval(input: {
   root: string;
   inventory: readonly WindowsInstallationInventoryEntry[];
+  onFileHashed?: () => void;
 }): WindowsInstallationRemoval {
   const fail = (): never => {
     throw Error('windows_installation_removal_unknown');
@@ -290,13 +291,15 @@ export function retainWindowsInstallationRemoval(input: {
           readCount[0] !== 0
         )
           fail();
-        return hash.digest('hex');
+        const digest = hash.digest('hex');
+        input.onFileHashed?.();
+        return digest;
       },
     };
   };
   const port: WindowsInstallationRemoval = Object.freeze({
     verify,
-    remove() {
+    remove(onProgress?: (completed: number, total: number) => void) {
       if (removed) return;
       if (released) fail();
       if (!attempted) verify();
@@ -306,6 +309,8 @@ export function retainWindowsInstallationRemoval(input: {
       const entries = [...originals.values()]
         .map((entry) => ({ entry, depth: entry.relative ? entry.relative.split('/').length : 0 }))
         .sort((a, b) => b.depth - a.depth);
+      let completed = entries.filter(({ entry }) => entry.closed).length;
+      onProgress?.(completed, entries.length);
       for (const { entry } of entries) {
         if (entry.closed) continue;
         if (!entry.marked) {
@@ -318,6 +323,7 @@ export function retainWindowsInstallationRemoval(input: {
         }
         // A failed close remains owned and retryable; never reopen or delete by path.
         close(entry);
+        onProgress?.(++completed, entries.length);
       }
       if (kernel.symbols.GetFileAttributesW(ptr(wide(root))) !== 0xffffffff) fail();
       if (![2, 3].includes(kernel.symbols.GetLastError())) fail();

@@ -109,13 +109,15 @@ struct Shortcut {
   }
 };
 
-bool updateShortcut(const KNOWNFOLDERID& folder, const DesktopRegistration& desktop, bool enabled) {
+bool updateShortcut(const KNOWNFOLDERID& folder, const DesktopRegistration& desktop, bool enabled,
+                    bool existingOnly = false) {
   Shortcut shortcut(folder);
   if (!shortcut.open()) return false;
   const auto supportDirectory = supportParent(shortcut.target);
   const bool own = shortcut.kiteDescription &&
     (equals(shortcut.target, desktop.host) || !prefixFromBootstrap(shortcut.target).empty() ||
       supportHostInDirectory(shortcut.target, supportParent(supportDirectory)));
+  if (existingOnly && (!shortcut.present || !own)) return true;
   if (!enabled) return !shortcut.present || !own || DeleteFileW(shortcut.path.c_str());
   if (shortcut.present && !own) return false;
   return SUCCEEDED(shortcut.link->SetPath(desktop.host.c_str())) &&
@@ -243,9 +245,9 @@ bool registerDesktop(const DesktopRegistration& desktop, const wchar_t* version)
     setString(key.value, L"DisplayName", displayName);
 }
 
-bool applyDesktopShortcuts(const DesktopRegistration& desktop) {
+bool applyDesktopShortcuts(const DesktopRegistration& desktop, bool upgrade) {
   const bool menu = updateShortcut(FOLDERID_Programs, desktop, true);
-  const bool icon = updateShortcut(FOLDERID_Desktop, desktop, desktop.desktopShortcut);
+  const bool icon = updateShortcut(FOLDERID_Desktop, desktop, upgrade || desktop.desktopShortcut, upgrade);
   return menu && icon;
 }
 

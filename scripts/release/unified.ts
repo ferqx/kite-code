@@ -44,6 +44,7 @@ const help = `Unified Agent release tooling
 Default product: terminal. Build destinations: dist/unified-terminal and dist/unified-native.
 Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
 Native build additionally accepts --terminal <verified-terminal> and --electron <installed-dist>.
+Native defaults to the desktop runtime on macOS arm64 and Windows x64; --terminal selects a complete Terminal.
 Windows x64 desktop installer: bun run release:windows-setup.
 Terminal build accepts --sqlite-library <reviewed macOS library>; the selected library is copied into the bundle.
 Verify additionally accepts --source-commit <40-hex-commit> and --clean-source true.

@@ -20,7 +20,7 @@ quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 
 | TUI 开发 | `bun run tui:dev --workspace .` | 同一 development profile 与 Ink；`--thread <id>` 选择原 Session |
 | Desktop 开发 | `bun run desktop:dev` | 已准备 workspace 资产、已安装 Electron；检查运行时依赖加载与真实 Service 就绪，UI 热更新，Service 及其 workspace 源码变更自动重载 |
 | 只读 Web 开发 | `bun run web:dev` | 已构建 Service/Web assets、development profile 与只读 Gateway |
-| 完整 Native 候选 | `bun run release:build --product native` 后 `bun run desktop` | 验证完整 Native、内嵌 Terminal/Bun 与实际 Electron Node；不依赖旧 Vite/配套服务 |
+| Native 候选 | `bun run release:build --product native` | macOS arm64 和 Windows x64 默认构建桌面专用候选。Linux 先构建独立 Terminal。使用 `--terminal` 可显式构建组合候选，启动和 Windows 构建条件见 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装) |
 | Desktop 定向验证 | `bun run test:desktop:native` | 新 Native bundle/process/Files 的隔离实际场景，使用本地固定 Provider |
 | Native 安装生命周期 | `bun run test:desktop:window` | 新完整 Native 的源码外安装、升级、强杀、回滚与卸载；具体资格见 Native owner |
 | 默认测试 | `bun run test` | 与 `test:unified-agent` 共用精确十 workspace 和有限 root safety 计划，最多四槽；独占场景串行 |
@@ -83,7 +83,7 @@ Windows 的 `desktop:dev` 在构建／创建应用目录前执行 [Electron 权�
 
 `tui:dev`、`desktop:dev` 与正式客户端强制使用普通用户界面，测试专用调试功能不得在 dev／prod 出现。TUI 公开参数拒绝 `--test-ui-diagnostics`；自动化只能从测试目录的入口向可信 host 显式传 `testDiagnostics:true`。Desktop 开发和普通正式 renderer 的构建常量固定为 false，传入组件参数也不能开启；DOM fixture 或单独测试制品可以显式启用。共享 UI 不以 `NODE_ENV` 等环境名自动开启诊断。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
 
-`npm run agent`、`npm run tui`、`npm run desktop` 仍选择正式候选。首次运行这组命令，先执行 `npm run release:build`，再执行 `npm run release:build -- --product native` 生成 Desktop 候选。缺失候选时分别返回 `terminal_bundle_unavailable`／`native_bundle_unavailable` 和准备命令，未通过完整验证时不进入 Profile。源码变化不会自动更新候选；需要重新生成时，先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。构建不覆盖正在使用或已有的目录。
+`npm run agent` 和 `npm run tui` 选择 `npm run release:build` 生成的正式 Terminal 候选。`npm run desktop` 选择 `npm run release:build -- --product native` 生成的 Native 候选。Linux 的 Native 构建先准备 Terminal。缺失候选时返回 `terminal_bundle_unavailable` 或 `native_bundle_unavailable` 和准备命令。源码变化不会自动更新候选。重新构建前先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。
 
 2026-10-26 已删除旧 Desktop、Service、Web 及旧 Runtime/Kernel/contract 等 workspace，同时清理其独占的测试、构建和发布脚本；旧架构只保留 [apps/kite-cli](../../apps/kite-cli/README.md) 供源码阅读。其依赖闭包已删除，不再提供旧 library 导入、构建或普通启动。旧命令的拒绝行为和旧制品证据属于[删除前历史](https://github.com/ferqx/kite-code/tree/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts)，不作为当前命令列表。正式和开发入口只使用上表的新架构；删除旧源码不改变 unknown、数据保护、平台或发布门禁。
 
