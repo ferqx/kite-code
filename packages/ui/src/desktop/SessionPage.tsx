@@ -100,6 +100,10 @@ function useNavigationCallbacks(
       removeWorkspace: (id: string) => committed.current.props.actions.removeWorkspace?.(id),
       lookupWorkspaceRemoval: (id: string) =>
         committed.current.props.actions.lookupWorkspaceRemoval?.(id),
+      manageSession: (...args: Parameters<NonNullable<PageActions['manageSession']>>) =>
+        committed.current.props.actions.manageSession?.(...args),
+      lookupSessionMutation: (id: string) =>
+        committed.current.props.actions.lookupSessionMutation?.(id),
       workbench: () => committed.current.props.actions.workbench?.(),
       scheduledTasks: () => committed.current.props.actions.scheduledTasks?.(),
       settings: () => committed.current.props.actions.settings?.(),
@@ -117,6 +121,9 @@ function useNavigationCallbacks(
   const removeWorkspace = !!props.actions.removeWorkspace;
   const workspaceRemovalResults = props.actions.workspaceRemovalResults;
   const lookupWorkspaceRemoval = !!props.actions.lookupWorkspaceRemoval;
+  const manageSession = !!props.actions.manageSession;
+  const lookupSessionMutation = !!props.actions.lookupSessionMutation;
+  const { sessionMutationBusy, sessionLookupBusy, sessionMutationResults } = props.actions;
   const workbench = !!props.actions.workbench;
   const scheduledTasks = !!props.actions.scheduledTasks;
   const settings = !!props.actions.settings;
@@ -132,6 +139,11 @@ function useNavigationCallbacks(
       removeWorkspace: removeWorkspace ? callbacks.removeWorkspace : undefined,
       workspaceRemovalResults,
       lookupWorkspaceRemoval: lookupWorkspaceRemoval ? callbacks.lookupWorkspaceRemoval : undefined,
+      manageSession: manageSession ? callbacks.manageSession : undefined,
+      lookupSessionMutation: lookupSessionMutation ? callbacks.lookupSessionMutation : undefined,
+      sessionMutationBusy,
+      sessionLookupBusy,
+      sessionMutationResults,
       workbench: workbench ? callbacks.workbench : undefined,
       scheduledTasks: scheduledTasks ? callbacks.scheduledTasks : undefined,
       settings: settings ? callbacks.settings : undefined,
@@ -148,6 +160,11 @@ function useNavigationCallbacks(
       removeWorkspace,
       workspaceRemovalResults,
       lookupWorkspaceRemoval,
+      manageSession,
+      lookupSessionMutation,
+      sessionMutationBusy,
+      sessionLookupBusy,
+      sessionMutationResults,
       workbench,
       scheduledTasks,
       settings,

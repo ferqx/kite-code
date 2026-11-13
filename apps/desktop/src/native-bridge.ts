@@ -430,6 +430,8 @@ export type NativeCompressionSubmission = {
 export type NativeSessionFacts = { observationId: number; session: Session };
 export type NativeSessionSubmission = {
   kind: 'fork' | 'rename' | 'delete';
+  source?: 'directory';
+  label?: string;
   phase: 'saved' | 'submitting' | 'unknown' | 'applied' | 'failed';
   sessionId: string;
   workspaceId: string;
@@ -489,6 +491,7 @@ export type NativeFileRecoveryObservation = {
 };
 export type NativeDirectory = {
   storeId: string;
+  canManageSessions?: boolean;
   /** Main's persisted local read receipts, independent of the renderer origin. */
   readTurns?: readonly (readonly [string, string])[];
   workspaces: Workspace[];
@@ -792,6 +795,13 @@ export type NativeRequest =
   | { method: 'fileRecovery.listSaved'; generation: number }
   | { method: 'fileRecovery.close'; generation: number; readId: string }
   | { method: 'session.observe'; generation: number; sessionId: string }
+  | { method: 'session.directory.observe'; generation: number; sessionId: string }
+  | {
+      method: 'session.directory.submit';
+      generation: number;
+      observationId: number;
+      mutation: { kind: 'rename'; title: string } | { kind: 'delete' };
+    }
   | {
       method: 'session.fork' | 'session.rename';
       generation: number;
@@ -1027,6 +1037,7 @@ export type NativeResult =
   | NativeProviderSubmission
   | NativeModelSettingsSubmission
   | NativeSessionFacts
+  | { kind: 'session.directory.result'; submission: NativeSessionSubmission }
   | NativeContextFacts
   | NativeContextResultFacts
   | NativeGrantFacts

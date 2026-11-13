@@ -3,6 +3,205 @@ import path from 'node:path';
 import type { Browser } from 'playwright';
 import type {} from './session-shell-browser.fixture';
 
+export async function verifySessionRowActions(browser: Browser, url: string, artifact: string) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 740 }, colorScheme });
+    const errors: string[] = [];
+    page.on('pageerror', (cause) => errors.push(cause.message));
+    try {
+      await page.goto(`${url}?manage-sessions=1`);
+      const editor = page.locator('.composer textarea');
+      const row = (name: string) => page.getByRole('button', { name, exact: true });
+      const rowElement = (name: string) => page.locator(`.session-row[aria-label="${name}"]`);
+      const menu = (name: string) => row(`${name} 更多操作`);
+      const menuOpacity = (name: string) =>
+        page
+          .locator(`.session-more[aria-label="${name} 更多操作"]`)
+          .evaluate((node) => Number(getComputedStyle(node.parentElement!).opacity));
+      const open = async (name: string, action: string) => {
+        await row(name).hover();
+        await menu(name).click();
+        await page.getByRole('menuitem', { name: action, exact: true }).click();
+      };
+      const pending = (phase: string) =>
+        page.waitForFunction((phase) => window.sessionShellFixture.pending(phase) === 1, phase);
+      const release = (phase: string) =>
+        page.evaluate((phase) => window.sessionShellFixture.release(phase), phase);
+      const frame = page.locator('.session-header');
+      await page.getByText('Reply a', { exact: true }).waitFor();
+      await editor.fill('Keep this draft');
+      await page.mouse.move(700, 300);
+      assert.equal(await menuOpacity('Session A'), 0);
+      assert.equal(await menuOpacity('Session B'), 0);
+      await row('Session B').hover();
+      assert.equal(await menuOpacity('Session A'), 0);
+      assert.equal(await menuOpacity('Session B'), 1);
+      await menu('Session B').click();
+      const panel = page.locator('.session-menu[role="menu"]');
+      await panel.waitFor();
+      await page.mouse.move(700, 300);
+      assert.equal(await menuOpacity('Session B'), 1);
+      await page.keyboard.press('Escape');
+      await panel.waitFor({ state: 'hidden' });
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute('aria-label') === 'Session B 更多操作',
+      );
+      assert.equal(await menuOpacity('Session B'), 0);
+      await row('Session A').focus();
+      await page.keyboard.press('ArrowDown');
+      assert.equal(
+        await row('Session B').evaluate((node) => node === document.activeElement),
+        true,
+      );
+      await page.keyboard.press('Tab');
+      assert.equal(
+        await menu('Session B').evaluate((node) => node === document.activeElement),
+        true,
+      );
+      await page.keyboard.press('Enter');
+      await panel.waitFor();
+      assert.deepEqual(await panel.getByRole('menuitem').allTextContents(), ['重命名', '删除']);
+      assert.equal(await rowElement('Session A').getAttribute('aria-current'), 'page');
+      assert.equal(await panel.evaluate((node) => getComputedStyle(node).borderRadius), '16px');
+      await page.screenshot({ path: path.join(artifact, `session-menu-${colorScheme}.png`) });
+
+      await page.evaluate(() => {
+        window.sessionShellFixture.hold();
+        const current = document.querySelector('.composer textarea');
+        const mutations = {
+          frames: [] as { a: boolean; draft: string; same: boolean }[],
+          done: false,
+        };
+        Reflect.set(window, 'sessionFrames', mutations);
+        const sample = () => {
+          if (mutations.done) return;
+          const editor = document.querySelector<HTMLTextAreaElement>('.composer textarea');
+          mutations.frames.push({
+            a: !!document.querySelector('[aria-label="Session A"][aria-current="page"]'),
+            draft: editor?.value ?? '',
+            same: current === editor,
+          });
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      await panel.getByRole('menuitem', { name: '重命名' }).press('Enter');
+      const rename = page.getByRole('dialog', { name: '重命名会话' });
+      const title = rename.getByRole('textbox', { name: '会话名称' });
+      await pending('session-observation');
+      assert.equal(await rename.getByRole('button', { name: '保存' }).isDisabled(), true);
+      assert.equal(await title.evaluate((node) => node === document.activeElement), true);
+      await release('session-observation');
+      await page.waitForFunction(
+        () =>
+          document.querySelector<HTMLInputElement>('[aria-label="会话名称"]')?.value ===
+          'Session B',
+      );
+      await title.fill('Renamed B');
+      await title.press('Enter');
+      await pending('session-mutation');
+      await rename.getByRole('button', { name: '保存中…' }).waitFor();
+      assert.equal(await rowElement('Session B').count(), 1);
+      await page.keyboard.press('Escape');
+      assert.equal(await rename.isVisible(), true);
+      await release('session-mutation');
+      await row('Renamed B').waitFor();
+      await rename.waitFor({ state: 'hidden' });
+
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await open('Renamed B', '删除');
+      const remove = page.getByRole('dialog', { name: '删除会话？' });
+      await remove.getByText(/Renamed B/).waitFor();
+      assert.equal(
+        await remove
+          .getByRole('button', { name: '取消' })
+          .evaluate((node) => node === document.activeElement),
+        true,
+      );
+      await remove.getByRole('button', { name: '取消' }).click();
+      await remove.waitFor({ state: 'hidden' });
+      assert.equal(await rowElement('Renamed B').count(), 1);
+
+      await page.evaluate(() => {
+        window.sessionShellFixture.hold();
+        window.sessionShellFixture.loseNextSessionReceipt();
+      });
+      await open('Renamed B', '删除');
+      await pending('session-observation');
+      await release('session-observation');
+      await remove.getByRole('button', { name: '删除', exact: true }).click();
+      await pending('session-mutation');
+      assert.equal(await rowElement('Renamed B').count(), 1);
+      await release('session-mutation');
+      await remove.waitFor({ state: 'hidden' });
+      await row('Renamed B').waitFor({ state: 'hidden' });
+      const lookup = row('查询会话操作结果');
+      await lookup.waitFor();
+      await lookup.click();
+      await page.getByRole('menuitem', { name: '删除 · Renamed B' }).click();
+      await pending('session-lookup');
+      await release('session-lookup');
+      await lookup.waitFor({ state: 'hidden' });
+      const observed = await page.evaluate(() => {
+        const sample = Reflect.get(window, 'sessionFrames');
+        sample.done = true;
+        return {
+          frames: sample.frames as { a: boolean; draft: string; same: boolean }[],
+          requests: window.sessionShellFixture.requests,
+        };
+      });
+      assert.ok(observed.frames.length > 10);
+      assert.ok(
+        observed.frames.every(({ a, draft, same }) => a && draft === 'Keep this draft' && same),
+      );
+      assert.equal(observed.requests.filter(({ method }) => method === 'select').length, 0);
+      assert.equal(
+        observed.requests.filter(({ method }) => method === 'session.directory.submit').length,
+        2,
+      );
+      const lookupRequest = observed.requests.find(
+        ({ method }) => method === 'lookupSessionMutation',
+      );
+      const deleteRequest = observed.requests.find(
+        (request) =>
+          request.method === 'session.directory.submit' && request.mutation.kind === 'delete',
+      );
+      assert.equal(
+        lookupRequest?.method === 'lookupSessionMutation' ? lookupRequest.commandId : undefined,
+        deleteRequest && 'observationId' in deleteRequest
+          ? `session-command-${deleteRequest.observationId}`
+          : undefined,
+      );
+
+      await page.evaluate(() => window.sessionShellFixture.resume());
+      await open('Session A', '重命名');
+      await page.evaluate(() => window.sessionShellFixture.withdraw());
+      await rename.getByText('会话暂不可用，等待连接恢复。').waitFor();
+      await title.fill('Discard while disconnected');
+      assert.equal(await rename.getByRole('button', { name: '重新核对' }).isDisabled(), true);
+      await page.evaluate(() => window.sessionShellFixture.restoreConnection());
+      await rename.getByText('会话暂不可用，等待连接恢复。').waitFor({ state: 'hidden' });
+      await rename.getByRole('button', { name: '重新核对' }).click();
+      await rename.getByRole('button', { name: '保存' }).waitFor();
+      assert.equal(await title.inputValue(), 'Discard while disconnected');
+      await page.keyboard.press('Escape');
+      assert.equal(await editor.inputValue(), 'Keep this draft');
+      await open('Session A', '删除');
+      await remove.getByRole('button', { name: '删除', exact: true }).waitFor();
+      await page.screenshot({ path: path.join(artifact, `session-delete-${colorScheme}.png`) });
+      await remove.getByRole('button', { name: '删除', exact: true }).click();
+      await frame.getByText('新对话', { exact: true }).waitFor();
+      await page.locator('.new-conversation-page').waitFor();
+      await row('Session A').waitFor({ state: 'hidden' });
+      assert.equal(await page.getByText('Reply a', { exact: true }).count(), 0);
+      assert.deepEqual(errors, []);
+    } finally {
+      await page.close();
+    }
+  }
+  return { sessionRowActions: ['light', 'dark'] };
+}
+
 /** Exercise Native pending transitions with actual Sidebar controls and production CSS. */
 export async function verifySidebarActions(browser: Browser, url: string, artifact: string) {
   const cases = [];

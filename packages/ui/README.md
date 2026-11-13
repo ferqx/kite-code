@@ -353,6 +353,8 @@ Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发�
 
 `@kite-ai/ui/desktop` 的 [SessionPage](src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer、RightSidebar 与 shadcn 控件从原 kite-client-ui 展示源码迁入，保留原 CSS、交互和依赖版本；[样式导出](src/desktop/style.css)供正式 Native 的原 Vite/Tailwind 管线编译。此层不导入旧 workspace 或 Runtime，事实映射和写入 authority 属 [Desktop host](../../apps/desktop/README.md#复用原桌面展示层)。
 
+[Sidebar](src/desktop/Sidebar.tsx) 的会话行通过宿主回调提供“…”浮层，阅读与菜单为同一行内的独立按钮，列表箭头仍在会话行之间移动。菜单与空间栏的原操作查询将用户选择传给 Native，目录身份、会话修订和回执由 [Desktop owner](../../apps/desktop/README.md) 核对。
+
 桌面圆角在[共享样式](src/desktop/style.css)统一定义：面板、卡片、列表、菜单和提示框消费 `--radius: 16px`，输入框消费 `--input-radius: 16px`，普通文字按钮、图标按钮和菜单项消费 `--button-radius: 8px`。Composer 仅在内部实际 `button` 节点上将 `--button-radius` 设为 `9999px`，形成随高度夹紧的胶囊形；非 Portal 权限菜单的菜单项仍为8px。Tailwind 的 `--radius-xs` 到 `--radius-4xl` 仍作为面板圆角的别名，控件按自身用途引用对应变量。圆形控件、滚动条、调宽把手保留圆形或胶囊轮廓，拼接内侧和全屏容器保留必要的直角；Native 设置样式、Mica 面板及正文排版共用这些变量。调整只改外观，不增加请求、写入或阅读权限；实际编译后的值和窗口验证归 [Native owner](../../apps/desktop/README.md#统一桌面圆角)。
 
 同一共享样式的 `--resize-handle-width: 1px` 管理调宽线。导航分隔以该值占位，收起时归零；阅读区与右侧工具之间的分隔始终不占布局宽度，以伪元素覆盖接缝，保留原命中区、把手和键盘操作，避免右栏开合改变共同外框的可分配宽度。Native Mica 以导航分隔和内容留白计算玻璃导航的外侧间距，具体视觉边界与实窗证据由 [Native owner](../../apps/desktop/README.md#玻璃导航间距)维护。

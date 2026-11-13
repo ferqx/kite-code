@@ -72,6 +72,7 @@ import type {
   NativeGrantFacts,
   NativeRequest,
   NativeResult,
+  NativeSessionSubmission,
   NativeState,
 } from './native-bridge';
 import type { NativeBrowserBridge } from './native-browser-bridge';
@@ -93,6 +94,10 @@ import {
   NativeDiagnosticsProvider,
   useNativeDiagnostics,
 } from './native-diagnostics';
+import {
+  type DirectorySessionDialog,
+  NativeDirectorySessionDialog,
+} from './native-directory-session-dialog';
 import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
 import { nativeExecutionObservation } from './native-execution-observation';
@@ -262,6 +267,30 @@ type CachedComposer = NativeModelDisplay & {
   contextUsage?: NonNullable<SessionPageProps['composer']>['contextUsage'];
 };
 
+type DirectorySessionTarget = {
+  generation: number;
+  epoch: number;
+  storeId: string;
+  sessionId: string;
+  workspaceId: string;
+};
+
+function directorySessionError(code?: string) {
+  switch (code) {
+    case 'session_observation_changed':
+    case 'native_selection_changed':
+    case 'session_scope_mismatch':
+    case 'session_revision_changed':
+      return '会话状态已变化，请重新核对。';
+    case 'session_mutation_pending':
+      return '请先查询上一项会话操作的结果。';
+    case 'permission_denied':
+      return '当前用户无权修改此会话。';
+    default:
+      return '暂时无法完成会话操作，请重新核对。';
+  }
+}
+
 // Match NativeHistory's observation identity, not its changing view revision.
 function nativeHistoryScope(state: NativeState | undefined): string | undefined {
   const selection = state?.selection;
@@ -403,6 +432,11 @@ function NativeDesktopContent({
   >(undefined);
   const [directory, setDirectory] = useState<NativeDirectory>();
   const [directoryProjection] = useState(() => new NativeDirectoryProjection());
+  const [sessionDialog, setSessionDialog] = useState<DirectorySessionDialog>();
+  const sessionDialogTarget = useRef<DirectorySessionTarget | undefined>(undefined);
+  const sessionDialogTrigger = useRef<HTMLButtonElement | null>(null);
+  const sessionMutationFlight = useRef(false);
+  const [sessionMutationPending, setSessionMutationPending] = useState(false);
   const [worktreeExitPending, setWorktreeExitPending] = useState(false);
   const worktreeExitRead = useRef<object | undefined>(undefined);
   const [worktreeExitNotice, setWorktreeExitNotice] = useState<{
@@ -541,6 +575,17 @@ function NativeDesktopContent({
       ),
     [state?.workspaceRemovalSubmissions],
   );
+  const sessionMutationResults = useMemo(
+    () =>
+      state?.sessionSubmissions?.flatMap(({ source, kind, phase, intent, label }) =>
+        source === 'directory' &&
+        phase === 'unknown' &&
+        intent.expectedStoreId === directory?.storeId
+          ? [{ id: intent.commandId, label: `${kind === 'rename' ? '重命名' : '删除'} · ${label}` }]
+          : [],
+      ),
+    [state?.sessionSubmissions, directory?.storeId],
+  );
   const [failedReads, setFailedReads] = useState<{
     state?: string;
     directory?: string;
@@ -598,6 +643,8 @@ function NativeDesktopContent({
   const rememberLatestDraft = useRef<() => void>(() => {});
   rememberLatestDraft.current = rememberDraft;
   const selected = useRef<string | undefined>(undefined);
+  const acceptRemovedSelection = useRef(finishRemovedSelection);
+  acceptRemovedSelection.current = finishRemovedSelection;
   const parentHistoryVisible = useRef(true);
   type StateReadIntent = { current: number; nonce: number; epoch: number };
   type QueuedStateRead = {
@@ -657,11 +704,34 @@ function NativeDesktopContent({
       setStartup('ready');
     }
   }
+  function finishRemovedSelection(value: NativeState) {
+    const leaving = selected.current;
+    if (!leaving || !value.directory || value.selection?.session.id === leaving) return;
+    const removed = value.sessionSubmissions?.find(
+      (entry) =>
+        entry.source === 'directory' &&
+        entry.kind === 'delete' &&
+        entry.phase === 'applied' &&
+        entry.sessionId === leaving &&
+        entry.intent.expectedStoreId === value.directory?.storeId,
+    );
+    if (!removed) return;
+    if (!preparing && !scheduledTasksView) prepareConversation(removed.workspaceId);
+    else rememberDraft();
+    selected.current = undefined;
+    viewIntent.current++;
+    selectionRead.current = undefined;
+    history.current?.close();
+    setMessages([]);
+    setPreparedModels(undefined);
+    setDraft('');
+  }
   function apply(
     result: NativeResult,
     preparedView?: { draft: string; models?: NativePreparedModels },
   ) {
     if (result && 'generation' in result && result.generation === generation.current) {
+      acceptRemovedSelection.current(result);
       const reading = selectionRead.current;
       const hold = reading?.holdPresentation && result.selection?.session.id === reading.sessionId;
       if (reading?.holdPresentation) reading.latest = result;
@@ -2353,6 +2423,174 @@ function NativeDesktopContent({
     if (generation.current !== current) return;
     await acceptWorkspaceRemoval(value).catch(() => {});
     await refresh().catch(() => {});
+  }
+  const isCurrentSessionDialog = (target: DirectorySessionTarget) =>
+    sessionDialogTarget.current === target && isCurrentRead(target.generation, target.epoch);
+
+  function closeSessionDialog() {
+    sessionDialogTarget.current = undefined;
+    setSessionDialog(undefined);
+  }
+  useEffect(() => {
+    const target = sessionDialogTarget.current;
+    if (
+      target &&
+      (state?.generation !== target.generation || directory?.storeId !== target.storeId)
+    ) {
+      sessionDialogTarget.current = undefined;
+      setSessionDialog(undefined);
+    } else if (target && directory?.unavailable && !sessionMutationFlight.current) {
+      sessionDialogTarget.current = { ...target };
+      setSessionDialog(
+        (dialog) => dialog && { ...dialog, facts: undefined, error: '请重新核对会话。' },
+      );
+    }
+  }, [state?.generation, directory?.storeId, directory?.unavailable]);
+
+  async function observeDirectorySession(target: DirectorySessionTarget) {
+    setSessionDialog((dialog) => dialog && { ...dialog, facts: undefined, error: undefined });
+    try {
+      const facts = await bridge.request({
+        method: 'session.directory.observe',
+        generation: target.generation,
+        sessionId: target.sessionId,
+      });
+      if (!isCurrentSessionDialog(target)) return;
+      if (
+        !facts ||
+        !('observationId' in facts) ||
+        !('session' in facts) ||
+        facts.session.id !== target.sessionId ||
+        facts.session.workspaceId !== target.workspaceId ||
+        facts.session.parentSessionId !== null ||
+        facts.session.deletedAt !== null
+      )
+        throw Error('session_scope_mismatch');
+      setSessionDialog((dialog) => dialog && { ...dialog, facts });
+    } catch (cause) {
+      if (isCurrentSessionDialog(target))
+        setSessionDialog(
+          (dialog) =>
+            dialog && {
+              ...dialog,
+              error: directorySessionError(
+                (cause as { code?: string })?.code ?? (cause as Error)?.message,
+              ),
+            },
+        );
+    }
+  }
+
+  function openSessionDialog(
+    sessionId: string,
+    kind: DirectorySessionDialog['kind'],
+    trigger: HTMLButtonElement,
+  ) {
+    if (
+      sessionDialogTarget.current ||
+      sessionMutationFlight.current ||
+      !directory ||
+      directory.unavailable
+    )
+      return;
+    const row = directory.sessions.find((entry) => entry.id === sessionId);
+    if (!row || row.parentSessionId !== null || row.deletedAt !== null) return;
+    const target = {
+      generation: generation.current,
+      epoch: readLifecycle.current.epoch,
+      storeId: directory.storeId,
+      sessionId,
+      workspaceId: row.workspaceId,
+    };
+    sessionDialogTarget.current = target;
+    sessionDialogTrigger.current = trigger;
+    showOperationMessage();
+    setSessionDialog({ kind, label: row.title || '新对话' });
+    void observeDirectorySession(target);
+  }
+
+  function showSessionMutationResult(submission: NativeSessionSubmission) {
+    if (submission.phase === 'applied')
+      showOperationMessage(submission.kind === 'rename' ? '会话已重命名。' : '已请求删除会话。');
+    else if (submission.phase === 'unknown')
+      showOperationMessage('会话操作结果待确认。请从空间栏查询结果。');
+    else if (submission.phase === 'failed')
+      showOperationMessage(directorySessionError(submission.error));
+  }
+
+  async function submitDirectorySession(title: string) {
+    const target = sessionDialogTarget.current;
+    if (
+      !target ||
+      !isCurrentSessionDialog(target) ||
+      directory?.storeId !== target.storeId ||
+      !sessionDialog?.facts ||
+      sessionMutationFlight.current
+    )
+      return;
+    sessionMutationFlight.current = true;
+    setSessionMutationPending(true);
+    try {
+      const result = await bridge.request({
+        method: 'session.directory.submit',
+        generation: target.generation,
+        observationId: sessionDialog.facts.observationId,
+        mutation: sessionDialog.kind === 'rename' ? { kind: 'rename', title } : { kind: 'delete' },
+      });
+      if (!isCurrentSessionDialog(target)) return;
+      if (
+        !result ||
+        !('submission' in result) ||
+        result.kind !== 'session.directory.result' ||
+        result.submission.sessionId !== target.sessionId ||
+        result.submission.workspaceId !== target.workspaceId ||
+        result.submission.intent.expectedStoreId !== target.storeId
+      )
+        throw Error('session_result_unavailable');
+      const { submission } = result;
+      if (submission.phase === 'failed') {
+        setSessionDialog(
+          (dialog) => dialog && { ...dialog, error: directorySessionError(submission.error) },
+        );
+      } else {
+        closeSessionDialog();
+        showSessionMutationResult(submission);
+      }
+    } catch (cause) {
+      if (!isCurrentSessionDialog(target)) return;
+      const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
+      setSessionDialog((dialog) => dialog && { ...dialog, error: directorySessionError(code) });
+    } finally {
+      await refresh().catch(() => {});
+      sessionMutationFlight.current = false;
+      setSessionMutationPending(false);
+    }
+  }
+
+  async function lookupDirectorySessionMutation(commandId: string) {
+    if (sessionMutationFlight.current) return;
+    const current = generation.current,
+      epoch = readLifecycle.current.epoch;
+    sessionMutationFlight.current = true;
+    setSessionMutationPending(true);
+    try {
+      const result = await bridge.request({
+        method: 'lookupSessionMutation',
+        generation: current,
+        commandId,
+      });
+      if (!isCurrentRead(current, epoch)) return;
+      if (result && 'submission' in result && result.kind === 'session.directory.result') {
+        showSessionMutationResult(result.submission);
+      }
+    } catch {
+      if (isCurrentRead(current, epoch))
+        showOperationMessage('会话操作结果仍未确认，可以稍后查询。');
+    } finally {
+      await refresh().catch(() => {});
+      sessionMutationFlight.current = false;
+      setSessionMutationPending(false);
+    }
   }
   async function addWorkspace() {
     if (!bridge) return;
@@ -4878,7 +5116,7 @@ function NativeDesktopContent({
       .some((note) => note.status !== 'ready') ||
     (firstSubmission?.creation.sessionId === selection.session.id &&
       firstSubmission.result?.phase === 'unknown');
-  return windowFrame(
+  const sessionPage = (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
       covered={settingsOpen}
@@ -5226,6 +5464,16 @@ function NativeDesktopContent({
           ? undefined
           : (id) => void report(() => removeWorkspace(id), true, '移除空间'),
         workspaceRemovalResults,
+        manageSession: directory?.canManageSessions ? openSessionDialog : undefined,
+        sessionMutationBusy:
+          !!directory?.unavailable ||
+          sessionMutationPending ||
+          !!state?.sessionSubmissions?.some(({ phase }) =>
+            ['saved', 'submitting', 'unknown'].includes(phase),
+          ),
+        sessionMutationResults,
+        sessionLookupBusy: sessionMutationPending,
+        lookupSessionMutation: (commandId) => void lookupDirectorySessionMutation(commandId),
         lookupWorkspaceRemoval: (commandId) =>
           void report(() => lookupWorkspaceRemoval(commandId), true, '查询移除结果'),
         settings: () => setSettingsOpen(true),
@@ -6063,6 +6311,32 @@ function NativeDesktopContent({
           </DialogContent>
         </Dialog>
       }
-    />,
+    />
+  );
+  return windowFrame(
+    <>
+      {sessionPage}
+      {sessionDialog && (
+        <NativeDirectorySessionDialog
+          dialog={sessionDialog}
+          pending={sessionMutationPending}
+          observeAvailable={!!directory && !directory.unavailable}
+          onClose={closeSessionDialog}
+          returnFocus={() => {
+            const trigger = sessionDialogTrigger.current;
+            if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+            else
+              document
+                .querySelector<HTMLButtonElement>('.primary-navigation .new-session')
+                ?.focus();
+          }}
+          onObserve={() => {
+            const target = sessionDialogTarget.current;
+            if (target) void observeDirectorySession(target);
+          }}
+          onSubmit={(title) => void submitDirectorySession(title)}
+        />
+      )}
+    </>,
   );
 }

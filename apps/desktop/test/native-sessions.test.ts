@@ -170,4 +170,83 @@ test('Native Session IPC does not accept renderer command/Store/revision authori
   expect(() =>
     decodeNativeRequest({ method: 'session.rename', generation: 1, observationId: 3, title: ' ' }),
   ).toThrow('invalid_native_request');
+  const directoryRequest = {
+    method: 'session.directory.submit',
+    generation: 1,
+    observationId: 3,
+    mutation: { kind: 'delete' },
+  } as const;
+  expect(decodeNativeRequest(directoryRequest)).toEqual(directoryRequest);
+  expect(() => decodeNativeRequest({ ...directoryRequest, mutation: { kind: 'fork' } })).toThrow(
+    'invalid_native_request',
+  );
+  expect(() =>
+    decodeNativeRequest({ ...directoryRequest, mutation: { kind: 'delete', sessionId: 'other' } }),
+  ).toThrow('invalid_native_request');
+});
+
+test('Native directory mutations bind to the observed row, independent of later conversation selection', async () => {
+  const row = { ...session, id: 'other', rootSessionId: 'other' };
+  let directoryEpoch = 1,
+    scope = { generation: 1, selection: 1, storeId: 'store', sessionId: 's' },
+    observedRow = row;
+  const posts: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['sessions'] },
+    getView: async (id: string) => ({
+      storeId: 'store',
+      session: id === row.id ? observedRow : session,
+    }),
+    async renameSession(id: string, input: Parameters<AgentClient['renameSession']>[1]) {
+      posts.push(id);
+      const updated = { ...observedRow, title: input.title, controlRevision: '5' };
+      observedRow = updated;
+      return {
+        command: {
+          id: input.commandId,
+          originStoreId: 'store',
+          sessionId: id,
+          kind: 'session.rename',
+          status: 'applied',
+          receipt: { outcome: 'renamed', session: updated },
+        },
+      };
+    },
+  } as unknown as AgentClient;
+  const host = new NativeSessionManagement(
+    client,
+    () => scope,
+    () => {},
+    (id) =>
+      id === row.id
+        ? { ...scope, selection: directoryEpoch, sessionId: id, workspaceId: row.workspaceId }
+        : undefined,
+  );
+  await expect(host.observe('missing', 'directory')).rejects.toThrow('native_selection_changed');
+  const first = await host.observe(row.id, 'directory');
+  expect(() => host.submit(first.observationId, 'delete')).toThrow('session_observation_changed');
+  directoryEpoch++;
+  await expect(host.submitDirectory(first.observationId, 'delete')).rejects.toThrow(
+    'session_observation_changed',
+  );
+  const fresh = await host.observe(row.id, 'directory');
+  await host.observe(session.id);
+  scope = { ...scope, sessionId: 'another', selection: 2 };
+  host.release();
+  expect(await host.submitDirectory(fresh.observationId, 'rename', 'New name')).toMatchObject({
+    source: 'directory',
+    phase: 'applied',
+    sessionId: row.id,
+    session: { title: 'New name' },
+  });
+  await expect(host.submitDirectory(fresh.observationId, 'delete')).rejects.toThrow(
+    'session_intent_consumed',
+  );
+  const stale = await host.observe(row.id, 'directory');
+  observedRow = { ...observedRow, controlRevision: '6' };
+  expect(await host.submitDirectory(stale.observationId, 'delete')).toMatchObject({
+    phase: 'failed',
+    error: 'session_observation_changed',
+  });
+  expect(posts).toEqual([row.id]);
 });

@@ -4168,6 +4168,109 @@ test('a stopped-target code during receipt verification GET does not reject an a
   expect(data.callers()[0]!.phase).toBe('unknown');
 });
 
+test('Native directory writes preserve the selected view and only retire a confirmed deleted selection', async () => {
+  const connection = client();
+  connection.serverInfo!.capabilities.push('sessions');
+  const getView = connection.getView.bind(connection);
+  const rows = new Map(
+    await Promise.all(['a', 'b'].map(async (id) => [id, (await getView(id)).session] as const)),
+  );
+  let lostReceipt: Command | undefined;
+  const writes: string[] = [];
+  connection.listAllSessions = async () => [...rows.values()].filter((row) => !row.deletedAt);
+  connection.getView = async (id) => ({ ...(await getView(id)), session: rows.get(id)! });
+  connection.renameSession = async (id, request) => {
+    writes.push(`rename:${id}`);
+    const updated = { ...rows.get(id)!, title: request.title, controlRevision: '1' };
+    rows.set(id, updated);
+    return {
+      session: updated,
+      command: {
+        id: request.commandId,
+        originStoreId: 'store',
+        sessionId: id,
+        kind: 'session.rename',
+        status: 'applied',
+        cancelRequestedAt: null,
+        receipt: { outcome: 'renamed', session: updated },
+      } as Command,
+    };
+  };
+  connection.deleteSession = async (id, request) => {
+    writes.push(`delete:${id}`);
+    const updated = { ...rows.get(id)!, deletedAt: 1, controlRevision: '1' };
+    rows.set(id, updated);
+    lostReceipt = {
+      id: request.commandId,
+      originStoreId: 'store',
+      sessionId: id,
+      kind: 'session.delete',
+      status: 'applied',
+      cancelRequestedAt: null,
+      receipt: { outcome: 'delete_requested', stopConfirmed: false, session: updated },
+    } as Command;
+    throw new ClientError('network_outcome_unknown');
+  };
+  connection.getCommand = async (id) => {
+    if (!lostReceipt) throw Error('missing delete receipt');
+    expect(id).toBe(lostReceipt.id);
+    return lostReceipt;
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'directory', generation });
+    const selected = (await caller.invoke({
+      method: 'select',
+      generation,
+      sessionId: 'a',
+    })) as NativeState;
+    const submit = async (
+      sessionId: string,
+      mutation: Extract<NativeRequest, { method: 'session.directory.submit' }>['mutation'],
+    ) => {
+      const facts = await caller.invoke({
+        method: 'session.directory.observe',
+        generation,
+        sessionId,
+      });
+      if (!facts || !('observationId' in facts)) throw Error('missing directory observation');
+      return caller.invoke({
+        method: 'session.directory.submit',
+        generation,
+        observationId: facts.observationId,
+        mutation,
+      });
+    };
+    expect(await submit('b', { kind: 'rename', title: 'Renamed B' })).toMatchObject({
+      submission: { phase: 'applied', sessionId: 'b' },
+    });
+    expect(caller.state().selection).toMatchObject({
+      session: { id: 'a' },
+      viewSelection: selected.selection?.viewSelection,
+    });
+    expect(caller.state().directory?.sessions.find(({ id }) => id === 'b')?.title).toBe(
+      'Renamed B',
+    );
+    expect(await submit('a', { kind: 'delete' })).toMatchObject({
+      submission: { phase: 'unknown', sessionId: 'a' },
+    });
+    expect(caller.state().selection?.session.id).toBe('a');
+    expect(
+      await caller.invoke({
+        method: 'lookupSessionMutation',
+        generation,
+        commandId: lostReceipt!.id,
+      }),
+    ).toMatchObject({ submission: { phase: 'applied', stopConfirmed: false } });
+    expect(caller.state().selection).toBeUndefined();
+    expect(caller.state().directory?.sessions.map(({ id }) => id)).toEqual(['b']);
+    expect(writes).toEqual(['rename:b', 'delete:a']);
+  } finally {
+    await caller.close();
+  }
+});
+
 test('Native settings rejects legacy Session/project MCP management before reading a Session or dispatching effects', async () => {
   const connection = client(),
     caller = new NativeCaller(connection, () => {}, memoryPrivateData());

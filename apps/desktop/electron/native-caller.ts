@@ -25,6 +25,7 @@ import type {
   NativeExecutionObservation,
   NativeRequest,
   NativeResult,
+  NativeSessionSubmission,
   NativeState,
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
@@ -640,7 +641,38 @@ export class NativeCaller {
     );
     this.fileRecovery = new NativeFileRecovery(client, current, () => this.changed(), privateData);
     this.recovery = new NativeRecovery(client, current, () => this.changed(), privateData);
-    this.sessions = new NativeSessionManagement(client, current, () => this.changed());
+    this.sessions = new NativeSessionManagement(
+      client,
+      current,
+      () => this.changed(),
+      (sessionId) => {
+        const storeId = client.serverInfo?.storeId;
+        if (
+          this.closed ||
+          !this.directoryEnabled ||
+          this.observationUnavailable ||
+          this.directoryUnavailable ||
+          !storeId ||
+          this.directory?.storeId !== storeId
+        )
+          return undefined;
+        const row = this.directory.sessions.find(
+          (session) =>
+            session.id === sessionId &&
+            session.parentSessionId === null &&
+            session.deletedAt === null,
+        );
+        return row
+          ? {
+              generation: this.generation,
+              selection: this.directoryEpoch,
+              storeId,
+              sessionId,
+              workspaceId: row.workspaceId,
+            }
+          : undefined;
+      },
+    );
     this.inputReads = new NativeModelOutputReads(client, current, 'modelInput');
     this.grants = new NativePermissionGrants(
       client,
@@ -767,6 +799,7 @@ export class NativeCaller {
   }
   private invalidateDirectory(clear = false) {
     this.directoryEpoch++;
+    this.sessions.release('directory');
     this.directoryRead?.abort.abort();
     this.directoryRead = undefined;
     this.directoryRefreshing = undefined;
@@ -814,7 +847,12 @@ export class NativeCaller {
       abort.signal.throwIfAborted();
       if (epoch !== this.directoryEpoch || this.client.serverInfo?.storeId !== storeId)
         throw new ClientError('directory_identity_conflict');
-      this.directory = { storeId, workspaces, sessions };
+      this.directory = {
+        storeId,
+        workspaces,
+        sessions,
+        canManageSessions: this.client.serverInfo!.capabilities.includes('sessions'),
+      };
       this.directoryUnavailable = false;
       this.workspaceObservation = { generation, storeId, workspaces };
       return this.directory;
@@ -1629,6 +1667,9 @@ export class NativeCaller {
         'select',
         'detach',
         'workspace.removal.lookup',
+        'session.directory.observe',
+        'session.directory.submit',
+        'lookupSessionMutation',
         'messages.close',
         'modelInputs.close',
         'modelOutput.close',
@@ -2193,6 +2234,21 @@ export class NativeCaller {
       case 'session.observe':
         result = await this.sessions.observe(request.sessionId);
         break;
+      case 'session.directory.observe':
+        result = await this.sessions.observe(request.sessionId, 'directory');
+        break;
+      case 'session.directory.submit': {
+        const mutation = request.mutation;
+        const submission = await this.sessions.submitDirectory(
+          request.observationId,
+          mutation.kind,
+          mutation.kind === 'rename' ? mutation.title : undefined,
+        );
+        this.assertGeneration(generation);
+        this.acceptDirectorySessionMutation(submission);
+        result = { kind: 'session.directory.result', submission };
+        break;
+      }
       case 'session.fork':
       case 'session.rename':
       case 'session.delete':
@@ -2208,9 +2264,16 @@ export class NativeCaller {
           'title' in request ? request.title : undefined,
         );
         break;
-      case 'lookupSessionMutation':
+      case 'lookupSessionMutation': {
         result = await this.sessions.lookup(request.commandId);
+        this.assertGeneration(generation);
+        const submission = this.sessions.directorySubmission(request.commandId);
+        if (submission) {
+          this.acceptDirectorySessionMutation(submission);
+          result = { kind: 'session.directory.result', submission };
+        }
         break;
+      }
       case 'recovery.prepare':
         result = await this.recovery.prepare(request.kind, request.targetId, request.readId);
         break;
@@ -3152,6 +3215,51 @@ export class NativeCaller {
       this.selection++;
     }
     this.invalidateDirectory();
+    this.changed();
+  }
+  private acceptDirectorySessionMutation(result: NativeSessionSubmission) {
+    if (
+      result.phase !== 'applied' ||
+      !result.session ||
+      result.intent.expectedStoreId !== this.client.serverInfo?.storeId
+    )
+      return;
+    const receipt = result.session;
+    const directory = this.directory;
+    if (directory?.storeId === result.intent.expectedStoreId) {
+      const row = directory.sessions.find(({ id }) => id === receipt.id);
+      if (row && BigInt(row.controlRevision) <= BigInt(receipt.controlRevision)) {
+        // Retire directory reads that might still return the pre-mutation row.
+        this.directoryEpoch++;
+        this.directoryRead?.abort.abort();
+        this.directoryRead = undefined;
+        this.directory = {
+          ...directory,
+          sessions:
+            result.kind === 'delete'
+              ? directory.sessions.filter(({ id }) => id !== receipt.id)
+              : directory.sessions.map((item) =>
+                  item === row
+                    ? { ...item, title: receipt.title, controlRevision: receipt.controlRevision }
+                    : item,
+                ),
+        };
+      }
+    }
+    const selectionRemoved = result.kind === 'delete' && result.sessionId === this.selected;
+    if (selectionRemoved) {
+      this.releaseReads(false);
+      this.controller.resetObservation();
+      this.selected = undefined;
+      this.lastView = undefined;
+      this.contextWorkspace = undefined;
+      this.permissionUnavailable = true;
+      this.selection++;
+    }
+    this.scheduleDirectoryRefresh();
+    // Keep title refresh independent of history and of the mutation response.
+    if (result.kind === 'rename' && this.selected === result.sessionId && this.observer)
+      this.scheduleSelectionRefresh(this.observer.signal);
     this.changed();
   }
   providerRemovalSummary(

@@ -188,58 +188,128 @@ const SessionRow = memo(function SessionRow({
   session,
   selected,
   onOpen,
+  onManage,
+  mutationBusy,
 }: {
   session: SessionSummary;
   selected: boolean;
   onOpen?: (id: string) => void;
+  onManage?: PageActions['manageSession'];
+  mutationBusy?: boolean;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const openingDialog = useRef(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const awaitingInteraction = Boolean(session.pendingInteractions);
   const statusLabel = sessionStatusLabel(session.status);
+  const menuLabel = `${session.displayName} 更多操作`;
   return (
-    <Tooltip>
+    <Tooltip open={tooltipOpen && !menuOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
-        <Button
-          className={`session-row ${selected ? 'selected' : ''}`}
-          aria-label={session.displayName}
-          aria-description={
-            [
-              awaitingInteraction ? '待用户输入' : statusLabel,
-              session.hasUnreadTurn && '有新结束的回复',
-              session.hasCreatedWorktree && '已创建 Git 工作树',
-            ]
-              .filter(Boolean)
-              .join('，') || undefined
-          }
-          aria-current={selected ? 'page' : undefined}
-          disabled={!onOpen}
-          onClick={() => onOpen?.(session.sessionId)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              onOpen?.(session.sessionId);
-            }
-          }}
+        <div
+          className={`session-heading${selected ? ' selected' : ''}`}
+          data-menu-active={menuOpen || undefined}
         >
-          <span className="nav-copy">
-            <strong>{session.displayName}</strong>
-          </span>
-          {session.hasCreatedWorktree && (
-            <HugeiconsIcon
-              className="session-worktree-icon"
-              icon={GitBranchIcon}
-              role="img"
-              aria-label="已创建 Git 工作树"
-            />
+          <Button
+            className={`session-row ${selected ? 'selected' : ''}`}
+            aria-label={session.displayName}
+            aria-description={
+              [
+                awaitingInteraction ? '待用户输入' : statusLabel,
+                session.hasUnreadTurn && '有新结束的回复',
+                session.hasCreatedWorktree && '已创建 Git 工作树',
+              ]
+                .filter(Boolean)
+                .join('，') || undefined
+            }
+            aria-current={selected ? 'page' : undefined}
+            disabled={!onOpen}
+            onClick={() => onOpen?.(session.sessionId)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                onOpen?.(session.sessionId);
+              }
+            }}
+          >
+            <span className="nav-copy">
+              <strong>{session.displayName}</strong>
+            </span>
+            {session.hasCreatedWorktree && (
+              <HugeiconsIcon
+                className="session-worktree-icon"
+                icon={GitBranchIcon}
+                role="img"
+                aria-label="已创建 Git 工作树"
+              />
+            )}
+            {awaitingInteraction ? (
+              <Badge>待用户输入</Badge>
+            ) : session.status === 'running' || session.status === 'waiting_execution' ? (
+              <Spinner aria-label="会话运行中" />
+            ) : null}
+            {session.hasUnreadTurn && (
+              <span className="session-unread-dot" role="img" aria-label="有新结束的回复" />
+            )}
+          </Button>
+          {onManage && (
+            <span className="sidebar-actions">
+              <DropdownMenu
+                open={menuOpen}
+                onOpenChange={(open) => {
+                  setMenuOpen(open);
+                  setTooltipOpen(false);
+                }}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    ref={trigger}
+                    className="ghost session-more"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={menuLabel}
+                    disabled={mutationBusy}
+                    onPointerEnter={() => setTooltipOpen(false)}
+                  >
+                    <HugeiconsIcon icon={MoreHorizontalIcon} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  alignOffset={-4}
+                  className="sidebar-menu session-menu"
+                  aria-label={menuLabel}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onCloseAutoFocus={(event) => {
+                    if (openingDialog.current) event.preventDefault();
+                    openingDialog.current = false;
+                  }}
+                >
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      openingDialog.current = true;
+                      if (trigger.current) onManage(session.sessionId, 'rename', trigger.current);
+                    }}
+                  >
+                    <HugeiconsIcon icon={PencilEdit02Icon} />
+                    重命名
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="session-menu-delete"
+                    onSelect={() => {
+                      openingDialog.current = true;
+                      if (trigger.current) onManage(session.sessionId, 'delete', trigger.current);
+                    }}
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} />
+                    删除
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
           )}
-          {awaitingInteraction ? (
-            <Badge>待用户输入</Badge>
-          ) : session.status === 'running' || session.status === 'waiting_execution' ? (
-            <Spinner aria-label="会话运行中" />
-          ) : null}
-          {session.hasUnreadTurn && (
-            <span className="session-unread-dot" role="img" aria-label="有新结束的回复" />
-          )}
-        </Button>
+        </div>
       </TooltipTrigger>
       <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
         <strong>{session.displayName}</strong>
@@ -257,6 +327,8 @@ const Workspace = memo(function Workspace({
   workspace: WorkspaceSummary;
   onNewSession?: (workspaceId: string) => void;
   onRemove?: (workspaceId: string) => void;
+  onManage?: PageActions['manageSession'];
+  sessionMutationBusy?: boolean;
 }) {
   const [expanded, setExpanded] = useState(props.defaultExpanded ?? workspace.state === 'loaded');
   const [visibleCount, setVisibleCount] = useState(5);
@@ -313,10 +385,14 @@ const Workspace = memo(function Workspace({
           onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
             const buttons = Array.from(
-              list.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [],
+              list.current?.querySelectorAll<HTMLButtonElement>('.session-row:not(:disabled)') ??
+                [],
             );
             if (!buttons.length) return;
-            const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            const row = (document.activeElement as HTMLElement | null)?.closest('.session-heading');
+            const index = buttons.findIndex(
+              (button) => button === document.activeElement || row?.contains(button),
+            );
             const next =
               event.key === 'Home'
                 ? 0
@@ -336,6 +412,8 @@ const Workspace = memo(function Workspace({
               session={session}
               selected={props.selected === session.sessionId}
               onOpen={props.onOpen}
+              onManage={props.onManage}
+              mutationBusy={props.sessionMutationBusy}
             />
           ))}
           {workspace.sessions.length > visibleCount && (
@@ -365,6 +443,11 @@ export interface PageActions {
   removeWorkspace?: (workspaceId: string) => void;
   workspaceRemovalResults?: readonly { id: string; label: string }[];
   lookupWorkspaceRemoval?: (id: string) => void;
+  manageSession?: (id: string, kind: 'rename' | 'delete', trigger: HTMLButtonElement) => void;
+  sessionMutationBusy?: boolean;
+  sessionMutationResults?: readonly { id: string; label: string }[];
+  sessionLookupBusy?: boolean;
+  lookupSessionMutation?: (id: string) => void;
   workbench?: () => void;
   scheduledTasks?: () => void;
   settings?: () => void;
@@ -437,6 +520,34 @@ export function Sidebar({
       )}
       <div className="nav-label">
         <span>空间</span>
+        {actions.lookupSessionMutation && !!actions.sessionMutationResults?.length && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                className="session-mutation-results"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="查询会话操作结果"
+                title="查询会话操作结果"
+                disabled={props.mutationBusy || actions.sessionLookupBusy}
+              >
+                <HugeiconsIcon icon={Clock01Icon} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="sidebar-menu" aria-label="查询会话操作结果">
+              {actions.sessionMutationResults.map((result) => (
+                <DropdownMenuItem
+                  key={result.id}
+                  onSelect={() => actions.lookupSessionMutation?.(result.id)}
+                >
+                  <span className="space-removal-result-label" title={result.label}>
+                    {result.label}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {actions.lookupWorkspaceRemoval && !!actions.workspaceRemovalResults?.length && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -498,6 +609,8 @@ export function Sidebar({
                 mutationBusy={props.mutationBusy}
                 defaultExpanded={props.defaultExpanded}
                 onOpen={props.onOpen}
+                onManage={workspace.state === 'loaded' ? actions.manageSession : undefined}
+                sessionMutationBusy={props.mutationBusy || actions.sessionMutationBusy}
                 onExpand={props.onExpand}
                 onNewSession={actions.newWorkspaceSession}
                 onRemove={actions.removeWorkspace}

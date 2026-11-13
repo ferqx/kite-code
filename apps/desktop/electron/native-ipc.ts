@@ -208,6 +208,8 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'recovery.lookup': ['commandId', 'readId'],
   'recovery.close': ['readId'],
   'session.observe': ['sessionId'],
+  'session.directory.observe': ['sessionId'],
+  'session.directory.submit': ['observationId', 'mutation'],
   'session.fork': ['observationId', 'title'],
   'session.rename': ['observationId', 'title'],
   'session.delete': ['observationId'],
@@ -915,6 +917,23 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       !input.title.trim())
   )
     throw Error('invalid_native_request');
+  if (method === 'session.directory.observe' && !resourceId(input.sessionId))
+    throw Error('invalid_native_request');
+  if (method === 'session.directory.submit') {
+    const mutation = record(input.mutation);
+    if (mutation.kind === 'rename') {
+      exact(mutation, ['kind', 'title']);
+      if (
+        typeof mutation.title !== 'string' ||
+        !mutation.title.trim() ||
+        Buffer.byteLength(mutation.title) > 4096
+      )
+        throw Error('invalid_native_request');
+    } else if (mutation.kind === 'delete') exact(mutation, ['kind']);
+    else throw Error('invalid_native_request');
+    if (!Number.isSafeInteger(input.observationId) || Number(input.observationId) < 1)
+      throw Error('invalid_native_request');
+  }
   const sequence = (value: unknown) =>
     typeof value === 'string' &&
     /^(0|[1-9][0-9]{0,18})$/.test(value) &&

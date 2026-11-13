@@ -31,6 +31,7 @@ export const control = sessionSwitchBridge({
       : 0,
   initialSelection: !new URL(location.href).searchParams.has('long'),
   worktreeNavigation: new URL(location.href).searchParams.has('worktree-navigation'),
+  manageSessions: new URL(location.href).searchParams.has('manage-sessions'),
   turnNotifications:
     new URL(location.href).searchParams.has('turn-notifications') ||
     new URL(location.href).searchParams.has('worktree-indicator'),

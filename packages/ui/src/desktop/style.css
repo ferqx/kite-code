@@ -530,7 +530,7 @@ body {
     font-size: inherit;
     padding: 3px 6px;
   }
-  .nav-label .space-removal-results {
+  .nav-label :is(.space-removal-results, .session-mutation-results):first-of-type {
     margin-inline-start: auto;
   }
   .space-row {
@@ -2127,18 +2127,19 @@ body {
 .kite-client .space-row {
   width: 100%;
 }
-.kite-client .space-heading {
+.kite-client :is(.space-heading, .session-heading) {
   display: flex;
   align-items: center;
   gap: 0;
   border-radius: var(--button-radius);
 }
-.kite-client .space-heading.selected,
-.kite-client .space-heading[data-menu-active],
-.kite-client .space-heading:hover {
+.kite-client :is(.space-heading, .session-heading):is(.selected, [data-menu-active], :hover) {
   background: var(--control-hover);
 }
-.kite-client .space-heading:has(.button:active:is(:not(:disabled), [data-read-gated="true"])) {
+.kite-client
+  :is(.space-heading, .session-heading):has(
+    .button:active:is(:not(:disabled), [data-read-gated="true"])
+  ) {
   background: var(--control-pressed);
 }
 .kite-client .nav-label .space-add,
@@ -2146,13 +2147,24 @@ body {
   .nav-label
   .space-add:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]),
 .kite-client
-  .space-heading
+  :is(.space-heading, .session-heading)
   .button:is(:hover, :active):is(:not(:disabled), [data-read-gated="true"]) {
   background: transparent;
 }
-.kite-client .space-heading .space-row {
+.kite-client :is(.space-heading .space-row, .session-heading .session-row) {
   flex: 1;
   min-width: 0;
+}
+.kite-client .session-heading {
+  margin-bottom: 2px;
+}
+.kite-client .session-heading .session-row {
+  margin-bottom: 0;
+  padding-inline-end: 4px;
+  background: transparent;
+}
+.kite-client :where(.session-heading) .sidebar-actions {
+  padding-inline-end: 4px;
 }
 .kite-client .space-heading :is(.space-new-session, .space-more) > svg,
 .kite-client .session-row > .session-worktree-icon,
@@ -2168,15 +2180,15 @@ body {
   animation-duration: 2.4s;
 }
 .kite-client .nav-label .space-add,
-.kite-client .space-heading :where(.space-new-session, .space-more) {
+.kite-client :where(.space-new-session, .space-more, .session-more) {
   color: var(--muted-foreground);
 }
 .kite-client
   .nav-label
   .space-add:is(:hover, :focus-visible):is(:not(:disabled), [data-read-gated="true"]),
 .kite-client
-  .space-heading
-  :where(.space-new-session, .space-more):is(:hover, :focus-visible):is(
+  :is(.space-heading, .session-heading)
+  :where(.space-new-session, .space-more, .session-more):is(:hover, :focus-visible):is(
     :not(:disabled),
     [data-read-gated="true"]
   ) {
@@ -2190,19 +2202,25 @@ body {
   pointer-events: none;
 }
 .kite-client :is(.nav-label:hover, .nav-label:focus-within) > .sidebar-actions,
-.kite-client .space-heading[data-menu-active] > .sidebar-actions,
-.kite-client :is(.space-heading:hover, .space-heading:focus-within) > .sidebar-actions {
+.kite-client .space-heading:is([data-menu-active], :hover, :focus-within) > .sidebar-actions,
+.kite-client .session-heading:is([data-menu-active], :hover) > .sidebar-actions {
   opacity: 1;
   pointer-events: auto;
 }
 @media (hover: none) {
-  .kite-client .sidebar-actions {
+  .kite-client :where(:not(.session-heading)) > .sidebar-actions {
     opacity: 1;
     pointer-events: auto;
   }
 }
+.kite-client .session-heading:has(.session-more:focus-visible) {
+  outline: 1px solid var(--ring);
+  outline-offset: -1px;
+}
 .kite-client
-  :where(.space-add, .space-new-session, .space-more):disabled:not([data-read-gated="true"]) {
+  :where(.space-add, .space-new-session, .space-more, .session-more):disabled:not(
+    [data-read-gated="true"]
+  ) {
   pointer-events: none;
 }
 .kite-client .space-name-muted {
@@ -2229,6 +2247,13 @@ body {
 }
 .sidebar-menu [role="menuitem"] {
   padding-inline: var(--select-padding-inline);
+}
+.session-menu {
+  border-radius: var(--radius);
+  padding: 5px;
+}
+.session-menu .session-menu-delete {
+  color: var(--destructive);
 }
 .sidebar-menu .space-removal-result-label {
   min-width: 0;

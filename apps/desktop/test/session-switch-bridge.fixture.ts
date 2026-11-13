@@ -5,6 +5,7 @@ import type {
   NativeReasoningEffort,
   NativeRequest,
   NativeResult,
+  NativeSessionSubmission,
   NativeState,
 } from '../src/native-bridge';
 import { backgroundShellItem } from './background-item.fixture';
@@ -29,6 +30,7 @@ export function sessionSwitchBridge(
     initialSelection?: boolean;
     holdDraft?: boolean;
     worktreeNavigation?: boolean;
+    manageSessions?: boolean;
   } = {},
 ) {
   const base = backgroundShellItem();
@@ -59,6 +61,9 @@ export function sessionSwitchBridge(
   let heldDirectory = false;
   const unavailableWorkspaces = new Set<string>();
   let releaseDirectory: (() => void) | undefined;
+  let sessionObservation = { id: 0, sessionId: '' };
+  let unknownSessionMutation = false;
+  const sessionSubmissions: NativeSessionSubmission[] = [];
   const send = () => {
     for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
   };
@@ -92,30 +97,33 @@ export function sessionSwitchBridge(
   );
   const directory = (): NativeDirectory => ({
     storeId: 'store',
+    ...(options.manageSessions ? { canManageSessions: true, unavailable: withdrawn } : {}),
     ...(options.turnNotifications ? { readTurns: [...readTurns] } : {}),
-    sessions: sessions.map((session) => ({
-      ...session,
-      ...(options.worktreeNavigation && session.id === 'b'
-        ? {
-            workspaceId: 'worktree',
-            ...(navigationSource ? { worktreeSource: { sessionId: 'a', workspaceId: 'w' } } : {}),
-          }
-        : {}),
-      ...(options.turnNotifications || options.worktreeNavigation
-        ? {
-            activity: {
-              updatedAt: null,
-              run: turns.get(session.id)!,
-              queued: false,
-              pendingInteractions: pendingInteractions.get(session.id) ?? 0,
-              ...(createdWorktrees.has(session.id) ||
-              (options.worktreeNavigation && session.id === 'a')
-                ? { hasCreatedWorktree: true }
-                : {}),
-            },
-          }
-        : {}),
-    })),
+    sessions: sessions
+      .filter((session) => !session.deletedAt)
+      .map((session) => ({
+        ...session,
+        ...(options.worktreeNavigation && session.id === 'b'
+          ? {
+              workspaceId: 'worktree',
+              ...(navigationSource ? { worktreeSource: { sessionId: 'a', workspaceId: 'w' } } : {}),
+            }
+          : {}),
+        ...(options.turnNotifications || options.worktreeNavigation
+          ? {
+              activity: {
+                updatedAt: null,
+                run: turns.get(session.id)!,
+                queued: false,
+                pendingInteractions: pendingInteractions.get(session.id) ?? 0,
+                ...(createdWorktrees.has(session.id) ||
+                (options.worktreeNavigation && session.id === 'a')
+                  ? { hasCreatedWorktree: true }
+                  : {}),
+              },
+            }
+          : {}),
+      })),
     workspaces: [
       { id: 'w', name: 'Workspace', rootUri: 'file:///workspace' },
       ...(options.worktreeNavigation
@@ -155,7 +163,10 @@ export function sessionSwitchBridge(
     inputSubmissions: [],
     permissionSubmissions: [],
     interactionSubmissions: [],
-    ...(options.turnNotifications || options.worktreeNavigation ? { directory: directory() } : {}),
+    ...(options.turnNotifications || options.worktreeNavigation || options.manageSessions
+      ? { directory: directory() }
+      : {}),
+    ...(options.manageSessions ? { sessionSubmissions: structuredClone(sessionSubmissions) } : {}),
     selection:
       selecting || withdrawn || !hasSelection
         ? undefined
@@ -225,6 +236,58 @@ export function sessionSwitchBridge(
     async request(request) {
       requests.push(request);
       switch (request.method) {
+        case 'session.directory.observe': {
+          if (withdrawn) throw Error('session_observation_changed');
+          const row = directory().sessions.find(({ id }) => id === request.sessionId);
+          if (!row) throw Error('session_scope_mismatch');
+          sessionObservation = { id: sessionObservation.id + 1, sessionId: row.id };
+          const observationId = sessionObservation.id;
+          return wait('session-observation', () => ({ observationId, session: row }));
+        }
+        case 'session.directory.submit': {
+          const row = sessions.find(({ id }) => id === sessionObservation.sessionId);
+          const display = directory().sessions.find(({ id }) => id === row?.id);
+          if (!row || !display || request.observationId !== sessionObservation.id || withdrawn)
+            throw Error('session_observation_changed');
+          const { mutation } = request;
+          const entry: NativeSessionSubmission = {
+            kind: mutation.kind,
+            source: 'directory',
+            label: row.title,
+            phase: 'submitting',
+            sessionId: row.id,
+            workspaceId: display.workspaceId,
+            intent: {
+              expectedStoreId: 'store',
+              commandId: `session-command-${sessionObservation.id}`,
+              ifRevision: row.controlRevision,
+              expectedContextSelectionId: row.contextSelectionId,
+            },
+          };
+          sessionSubmissions.push(entry);
+          send();
+          return wait('session-mutation', () => {
+            if (mutation.kind === 'rename') row.title = mutation.title;
+            else row.deletedAt = 1;
+            row.controlRevision = String(BigInt(row.controlRevision) + 1n);
+            entry.phase = unknownSessionMutation ? 'unknown' : 'applied';
+            unknownSessionMutation = false;
+            if (row.id === selected && row.deletedAt) hasSelection = false;
+            send();
+            return { kind: 'session.directory.result', submission: { ...entry } };
+          });
+        }
+        case 'lookupSessionMutation': {
+          const entry = sessionSubmissions.find(
+            ({ intent }) => intent.commandId === request.commandId,
+          );
+          if (!entry) throw Error('session_intent_missing');
+          return wait('session-lookup', () => {
+            entry.phase = 'applied';
+            send();
+            return { kind: 'session.directory.result', submission: { ...entry } };
+          });
+        }
         case 'scheduled.list':
           return { kind: 'scheduled.tasks', tasks: [], runs: [] };
         case 'session.markRead':
@@ -451,6 +514,14 @@ export function sessionSwitchBridge(
       held = false;
       for (const queue of pending.values()) for (const resolve of queue) resolve();
       pending.clear();
+    },
+    loseNextSessionReceipt() {
+      unknownSessionMutation = true;
+    },
+    restoreConnection() {
+      withdrawn = false;
+      revision++;
+      send();
     },
     withdraw() {
       withdrawn = true;

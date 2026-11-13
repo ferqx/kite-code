@@ -20,7 +20,7 @@ import {
   verifyWorktreeIndicator,
   verifyWorktreeNavigation,
 } from './session-shell-geometry.fixture';
-import { verifySidebarActions } from './sidebar-actions-browser.fixture';
+import { verifySessionRowActions, verifySidebarActions } from './sidebar-actions-browser.fixture';
 
 // Explicit standalone fixture; it never loads Service, user data or the production diagnostics.
 const directory = import.meta.dir;
@@ -28,17 +28,36 @@ const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'session-shell-browser-'));
 const output = path.join(artifact, 'dist');
+const sessionActionsOnly = process.argv.includes('--session-actions');
+const validatorFile = path.join(directory, '../../../packages/client/src/generated/validators.js');
 await build({
   root: path.dirname(directory),
   configFile: false,
   envFile: false,
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    ...(sessionActionsOnly
+      ? [
+          {
+            name: 'session-actions-validators',
+            enforce: 'pre' as const,
+            resolveId(id: string) {
+              return id === './generated/validators.js'
+                ? { id: './validators.js', external: true }
+                : null;
+            },
+          },
+        ]
+      : []),
+  ],
   base: './',
   logLevel: 'error',
   define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: 'false', 'process.env.NODE_ENV': '"production"' },
   build: {
     outDir: output,
     emptyOutDir: false,
+    ...(sessionActionsOnly ? { minify: false } : {}),
     lib: {
       entry: path.join(directory, 'session-shell-browser.fixture.tsx'),
       formats: ['es'],
@@ -48,6 +67,8 @@ await build({
     target: 'esnext',
   },
 });
+if (sessionActionsOnly)
+  await Bun.write(path.join(output, 'validators.js'), Bun.file(validatorFile));
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
@@ -133,13 +154,16 @@ try {
     layoutOnly ||
     menuOnly ||
     auditOnly ||
-    sidebarOnly;
+    sidebarOnly ||
+    sessionActionsOnly;
   if (permissionOnly) {
     report.cases.push(...(await verifyFormControlStyles(browser, server.url.toString(), artifact)));
     report.cases.push(...(await verifySwitchGeometry(browser, server.url.toString(), artifact)));
   }
   if (sidebarOnly || !focused)
     report.cases.push(...(await verifySidebarActions(browser, server.url.toString(), artifact)));
+  if (sessionActionsOnly || !focused)
+    report.cases.push(await verifySessionRowActions(browser, server.url.toString(), artifact));
   if (auditOnly) {
     report.cases.push(
       ...(await verifyModelCatalogueNavigation(browser, server.url.toString(), artifact)),
@@ -872,21 +896,23 @@ try {
     JSON.stringify({
       browser: report.browser,
       themes: 2,
-      ...(sidebarOnly
-        ? { sidebarActionCases: report.cases.length }
-        : layoutOnly
-          ? { composerLayoutCases: report.cases.length }
-          : menuOnly
-            ? { permissionMenuCases: report.cases.length }
-            : auditOnly
-              ? { sessionAuditCases: report.cases.length }
-              : composerOnly
-                ? { composerHandoffCases: report.cases.length }
-                : modelsOnly
-                  ? { modelNavigationCases: report.cases.length }
-                  : focused
-                    ? { worktreeCases: report.cases.length }
-                    : { switches: 200, heldFrames: 192 }),
+      ...(sessionActionsOnly
+        ? { sessionActionCases: report.cases.length }
+        : sidebarOnly
+          ? { sidebarActionCases: report.cases.length }
+          : layoutOnly
+            ? { composerLayoutCases: report.cases.length }
+            : menuOnly
+              ? { permissionMenuCases: report.cases.length }
+              : auditOnly
+                ? { sessionAuditCases: report.cases.length }
+                : composerOnly
+                  ? { composerHandoffCases: report.cases.length }
+                  : modelsOnly
+                    ? { modelNavigationCases: report.cases.length }
+                    : focused
+                      ? { worktreeCases: report.cases.length }
+                      : { switches: 200, heldFrames: 192 }),
       artifact,
     }),
   );
