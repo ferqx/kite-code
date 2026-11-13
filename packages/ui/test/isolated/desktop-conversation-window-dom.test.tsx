@@ -285,6 +285,65 @@ test('message navigation uses mounted input identities across history expansion 
   }
 });
 
+test('paging through overflowing message markers keeps the transcript and highlight in place', async () => {
+  const f = await fixture(140);
+  const earlier = () =>
+    f.host.querySelector<HTMLButtonElement>('[aria-label="查看更早的消息刻度"]')!;
+  const later = () => f.host.querySelector<HTMLButtonElement>('[aria-label="查看更新的消息刻度"]')!;
+  try {
+    await f.render({ messageNavigation: true });
+    const list = f.host.querySelector<HTMLElement>('.conversation-marker-list')!;
+    const markers = [...list.querySelectorAll('button')];
+    let navigationHeight = 148;
+    let listHeight = 120;
+    let markerScroll = 0;
+    Object.defineProperty(list.parentElement!, 'clientHeight', { get: () => navigationHeight });
+    Object.defineProperties(list, {
+      clientHeight: { get: () => listHeight },
+      scrollHeight: { value: markers.length * 10 },
+      scrollTop: {
+        get: () => markerScroll,
+        set: (value) => {
+          markerScroll = Math.max(0, Math.min(value, markers.length * 10 - list.clientHeight));
+        },
+      },
+    });
+    markers.forEach((marker, index) => {
+      Object.defineProperties(marker, {
+        offsetTop: { value: index * 10 },
+        offsetHeight: { value: 10 },
+      });
+    });
+    await act(async () => f.resize());
+    expect(list.scrollTop).toBe(280);
+    expect(later().getAttribute('aria-disabled')).toBe('true');
+    const transcriptTop = f.viewport().scrollTop;
+    await act(async () => earlier().click());
+    expect(list.scrollTop).toBe(160);
+    expect(f.viewport().scrollTop).toBe(transcriptTop);
+    expect(markers.at(-1)!.getAttribute('aria-current')).toBe('location');
+    await act(async () => later().click());
+    expect(list.scrollTop).toBe(280);
+    await act(async () => {
+      list.scrollTop = 0;
+      list.dispatchEvent(new f.dom.window.Event('scroll'));
+    });
+    expect(earlier().getAttribute('aria-disabled')).toBe('true');
+    expect(f.viewport().scrollTop).toBe(transcriptTop);
+    await act(async () => markers[1]!.click());
+    expect(markers[1]!.getAttribute('aria-current')).toBe('location');
+    expect(f.row('u-101')!.getBoundingClientRect().top).toBe(12);
+
+    navigationHeight = 405;
+    listHeight = 377;
+    await act(async () => f.resize());
+    expect(earlier()).toBeNull();
+    expect(later()).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
 test('native conversation applies its 100 entry threshold and initially renders the last forty whole messages', async () => {
   for (const count of [100, 101, 220]) {
     const f = await fixture(count);

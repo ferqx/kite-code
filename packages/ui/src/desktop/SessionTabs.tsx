@@ -4,12 +4,13 @@ import {
   ArrowRight01Icon,
   BotIcon,
   Cancel01Icon,
+  FileDiffIcon,
+  Flowchart01Icon,
   Globe02Icon,
   MoreHorizontalIcon,
   PanelRightCloseIcon,
   PencilEdit02Icon,
   RefreshIcon,
-  SourceCodeIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
@@ -87,6 +88,15 @@ type SessionTab =
 type SessionTabsAction =
   | { readonly type: 'select' | 'close'; readonly id: string }
   | { readonly type: 'add' | 'collapse' | 'retryRestore' | 'openChanges' };
+
+const tabIcons = {
+  browser: Globe02Icon,
+  changes: FileDiffIcon,
+  child: BotIcon,
+  trajectory: Flowchart01Icon,
+  workspace: Globe02Icon,
+};
+
 interface SessionTabsHeaderPresentation {
   readonly data: Pick<SessionTabsModel, 'tabs' | 'active' | 'restoring' | 'restoreIssue'>;
   readonly dispatch: (action: SessionTabsAction) => void;
@@ -562,17 +572,7 @@ function SessionTabsHeader({ data, dispatch }: SessionTabsHeaderPresentation) {
               {tab.kind === 'child' && tab.childAgentIdentity ? (
                 <ChildAgentIcon identity={tab.childAgentIdentity} />
               ) : (
-                <HugeiconsIcon
-                  icon={
-                    tab.kind === 'browser'
-                      ? Globe02Icon
-                      : tab.kind === 'child'
-                        ? BotIcon
-                        : tab.kind === 'workspace'
-                          ? Globe02Icon
-                          : SourceCodeIcon
-                  }
-                />
+                <HugeiconsIcon icon={tabIcons[tab.kind]} aria-hidden="true" />
               )}
               <span>{tab.title}</span>
             </TabsTrigger>
@@ -693,35 +693,37 @@ export function SessionTabs({
   const tools = (
     <section className="session-browser-tools" aria-label="工具">
       <h2>工具</h2>
-      <Button
-        type="button"
-        className="session-browser-tool"
-        disabled={
-          model.restoring ||
-          model.restoreIssue ||
-          (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'changes'))
-        }
-        onClick={openChanges}
-      >
-        <HugeiconsIcon icon={SourceCodeIcon} />
-        <span>变更</span>
-      </Button>
-      {renderTrajectory && (
+      <div className="session-browser-tool-grid">
         <Button
           type="button"
           className="session-browser-tool"
           disabled={
             model.restoring ||
             model.restoreIssue ||
-            (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'trajectory'))
+            (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'changes'))
           }
-          onClick={() => model.openTrajectory()}
-          aria-label="执行轨迹"
+          onClick={openChanges}
         >
-          <HugeiconsIcon icon={SourceCodeIcon} />
-          <span>执行轨迹</span>
+          <HugeiconsIcon icon={tabIcons.changes} aria-hidden="true" />
+          <span>变更</span>
         </Button>
-      )}
+        {renderTrajectory && (
+          <Button
+            type="button"
+            className="session-browser-tool"
+            disabled={
+              model.restoring ||
+              model.restoreIssue ||
+              (tabs.length >= maxTabs && !tabs.some((tab) => tab.kind === 'trajectory'))
+            }
+            onClick={() => model.openTrajectory()}
+            aria-label="执行轨迹"
+          >
+            <HugeiconsIcon icon={tabIcons.trajectory} aria-hidden="true" />
+            <span>执行轨迹</span>
+          </Button>
+        )}
+      </div>
     </section>
   );
   return (

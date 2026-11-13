@@ -532,6 +532,7 @@ export function Composer(props: ComposerProps) {
               confirmingFull || props.permissionPending || props.sessionLoading || undefined
             }
             aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionLabel}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
+            title={permissionLabel}
             disabled={confirmingFull || props.permissionDisabled || !props.permission}
           >
             <HugeiconsIcon
@@ -541,7 +542,7 @@ export function Composer(props: ComposerProps) {
                 Loading03Icon
               }
             />
-            <span>{permissionLabel}</span>
+            <span className="permission-trigger-label">{permissionLabel}</span>
           </ShadcnButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent
