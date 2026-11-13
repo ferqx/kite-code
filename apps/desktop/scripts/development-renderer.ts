@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { createServer, type FSWatcher, type ViteDevServer } from 'vite';
+import { createServer, type FSWatcher, normalizePath, type ViteDevServer } from 'vite';
 import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 
 /** Own a fresh instance of Vite's public FSWatcher class, including its first scan. */
@@ -133,6 +133,7 @@ export async function startDevelopmentServiceWatcher(input: {
 
 export async function startDesktopRenderer(root: string) {
   const cspNonce = randomUUID().replaceAll('-', '');
+  const validators = normalizePath(resolve(root, 'packages/client/src/generated/validators.js'));
   const http = createHttpServer();
   let server: ViteDevServer | undefined;
   let closing: Promise<void> | undefined;
@@ -166,7 +167,19 @@ export async function startDesktopRenderer(root: string) {
       envFile: false,
       mode: 'development',
       define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: 'false' },
-      plugins: [react(), tailwindcss()],
+      plugins: [
+        react(),
+        tailwindcss(),
+        {
+          name: 'kite-desktop-generated-validators',
+          transform(code, id) {
+            if (id !== validators) return null;
+            // Vite's fallback map embeds this entire generated module and its mappings.
+            // Vite keeps the transform map only when the transformed code differs.
+            return { code: `${code}\n`, map: { mappings: '' } };
+          },
+        },
+      ],
       resolve: { alias: [desktopMarkdownDecoderAlias()] },
       clearScreen: false,
       logLevel: 'warn',

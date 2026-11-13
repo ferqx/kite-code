@@ -401,6 +401,10 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 开发 Main 的 Root 与全局确认框均沿同一受限 Vite 地址加载，builder 不再生产构建这条路径不会使用的静态 HTML／renderer；Main、两个 preload、私有权限 helper 与运行资产校验仍每次构建。普通固定 renderer 继续生成完整页面与确认框。Vite 在启动期间预热两个 HTML 入口及动态加载的 NativeDesktop，提前转换依赖；这不执行页面或业务请求，也不提前宣告 Service 就绪。终端逐项报告 Electron 准备、renderer／监听、Service 构建与加载检查、Main／preload 构建及真实就绪总耗时。
 
+[开发 Vite 配置](scripts/development-renderer.ts)仅对 Client 生成的 `validators.js` 省略内联源码映射，继续通过原模块图提供校验代码，普通模块仍生成开发映射。[重载回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)直接核对实际 HTTP 响应及普通模块映射。Windows x64／Bun 1.4.4 的同一路径探针中，响应从约 158 MiB 降到 20 MiB，包含收取响应的探针工作集从约 2.4 GiB 降到约 300 MiB。
+
+2026-11-13 使用隔离 Profile 执行 `npm run desktop:dev`，Service 完成握手，实窗显示新对话且能输入草稿。CSS 热更新保留草稿，保存 Service 源码后旧进程退出、同一 Main 重载页面。退出后核对所属进程和应用临时目录均已清理。修前后的实窗采集都出现同一处矩形遮挡，重载后的草稿区可用。定向重载回归 13 项通过，启动测试的四项 Store 故障注入断言在同批未修复对照中同样失败。
+
 确认框经 [UI 专用出口](../../packages/ui/src/desktop/confirmation.ts)只导入原确认组件，避免从会话展示总出口带入 Markdown、公式及高亮初始化。macOS arm64 的独立引擎副本请求文件系统写时复制，不支持时沿普通复制；首次源库存贯穿目标完整等价／独立 inode 校验与最终源不变校验，保留原两处补丁、签名前后完整 payload、签名及 Main 实际加载准入。准备期间只合并重复源扫描，不跨启动复用已修改 runtime 或改动已安装 Electron。
 
 Renderer模块热更新与整页重载分别处理。`NativeBrowserPane`的展示revision归当前Root document持有，模块重求值继续递增；新document使用新序列，Main仍按当前Caller generation及完整scope拒绝旧展示／cleanup。Root重新attach后从同Main保留的准确会话展示意图重新执行select、历史和模型事实读取，不把旧selection或截图当授权。Main为其生命周期内的全部Caller分配不重复的generation，Service重载后的新Caller只接收原Store／Session展示候选并重新核实；Main实际重启没有进程内网页保留承诺。原网页由Main独立持有，Renderer重挂载不导航、不刷新、不重开网页；模型观察仍由实际页面／文档／控制身份及新Run边界判断有效性。

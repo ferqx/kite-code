@@ -479,7 +479,7 @@ export const linuxShellInitAsset=()=>new URL('../platform/process/linux-shell-in
   }
 });
 
-test('Vite serves a nonce-bearing hot renderer on loopback, rejects development profile files and closes its listener', async () => {
+test('Vite serves a nonce-bearing hot renderer on loopback with scoped sourcemaps and file access', async () => {
   // Vite's raw filesystem middleware serves the current drive on Windows.
   // Keep the fixture on that drive so the request exercises a real file, not SPA fallback.
   const fixtures = join(import.meta.dir, '../../../.cache');
@@ -493,6 +493,11 @@ test('Vite serves a nonce-bearing hot renderer on loopback, rejects development 
       '<html><head></head><body>hot renderer</body></html>',
     );
     writeFileSync(join(root, 'apps/desktop/public-probe.txt'), 'public-renderer-sentinel');
+    const generated = join(root, 'packages/client/src/generated');
+    mkdirSync(generated, { recursive: true });
+    const validatorModule = 'export const validate = (value) => typeof value === "string";';
+    writeFileSync(join(generated, 'validators.js'), validatorModule);
+    writeFileSync(join(generated, 'probe.js'), validatorModule);
     const privateDirectories = ['.git', '.kite-code', '.cache', '.aws', '.codex', '.agents'];
     for (const directory of privateDirectories) {
       mkdirSync(join(root, directory), { recursive: true });
@@ -535,6 +540,13 @@ test('Vite serves a nonce-bearing hot renderer on loopback, rejects development 
     );
     expect(publicFile.status).toBe(200);
     expect(await publicFile.text()).toBe('public-renderer-sentinel');
+    const generatedUrl = `${renderer.configuration.rendererUrl}@fs/${generated.replaceAll('\\', '/')}`;
+    const validators = await fetch(`${generatedUrl}/validators.js`);
+    expect(validators.status).toBe(200);
+    expect((await validators.text()).trimEnd()).toBe(validatorModule);
+    const ordinaryModule = await fetch(`${generatedUrl}/probe.js`);
+    expect(ordinaryModule.status).toBe(200);
+    expect(await ordinaryModule.text()).toContain('sourceMappingURL=data:');
     for (const directory of privateDirectories) {
       const denied = await fetch(
         `${renderer.configuration.rendererUrl}@fs/${join(root, directory, 'private.txt').replaceAll('\\', '/')}`,

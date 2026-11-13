@@ -18,6 +18,8 @@ Status: implemented
 
 同轮真实退出回归另发现，Vite 独立服务器的 SIGTERM 处理器会直接调用进程退出，绕过开发宿主的 finally 并留下版本目录。改用其 middleware 模式，HTTP 与 HMR 共用宿主端口，进程退出与清理归同一宿主；不删除或改写第三方内部信号处理器。宿主自己的处理器保留到清理完成，原认证、CSP、私有文件拒绝和正式候选边界不变。
 
+2026-11-13 补充：Vite 给生成的 Client 校验文件构造内联 fallback sourcemap，重复嵌入完整源码并生成大量映射，在 Windows 提交内存紧张时使开发启动失败。只对这个生成模块返回空映射。Vite 7.3.6 会忽略代码原样返回时的 transform map，因此同时追加换行，使空映射在真实响应中生效。普通模块保留映射，生成校验继续进入模块图。
+
 ## Alternatives considered
 
 - 仅自动重启整个 Electron：会在 UI 编辑时丢失窗口和未保存状态，无法满足已确认的 UI 热更新体验。当前 UI 保窗口，仅 backend 变更重载页面。
@@ -26,6 +28,7 @@ Status: implemented
 - 在应用目录生成外部第三方依赖的 Service bundle：实际启动无法从该目录找到只属于 Service workspace 的 `hono`。保留 workspace 外部解析以沿用 Worker 资产，打入第三方依赖以使独立版本可执行。
 - 只扩大监听目录：外部 workspace 改动不一定改变入口字节，原 SHA 比较仍可能跳过重载；同步比较运行 workspace 的源码内容。
 - 每次保存执行整仓类型检查：不能证明后台实际就绪，也扩大热更新成本；此处检查准确模块加载和原 Service 准入，完整类型检查继续属于独立验证。
+- 更换运行时或关闭全部开发映射会改变调试行为，且前者仍要生成大响应。针对生成文件处理即可降低这条请求的峰值，保留手写源码调试。
 
 ## Consequences
 
