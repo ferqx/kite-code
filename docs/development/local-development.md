@@ -49,7 +49,7 @@ npm run desktop:dev
 
 Desktop 在准备 Electron／Vite 前先只读预检这个实际 development Profile。遇到 `store_incompatible` 时取得该 Profile 的独占使用锁并重新核对，在交互终端展示备份位置、历史隔离和全局模型配置保留说明，询问是否备份后新建。只有明确输入 `y`／`yes`（不区分大小写）才将旧目录整体改名保留在同一数据根的 `development-backup-<时间戳>-<随机标识>`，然后继续启动；Service 按原流程创建干净的 development 数据。回车、其他回答、Ctrl+C 或关闭输入均取消；非交互环境返回 `development_profile_confirmation_required`，不自动接受。旧会话、附件和 Profile 内配置保留在备份中，不会出现在新环境；数据根中的全局模型配置保持原位。兼容数据直接复用，不询问或反复备份。其他客户端仍在使用、恢复日志待处理、访问／I/O 失败或无法完整改名备份时停止，不清库、不强杀其他进程；占用时关闭使用同一 Profile 的客户端再重试。此确认后自动处置仅限 `desktop:dev`，不是旧数据迁移能力，正式客户端和其他开发入口的格式检查保持。具体实现与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
-Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预热页面模块，不另做这两页的生产构建。终端会分项输出准备／构建耗时，并在真实 Service 就绪后输出总耗时；初次依赖优化与本机文件系统状态仍会影响耗时。具体构建边界及本机前后对照归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预热页面模块，不另做这两页的生产构建。Vite 跳过 `apps/desktop/.cache` 生成目录的文件监听，避免开发启动时逐项注册缓存文件。终端会分项输出准备／构建耗时，并在真实 Service 就绪后输出总耗时。初次依赖优化与本机文件系统状态仍会影响耗时。具体构建边界及本机前后对照归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
 构建完成后，终端继续输出 `Service shell_runtime/configuration/store/runtime/http` 的开始、完成或失败及耗时，最后输出 Electron／Service 握手耗时；阶段日志不包含路径、凭据或原始服务输出。`desktop:dev` 的 Service bootstrap 与连接等待各有30秒上限，外层父控制仍最多等待45秒；编译时间不计入 Service 的等待期限。Windows 首次准备 Git Bash 会复制并校验两套运行时，优化后的并发文件处理仍完整核对资产；后续启动保留副本并重新校验。
 

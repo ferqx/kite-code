@@ -493,6 +493,9 @@ test('Vite serves a nonce-bearing hot renderer on loopback with scoped sourcemap
       '<html><head></head><body>hot renderer</body></html>',
     );
     writeFileSync(join(root, 'apps/desktop/public-probe.txt'), 'public-renderer-sentinel');
+    const desktopCache = join(root, 'apps/desktop/.cache');
+    mkdirSync(desktopCache);
+    writeFileSync(join(desktopCache, 'generated-probe.txt'), 'generated output');
     const generated = join(root, 'packages/client/src/generated');
     mkdirSync(generated, { recursive: true });
     const validatorModule = 'export const validate = (value) => typeof value === "string";';
@@ -554,6 +557,12 @@ test('Vite serves a nonce-bearing hot renderer on loopback with scoped sourcemap
       expect(denied.status).toBe(403);
       expect(await denied.text()).not.toContain('private-profile-sentinel');
     }
+    const watched = () => Object.values(renderer!.server.watcher.getWatched()).flat();
+    const deadline = Date.now() + 2000;
+    while (!watched().includes('public-probe.txt') && Date.now() < deadline) await Bun.sleep(5);
+    expect(watched()).toContain('public-probe.txt');
+    expect(watched()).not.toContain('.cache');
+    expect(watched()).not.toContain('generated-probe.txt');
     await renderer.close();
     await expect(fetch(renderer.configuration.rendererUrl)).rejects.toThrow();
   } finally {

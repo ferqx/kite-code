@@ -403,6 +403,10 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 [开发 Vite 配置](scripts/development-renderer.ts)仅对 Client 生成的 `validators.js` 省略内联源码映射，继续通过原模块图提供校验代码，普通模块仍生成开发映射。[重载回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)直接核对实际 HTTP 响应及普通模块映射。Windows x64／Bun 1.4.4 的同一路径探针中，响应从约 158 MiB 降到 20 MiB，包含收取响应的探针工作集从约 2.4 GiB 降到约 300 MiB。
 
+开发 Vite 的文件监听跳过 `apps/desktop/.cache` 及其内容。Windows x64／Bun 1.4.4 本机约 1.69 万个监听条目来自该生成目录，`fs.watch` 注册曾阻塞约 24 秒。排除该目录后保留原生监听，同机从准备到构建完成由约 31 秒降至约 9 秒。全量轮询也能绕开阻塞，但在同一探针中空闲 CPU 达单逻辑核心的约 87%，因此沿用原生监听。[重载回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)核对生成目录被跳过、普通文件仍在监听范围内。
+
+2026-11-13，Windows x64／Bun 1.4.4，沿 `runDevelopmentDesktop` 使用独立 HOME 和 Electron userData 实启，完成窗口观察的三次启动在 16.67–22.77 秒握手就绪。最终一次 Main／preload 构建 2.71 秒。窗口从启动页进入唯一新对话和输入区，UI 模块更新后保留同一文档，Service 更新后原窗口完成重载并恢复输入区，退出返回 0 且临时应用目录已清理。一次 Service 重载观察到额外的页面导航，后续按 WebContents 区分导航的复测只看到预期的一次主页面重载，额外导航的触发原因未确定。
+
 2026-11-13 使用隔离 Profile 执行 `npm run desktop:dev`，Service 完成握手，实窗显示新对话且能输入草稿。CSS 热更新保留草稿，保存 Service 源码后旧进程退出、同一 Main 重载页面。退出后核对所属进程和应用临时目录均已清理。修前后的实窗采集都出现同一处矩形遮挡，重载后的草稿区可用。定向重载回归 13 项通过，启动测试的四项 Store 故障注入断言在同批未修复对照中同样失败。
 
 确认框经 [UI 专用出口](../../packages/ui/src/desktop/confirmation.ts)只导入原确认组件，避免从会话展示总出口带入 Markdown、公式及高亮初始化。macOS arm64 的独立引擎副本请求文件系统写时复制，不支持时沿普通复制；首次源库存贯穿目标完整等价／独立 inode 校验与最终源不变校验，保留原两处补丁、签名前后完整 payload、签名及 Main 实际加载准入。准备期间只合并重复源扫描，不跨启动复用已修改 runtime 或改动已安装 Electron。

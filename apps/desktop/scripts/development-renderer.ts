@@ -134,6 +134,7 @@ export async function startDevelopmentServiceWatcher(input: {
 export async function startDesktopRenderer(root: string) {
   const cspNonce = randomUUID().replaceAll('-', '');
   const validators = normalizePath(resolve(root, 'packages/client/src/generated/validators.js'));
+  const desktopCache = normalizePath(resolve(root, 'apps/desktop/.cache'));
   const http = createHttpServer();
   let server: ViteDevServer | undefined;
   let closing: Promise<void> | undefined;
@@ -187,6 +188,13 @@ export async function startDesktopRenderer(root: string) {
       cacheDir: join(root, 'apps/desktop/node_modules/.vite-desktop-dev'),
       server: {
         middlewareMode: true,
+        watch: {
+          ignored(path) {
+            // This generated directory can contain thousands of files on Windows.
+            const file = normalizePath(path);
+            return file === desktopCache || file.startsWith(`${desktopCache}/`);
+          },
+        },
         // NativeDesktop is dynamically imported after the window appearance read.
         // Prepare it alongside both HTML entries before Electron requests them.
         warmup: {
