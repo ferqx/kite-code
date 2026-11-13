@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import type { Browser, Locator } from 'playwright';
+import { type Browser, expect, type Locator } from 'playwright/test';
 import type {} from './session-shell-browser.fixture';
 
 function sampleDialogOpening(dialog: Locator) {
   return dialog.evaluate((element) => {
-    const frames: { layout: number[][]; title?: string; description?: string }[] = [];
     const snapshot = () => {
       const input = element.querySelector('input');
-      const description = element.querySelector('p[id]');
       return {
         layout: [
           element,
@@ -18,9 +16,10 @@ function sampleDialogOpening(dialog: Locator) {
           return [x, y, width, height];
         }),
         title: input?.value,
-        description: input ? undefined : (description?.textContent ?? undefined),
+        text: element.textContent,
       };
     };
+    const frames: ReturnType<typeof snapshot>[] = [];
     let nextFrame = 0;
     const sample = () => {
       if (!element.isConnected) return;
@@ -35,20 +34,29 @@ function sampleDialogOpening(dialog: Locator) {
   });
 }
 
-async function assertStableDialogOpening(dialog: Locator, originalTitle?: string) {
+async function assertStableDialogOpening(
+  dialog: Locator,
+  titles?: { initial: string; final: string },
+) {
   const frames = await dialog.evaluate(
     (element) =>
       Reflect.get(element, 'finishOpeningSample')() as {
         layout: number[][];
         title?: string;
-        description?: string;
+        text: string;
       }[],
   );
   const first = frames[0]!;
   assert.ok(frames.length > 1);
-  if (originalTitle !== undefined) assert.equal(first.title, originalTitle);
-  else assert.match(first.description ?? '', /Renamed B/);
-  for (const frame of frames) assert.deepEqual(frame, first);
+  if (titles) {
+    assert.equal(first.title, titles.initial);
+    assert.equal(frames.at(-1)?.title, titles.final);
+  } else assert.match(first.text, /Renamed B/);
+  for (const frame of frames) {
+    assert.deepEqual(frame.layout, first.layout);
+    assert.equal(frame.text, first.text);
+    assert.doesNotMatch(frame.text, /正在核对/);
+  }
 }
 
 export async function verifySessionRowActions(browser: Browser, url: string, artifact: string) {
@@ -138,14 +146,13 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       const title = rename.getByRole('textbox', { name: '会话名称' });
       await pending('session-observation');
       await sampleDialogOpening(rename);
-      assert.equal(await rename.getByRole('button', { name: '保存' }).isDisabled(), true);
+      const save = rename.getByRole('button', { name: '保存' });
       assert.equal(await title.evaluate((node) => node === document.activeElement), true);
-      await release('session-observation');
-      await page.waitForFunction(
-        () => !document.querySelector('.session-management-dialog [role="status"]'),
-      );
-      await assertStableDialogOpening(rename, 'Session B');
       await title.fill('Renamed B');
+      assert.equal(await save.isDisabled(), true);
+      await release('session-observation');
+      await expect(save).toBeEnabled();
+      await assertStableDialogOpening(rename, { initial: 'Session B', final: 'Renamed B' });
       await title.press('Enter');
       await pending('session-mutation');
       await rename.getByRole('button', { name: '保存中…' }).waitFor();
@@ -177,15 +184,12 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await open('Renamed B', '删除');
       await pending('session-observation');
       await sampleDialogOpening(remove);
+      const deleteButton = remove.getByRole('button', { name: '删除', exact: true });
+      assert.equal(await deleteButton.isDisabled(), true);
       await release('session-observation');
-      await page.waitForFunction(() => {
-        const submit = document.querySelector<HTMLButtonElement>(
-          '.session-management-dialog button[type="submit"]',
-        );
-        return submit && !submit.disabled;
-      });
+      await expect(deleteButton).toBeEnabled();
       await assertStableDialogOpening(remove);
-      await remove.getByRole('button', { name: '删除', exact: true }).click();
+      await deleteButton.click();
       await pending('session-mutation');
       assert.equal(await rowElement('Renamed B').count(), 1);
       await release('session-mutation');

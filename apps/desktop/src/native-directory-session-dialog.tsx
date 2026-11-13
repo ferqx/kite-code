@@ -88,15 +88,7 @@ export function NativeDirectorySessionDialog({
           {dialog.error && <p role="alert">{dialog.error}</p>}
           {rename && bytes > 4096 && <p role="alert">会话名称过长。</p>}
           {!observeAvailable && <p role="status">会话暂不可用，等待连接恢复。</p>}
-          <DialogFooter className="items-center">
-            {observeAvailable && !dialog.facts && !dialog.error && (
-              <span
-                role="status"
-                className="mr-auto min-w-0 truncate text-xs text-muted-foreground"
-              >
-                正在核对会话…
-              </span>
-            )}
+          <DialogFooter>
             <Button ref={cancel} variant="outline" disabled={pending} onClick={onClose}>
               取消
             </Button>
