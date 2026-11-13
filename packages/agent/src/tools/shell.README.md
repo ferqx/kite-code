@@ -8,6 +8,10 @@
 
 模型结果中的 `execution_id/cancellation_execution_id` 使用原 ID 的无损短表示，计划进度与执行证据入口准确解码。原 Store 回执仍保存原 ID；不做前缀搜索、近似纠错或选择最近调用，也不改变 Shell 身份与派发次数。
 
+`shell_execute` 指导模型优先使用 `rg` 和 `rg --files`。普通 Shell 的 [输出采集](shell-output.ts) 共用 Store 的 1 MiB JSON／记录预算，在运行中发布稳定前缀，随后有界保留最近输出，在原终态前按顺序发布省略量和尾部。标准输出和错误输出共用预算；两个流的省略字节分别保存。Git 工作树的受信 worker 继续使用完整帧读取。Store 和旧记录合同见 [Jobs owner](../jobs/README.md)。
+
+`shell_execute` 和 `shell_read` 接受可选 `max_output_tokens`，它仅影响送入模型的输出预览，不进入 Shell Job 参数、命令授权摘要或运行时输出采集。默认 10,000，按每 token 4 个 UTF-8 字节估算，并与已知的所选模型输入容量取小。原回执、退出状态、Shell 引用、分页位置和采集省略量继续可读。已截断的读取页可用同一输入游标减小 `limit` 重新读取，读取操作不启动命令。验证见 [Shell 回归](../../test/isolated/tools/shell/unified-entry.test.ts)。
+
 `shell_read({shell_id,cursor?,limit?})` 的 cursor 绑定原 Job 和流位置；`caught_up` 只表示读到当前水位，`terminal` 才表示原执行终态，暂时无输出不表示完成。`shell_stop({shell_id})` 由宿主按原取消 Tool 稳定派生 command 身份，结果同时保原启动 `execution_id` 和独立 `cancellation_execution_id`；请求取消不冒充进程已停止，也不重放命令。`shell_wait({shell_id,wait_ms?})` 仅观察，期限到达不取消业务。
 
 前台期限 `execution_timeout_ms` 单位毫秒、范围1～3600000；省略不设期限。`background:true` 与期限同时填写在模型 Schema 和执行前参数校验中都失败，不创建 Job。`shell_wait` 的 `wait_ms` 保持0～30000、默认30000，超时不停止 Job。

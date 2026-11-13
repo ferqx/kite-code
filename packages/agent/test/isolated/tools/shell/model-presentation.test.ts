@@ -382,6 +382,18 @@ test('a bounded output preview remains explicitly incomplete and recovers the sa
   expect(body).toContain(f.details.stdout as string);
 });
 
+test('the default model preview preserves both ends within the approximate 10000-token budget', () => {
+  const f = fixture();
+  f.details.stdout = `start 🪁${'你'.repeat(15000)}end`;
+  const body = render(f)!;
+  expect(body).toContain('start 🪁');
+  expect(body).toContain('end');
+  expect(body).toContain('Model output preview omitted');
+  expect(body).not.toContain('\uFFFD');
+  expect(Buffer.byteLength(body)).toBeLessThan(40500);
+  expect(f.details.stdout).toEndWith(`${'你'.repeat(15000)}end`);
+});
+
 for (const damage of [
   'reference',
   'reference-store',

@@ -72,11 +72,12 @@ async function readForegroundShell(
   }
   assertOriginalShell(ref, execution);
   if (!terminal.includes(execution.status)) throw new AgentError('shell_unverifiable');
-  const text = { stdout: '', stderr: '' };
+  const text: { stdout: string[]; stderr: string[] } = { stdout: [], stderr: [] };
   const bytes = { stdout: 0, stderr: 0 };
   let cursor = '0',
     upper: string | undefined;
   let droppedBytes = 0n;
+  let truncated = false;
   for (;;) {
     context.signal.throwIfAborted();
     const page = await context.operations.readOutput(ref, {
@@ -86,6 +87,7 @@ async function readForegroundShell(
     });
     upper ??= page.highWaterSeq;
     if (BigInt(page.highWaterSeq) < BigInt(upper)) throw new AgentError('shell_output_conflict');
+    let next = BigInt(cursor);
     for (const item of page.items) {
       if (
         item.executionId !== ref.executionId ||
@@ -95,28 +97,29 @@ async function readForegroundShell(
         throw new AgentError('shell_output_conflict');
       if (BigInt(item.throughSeq) < BigInt(item.seq) || BigInt(item.throughSeq) > BigInt(upper))
         throw new AgentError('shell_output_conflict');
-      cursor = item.throughSeq;
+      const through = BigInt(item.throughSeq);
+      if (through > next) next = through;
+      if (item.droppedBytes === null || item.droppedBytes !== '0') truncated = true;
       if (item.droppedBytes) droppedBytes += BigInt(item.droppedBytes);
       if (item.stream !== 'stdout' && item.stream !== 'stderr') continue;
       bytes[item.stream] += Buffer.byteLength(item.content);
-      // The original complete output stays in the Job reader; the Model gets a bounded preview.
-      const remaining = 512 * 1024 - Buffer.byteLength(text[item.stream]);
-      if (remaining > 0)
-        text[item.stream] += Buffer.from(item.content).subarray(0, remaining).toString('utf8');
+      text[item.stream].push(item.content);
     }
-    if (BigInt(cursor) === BigInt(upper)) break;
-    if (!page.items.length) throw new AgentError('shell_output_conflict');
+    if (next === BigInt(upper)) break;
+    if (next === BigInt(cursor)) throw new AgentError('shell_output_conflict');
+    cursor = String(next);
   }
   const details = {
     ref: ref as unknown as Json,
     presentation,
     timedOut,
     execution: execution as unknown as Json,
-    ...text,
+    stdout: text.stdout.join(''),
+    stderr: text.stderr.join(''),
     stdoutBytes: String(bytes.stdout),
     stderrBytes: String(bytes.stderr),
     droppedBytes: String(droppedBytes),
-    truncated: bytes.stdout > 512 * 1024 || bytes.stderr > 512 * 1024,
+    truncated,
   };
   return {
     outcome:

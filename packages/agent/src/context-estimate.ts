@@ -92,6 +92,33 @@ export interface ModelContextEstimate {
 const positive = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
+export function modelInputCapacity(
+  capabilities: { contextWindowTokens?: unknown; maxOutputTokens?: unknown } = {},
+  requestMaxOutputTokens?: unknown,
+) {
+  const contextWindowTokens = positive(capabilities.contextWindowTokens)
+    ? capabilities.contextWindowTokens
+    : undefined;
+  const reservedOutputTokens = positive(requestMaxOutputTokens)
+    ? requestMaxOutputTokens
+    : positive(capabilities.maxOutputTokens)
+      ? capabilities.maxOutputTokens
+      : undefined;
+  const budgetKnown = contextWindowTokens !== undefined && reservedOutputTokens !== undefined;
+  const providerSafetyMarginTokens = budgetKnown
+    ? Math.max(1024, Math.floor(contextWindowTokens * 0.02))
+    : 0;
+  const usableInputTokens = budgetKnown
+    ? Math.max(0, contextWindowTokens - reservedOutputTokens - providerSafetyMarginTokens)
+    : undefined;
+  return {
+    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    ...(reservedOutputTokens === undefined ? {} : { reservedOutputTokens }),
+    providerSafetyMarginTokens,
+    ...(usableInputTokens === undefined ? {} : { usableInputTokens }),
+  };
+}
+
 /** Pure local estimate. Capabilities must be explicit facts from the original frozen Model. */
 export function estimateModelContext(
   request: Pick<ModelRequest, 'messages' | 'tools'>,
@@ -154,29 +181,12 @@ export function estimateModelContext(
     framingTokens,
     totalInputTokens: systemTokens + transcriptTokens + toolSchemaTokens + framingTokens,
   };
-  const contextWindowTokens = positive(capabilities.contextWindowTokens)
-    ? capabilities.contextWindowTokens
-    : undefined;
-  const reservedOutputTokens = positive(requestMaxOutputTokens)
-    ? requestMaxOutputTokens
-    : positive(capabilities.maxOutputTokens)
-      ? capabilities.maxOutputTokens
-      : undefined;
-  const budgetKnown = contextWindowTokens !== undefined && reservedOutputTokens !== undefined;
-  const providerSafetyMarginTokens = budgetKnown
-    ? Math.max(1024, Math.floor(contextWindowTokens * 0.02))
-    : 0;
-  const usableInputTokens = budgetKnown
-    ? Math.max(0, contextWindowTokens - reservedOutputTokens - providerSafetyMarginTokens)
-    : undefined;
+  const capacity = modelInputCapacity(capabilities, requestMaxOutputTokens);
   return {
     estimate,
-    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
-    ...(reservedOutputTokens === undefined ? {} : { reservedOutputTokens }),
-    providerSafetyMarginTokens,
-    ...(usableInputTokens === undefined ? {} : { usableInputTokens }),
-    ...(usableInputTokens && usableInputTokens > 0
-      ? { utilization: estimate.totalInputTokens / usableInputTokens }
+    ...capacity,
+    ...(capacity.usableInputTokens
+      ? { utilization: estimate.totalInputTokens / capacity.usableInputTokens }
       : {}),
   };
 }

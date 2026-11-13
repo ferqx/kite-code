@@ -23,10 +23,13 @@ function definition(): JobDefinition {
     },
   };
 }
-test('Shell Tool factory is pure and includes the exact selected Job rather than another process manager', () => {
+test('Shell Tool factory is pure and wraps only the selected Job output observer', () => {
   const job = definition();
   const extension = createShellExtension({ job });
-  expect(extension.jobs).toEqual([job]);
+  expect(extension.jobs).toHaveLength(1);
+  const registered = extension.jobs![0]!;
+  expect(registered.observe).not.toBe(job.observe);
+  expect({ ...registered, observe: job.observe }).toEqual(job);
   expect(extension.tools?.map((tool) => [tool.id, tool.version])).toEqual([
     ['shell.execute', '1'],
     ['shell.launch', '1'],

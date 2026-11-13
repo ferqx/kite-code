@@ -10,7 +10,7 @@ import type {
 } from '../extensions';
 import { canonicalJson } from '../json';
 import { modelCursor, readModelCursor } from '../model-cursor';
-import { parseShellCommandInput, shellOperationKey } from '../shell-input';
+import { parseShellCommandInput, shellOperationKey, validShellOutputTokens } from '../shell-input';
 import { AgentError } from '../storage/types';
 import {
   createGitWorktreeTool,
@@ -18,6 +18,7 @@ import {
   gitWorktreeRecordDefinition,
 } from './git-worktree';
 import { completeForegroundShell } from './shell-foreground';
+import { retainShellOutput } from './shell-output';
 
 export interface ShellToolsOptions {
   readonly job: JobDefinition;
@@ -25,6 +26,8 @@ export interface ShellToolsOptions {
   readonly permissionsSchema?: Json;
   readonly dialect?: 'git-bash' | 'powershell';
   readonly classifyPresentation?: (command: string) => Promise<'exploration' | 'standalone'>;
+  /** Internal workers consume a machine-readable frame rather than a Shell preview. */
+  readonly preserveJobOutput?: (input: Json) => boolean;
   readonly gitWorktree?: GitWorktreeToolOptions;
 }
 /** The source client uses built assets; it never executes a project-selected TS worker. */
@@ -69,8 +72,24 @@ async function reference(context: ToolContext, key: string): Promise<{ ref: Oper
 }
 /** Pure registrations. Only the ordinary Job.start path may start a process. */
 export function createShellExtension(options: ShellToolsOptions): Extension {
+  const { preserveJobOutput } = options;
+  const unbuffered = new WeakSet<Parameters<JobDefinition['observe']>[0]>();
   const job = Object.freeze({
     ...options.job,
+    ...(preserveJobOutput
+      ? {
+          async start(input: Json, context: Parameters<JobDefinition['start']>[1]) {
+            const preserve = preserveJobOutput(input);
+            const handle = await options.job.start(input, context);
+            if (preserve) unbuffered.add(handle);
+            return handle;
+          },
+        }
+      : {}),
+    observe: (handle: Parameters<JobDefinition['observe']>[0]) =>
+      unbuffered.has(handle)
+        ? options.job.observe(handle)
+        : retainShellOutput(options.job.observe(handle)),
     inputSchema: structuredClone(options.job.inputSchema),
     ...(options.job.resources ? { resources: structuredClone(options.job.resources) } : {}),
   });
@@ -84,6 +103,14 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       : options.dialect === 'git-bash'
         ? ' The command language is Git Bash on Windows.'
         : '';
+  const searchGuidance =
+    'Prefer rg for text search and rg --files for file discovery. Use alternatives when rg is unavailable.';
+  const outputTokens = {
+    type: 'integer',
+    minimum: 1,
+    description:
+      'Model output preview budget in tokens (default 10000). The selected model can impose a lower budget.',
+  };
   const schema = (foreground: boolean) => ({
     ...object(
       {
@@ -118,6 +145,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         },
         ...(foreground
           ? {
+              max_output_tokens: outputTokens,
               background: {
                 type: 'boolean',
                 default: false,
@@ -260,7 +288,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           omitParameters: ['key', 'permissions', 'cancellation', 'timeoutMs'],
         },
         version: '1',
-        description: `Execute one supervised command.${dialectGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
+        description: `Execute one supervised command.${dialectGuidance} ${searchGuidance} Create Git worktrees only with git_worktree, never through this tool or scripts; if git_worktree is unavailable, report the limitation. By default wait for it to finish and return its retained output; background:true returns the original handle and acceptance state instead. Background acceptance is not completion. execution_timeout_ms is a foreground-only deadline (1–3600000 ms); omission means no execution deadline. Approval and resource queues do not consume it; expiry requests cancellation and waits for actual stop evidence. Ordinary model Shells remain attached to parent cancellation. The returned execution_id identifies this exact Tool call for execution evidence and plan progress. shell_id is its compact handle for shell_read, shell_wait and shell_stop; copy it exactly, without deriving another identity. A new call is a new execution even when command text is identical. Recover the original result with shell_read and its returned shell_id, without executing again. Large output is an explicit preview with the original shell_id.${scopeGuidance}`,
         inputSchema: schema(true),
         async execute(input, context) {
           const parsed = parseShellCommandInput(input, 'execute', !!options.permissionsSchema);
@@ -316,11 +344,17 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             shellId: idSchema,
             cursor: { type: 'string', minLength: 1, maxLength: 4096 },
             limit: { type: 'integer', minimum: 1, maximum: 200 },
+            max_output_tokens: outputTokens,
           },
           ['shellId'],
         ),
         async execute(input, context) {
           const inputArgs = args(input);
+          if (
+            inputArgs.max_output_tokens !== undefined &&
+            !validShellOutputTokens(inputArgs.max_output_tokens)
+          )
+            throw new AgentError('invalid_shell_arguments');
           const shellId = text(inputArgs, 'shellId');
           const resolved = await reference(context, shellId);
           if (!resolved) return missingReference(shellId);
@@ -341,7 +375,10 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             ...position,
             ...(typeof inputArgs.limit === 'number' ? { limit: inputArgs.limit } : {}),
           });
-          const afterSeq = output.items.at(-1)?.throughSeq ?? String(position.afterSeq ?? '0');
+          const afterSeq = output.items.reduce(
+            (latest, item) => (BigInt(item.throughSeq) > BigInt(latest) ? item.throughSeq : latest),
+            String(position.afterSeq ?? '0'),
+          );
           const upperSeq = String(position.upperSeq ?? output.highWaterSeq);
           const caughtUp = BigInt(afterSeq) >= BigInt(upperSeq);
           return result({

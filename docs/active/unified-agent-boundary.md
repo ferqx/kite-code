@@ -521,6 +521,8 @@ Native首次页面授权候选在原browser.open Tool内先取得既有持久Que
 
 ## Trajectory 与 Trace 独立消费者边界
 
+普通 Shell 的 1 MiB 输出保留预算覆盖原 Job 的头尾及省略区间。Store 沿原输出事件顺序发布稳定前缀，原终态前追加省略记录和保留的尾部，公开游标继续读取已发布记录。模型输出预算独立应用于发送给模型的预览。采集和呈现的当前合同归 [Jobs owner](../../packages/agent/src/jobs/README.md) 与 [Shell tools](../../packages/agent/src/tools/shell.README.md)。
+
 [Trajectory](../../packages/trajectory/README.md)与[Trace SDK](../../packages/trace-extension-sdk/README.md)是明确新增的两个 workspace，根清单共十包。纯协议保存闭合事件／Evidence／完整性、固定上界分页、原来源身份和确定性投影；SDK公共入口只承担有限消费、broker context与明确ACK／reject，不提供通用CAS／outbox。纯入口不导入Agent、SQLite、Provider、React、Electron或宿主网络／文件I/O；SDK本地打包叶与guest入口分别检查。
 
 [原事务事实／Reader](../../packages/agent/src/trajectory/README.md)仍由原Runtime Store拥有，公开分页每页短事务重新准入，无跨页lease；typed材料按原事件／版本授权，Shell沿原截断预览。备份恢复保原来源，旧格式与缺口不推测完整，Blob ref／GC生命周期不因轨迹改变。

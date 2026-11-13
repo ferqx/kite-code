@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { modelExecutionId } from './model-identifier';
-import { parseShellCommandInput, shellOperationKey } from './shell-input';
+import { parseShellCommandInput, shellOperationKey, validShellOutputTokens } from './shell-input';
 import type { ExecutionRecord, Json } from './storage/types';
 import { failureOutcomeExplanation, toolFailurePresentation } from './tool-failure-presentation';
 
@@ -9,16 +9,41 @@ const object = (value: unknown): Record<string, Json> | undefined =>
     ? (value as Record<string, Json>)
     : undefined;
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'outcome_unknown']);
+const defaultMaxOutputTokens = 10000;
+
+/** Use Codex CLI's approximate four UTF-8 bytes per token. Keep Unicode intact. */
+function previewOutput(output: string, maxTokens: number): string {
+  const bytes = Buffer.from(output);
+  const budget = maxTokens * 4;
+  if (bytes.length <= budget) return output;
+  // Reserve space for the largest possible omission marker before slicing.
+  const markerBytes = Buffer.byteLength(
+    `[Model output preview omitted ${bytes.length} retained bytes.]`,
+  );
+  const excerptBudget = Math.max(0, budget - markerBytes - 2);
+  let start = Math.ceil(excerptBudget / 2);
+  let end = bytes.length - Math.floor(excerptBudget / 2);
+  while (start > 0 && (bytes[start]! & 0xc0) === 0x80) start--;
+  while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end++;
+  return [
+    bytes.toString('utf8', 0, start),
+    `[Model output preview omitted ${end - start} retained bytes.]`,
+    bytes.toString('utf8', end),
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
 /** Model presentation only. Callers must verify the frozen builtin registration.
  * Match the exact original operation before using its authorization observations.
- * The complete native receipt remains durable; stdout and stderr are never rewritten.
+ * The native receipt remains durable; only the model's copy is bounded here.
  */
 export function formatShellResult(input: {
   execution: ExecutionRecord;
   result: Record<string, Json>;
   operation: ExecutionRecord;
   starter: ExecutionRecord;
+  modelTokenLimit?: number;
 }): string | undefined {
   const { execution, result, operation, starter } = input;
   const details = object(result.details);
@@ -198,9 +223,16 @@ export function formatShellResult(input: {
     }
   } else return;
   lines.push(`execution_id: ${JSON.stringify(modelExecutionId(starter.id))}`, handle);
+  const outputLines: string[] = [];
+  const missingBytes =
+    typeof details.droppedBytes === 'string' && /^[1-9]\d*$/.test(details.droppedBytes)
+      ? details.droppedBytes
+      : undefined;
   for (const stream of ['stdout', 'stderr']) {
-    if (typeof details[stream] === 'string') lines.push(`${stream}:\n${details[stream]}`);
+    if (typeof details[stream] === 'string') outputLines.push(`${stream}:\n${details[stream]}`);
   }
+  let cursorLine: string | undefined;
+  const gaps: string[] = [];
   if (output) {
     if (
       typeof details.next_cursor !== 'string' ||
@@ -218,16 +250,41 @@ export function formatShellResult(input: {
         !['stdout', 'stderr'].includes(String(item.stream))
       )
         return;
-      lines.push(`${item.stream}:\n${item.content}`);
-      if (item.droppedBytes && item.droppedBytes !== '0')
-        lines.push(`Output bytes unavailable: ${item.droppedBytes}.`);
+      outputLines.push(`${item.stream}:\n${item.content}`);
+      if (item.droppedBytes === null) {
+        gaps.push(`Output gap in ${item.stream} (byte count unavailable for this page).`);
+        outputLines.push(gaps.at(-1)!);
+      } else if (item.droppedBytes && item.droppedBytes !== '0') {
+        gaps.push(`Output bytes unavailable: ${item.droppedBytes} (${item.stream}).`);
+        outputLines.push(gaps.at(-1)!);
+      }
     }
-    lines.push(
-      `Output cursor: ${JSON.stringify({ cursor: details.next_cursor, caught_up: details.caught_up, terminal: details.terminal })}`,
-    );
+    cursorLine = `Output cursor: ${JSON.stringify({ cursor: details.next_cursor, caught_up: details.caught_up, terminal: details.terminal })}`;
   }
+  if (outputLines.length) {
+    const requested = object(execution.input)?.max_output_tokens;
+    const limit = Math.min(
+      requested !== undefined && validShellOutputTokens(requested)
+        ? requested
+        : defaultMaxOutputTokens,
+      input.modelTokenLimit ?? Number.POSITIVE_INFINITY,
+    );
+    const outputText = outputLines.join('\n');
+    const preview = previewOutput(outputText, limit);
+    lines.push(preview);
+    if (preview !== outputText) {
+      for (const gap of gaps) if (!preview.includes(gap)) lines.push(gap);
+      if (output)
+        lines.push(
+          'Use the same input cursor with a smaller page limit or a larger output budget to inspect this retained page.',
+        );
+      else lines.push('Use shell_read with the original shell_id to inspect the retained output.');
+    }
+  }
+  if (cursorLine) lines.push(cursorLine);
   if (execution.definitionId === 'shell.stop' && details.cancellation_execution_id === execution.id)
     lines.push(`cancellation_execution_id: ${JSON.stringify(modelExecutionId(execution.id))}`);
+  if (missingBytes) lines.push(`Collection omitted ${missingBytes} output bytes.`);
   if (
     details.truncated === true ||
     (typeof details.droppedBytes === 'string' && details.droppedBytes !== '0')

@@ -6,6 +6,10 @@ export type ShellScope = {
   network: 'none' | 'internet';
 };
 
+export function validShellOutputTokens(value: Json): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
+}
+
 /** The persisted logical Tool identity survives attempts; command text never selects an identity. */
 export function shellOperationKey(key: Json | undefined, executionId: string): string {
   return typeof key === 'string' ? key : `sh_${modelIdentifier(executionId)}`;
@@ -33,7 +37,9 @@ export function parseShellCommandInput(
     'command',
     'workdir',
     ...(tool ? ['key', 'cancellation', 'description'] : []),
-    ...(kind === 'execute' ? ['background', 'execution_timeout_ms', 'timeoutMs'] : []),
+    ...(kind === 'execute'
+      ? ['background', 'execution_timeout_ms', 'timeoutMs', 'max_output_tokens']
+      : []),
     ...(scoped ? ['permissions', ...(tool ? ['filesystem', 'network'] : [])] : []),
   ];
   if (
@@ -50,6 +56,7 @@ export function parseShellCommandInput(
       (typeof input.key !== 'string' || !/^[A-Za-z0-9_.-]{1,128}$/.test(input.key))) ||
     (input.description !== undefined && typeof input.description !== 'string') ||
     (input.background !== undefined && typeof input.background !== 'boolean') ||
+    (input.max_output_tokens !== undefined && !validShellOutputTokens(input.max_output_tokens)) ||
     (input.cancellation !== undefined &&
       input.cancellation !== 'attached' &&
       input.cancellation !== 'detached') ||

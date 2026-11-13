@@ -750,6 +750,14 @@ export async function createShellConfiguration(input: {
         : {}),
       ...(worktree
         ? {
+            preserveJobOutput(input: import('../extensions').Json) {
+              const command = parseShellCommandInput(input, 'job', !!host)?.command;
+              return !!(
+                command &&
+                worktree.profile &&
+                parseWorkerCommand(command, worktree.configuration)
+              );
+            },
             gitWorktree: {
               configuration: worktree.configuration,
               worktreeHost: input.worktreeHost,

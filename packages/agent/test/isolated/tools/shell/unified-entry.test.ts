@@ -10,6 +10,7 @@ import {
   type ModelRequest,
 } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
+import { createArtifactStore } from '../../../../src/artifacts';
 import type {
   JobDefinition,
   JobEvent,
@@ -69,7 +70,15 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean):
     await Bun.sleep(5);
   }
 }
-async function fixture(responses: ModelEvent[][], hold = false, reenter = false) {
+async function fixture(
+  responses: ModelEvent[][],
+  hold = false,
+  reenter = false,
+  output: readonly JobEvent[] = [
+    { type: 'output', stream: 'stdout', content: 'original durable output\n' },
+  ],
+  contextWindowTokens?: number,
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell-unified-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const requests: ModelRequest[] = [];
@@ -121,7 +130,7 @@ async function fixture(responses: ModelEvent[][], hold = false, reenter = false)
       return handle;
     },
     async *observe(handle): AsyncIterable<JobEvent> {
-      yield { type: 'output', stream: 'stdout', content: 'original durable output\n' };
+      yield* output;
       if (hold) await gate;
       yield {
         type: 'terminal',
@@ -161,8 +170,32 @@ async function fixture(responses: ModelEvent[][], hold = false, reenter = false)
     : registered;
   const runtime = createRuntime({
     store,
+    artifacts: createArtifactStore({
+      profile: { dataRoot: join(root, 'data'), profile: 'test' },
+      store,
+    }),
     model,
     modelId: 'fixed',
+    ...(contextWindowTokens === undefined
+      ? {}
+      : {
+          async resolveRunConfiguration() {
+            return {
+              model,
+              modelId: 'fixed',
+              snapshot: {
+                configuration: {
+                  models: [
+                    {
+                      id: 'fixed',
+                      modelCapabilities: { contextWindowTokens, maxOutputTokens: 512 },
+                    },
+                  ],
+                },
+              },
+            };
+          },
+        }),
     permissions: {
       async authorize() {
         return { allowed: true, revision: 'fixture-allow' };
@@ -354,6 +387,7 @@ test('the current Shell model surface has four tools and rejects hidden legacy p
         'filesystem',
         'network',
         'workdir',
+        'max_output_tokens',
       ].sort(),
     );
     const decode = (input: Record<string, unknown>) =>
@@ -381,6 +415,8 @@ test('the current Shell model surface has four tools and rejects hidden legacy p
       { execution_timeout_ms: 1.5 },
       { filesystem: 'outside' },
       { network: 'localhost' },
+      { max_output_tokens: 0 },
+      { max_output_tokens: 1.5 },
     ])
       expect(decode(input).model?.error).toBe('invalid_tool_arguments');
     expect(
@@ -401,6 +437,10 @@ test('default foreground execution waits for one original Job and preserves its 
   ]);
   try {
     const view = await f.run();
+    const description = f.model.requests[0]!.tools!.find(
+      (tool) => tool.id === 'shell_execute',
+    )!.description;
+    expect(description).toContain('Prefer rg for text search and rg --files for file discovery');
     const jobs = view.executions.filter((execution) => execution.kind === 'job');
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.status).toBe('succeeded');
@@ -436,6 +476,137 @@ test('default foreground execution waits for one original Job and preserves its 
       definitionVersion: '1',
     });
     expect(original.sourceTool).not.toHaveProperty('background');
+  } finally {
+    await f.close();
+  }
+});
+
+test('large Shell output retains its head and tail with exact omissions and budgets the next Model request independently', async () => {
+  const chunks = Array.from({ length: 180 }, (_, index) => {
+    const prefix = `chunk-${String(index).padStart(3, '0')}: `;
+    return `${prefix}${'x'.repeat(16384 - prefix.length - 1)}\n`;
+  });
+  const f = await fixture(
+    [
+      calls(['shell_execute', { command: 'emit output', max_output_tokens: 50000 }]),
+      calls(['shell_read', { shell_id: 'original', limit: 1, max_output_tokens: 64 }]),
+      [finish],
+    ],
+    false,
+    false,
+    chunks.map((content) => ({ type: 'output', stream: 'stdout', content })),
+    2000,
+  );
+  try {
+    const view = await f.run();
+    const job = view.executions.find((entry) => entry.definitionId === 'shell.command')!;
+    const tool = view.executions.find((entry) => entry.definitionId === 'shell.execute')!;
+    expect(f.started).toEqual([job.id]);
+    expect(f.inputs).toEqual([{ command: 'emit output' }]);
+    expect(job.status).toBe('succeeded');
+    const saved = await f.store.listExecutionOutput({ executionId: job.id, limit: 200 });
+    const retained = saved.items.map((item) => item.content).join('');
+    const omitted = saved.items.filter((item) => item.droppedBytes !== '0');
+    expect(retained).toStartWith(chunks[0]!);
+    expect(retained).toEndWith(chunks.at(-1)!);
+    expect(retained).not.toContain('chunk-090');
+    expect(Buffer.byteLength(retained)).toBeLessThanOrEqual(1024 * 1024);
+    expect(omitted).toHaveLength(1);
+    expect(omitted[0]!.droppedBytes).toBe(String(chunks.length * 16384 - retained.length));
+    expect(tool.result).toMatchObject({ details: { stdout: retained, truncated: true } });
+    expect(view.runs.map((run) => ({ status: run.status, reason: run.reason }))).toEqual([
+      { status: 'completed', reason: null },
+    ]);
+    const started = f.model.requests[1]!.messages.filter((message) => message.role === 'tool').at(
+      -1,
+    )!.content;
+    expect(started).toContain('chunk-000');
+    expect(started).toContain('Model output preview omitted');
+    expect(started).toContain(`Collection omitted ${omitted[0]!.droppedBytes} output bytes`);
+    expect(Buffer.byteLength(started)).toBeLessThan(2500);
+    const read = f.model.requests[2]!.messages.filter((message) => message.role === 'tool').at(
+      -1,
+    )!.content;
+    expect(read).toContain('Output cursor:');
+    expect(read).toContain('Model output preview omitted');
+    expect(Buffer.byteLength(read)).toBeLessThan(1000);
+  } finally {
+    await f.close();
+  }
+});
+
+test('background output keeps its live cursor and publishes both stream gaps before the cancelled Job settles', async () => {
+  const first = 'first\n';
+  const middle = 'x'.repeat(32768);
+  const last = 'last stderr\n';
+  const f = await fixture(
+    [calls(['shell_execute', { command: 'emit background output', background: true }]), [finish]],
+    true,
+    false,
+    [
+      { type: 'output', stream: 'stdout', content: first },
+      ...Array.from(
+        { length: 48 },
+        (): JobEvent => ({
+          type: 'output',
+          stream: 'stdout',
+          content: middle,
+        }),
+      ),
+      { type: 'output_dropped', stream: 'stderr', bytes: '31' },
+      { type: 'output', stream: 'stderr', content: last },
+    ],
+  );
+  try {
+    const view = await f.run();
+    const job = await until(
+      async () =>
+        (await f.store.listExecutions('s')).find((entry) => entry.definitionId === 'shell.command'),
+      (entry) => entry?.status === 'running',
+    );
+    const live = await until(
+      () => f.store.listExecutionOutput({ executionId: job!.id }),
+      (page) => page.items.length === 16,
+    );
+    expect(live.items[0]!.content).toBe(first);
+    expect(live.items.every((item) => item.droppedBytes === '0')).toBeTrue();
+    expect(live.items.some((item) => item.content === last)).toBeFalse();
+    expect(view.executions.find((entry) => entry.definitionId === 'shell.execute')?.status).toBe(
+      'succeeded',
+    );
+    await f.store.cancelCommand({
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 's',
+      commandId: 'stop-exact-job',
+      targetCommandId: job!.originCommandId,
+      subjectId: 'owner',
+    });
+    await until(
+      () => f.store.getExecution(job!.id),
+      (entry) => entry?.status === 'cancelled',
+    );
+    const next = await f.store.listExecutionOutput({
+      executionId: job!.id,
+      afterSeq: live.highWaterSeq,
+    });
+    expect(next.items.at(-1)!.content).toBe(last);
+    const gaps = next.items.filter((item) => item.droppedBytes !== '0');
+    expect(gaps).toEqual([
+      expect.objectContaining({
+        stream: 'stdout',
+        droppedBytes: String(48 * middle.length - live.items.slice(1).length * middle.length),
+      }),
+      expect.objectContaining({ stream: 'stderr', droppedBytes: '31' }),
+    ]);
+    expect(
+      (
+        await f.store.listExecutionOutput({
+          executionId: job!.id,
+          upperSeq: live.highWaterSeq,
+        })
+      ).items,
+    ).toEqual(live.items);
+    expect(f.started).toEqual([job!.id]);
   } finally {
     await f.close();
   }

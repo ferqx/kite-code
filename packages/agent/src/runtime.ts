@@ -22,6 +22,7 @@ import {
 import {
   type ContextTokenBaseline,
   estimateModelContext,
+  modelInputCapacity,
   projectModelContext,
 } from './context-estimate';
 import {
@@ -4103,6 +4104,7 @@ export class AgentRuntime {
       undefined,
       definitions,
       recordedTools,
+      this.shellModelTokenLimit(run, saved.request.modelId),
     );
     // Step-selected capabilities may add presentation beyond the initial Run
     // catalogue. Original sealed requests are the comparison evidence, not a
@@ -4206,6 +4208,15 @@ export class AgentRuntime {
     const config = frozen?.snapshot?.configuration ?? frozen?.configuration;
     const matches = config?.models?.filter((model) => model.id === modelId);
     return matches?.length === 1 ? matches[0] : undefined;
+  }
+  private shellModelTokenLimit(run: RunRecord, modelId: string): number | undefined {
+    const model = this.frozenTokenModel(run, modelId);
+    const capabilities = model?.modelCapabilities as
+      | { contextWindowTokens?: unknown; maxOutputTokens?: unknown }
+      | undefined;
+    const options = model?.options as { maxOutputTokens?: unknown } | undefined;
+    const capacity = modelInputCapacity(capabilities, options?.maxOutputTokens);
+    return capacity.usableInputTokens ?? capacity.contextWindowTokens;
   }
   private inputTokenBaseline(
     execution: ExecutionRecord,
@@ -8556,6 +8567,8 @@ export class AgentRuntime {
             retainedInputMessages,
             compressionSummaryMessages,
             scope.bindings.tools,
+            undefined,
+            this.shellModelTokenLimit(run, modelId),
           ),
         );
         if (
@@ -8576,6 +8589,8 @@ export class AgentRuntime {
               undefined,
               compressionSummaryMessages,
               scope.bindings.tools,
+              undefined,
+              this.shellModelTokenLimit(run, modelId),
             ),
           );
         }
@@ -9144,6 +9159,8 @@ export class AgentRuntime {
             undefined,
             undefined,
             scope.bindings.tools,
+            undefined,
+            this.shellModelTokenLimit(run, modelId),
           );
           if (
             !selectedCompressor?.validateExpanded ||
@@ -10456,8 +10473,9 @@ export class AgentRuntime {
   private async modelResultPresentation(
     input: Parameters<AgentRuntime['formatModelResult']>[0],
     signal?: AbortSignal,
+    shellTokenLimit?: number,
   ): Promise<string | undefined> {
-    const presented = await this.formatModelResult(input, signal);
+    const presented = await this.formatModelResult(input, signal, shellTokenLimit);
     if (
       input.kind !== 'tool' ||
       input.execution.status !== 'succeeded' ||
@@ -10503,6 +10521,7 @@ export class AgentRuntime {
         }
       | ({ kind: 'child' } & Parameters<typeof formatChildResult>[0]),
     signal?: AbortSignal,
+    shellTokenLimit?: number,
   ): Promise<string | undefined> {
     if (
       input.kind === 'child' &&
@@ -10605,6 +10624,7 @@ export class AgentRuntime {
                         ...(originalBody === undefined ? {} : { body: originalBody }),
                       },
                       signal,
+                      shellTokenLimit,
                     )
                   : await this.modelResultPresentation(
                       {
@@ -10620,6 +10640,7 @@ export class AgentRuntime {
                         ...(originalBody === undefined ? {} : { body: originalBody }),
                       },
                       signal,
+                      shellTokenLimit,
                     );
               if (content === undefined) {
                 const metadata = canonicalJson(originalResult);
@@ -10721,6 +10742,7 @@ export class AgentRuntime {
                 result: { outcome: execution.status, content: canonicalJson(details), details },
                 operation: execution,
                 starter,
+                modelTokenLimit: shellTokenLimit,
               });
               if (presented)
                 return typeof details.stdout === 'string'
@@ -10739,7 +10761,13 @@ export class AgentRuntime {
         const operation = shellOperation;
         const starter = shellStarter;
         if (operation && starter) {
-          const presented = formatShellResult({ execution, result, operation, starter });
+          const presented = formatShellResult({
+            execution,
+            result,
+            operation,
+            starter,
+            modelTokenLimit: shellTokenLimit,
+          });
           if (presented) return presented;
         }
       }
@@ -10804,6 +10832,7 @@ export class AgentRuntime {
     compressionSummaryMessages?: ModelMessage[],
     definitions: ReadonlyMap<string, ToolDefinition> = this.tools,
     recordedTools?: ReadonlyMap<string, ModelMessage>,
+    shellTokenLimit?: number,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage; summary?: true }>();
@@ -11149,6 +11178,7 @@ export class AgentRuntime {
                         ...(body === undefined ? {} : { body }),
                       },
                       signal,
+                      shellTokenLimit,
                     )) ?? content;
               }
             }
@@ -11331,6 +11361,7 @@ export class AgentRuntime {
                   ...(body === undefined ? {} : { body }),
                 },
                 signal,
+                shellTokenLimit,
               )
             : undefined;
         const failureState =

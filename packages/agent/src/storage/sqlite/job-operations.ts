@@ -1,4 +1,5 @@
 import { canonicalJson } from '../../json';
+import { executionOutputBudget, executionOutputCost } from '../output-budget';
 import type { Store } from '../port';
 import { AgentError, type ExecutionOutputRecord, type OwnerRef } from '../types';
 import { assertCurrentExecutionPurpose } from './child-operations';
@@ -82,7 +83,7 @@ export function callJob(
         throw new AgentError('invalid_execution_output');
       const size = new TextEncoder().encode(input.content).byteLength;
       if (size > 32768) throw new AgentError('output_chunk_too_large');
-      const retainedCost = new TextEncoder().encode(JSON.stringify(input.content)).byteLength + 128;
+      const retainedCost = executionOutputCost(input.content);
       const dropped = decimal(input.droppedBytes ?? '0');
       if (!size && !dropped) throw new AgentError('empty_execution_output');
       if (BigInt(execution.output_seq!) >= max) throw new AgentError('sequence_exhausted');
@@ -92,10 +93,19 @@ export function callJob(
         input.executionId,
         input.stream,
       );
-      const budgetExhausted = Number(execution.output_bytes) + retainedCost > 1048576;
+      const shellOutput =
+        (prior !== null || dropped > 0n) &&
+        execution.kind === 'job' &&
+        execution.adapter_id === 'shell.command' &&
+        execution.definition_version === '1' &&
+        db.row('SELECT extension_id FROM command WHERE id=?', execution.origin_command_id!)
+          ?.extension_id === 'builtin.shell';
+      const budgetExhausted =
+        (!shellOutput || size > 0) &&
+        Number(execution.output_bytes) + retainedCost > executionOutputBudget;
       const gap =
         execution.output_budget_exhausted === 1n ||
-        prior !== null ||
+        (prior !== null && !shellOutput) ||
         dropped > 0n ||
         budgetExhausted;
       if (gap) {

@@ -121,7 +121,7 @@ export function createShellToolBehaviors(options: {
                       !Array.isArray(request.input)
                         ? (Object.fromEntries(
                             Object.entries(request.input).filter(
-                              ([name]) => name !== 'description',
+                              ([name]) => !['description', 'max_output_tokens'].includes(name),
                             ),
                           ) as Json)
                         : request.input;
