@@ -278,6 +278,8 @@ async function qualify(terminal: string, combined: string, desktop: string) {
         }
       };
       const idle = (frame: string) => frame.includes('❯') && !frame.includes('Working');
+      // Ink forces Kitty's disambiguation mode on POSIX; ConPTY sends native CR.
+      const enter = windows ? '\r' : '\u001b[13u';
       const trust = 'Trust this workspace and continue';
       try {
         await wait(
@@ -296,12 +298,27 @@ async function qualify(terminal: string, combined: string, desktop: string) {
           (frame) => idle(frame) && frame.includes(submit ? replies[1]! : replies[2]!),
         );
         if (submit) {
+          // History can render while the first Service observation still refreshes
+          // admission. Validate the active snapshot through the normal status UI.
+          if (!windows) assert(pty.text().includes('\u001b[>1u'));
+          await pty.key('/status');
+          await wait('tui_status_input', (frame) => frame.includes('❯ /status'));
+          await pty.key(enter);
+          await wait(
+            'tui_admission_confirmed',
+            (frame) =>
+              frame.includes('Connection: verified') &&
+              frame.includes('Observation: ready · Session snapshot: confirmed'),
+          );
+          await pty.key('\x1b');
+          await wait(
+            'tui_status_closed',
+            (frame) => idle(frame) && !frame.includes('Host status · Esc back'),
+          );
           await pty.key(prompts[2]!);
           await wait('tui_input_visible', (frame) => frame.includes(`❯ ${prompts[2]}`));
           assert.deepEqual(calls, prompts.slice(0, 2));
-          // Ink forces Kitty's disambiguation mode on POSIX; ConPTY sends native CR.
-          if (!windows) assert(pty.text().includes('\u001b[>1u'));
-          await pty.key(windows ? '\r' : '\u001b[13u');
+          await pty.key(enter);
           const frame = await wait(
             'tui_reply_and_editor',
             (value) => idle(value) && value.includes(replies[2]!),
