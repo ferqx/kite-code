@@ -1906,7 +1906,9 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 
 原生会话管理由 [Main 控制器](electron/session-management.ts) 消费公开 Fork、rename、delete API。[普通窗口的会话行菜单](../../packages/ui/src/desktop/Sidebar.tsx)提供重命名和删除，由 [Native 对话框](src/native-directory-session-dialog.tsx)确认。Main 根据当前可用目录核对 Store、目录代次、Workspace 和根 Session，观察与会话选择分开，写前重新读取目标 view 并核对修订。测试窗口的[管理面板](src/native-sessions.tsx)仍按当前 selection 准入。两处复用原 commandId 和回执校验，目录观察仅可提交一次操作，未知结果只查询原 commandId。窗口意图最多保留 128 项，普通目录的已结束意图可淘汰，未知意图保留到 Main 退出。会话创建与用户草稿仍使用前述私有数据库。
 
-目录回执确证后，[Main](electron/native-caller.ts)按准确 Session 与修订更新目录、使在途旧目录读取失效，并安排常规刷新。删除当前根会话同时释放其读取，renderer 跳回同一空间的新对话。其他会话的读取与输入继续保留。丢失回执时空间栏提供原命令查询，行可先随真实目录观察消失。受控浏览器验证沿[侧栏回归](test/sidebar-actions-browser.fixture.ts)的 `--session-actions` 入口，覆盖菜单、键盘、在途反馈、取消、未知查询和当前页交接。
+改名和删除弹框首帧使用目录已显示的名称，核对提示与按钮共用一行。同名核对完成时，标题、正文和按钮位置保持稳定；最新事实仍用于提交准入，用户已输入的名称继续保留。
+
+目录回执确证后，[Main](electron/native-caller.ts)按准确 Session 与修订更新目录、使在途旧目录读取失效，并安排常规刷新。删除当前根会话同时释放其读取，renderer 跳回同一空间的新对话。其他会话的读取与输入继续保留。丢失回执时空间栏提供原命令查询，行可先随真实目录观察消失。受控浏览器验证沿[侧栏回归](test/sidebar-actions-browser.fixture.ts)的 `--session-actions` 入口，覆盖菜单、键盘、逐帧弹框位置、在途反馈、取消、未知查询和当前页交接。
 
 2026-11-13，Windows x64／Chrome 157，关闭诊断的隔离 renderer 在深浅主题下检查会话按钮默认隐藏、逐行悬停、浮层打开时保持和移出后关闭即隐藏。暂扣观察与写入回执、模拟断线恢复、取消删除、只查询原命令和当前会话退出均走同一页面。另有真实 HTTP／SQLite 回归核对原命令与删除收尾。此范围为本机开发验证，未运行安装版 Electron。
 

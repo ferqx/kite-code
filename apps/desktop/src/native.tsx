@@ -2466,7 +2466,7 @@ function NativeDesktopContent({
         facts.session.deletedAt !== null
       )
         throw Error('session_scope_mismatch');
-      setSessionDialog((dialog) => dialog && { ...dialog, facts });
+      setSessionDialog((dialog) => dialog && { ...dialog, label: facts.session.title, facts });
     } catch (cause) {
       if (isCurrentSessionDialog(target))
         setSessionDialog(
@@ -2505,7 +2505,7 @@ function NativeDesktopContent({
     sessionDialogTarget.current = target;
     sessionDialogTrigger.current = trigger;
     showOperationMessage();
-    setSessionDialog({ kind, label: row.title || '新对话' });
+    setSessionDialog({ kind, label: row.title });
     void observeDirectorySession(target);
   }
 

@@ -37,7 +37,7 @@ export function NativeDirectorySessionDialog({
 }) {
   const [editedTitle, setEditedTitle] = useState<string>();
   const rename = dialog.kind === 'rename';
-  const title = editedTitle ?? dialog.facts?.session.title ?? '';
+  const title = editedTitle ?? dialog.label;
   const bytes = new TextEncoder().encode(title.trim()).length;
   const valid =
     observeAvailable &&
@@ -65,7 +65,7 @@ export function NativeDirectorySessionDialog({
           <DialogDescription className={rename ? 'sr-only' : 'break-words'}>
             {rename
               ? '输入新的会话名称。'
-              : `「${dialog.facts?.session.title || dialog.label}」将从列表移除。正在执行的任务会收到停止请求，工作区文件会保留。`}
+              : `「${dialog.label || '新对话'}」将从列表移除。正在执行的任务会收到停止请求，工作区文件会保留。`}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -88,8 +88,15 @@ export function NativeDirectorySessionDialog({
           {dialog.error && <p role="alert">{dialog.error}</p>}
           {rename && bytes > 4096 && <p role="alert">会话名称过长。</p>}
           {!observeAvailable && <p role="status">会话暂不可用，等待连接恢复。</p>}
-          {observeAvailable && !dialog.facts && !dialog.error && <p role="status">正在核对会话…</p>}
-          <DialogFooter>
+          <DialogFooter className="items-center">
+            {observeAvailable && !dialog.facts && !dialog.error && (
+              <span
+                role="status"
+                className="mr-auto min-w-0 truncate text-xs text-muted-foreground"
+              >
+                正在核对会话…
+              </span>
+            )}
             <Button ref={cancel} variant="outline" disabled={pending} onClick={onClose}>
               取消
             </Button>

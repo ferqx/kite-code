@@ -1,7 +1,55 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import type { Browser } from 'playwright';
+import type { Browser, Locator } from 'playwright';
 import type {} from './session-shell-browser.fixture';
+
+function sampleDialogOpening(dialog: Locator) {
+  return dialog.evaluate((element) => {
+    const frames: { layout: number[][]; title?: string; description?: string }[] = [];
+    const snapshot = () => {
+      const input = element.querySelector('input');
+      const description = element.querySelector('p[id]');
+      return {
+        layout: [
+          element,
+          ...element.querySelectorAll('h2, p[id]:not(.sr-only), input, button'),
+        ].map((node) => {
+          const { x, y, width, height } = node.getBoundingClientRect();
+          return [x, y, width, height];
+        }),
+        title: input?.value,
+        description: input ? undefined : (description?.textContent ?? undefined),
+      };
+    };
+    let nextFrame = 0;
+    const sample = () => {
+      if (!element.isConnected) return;
+      frames.push(snapshot());
+      nextFrame = requestAnimationFrame(sample);
+    };
+    Reflect.set(element, 'finishOpeningSample', () => {
+      cancelAnimationFrame(nextFrame);
+      return [...frames, snapshot()];
+    });
+    sample();
+  });
+}
+
+async function assertStableDialogOpening(dialog: Locator, originalTitle?: string) {
+  const frames = await dialog.evaluate(
+    (element) =>
+      Reflect.get(element, 'finishOpeningSample')() as {
+        layout: number[][];
+        title?: string;
+        description?: string;
+      }[],
+  );
+  const first = frames[0]!;
+  assert.ok(frames.length > 1);
+  if (originalTitle !== undefined) assert.equal(first.title, originalTitle);
+  else assert.match(first.description ?? '', /Renamed B/);
+  for (const frame of frames) assert.deepEqual(frame, first);
+}
 
 export async function verifySessionRowActions(browser: Browser, url: string, artifact: string) {
   for (const colorScheme of ['light', 'dark'] as const) {
@@ -89,14 +137,14 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       const rename = page.getByRole('dialog', { name: '重命名会话' });
       const title = rename.getByRole('textbox', { name: '会话名称' });
       await pending('session-observation');
+      await sampleDialogOpening(rename);
       assert.equal(await rename.getByRole('button', { name: '保存' }).isDisabled(), true);
       assert.equal(await title.evaluate((node) => node === document.activeElement), true);
       await release('session-observation');
       await page.waitForFunction(
-        () =>
-          document.querySelector<HTMLInputElement>('[aria-label="会话名称"]')?.value ===
-          'Session B',
+        () => !document.querySelector('.session-management-dialog [role="status"]'),
       );
+      await assertStableDialogOpening(rename, 'Session B');
       await title.fill('Renamed B');
       await title.press('Enter');
       await pending('session-mutation');
@@ -128,7 +176,15 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       });
       await open('Renamed B', '删除');
       await pending('session-observation');
+      await sampleDialogOpening(remove);
       await release('session-observation');
+      await page.waitForFunction(() => {
+        const submit = document.querySelector<HTMLButtonElement>(
+          '.session-management-dialog button[type="submit"]',
+        );
+        return submit && !submit.disabled;
+      });
+      await assertStableDialogOpening(remove);
       await remove.getByRole('button', { name: '删除', exact: true }).click();
       await pending('session-mutation');
       assert.equal(await rowElement('Renamed B').count(), 1);
