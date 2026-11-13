@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
+import { expect, test } from '#kite-test';
 import { createClient, type StartCommandRequest, validateRequest } from '../../src';
 
 test('per-Run selection requires actual capability including empty selection and preserves physical lost reply intent without POST retry', async () => {

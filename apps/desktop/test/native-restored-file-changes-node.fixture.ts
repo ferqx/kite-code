@@ -12,7 +12,7 @@ globalThis.fetch = Object.assign(
     methods.push(init?.method ?? (request instanceof Request ? request.method : 'GET'));
     return originalFetch(request, init);
   },
-  { preconnect: originalFetch.preconnect },
+  {},
 );
 const client = createClient({
   endpoint: input.bootstrap.endpoint,

@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -266,7 +267,7 @@ export async function runNaturalToolProbe(caseId: NaturalCase, output: string) {
     await runtime.waitForCommand('A', { timeoutMs: Math.max(1, deadline - Date.now()) });
     while (runtime.getLifecycleState().busy) {
       if (Date.now() >= deadline) throw new Boundary('deadline_before_real_lifecycle_terminal');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     const view = await owned.getView('root');
     stages.terminal = {

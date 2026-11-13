@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { spawn } from '../../../scripts/tooling/process';
 
 export const nodeApiHeaderHashes = Object.freeze({
   'node_api.h': 'd14db85d16f182045c42745a6e44b96e932dfe6e3bfcaac7a1096fae8412c579',
@@ -9,7 +10,7 @@ export const nodeApiHeaderHashes = Object.freeze({
   'js_native_api_types.h': '0410c31e227f81e2981363c4d543f4832ac3df785343ec64cee621742ff8a034',
 });
 export function verifyNodeApiHeaders() {
-  const root = join(import.meta.dir, '../native/windows-access');
+  const root = join(import.meta.dirname, '../native/windows-access');
   for (const [name, hash] of Object.entries(nodeApiHeaderHashes)) {
     if (
       createHash('sha256')
@@ -29,7 +30,7 @@ export async function buildWindowsAccess(outdir: string, compiler = process.env.
   const root = verifyNodeApiHeaders();
   const output = join(outdir, 'windows-access.node');
   if (!isAbsolute(outdir) || existsSync(output)) throw Error('windows_access_output_invalid');
-  const child = Bun.spawn(
+  const child = spawn(
     [
       compiler,
       '/nologo',

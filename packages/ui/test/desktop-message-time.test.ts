@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { formatMessageTime } from '../src/desktop/message-time';
 
 test('message time uses local calendar dates, yesterday across midnight, and explicit older dates', () => {

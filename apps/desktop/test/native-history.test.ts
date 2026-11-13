@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Message } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeSelection } from '../src/native-bridge';
 import { type HistoryState, NativeHistory } from '../src/native-history';
 
@@ -74,7 +75,7 @@ test('Native normal streaming merges same-seq changes without rescanning, loadin
     expect(reads.filter((request) => !request.changes)).toHaveLength(1);
     expect(reads.map((request) => request.changes?.afterCursor)).toEqual([undefined, '1', '2']);
     reader.select(1, { ...incrementalSelection(3), viewGeneration: 4 });
-    await Bun.sleep(5);
+    await fixtureDelay(5);
     expect(calls).toHaveLength(3);
   } finally {
     reader.dispose();
@@ -187,7 +188,7 @@ test('Native expired change cursors rebase automatically and an epoch change rej
     reader.select(1, incrementalSelection(4), 1);
     await until(() => reader.state.phase === 'complete');
     release();
-    await Bun.sleep(5);
+    await fixtureDelay(5);
     expect(reader.state.messages[0]?.content).toBe('new epoch');
     reader.preview('other');
     reader.select(1, incrementalSelection(5), 1);

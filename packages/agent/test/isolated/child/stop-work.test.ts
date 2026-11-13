@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { OperationRef, ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -33,7 +34,7 @@ async function until(check: () => Promise<boolean>, label: string) {
   const end = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() >= end) throw Error(`stop_work_fixture_timeout:${label}`);
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function waitGate(ready: Promise<void>, signal: AbortSignal) {

@@ -1,7 +1,8 @@
-import { expect, mock, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, mock, spyOn, test } from '#kite-test';
 import type { BrowserPagePort, NativeBrowserPageHost } from '../../electron/browser-page-host';
 import {
   type NativeBrowserBounds,
@@ -2153,7 +2154,7 @@ test('the first native frame waits for the engine past two seconds without faili
     const receive = f.contents.frame!;
     expect(typeof receive).toBe('function');
     expect(f.aboveRoot()).toBe(false);
-    await Bun.sleep(2050);
+    await fixtureDelay(2050);
     expect(f.pageState().display).toBe('loading');
     expect(f.aboveRoot()).toBe(false);
     expect(f.contents.frame).toBe(receive);
@@ -2179,7 +2180,7 @@ test('a first document waits for engine readiness past twelve seconds and can st
     expect(f.contents.frameCallbacks).toHaveLength(0);
     expect(f.aboveRoot()).toBe(false);
     expect(f.pageState().display).toBe('loading');
-    await Bun.sleep(12050);
+    await fixtureDelay(12050);
     expect(f.pageState().display).toBe('loading');
     expect(f.view.visible).toBe(false);
     f.completeDocument(f.view, 'https://example.test/late', false);

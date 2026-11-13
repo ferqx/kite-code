@@ -1,15 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 // Explicit isolated process measurement. Timing, local Provider and fixed
 // credentials are test composition only; no ordinary client gets a debug entry.
 const root = temporaryDirectory('kite-lifecycle-process-');
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 const countArgument = process.argv.find((value) => value.startsWith('--samples='));
 const count = countArgument ? Number(countArgument.slice('--samples='.length)) : 20;
 if (!Number.isSafeInteger(count) || count < 1 || count > 100)
@@ -50,7 +53,7 @@ interface Sample {
 }
 const samples: Sample[] = [];
 let current: Sample | undefined;
-const provider = Bun.serve({
+const provider = await fixtureServe({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -85,7 +88,7 @@ const provider = Bun.serve({
             const until = performance.now() + (naming ? sample.titleDelay : 10);
             while (!cancelled && performance.now() < until) {
               controller.enqueue(encoder.encode(': isolated Provider heartbeat\n\n'));
-              await Bun.sleep(Math.min(100, Math.max(1, until - performance.now())));
+              await sleepTimer(Math.min(100, Math.max(1, until - performance.now())));
             }
             if (cancelled) return;
             controller.enqueue(chunk(naming ? '进程性能测量' : 'process complete answer', null));
@@ -173,7 +176,7 @@ async function run(scenario: string, profileName: string, titleDelay = 100) {
   };
   samples.push(sample);
   current = sample;
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
       driver,
@@ -314,7 +317,7 @@ try {
         environment: {
           platform: process.platform,
           arch: process.arch,
-          bun: Bun.version,
+          node: process.versions.node,
           timing:
             'launch/provider/terminal/exit use the parent monotonic clock; child phases use their own process monotonic clock; wall timestamps correlate identities only',
         },

@@ -22,6 +22,7 @@ import {
 } from './http/schema';
 import { FileCheckpointListQuerySchema } from './http/schema/file-checkpoints';
 import { BrowserSessionLogQuerySchema, SessionLogPageSchema } from './http/schema/session-logs';
+import { type LoopbackServer, serveLoopback } from './loopback-server';
 import { modelInputResponse, modelOutputResponse } from './model-input-response';
 
 const security = {
@@ -48,7 +49,14 @@ export interface DevelopmentWebOptions {
 }
 
 /** Development Service owns this explicit listener. Only finite public reads can reach Client. */
-export function startDevelopmentWeb(options: DevelopmentWebOptions) {
+export async function startDevelopmentWeb(options: DevelopmentWebOptions) {
+  const gateway = prepareDevelopmentWeb(options);
+  return gateway.activate(await serveLoopback(gateway.fetch));
+}
+
+export { startDevelopmentWeb as startDaemonWeb };
+
+function prepareDevelopmentWeb(options: DevelopmentWebOptions) {
   const admitted = options.admittedClient.serverInfo;
   if (!admitted) throw new ClientError('connection_not_admitted');
   const original = structuredClone(admitted);
@@ -191,14 +199,11 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
       seen.add(key);
     }
   }
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    development: false,
-    async fetch(request, activeServer) {
+  const listener = {
+    async fetch(request: Request, peerAddress?: string) {
       if (closed) return problem('browser_unavailable', 503);
       if (
-        activeServer.requestIP(request)?.address !== '127.0.0.1' ||
+        peerAddress !== '127.0.0.1' ||
         request.headers.get('host') !== new URL(endpoint).host ||
         (request.headers.get('origin') && request.headers.get('origin') !== endpoint) ||
         request.headers.has('authorization')
@@ -787,23 +792,26 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         if (!streaming) finish();
       }
     },
-  });
-  endpoint = `http://127.0.0.1:${server.port}`;
-  return {
-    endpoint,
-    pageIdentity,
-    close(): Promise<void> {
-      if (closeTask) return closeTask;
-      closed = true;
-      sessions.clear();
-      closeTask = Promise.resolve().then(async () => {
-        await Promise.all([...pendingReads]);
-        if (cleanupFailure !== undefined) throw cleanupFailure;
-        await server.stop(true);
-      });
-      for (const read of reads) read.abort();
-      void closeTask.catch(() => {});
-      return closeTask;
-    },
   };
+  function activate(server: LoopbackServer) {
+    endpoint = `http://127.0.0.1:${server.port}`;
+    return {
+      endpoint,
+      pageIdentity,
+      close(): Promise<void> {
+        if (closeTask) return closeTask;
+        closed = true;
+        sessions.clear();
+        closeTask = Promise.resolve().then(async () => {
+          await Promise.all([...pendingReads]);
+          if (cleanupFailure !== undefined) throw cleanupFailure;
+          await server.stop(true);
+        });
+        for (const read of reads) read.abort();
+        void closeTask.catch(() => {});
+        return closeTask;
+      },
+    };
+  }
+  return { fetch: listener.fetch, activate };
 }

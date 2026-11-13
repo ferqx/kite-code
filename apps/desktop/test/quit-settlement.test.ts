@@ -1,4 +1,4 @@
-import { expect, jest, spyOn, test } from 'bun:test';
+import { expect, jest, spyOn, test } from '#kite-test';
 import { settleDesktopQuit } from '../electron/quit-settlement';
 
 function deferredClose() {

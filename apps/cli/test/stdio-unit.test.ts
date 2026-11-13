@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { Readable } from 'node:stream';
 import type { AgentClient, Interaction } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createStdioInteractionHandler, run } from '../src';
 
 async function read(kind: Interaction['kind'], request: Interaction['request'], text: string) {

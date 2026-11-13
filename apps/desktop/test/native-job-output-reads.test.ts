@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, ExecutionOutputPage } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeJobOutputReads } from '../electron/job-output-reads';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';

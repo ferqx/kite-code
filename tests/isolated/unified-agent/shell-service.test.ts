@@ -1,15 +1,18 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Execution } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 const posixTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
-const entrypoint = join(import.meta.dir, '../../fixtures/shell-service/entry.ts');
+const entrypoint = join(import.meta.dirname, '../../fixtures/shell-service/entry.ts');
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 function alive(pid: number) {
   try {
@@ -37,7 +40,7 @@ async function until<T>(
     const value = await read();
     if (valid(value)) return value;
     if (Date.now() >= deadline) throw new Error('shell_service_deadline');
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 async function setup(serial = false) {
@@ -45,13 +48,13 @@ async function setup(serial = false) {
   const cwd = join(root, 'workspace');
   mkdirSync(cwd);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'fixture' });
-  const built = await Bun.build({
+  const built = await buildFixture({
     entrypoints: [
-      join(import.meta.dir, '../../../packages/agent/src/platform/process/shell-supervisor.ts'),
+      join(import.meta.dirname, '../../../packages/agent/src/platform/process/shell-supervisor.ts'),
     ],
     outdir: join(root, 'assets'),
     naming: 'shell-supervisor.js',
-    target: 'bun',
+    target: 'node',
   });
   expect(built.success).toBe(true);
   const ledger = join(root, 'starts');
@@ -157,7 +160,10 @@ posixTest(
   'real paired Services share owner and Workspace resource; precise cancel receipt precedes confirmed Shell group stop',
   async () => {
     const f = await setup(true);
-    const unrelated = Bun.spawn(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+    const unrelated = spawnFixtureProcess(['/bin/sleep', '30'], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
     let group: number | undefined;
     try {
       const b = await f.launch('owner-b');
@@ -200,7 +206,7 @@ posixTest(
       const sameSessionJob = await f.job(b, 'same-session');
       await f.invoke(b, 'resource-wait', 'printf peer-resource', 'other');
       const waiting = await f.job(b, 'resource-wait', 'other');
-      await Bun.sleep(80);
+      await fixtureDelay(80);
       expect(
         (
           await until(
@@ -284,7 +290,10 @@ for (const exit of ['eof', 'sigkill'] as const)
     `actual paired Service ${exit} cleans Shell root/descendants; reopening preserves durable facts without restart`,
     async () => {
       const f = await setup();
-      const unrelated = Bun.spawn(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+      const unrelated = spawnFixtureProcess(['/bin/sleep', '30'], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
       let group: number | undefined;
       let readerStore: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
       try {
@@ -349,7 +358,7 @@ for (const exit of ['eof', 'sigkill'] as const)
           exit === 'eof' ? 'cancelled' : 'outcome_unknown',
         );
         await f.invoke(resumed, 'orphan-job', command);
-        await Bun.sleep(100);
+        await fixtureDelay(100);
         expect(readFileSync(f.ledger, 'utf8').trim().split('\n')).toHaveLength(1);
         expect(groupAlive(group!)).toBe(false);
       } finally {

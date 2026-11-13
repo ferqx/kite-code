@@ -85,6 +85,7 @@ import {
 } from './native-browser-session';
 import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
+import { readNativeCallerBody } from './native-caller-body';
 import { NativeChildDetail } from './native-child-detail';
 import { NativeContextView } from './native-context';
 import { useNativeContextUsage } from './native-context-usage';
@@ -115,6 +116,7 @@ import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
+import { nativeModelFailure } from './native-model-failure';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
@@ -158,7 +160,11 @@ import {
 } from './native-transcript';
 import { NativeTranscriptDisplay } from './native-transcript-display';
 import { useNativeTurnNotifications } from './native-turn-notifications';
-import { NativePendingAttachments, NativeUserImages } from './native-user-images';
+import {
+  type NativePendingAttachmentNames,
+  NativePendingAttachments,
+  NativeUserImages,
+} from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
 import { NativeWorkspaceChanges } from './native-workspace-changes';
 import {
@@ -567,6 +573,7 @@ function NativeDesktopContent({
         afterInputCommandId?: string;
         text: string;
         phase: 'sending' | 'unknown' | 'failed' | 'accepted';
+        error?: string;
         files?: readonly { name: string }[];
         images?: readonly { name: string }[];
       }
@@ -1940,13 +1947,18 @@ function NativeDesktopContent({
           row.scope.sessionId === sessionId &&
           row.scope.storeId === receiptStoreId &&
           (row.phase === 'unknown' ||
-            (row.phase === 'accepted' &&
-              ['run.start', 'input.follow_up'].includes(row.request.kind) &&
+            (((row.phase === 'accepted' &&
+              ['run.start', 'input.follow_up'].includes(row.request.kind)) ||
+              (row.phase === 'rejected' &&
+                row.request.kind === 'run.start' &&
+                row.rejectionReason === undefined)) &&
               !state?.inputSubmissions.some(
                 (input) => input.intent.commandId === row.request.commandId,
               )))
         )
           lookup('caller.lookup', row.request.commandId);
+      if (coldKey && coldGeneration === current && coldRejectedInput?.key !== coldKey)
+        add(`caller.body:${coldKey}`, () => readColdRejectedInput(active));
       for (const row of state?.permissionSubmissions ?? [])
         if (
           row.sessionId === sessionId &&
@@ -2886,6 +2898,10 @@ function NativeDesktopContent({
         if (original)
           next.set(commandId, {
             ...original,
+            error:
+              intent.kind === 'run.start' && value && 'error' in value
+                ? nativeModelFailure(value.error)?.reasonCode
+                : undefined,
             phase:
               value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase)
                 ? 'accepted'
@@ -3257,6 +3273,13 @@ function NativeDesktopContent({
       state?.callerSubmissions,
     ],
   );
+  const firstRejectionReason =
+    firstVisible &&
+    firstSubmission.result?.phase === 'failed' &&
+    firstSubmission.result.stage === 'input'
+      ? nativeModelFailure(firstSubmission.result.input?.error ?? firstSubmission.result.code)
+          ?.reasonCode
+      : undefined;
   const rejectedInputs = useMemo(() => {
     const rejected = new Map<string, string | undefined>();
     if (!selection) return rejected;
@@ -3280,7 +3303,7 @@ function NativeDesktopContent({
         row.scope.storeId === selection.storeId &&
         row.scope.sessionId === selection.session.id
       )
-        rejected.set(row.request.commandId, undefined);
+        rejected.set(row.request.commandId, row.rejectionReason ?? undefined);
     for (const input of state?.inputSubmissions ?? [])
       if (
         input.phase === 'rejected' &&
@@ -3289,49 +3312,183 @@ function NativeDesktopContent({
         input.intent.expectedStoreId === selection.storeId &&
         input.sessionId === selection.session.id
       )
-        rejected.set(input.intent.commandId, input.error);
-    return rejected;
-  }, [selection, state?.callerSubmissions, state?.inputSubmissions]);
-  const rejectedInputAnchors = useRef(new Map<string, string | null>());
-  useLayoutEffect(() => {
-    if (
-      !selection ||
-      preparing ||
-      selection.viewLoading ||
-      historyState.phase !== 'complete' ||
-      history.current?.state !== historyState ||
-      historyMetadataLoading ||
-      selectionRead.current?.holdPresentation
-    )
-      return;
-    for (const commandId of rejectedInputs.keys()) {
-      const key = JSON.stringify([replyDisplayScope, commandId]);
+        rejected.set(input.intent.commandId, input.error ?? rejected.get(input.intent.commandId));
+    for (const [id, input] of inputDeliveries)
       if (
-        !rejectedInputAnchors.current.has(key) &&
-        !displayMessages.some((message) =>
-          savedNativeInput(
-            message,
-            commandId,
-            { storeId: selection.storeId, sessionId: selection.session.id },
-            selection,
-          ),
-        )
+        input.kind === 'run.start' &&
+        input.phase === 'failed' &&
+        input.error &&
+        input.storeId === selection.storeId &&
+        input.sessionId === selection.session.id &&
+        !rejected.has(id)
       )
-        // No historical input exists to order this rejection. Fix its first
-        // fully read position so later explicit inputs do not move it forward.
-        rejectedInputAnchors.current.set(key, displayMessages.at(-1)?.id ?? null);
+        rejected.set(id, input.error);
+    if (
+      firstRejectionReason &&
+      firstSubmission?.creation.expectedStoreId === selection.storeId &&
+      firstSubmission.creation.sessionId === selection.session.id &&
+      !rejected.has(firstSubmission.commandId)
+    )
+      rejected.set(firstSubmission.commandId, firstRejectionReason);
+    return rejected;
+  }, [
+    selection,
+    state?.callerSubmissions,
+    state?.inputSubmissions,
+    inputDeliveries,
+    firstSubmission,
+    firstRejectionReason,
+  ]);
+  const anchoredRejections = useMemo(() => {
+    const anchors = new Map<string, { messageId?: string; turnId?: string }>();
+    if (!selection) return anchors;
+    const scope = { storeId: selection.storeId, sessionId: selection.session.id };
+    for (const commandId of rejectedInputs.keys()) {
+      const messageId = displayMessages.find((message) =>
+        savedNativeInput(message, commandId, scope, selection),
+      )?.id;
+      const turnId = nativeInputTurnId(commandId, scope, selection);
+      if (messageId || turnId) anchors.set(commandId, { messageId, turnId });
     }
-    while (rejectedInputAnchors.current.size > 256)
-      rejectedInputAnchors.current.delete(rejectedInputAnchors.current.keys().next().value!);
+    return anchors;
+  }, [selection, displayMessages, rejectedInputs]);
+  const orphanRejection = useMemo(() => {
+    if (!selection || preparing || selected.current !== selection.session.id) return undefined;
+    const sameSession = (storeId: string, sessionId: string) =>
+      storeId === selection.storeId && sessionId === selection.session.id;
+    const attempts = new Map<string, { accepted: boolean; row?: NativeCallerMetadata }>();
+    for (const row of state?.callerSubmissions ?? []) {
+      if (
+        sameSession(row.scope.storeId, row.scope.sessionId) &&
+        row.scope.workspaceId === selection.session.workspaceId &&
+        ['run.start', 'input.follow_up'].includes(row.request.kind)
+      )
+        attempts.set(row.request.commandId, {
+          accepted: row.phase === 'accepted' || row.phase === 'applied',
+          row,
+        });
+    }
+    const observe = (id: string, accepted: boolean) => {
+      const existing = attempts.get(id);
+      attempts.set(id, {
+        ...existing,
+        accepted: !rejectedInputs.has(id) && (accepted || !!existing?.accepted),
+      });
+    };
+    for (const input of state?.inputSubmissions ?? [])
+      if (
+        sameSession(input.intent.expectedStoreId, input.sessionId) &&
+        ['run.start', 'input.follow_up'].includes(input.intent.kind)
+      )
+        observe(input.intent.commandId, ['accepted', 'applied', 'terminal'].includes(input.phase));
+    if (
+      firstSubmission &&
+      sameSession(firstSubmission.creation.expectedStoreId, firstSubmission.creation.sessionId)
+    )
+      observe(firstSubmission.commandId, firstSubmission.result?.phase === 'accepted');
+    for (const [id, input] of inputDeliveries)
+      if (sameSession(input.storeId, input.sessionId) && input.kind !== 'input.steer')
+        observe(id, input.phase === 'accepted');
+    for (const [id, attempt] of [...attempts].reverse()) {
+      if (attempt.accepted) return undefined;
+      if (rejectedInputs.has(id) && !anchoredRejections.has(id)) return { id, row: attempt.row };
+    }
+    return undefined;
   }, [
     selection,
     preparing,
-    historyState,
-    historyMetadataLoading,
-    displayMessages,
+    state?.callerSubmissions,
+    state?.inputSubmissions,
+    inputDeliveries,
+    firstSubmission,
     rejectedInputs,
-    replyDisplayScope,
+    anchoredRejections,
   ]);
+  const coldRejection =
+    orphanRejection?.row?.phase === 'rejected' &&
+    !inputDeliveries.has(orphanRejection.id) &&
+    !(firstVisible && firstSubmission.commandId === orphanRejection.id) &&
+    historyState.phase === 'complete' &&
+    !historyMetadataLoading &&
+    !selectionRead.current?.holdPresentation
+      ? orphanRejection.row
+      : undefined;
+  const coldCommandId = coldRejection?.request.commandId;
+  const coldDigest = coldRejection?.bodyDigest;
+  const coldStoreId = coldRejection?.scope.storeId;
+  const coldKey = coldRejection && JSON.stringify([replyDisplayScope, coldCommandId, coldDigest]);
+  const [coldRejectedInput, setColdRejectedInput] = useState<
+    NativePendingAttachmentNames & { key: string; text: string }
+  >();
+  const coldGeneration = state?.generation;
+  type ColdReader = { key: string; close?: () => Promise<void> };
+  const coldReader = useRef<ColdReader | undefined>(undefined);
+  // Revocation closes the active page reader even when an IPC request is still settling.
+  useLayoutEffect(() => {
+    if (!bridge || !coldKey) return;
+    const owner: ColdReader = { key: coldKey };
+    coldReader.current = owner;
+    return () => {
+      coldReader.current = undefined;
+      void owner.close?.();
+    };
+  }, [bridge, coldKey]);
+
+  async function readColdRejectedInput(active: () => boolean) {
+    const owner = coldReader.current;
+    if (
+      !bridge ||
+      !owner ||
+      owner.key !== coldKey ||
+      coldGeneration === undefined ||
+      !coldCommandId ||
+      !coldDigest
+    )
+      return;
+    const readId = crypto.randomUUID();
+    const owned = () => active() && coldReader.current === owner;
+    const close = async () => {
+      if (owner.close !== close) return;
+      owner.close = undefined;
+      await bridge
+        .request({ method: 'caller.close', generation: coldGeneration, readId })
+        .catch(() => {});
+    };
+    owner.close = close;
+    try {
+      const body = await readNativeCallerBody({
+        bridge,
+        generation: coldGeneration,
+        commandId: coldCommandId,
+        bodyDigest: coldDigest,
+        readId,
+        owned,
+      });
+      if (!body || !owned()) return;
+      const input = JSON.parse(body) as Partial<
+        NativePendingAttachmentNames & {
+          kind: string;
+          commandId: string;
+          expectedStoreId: string;
+          content: string;
+        }
+      >;
+      if (
+        (input.kind === 'run.start' || input.kind === 'input.follow_up') &&
+        input.commandId === coldCommandId &&
+        input.expectedStoreId === coldStoreId &&
+        typeof input.content === 'string'
+      )
+        setColdRejectedInput({
+          key: owner.key,
+          text: input.content,
+          files: input.files?.map(({ name }) => ({ name })),
+          images: input.images?.map(({ name }) => ({ name })),
+        });
+    } finally {
+      await close();
+    }
+  }
   const firstRun =
     firstVisible &&
     !preparing &&
@@ -3411,8 +3568,24 @@ function NativeDesktopContent({
       if (!model.presentationKey && commandId)
         models[index] = { ...model, presentationKey: commandId };
     }
+    if (coldRejectedInput && coldRejectedInput.key === coldKey && coldCommandId)
+      models.push({
+        id: coldCommandId,
+        role: 'user',
+        text: coldRejectedInput.text,
+        hasAttachments: !!(coldRejectedInput.files?.length || coldRejectedInput.images?.length),
+        settled: true,
+        copyText: null,
+      });
     const pendingIds = new Set(pendingInputModels.map((input) => input.id));
     for (const input of pendingInputModels) {
+      if (
+        rejectedInputs.has(input.id) &&
+        input.delivery !== 'unknown' &&
+        !anchoredRejections.has(input.id) &&
+        orphanRejection?.id !== input.id
+      )
+        continue;
       // Run observation can arrive before persisted user history. Keep the
       // original input ahead of its own status, tool output and reply throughout.
       const delivery = inputDeliveries.get(input.id)!;
@@ -3441,7 +3614,14 @@ function NativeDesktopContent({
       if (index < 0) models.push(input);
       else models.splice(index, 0, input);
     }
-    if (firstVisible && !firstSaved) {
+    if (
+      firstVisible &&
+      !firstSaved &&
+      (preparing ||
+        !rejectedInputs.has(firstSubmission.commandId) ||
+        anchoredRejections.has(firstSubmission.commandId) ||
+        orphanRejection?.id === firstSubmission.commandId)
+    ) {
       const turnId = nativeInputTurnId(
         firstSubmission.commandId,
         {
@@ -3472,42 +3652,33 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending',
       });
+      if (preparing && firstRejectionReason)
+        models.splice(
+          position + 1,
+          0,
+          nativeInputFailureMessage(firstSubmission.commandId, firstRejectionReason),
+        );
     }
     if (selection && !preparing) {
       for (const [commandId, reason] of rejectedInputs) {
-        const persisted = displayMessages.find((message) =>
-          savedNativeInput(
-            message,
-            commandId,
-            { storeId: selection.storeId, sessionId: selection.session.id },
-            selection,
-          ),
-        );
-        const index = models.findIndex((model) => model.id === (persisted?.id ?? commandId));
-        if (index < 0) {
-          // Preparation may reject before Core saves any Message or Run. The verified
-          // original rejection remains visible without inventing a historical input.
-          const key = JSON.stringify([replyDisplayScope, commandId]);
-          const anchor = rejectedInputAnchors.current.get(key);
-          const anchorIndex = anchor ? models.findIndex((model) => model.id === anchor) : -1;
-          let position = anchor === null ? 0 : models.length;
-          if (anchorIndex >= 0) {
-            position = anchorIndex + 1;
-            const turnId = models[anchorIndex]?.turnId;
-            while (turnId && models[position]?.turnId === turnId) position++;
-          }
-          models.splice(position, 0, nativeInputFailureMessage(commandId, reason));
-          continue;
-        }
+        const anchor = anchoredRejections.get(commandId);
+        if (!anchor && orphanRejection?.id !== commandId) continue;
+        const index = models.findIndex((model) => model.id === (anchor?.messageId ?? commandId));
+        if (index < 0) continue;
         const turnId =
-          models[index]?.turnId ??
-          JSON.stringify(['native-input', selection.storeId, selection.session.id, commandId]);
-        models[index] = { ...models[index]!, turnId };
-        if (models.some((model) => model.turnId === turnId && model.systemKind === 'turn_failure'))
+          anchor &&
+          (models[index]?.turnId ??
+            anchor.turnId ??
+            JSON.stringify(['native-input', selection.storeId, selection.session.id, commandId]));
+        if (
+          turnId &&
+          models.some((model) => model.turnId === turnId && model.systemKind === 'turn_failure')
+        )
           continue;
+        if (turnId) models[index] = { ...models[index]!, turnId };
         models.splice(index + 1, 0, {
           ...nativeInputFailureMessage(commandId, reason),
-          turnId,
+          ...(turnId ? { turnId } : {}),
         });
       }
     }
@@ -3524,6 +3695,12 @@ function NativeDesktopContent({
     pendingInputModels,
     inputDeliveries,
     rejectedInputs,
+    anchoredRejections,
+    orphanRejection,
+    coldRejectedInput,
+    coldKey,
+    coldCommandId,
+    firstRejectionReason,
     replyDisplayScope,
     displayMessages,
     firstVisible,
@@ -4347,14 +4524,23 @@ function NativeDesktopContent({
   const renderNativeAttachments: NonNullable<SessionPageProps['renderMessageAttachments']> = (
     model,
   ) => {
-    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
-      return (
-        <NativePendingAttachments files={firstSubmission.files} images={firstSubmission.images} />
-      );
-    const delivery = inputDeliveries.get(model.id);
-    if (delivery && !messagesById.has(model.id))
-      return <NativePendingAttachments files={delivery.files} images={delivery.images} />;
     const message = messagesById.get(model.id);
+    const pending =
+      firstVisible && !firstSaved && model.id === firstSubmission.commandId
+        ? firstSubmission
+        : model.id === coldCommandId && coldRejectedInput?.key === coldKey
+          ? coldRejectedInput
+          : !message
+            ? inputDeliveries.get(model.id)
+            : undefined;
+    if (pending)
+      return (
+        <NativePendingAttachments
+          files={pending.files}
+          images={pending.images}
+          rejected={model.delivery === 'failed' || rejectedInputs.has(model.id)}
+        />
+      );
     if (!message || !selection || !state) return null;
     return (
       <NativeUserImages
@@ -4402,29 +4588,29 @@ function NativeDesktopContent({
     if (
       model.role === 'user' &&
       (firstPending ||
+        model.id === coldCommandId ||
         (!message && inputDeliveries.has(model.id)) ||
         (message &&
           !message.agentMessage &&
           !message.agentResult &&
           !message.outputBody &&
           message.contentFormat !== 'unsupported'))
-    )
+    ) {
+      const failureReply = rejectedInputs.has(model.id) || (firstPending && firstRejectionReason);
+      const retained = firstPending ? '原文已恢复供重试。' : '原文已保留。';
       return (
         <>
           {model.text && (
             <PromptMarkdown text={model.text} openFile={message ? openFile : undefined} />
           )}
-          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
+          {(model.delivery === 'unknown' || (model.delivery === 'failed' && !failureReply)) && (
             <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown'
-                ? '发送结果尚未确认。'
-                : firstPending
-                  ? '发送失败，原文已恢复供重试。'
-                  : '发送失败，原文已保留。'}
+              {model.delivery === 'unknown' ? '发送结果尚未确认。' : `发送失败，${retained}`}
             </p>
           )}
         </>
       );
+    }
     if (!message || !selection || !state) return null;
     if (message.agentMessage)
       return <NativeModelOutputMessage message={message} storeId={selection.storeId} />;

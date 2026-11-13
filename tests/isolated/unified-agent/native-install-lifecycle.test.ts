@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   cpSync,
   existsSync,
@@ -18,6 +17,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import { expect, test } from '#kite-test';
 import { readCLIRegistration } from '../../../apps/cli/host/cli-registration';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
@@ -32,10 +32,17 @@ import {
   installTerminalBundle,
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import { hash } from '../../fixtures/unified-agent/native-artifact-fixture';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'actual full Native archive/install relocates, samebaseline synthetic version upgrades/rolls back, Main/owned Service prohibit uninstall and data remains',
   async () => {
@@ -55,8 +62,12 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       firstId = '',
       secondRoot = '',
       secondId = '',
+      firstRuntime = '',
+      secondRuntime = '',
+      firstRenderer = '',
+      secondRenderer = '',
       released = false,
-      driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+      driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     let preserved: { core: string; native: string; config: string } | undefined;
     let originalRegistration: ReturnType<typeof readCLIRegistration>;
     let savedWork:
@@ -104,13 +115,21 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         );
       }
     };
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
         const path = new URL(request.url).pathname;
         if (path === '/count') return Response.json({ providerCalls });
-        if (path === '/identity') return Response.json({ firstId, secondId });
+        if (path === '/identity')
+          return Response.json({
+            firstId,
+            secondId,
+            firstRuntime,
+            secondRuntime,
+            firstRenderer,
+            secondRenderer,
+          });
         if (path === '/locks' || path === '/current-locks') {
           const target =
             path === '/current-locks'
@@ -326,6 +345,11 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       firstId = installed.candidateId;
       expect(firstId).toBe(built.digest);
       expect(verifyNativeRuntimeBundle(firstRoot).digest).toBe(firstId);
+      firstRuntime = join(firstRoot, 'terminal', relocated.terminal.manifest.entries.runtime);
+      firstRenderer = join(firstRoot, relocated.manifest.entries.html);
+      const secondInstallRoot = join(prefix, 'releases', secondId);
+      secondRuntime = join(secondInstallRoot, 'terminal', v2Terminal.manifest.entries.runtime);
+      secondRenderer = join(secondInstallRoot, second.manifest.entries.html);
       const fixture = join(root, 'electron-driver.ts');
       writeFileSync(
         fixture,
@@ -339,7 +363,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           ),
         ),
       );
-      const result = await Bun.build({
+      const result = await buildFixture({
         entrypoints: [fixture],
         target: 'node',
         format: 'esm',
@@ -348,9 +372,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         naming: 'electron-driver.mjs',
       });
       expect(result.success).toBe(true);
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'electron-driver.mjs'),
           join(prefix, 'bin/kite-desktop'),
           home,

@@ -1,22 +1,16 @@
-/** Local real-code comparison only; this is not published-predecessor release qualification. */
+/** Local real-code comparison using reviewed prebuilt historical artifacts. */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 import {
-  assertCompatiblePredecessorInputPaths,
-  assertCompatiblePredecessorLockedInput,
   COMPATIBLE_PREDECESSOR_COMMIT,
   COMPATIBLE_PREDECESSOR_INPUT_PATHS,
   COMPATIBLE_PREDECESSOR_MIGRATIONS,
 } from './compatible-predecessor-input';
-import {
-  matchReviewedCurrentOnlyPredecessorInput,
-  matchReviewedPredecessorInput,
-} from './predecessor-reviewed-input';
+import { matchReviewedPredecessorInput } from './predecessor-reviewed-input';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
@@ -25,11 +19,9 @@ import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-
 // used 3140 (macOS) / 1b796 (Linux); their locks predate the PC presentation migration.
 // Keep all original-source, dependency, engine and actual-code-change guards below.
 export const COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT = COMPATIBLE_PREDECESSOR_COMMIT;
-// Real code before the current public Model-output projection fix; all six SQL migrations are identical.
-// Keep the original DB7/DB8 builders below for incompatible-schema rejection coverage.
-export const CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT =
-  '12628a616e7614cbd60666d71896b1db9f74b0f5';
-export const CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS = [
+// Historical six-migration witness remains bound to its original SQL bytes.
+export const SESSION_FILES_TERMINAL_PREDECESSOR_COMMIT = '12628a616e7614cbd60666d71896b1db9f74b0f5';
+export const SESSION_FILES_PREDECESSOR_MIGRATIONS = [
   ...COMPATIBLE_PREDECESSOR_MIGRATIONS,
   {
     path: 'packages/agent/src/storage/migrations/0003-session-reconciliation.sql',
@@ -46,6 +38,19 @@ export const CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS = [
   {
     path: 'packages/agent/src/storage/migrations/0006-input-file-imports.sql',
     sha256: 'af8e55877fe1000569c35d6828b3f659baf04ad4844f67a451125f6f862fde4c',
+  },
+] as const;
+// Last reviewed clean Bun candidate before the Node migration, using the consolidated Core schema.
+export const CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT =
+  'a45ca81cf778b6ab8177424376e48b4134f06255';
+export const CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS = [
+  {
+    path: 'packages/agent/src/storage/migrations/0001-baseline.sql',
+    sha256: '31bcc115aa410172806a87ec6ab66c4ac6858f48e9e1b2732f795162f0de3a54',
+  },
+  {
+    path: 'packages/agent/src/storage/migrations/0002-trajectory-facts.sql',
+    sha256: '8c14e1d50397aaf3826425f2c6d574ae26dce1d224f912138196710294325612',
   },
 ] as const;
 export const TERMINAL_PREDECESSOR_COMMIT = 'a2b6441fde28d9c0f895a26e6a9d2471d2b1b242';
@@ -204,7 +209,7 @@ function inside(root: string, path: string) {
   return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith(`..${sep}`));
 }
 
-/** Each command owns its process group, including the old builder's compiler children. */
+/** Bound read-only Git input retrieval. */
 async function command(argv: string[], cwd: string, timeoutMs: number): Promise<Buffer> {
   return await new Promise((accept, reject) => {
     const detached = process.platform !== 'win32';
@@ -257,321 +262,179 @@ async function command(argv: string[], cwd: string, timeoutMs: number): Promise<
   });
 }
 
-/**
- * Caller supplies an empty, owned temporary directory and remains its sole cleanup owner.
- * Failure retains the clone and command scripts for diagnosis; success removes all old source.
- * No install, checkout, build, or source mutation occurs in repositoryRoot.
- */
-type TerminalPredecessorInput = {
+type HistoricalArtifactInput = {
   root: string;
   repositoryRoot: string;
-  bunExecutable?: string;
-  sqliteLibrary?: string;
-  buildTimeoutMs?: number;
-  /** Also build the old Native app from this same original checkout, before deleting it. */
-  nativeElectronDist?: string;
+  native?: boolean;
 };
-export function materializeTerminalPredecessor(input: TerminalPredecessorInput) {
-  return materializeTerminalPredecessorVersion(input, false);
+const legacyMigrations = [{ path: baseline, sha256: baselineSha256 }] as const;
+
+type PredecessorPolicy = {
+  commit: string;
+  variablePrefix: string;
+  migrations: readonly { path: string; sha256: string }[];
+  schemaCapability: 'trajectory-facts-v1' | 'recovery-audit-v1' | 'baseline-v1';
+  expectIncompatible?: true;
+  inputInventory?: readonly string[];
+};
+
+export const RELEASE_PREDECESSORS = {
+  currentSchema: {
+    commit: CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
+    variablePrefix: 'KITE_PREDECESSOR_CURRENT_SCHEMA',
+    migrations: CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS,
+    schemaCapability: 'trajectory-facts-v1',
+    inputInventory: [
+      'bun.lock',
+      'package.json',
+      ...['packages/trajectory', 'packages/trace-extension-sdk', ...workspaces].map(
+        (path) => `${path}/package.json`,
+      ),
+      'patches/ink-virtual-list@0.2.3.patch',
+      'patches/@radix-ui%2Freact-scroll-area@1.2.18.patch',
+    ],
+  },
+  legacy: {
+    commit: TERMINAL_PREDECESSOR_COMMIT,
+    variablePrefix: 'KITE_PREDECESSOR_LEGACY',
+    migrations: legacyMigrations,
+    schemaCapability: 'baseline-v1',
+    expectIncompatible: true,
+  },
+} satisfies Record<string, PredecessorPolicy>;
+
+function artifactEnvironmentPath(prefix: string, kind: 'TERMINAL' | 'NATIVE') {
+  const pathKey = `${prefix}_${kind}`;
+  const digestKey = `${pathKey}_SHA256`;
+  const root = process.env[pathKey];
+  const digest = process.env[digestKey];
+  if (!root) throw Error(`predecessor_artifact_required:${pathKey}`);
+  if (!digest) throw Error(`predecessor_artifact_required:${digestKey}`);
+  if (!isAbsolute(root) || !/^[a-f0-9]{64}$/.test(digest))
+    throw Error(`predecessor_artifact_invalid:${pathKey}`);
+  return { root, digest };
 }
-export function materializeCompatibleTerminalPredecessor(input: TerminalPredecessorInput) {
-  return materializeTerminalPredecessorVersion(input, true);
-}
-export function materializeCurrentSchemaTerminalPredecessor(input: TerminalPredecessorInput) {
-  return materializeTerminalPredecessorVersion(input, true, true);
-}
-async function materializeTerminalPredecessorVersion(
-  input: TerminalPredecessorInput,
-  compatible: boolean,
-  currentSchema = false,
+
+/** Verify caller-reviewed bytes before use; historical source and current lock stay independent. */
+export async function verifyPinnedPredecessor(
+  input: HistoricalArtifactInput,
+  policy: PredecessorPolicy,
 ) {
-  const predecessorCommit = currentSchema
-    ? CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT
-    : compatible
-      ? COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT
-      : TERMINAL_PREDECESSOR_COMMIT;
   const root = realpathSync(input.root),
     repository = realpathSync(input.repositoryRoot);
   if (inside(repository, root) || inside(root, repository) || !lstatSync(root).isDirectory())
     throw Error('terminal_predecessor_root_invalid');
-  const source = join(root, 'predecessor-source'),
-    candidate = join(root, 'predecessor-candidate');
-  const mirrorScript = join(root, 'predecessor-dependencies.mjs');
-  const buildScript = join(root, 'predecessor-build.ts');
-  if ([source, candidate, mirrorScript, buildScript].some(existsSync))
-    throw Error('terminal_predecessor_destination_exists');
-  const bun = realpathSync(input.bunExecutable ?? process.execPath);
-  const timeoutMs = input.buildTimeoutMs ?? 180_000;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000)
-    throw Error('terminal_predecessor_deadline_invalid');
-  const manifest = JSON.parse(readFileSync(join(repository, 'package.json'), 'utf8')) as {
+  if (!policy.expectIncompatible) {
+    for (const migration of policy.migrations)
+      if (sha256(readFileSync(join(repository, migration.path))) !== migration.sha256)
+        throw Error(`predecessor_current_schema_changed:${migration.path}`);
+  }
+  const terminal = artifactEnvironmentPath(policy.variablePrefix, 'TERMINAL');
+  const native = input.native
+    ? artifactEnvironmentPath(policy.variablePrefix, 'NATIVE')
+    : undefined;
+  for (const artifact of [terminal, native]) {
+    if (artifact && inside(root, artifact.root))
+      throw Error('predecessor_artifact_disposable_root');
+  }
+  const candidate = verifyTerminalRuntimeBundle(terminal.root);
+  const nativeCandidate = native ? verifyNativeRuntimeBundle(native.root) : undefined;
+  if (
+    candidate.digest !== terminal.digest ||
+    (native &&
+      (nativeCandidate?.digest !== native.digest ||
+        nativeCandidate.terminal.digest !== candidate.digest))
+  )
+    throw Error('predecessor_artifact_digest_mismatch');
+  const { manifest } = candidate;
+  if (
+    manifest.source.commit !== policy.commit ||
+    manifest.source.dirty ||
+    manifest.target.platform !== process.platform ||
+    manifest.target.arch !== process.arch ||
+    manifest.bunVersion === undefined ||
+    manifest.nodeVersion !== undefined ||
+    manifest.sqlite.driver !== 'bun:sqlite'
+  )
+    throw Error('predecessor_artifact_provenance_invalid');
+  const migrationDirectory = 'node_modules/@kite-ai/agent/storage/migrations/';
+  const artifactMigrations = manifest.files.filter((file) =>
+    file.path.startsWith(migrationDirectory),
+  );
+  if (
+    artifactMigrations.length !== policy.migrations.length ||
+    policy.migrations.some(
+      (migration) =>
+        !artifactMigrations.some(
+          (file) =>
+            file.path === `${migrationDirectory}${basename(migration.path)}` &&
+            file.sha256 === migration.sha256,
+        ),
+    )
+  )
+    throw Error('predecessor_artifact_schema_invalid');
+
+  const historical = (path: string) =>
+    command(['git', 'show', `${policy.commit}:${path}`], repository, 10000);
+  const historicalManifest = JSON.parse((await historical('package.json')).toString()) as {
+    version: string;
+    workspaces: string[];
     patchedDependencies?: Record<string, string>;
   };
-  const previousManifest = JSON.parse(
-    (
-      await command(['git', 'show', `${predecessorCommit}:package.json`], repository, 10_000)
-    ).toString(),
-  ) as { patchedDependencies?: Record<string, string> };
-  // The predecessor's original eleven inputs are immutable. Current-only patches
-  // are independently closed and recorded; they are not invented old blobs.
-  const inputs = [
+  if (manifest.productVersion !== historicalManifest.version)
+    throw Error('predecessor_artifact_product_version_mismatch');
+  const patches = Object.values(historicalManifest.patchedDependencies ?? {});
+  if (patches.some((path) => !/^patches\/(?:[a-zA-Z0-9@._+-]|%2F)+\.patch$/.test(path)))
+    throw Error('predecessor_artifact_patch_path_invalid');
+  const paths = [
     'bun.lock',
     'package.json',
-    ...workspaces.map((path) => `${path}/package.json`),
-    ...Object.values(previousManifest.patchedDependencies ?? {}),
+    ...historicalManifest.workspaces.map((path) => `${path}/package.json`),
+    ...patches,
   ];
-  if (currentSchema) {
-    const expected = [
-      ...COMPATIBLE_PREDECESSOR_INPUT_PATHS,
-      'patches/@radix-ui%2Freact-scroll-area@1.2.18.patch',
-    ];
-    if (JSON.stringify(inputs) !== JSON.stringify(expected))
-      throw Error('current_schema_predecessor_input_inventory_changed');
-  } else if (compatible) assertCompatiblePredecessorInputPaths(inputs);
-  const lockedInputs: {
-    path: string;
-    sha256: string;
-    currentSha256: string;
-    match: NonNullable<ReturnType<typeof matchTerminalPredecessorInput>>;
-  }[] = [];
-  const reviewedDeclarations: {
-    path: string;
-    kind: string;
-    commits: string[];
-    projectedSha256: string;
-  }[] = [];
-  const reviewedInputIncrements: {
-    path: string;
-    evidence: NonNullable<ReturnType<typeof matchReviewedPredecessorInput>>;
-  }[] = [];
-  for (const path of inputs) {
-    if (!inside(repository, resolve(repository, path)))
-      throw Error('terminal_predecessor_input_escape');
-    const old = await command(['git', 'show', `${predecessorCommit}:${path}`], repository, 10_000);
-    const current = readFileSync(join(repository, path)),
-      match = currentSchema
-        ? old.equals(current)
-          ? ('identical' as const)
-          : undefined
-        : compatible
-          ? assertCompatiblePredecessorLockedInput(path, old, current).match
-          : matchTerminalPredecessorInput(path, old, current);
-    if (!match) throw Error(`terminal_predecessor_dependency_input_changed:${path}`);
-    lockedInputs.push({ path, sha256: sha256(old), currentSha256: sha256(current), match });
-    const reviewedInput = matchReviewedPredecessorInput(
-      compatible ? 'compatible' : 'terminal_legacy',
-      path,
-      old,
-      current,
-    );
-    if (reviewedInput) reviewedInputIncrements.push({ path, evidence: reviewedInput });
-    const refinement =
-      compatible || reviewedInput
-        ? undefined
-        : refinePredecessorWorkspaceDeclarations(path, current);
-    if (refinement)
-      reviewedDeclarations.push({
-        path,
-        kind: refinement.kind,
-        commits: refinement.commits,
-        projectedSha256: sha256(refinement.bytes),
-      });
-  }
-  const additionalCurrentInputs = Object.values(manifest.patchedDependencies ?? {})
-    .filter((path) => !inputs.includes(path))
-    .map((path) => {
-      if (!inside(repository, resolve(repository, path)))
-        throw Error('terminal_predecessor_input_escape');
-      const proof = matchReviewedCurrentOnlyPredecessorInput(
-        compatible ? 'compatible' : 'terminal_legacy',
-        path,
-        readFileSync(join(repository, path)),
-      );
-      if (!proof) throw Error(`terminal_predecessor_additional_input_changed:${path}`);
-      return proof;
-    });
-  const migrations = currentSchema
-    ? CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS
-    : compatible
-      ? COMPATIBLE_PREDECESSOR_MIGRATIONS
-      : [{ path: baseline, sha256: baselineSha256 }];
-  for (const migration of migrations) {
-    const previous = await command(
-      ['git', 'show', `${predecessorCommit}:${migration.path}`],
-      repository,
-      10_000,
-    );
-    const current = readFileSync(join(repository, migration.path));
-    if (compatible && !currentSchema)
-      assertCompatiblePredecessorLockedInput(migration.path, previous, current);
-    else if (sha256(previous) !== migration.sha256 || sha256(current) !== migration.sha256)
-      throw Error('terminal_predecessor_baseline_changed');
-  }
-  await command(
-    ['git', 'clone', '--shared', '--no-checkout', '--', repository, source],
-    root,
-    30_000,
+  if (policy.inputInventory && JSON.stringify(paths) !== JSON.stringify(policy.inputInventory))
+    throw Error('predecessor_historical_input_inventory_changed');
+  for (const migration of policy.migrations)
+    if (sha256(await historical(migration.path)) !== migration.sha256)
+      throw Error(`predecessor_historical_schema_changed:${migration.path}`);
+  const historicalSourceInputs = await Promise.all(
+    paths.map(async (path) => ({ path, sha256: sha256(await historical(path)) })),
   );
-  await command(['git', 'checkout', '--detach', predecessorCommit], source, 30_000);
-  // The old builder rejects npm realpaths outside its own node_modules. Mirror exact installed
-  // bytes and internal links, remap package-local npm links, and omit current workspace links
-  // before adding the eight old owners. The old builder still verifies the resulting closure.
-  writeFileSync(
-    mirrorScript,
-    `
-import {
-  cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync,
-  readlinkSync, realpathSync, rmSync, symlinkSync,
-} from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-const [installed, target, source, workspaceJSON, repository] = process.argv.slice(2);
-const inside = (root, path) => {
-  const part = relative(root, path);
-  return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith('..' + sep));
-};
-cpSync(installed, target, {
-  recursive: true,
-  verbatimSymlinks: true,
-  filter: path => {
-    if (relative(installed, path).split(sep).includes('@kite-ai')) return false;
-    if (!lstatSync(path).isSymbolicLink()) return true;
-    // Installed history may retain renamed workspace scopes. Determine their targets
-    // without following the link during traversal; no current repository source is copied.
-    const declared = resolve(dirname(path), readlinkSync(path));
-    const resolved = existsSync(path) ? realpathSync(path) : declared;
-    return !(inside(repository, resolved) && !inside(installed, resolved));
-  },
-});
-function walk(folder) {
-  for (const name of readdirSync(folder)) {
-    const path = join(folder, name), stat = lstatSync(path);
-    if (stat.isDirectory()) walk(path);
-    else if (stat.isSymbolicLink()) {
-      const link = readlinkSync(path);
-      const original = resolve(dirname(join(installed, relative(target, path))), link);
-      if (!inside(installed, original))
-        throw Error('terminal_predecessor_dependency_link_escape:' + path);
-      if (isAbsolute(link)) {
-        rmSync(path);
-        symlinkSync(relative(dirname(path), join(target, relative(installed, original))), path);
-      }
-      if (existsSync(path) && !inside(target, realpathSync(path)))
-        throw Error('terminal_predecessor_dependency_realpath_escape:' + path);
-    }
-  }
-}
-walk(target);
-function mirrorLocal(installedFolder, oldFolder) {
-  mkdirSync(oldFolder, { recursive: true });
-  for (const name of readdirSync(installedFolder)) {
-    const path = join(installedFolder, name), oldPath = join(oldFolder, name);
-    const stat = lstatSync(path);
-    // The renderer's owned Vite cache is generated output, not an installed dependency.
-    if (['.vite', '.vite-desktop-dev'].some(cache => path === join(repository, 'apps/desktop/node_modules', cache)) && stat.isDirectory()) continue;
-    if (stat.isSymbolicLink()) {
-      const declared = resolve(dirname(path), readlinkSync(path));
-      const resolved = existsSync(path) ? realpathSync(path) : declared;
-      if (inside(repository, resolved) && !inside(installed, resolved)) continue;
-      if (!inside(installed, resolved))
-        throw Error('terminal_predecessor_local_dependency_escape:' + path);
-      const mapped = join(target, relative(installed, resolved));
-      if (!existsSync(mapped) || !inside(target, realpathSync(mapped)))
-        throw Error('terminal_predecessor_local_dependency_missing:' + path);
-      symlinkSync(relative(dirname(oldPath), mapped), oldPath, lstatSync(mapped).isDirectory() ? 'dir' : 'file');
-    } else if (stat.isDirectory()) {
-      if (existsSync(join(path, 'package.json')))
-        throw Error('terminal_predecessor_local_dependency_not_link:' + path);
-      mirrorLocal(path, oldPath);
-    } else throw Error('terminal_predecessor_local_dependency_not_link:' + path);
-  }
-}
-for (const path of JSON.parse(workspaceJSON)) {
-  const local = join(repository, path, 'node_modules');
-  if (existsSync(local)) mirrorLocal(local, join(source, path, 'node_modules'));
-}
-for (const path of JSON.parse(workspaceJSON)) {
-  const pkg = JSON.parse(readFileSync(join(source, path, 'package.json'), 'utf8'));
-  const link = join(target, pkg.name);
-  mkdirSync(dirname(link), { recursive: true });
-  symlinkSync(relative(dirname(link), join(source, path)), link, 'dir');
-  if (realpathSync(link) !== realpathSync(join(source, path)))
-    throw Error('terminal_predecessor_workspace_resolution_mismatch');
-}
-`,
-  );
-  await command(
-    [
-      bun,
-      mirrorScript,
-      realpathSync(join(repository, 'node_modules')),
-      join(source, 'node_modules'),
-      source,
-      JSON.stringify(workspaces),
-      repository,
-    ],
-    root,
-    timeoutMs,
-  );
-  const sourceIdentity = async () => ({
-    commit: (await command(['git', 'rev-parse', 'HEAD'], source, 10_000)).toString().trim(),
-    dirty: (await command(['git', 'status', '--porcelain'], source, 10_000)).length !== 0,
-  });
-  const before = await sourceIdentity();
-  if (before.commit !== predecessorCommit || before.dirty)
-    throw Error('terminal_predecessor_source_identity_invalid');
-  writeFileSync(
-    buildScript,
-    `import {buildTerminalBundle} from ${JSON.stringify(pathToFileURL(join(source, 'scripts/release/terminal-bundle.ts')).href)};\nawait buildTerminalBundle(${JSON.stringify({ destination: candidate, repositoryRoot: source, bunExecutable: bun, ...(input.sqliteLibrary ? { sqliteLibrary: input.sqliteLibrary } : {}) })});\n` +
-      (input.nativeElectronDist
-        ? `import {buildNativeCandidate} from ${JSON.stringify(pathToFileURL(join(source, 'apps/desktop/scripts/build-native.ts')).href)};\nawait buildNativeCandidate(${JSON.stringify({ terminalRoot: candidate, electronDist: realpathSync(input.nativeElectronDist), outdir: join(root, 'predecessor-native'), ...(compatible ? { testDiagnostics: true } : {}) })});\n`
-        : ''),
-  );
-  await command([bun, buildScript], source, timeoutMs);
-  const built = verifyTerminalRuntimeBundle(candidate),
-    after = await sourceIdentity();
-  const oldProductVersion = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).version;
-  if (
-    built.manifest.source.commit !== predecessorCommit ||
-    built.manifest.source.dirty ||
-    after.dirty ||
-    after.commit !== before.commit ||
-    built.manifest.productVersion !== oldProductVersion
-  )
-    throw Error('terminal_predecessor_candidate_provenance_invalid');
-  rmSync(source, { recursive: true });
-  rmSync(mirrorScript);
-  rmSync(buildScript);
-  if (existsSync(source)) throw Error('terminal_predecessor_source_removal_unconfirmed');
-  const verified = verifyTerminalRuntimeBundle(candidate);
-  if (verified.digest !== built.digest) throw Error('terminal_predecessor_candidate_changed');
-  const nativeCandidate = input.nativeElectronDist
-    ? verifyNativeRuntimeBundle(join(root, 'predecessor-native'))
-    : undefined;
-  if (nativeCandidate && nativeCandidate.terminal.digest !== verified.digest)
-    throw Error('native_predecessor_terminal_mismatch');
   return {
-    candidate: verified,
-    ...(nativeCandidate ? { nativeCandidate } : {}),
+    candidate,
+    nativeCandidate,
     provenance: {
       kind: 'local-real-code-comparison' as const,
+      historicalInput: 'prebuilt' as const,
       platform: process.platform,
-      commit: predecessorCommit,
+      commit: policy.commit,
       dirty: false as const,
-      builder: 'scripts/release/terminal-bundle.ts',
-      productVersion: oldProductVersion as string,
-      lockedInputs,
-      additionalCurrentInputs,
-      reviewedDeclarations,
-      reviewedInputIncrements,
-      baseline: { path: baseline, sha256: baselineSha256, format: 1 as const },
-      schemaCapability: currentSchema
-        ? ('session-files-v1' as const)
-        : compatible
-          ? ('recovery-audit-v1' as const)
-          : ('baseline-v1' as const),
-      migrations,
-      sourceRoot: source,
-      sourceRemoved: true as const,
+      productVersion: manifest.productVersion,
+      terminalDigest: candidate.digest,
+      ...(nativeCandidate ? { nativeDigest: nativeCandidate.digest } : {}),
+      historicalSourceInputs,
+      baseline: {
+        path: baseline,
+        sha256: policy.migrations.find((migration) => migration.path === baseline)!.sha256,
+        format: 1 as const,
+      },
+      schemaCapability: policy.schemaCapability,
+      migrations: policy.migrations,
     },
   };
+}
+export function materializeTerminalPredecessor(input: HistoricalArtifactInput) {
+  return verifyPinnedPredecessor(input, RELEASE_PREDECESSORS.legacy);
+}
+export function materializeCompatibleTerminalPredecessor(input: HistoricalArtifactInput) {
+  return verifyPinnedPredecessor(input, {
+    commit: COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT,
+    variablePrefix: 'KITE_PREDECESSOR_COMPATIBLE',
+    migrations: COMPATIBLE_PREDECESSOR_MIGRATIONS,
+    schemaCapability: 'recovery-audit-v1',
+    inputInventory: COMPATIBLE_PREDECESSOR_INPUT_PATHS,
+  });
+}
+export function materializeCurrentSchemaTerminalPredecessor(input: HistoricalArtifactInput) {
+  return verifyPinnedPredecessor(input, RELEASE_PREDECESSORS.currentSchema);
 }

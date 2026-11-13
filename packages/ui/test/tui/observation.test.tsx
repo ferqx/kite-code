@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Change, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import {
   activity,
   TuiController,
@@ -20,7 +21,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 async function until(check: () => boolean) {
-  for (let i = 0; i < 100 && !check(); i++) await Bun.sleep(5);
+  for (let i = 0; i < 100 && !check(); i++) await fixtureDelay(5);
   expect(check()).toBe(true);
 }
 function snapshot(id = 'a', cursor = '1', active = true): TuiSnapshot {
@@ -179,7 +180,7 @@ test('terminal execution publishes before held admission/history; draft and writ
     await f.controller.select('a');
     f.controller.setDraft('unfinished 中文 draft');
     app = render(<TuiSession controller={f.controller} />);
-    await Bun.sleep(60);
+    await fixtureDelay(60);
     expect(app.lastFrame()).toContain('Waiting · background results');
     const reading = f.controller.refresh(['admission']);
     await until(() => admissionStarted);
@@ -192,7 +193,7 @@ test('terminal execution publishes before held admission/history; draft and writ
     expect(f.controller.state.draft).toBe('unfinished 中文 draft');
     await f.controller.send();
     expect(f.counts.writes).toBe(0);
-    await Bun.sleep(60);
+    await fixtureDelay(60);
     expect(app.lastFrame()).not.toContain('Waiting · background results');
     admission.resolve();
     await reading;
@@ -219,7 +220,7 @@ test('message changes keep admission fresh, replace same-seq body, and do not re
     await until(() => f.controller.state.domains?.history?.cursor === '2');
     f.controller.changed(change('execution.finished', '999999', 'foreign'));
     f.controller.changed(change('session.renamed', '999999'));
-    await Bun.sleep(10);
+    await fixtureDelay(10);
     expect(f.controller.state.snapshot?.messages.map((item) => item.content)).toEqual([
       'same-seq new body',
     ]);

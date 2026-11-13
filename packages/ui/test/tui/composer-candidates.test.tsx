@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
+import { expect, test } from '#kite-test';
 import { ComposerBuffer } from '../../src/tui/composer';
 import { candidateViewport, TuiComposer } from '../../src/tui/composer-input';
 

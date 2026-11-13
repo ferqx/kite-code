@@ -1,9 +1,7 @@
-import type { Database, Statement } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
+import type { Database, Statement } from '../../runtime-sqlite';
 import { recordedTokenUsage } from '../../token-usage';
 import type {
   AcceptCommandInput,
@@ -166,7 +164,6 @@ import { registerRunRequirements } from './requirement-operations';
 import { assertRequirementReadSet } from './requirement-read-set';
 import { readRunExecutionSafetySnapshot } from './run-execution-safety';
 import { callRunResume } from './run-resume-operations';
-import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
 import { readFirstSessionRun } from './session-first-run';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
@@ -641,13 +638,7 @@ export class SqliteOperations {
     );
   }
   metadata() {
-    const selected = drizzle(this.db)
-      .select()
-      .from(storageMeta)
-      .where(eq(storageMeta.singleton, 1))
-      .get()!;
     const row = this.row('SELECT * FROM storage_meta WHERE singleton=1')!;
-    if (selected.storeId !== row.store_id) throw new AgentError('metadata_conflict');
     const engine = this.row('SELECT sqlite_version() AS version,sqlite_source_id() AS source')!;
     return {
       storeId: String(row.store_id),

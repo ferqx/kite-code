@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import type { Interaction, PermissionModeState, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeState, NativeWindowBridge } from '../../src/native-bridge';
 import { nextDesktopPresentation, prepareDesktopDom } from '../native-page-dom.fixture';
 

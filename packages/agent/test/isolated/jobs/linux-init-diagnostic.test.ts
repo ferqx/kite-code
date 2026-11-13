@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 
 const linuxTest = process.platform === 'linux' ? test : test.skip;
 for (const kind of ['shell', 'stdio']) {
@@ -13,7 +13,7 @@ for (const kind of ['shell', 'stdio']) {
       try {
         const source = join(root, 'probe.c');
         const binary = join(root, 'probe');
-        const original = resolve(import.meta.dir, `../../../native/linux-${kind}-init.c`);
+        const original = resolve(import.meta.dirname, `../../../native/linux-${kind}-init.c`);
         writeFileSync(
           source,
           `#define _GNU_SOURCE

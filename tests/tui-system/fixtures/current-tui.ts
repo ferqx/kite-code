@@ -9,6 +9,7 @@ import { connectSharedService } from '../../../apps/cli/host/shared-service';
 import { runTUIProcess } from '../../../apps/cli/host/tui-main';
 import { waitForTuiProfileAccess } from '../../../apps/cli/host/tui-startup-wait';
 import { buildOwnedDaemon } from '../../../apps/cli/test/fixtures/daemon-host-build';
+import { build as testBuild } from '../../../scripts/tooling/build';
 
 const args = process.argv.slice(2);
 const value = (name: string) => {
@@ -32,9 +33,9 @@ async function main() {
     await buildOwnedDaemon(artifactRoot);
     // Explicit test composition only: credential tests never touch the host OS vault.
     if (process.env.KITE_TUI_SYSTEM_TEMPORARY_CREDENTIALS === '1') {
-      const built = await Bun.build({
-        entrypoints: [join(import.meta.dir, 'temporary-credential-service.ts')],
-        target: 'bun',
+      const built = await testBuild({
+        entrypoints: [join(import.meta.dirname, 'temporary-credential-service.ts')],
+        target: 'node',
         packages: 'external',
         outdir: join(artifactRoot, 'node_modules/@kite-ai/service'),
         naming: 'main.js',

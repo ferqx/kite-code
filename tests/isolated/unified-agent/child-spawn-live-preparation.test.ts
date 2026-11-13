@@ -1,9 +1,11 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import {
   childSpawnReportChecks,
+  childSpawnReviewTimeoutMs,
   createChildSpawnFixture,
 } from '../../e2e/live/model/child-spawn.live';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
@@ -54,13 +56,14 @@ test('exploration still requires the requested reachable function and exact sour
 });
 
 for (const mode of ['accept_edits', 'auto', 'full'] as const)
-  for (const role of ['worker', 'explore', 'review'] as const)
+  for (const role of ['general', 'explore'] as const)
     test.skipIf(process.platform !== 'darwin')(
       `live preparation uses actual default computer-use and the ${role}/${mode} child capability fence without provider calls`,
       async () => {
         const root = temporaryDirectory('kite-child-spawn-live-preparation-');
         let f: Awaited<ReturnType<typeof createChildSpawnFixture>> | undefined;
         let childModels = 0;
+        let rootModels = 0;
         const model: ModelAdapter = {
           async *stream(request) {
             const execution = (await f!.store.getExecution(request.requestId))!;
@@ -83,10 +86,14 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
                   ];
             } else if (
               request.messages.some((message) => message.content.startsWith('Child result source'))
-            )
+            ) {
               events = [finish];
-            else {
+            } else {
+              if (++rootModels > 8) throw Error('child_spawn_fixture_root_model_budget');
               const last = request.messages.filter((message) => message.role === 'tool').at(-1);
+              const cursor = last?.toolCallId?.startsWith('wait-')
+                ? (JSON.parse(last.content) as { next_cursor?: string }).next_cursor
+                : undefined;
               events = !last
                 ? [
                     {
@@ -95,7 +102,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
                       name: 'spawn_agent',
                       arguments: JSON.stringify({
                         prompt: 'Read source.txt without modifying business files.',
-                        ...(role === 'worker' ? {} : { preset: role }),
+                        ...(role === 'general' ? {} : { preset: role }),
                       }),
                     },
                     { ...finish, reason: 'tool_calls' },
@@ -106,10 +113,8 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
                       id: `wait-${request.requestId}`,
                       name: 'wait_agent_events',
                       arguments: JSON.stringify({
-                        after_seq: last.toolCallId?.startsWith('wait-')
-                          ? JSON.parse(last.content).next_seq
-                          : '0',
-                        wait_ms: 10000,
+                        ...(cursor ? { cursor } : {}),
+                        wait_ms: 1000,
                       }),
                     },
                     { ...finish, reason: 'tool_calls' },
@@ -127,6 +132,17 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
             content: 'Delegate the one read and report its actual result.',
           });
           await f.runtime.waitForCommand('work', { timeoutMs: 10000 });
+          const deadline = performance.now() + 10000;
+          while (performance.now() < deadline) {
+            const safety = await f.store.readExecutionGroupSafety({
+              expectedStoreId: f.expectedStoreId,
+              sessionId: 's',
+              subjectId: 'owner',
+            });
+            if (safety.quiescent) break;
+            await delay(20);
+          }
+          expect(performance.now()).toBeLessThan(deadline);
           const directory = await f.directory();
           const child = directory.executions.filter((row) => row.childSessionId);
           expect(child).toHaveLength(1);
@@ -143,9 +159,9 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
           expect(childSnapshot.roleId).toBe(role);
           expect(childSnapshot.skillSelection).toEqual({
             requested: null,
-            resolvedIds: role === 'worker' ? ['computer-use'] : [],
+            resolvedIds: role === 'general' ? ['computer-use'] : [],
           });
-          expect(childBinding.toolIds.includes('browser.execute')).toBe(role === 'worker');
+          expect(childBinding.toolIds.includes('browser.execute')).toBe(role === 'general');
           expect(
             directory.executions.filter(
               (row) =>
@@ -161,7 +177,9 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
             ),
           ).toBe(true);
           expect(f.browserRequests).toEqual([]);
-          expect(f.bindings.every((binding) => binding.checkerTimeout === 10000)).toBe(true);
+          expect(
+            f.bindings.every((binding) => binding.checkerTimeout === childSpawnReviewTimeoutMs),
+          ).toBe(true);
         } finally {
           await f?.close();
           rmSync(root, { recursive: true, force: true });

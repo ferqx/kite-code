@@ -98,11 +98,11 @@ export function createTaskQualityResearchFixture(options: { trial: number; nonce
   const files: Record<string, string> = {
     'package.json': JSON.stringify({
       type: 'module',
-      scripts: { start: 'bun apps/service/main.ts' },
+      scripts: { start: 'node apps/service/main.ts' },
     }),
     'config/active-profile.json': JSON.stringify({ runtime: profile }),
-    'apps/service/main.ts': `import { readFileSync } from 'node:fs';\nimport { registry } from './runtime-registry';\nconst profile = JSON.parse(readFileSync(new URL('../../config/active-profile.json', import.meta.url), 'utf8'));\nconst runtime = registry[profile.runtime as keyof typeof registry]();\nconsole.log(JSON.stringify(runtime.accept()));\n`,
-    'apps/service/runtime-registry.ts': `import { buildRuntime as core } from '../../packages/runtime-core/assembly';\nimport { buildRuntime as next } from '../../packages/runtime-next/assembly';\nexport const registry = { stable: core, preview: next };\n`,
+    'apps/service/main.ts': `import { readFileSync } from 'node:fs';\nimport { registry } from './runtime-registry.ts';\nconst profile = JSON.parse(readFileSync(new URL('../../config/active-profile.json', import.meta.url), 'utf8'));\nconst runtime = registry[profile.runtime as keyof typeof registry]();\nconsole.log(JSON.stringify(runtime.accept()));\n`,
+    'apps/service/runtime-registry.ts': `import { buildRuntime as core } from '../../packages/runtime-core/assembly.ts';\nimport { buildRuntime as next } from '../../packages/runtime-next/assembly.ts';\nexport const registry = { stable: core, preview: next };\n`,
     '.gitignore': 'dist/\n',
     'dist/runtime-registry.ts':
       'export const registry = { stable: "generated-not-started", preview: "generated-not-started" };\n',
@@ -110,9 +110,9 @@ export function createTaskQualityResearchFixture(options: { trial: number; nonce
   };
   for (const name of ['runtime-core', 'runtime-next'] as const) {
     files[`packages/${name}/assembly.ts`] =
-      `import { publish } from './result';\nexport const buildRuntime = () => ({ accept: publish });\n`;
+      `import { publish } from './result.ts';\nexport const buildRuntime = () => ({ accept: publish });\n`;
     files[`packages/${name}/result.ts`] =
-      `import { channel } from './channel';\nexport const publish = () => ({ channel, mechanism: '${mechanisms[name]}', receiptField: '${fields[name]}' });\n`;
+      `import { channel } from './channel.ts';\nexport const publish = () => ({ channel, mechanism: '${mechanisms[name]}', receiptField: '${fields[name]}' });\n`;
     files[`packages/${name}/channel.ts`] = `export const channel = '${channel(name)}';\n`;
   }
   for (let index = 0; index < 24; index++) {

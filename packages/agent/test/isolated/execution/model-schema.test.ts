@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { compileModelSchema } from '../../../src/model-schema';
 import type { JsonSchema } from '../../../src/storage/types';
 

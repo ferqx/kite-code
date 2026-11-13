@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +9,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { AuthorizationRequest, JobDefinition, JobEvent } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';

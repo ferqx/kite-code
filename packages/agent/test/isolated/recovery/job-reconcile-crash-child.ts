@@ -1,5 +1,6 @@
 import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -68,7 +69,7 @@ for (;;) {
     break;
   }
   if (Date.now() > deadline) throw Error('crash_job_not_running');
-  await Bun.sleep(5);
+  await sleepTimer(5);
 }
 // The parent kills this actual Runtime while it owns the dispatched Job and profile.
 await new Promise<void>(() => {});

@@ -1,11 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { semanticDigest } from '../../../../packages/agent/src/json';
 import {
   approvalReviewerTimeoutMs,

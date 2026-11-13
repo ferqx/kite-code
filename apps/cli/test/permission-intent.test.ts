@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError, type PermissionGrantPage } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { clearPermissionGrants, getPermissionGrants, setPermissionMode } from '../src/permissions';
 
 test('bad submitted permission response reads original mutation once; duplicate remains zero POST and original scope', async () => {
@@ -41,7 +41,9 @@ test('bad submitted permission response reads original mutation once; duplicate 
   expect((await setPermissionMode('a', request, options)).status).toBe('applied');
   expect(posts).toBe(1);
   expect(reads).toBe(1);
-  expect(() => setPermissionMode('b', request, options)).toThrow();
+  await expect(setPermissionMode('b', request, options)).rejects.toThrow('command_conflict');
+  expect(posts).toBe(1);
+  expect(reads).toBe(1);
 });
 test('grants read completes 201 fixed upper items; changed epoch fails without returning prefix', async () => {
   const queries: unknown[] = [];

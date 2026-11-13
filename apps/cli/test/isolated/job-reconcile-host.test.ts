@@ -1,7 +1,7 @@
-import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,6 +13,9 @@ import {
   readDaemonReservation,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { expect, mock, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedDaemon } from '../../host/daemon';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
@@ -24,7 +27,7 @@ async function until(check: () => Promise<boolean>) {
   const deadline = Date.now() + 8000;
   while (!(await check())) {
     if (Date.now() > deadline) throw Error('reconciliation_host_fixture_timeout');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 nativeTest(
@@ -35,14 +38,14 @@ nativeTest(
     try {
       const baseEntry = await buildOwnedDaemon(join(root, 'artifact'));
       const output = dirname(baseEntry);
-      const built = await Bun.build({
+      const built = await testBuild({
         entrypoints: [
           'job-reconcile-paired-child',
           'job-reconcile-daemon-child',
           'job-reconcile-driver',
         ].map((name) => new URL(`../fixtures/${name}.ts`, import.meta.url).pathname),
         packages: 'external',
-        target: 'bun',
+        target: 'node',
         outdir: output,
       });
       expect(built.success).toBe(true);
@@ -248,7 +251,7 @@ nativeTest(
             expectedResultRevision: job!.resultRevision,
           };
           for (let repeat = 0; repeat < 2; repeat++) {
-            const child = Bun.spawn(
+            const child = testSpawn(
               [
                 executable,
                 driver,

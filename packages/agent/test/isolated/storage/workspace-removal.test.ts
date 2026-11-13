@@ -1,8 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { openSqliteStore } from '../../../src/sqlite';
 

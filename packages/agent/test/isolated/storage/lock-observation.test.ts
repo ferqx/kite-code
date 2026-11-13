@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   linkSync,
@@ -13,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import {
   acquireExistingSharedFileLock,
   acquireFileLock,

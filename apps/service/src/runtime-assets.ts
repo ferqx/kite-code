@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
-import type { WindowsInstallationRemoval } from '@kite-ai/agent/artifact-access';
+import {
+  hashWindowsArtifactFile,
+  readWindowsArtifactFile,
+  readWindowsArtifactObject,
+  retainWindowsCandidateFiles,
+  type WindowsInstallationRemoval,
+  windowsInstallationRemovalReader,
+} from '@kite-ai/agent/artifact-access';
 import { verifySqliteEngineAsset } from '@kite-ai/agent/sqlite-engine';
 import { createAssetFileHasher } from './asset-file-hash';
 import {
@@ -23,9 +30,10 @@ interface RuntimeBundleManifest {
   readonly version: 1;
   readonly apiMajor: 1;
   readonly target: { readonly platform: string; readonly arch: string };
-  readonly bunVersion: string;
+  readonly bunVersion?: string;
+  readonly nodeVersion?: string;
   readonly sqlite: SqliteReleaseIdentity & {
-    readonly driver: 'bun:sqlite';
+    readonly driver: 'bun:sqlite' | 'node-api:sqlite';
     readonly manifestSha256: string;
   };
   readonly productVersion: string;
@@ -43,8 +51,16 @@ export const windowsDesktopRuntimeEntries = Object.freeze({
   runtime: 'runtime/bun.exe',
   service: desktopServiceEntrypoint,
 } as const);
+export const windowsNodeDesktopRuntimeEntries = Object.freeze({
+  runtime: 'runtime/node.exe',
+  service: desktopServiceEntrypoint,
+} as const);
 export const macosDesktopRuntimeEntries = Object.freeze({
   runtime: 'runtime/bun',
+  service: desktopServiceEntrypoint,
+} as const);
+export const macosNodeDesktopRuntimeEntries = Object.freeze({
+  runtime: 'runtime/node',
   service: desktopServiceEntrypoint,
 } as const);
 const legacyWindowsDesktopRuntimeEntries = Object.freeze({
@@ -52,12 +68,38 @@ const legacyWindowsDesktopRuntimeEntries = Object.freeze({
   service: 'node_modules/@kite-ai/service/main.js',
 } as const);
 export interface WindowsDesktopRuntimeManifest extends RuntimeBundleManifest {
+  readonly bunVersion: string;
+  readonly nodeVersion?: never;
   readonly entries: typeof windowsDesktopRuntimeEntries | typeof legacyWindowsDesktopRuntimeEntries;
 }
 interface MacosDesktopRuntimeManifest extends RuntimeBundleManifest {
+  readonly bunVersion: string;
+  readonly nodeVersion?: never;
   readonly entries: typeof macosDesktopRuntimeEntries;
 }
-export type DesktopRuntimeManifest = MacosDesktopRuntimeManifest | WindowsDesktopRuntimeManifest;
+interface MacosNodeDesktopRuntimeManifest extends RuntimeBundleManifest {
+  readonly bunVersion?: never;
+  readonly nodeVersion: string;
+  readonly sqlite: RuntimeBundleManifest['sqlite'] & {
+    readonly driver: 'node-api:sqlite';
+    readonly linkage: 'dynamic';
+  };
+  readonly entries: typeof macosNodeDesktopRuntimeEntries;
+}
+interface WindowsNodeDesktopRuntimeManifest extends RuntimeBundleManifest {
+  readonly bunVersion?: never;
+  readonly nodeVersion: string;
+  readonly sqlite: RuntimeBundleManifest['sqlite'] & {
+    readonly driver: 'node-api:sqlite';
+    readonly linkage: 'dynamic';
+  };
+  readonly entries: typeof windowsNodeDesktopRuntimeEntries;
+}
+export type DesktopRuntimeManifest =
+  | MacosDesktopRuntimeManifest
+  | MacosNodeDesktopRuntimeManifest
+  | WindowsNodeDesktopRuntimeManifest
+  | WindowsDesktopRuntimeManifest;
 export interface TerminalBundleManifest extends RuntimeBundleManifest {
   readonly entries: {
     readonly runtime: string;
@@ -78,14 +120,14 @@ export interface VerifiedTerminalRuntimeBundle<
 }
 /** Fixed empty installation assets, derived from the authenticated v1 file closure. */
 export function terminalEmptyAssetDirectories(
-  manifest: Pick<TerminalBundleManifest, 'files'>,
+  manifest: Pick<TerminalBundleManifest, 'files' | 'nodeVersion'>,
 ): string[] {
   const files = new Set(manifest.files.map((file) => file.path));
+  const assets = ['worker.js', 'manifest.json'];
+  if (manifest.nodeVersion === undefined) assets.push('empty-bunfig.toml');
   return ['code', 'node_modules'].flatMap((root) => {
     const directory = `${root}/@kite-ai/agent/tools/git-worktree`;
-    return ['worker.js', 'empty-bunfig.toml', 'manifest.json'].every((name) =>
-      files.has(`${directory}/${name}`),
-    )
+    return assets.every((name) => files.has(`${directory}/${name}`))
       ? [`${directory}/empty-hooks`]
       : [];
   });
@@ -100,9 +142,14 @@ export interface TerminalRuntimeProtection {
   readonly root: string;
   readonly manifestSha256: string;
 }
-export const terminalBundleEntries = (platform: string): TerminalBundleManifest['entries'] =>
+export const nodeNativeInstallerPath = 'entrypoints/kite-install.command';
+export const nodeNativeMaintenancePath = 'node_modules/@kite-ai/agent/native-maintenance.mjs';
+export const terminalBundleEntries = (
+  platform: string,
+  runtime: 'bun' | 'node' = 'bun',
+): TerminalBundleManifest['entries'] =>
   Object.freeze({
-    runtime: platform === 'win32' ? 'runtime/bun.exe' : 'runtime/bun',
+    runtime: `runtime/${runtime}${platform === 'win32' ? '.exe' : ''}`,
     service: 'node_modules/@kite-ai/service/main.js',
     daemon: 'node_modules/@kite-ai/service/daemon-main.js',
     webManifest: 'web/manifest.json',
@@ -120,12 +167,17 @@ export const windowsTerminalFrontdoorFiles = Object.freeze([
   'windows-frontdoor/kite-tui.exe',
   'windows-frontdoor/terminal-verifier.exe',
 ]);
+export const windowsTerminalVerifierAddonPath = 'windows-frontdoor/runtime-native.node';
 export const windowsTerminalRuntimeConfigFiles = Object.freeze([
   'runtime/windows-bunfig.toml',
   'runtime/windows-tsconfig.json',
 ]);
 /** Fixed candidate config prevents working-directory preloads, aliases and implicit installs. */
-export function windowsTerminalRuntimeArguments(root: string): readonly string[] {
+export function windowsTerminalRuntimeArguments(
+  root: string,
+  runtime: 'node' | 'bun' = 'bun',
+): readonly string[] {
+  if (runtime === 'node') return Object.freeze(['--no-global-search-paths']);
   return Object.freeze([
     '--no-env-file',
     '--no-install',
@@ -174,12 +226,15 @@ export function parseTerminalBundleManifest(
   value: unknown,
   embedded = false,
 ): EmbeddedRuntimeManifest {
+  const node = record(value) && Object.hasOwn(value, 'nodeVersion');
+  const versionKey = node ? 'nodeVersion' : 'bunVersion';
+  const runtimeVersion = record(value) ? value[versionKey] : undefined;
   if (
     !closed(value, [
       'version',
       'apiMajor',
       'target',
-      'bunVersion',
+      versionKey,
       'sqlite',
       'productVersion',
       'source',
@@ -194,10 +249,10 @@ export function parseTerminalBundleManifest(
     typeof value.target.arch !== 'string' ||
     !['darwin', 'linux', 'win32'].includes(value.target.platform) ||
     !['x64', 'arm64'].includes(value.target.arch) ||
-    typeof value.bunVersion !== 'string' ||
-    !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(value.bunVersion) ||
+    typeof runtimeVersion !== 'string' ||
+    !/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(runtimeVersion) ||
     !closed(value.sqlite, ['driver', 'linkage', 'version', 'sourceId', 'manifestSha256']) ||
-    value.sqlite.driver !== 'bun:sqlite' ||
+    value.sqlite.driver !== (node ? 'node-api:sqlite' : 'bun:sqlite') ||
     typeof value.sqlite.manifestSha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(value.sqlite.manifestSha256) ||
     typeof value.productVersion !== 'string' ||
@@ -216,23 +271,26 @@ export function parseTerminalBundleManifest(
     const { manifestSha256, ...identity } = value.sqlite;
     sqlite = Object.freeze({
       ...parseSqliteReleaseIdentity(identity),
-      driver: 'bun:sqlite',
+      driver: node ? 'node-api:sqlite' : 'bun:sqlite',
       manifestSha256: manifestSha256 as string,
     });
   } catch {
     fail('terminal_manifest_invalid');
   }
   const desktop = embedded && closed(value.entries, ['runtime', 'service']);
+  const targetPlatform = value.target.platform;
   const rawEntries = value.entries;
   let entries: EmbeddedRuntimeManifest['entries'];
-  if (!desktop) entries = terminalBundleEntries(value.target.platform);
-  else if (value.target.platform === 'win32')
-    entries =
-      rawEntries.service === legacyWindowsDesktopRuntimeEntries.service
-        ? legacyWindowsDesktopRuntimeEntries
-        : windowsDesktopRuntimeEntries;
-  else if (value.target.platform === 'darwin' && value.target.arch === 'arm64')
-    entries = macosDesktopRuntimeEntries;
+  if (!desktop) entries = terminalBundleEntries(value.target.platform, node ? 'node' : 'bun');
+  else if (value.target.platform === 'win32') {
+    if (node) entries = windowsNodeDesktopRuntimeEntries;
+    else
+      entries =
+        rawEntries.service === legacyWindowsDesktopRuntimeEntries.service
+          ? legacyWindowsDesktopRuntimeEntries
+          : windowsDesktopRuntimeEntries;
+  } else if (value.target.platform === 'darwin' && value.target.arch === 'arm64')
+    entries = node ? macosNodeDesktopRuntimeEntries : macosDesktopRuntimeEntries;
   else fail('terminal_manifest_invalid');
   const bundledDesktop = entries.service === desktopServiceEntrypoint;
   const files = value.files;
@@ -283,6 +341,30 @@ export function parseTerminalBundleManifest(
   if (!files.some((item) => item.path === entries.runtime && item.mode === 493))
     fail('terminal_manifest_invalid');
   if (
+    node &&
+    (!files.some((item) => item.path === 'runtime/LICENSE.node' && item.mode === 420) ||
+      files.some((item) => /^runtime\/bun(?:[./]|$)/iu.test(item.path)))
+  )
+    fail('terminal_manifest_invalid');
+  if (
+    node &&
+    !desktop &&
+    (!files.some((item) => item.path === nodeNativeInstallerPath && item.mode === 493) ||
+      !files.some((item) => item.path === nodeNativeMaintenancePath && item.mode === 420) ||
+      !files.some((item) => item.path === 'entrypoints/package.json' && item.mode === 420))
+  )
+    fail('terminal_manifest_invalid');
+  if (
+    node &&
+    ((desktop && !files.some((item) => item.path === 'code/package.json' && item.mode === 420)) ||
+      !files.some(
+        (item) =>
+          item.path === `${desktop ? 'code' : 'node_modules'}/@kite-ai/agent/runtime-native.node` &&
+          item.mode === 493,
+      ))
+  )
+    fail('terminal_manifest_invalid');
+  if (
     !desktop &&
     terminalHostEntrypoints.some(
       (path) => !files.some((item) => item.path === path && item.mode === 420),
@@ -297,9 +379,15 @@ export function parseTerminalBundleManifest(
         windowsTerminalFrontdoorFiles.some(
           (path) => !files.some((item) => item.path === path && item.mode === 493),
         )) ||
-      windowsTerminalRuntimeConfigFiles.some(
-        (path) => !files.some((item) => item.path === path && item.mode === 420),
-      ))
+      (node &&
+        !desktop &&
+        !files.some(
+          (item) => item.path === windowsTerminalVerifierAddonPath && item.mode === 493,
+        )) ||
+      (!node &&
+        windowsTerminalRuntimeConfigFiles.some(
+          (path) => !files.some((item) => item.path === path && item.mode === 420),
+        )))
   )
     fail('terminal_manifest_invalid');
   if (
@@ -318,6 +406,13 @@ export function parseTerminalBundleManifest(
     fail('terminal_manifest_invalid');
   const engineRoot = sqliteEngineRoot(entries);
   if (
+    (node &&
+      !files.some(
+        (item) =>
+          item.path ===
+            `${engineRoot}/${targetPlatform === 'win32' ? 'sqlite3.dll' : targetPlatform === 'linux' ? 'libsqlite3.so' : 'libsqlite3.dylib'}` &&
+          item.mode === 420,
+      )) ||
     !['engine-selection.json', 'engine-manifest.json'].every((name) =>
       files.some((item) => item.path === `${engineRoot}/${name}` && item.mode === 420),
     ) ||
@@ -332,7 +427,7 @@ export function parseTerminalBundleManifest(
     version: 1,
     apiMajor: 1,
     target: Object.freeze({ ...value.target }),
-    bunVersion: value.bunVersion,
+    ...(node ? { nodeVersion: runtimeVersion } : { bunVersion: runtimeVersion }),
     sqlite,
     productVersion: value.productVersion,
     source: Object.freeze({ ...value.source }),
@@ -357,14 +452,6 @@ export function retainWindowsTerminalRuntimeFiles(root: string): {
   release(): void;
 } {
   if (process.platform !== 'win32') fail('terminal_target_mismatch');
-  // Node/Electron also imports the pure verifier on POSIX. Native Bun ownership
-  // loads only at this explicit Windows boundary, never during metadata parsing.
-  const {
-    retainWindowsCandidateFiles,
-    readWindowsArtifactObject,
-    hashWindowsArtifactFile,
-    readWindowsArtifactFile,
-  } = require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
   const pins: ReturnType<typeof retainWindowsCandidateFiles>[] = [];
   let access: { verify(): void; release(): void } | undefined;
   const release = () => {
@@ -481,8 +568,6 @@ function terminalRuntimeBundleContent(
       removal &&
       (() => {
         if (process.platform !== 'win32') fail('terminal_target_mismatch');
-        const { windowsInstallationRemovalReader } =
-          require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
         return windowsInstallationRemovalReader(removal, root);
       })();
     if (!removal && !contentOnly && process.platform === 'win32')
@@ -601,6 +686,7 @@ function terminalRuntimeBundleContent(
       manifestSha256: manifest.sqlite.manifestSha256,
     }).manifest;
     if (
+      engine.driver !== manifest.sqlite.driver ||
       engine.sqlite.version !== manifest.sqlite.version ||
       engine.sqlite.sourceId !== manifest.sqlite.sourceId ||
       ('linkage' in engine && engine.linkage === 'builtin' ? 'builtin' : 'dynamic') !==

@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeExtensionScope } from '../../src/extensions-bridge';
 import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
 import { readNativeExtensionBody } from '../../src/native-extension-read';
@@ -119,7 +120,7 @@ test('real panel reads query and complete public view, invokes exact offered inp
   async function flush(action: () => void) {
     await act(async () => {
       action();
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     });
   }
   try {
@@ -337,7 +338,7 @@ test('real panel drops a late catalogue after session selection and releases its
       const details = host.querySelector('details')!;
       details.open = true;
       details.dispatchEvent(new dom.window.Event('toggle'));
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     });
     await act(async () =>
       root.render(
@@ -352,7 +353,7 @@ test('real panel drops a late catalogue after session selection and releases its
     );
     await act(async () => {
       release();
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     });
     expect(host.body.textContent).not.toContain('Save');
     expect(calls.some((call) => call.method === 'extensions.release')).toBe(true);

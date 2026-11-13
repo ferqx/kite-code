@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -54,7 +57,7 @@ try {
 `,
       { mode: 0o600 },
     );
-    const build = await Bun.build({
+    const build = await buildBundle({
       entrypoints: [source],
       target: 'node',
       packages: 'bundle',
@@ -66,9 +69,9 @@ try {
     writeFileSync(join(directory, 'package.json'), '{"type":"module"}', { mode: 0o600 });
   }
   const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-  const node = Bun.which('node');
-  if (!node) throw Error('owned_node_unavailable');
-  const child = Bun.spawn(
+  const node = fixtureNodeExecutable();
+
+  const child = spawnProcess(
     [
       node,
       driver,
@@ -78,8 +81,8 @@ try {
         profilePath: selectProfile(profile).profilePath,
         access: {
           profile,
-          bunExecutable: process.execPath,
-          bunSha256: digest(process.execPath),
+          runtimeExecutable: fixtureNodeExecutable(),
+          runtimeSha256: digest(fixtureNodeExecutable()),
           helperPath: helper,
           helperSha256: digest(helper),
         },

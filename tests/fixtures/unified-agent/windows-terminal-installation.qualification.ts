@@ -4,12 +4,21 @@ import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import {
+  terminalEmptyAssetDirectories,
+  windowsTerminalRuntimeArguments,
+} from '../../../apps/service/src/runtime-assets';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import type {
   ProfileBackup,
   ProfileGarbageCollection,
 } from '../../../packages/agent/src/maintenance';
 import type { SessionRecord } from '../../../packages/agent/src/storage/types';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { qualifyInstalledWindowsDaemon } from './windows-daemon-qualification';
 
 /** Explicit native Windows qualification, never a default availability-skipped test.
@@ -47,6 +56,8 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       'terminal-manifest.json',
       ...manifest.files.map((file) => file.path),
     ]);
+    for (const directory of terminalEmptyAssetDirectories(manifest))
+      privateDirectory(join(destination, directory));
   };
   const built = verifyTerminalBundle(candidate);
   assert(performance.now() < workDeadline, 'windows_terminal_qualification_input_deadline');
@@ -95,6 +106,8 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
   for (const key of [
     'NODE_PATH',
     'NODE_OPTIONS',
+    'NODE_COMPILE_CACHE',
+    'NODE_V8_COVERAGE',
     'BUN_OPTIONS',
     'BUN_BE_BUN',
     'ELECTRON_RUN_AS_NODE',
@@ -108,7 +121,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     NODE_PATH: workspace,
     ELECTRON_RUN_AS_NODE: '1',
   };
-  const children = new Set<Bun.Subprocess<'ignore', 'pipe', 'pipe'>>();
+  const children = new Set<FixtureProcess<'ignore', 'pipe', 'pipe'>>();
   const records: {
     phase: string;
     code: number;
@@ -125,7 +138,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
   ) => {
     const budget = Math.min(30000, remaining(Boolean(options.cleanup)));
     assert(budget > 0, 'windows_terminal_qualification_deadline');
-    const child = Bun.spawn(argv, {
+    const child = spawnFixtureProcess(argv, {
       cwd: options.cwd ?? workspace,
       env: options.frontdoor === false ? env : poisoned,
       stdin: 'ignore',
@@ -177,7 +190,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
   // legitimately stay inline; never seed an unrelated blob to satisfy backup.
   const modelInstructions = 'WINDOWS_INSTALLED_ORIGINAL_CONTEXT '.repeat(4000);
   security.writePrivateFile(join(workspace, 'AGENTS.md'), Buffer.from(modelInstructions));
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -380,13 +393,21 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     assert.equal(selectedB.candidateId, b.candidateId);
     const runtime = join(selectedB.releaseRoot, b.manifest.entries.runtime);
     const reader = join(home, 'read.mjs');
+    const readerCommand = [
+      runtime,
+      ...windowsTerminalRuntimeArguments(
+        selectedB.releaseRoot,
+        b.manifest.nodeVersion ? 'node' : 'bun',
+      ),
+      reader,
+    ];
     security.writePrivateFile(
       reader,
       Buffer.from(
         `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(selectedB.releaseRoot, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const executions=await s.listExecutions('windows-installed');console.log(JSON.stringify({metadata:await s.getMetadata(),session:await s.getSession('windows-installed'),messages:await s.listMessages('windows-installed'),executions,command:await s.getCommand(executions[0].originCommandId)}));}finally{await s.close();}`,
       ),
     );
-    const cold = await execute('installed_cold_history', [runtime, reader], {
+    const cold = await execute('installed_cold_history', readerCommand, {
       frontdoor: false,
       cwd: home,
     });
@@ -493,7 +514,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     assert.deepEqual(readFileSync(preferencesPath), preferences);
     verifyOriginalMedia();
     assert.equal((await maintenance('status', scope)).restore, null);
-    const restoredCold = await execute('installed_restored_cold_history', [runtime, reader], {
+    const restoredCold = await execute('installed_restored_cold_history', readerCommand, {
       frontdoor: false,
       cwd: home,
     });
@@ -556,7 +577,7 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
     verifyOriginalMedia();
     assert.deepEqual(readFileSync(recentPath), recent);
     assert.deepEqual(readFileSync(profile.databasePath), beforeGcDatabase);
-    const gcCold = await execute('installed_gc_cold_history', [runtime, reader], {
+    const gcCold = await execute('installed_gc_cold_history', readerCommand, {
       frontdoor: false,
       cwd: home,
     });
@@ -572,15 +593,18 @@ export async function qualifyWindowsTerminalInstallation(candidateInput: string)
       dataRoot,
       userConfigurationPath: ownedUserConfiguration(home).path,
       workspace,
+      readerEnvironment: env,
       candidateA: {
         releaseRoot: installed.releaseRoot,
         candidateId: built.candidateId,
         buildId: built.buildId,
+        manifest: built.manifest,
       },
       candidateB: {
         releaseRoot: selectedB.releaseRoot,
         candidateId: b.candidateId,
         buildId: b.buildId,
+        manifest: b.manifest,
       },
       execute,
       deadline: workDeadline,

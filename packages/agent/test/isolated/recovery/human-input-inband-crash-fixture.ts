@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { semanticDigest } from '../../../src/json';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 

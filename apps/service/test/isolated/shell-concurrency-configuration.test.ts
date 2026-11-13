@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -9,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { retainWindowsOwnedProcessObservation } from '../../../../packages/agent/src/platform/process/windows-owned-child';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
 import {
@@ -58,7 +59,7 @@ test.skipIf(process.platform !== 'win32')(
         configurationId: 'native-concurrency-test',
         env: { SystemRoot: process.env.SystemRoot!, Path: '' },
         supervisorPath: assets.runner,
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: assets.shell,
         windows: {
           fullShellExecutable: assets.fullShell,
@@ -126,7 +127,7 @@ test.skipIf(process.platform !== 'win32')(
         const value = await read();
         if (value !== undefined) return value;
         if (Date.now() > deadline) throw Error('shell_concurrency_deadline');
-        await Bun.sleep(10);
+        await sleepTimer(10);
       }
     };
     const latest = async (sessionId: string) =>

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { NativeDirectory, NativeSelection } from '../src/native-bridge';
 import {
   isNativeWorktreeExitCommand,

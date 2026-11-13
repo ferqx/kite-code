@@ -1,8 +1,8 @@
-import { dlopen, ptr } from 'bun:ffi';
 import {
   type OwnedProcessIdentity,
   observeOwnedProcessIdentity,
 } from '../../../platform/process/owned-process-observation';
+import { dlopen, ptr } from '../../../runtime-ffi';
 
 /** Kernel budget and suspension for the exact sandbox root. Lifecycle stays with its guardian. */
 export function createExecutorCpuBudget(original: OwnedProcessIdentity) {

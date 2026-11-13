@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   mkdirSync,
@@ -11,10 +10,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { createFileCheckpointProvider } from '../fixtures/file-checkpoint-provider';
@@ -27,7 +28,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('default_file_checkpoint_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function stamp(path: string) {
@@ -53,7 +54,7 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
   writeFileSync(join(workspace, 'AGENTS.md'), agents);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
-  const { provider, requests, model } = createFileCheckpointProvider();
+  const { provider, requests, model } = await createFileCheckpointProvider();
   writeFileSync(
     userConfiguration.path,
     JSON.stringify({
@@ -67,7 +68,7 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
   );
   const launch = (id: string) =>
     launchPairedService({
-      entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      entrypoint: join(import.meta.dirname, '../../src/main.ts'),
       spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,

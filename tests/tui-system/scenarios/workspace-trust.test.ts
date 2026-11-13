@@ -7,12 +7,12 @@
  * exits without persisting anything.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
@@ -26,9 +26,9 @@ const GATE_TEXT = 'Open this workspace?';
 describe('TUI PTY System — Workspace Trust', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
-  let declinedServer: ReturnType<typeof createMockModelServer> | undefined;
+  let declinedServer: Awaited<ReturnType<typeof createMockModelServer>> | undefined;
   let declinedWorkspace: ReturnType<typeof createTestWorkspace> | undefined;
   let tui: PtyProcess;
   let restarted: PtyProcess | undefined;
@@ -36,10 +36,9 @@ describe('TUI PTY System — Workspace Trust', () => {
   let externalGitDir = '';
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     // enforceWorkspaceTrust skips the harness pre-trust so the gate runs. The
-    // forged .env proves Bun dotenv injection cannot bypass the gate: Bun loads
-    // `<cwd>/.env*` into the child env, and the gate must still appear.
+    // forged dotenv file must remain project data and the gate must still appear.
     workspace = createTestWorkspace({
       configOverrides: { language: 'en-US' },
       enforceWorkspaceTrust: true,
@@ -184,7 +183,7 @@ describe('TUI PTY System — Workspace Trust', () => {
       });
       declinedWorkspace.env.CI = 'true';
       // A distinct workspace owns a distinct fixture tool baseline and response queue.
-      declinedServer = createMockModelServer();
+      declinedServer = await createMockModelServer();
       declinedServer.setResponses([]);
       const proc = await spawnReadyTui({
         cols: 120,

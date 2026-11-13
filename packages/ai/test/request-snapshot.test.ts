@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { ModelRequest } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 
 const request: ModelRequest = {
   modelId: 'selected',
@@ -18,7 +18,6 @@ test('pure SDK description is sealed from actual binding/preset and never expose
         { headers: { 'content-type': 'text/event-stream' } },
       );
     },
-    { preconnect: fetch.preconnect },
   );
   const preset = { temperature: 0.2, topP: 0.7, maxOutputTokens: 123 };
   const model = createCompatibleModelBinding({

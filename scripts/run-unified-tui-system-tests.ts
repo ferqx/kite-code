@@ -2,6 +2,7 @@ import { basename, relative, resolve } from 'node:path';
 import { withTestRuntime } from './test-environment';
 import { planTestSuites, runTestPlan } from './test-plan';
 import { collectTestFiles, testParallelism } from './test-suite';
+import { testNodeCommand } from './tooling/test-command';
 
 export const UNIFIED_TUI_SHARD_ENV = 'KITE_TUI_SYSTEM_SHARD';
 const formal = [
@@ -40,7 +41,9 @@ export function selectUnifiedTuiTests(
   shardValue: string | undefined,
 ) {
   if (args.length > 1 || (args.length === 1 && args[0] !== '--list'))
-    throw Error('usage: bun run scripts/run-unified-tui-system-tests.ts [--list]');
+    throw Error(
+      'usage: node --import ./scripts/tooling/register.mjs scripts/run-unified-tui-system-tests.ts [--list]',
+    );
   const shard = parseUnifiedTuiShard(shardValue);
   const files = unifiedTuiInventory(root).filter(
     (_, index) => !shard || index % shard.count === shard.index,
@@ -59,7 +62,7 @@ export function unifiedTuiTestPlan(root: string, files: readonly string[], concu
       label: `original-tui:${basename(file)}`,
       files: [resolve(root, file)],
       // Retain the original per-file, test, journey and owned-process teardown budgets.
-      command: [process.execPath, resolve(root, 'scripts/run-tui-system-tests.ts'), basename(file)],
+      command: testNodeCommand(resolve(root, 'scripts/run-tui-system-tests.ts'), [basename(file)]),
       maxConcurrency: 1,
       drainOnFailure: true,
     });
@@ -94,7 +97,7 @@ if (import.meta.main) {
   const args = process.argv.slice(2);
   const run = () =>
     runUnifiedTuiSystemTests(
-      resolve(import.meta.dir, '..'),
+      resolve(import.meta.dirname, '..'),
       args,
       process.env[UNIFIED_TUI_SHARD_ENV],
     );

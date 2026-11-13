@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import { MessageContent } from '../src/desktop/MessageContent';
 import { diagramRestriction, isClosedDiagramFence } from '../src/desktop/markdown-diagram';
 import { parseDesktopMarkdown } from '../src/desktop/markdown-parser';

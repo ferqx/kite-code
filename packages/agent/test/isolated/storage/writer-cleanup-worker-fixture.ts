@@ -1,4 +1,5 @@
-import type { Database, Statement } from 'bun:sqlite';
+import { parentPort } from 'node:worker_threads';
+import type { Database, Statement } from '../../../src/runtime-sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import '../../../src/storage/worker/main';
 
@@ -61,9 +62,9 @@ SqliteOperations.prototype.call = function (method: string, args: unknown[]): un
   }
   return call.call(this, method, args);
 };
-declare const self: Worker;
-const post = self.postMessage.bind(self);
-self.postMessage = (response: unknown) =>
+const port = parentPort!;
+const post = port.postMessage.bind(port);
+port.postMessage = (response: unknown) =>
   post({
     ...(response as object),
     fixtureFaults: faults,

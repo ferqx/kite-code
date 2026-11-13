@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import { createAgentBrowserObservationOwner } from '../../src/agent-browser-observation-owner';
 import { browserFixture, browserScope } from '../agent-browser.fixture';
 
@@ -6,7 +7,7 @@ async function until(check: () => boolean) {
   const end = Date.now() + 2500;
   while (!check()) {
     if (Date.now() > end) throw Error('shared_owner_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 test('same-scope picker and toolbar share one Main catalogue; picker closure never revokes the live control observation', async () => {

@@ -1,10 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { rewriteArtifact } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';

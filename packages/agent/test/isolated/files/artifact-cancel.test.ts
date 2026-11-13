@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
@@ -151,7 +152,7 @@ test('precise cancellation while the real scoped Artifact reader is awaited prev
       request: { kind: 'run.start', content: 'write exact Artifact' },
     });
     const deadline = Date.now() + 3000;
-    while (!entered && Date.now() < deadline) await Bun.sleep(10);
+    while (!entered && Date.now() < deadline) await sleepTimer(10);
     expect(entered).toBe(true);
     await runtime.cancelCommand({
       expectedStoreId,

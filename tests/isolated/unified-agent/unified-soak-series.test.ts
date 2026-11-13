@@ -1,11 +1,16 @@
-import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import {
+  fixtureNodeExecutable,
+  fixtureNodeLoader,
+} from '../../../packages/agent/test/fixtures/node-runtime';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
-import { runStableCrashSeries } from '../../../scripts/runtime/unified-soak';
+import { buildUnifiedSoakProbe, runStableCrashSeries } from '../../../scripts/runtime/unified-soak';
 import { sameNativeProcess } from '../../../scripts/runtime/unified-soak-native';
-import { runProbe } from '../../../scripts/runtime/unified-soak-probe';
+import type { ProbeEvidence } from '../../../scripts/runtime/unified-soak-report';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
 test.skipIf(process.platform === 'win32')(
@@ -13,7 +18,35 @@ test.skipIf(process.platform === 'win32')(
   async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-soak-active-window-'));
     try {
-      const result = await runProbe(root, 'lifecycle', 3, 2000);
+      const child = spawnFixtureProcess(
+        [
+          fixtureNodeExecutable(),
+          '--no-global-search-paths',
+          '--expose-gc',
+          '--import',
+          fixtureNodeLoader,
+          join(import.meta.dirname, '../../../scripts/runtime/unified-soak-probe.ts'),
+          root,
+          'lifecycle',
+          '3',
+          '2000',
+        ],
+        {
+          env: { PATH: process.env.PATH ?? '', HOME: root, TMPDIR: root },
+          stdout: 'ignore',
+          stderr: 'pipe',
+        },
+      );
+      const stderr = new Response(child.stderr).text();
+      const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+      try {
+        expect(await child.exited, await stderr).toBe(0);
+      } finally {
+        clearTimeout(timer);
+      }
+      const result = JSON.parse(
+        readFileSync(join(root, 'lifecycle.json'), 'utf8'),
+      ) as ProbeEvidence;
       if (result.completedCycles === undefined) throw Error('lifecycle_cycle_count_missing');
       expect(result.completedCycles).toBeGreaterThan(3);
       expect(result.calls).toBe(result.completedCycles * 2);
@@ -25,7 +58,7 @@ test.skipIf(process.platform === 'win32')(
       for (const point of result.points) {
         expect(point.durationMs).toBeLessThan(180000);
         expect(
-          sameNativeProcess(point.observations.before.native, point.observations.after.native),
+          sameNativeProcess(point.observations!.before.native, point.observations!.after.native),
         ).toBe(true);
       }
     } finally {
@@ -42,20 +75,16 @@ test.skipIf(process.platform === 'win32')(
     try {
       const candidate = await buildTerminalBundle({ destination: join(root, 'candidate') });
       symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'), 'dir');
-      const built = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../../../scripts/runtime/unified-soak-probe.ts')],
-        target: 'bun',
-        packages: 'external',
-        outdir: root,
-      });
-      expect(built.success).toBe(true);
+      const { probe } = await buildUnifiedSoakProbe(root);
       const directory = join(root, 'series');
       privateDirectory(directory);
       const spawn = (path: string, mode: string) =>
-        Bun.spawn(
+        spawnFixtureProcess(
           [
-            join(candidate.root, 'runtime/bun'),
-            join(root, 'unified-soak-probe.js'),
+            candidate.artifact.executable,
+            '--no-global-search-paths',
+            '--expose-gc',
+            probe,
             path,
             mode,
             '1',

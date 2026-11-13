@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createMcpResourceModelSource } from '../../../src/mcp/resource-model-source';
 
 const scope = { storeId: 'store', sessionId: 'session', runId: 'run' };

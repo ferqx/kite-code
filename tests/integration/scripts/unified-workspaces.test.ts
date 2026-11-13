@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import { checkUnifiedAgentBoundary } from '../../../scripts/check-unified-agent-boundary';
 import {
+  checkUnifiedFormalConsumers,
   checkUnifiedWorkspaces,
   UNIFIED_WORKSPACES,
 } from '../../../scripts/check-unified-workspaces';
@@ -18,22 +19,29 @@ function fixture() {
   const root = mkdtempSync(resolve(tmpdir(), 'kite-unified-workspaces-'));
   roots.push(root);
   const scripts = {
-    build: 'bun run scripts/run-runtime-workspace-script.ts build',
-    test: 'bun run scripts/run-default-tests.ts',
+    build:
+      'node --import ./scripts/tooling/register.mjs scripts/run-runtime-workspace-script.ts build',
+    test: 'node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts',
     'test:all': 'bun run test',
-    typecheck: 'bun check -b -p tsconfig.typecheck.json',
-    agent: 'bun run scripts/release/entrypoints/cli.ts',
-    tui: 'bun run scripts/release/entrypoints/tui.ts',
-    'prod:tui': 'NODE_ENV=production bun run scripts/release/entrypoints/tui.ts',
-    server: 'bun run scripts/development/ensure-web.ts',
-    desktop: 'bun run scripts/release/native.ts launch',
-    'release:terminal': 'bun run scripts/release/terminal.ts',
-    'release:build': 'bun run scripts/release/unified.ts build',
-    'release:verify': 'bun run scripts/release/unified.ts verify',
-    'release:smoke': 'bun run scripts/release/unified.ts smoke',
-    'release:install': 'bun run scripts/release/unified.ts install',
-    'release:native': 'bun run scripts/release/native.ts',
-    'check:runtime-packages': 'bun run scripts/check-unified-workspaces.ts',
+    typecheck: 'node node_modules/typescript/bin/tsc -b tsconfig.typecheck.json',
+    agent: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/cli.ts',
+    tui: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/tui.ts',
+    'prod:tui':
+      'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/production-tui.ts',
+    server: 'node --import ./scripts/tooling/register.mjs scripts/development/ensure-web.ts',
+    desktop: 'node --import ./scripts/tooling/register.mjs scripts/release/native.ts launch',
+    'release:terminal': 'node --import ./scripts/tooling/register.mjs scripts/release/terminal.ts',
+    'release:build':
+      'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts build',
+    'release:verify':
+      'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts verify',
+    'release:smoke':
+      'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts smoke',
+    'release:install':
+      'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts install',
+    'release:native': 'node --import ./scripts/tooling/register.mjs scripts/release/native.ts',
+    'check:runtime-packages':
+      'node --import ./scripts/tooling/register.mjs scripts/check-unified-workspaces.ts',
   };
   put(root, 'package.json', {
     module: 'scripts/release/source-terminal.ts',
@@ -42,7 +50,7 @@ function fixture() {
     devDependencies: { '@kite-ai/agent': 'workspace:*' },
   });
   for (const script of Object.values(scripts)) {
-    const path = script.match(/bun run (\S+\.ts)/)?.[1];
+    const path = script.match(/node --import \S+ (\S+\.ts)/)?.[1];
     if (path) put(root, path, 'export {};');
   }
   put(root, 'scripts/release/source-terminal.ts', 'export {};');
@@ -59,9 +67,10 @@ function fixture() {
       type: 'module',
       exports: { '.': './src/index.ts' },
       scripts: {
-        build: 'bun build src/index.ts',
-        typecheck: 'bun check -p tsconfig.json',
-        test: 'bun test test',
+        build:
+          'node --import ./scripts/tooling/register.mjs scripts/tooling/build-command.ts src/index.ts',
+        typecheck: 'node ../../node_modules/typescript/bin/tsc -p tsconfig.json',
+        test: 'node --import ../../scripts/tooling/register.mjs ../../scripts/run-test-files.ts test',
       },
       dependencies: path === 'apps/service' ? { '@kite-ai/agent': 'workspace:*' } : {},
     });
@@ -212,8 +221,9 @@ test('formal module, script override or trusted wrapper barrel back to old sourc
   const root = fixture();
   edit(root, 'package.json', (m) => {
     m.module = 'apps/kite-cli/src/index.ts';
-    m.scripts.desktop = 'bun run --cwd apps/kite-desktop dev';
-    m.scripts['release:build'] = 'bun run scripts/release/build-oss-candidate.ts';
+    m.scripts.desktop = 'bun --cwd=apps/kite-desktop run dev';
+    m.scripts['release:build'] =
+      'node --import ./scripts/tooling/register.mjs scripts/release/build-oss-candidate.ts';
   });
   const report = checkUnifiedWorkspaces(root);
   expect(report.violations.some((v) => v.code === 'formal-module-invalid')).toBe(true);
@@ -245,8 +255,8 @@ test('existing conditional types/runtime exports stay valid while any escaping b
 test('unlisted root alias, nested workspace build and CI source imports cannot reattach legacy', () => {
   for (const command of [
     'bun run hidden',
-    'bun run --cwd apps/kite-service build',
-    'bun test apps/kite-cli/test',
+    'bun --cwd=apps/kite-service run build',
+    'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/kite-cli/test',
   ]) {
     const root = fixture();
     edit(root, 'package.json', (m) => {
@@ -261,11 +271,41 @@ test('unlisted root alias, nested workspace build and CI source imports cannot r
   put(root, 'scripts/release/extra.ts', 'export * from "./bridge";');
   put(root, 'scripts/release/bridge.ts', 'export * from "../../packages/runtime-host/src/index";');
   put(root, 'packages/runtime-host/src/index.ts', 'export {};');
-  edit(root, 'package.json', (m) => (m.scripts.extra = 'bun run scripts/release/extra.ts'));
+  edit(
+    root,
+    'package.json',
+    (m) =>
+      (m.scripts.extra = 'node --import ./scripts/tooling/register.mjs scripts/release/extra.ts'),
+  );
   expect(checkUnifiedWorkspaces(root).violations.some((v) => v.code === 'source-boundary')).toBe(
     true,
   );
   const historical = fixture();
   put(historical, 'packages/runtime-host/src/index.ts', 'export class RuntimeState {}');
   expect(checkUnifiedWorkspaces(historical).violations).toEqual([]);
+});
+
+test('formal consumers allow frozen Bun installs and manifest dispatch while rejecting Bun runtime overrides', () => {
+  const root = fixture();
+  edit(root, 'package.json', (m) => {
+    m.scripts.extra = 'bun install --frozen-lockfile && bun --cwd=packages/agent run build';
+  });
+  expect(checkUnifiedFormalConsumers(root).violations).toEqual([]);
+  for (const command of [
+    'bun install',
+    'bun install --frozen-lockfile --no-verify',
+    'bun --bun run test',
+    'bun run --bun test',
+    'bun run ./scripts/run-default-tests.ts',
+    'bun test',
+  ]) {
+    edit(root, 'package.json', (m) => {
+      m.scripts.extra = command;
+    });
+    expect(checkUnifiedFormalConsumers(root).violations).toContainEqual({
+      code: 'formal-runtime-forbidden',
+      path: 'package.json#extra',
+      message: 'Bun may install frozen dependencies or dispatch a manifest script',
+    });
+  }
 });

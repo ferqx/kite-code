@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { buildUnifiedSoakProbe } from '../../../scripts/runtime/unified-soak';
 import { sameNativeProcess } from '../../../scripts/runtime/unified-soak-native';
 import { runTuiCase } from '../../fixtures/unified-agent/soak/tui';
 
@@ -13,19 +14,8 @@ test.skipIf(process.platform === 'win32')(
     try {
       const candidate = await buildTerminalBundle({ destination: join(root, 'candidate') });
       symlinkSync(join(candidate.root, 'node_modules'), join(root, 'node_modules'), 'dir');
-      const sampler = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../../../scripts/runtime/unified-soak-cases.ts')],
-        target: 'bun',
-        packages: 'external',
-        outdir: root,
-      });
-      expect(sampler.success).toBe(true);
-      const result = await runTuiCase(
-        join(root, 'case'),
-        candidate.artifact,
-        join(root, 'unified-soak-cases.js'),
-        9,
-      );
+      const { sampler } = await buildUnifiedSoakProbe(root);
+      const result = await runTuiCase(join(root, 'case'), candidate.artifact, sampler, 9);
       if (result.status !== 'passed') console.error(JSON.stringify(result));
       expect(result.unavailable).toEqual([]);
       expect(result.status).toBe('passed');

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -15,6 +14,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   fixtureNativeSqlite,
@@ -165,8 +167,8 @@ test('Node-safe full Native closure relocates with exact inner proof, fixed coor
       }),
     ).toThrow('native_protection_identity_mismatch');
     const out = join(f.parent, 'node-reader.mjs'),
-      built = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../src/native-runtime-assets.ts')],
+      built = await buildBundle({
+        entrypoints: [join(import.meta.dirname, '../../src/native-runtime-assets.ts')],
         target: 'node',
         format: 'esm',
         packages: 'bundle',
@@ -175,7 +177,7 @@ test('Node-safe full Native closure relocates with exact inner proof, fixed coor
       });
     expect(built.success).toBe(true);
     const before = readdirSync(moved),
-      child = Bun.spawn(
+      child = spawnProcess(
         [
           'node',
           '--input-type=module',

@@ -1,18 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import {
-  getNodeValue,
-  type Node as JsonNode,
-  type ParseError,
-  parseTree,
-  printParseErrorCode,
-} from 'jsonc-parser';
+import { bunDependencySections, bunIntegrityHash, bunLockfile, parseBunLock } from './bun-lock';
 import { canonicalJsonBytes, parseStrictJson, sha256Digest } from './canonical-json';
-
-interface BunLockPackageEntry {
-  resolution: string;
-  integrity?: string;
-}
 
 export interface SyntheticCycloneDxComponent {
   type: 'library';
@@ -46,53 +35,42 @@ export interface SyntheticCycloneDxSbom {
 /** Deterministic SBOM contract; it does not claim vulnerability or license evidence. */
 export function generateSyntheticCycloneDxSbom(input: {
   packageJsonBytes: Uint8Array;
-  bunLockBytes: Uint8Array;
+  lockfileBytes: Uint8Array;
 }): SyntheticCycloneDxSbom {
   const packageJson = expectObject(parseStrictJson(input.packageJsonBytes), 'package.json');
-  const lock = expectObject(parseBunLock(input.bunLockBytes), 'bun.lock');
+  const lock = parseBunLock(input.lockfileBytes);
   const rootName = expectString(packageJson.name, 'package.json.name');
   const rootVersion = expectString(packageJson.version, 'package.json.version');
-  const workspaces = expectObject(lock.workspaces, 'bun.lock.workspaces');
-  const rootWorkspace = expectObject(workspaces[''], 'bun.lock.workspaces[""]');
-  const productionDependencies = dependencyNames(rootWorkspace.dependencies);
-  const developmentDependencies = dependencyNames(rootWorkspace.devDependencies);
-  const packages = expectObject(lock.packages, 'bun.lock.packages');
-
+  const root = lock.workspaces['']!;
+  const directScopes = new Map<string, SyntheticCycloneDxComponent['properties'][0]['value']>();
+  for (const field of [...bunDependencySections].reverse()) {
+    for (const name of Object.keys(root[field] ?? {})) {
+      directScopes.set(name, field === 'devDependencies' ? 'development' : 'production');
+    }
+  }
   const componentsByPurl = new Map<string, SyntheticCycloneDxComponent>();
-  for (const [key, rawEntry] of Object.entries(packages)) {
-    const entry = parseBunLockPackageEntry(rawEntry, key);
-    const { name, version } = packageIdentity(entry.resolution, key);
-    const scope: SyntheticCycloneDxComponent['properties'][0]['value'] =
-      key === name && productionDependencies.has(name)
-        ? 'production'
-        : key === name && developmentDependencies.has(name)
-          ? 'development'
-          : 'transitive';
-    const integrity = entry.integrity ? integrityHash(entry.integrity, key) : undefined;
-    const hashes: SyntheticCycloneDxComponent['hashes'] = integrity
-      ? [{ alg: 'SHA-512', content: integrity }]
-      : undefined;
+  for (const [key, { name, version, integrity }] of Object.entries(lock.packages)) {
     const purl = npmPurl(name, version);
+    const scope = directScopes.get(key) ?? 'transitive';
     const existing = componentsByPurl.get(purl);
     if (existing) {
-      if (existing.hashes?.[0]?.content !== hashes?.[0]?.content) {
-        throw new Error(`bun.lock repeats ${purl} with different integrity.`);
-      }
-      const existingScope = existing.properties[0].value;
-      existing.properties[0].value = tighterDependencyScope(existingScope, scope);
+      const previous = existing.properties[0].value;
+      if (scope === 'production' || (scope === 'development' && previous === 'transitive'))
+        existing.properties[0].value = scope;
       continue;
     }
-    const properties: SyntheticCycloneDxComponent['properties'] = [
-      { name: 'kite-code:dependency-scope', value: scope },
-      { name: 'kite-code:license-evidence', value: 'not_collected' },
-    ];
     componentsByPurl.set(purl, {
       type: 'library',
       name,
       version,
       purl,
-      ...(hashes ? { hashes } : {}),
-      properties,
+      ...(integrity
+        ? { hashes: [{ alg: 'SHA-512', content: bunIntegrityHash(integrity, key) }] }
+        : {}),
+      properties: [
+        { name: 'kite-code:dependency-scope', value: scope },
+        { name: 'kite-code:license-evidence', value: 'not_collected' },
+      ],
     });
   }
   const components = [...componentsByPurl.values()].sort((left, right) =>
@@ -110,7 +88,7 @@ export function generateSyntheticCycloneDxSbom(input: {
         { name: 'kite-code:production-evidence', value: 'false' },
         { name: 'kite-code:registry-audit-status', value: 'not_run' },
         { name: 'kite-code:license-scan-status', value: 'not_run' },
-        { name: 'kite-code:source-lockfile-sha256', value: sha256Digest(input.bunLockBytes) },
+        { name: 'kite-code:source-lockfile-sha256', value: sha256Digest(input.lockfileBytes) },
       ],
     },
     components,
@@ -121,98 +99,11 @@ export function encodeSyntheticCycloneDxSbom(sbom: SyntheticCycloneDxSbom): Uint
   return canonicalJsonBytes(sbom);
 }
 
-function parseBunLockPackageEntry(value: unknown, key: string): BunLockPackageEntry {
-  if (!Array.isArray(value) || typeof value[0] !== 'string') {
-    throw new Error(`bun.lock package ${key} has an invalid entry.`);
-  }
-  const integrity = value[3];
-  if (integrity !== undefined && typeof integrity !== 'string') {
-    throw new Error(`bun.lock package ${key} has an invalid integrity value.`);
-  }
-  return { resolution: value[0], ...(integrity ? { integrity } : {}) };
-}
-
-function parseBunLock(input: Uint8Array): unknown {
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(input);
-  const errors: ParseError[] = [];
-  const root = parseTree(text, errors, {
-    allowTrailingComma: true,
-    disallowComments: true,
-    allowEmptyContent: false,
-  });
-  if (!root || errors.length > 0) {
-    const first = errors[0];
-    const detail = first
-      ? `${printParseErrorCode(first.error)} at byte ${first.offset}`
-      : 'empty document';
-    throw new Error(`Invalid bun.lock: ${detail}.`);
-  }
-  rejectDuplicateKeys(root, '$');
-  return getNodeValue(root) as unknown;
-}
-
-function rejectDuplicateKeys(node: JsonNode, path: string): void {
-  if (node.type === 'object') {
-    const keys = new Set<string>();
-    for (const property of node.children ?? []) {
-      const keyNode = property.children?.[0];
-      const valueNode = property.children?.[1];
-      if (!keyNode || typeof keyNode.value !== 'string' || !valueNode) {
-        throw new Error(`Invalid bun.lock object member at ${path}.`);
-      }
-      if (keys.has(keyNode.value)) {
-        throw new Error(`Duplicate bun.lock key ${JSON.stringify(keyNode.value)} at ${path}.`);
-      }
-      keys.add(keyNode.value);
-      rejectDuplicateKeys(valueNode, `${path}.${keyNode.value}`);
-    }
-  } else if (node.type === 'array') {
-    for (const [index, child] of (node.children ?? []).entries()) {
-      rejectDuplicateKeys(child, `${path}[${index}]`);
-    }
-  }
-}
-
-function packageIdentity(resolution: string, key: string): { name: string; version: string } {
-  const separator = resolution.lastIndexOf('@');
-  if (separator <= 0 || separator === resolution.length - 1) {
-    throw new Error(`bun.lock package ${key} has an invalid resolution.`);
-  }
-  const name = resolution.slice(0, separator);
-  const version = resolution.slice(separator + 1);
-  if (!name || !version || /[\s?#]/.test(name) || /[\s?#]/.test(version)) {
-    throw new Error(`bun.lock package ${key} has an invalid package identity.`);
-  }
-  return { name, version };
-}
-
 function npmPurl(name: string, version: string): string {
   const encodedName = name.startsWith('@')
     ? `%40${encodeURIComponent(name.slice(1)).replace('%2F', '/')}`
     : encodeURIComponent(name);
   return `pkg:npm/${encodedName}@${encodeURIComponent(version)}`;
-}
-
-function integrityHash(value: string, key: string): string {
-  if (!value.startsWith('sha512-')) throw new Error(`bun.lock package ${key} is not sha512-bound.`);
-  const bytes = Buffer.from(value.slice('sha512-'.length), 'base64');
-  if (bytes.byteLength !== 64 || bytes.toString('base64') !== value.slice('sha512-'.length)) {
-    throw new Error(`bun.lock package ${key} has invalid canonical sha512 integrity.`);
-  }
-  return bytes.toString('hex');
-}
-
-function dependencyNames(value: unknown): Set<string> {
-  if (value === undefined) return new Set();
-  return new Set(Object.keys(expectObject(value, 'workspace dependencies')));
-}
-
-function tighterDependencyScope(
-  left: SyntheticCycloneDxComponent['properties'][0]['value'],
-  right: SyntheticCycloneDxComponent['properties'][0]['value'],
-): SyntheticCycloneDxComponent['properties'][0]['value'] {
-  const rank = { transitive: 0, development: 1, production: 2 } as const;
-  return rank[left] >= rank[right] ? left : right;
 }
 
 function expectObject(value: unknown, label: string): Record<string, unknown> {
@@ -233,12 +124,12 @@ function compareStrings(left: string, right: string): number {
   return 0;
 }
 
-if (import.meta.main) {
+if (Reflect.get(import.meta, 'main') === true) {
   const root = resolve(process.argv[2] ?? '.');
   const output = resolve(process.argv[3] ?? 'dist/release-synthetic/sbom.cdx.json');
   const sbom = generateSyntheticCycloneDxSbom({
     packageJsonBytes: readFileSync(resolve(root, 'package.json')),
-    bunLockBytes: readFileSync(resolve(root, 'bun.lock')),
+    lockfileBytes: readFileSync(resolve(root, bunLockfile)),
   });
   mkdirSync(dirname(output), { recursive: true, mode: 0o700 });
   writeFileSync(output, encodeSyntheticCycloneDxSbom(sbom), { mode: 0o600 });

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, Interaction } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { observeCommand } from '../src';
 
 const card = (id: string, runId = 'other'): Interaction => ({

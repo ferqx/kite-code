@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import {
   type CredentialBackend,
   createCredentialVault,
@@ -11,6 +11,7 @@ import {
   createMcpOAuthProvider,
   McpCredentialError,
 } from '@kite-ai/agent/mcp';
+import { expect, test } from '#kite-test';
 import { createMcpHttpTransportPort, type McpHttpPortOptions } from '../../src/mcp-http-port';
 import { createMcpOAuthSession, McpOAuthSessionError } from '../../src/mcp-oauth-session';
 
@@ -31,7 +32,7 @@ async function until(read: () => boolean) {
   const end = Date.now() + 5000;
   while (!read()) {
     if (Date.now() >= end) throw Error('owned_bind_deadline');
-    await Bun.sleep(2);
+    await sleepTimer(2);
   }
 }
 type Bind = NonNullable<McpHttpPortOptions['servers'][number]['credential']>['bind'];

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { saveLiveCanonicalModelEvidence } from '../../e2e/live/model/live-canonical-evidence';
 import {
   privateDirectory,

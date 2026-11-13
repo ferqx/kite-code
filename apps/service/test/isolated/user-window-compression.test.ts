@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -10,7 +10,9 @@ import type { ToolDefinition } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
 import { presentedFileRead } from '../../../../packages/agent/test/fixtures/presented-file-read';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
@@ -31,7 +33,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
     let summaries = 0;
     let decisions = 0;
     const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -195,7 +197,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         ),
       ).toBe(true);
       const executionIds = view.executions.map((execution) => execution.id);
-      await Bun.sleep(100);
+      await sleepTimer(100);
       expect((await store.getView('s')).executions.map((execution) => execution.id)).toEqual(
         executionIds,
       );

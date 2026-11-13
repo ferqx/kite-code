@@ -1,3 +1,4 @@
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 export type WindowsProcessState = 'alive' | 'dead' | 'uncertain';
 export interface WindowsProcessObservation {
   readonly identity: string | undefined;
@@ -47,7 +48,6 @@ export function inspectWindowsProcess(pid: number, expectedStart: string): Windo
 
 function native() {
   // kernel32 is a fixed Windows KnownDLL; loading remains lazy on Node/POSIX imports.
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     OpenProcess: { args: ['u32', 'bool', 'u32'], returns: 'u64' },
     GetProcessId: { args: ['u64'], returns: 'u32' },

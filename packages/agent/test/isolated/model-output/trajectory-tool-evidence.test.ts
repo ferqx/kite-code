@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import type { TrajectoryEvent } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';

@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { afterEach, describe, expect, test } from '#kite-test';
+import type { FixtureServer } from '../../../scripts/tooling/http';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
@@ -21,7 +22,7 @@ import {
 describe('TUI PTY System — MCP authentication recovery', () => {
   let tui: PtyProcess | undefined;
   let modelServer: MockModelServer | undefined;
-  let authServer: ReturnType<typeof Bun.serve> | undefined;
+  let authServer: FixtureServer | undefined;
   let workspace: TestWorkspace | undefined;
 
   afterEach(async () => {
@@ -36,7 +37,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
   test('publishes login-required without browser navigation and exposes it through /mcp', async () => {
     let mcpRequests = 0;
     let authorizationRequests = 0;
-    authServer = startTestHttpServer({
+    authServer = await startTestHttpServer({
       fetch: (request) => {
         const url = new URL(request.url);
         if (url.pathname === '/authorize') authorizationRequests += 1;
@@ -47,7 +48,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
         return new Response('Not found', { status: 404 });
       },
     });
-    modelServer = createMockModelServer();
+    modelServer = await createMockModelServer();
     modelServer.setResponses([]);
     workspace = createTestWorkspace({
       configOverrides: {
@@ -62,7 +63,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       rows: 40,
       mockServer: modelServer,
       workspace,
-      entryPath: join(import.meta.dir, '../fixtures/mcp-auth-tui.tsx'),
+      entryPath: join(import.meta.dirname, '../fixtures/mcp-auth-tui.tsx'),
     });
     await waitForCondition(() => mcpRequests > 0, 'initial MCP connection attempt', 5_000);
     expect(mcpRequests).toBeGreaterThan(0);
@@ -83,7 +84,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     let baseUrl = '';
     let metadataRequests = 0;
     let authorizationRequests = 0;
-    authServer = startTestHttpServer({
+    authServer = await startTestHttpServer({
       fetch: (request) => {
         const url = new URL(request.url);
         if (url.pathname === '/resource-metadata') {
@@ -118,7 +119,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
     });
     baseUrl = authServer.url.origin;
-    modelServer = createMockModelServer();
+    modelServer = await createMockModelServer();
     modelServer.setResponses([]);
     workspace = createTestWorkspace({
       configOverrides: {
@@ -137,7 +138,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       rows: 40,
       mockServer: modelServer,
       workspace,
-      entryPath: join(import.meta.dir, '../fixtures/mcp-auth-tui.tsx'),
+      entryPath: join(import.meta.dirname, '../fixtures/mcp-auth-tui.tsx'),
     });
     await submitCommand(tui, '/mcp');
     await waitForText(() => tui!.viewport(), '● 需要登录', 10_000);
@@ -175,10 +176,10 @@ describe('TUI PTY System — MCP authentication recovery', () => {
   }, 50_000);
 
   test('offline required provider does not block an unrelated turn or create a waiver', async () => {
-    authServer = startTestHttpServer({
+    authServer = await startTestHttpServer({
       fetch: () => new Response('Unauthorized', { status: 401 }),
     });
-    modelServer = createMockModelServer();
+    modelServer = await createMockModelServer();
     modelServer.setResponses([{ message: { content: 'completed without provider' } }]);
     workspace = createTestWorkspace({
       configOverrides: {
@@ -229,7 +230,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       let toolCalls = 0;
       let metadataRequests = 0;
       let baseUrl = '';
-      authServer = startTestHttpServer({
+      authServer = await startTestHttpServer({
         fetch: async (request) => {
           const url = new URL(request.url);
           if (choice === 'login' && url.pathname === '/resource-metadata') {
@@ -312,7 +313,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
         },
       });
       baseUrl = authServer.url.origin;
-      modelServer = createMockModelServer();
+      modelServer = await createMockModelServer();
       modelServer.setResponses([
         {
           message: {
@@ -380,7 +381,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
         rows: 40,
         mockServer: modelServer,
         workspace,
-        entryPath: join(import.meta.dir, '../fixtures/mcp-auth-tui.tsx'),
+        entryPath: join(import.meta.dirname, '../fixtures/mcp-auth-tui.tsx'),
       });
       await submitUserMessage(tui, modelServer, 'call the recoverable echo tool', {
         timeout: 15_000,

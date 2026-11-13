@@ -1,13 +1,13 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { verifyArtifact } from '../host';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-test('actual selected Bun executable is admitted with its exact digest on the native platform', () => {
+test('actual selected Node executable is admitted with its exact digest on the native platform', () => {
   const executable = realpathSync(process.execPath);
   const digest = hash(readFileSync(executable));
   expect(() => verifyArtifact(executable, digest, true)).not.toThrow();

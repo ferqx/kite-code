@@ -9,6 +9,8 @@ import react from '@vitejs/plugin-react';
 import { _electron, chromium, type ElectronApplication, type Page } from 'playwright';
 import ts from 'typescript';
 import { build, createServer, type ViteDevServer } from 'vite';
+import { openFixtureFile } from '../../../scripts/tooling/files';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './initial-render-performance-browser.fixture';
 
 const developmentMode = process.argv.includes('--dev');
@@ -29,7 +31,7 @@ const blocks = Number(
   process.argv.find((arg) => arg.startsWith('--blocks='))?.slice(9) ?? (shape === 'long' ? 600 : 1),
 );
 assert.ok(counts.every((count) => Number.isInteger(count) && count > 0 && count <= 2000));
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const entry = path.join(directory, 'initial-render-performance-browser.fixture.tsx');
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
@@ -86,7 +88,7 @@ const structuralTiming = {
   },
 };
 let dev: ViteDevServer | undefined;
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: FixtureServer | undefined;
 let url: string;
 if (developmentMode) {
   dev = await createServer({
@@ -158,10 +160,10 @@ if (developmentMode) {
       target: 'esnext',
     },
   });
-  server = Bun.serve({
+  server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
-    fetch(request) {
+    async fetch(request) {
       const pathname = new URL(request.url).pathname;
       if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
       if (pathname === '/')
@@ -170,7 +172,7 @@ if (developmentMode) {
         });
       const file = path.resolve(output, `.${pathname}`);
       if (!file.startsWith(output + path.sep)) return new Response(null, { status: 404 });
-      return new Response(Bun.file(file));
+      return new Response(await openFixtureFile(file));
     },
   });
   url = server.url.toString();

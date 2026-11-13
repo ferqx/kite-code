@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { ToolContext, ToolDefinition } from '../../../src/extensions';
 import { requestMcpProviderAction } from '../../../src/mcp/provider-action';
 import { createMcpToolsSearchTool } from '../../../src/mcp/tools-search';

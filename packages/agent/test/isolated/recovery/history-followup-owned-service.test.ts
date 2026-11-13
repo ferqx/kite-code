@@ -1,12 +1,14 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { recoveryProfile } from '../../../../../apps/cli/test/fixtures/recovery-profile';
+import type { Subprocess } from '../../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 
-const repo = resolve(import.meta.dir, '../../../../..');
+const repo = resolve(import.meta.dirname, '../../../../..');
 test('actual owned Service and 80x24 PTY accept new input in the original explicitly interrupted Session with exact cancelled history', async () => {
   const f = await recoveryProfile();
-  let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let python: Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const transcript = `${f.root}-original-session-history.pty.log`;
   try {
     const cold = await f.launch();
@@ -29,7 +31,7 @@ test('actual owned Service and 80x24 PTY accept new input in the original explic
     const runner = join(f.root, 'followup-runner.ts');
     writeFileSync(
       runner,
-      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
     );
     const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);full=b'';buffer=b''
@@ -54,7 +56,7 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master)
 `;
-    python = Bun.spawn(['python3', '-c', program], {
+    python = spawnProcess(['python3', '-c', program], {
       env: { ...process.env, ...f.userConfiguration.homeEnvironment },
       stdout: 'pipe',
       stderr: 'pipe',

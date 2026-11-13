@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import {
   type BrowserView,
   ClientError,
@@ -8,6 +8,7 @@ import {
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { installGlobals } from './globals.fixture';
 
 function view(id: string, active = false): BrowserView {
@@ -71,7 +72,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() > end) throw new Error('dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -326,7 +327,7 @@ test('automatic live output rechecks an unchanged body when its Model or owning 
       expect(f.dom.window.document.querySelector('[data-message-id="a-201"]')).toBe(article);
       expect(f.state.outputReads).toBe(2);
       expect(article.textContent).toContain(f.state.outputBody);
-      await act(async () => Bun.sleep(250));
+      await act(async () => fixtureDelay(250));
       expect(f.state.outputReads).toBe(2);
     } finally {
       await f.close();
@@ -403,7 +404,7 @@ test('DOM visibility controls actual activity polling, navigation blocks late A 
     f.state.release!();
     f.state.held = undefined;
     await act(async () => {
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     });
     expect(f.dom.window.document.querySelector('h1')?.textContent).toBe('Session b');
     Object.defineProperty(f.dom.window.document, 'visibilityState', {
@@ -415,7 +416,7 @@ test('DOM visibility controls actual activity polling, navigation blocks late A 
     );
     const hidden = f.state.reads;
     await act(async () => {
-      await Bun.sleep(40);
+      await fixtureDelay(40);
     });
     expect(f.state.reads).toBe(hidden);
     Object.defineProperty(f.dom.window.document, 'visibilityState', {
@@ -429,7 +430,7 @@ test('DOM visibility controls actual activity polling, navigation blocks late A 
     await f.click(f.dom.window.document.querySelector('a[href="/"]')!);
     const unselected = f.state.reads;
     await act(async () => {
-      await Bun.sleep(40);
+      await fixtureDelay(40);
     });
     expect(f.state.reads).toBe(unselected);
     expect(f.dom.window.document.body.textContent).toContain('Select a session');
@@ -591,7 +592,7 @@ test('persisted pagehide retains document/reading state, pauses reads, and pages
       f.dom.window.document.dispatchEvent(new f.dom.window.Event('visibilitychange')),
     );
     await act(async () => {
-      await Bun.sleep(120);
+      await fixtureDelay(120);
     });
     expect(f.state.reads).toBe(pausedReads);
     f.state.resumeGate = new Promise<void>((resolve) => {

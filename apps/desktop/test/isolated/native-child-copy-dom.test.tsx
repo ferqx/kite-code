@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { NativeBackgroundChild } from '../../src/background-bridge';
 import { NativeChildDetail } from '../../src/native-child-detail';
 import { backgroundItem } from '../background-item.fixture';

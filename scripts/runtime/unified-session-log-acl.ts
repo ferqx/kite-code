@@ -111,7 +111,7 @@ export async function runUnifiedSessionLogAcl(): Promise<{
   [key: string]: unknown;
 }> {
   const scriptSha256 = createHash('sha256')
-    .update(readFileSync(import.meta.path))
+    .update(readFileSync(import.meta.filename))
     .digest('hex');
   const binding = {
     workflow: process.env.GITHUB_WORKFLOW ?? null,
@@ -126,8 +126,8 @@ export async function runUnifiedSessionLogAcl(): Promise<{
     binding,
     platform: process.platform,
     arch: process.arch,
-    bunVersion: Bun.version,
-    driver: 'bun:sqlite',
+    nodeVersion: process.versions.node,
+    driver: 'node-api:sqlite',
     runtimeSha256: createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),
   };
   if (
@@ -144,7 +144,7 @@ export async function runUnifiedSessionLogAcl(): Promise<{
   const { openSqliteStore, resolveProfile, acquireProfileAccess } = await import(
     '@kite-ai/agent/sqlite'
   );
-  const { Database } = await import('bun:sqlite');
+  const { Database } = await import('@kite-ai/agent/runtime-sqlite');
   const { getLoadedSqliteEngine } = await import('@kite-ai/agent/sqlite-engine');
   let native: NativeSecurity | undefined;
   try {

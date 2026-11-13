@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, parse, posix, relative, resolve, sep } from 'node:path';
 import { defaultWindowsPathSecurity } from '../../platform/windows-path-security';
+import { dlopen, ptr } from '../../runtime-ffi';
 import { normalizeWorktreeError, WorktreeError } from './errors';
 import { limits } from './protocol';
 
@@ -223,7 +224,6 @@ function mountSnapshot(): { targets: string[]; digest: string } {
     }
     if (process.platform === 'darwin') {
       // Darwin statfs64: 2168 bytes, f_mntonname[1024] at offset 88.
-      const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
       const native = dlopen('/usr/lib/libSystem.B.dylib', {
         getfsstat64: { args: ['ptr', 'i32', 'i32'], returns: 'i32' },
       });

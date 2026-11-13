@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -20,6 +20,8 @@ import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -31,7 +33,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw new Error('Default policy fixture deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 async function fixture(
@@ -66,7 +68,7 @@ async function fixture(
         undefined,
       ]
     : [{ name: 'write_file', input: { path: 'output.txt', content: 'exact first' } }, undefined];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

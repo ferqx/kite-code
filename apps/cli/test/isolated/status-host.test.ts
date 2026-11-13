@@ -1,16 +1,21 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createClient } from '@kite-ai/client';
 import {
   inspectProcess,
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   temporarySocketDirectory,
@@ -26,13 +31,13 @@ beforeAll(async () => {
   if (!supportsDaemonFixture) return;
   root = realpathSync(temporarySocketDirectory('kite-status-host-'));
   const old = await buildOwnedDaemon(join(root, 'artifact'));
-  const result = await Bun.build({
+  const result = await testBuild({
     entrypoints: [
       fileURLToPath(new URL('../fixtures/status-host-driver.ts', import.meta.url)),
       fileURLToPath(new URL('../fixtures/status-host-daemon-child.ts', import.meta.url)),
       fileURLToPath(new URL('../fixtures/status-host-paired-child.ts', import.meta.url)),
     ],
-    target: 'bun',
+    target: 'node',
     packages: 'external',
     naming: '[name].js',
     outdir: dirname(old),
@@ -49,7 +54,7 @@ async function until(check: () => Promise<boolean>) {
   const end = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() > end) throw Error('status_fixture_timeout');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 async function proveBusiness(
@@ -172,7 +177,7 @@ async function fixture() {
   const profile = selectProfile({ dataRoot: join(base, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
   let providers = 0;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -206,7 +211,7 @@ async function fixture() {
     apiMajor: 1 as const,
   };
   async function run(args: string[], shared = false) {
-    const child = Bun.spawn([process.execPath, driver, ...args], {
+    const child = testSpawn([process.execPath, ...testRuntimeFlags, driver, ...args], {
       cwd: elsewhere,
       stdin: 'pipe',
       stdout: 'pipe',

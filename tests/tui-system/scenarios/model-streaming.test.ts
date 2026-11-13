@@ -1,12 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  activateSessionSearch,
-  submitCommand,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { openSessionByTitle, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -22,11 +17,11 @@ const TIMEOUT = 30_000;
 
 describe('TUI PTY System — model streaming', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         provider: {
@@ -172,11 +167,11 @@ describe('TUI PTY System — model streaming', () => {
 
 describe('TUI PTY System — model delivery races', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         provider: {
@@ -235,11 +230,11 @@ describe('TUI PTY System — model delivery races', () => {
 describe('TUI PTY System — late reasoning after visible content', () => {
   let tui: PtyProcess;
   let resumedTui: PtyProcess | undefined;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         provider: {
@@ -358,20 +353,12 @@ describe('TUI PTY System — late reasoning after visible content', () => {
         'the late-reasoning session to appear in /resume',
         10_000,
       );
-      await activateSessionSearch(resumedTui);
-      await typeText(resumedTui, 'Reproduce late reasoning');
-      resumedTui.write('\x1b[B');
-      await waitForCondition(
-        () =>
-          screenHasSessionRow(resumedTui!.viewport(), 'Reproduce late reasoning', {
-            selected: true,
-            active: false,
-          }),
-        'the persisted late-reasoning session row to become selected',
-        5_000,
+      await openSessionByTitle(
+        resumedTui,
+        'Reproduce late reasoning',
+        (viewport) => screenContains(viewport, 'LATE_REASONING_ANSWER_ONCE'),
+        15_000,
       );
-      resumedTui.write('\r');
-      await waitForText(() => resumedTui!.viewport(), 'LATE_REASONING_ANSWER_ONCE', 15_000);
 
       const replay = stripAnsi(resumedTui.scrollback());
       expect(replay.match(/Thinking \d+s/g) ?? []).toHaveLength(1);

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -10,8 +8,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -30,9 +33,10 @@ for (const proof of [
 ] as const)
   test(`SIGKILL after applied steer restores only proven superseded Model (${proof})`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-steer-resume-')));
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./run-resume-crash-child.ts', import.meta.url)),
         directory,
         'steer_applied',
@@ -45,7 +49,7 @@ for (const proof of [
       const deadline = Date.now() + 5000;
       while (!existsSync(join(directory, 'ready.json'))) {
         if (Date.now() > deadline) throw Error('steer_crash_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       child.kill('SIGKILL');
       await child.exited;
@@ -57,9 +61,10 @@ for (const proof of [
       };
       const retiredId = ready.executionId;
       if (proof === 'old-receipt') {
-        const next = Bun.spawn(
+        const next = spawnProcess(
           [
             process.execPath,
+            ...testRuntimeFlags,
             fileURLToPath(new URL('./run-resume-crash-child.ts', import.meta.url)),
             directory,
             'steer_applied',
@@ -71,7 +76,7 @@ for (const proof of [
           const end = Date.now() + 5000;
           while (!existsSync(join(directory, 'ready-after-steer.json'))) {
             if (Date.now() > end) throw Error('second_plan_timeout');
-            await Bun.sleep(5);
+            await sleepTimer(5);
           }
           ready = JSON.parse(readFileSync(join(directory, 'ready-after-steer.json'), 'utf8'));
           expect(ready.executionId).not.toBe(retiredId);
@@ -226,9 +231,10 @@ for (const proof of [
 for (const source of ['valid', 'damaged', 'both-missing', 'parent-cancelled'] as const)
   test(`SIGKILL preserves parent-to-child steering attribution through group resume (${source})`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-agent-steer-resume-')));
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./run-resume-steering-agent-crash-child.ts', import.meta.url)),
         directory,
       ],
@@ -244,7 +250,7 @@ for (const source of ['valid', 'damaged', 'both-missing', 'parent-cancelled'] as
           await child.exited;
           throw Error(`agent_crash_timeout: ${await new Response(child.stderr).text()}`);
         }
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       child.kill('SIGKILL');
       await child.exited;
@@ -312,7 +318,7 @@ for (const source of ['valid', 'damaged', 'both-missing', 'parent-cancelled'] as
       const deadline = Date.now() + 5000;
       while ((await store.getRun(ready.childRunId))?.isActive) {
         if (Date.now() > deadline) throw Error('child_resume_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       const rows = readFileSync(join(directory, 'ledger'), 'utf8')
         .split('\n')

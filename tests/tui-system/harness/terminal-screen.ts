@@ -9,9 +9,12 @@
  * regex helpers below remain useful for action-scoped raw-output diagnostics.
  */
 
-import { Terminal } from '@xterm/headless';
+import xterm from '@xterm/headless';
 import { tuiSystemDelay } from './cancellation';
 import { tuiPollInterval, tuiWaitTimeout } from './timing';
+
+const { Terminal } = xterm;
+type Terminal = InstanceType<typeof Terminal>;
 
 export interface HeadlessTerminalScreen {
   /** Queue raw PTY bytes for VT parsing. */

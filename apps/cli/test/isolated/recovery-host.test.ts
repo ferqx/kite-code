@@ -1,10 +1,15 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { AgentClient } from '@kite-ai/client';
 import { selectDaemonEndpoint } from '@kite-ai/service/daemon';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
 import { openRecoveryJournal } from '../../host/recovery-journal';
 import { lookupRecovery, type RecoveryIntent, submitRecovery } from '../../src/recovery';
 import { recoveryProfile, untilRecovery } from '../fixtures/recovery-profile';
@@ -153,16 +158,16 @@ for (const mode of ['paired', 'shared'] as const)
         const driverSource = join(f.root, 'artifact/recovery-driver.ts');
         writeFileSync(
           driverSource,
-          `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(fileURLToPath(new URL('../../host/main.ts', import.meta.url)))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const response=await actual(...args);appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null,status:response.status})+'\\n');return response;},{preconnect:actual.preconnect});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
+          `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(fileURLToPath(new URL('../../host/main.ts', import.meta.url)))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const response=await actual(...args);appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null,status:response.status})+'\\n');return response;});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
         );
         const daemonSource = join(f.root, 'artifact/daemon-control.ts');
         writeFileSync(
           daemonSource,
-          `import {runSelectedDaemon} from ${JSON.stringify(fileURLToPath(new URL('../../host/daemon.ts', import.meta.url)))};const options=JSON.parse(process.argv[2]!);const started=await runSelectedDaemon({...options,write(){}});if(started!==0)throw Error('owned_daemon_start_failed');console.log('owned_daemon_ready');const stop=await new Response(Bun.stdin).text();if(stop!==${JSON.stringify('stop\n')})throw Error('owned_daemon_stop_required');process.exitCode=await runSelectedDaemon({...options,arguments:{...options.arguments,action:'stop'},write(){}});`,
+          `import {runSelectedDaemon} from ${JSON.stringify(fileURLToPath(new URL('../../host/daemon.ts', import.meta.url)))};const options=JSON.parse(process.argv[2]!);const started=await runSelectedDaemon({...options,write(){}});if(started!==0)throw Error('owned_daemon_start_failed');console.log('owned_daemon_ready');const stop=await (await import('node:stream/consumers')).text(process.stdin);if(stop!==${JSON.stringify('stop\n')})throw Error('owned_daemon_stop_required');process.exitCode=await runSelectedDaemon({...options,arguments:{...options.arguments,action:'stop'},write(){}});`,
         );
-        const built = await Bun.build({
+        const built = await testBuild({
           entrypoints: [driverSource, daemonSource],
-          target: 'bun',
+          target: 'node',
           packages: 'external',
           outdir: join(f.root, 'artifact'),
         });
@@ -209,7 +214,7 @@ for (const mode of ['paired', 'shared'] as const)
           resultPresentationVersion: '1',
         });
 
-        let daemonManager: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+        let daemonManager: TestSubprocess<'pipe', 'pipe', 'pipe'> | undefined;
         let daemonErrors: Promise<string> | undefined;
         let daemonReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
         const daemon = async (action: 'start' | 'stop') => {
@@ -244,8 +249,8 @@ for (const mode of ['paired', 'shared'] as const)
             return;
           }
           // Keep the actual manager alive until stop: --no-orphans kills its descendants on exit.
-          // Its startup HOME also owns Bun's cached homedir for configuration discovery.
-          const child = Bun.spawn(
+          // Its startup HOME also owns configuration discovery from its home for configuration discovery.
+          const child = testSpawn(
             [
               realpathSync(process.execPath),
               join(f.root, 'artifact/daemon-control.js'),
@@ -316,7 +321,7 @@ for (const mode of ['paired', 'shared'] as const)
               };
         let originalCardPresentations = 0;
         const invoke = async (action: 'interrupt' | 'run' | 'lookup' | 'list') => {
-          const child = Bun.spawn(
+          const child = testSpawn(
             [
               realpathSync(process.execPath),
               join(f.root, 'artifact/recovery-driver.js'),

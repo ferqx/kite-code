@@ -1,8 +1,9 @@
-import { mock } from 'bun:test';
 import { strict as assert } from 'node:assert';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { mock } from '#kite-test';
 import * as realLocks from '../../../src/platform/locks';
 import * as realProfile from '../../../src/platform/profile';
 
@@ -88,7 +89,7 @@ try {
     const earlyClose = mode === 'workspace-closing' ? locks.close() : undefined;
     const earlyObserved = earlyClose && settled(earlyClose);
     assert.throws(release, (error) => error === fault);
-    await Bun.sleep(40);
+    await sleepTimer(40);
     assert.equal(entered, false);
     assert.throws(() => acquireFileLock(workspacePath, 'exclusive'), /busy/);
     assert.throws(() => acquireProfileAccess(profile, 'exclusive'), /busy/);

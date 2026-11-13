@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type FixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { type AgentRuntime, createRuntime } from '../../../src';
 import type { Json } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -24,7 +25,7 @@ const until = async (check: () => boolean | Promise<boolean>) => {
   const limit = Date.now() + 4000;
   while (!(await check())) {
     if (Date.now() > limit) throw Error('browser_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 };
 test('public browser references flow through real receipts; stale elements and foreign scope never reach native input', async () => {
@@ -613,7 +614,7 @@ test('same Runtime model task waits for human Action, then the original Tool and
         },
       },
     });
-    await Bun.sleep(70);
+    await sleepTimer(70);
     expect((await f.runtime.getCommand('ordinary-select'))?.status).toBe('accepted');
     expect(
       f.authorizations.some((row) => row.definitionId === 'builtin.browser/browser.select'),

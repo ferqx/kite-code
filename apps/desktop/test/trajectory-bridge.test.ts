@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { TrajectoryReplayController, type TrajectoryReplaySource } from '@kite-ai/client';
 import {
   type TrajectoryEvent,
   type TrajectorySnapshot,
   trajectoryEventSchema,
 } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeRequest } from '../src/native-bridge';
 import {
   loadNativeTrajectory,

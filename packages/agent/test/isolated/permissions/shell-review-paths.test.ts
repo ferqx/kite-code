@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import type { AuthorizationRequest } from '../../../src/extensions';
 import { createShellConfiguration } from '../../../src/permissions/shell';
 
@@ -28,7 +28,7 @@ test.skipIf(process.platform !== 'darwin')(
           configurationId: 'review-paths',
           env: { PATH: '/usr/bin:/bin' },
           supervisorPath: supervisor,
-          bunExecutable: process.execPath,
+          runtimeExecutable: process.execPath,
           shellExecutable: '/bin/sh',
           host: {
             controlBase: control,

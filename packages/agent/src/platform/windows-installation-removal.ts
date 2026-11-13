@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { dlopen, ptr } from '../runtime-ffi';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
 // Failed native closes remain strongly owned even if acquisition could not return a port.
@@ -106,7 +107,6 @@ export function retainWindowsInstallationRemoval(input: {
     if (expected.get(parent) !== 'directory') fail();
   }
   const security = defaultWindowsPathSecurity()!;
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },

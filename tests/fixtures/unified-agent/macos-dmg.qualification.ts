@@ -1,4 +1,3 @@
-import { constants, Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,18 +19,22 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { constants, Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { userConfigurationPath } from '../../../apps/service/src/user-configuration-path';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { which as findFixtureExecutable } from '../../../scripts/tooling/process';
 import { temporarySocketDirectory } from '../test-filesystem';
 
 const exec = promisify(execFile);
 const usage =
-  'Usage: bun run tests/fixtures/unified-agent/macos-dmg.qualification.ts --previous <A.dmg> --current <B.dmg> --evidence <directory> [--applications /Applications]';
-const repository = resolve(import.meta.dir, '../../..');
+  'Usage: node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/macos-dmg.qualification.ts --previous <A.dmg> --current <B.dmg> --evidence <directory> [--applications /Applications]';
+const repository = resolve(import.meta.dirname, '../../..');
 const bundleName = 'Kite Desktop.app';
 const nativeResources = 'Contents/Resources/native';
-type InstallPhase = 'previous' | 'current' | 'fresh';
+type InstallPhase = 'previous' | 'current' | 'rollback' | 'fresh';
 const finderCopy = `on run argv
     set imageFolder to POSIX file (item 1 of argv) as alias
     set sourceItem to POSIX file (item 2 of argv) as alias
@@ -70,6 +73,8 @@ const sessionTitle = 'macOS DMG installation witness';
 const modelId = 'macos-dmg-fixture';
 const message = '请保留这条 macOS 安装验收消息。';
 const answer = '已记录 macOS 安装验收回复。';
+const freshMessage = '请保留新版 Node 安装后的这条消息。';
+const freshAnswer = '新版 Node 已记录这条回复。';
 
 async function digest(path: string) {
   const hash = createHash('sha256');
@@ -140,7 +145,7 @@ async function runQualification(args: string[]) {
   }
   const imageDigests = { previous: await digest(previous), current: await digest(current) };
   assert.notEqual(imageDigests.previous, imageDigests.current);
-  const node = Bun.which('node');
+  const node = findFixtureExecutable('node');
   assert(node && isAbsolute(node), 'node_for_playwright_required');
   const evidence = prepareEvidence(inputs.evidence);
   const root = temporarySocketDirectory('kite-dmg-');
@@ -227,8 +232,8 @@ async function runQualification(args: string[]) {
       const shortcut = join(mount, 'Applications');
       assert(inspect(shortcut)?.isSymbolicLink());
       assert.equal(readlinkSync(shortcut), '/Applications');
-      if (label !== 'previous') checkDesktopPayload(source);
-      const replacing = label === 'current';
+      if (label === 'current' || label === 'fresh') checkDesktopPayload(source);
+      const replacing = label === 'current' || label === 'rollback';
       if (replacing) checkOwnedApp(app);
       else assert.equal(inspect(app), undefined, 'finder_app_destination_already_exists');
       const copied = await command(`${label}-finder-copy`, '/usr/bin/osascript', [
@@ -271,22 +276,34 @@ async function runQualification(args: string[]) {
     assert(lstatSync(executable).isFile());
     const bundle = verifyNativeRuntimeBundle(native);
     assert.deepEqual(bundle.manifest.target, { platform: 'darwin', arch: 'arm64' });
-    const entries = bundle.terminal.manifest.entries;
-    if (phase !== 'previous') {
+    const { entries, bunVersion, nodeVersion, source, files } = bundle.terminal.manifest;
+    const node = phase === 'current' || phase === 'fresh';
+    if (node) {
       checkDesktopPayload(app);
       assert.deepEqual(entries, {
-        runtime: 'runtime/bun',
+        runtime: 'runtime/node',
         service: 'code/@kite-ai/service/main.js',
       });
+      assert(nodeVersion);
+      assert.equal(bunVersion, undefined);
+      assert.equal(inspect(join(bundle.terminal.root, 'runtime/bun')), undefined);
+      assert(files.some((file) => file.path === 'code/@kite-ai/agent/runtime-native.node'));
+    } else {
+      assert(bunVersion);
+      assert.equal(nodeVersion, undefined);
+      assert.equal(entries.runtime, 'runtime/bun');
     }
     const main = bundle.manifest.files.find((file) => file.path === bundle.manifest.entries.main);
     assert(main);
     return {
       id: bundle.digest,
-      source: bundle.terminal.manifest.source,
+      source,
       mainSha256: main.sha256,
       entries,
+      runtimeVersion: nodeVersion ?? bunVersion,
+      terminalRoot: bundle.terminal.root,
       runtime: join(bundle.terminal.root, entries.runtime),
+      serviceEntrypoint: join(bundle.terminal.root, entries.service),
       mainExecutable: join(bundle.root, bundle.manifest.entries.electron),
       rendererUrl: pathToFileURL(join(bundle.root, bundle.manifest.entries.html)).href,
     };
@@ -355,7 +372,7 @@ async function runQualification(args: string[]) {
   }
 
   let providerCalls = 0;
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -367,15 +384,18 @@ async function runQualification(args: string[]) {
         messages: { role: string; content: string }[];
       };
       assert.equal(input.model, modelId);
+      const expected = providerCalls === 0 ? message : freshMessage;
       assert.equal(
-        input.messages.filter(({ role, content }) => role === 'user' && content === message).length,
+        input.messages.filter(({ role, content }) => role === 'user' && content === expected)
+          .length,
         1,
       );
+      const reply = expected === freshMessage ? freshAnswer : answer;
       providerCalls++;
       const frame = (delta: unknown, finishReason: string | null) =>
         `data: ${JSON.stringify({ id: 'macos-dmg', object: 'chat.completion.chunk', model: modelId, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
       return new Response(
-        `${frame({ content: answer }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+        `${frame({ content: reply }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
         { headers: { 'content-type': 'text/event-stream' } },
       );
     },
@@ -424,8 +444,8 @@ async function runQualification(args: string[]) {
     );
 
     const driver = join(evidence, 'electron-driver.mjs');
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, 'macos-dmg-electron.fixture.ts')],
+    const built = await buildFixture({
+      entrypoints: [join(import.meta.dirname, 'macos-dmg-electron.fixture.ts')],
       target: 'node',
       format: 'esm',
     });
@@ -443,14 +463,18 @@ async function runQualification(args: string[]) {
             executable,
             mainExecutable: candidate.mainExecutable,
             runtime: candidate.runtime,
+            serviceEntrypoint: candidate.serviceEntrypoint,
             rendererUrl: candidate.rendererUrl,
             home,
+            temporaryDirectory: scratch,
             storeId,
             sessionId,
             sessionTitle,
             modelId,
             message,
             answer,
+            freshMessage,
+            freshAnswer,
             screenshot: join(evidence, `${phase}.png`),
           }),
         ],
@@ -487,6 +511,16 @@ async function runQualification(args: string[]) {
     assert.equal(providerCalls, 1, 'cold read must not replay the original model request');
     assert.deepEqual(sessionSnapshot(), originalSession);
 
+    const beforeRollback = await filesSnapshot(storeId);
+    await applyImage('rollback', previous);
+    const rolledBack = installedCandidate('rollback');
+    assert.deepEqual(rolledBack, initial);
+    const afterRollback = await filesSnapshot(storeId);
+    assert.deepEqual(afterRollback, beforeRollback);
+    await window('rollback', rolledBack);
+    assert.equal(providerCalls, 1);
+    assert.deepEqual(sessionSnapshot(), originalSession);
+
     const beforeUninstall = await filesSnapshot(storeId);
     const trashPath = await moveOwnedAppToTrash('finder-move-to-trash');
     assert.equal(inspect(app), undefined);
@@ -499,13 +533,37 @@ async function runQualification(args: string[]) {
     assert.deepEqual(freshlyInstalled, updated);
     assert.deepEqual(await filesSnapshot(storeId), afterUninstall);
     await window('fresh', freshlyInstalled);
-    assert.equal(providerCalls, 1);
-    assert.deepEqual(sessionSnapshot(), originalSession);
+    assert.equal(providerCalls, 2);
+    const freshSession = sessionSnapshot();
+    const originalRunId = originalSession.runs[0]!.id;
+    assert.deepEqual(
+      freshSession.runs.filter(({ id }) => id === originalRunId),
+      originalSession.runs,
+    );
+    assert.equal(freshSession.runs.length, 2);
+    assert.equal(freshSession.runs.find(({ id }) => id !== originalRunId)?.status, 'completed');
+    assert.deepEqual(freshSession.messages.slice(0, 2), originalSession.messages);
+    assert.deepEqual(
+      freshSession.messages
+        .slice(2)
+        .map(({ role, source_json }) => [role, JSON.parse(source_json).content]),
+      [
+        ['user', freshMessage],
+        ['assistant', freshAnswer],
+      ],
+    );
+    const nodeProbe = await command('fresh-node-model-output', freshlyInstalled.runtime, [
+      join(import.meta.dirname, 'macos-dmg-model-output.fixture.mjs'),
+      freshlyInstalled.terminalRoot,
+      scratch,
+    ]);
+    assert.match(nodeProbe, /PACKAGED_NODE_KEYCHAIN_LOOKUP_OK/);
+    assert.match(nodeProbe, /PACKAGED_NODE_MODEL_OUTPUT_OK/);
     const beforeFreshUninstall = await filesSnapshot(storeId);
     const freshTrashPath = await moveOwnedAppToTrash('fresh-finder-move-to-trash');
     const afterFreshUninstall = await filesSnapshot(storeId);
     assert.deepEqual(afterFreshUninstall, beforeFreshUninstall);
-    assert.deepEqual(sessionSnapshot(), originalSession);
+    assert.deepEqual(sessionSnapshot(), freshSession);
     assert.deepEqual(
       { previous: await digest(previous), current: await digest(current) },
       imageDigests,
@@ -515,12 +573,15 @@ async function runQualification(args: string[]) {
       imageDigests,
       initial,
       updated,
+      rolledBack,
       freshlyInstalled,
       storeId,
       sessionId,
       providerCalls,
       beforeUpdate,
       afterUpdate,
+      beforeRollback,
+      afterRollback,
       beforeUninstall,
       afterUninstall,
       beforeFreshUninstall,

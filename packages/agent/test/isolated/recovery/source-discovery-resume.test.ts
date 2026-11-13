@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,8 +9,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -32,9 +35,10 @@ for (const boundary of ['response', 'results'])
     );
     writeFileSync(join(directory, 'io.jsonl'), '');
     writeFileSync(join(directory, 'models.jsonl'), '');
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./source-discovery-resume-child.ts', import.meta.url)),
         directory,
         boundary,
@@ -48,7 +52,7 @@ for (const boundary of ['response', 'results'])
       const deadline = Date.now() + 7000;
       while (!existsSync(join(directory, 'ready.json'))) {
         if (Date.now() > deadline) throw Error('discovery_child_boundary_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8'));
       child.kill('SIGKILL');

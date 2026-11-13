@@ -5,10 +5,10 @@
  * treated as proof. Single-use planning does not persist as a Session mode.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -25,12 +25,12 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let readonlyReceipt = false;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       files: { 'planning-baseline.txt': 'Exact readonly baseline.\n' },
       configOverrides: { interactionMode: 'full' },

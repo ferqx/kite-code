@@ -1,17 +1,23 @@
-import { expect, test } from 'bun:test';
 import { cpSync, linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fileToken, TuiController, type TuiPort } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { createTuiFileCandidates } from '../../host/file-candidates';
 import { recoveryProfile } from '../fixtures/recovery-profile';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('actual SDK original Workspace names exhaust >500, scoped ignore negation, unsafe subtrees, and 80x24 quoted Tab without mutation', async () => {
   const f = await recoveryProfile();
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const transcript = join(tmpdir(), `kite-file-candidates-${crypto.randomUUID()}.pty.log`),
     wire = `${f.root}-file-wire.jsonl`;
   try {
@@ -167,14 +173,15 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
       await controller.readFileCandidates(fileToken('@B', 2));
       expect(controller.state.fileCandidates?.paths).toEqual(['B_ONLY.txt']);
       controller.dispose();
-      // Resolve the declared exact dependency in a standalone built host module, with only its admitted installed asset.
+      // Keep the first-party runtime adapter in the host bundle and resolve the exact installed ignore dependency.
       const standalone = join(f.root, 'standalone');
       mkdirSync(standalone);
-      const built = await Bun.build({
+      const built = await testBuild({
         entrypoints: [join(repo, 'apps/cli/host/file-candidates.ts')],
         outdir: standalone,
-        target: 'bun',
-        packages: 'external',
+        target: 'node',
+        packages: 'bundle',
+        external: ['ignore'],
       });
       expect(built.success).toBe(true);
       const require = createRequire(join(repo, 'apps/cli/host/file-candidates.ts'));
@@ -198,12 +205,12 @@ test('actual SDK original Workspace names exhaust >500, scoped ignore negation, 
     const runner = join(f.root, 'file-runner.ts');
     writeFileSync(
       runner,
-      `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(wire)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,...(typeof args[1]?.body==='string'?{body:JSON.parse(args[1].body)}:{})})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'files',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'file-service.pid'))},String(pid),{mode:0o600})});`,
+      `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(wire)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,...(typeof args[1]?.body==='string'?{body:JSON.parse(args[1].body)}:{})})+'\\n');return actual(...args);});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'files',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'file-service.pid'))},String(pid),{mode:0o600})});`,
     );
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         join(repo, 'apps/cli/test/fixtures/tui-file-candidates-driver.ts'),
         runner,
         f.workspace,

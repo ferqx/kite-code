@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError, type Command } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { NativeSessionManagement } from '../electron/session-management';
 

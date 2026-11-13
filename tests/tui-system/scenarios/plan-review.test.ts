@@ -9,7 +9,7 @@
  * Artifact identity instead of predicting the generated plan ID.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { assertCurrentPlanCompletion, currentPlanWorkResponses } from '../harness/current-plan';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
@@ -25,11 +25,11 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
 
     // Shared mock responses — write_plan in planning phase.

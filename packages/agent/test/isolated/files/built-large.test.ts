@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -11,9 +10,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { hostBuildEnvironment } from '../../../../../tests/fixtures/build-tool-environment';
 
-const repository = resolve(import.meta.dir, '../../../../..');
+const repository = resolve(import.meta.dirname, '../../../../..');
 type Manifest = {
   name: string;
   version: string;
@@ -22,7 +24,7 @@ type Manifest = {
   scripts: { build: string };
 };
 async function run(args: string[], cwd: string, env = process.env): Promise<string> {
-  const processHandle = Bun.spawn([process.execPath, ...args], {
+  const processHandle = spawnProcess([process.execPath, ...testRuntimeFlags, ...args], {
     cwd,
     env,
     stdout: 'pipe',
@@ -107,12 +109,12 @@ test('fresh complete package outside source runs large file and streamed Artifac
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync} from 'node:fs';
 import {join,relative,isAbsolute,sep} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
-const base=import.meta.dir;
+const base=import.meta.dirname;
 const pkg=join(base,'node_modules/@kite-ai/agent');
 const manifest=JSON.parse(readFileSync(join(pkg,'package.json'),'utf8'));
-for(const key of Object.keys(manifest.exports)){const spec=key==='.'?'@kite-ai/agent':'@kite-ai/agent/'+key.slice(2);const resolved=Bun.resolveSync(spec,base);const local=relative(pkg,resolved);assert(!isAbsolute(local)&&!local.split(sep).some(x=>x==='..'||x==='src'));await import(spec);}
+for(const key of Object.keys(manifest.exports)){const spec=key==='.'?'@kite-ai/agent':'@kite-ai/agent/'+key.slice(2);const resolved=fileURLToPath(import.meta.resolve(spec));const local=relative(pkg,resolved);assert(!isAbsolute(local)&&!local.split(sep).some(x=>x==='..'||x==='src'));await import(spec);}
 const {createRuntime}=await import('@kite-ai/agent');
 const {createWorkspaceFiles,createFileTools}=await import('@kite-ai/agent/files');
 const {openSqliteStore}=await import('@kite-ai/agent/sqlite');

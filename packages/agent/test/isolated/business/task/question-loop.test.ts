@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
@@ -26,7 +27,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() >= deadline) throw Error('question_loop_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 

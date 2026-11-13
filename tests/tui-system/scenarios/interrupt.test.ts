@@ -14,7 +14,7 @@
  * ctrlCPressed is reset by any other key press OR a 1-second timer.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -31,11 +31,11 @@ const TIMEOUT = 30000;
 
 describe('TUI PTY System — Ctrl+C Interrupt', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
 
     server.setResponses([]);

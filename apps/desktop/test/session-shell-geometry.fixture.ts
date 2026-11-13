@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import type { Browser } from 'playwright';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 import type {} from './session-shell-browser.fixture';
 
 /** Hidden preparation must paint no leaf controls, including inherited visibility transitions. */
@@ -182,7 +183,7 @@ export async function verifyComposerHandoff(browser: Browser, url: string, artif
           (frame.pending && frame.controls.length) ||
           (frame.title === 'Session B' && frame.overlays.length),
       );
-      await Bun.write(
+      await writeFixtureFile(
         path.join(artifact, `handoff-${theme}.json`),
         JSON.stringify({ frames, errors, violations }, null, 2),
       );
@@ -248,23 +249,11 @@ export async function verifyModelCatalogueNavigation(
       await row('a').click();
       await ready('a');
       await page.evaluate(() => {
-        Reflect.set(window, 'readModelNavigationDraft', () => {
-          const editor = document.querySelector('.composer [role="textbox"]');
-          // innerText inserts two newlines between block paragraphs, while
-          // the editor's preserved Markdown line boundary is one newline.
-          const text = (node: Node): string =>
-            node.nodeName === 'BR'
-              ? '\n'
-              : node.nodeType === 3
-                ? (node.textContent ?? '')
-                : [...node.childNodes].map(text).join('');
-          return editor
-            ? [...editor.children]
-                .map((child) => (child.textContent ? text(child) : ''))
-                .join('\n')
-                .replace(/\r\n?/g, '\n')
-            : undefined;
-        });
+        Reflect.set(
+          window,
+          'readModelNavigationDraft',
+          () => document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value,
+        );
       });
       const readDraft = () =>
         page.evaluate(() => Reflect.get(window, 'readModelNavigationDraft')());
@@ -280,9 +269,6 @@ export async function verifyModelCatalogueNavigation(
       const originalComposerTop = await page
         .locator('.composer')
         .evaluate((element) => element.getBoundingClientRect().top);
-      const originalModelLeft = await page
-        .locator('[data-model-trigger]')
-        .evaluate((element) => element.getBoundingClientRect().left);
       const originalScroll = await page.locator('.conversation-viewport').evaluate((viewport) => {
         viewport.scrollTop = Math.min(140, viewport.scrollHeight - viewport.clientHeight);
         viewport.dispatchEvent(new Event('scroll', { bubbles: true }));
@@ -318,8 +304,22 @@ export async function verifyModelCatalogueNavigation(
             expected: state.expected,
             title: document.querySelector('.breadcrumb strong')?.textContent,
             model: document.querySelector('[data-model-trigger]')?.textContent,
+            modelDescription: document
+              .querySelector('[data-model-trigger]')
+              ?.getAttribute('aria-description'),
+            pickerText: document.querySelector('[data-model-picker]')?.textContent,
+            pickerHeight: document.querySelector('[data-model-picker]')?.getBoundingClientRect()
+              .height,
+            triggerHeight: document.querySelector('[data-model-trigger]')?.getBoundingClientRect()
+              .height,
             effort: document.querySelector('.model-effort-summary')?.textContent,
-            modelLeft: document.querySelector('[data-model-trigger]')?.getBoundingClientRect().left,
+            modelOverlapsAction: (() => {
+              const model = document.querySelector('[data-model-trigger]')?.getBoundingClientRect();
+              const send = document
+                .querySelector('.composer-actions button')
+                ?.getBoundingClientRect();
+              return !!(model?.height && send?.height && model.right > send.left + 0.5);
+            })(),
             attachment: !!document.querySelector('.composer-attach'),
             permission: document.querySelector('[data-permission-trigger]')?.textContent,
             composerVisible: visible(composer),
@@ -332,7 +332,7 @@ export async function verifyModelCatalogueNavigation(
               ),
             ].filter(visible).length,
             disabled: document.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled,
-            readonly: editor?.getAttribute('contenteditable'),
+            readonly: editor?.hasAttribute('readonly'),
             draft: Reflect.get(window, 'readModelNavigationDraft')(),
             alerts: [...document.querySelectorAll('[role="alert"]')].map(
               (node) => node.textContent,
@@ -474,7 +474,9 @@ export async function verifyModelCatalogueNavigation(
         window.sessionShellFixture.modelFailure('b', 'catalogue_network_failed'),
       );
       await row('b').click();
-      await page.getByText('模型目录不可用：catalogue_network_failed', { exact: true }).waitFor();
+      await page
+        .locator('[data-model-trigger][aria-description="暂时无法读取模型目录。"]')
+        .waitFor();
       await phase('genuine-failure');
       assert.equal(await page.locator('.composer-actions button').isDisabled(), true);
       await page.evaluate(() => window.sessionShellFixture.modelFailure('b'));
@@ -487,6 +489,42 @@ export async function verifyModelCatalogueNavigation(
       await ready('a');
       await phase('final');
       assert.equal(await readDraft(), draftA);
+      if (!unselected && !withoutPermissions) {
+        await tasks();
+        await phase('disable-model');
+        await expectTarget('b');
+        await page.evaluate(() => {
+          window.sessionShellFixture.setActive(false);
+          window.sessionShellFixture.disableModel('b');
+        });
+        await row('b').click();
+        await ready('b');
+        await page.waitForFunction(
+          () => document.querySelector('[data-model-trigger]')?.textContent === '选择模型',
+        );
+        await phase('saved-model-disabled');
+        assert.equal(await page.getByText('Reply b', { exact: true }).count(), 1);
+        assert.equal(await readDraft(), 'Draft B');
+        const send = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
+        assert.equal(await send.isDisabled(), true);
+        await page.locator('[data-model-trigger]').click();
+        const popup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
+        await popup.getByRole('button', { name: '选择模型，当前 未选择', exact: true }).click();
+        assert.equal(await popup.getByRole('option').count(), 1);
+        assert.equal(await popup.getByRole('option', { name: '选择模型 model-b' }).count(), 0);
+        await phase('choose-replacement');
+        await phase('apply-replacement');
+        await popup.getByRole('option', { name: '选择模型 model-a', exact: true }).click();
+        await page.keyboard.press('Escape');
+        await popup.waitFor({ state: 'hidden' });
+        await page.waitForFunction(() =>
+          document.querySelector('[data-model-trigger]')?.textContent?.startsWith('Model A'),
+        );
+        await phase('replacement-selected');
+        assert.equal(await send.isEnabled(), true);
+        assert.equal(await readDraft(), 'Draft B');
+        assert.equal(await page.getByText('Reply b', { exact: true }).count(), 1);
+      }
       const frames = (await page.evaluate(
         () => Reflect.get(window, 'modelNavigationObservation').frames,
       )) as {
@@ -494,8 +532,12 @@ export async function verifyModelCatalogueNavigation(
         expected?: string;
         title?: string;
         model?: string;
+        modelDescription?: string | null;
+        pickerText?: string;
+        pickerHeight?: number;
+        triggerHeight?: number;
         effort?: string;
-        modelLeft?: number;
+        modelOverlapsAction: boolean;
         attachment: boolean;
         permission?: string;
         draft?: string;
@@ -510,9 +552,17 @@ export async function verifyModelCatalogueNavigation(
       }[];
       assert.ok(frames.length > 60);
       for (const frame of frames) {
+        const catalogueFailed = frame.modelDescription === '暂时无法读取模型目录。';
         assert.equal(
-          frame.alerts.some((alert) => alert.includes('native_request_failed')),
+          frame.alerts.some((alert) => alert.includes('模型目录不可用')),
           false,
+        );
+        assert.equal(frame.pickerText, frame.model);
+        assert.equal(frame.pickerHeight, frame.triggerHeight);
+        assert.equal(
+          frame.modelOverlapsAction,
+          false,
+          `${theme}/${frame.phase}: no control overlap`,
         );
         assert.equal(new Set(frame.messages).size, frame.messages.length);
         assert.equal(frame.welcome, false);
@@ -529,12 +579,18 @@ export async function verifyModelCatalogueNavigation(
           frame.title === 'Session A' ? 'a' : frame.title === 'Session B' ? 'b' : undefined;
         if (displayed && frame.composerVisible) {
           assert.equal(frame.attachment, true, `${theme}/${frame.phase}: attachment control`);
+          const replacingModel =
+            displayed === 'b' &&
+            [
+              'disable-model',
+              'saved-model-disabled',
+              'choose-replacement',
+              'apply-replacement',
+              'replacement-selected',
+            ].includes(frame.phase);
           assert.ok(
-            Math.abs(frame.modelLeft! - originalModelLeft) < 1,
-            `${theme}/${frame.phase}: stable model control position`,
-          );
-          assert.ok(
-            frame.alerts.some((alert) => alert.includes('catalogue_network_failed')) ||
+            catalogueFailed ||
+              replacingModel ||
               (unselected
                 ? frame.model === '选择模型'
                 : frame.model?.includes(`Model ${displayed.toUpperCase()}`)),
@@ -556,7 +612,7 @@ export async function verifyModelCatalogueNavigation(
             frame.messages.every((id) => id === `u-${displayed}` || id === `m-${displayed}`),
             `${theme}/${frame.phase}: own Session messages`,
           );
-          if (!frame.alerts.some((alert) => alert.includes('catalogue_network_failed')))
+          if (!catalogueFailed && !replacingModel)
             assert.equal(
               frame.effort,
               unselected ? undefined : displayed === 'a' ? '高' : '轻度',
@@ -575,10 +631,7 @@ export async function verifyModelCatalogueNavigation(
         }
       }
       assert.deepEqual(errors, []);
-      assert.equal(
-        await page.locator('[role="alert"]').filter({ hasText: '模型目录不可用' }).count(),
-        0,
-      );
+      assert.equal(await page.locator('[data-model-trigger][aria-description]').count(), 0);
       assert.deepEqual(
         await page.evaluate(() =>
           window.sessionShellFixture.requests.filter((input) =>
@@ -605,7 +658,6 @@ export async function verifyModelCatalogueNavigation(
         frames,
         errors,
         originalScroll,
-        originalModelLeft,
         originalComposerTop,
       });
     } finally {
@@ -1187,7 +1239,7 @@ export async function verifySwitchGeometry(browser: Browser, url: string, artifa
           popupFrames,
           errors,
         };
-        await Bun.write(
+        await writeFixtureFile(
           path.join(artifact, `switch-${theme}-${motion}.json`),
           JSON.stringify(result, null, 2),
         );
@@ -1273,7 +1325,7 @@ export async function verifyFormControlStyles(browser: Browser, url: string, art
       await page.screenshot({ path: path.join(artifact, `form-components-${theme}.png`) });
       assert.deepEqual(errors, []);
       const result = { formControls: true, theme, states, focused, errors };
-      await Bun.write(
+      await writeFixtureFile(
         path.join(artifact, `form-components-${theme}.json`),
         JSON.stringify(result, null, 2),
       );
@@ -1413,7 +1465,7 @@ export async function verifySessionShellGeometry(browser: Browser, url: string, 
           return window.shellGeometry.frames;
         });
         const result = { theme, width, fresh, loaded, reading, returned, jump, frames, errors };
-        await Bun.write(
+        await writeFixtureFile(
           path.join(artifact, `geometry-${theme}-${width}.json`),
           JSON.stringify(result, null, 2),
         );
@@ -1651,7 +1703,7 @@ export async function verifyColdSessionToolbarWidth(
             detail,
             errors,
           };
-          await Bun.write(
+          await writeFixtureFile(
             path.join(artifact, `toolbar-${theme}-${width}-${mode}.json`),
             JSON.stringify(result, null, 2),
           );
@@ -1870,7 +1922,7 @@ export async function verifySettingsGeometry(browser: Browser, url: string, arti
           frames,
           errors,
         };
-        await Bun.write(
+        await writeFixtureFile(
           path.join(artifact, `settings-${theme}-${width}.json`),
           JSON.stringify(result, null, 2),
         );

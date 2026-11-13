@@ -51,7 +51,7 @@ const observedFetch: typeof fetch = Object.assign(
     }
     return result;
   },
-  { preconnect: originalFetch.preconnect },
+  {},
 );
 globalThis.fetch = observedFetch;
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {

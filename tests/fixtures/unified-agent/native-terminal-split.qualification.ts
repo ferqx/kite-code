@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -23,6 +24,8 @@ import {
 } from '../../../scripts/release/terminal-bundle';
 import { replaceWindowsNativeBundle } from '../../../scripts/release/windows-native-install';
 import { prepareSetupLocation } from '../../../scripts/release/windows-setup/install-location';
+import { serve } from '../../../scripts/tooling/http';
+import { spawn } from '../../../scripts/tooling/process';
 import { privateDirectory, removeTemporaryDirectory, temporaryDirectory } from '../test-filesystem';
 
 const windows = process.platform === 'win32';
@@ -41,6 +44,8 @@ async function qualify(terminal: string, combined: string, desktop: string) {
     'runtime',
     'service',
   ]);
+  assert(replacement.terminal.manifest.nodeVersion);
+  assert.equal(replacement.terminal.manifest.bunVersion, undefined);
   assert(!existsSync(join(replacement.terminal.root, 'node_modules')));
   const root = temporaryDirectory('kite-native-terminal-split-');
   phase('isolated_root', { root });
@@ -89,7 +94,7 @@ async function qualify(terminal: string, combined: string, desktop: string) {
   const replies = ['BEFORE_UPGRADE_REPLY', 'INDEPENDENT_CLI_REPLY', 'INDEPENDENT_TUI_REPLY'];
   const calls: string[] = [];
   let unexpectedModelRequests = 0;
-  const server = Bun.serve({
+  const server = await serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -114,7 +119,7 @@ async function qualify(terminal: string, combined: string, desktop: string) {
     },
   });
   const runCLI = async (...args: string[]) => {
-    const child = Bun.spawn([cli, ...args], {
+    const child = spawn([cli, ...args], {
       cwd: workspace,
       env,
       stdin: 'ignore',
@@ -227,7 +232,25 @@ async function qualify(terminal: string, combined: string, desktop: string) {
     assert.equal(readCLIRegistration(terminalPrefix), undefined);
     assert.equal(readCLIRegistration(upgraded.root, true), undefined);
     if (windows) assert(!existsSync(oldPrefix));
-    else assert.deepEqual(readdirSync(join(upgraded.root, 'bin')), ['kite-desktop']);
+    else {
+      assert.deepEqual(readdirSync(join(upgraded.root, 'bin')).sort(), [
+        'kite-desktop',
+        'kite-maintenance',
+      ]);
+      const maintenance = spawn([join(upgraded.root, 'bin', 'kite-maintenance'), 'verify'], {
+        cwd: workspace,
+        env,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'inherit',
+      });
+      const [code, stdout] = await Promise.all([
+        maintenance.exited,
+        new Response(maintenance.stdout).text(),
+      ]);
+      assert.equal(code, 0);
+      assert.equal(JSON.parse(stdout).candidateId, replacement.digest);
+    }
     assert.deepEqual(readFileSync(profile.databasePath), beforeUpgrade);
     phase('desktop_upgrade_released_registration', { candidate: upgraded.candidateId });
     assert.match(await runTask(1), /completed/);
@@ -251,7 +274,7 @@ async function qualify(terminal: string, combined: string, desktop: string) {
             return frame;
           }
           assert(!pty.ended && Date.now() < deadline, `${label}\n${frame}`);
-          await Bun.sleep(30);
+          await sleep(30);
         }
       };
       const idle = (frame: string) => frame.includes('❯') && !frame.includes('Working');
@@ -276,7 +299,9 @@ async function qualify(terminal: string, combined: string, desktop: string) {
           await pty.key(prompts[2]!);
           await wait('tui_input_visible', (frame) => frame.includes(`❯ ${prompts[2]}`));
           assert.deepEqual(calls, prompts.slice(0, 2));
-          await pty.key('\r');
+          // Ink forces Kitty's disambiguation mode on POSIX; ConPTY sends native CR.
+          if (!windows) assert(pty.text().includes('\u001b[>1u'));
+          await pty.key(windows ? '\r' : '\u001b[13u');
           const frame = await wait(
             'tui_reply_and_editor',
             (value) => idle(value) && value.includes(replies[2]!),
@@ -330,15 +355,25 @@ async function qualify(terminal: string, combined: string, desktop: string) {
     phase('independent_maintenance_verified', { storeId });
 
     if (!windows) {
+      const standalone = installNativeBundle({
+        bundleRoot: desktop,
+        prefix: join(root, 'standalone-desktop'),
+      });
+      assert.deepEqual(readdirSync(join(standalone.root, 'bin')), ['kite-desktop']);
+      uninstallNativeBundle(standalone.root);
       assert.equal(rollbackNativeBundle(upgraded.root).candidateId, previous.digest);
       assert.deepEqual(readdirSync(join(upgraded.root, 'bin')).sort(), [
         'kite',
         'kite-desktop',
+        'kite-maintenance',
         'kite-tui',
       ]);
       assert.equal(readCLIRegistration(terminalPrefix), undefined);
       assert.equal(rollbackNativeBundle(upgraded.root).candidateId, replacement.digest);
-      assert.deepEqual(readdirSync(join(upgraded.root, 'bin')), ['kite-desktop']);
+      assert.deepEqual(readdirSync(join(upgraded.root, 'bin')).sort(), [
+        'kite-desktop',
+        'kite-maintenance',
+      ]);
     }
     uninstallNativeBundle(upgraded.root);
     assert(existsSync(cli) && existsSync(tui));
@@ -347,7 +382,7 @@ async function qualify(terminal: string, combined: string, desktop: string) {
     assert.equal(unexpectedModelRequests, 0);
     phase('complete', { storeId, modelCalls: calls.length });
   } finally {
-    server.stop(true);
+    await server.stop(true);
   }
   removeTemporaryDirectory(root);
 }

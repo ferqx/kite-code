@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 
 function gate() {

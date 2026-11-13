@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { rmdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { AgentClient, Session, Workspace } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { ensureSession } from '../host';
 

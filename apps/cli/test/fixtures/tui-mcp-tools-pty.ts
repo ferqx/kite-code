@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { appendFileSync, closeSync, fsyncSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -33,7 +35,7 @@ const wait = async (text: string, compact = false) => {
     if (frame.fresh && (compact ? value.replace(/ /g, '') : value).includes(text)) return;
     if (Date.now() > end) throw Error(`expected ${text} tail=${value.slice(-5000)}`);
     if (active.ended) throw Error(`original Tools host ended before ${text}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string) => {
@@ -57,7 +59,7 @@ const control = async (path: string) =>
   );
 const start = async () => {
   active = spawnTuiPTY({
-    cmd: [process.execPath, '--no-install', input.runner],
+    cmd: [process.execPath, ...testRuntimeFlags, input.runner],
     cwd: input.root,
     env: {
       HOME: input.root,
@@ -95,7 +97,7 @@ const waitSeed = async (executionId: string) => {
     }
     if (Date.now() > end) throw Error(`original refresh not rendered ready: ${value.slice(-5000)}`);
     if (active.ended) throw Error('original Tools host ended before refresh ready');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const frame = async (generation: number, kind: string) => {
@@ -118,7 +120,7 @@ const chooseMenu = async (label: string) => {
     if (text.includes(`❯ ${label}`)) return;
     if (!text.includes('❯')) {
       if (Date.now() > end) throw Error(`owned_tools_menu_absent:${label}`);
-      await Bun.sleep(50);
+      await testSleep(50);
       index--;
       continue;
     }
@@ -129,7 +131,7 @@ const chooseMenu = async (label: string) => {
       const currentSelection = selected(next.text);
       if (next.fresh && currentSelection && currentSelection !== previous) break;
       if (Date.now() > end) throw Error(`owned_tools_menu_deadline:${label}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   throw Error(`owned_tools_menu_unavailable:${label}`);
@@ -165,7 +167,7 @@ const tools = async (indices: number[], generation: number) => {
 const close = async () => {
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!active.ended && Date.now() < end) await Bun.sleep(50);
+  while (!active.ended && Date.now() < end) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([active.host.exited, active.eof]),
     3000,

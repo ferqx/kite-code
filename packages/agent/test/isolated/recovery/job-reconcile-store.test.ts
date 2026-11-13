@@ -1,9 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
@@ -83,7 +84,7 @@ async function fixture(extra?: 'job' | 'tool') {
     ).length < 1
   ) {
     if (Date.now() > deadline) throw Error('seed_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   const view = await store.getView('s'),
     job = view.executions.find((e) => e.kind === 'job')!;

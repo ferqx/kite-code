@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -14,6 +13,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { buildNativeDesktop } from '../../../../apps/desktop/scripts/build-native';
 import {
@@ -22,6 +22,14 @@ import {
 } from '../../../../apps/service/src/configuration';
 import { ordinaryHostConfigurationDefaults } from '../../../../apps/service/src/configuration-defaults';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
+import { buildDevelopmentService } from '../../../../scripts/development/desktop-reload';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink } from '../../../fixtures/test-filesystem';
 import { liveCodeEvidence } from './live-code-evidence';
 
@@ -52,7 +60,7 @@ type Attempt = {
   eof: boolean;
   failed: boolean;
 };
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 const require = createRequire(resolve(repository, 'apps/desktop/package.json'));
 const markers = [
   'ANOMALY_DISCONNECT',
@@ -167,15 +175,15 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
     prompts = Object.fromEntries(
       markers.map((marker) => [
         marker,
-        `${marker}\n\nThis is one explicitly authorized isolated file task. Use write_file exactly once with path ${JSON.stringify(`effects/${marker}.txt`)}, content exactly ${JSON.stringify(marker)}, and base null. Do not call any other tool, create a child, ask a question, or touch another path. After its actual successful result, reply briefly DONE ${marker}. Do not retry a failed write.${marker.endsWith('_CONTINUE') ? ' This is a new independent task. Do not resume, repeat, or complete any previous interrupted task.' : ''}`,
+        `${marker}\n\nThis is one explicitly authorized isolated file task. Use write_file exactly once with path ${JSON.stringify(`effects/${marker}.txt`)}, content exactly ${JSON.stringify(marker)}, and omit base_ref to create the file. Do not call any other tool, create a child, ask a question, or touch another path. After its actual successful result, reply briefly DONE ${marker}. Do not retry a failed write.${marker.endsWith('_CONTINUE') ? ' This is a new independent task. Do not resume, repeat, or complete any previous interrupted task.' : ''}`,
       ]),
     );
   let budgetReached = false,
     stage = 'configuration',
     passed = false,
     cleanupSucceeded = true,
-    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    proxy: ReturnType<typeof Bun.serve> | undefined,
+    driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
+    proxy: Awaited<ReturnType<typeof serveFixture>> | undefined,
     warm: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     driverTimer: ReturnType<typeof setTimeout> | undefined;
   let modelMetadata: Record<string, unknown> = {},
@@ -464,7 +472,7 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
     );
     modelMetadata = { model: selected.model, provider: selected.provider, protocol, preset };
     stage = 'proxy';
-    proxy = Bun.serve({
+    proxy = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 0,
@@ -589,7 +597,7 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
           const reader = response.body.getReader(),
             selectedAttempt = attempt,
             hash = createHash('sha256');
-          // Observe immediately: Bun marks both cancel() and closed as AbortError
+          // Observe immediately: the transport can reject both cancel() and closed on abort
           // after the original fetch signal has aborted, even though transport settled.
           const readerClosed = reader.closed.then(
             () => {
@@ -768,29 +776,16 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
       { mode: 0o600 },
     );
     stage = 'build_service';
-    const serviceOutdir = join(root, 'apps/service/dist');
-    mkdirSync(serviceOutdir, { recursive: true });
-    directoryLink(
-      resolve(repository, 'apps/service/node_modules'),
-      join(root, 'apps/service/node_modules'),
-    );
-    const serviceEntrypoint = join(serviceOutdir, 'service.js'),
-      built = await Bun.build({
-        entrypoints: [resolve(repository, 'apps/service/src/main.ts')],
-        target: 'bun',
-        format: 'esm',
-        packages: 'external',
-        outdir: serviceOutdir,
-        naming: 'service.js',
-      });
-    check(built.success, 'live_anomaly_service_build');
-    const bunExecutable = realpathSync(process.execPath),
+    const serviceOutdir = join(root, 'service');
+    const runtimeExecutable = realpathSync(process.execPath);
+    const built = await buildDevelopmentService(repository, serviceOutdir, runtimeExecutable);
+    const serviceEntrypoint = join(serviceOutdir, 'services', built.id, 'main.js'),
       hashFile = (path: string) => digest(readFileSync(path)),
       artifact = {
         entrypoint: serviceEntrypoint,
-        executable: bunExecutable,
+        executable: runtimeExecutable,
         entrypointSha256: hashFile(serviceEntrypoint),
-        executableSha256: hashFile(bunExecutable),
+        executableSha256: hashFile(runtimeExecutable),
         buildId: 'live-session-anomalies',
         apiMajor: 1,
       };
@@ -858,16 +853,19 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
     await buildNativeDesktop(
       {
         serviceEntrypoint,
-        bunExecutable,
+        runtimeExecutable,
         serviceSha256: artifact.entrypointSha256,
-        bunSha256: artifact.executableSha256,
+        runtimeSha256: artifact.executableSha256,
         buildId: artifact.buildId,
         apiMajor: 1,
         requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
         profile: { dataRoot: profile.dataRoot, profile: profile.profile },
       },
       outdir,
-      { testDiagnostics: false },
+      {
+        testDiagnostics: false,
+        runtimeAddon: resolve(repository, 'packages/agent/dist/runtime-native.node'),
+      },
     );
     writeEvidence('metadata.json', {
       sourceCommit: codeEvidence.head,
@@ -894,7 +892,7 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
       model: modelMetadata,
       budget: { requestLimit: 20, timeoutMs: 600000, perRequestTimeoutMs: 60000 },
     });
-    const driverBuild = await Bun.build({
+    const driverBuild = await buildFixture({
       entrypoints: [
         resolve(repository, 'apps/desktop/test/native-session-anomalies-electron.fixture.ts'),
       ],
@@ -908,9 +906,9 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
     directoryLink(join(repository, 'node_modules'), join(root, 'node_modules'));
     stage = 'driver';
     deadline.signal.throwIfAborted();
-    driver = Bun.spawn(
+    driver = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         join(root, 'driver.js'),
         outdir,
         home,
@@ -918,7 +916,7 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
         controlBase,
         evidence,
         profile.databasePath,
-        bunExecutable,
+        runtimeExecutable,
         resolve(repository, 'apps/desktop/package.json'),
         'live',
       ],
@@ -976,7 +974,7 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
     if (cancellations.size)
       await Promise.race([Promise.allSettled([...cancellations]), sleep(10000)]);
     if (cancellations.size) cleanupSucceeded = false;
-    proxy?.stop(true);
+    await proxy?.stop(true);
     clearTimeout(timeout);
     let facts: unknown;
     try {

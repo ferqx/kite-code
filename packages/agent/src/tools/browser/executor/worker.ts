@@ -44,7 +44,7 @@ function errorSummary(text: string): string {
   return summary;
 }
 let diagnostic: { origin: Evaluation; chunks: Buffer[]; size: number } | undefined;
-// Bun's built-in REPL sends rejected top-level await to its output instead of
+// The Node REPL sends rejected top-level await to its output instead of
 // its eval callback. This output has no prompts or normal result printing here.
 diagnostics.on('data', (bytes: Buffer) => {
   const origin = evaluations.getStore();
@@ -71,8 +71,8 @@ diagnostics.on('data', (bytes: Buffer) => {
   diagnostic.size += chunk.byteLength;
 });
 const pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>();
-// Bun otherwise exits on a rejection created by a retired evaluation. Its
-// process event can lose ALS; never attribute an unscoped, detached rejection
+// An unhandled rejection from a retired evaluation can otherwise exit the process.
+// The process event can lose ALS; never attribute an unscoped, detached rejection
 // to the active evaluation. Awaited evaluation failures still use the REPL
 // callback/diagnostic path. Host operations and their failures live outside here.
 process.on('unhandledRejection', (reason) => {

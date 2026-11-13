@@ -1,17 +1,64 @@
 import { promisify } from 'node:util';
-import { constants, gunzipSync, zstdCompress, zstdDecompressSync } from 'node:zlib';
+import { constants, gunzipSync, gzip, zstdCompress, zstdDecompressSync } from 'node:zlib';
 
 const zstdMagic = 0xfd2fb528;
 const windowLog = 27;
 const compressZstd = promisify(zstdCompress);
+const compressGzip = promisify(gzip);
+
+const block = 512;
+
+function tarHeader(name: string, size: number, type: '0' | 'x') {
+  const header = Buffer.alloc(block);
+  const number = (value: number, width: number, offset: number) => {
+    const digits = value.toString(8);
+    if (digits.length >= width) throw Error('terminal_archive_entry_too_large');
+    header.write(digits.padStart(width - 1, '0'), offset, 'ascii');
+  };
+  header.write(name, 0, 100, 'utf8');
+  number(0o644, 8, 100);
+  number(0, 8, 108);
+  number(0, 8, 116);
+  number(size, 12, 124);
+  number(0, 12, 136);
+  header.fill(32, 148, 156);
+  header.write(type, 156, 'ascii');
+  header.write('ustar\0' + '00', 257, 'ascii');
+  const sum = header.reduce((total, byte) => total + byte, 0);
+  header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii');
+  return header;
+}
+
+/** Emit regular files only. Long UTF-8 paths use one POSIX PAX path record. */
+export function releaseTarBytes(files: Record<string, Uint8Array>): Buffer {
+  const parts: Uint8Array[] = [];
+  function entry(name: string, bytes: Uint8Array, type: '0' | 'x') {
+    parts.push(tarHeader(name, bytes.byteLength, type), bytes);
+    const remainder = bytes.byteLength % block;
+    if (remainder) parts.push(Buffer.alloc(block - remainder));
+  }
+  for (const [path, bytes] of Object.entries(files)) {
+    let name = path;
+    if (Buffer.byteLength(path) >= 100) {
+      const record = ` path=${path}\n`;
+      const length = Buffer.byteLength(record);
+      let width = 1;
+      while (String(length + width).length !== width) width++;
+      entry('PaxHeaders/file', Buffer.from(`${length + width}${record}`), 'x');
+      name = 'file';
+    }
+    entry(name, bytes, '0');
+  }
+  parts.push(Buffer.alloc(2 * block));
+  return Buffer.concat(parts);
+}
 
 export async function releaseArchiveBytes(
   files: Record<string, Uint8Array>,
   archivePath: string,
 ): Promise<Uint8Array> {
-  if (!archivePath.toLowerCase().endsWith('.tar.zst'))
-    return new Bun.Archive(files, { compress: 'gzip', level: 6 }).bytes();
-  const tar = await new Bun.Archive(files).bytes();
+  const tar = releaseTarBytes(files);
+  if (!archivePath.toLowerCase().endsWith('.tar.zst')) return compressGzip(tar, { level: 6 });
   const options = {
     pledgedSrcSize: tar.byteLength,
     params: {
@@ -24,7 +71,7 @@ export async function releaseArchiveBytes(
   return compressZstd(tar, options);
 }
 
-// RFC 8878 frame boundaries. Bun's streaming decoder can return a partial frame.
+// Verify the complete RFC 8878 frame before decompressing.
 function verifyZstdFrame(bytes: Buffer) {
   const descriptor = bytes[4];
   if (descriptor === undefined || descriptor & 8) throw Error('terminal_archive_invalid');

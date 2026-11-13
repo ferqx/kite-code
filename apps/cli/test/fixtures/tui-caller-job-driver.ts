@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { spawnSync as testSpawnSync } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -9,7 +12,10 @@ const input = JSON.parse(process.argv[2]!) as {
   base: string;
   jobId: string;
 };
-const pty = spawnTuiPTY({ cmd: [process.execPath, input.runner], cwd: input.root });
+const pty = spawnTuiPTY({
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
+  cwd: input.root,
+});
 let normal = false,
   aborted = false;
 const stop = () => {
@@ -22,7 +28,7 @@ if (process.platform === 'win32')
     if (message === 'caller-job-driver-stop') stop();
   });
 async function pump() {
-  await Bun.sleep(100);
+  await testSleep(100);
   await pty.drain();
   if (aborted) throw Error('caller_job_driver_aborted');
 }
@@ -93,7 +99,7 @@ try {
       }
       assert.equal(pty.ended, false);
       process.kill(pty.host.pid, 0);
-      const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(pty.host.pid), '/f'], {
+      const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(pty.host.pid), '/f'], {
         stdout: 'pipe',
         stderr: 'pipe',
       });

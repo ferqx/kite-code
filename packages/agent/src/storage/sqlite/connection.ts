@@ -1,4 +1,3 @@
-import { constants, Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -15,8 +14,9 @@ import {
 import { join } from 'node:path';
 import { assertNoSymlinkPath, type ProfileAccess } from '../../platform/profile';
 import { defaultWindowsPathSecurity, privateDirectory } from '../../platform/windows-path-security';
+import { constants, Database } from '../../runtime-sqlite';
 import { initializeDefaultSqliteEngine, type SqliteEngineSelection } from '../../sqlite-engine';
-import { matchingSchema, supportedSchemas } from './migrations';
+import { invalidateSchemaCache, matchingSchema, supportedSchemas } from './migrations';
 export const FORMAT_MAJOR = 1;
 export class StoreOpenError extends Error {
   readonly code: string;
@@ -185,6 +185,9 @@ export type StorePreflight =
 export function preflightDatabase(access: ProfileAccess, baseline: URL): StorePreflight {
   initializeDefaultSqliteEngine();
   validateFiles(access);
+  // Each preflight observes migration read errors, including the recheck after
+  // exclusive admission when deciding whether a development profile can move.
+  invalidateSchemaCache(baseline);
   validateProfileFormat(access, baseline);
   const journal = `${access.databasePath}-journal`;
   assertNoSymlinkPath(journal);

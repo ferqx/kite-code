@@ -1,4 +1,3 @@
-import { describe, expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
+import { describe, expect, test } from '#kite-test';
 import {
   analyzeTestOwnership,
   isExtensionFixtureTest,
@@ -24,7 +24,7 @@ import {
 
 import { UNIFIED_TEST_SUITES, unifiedTestInventory } from '../../../scripts/unified-test-plan';
 
-const repoRoot = join(import.meta.dir, '..', '..', '..');
+const repoRoot = join(import.meta.dirname, '..', '..', '..');
 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'kite-test-plan-'));
@@ -86,7 +86,7 @@ describe('test discovery boundaries V2', () => {
       mkdirSync(join(root, 'tests', 'isolated', 'exclusive'), { recursive: true });
       writeFileSync(isolated, 'export {};\n');
       writeFileSync(exclusive, 'export {};\n');
-      writeFileSync(implicitExclusive, "Bun.spawn(['true']);\n");
+      writeFileSync(implicitExclusive, "spawn(['true']);\n");
       const integration = planSuiteTests(root, 'tests/integration', 4);
       const isolation = planSuiteTests(root, 'tests/isolated', 4);
       expect(collectTestFiles(parallel[0]!)).toEqual([parallel[0]!]);
@@ -118,7 +118,7 @@ describe('test discovery boundaries V2', () => {
     }
   });
 
-  test('covers the complete default Bun file inventory once across all suites', () => {
+  test('covers the complete default Node test file inventory once across all suites', () => {
     const suites = UNIFIED_TEST_SUITES;
     const expected = suites.flatMap((suite) => collectTestFiles(join(repoRoot, suite))).sort();
     const plan = planTestSuites(repoRoot, suites, 4);
@@ -194,7 +194,9 @@ describe('test discovery boundaries V2', () => {
       scripts: Record<string, string>;
     };
     const runner = readFileSync(join(repoRoot, 'scripts', 'run-default-tests.ts'), 'utf8');
-    expect(pkg.scripts.test).toBe('bun run scripts/run-default-tests.ts');
+    expect(pkg.scripts.test).toBe(
+      'node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts',
+    );
     expect(runner).not.toContain('PROCESS_ISOLATED_TEST_FILES');
     expect(runner).not.toContain('path-ignore-patterns');
     expect(runner).toContain('runUnifiedTests');

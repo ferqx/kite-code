@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, AnswerInteractionRequest, Command, Interaction } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { observeCommand, run } from '../src';
 
 const intent = {

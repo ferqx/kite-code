@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { AgentClient, Interaction, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { createDesktopController } from '../src/controller';
@@ -209,7 +210,7 @@ test.each([
         caller.state().selection!.permissionUnavailable);
       i++
     )
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     expect(caller.state().selection!.viewGeneration).toBeGreaterThan(previous);
     expect(caller.state().selection!.permissionUnavailable).toBe(false);
     expect(caller.state().selection!.interactions.map((value) => value.id)).toEqual(['b']);

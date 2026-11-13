@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { createClient, type IncludeResultRequest, type SelectContextRequest } from '../src';
 
 test('context SDK admits before business, validates bounded closed requests and preserves original selection/Store/revision and future source fields', async () => {
@@ -28,7 +29,7 @@ test('context SDK admits before business, validates bounded closed requests and 
     result: { content: 'saved result', future: { preserved: true } },
     futureMetadata: 'retained',
   };
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

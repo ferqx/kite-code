@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { expect, test } from '#kite-test';
 import { createPlanningValidation, planningExtensionId } from '../../../src/business/planning';
 import type {
   ConditionReadContext,

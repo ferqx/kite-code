@@ -1,11 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
+import { Database } from '../../../src/runtime-sqlite';
 import { type DbTiming, openSqliteStore } from '../../../src/sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import { UnstartedSqliteWrite } from '../../../src/storage/sqlite/write-lock';

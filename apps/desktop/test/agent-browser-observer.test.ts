@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import { type AgentBrowserObservation, AgentBrowserObserver } from '../src/agent-browser-observer';
 import { browserFixture, browserScope } from './agent-browser.fixture';
 
@@ -6,7 +7,7 @@ async function until(check: () => boolean, timeout = 2500) {
   const end = Date.now() + timeout;
   while (!check()) {
     if (Date.now() > end) throw Error('condition_timeout');
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 function observe(f = browserFixture(), scope = browserScope) {
@@ -104,13 +105,13 @@ test('polling is single-flight, drops late frames and stops hidden/unmounted wit
   o.owner.start(true);
   try {
     await until(() => queryCount(o.f) === 1);
-    await Bun.sleep(650);
+    await fixtureDelay(650);
     expect(queryCount(o.f)).toBe(1);
     expect(o.f.maxInFlight).toBe(1);
     o.owner.setVisible(false);
     o.f.view.title = 'Latest page';
     release();
-    await Bun.sleep(450);
+    await fixtureDelay(450);
     expect(o.state.view).toBeUndefined();
     expect(queryCount(o.f)).toBe(1);
     expect(o.f.calls.some((call) => call.method === 'extensions.release')).toBe(true);
@@ -119,7 +120,7 @@ test('polling is single-flight, drops late frames and stops hidden/unmounted wit
     await until(() => o.state.fresh && o.state.view?.title === 'Latest page');
     const count = queryCount(o.f);
     o.owner.stop();
-    await Bun.sleep(450);
+    await fixtureDelay(450);
     expect(queryCount(o.f)).toBe(count);
     expect(o.f.submitted).toHaveLength(0);
   } finally {

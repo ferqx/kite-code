@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { ArtifactRef, OperationRef } from '../../../src/extensions';
 import { createProfileBackup, restoreProfileBackup } from '../../../src/maintenance';

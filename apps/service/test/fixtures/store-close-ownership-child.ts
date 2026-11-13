@@ -1,3 +1,4 @@
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { AgentRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -101,7 +102,7 @@ try {
     const view = await client.getView('s');
     if (view.runs.length && view.runs.every((row) => !row.isActive)) break;
     if (Date.now() >= deadline) throw Error('original task deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   if (!runtime) throw Error('original runtime missing');
   const view = await client.getView('s');

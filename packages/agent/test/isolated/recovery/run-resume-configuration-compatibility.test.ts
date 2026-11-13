@@ -1,9 +1,12 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -84,9 +87,10 @@ type Ready = {
 };
 async function seed(shape: 'current' | 'context') {
   const directory = temporaryDirectory('kite-current-check-recovery-');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./authorization-check-clock-crash-child.ts', import.meta.url)),
       directory,
       JSON.stringify(qualified!.engine.selection),
@@ -102,7 +106,7 @@ async function seed(shape: 'current' | 'context') {
         await child.exited;
         throw Error(`check_seed_failed:${await new Response(child.stderr).text()}`);
       }
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8')) as Ready;
     child.kill('SIGKILL');

@@ -70,7 +70,7 @@ const report: Record<string, unknown> = {
   date: new Date().toISOString(),
   platform: process.platform,
   arch: process.arch,
-  bunVersion: Bun.version,
+  nodeVersion: process.versions.node,
   network: 'configured-provider-direct-no-fallback',
   command: 'KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live',
   requestLimit: 20,
@@ -120,38 +120,38 @@ async function main() {
       ? (configuration.resolveCredential(selected.credentialRef) ??
         (await vault.resolve(selected.credentialRef)))
       : undefined;
-  const fetchProvider: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      check(wire.length < 20, 'request_budget_exhausted');
-      deadline.throwIfAborted();
-      const body = JSON.parse(String(init?.body)) as {
-        tools?: { type: string; name?: string; function?: { name: string } }[];
-      };
-      const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
-      check(
-        tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
-        'wire_name_invalid',
-      );
-      const observation = { status: 0, tools };
-      wire.push(observation);
-      try {
-        const response = await fetch(input, {
-          ...init,
-          redirect: 'error',
-          signal: AbortSignal.any([
-            deadline,
-            AbortSignal.timeout(60_000),
-            ...(init?.signal ? [init.signal] : []),
-          ]),
-        });
-        observation.status = response.status;
-        return response;
-      } catch {
-        throw Error('live_tools_transport_failed');
-      }
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const fetchProvider: typeof fetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    check(wire.length < 20, 'request_budget_exhausted');
+    deadline.throwIfAborted();
+    const body = JSON.parse(String(init?.body)) as {
+      tools?: { type: string; name?: string; function?: { name: string } }[];
+    };
+    const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
+    check(
+      tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
+      'wire_name_invalid',
+    );
+    const observation = { status: 0, tools };
+    wire.push(observation);
+    try {
+      const response = await fetch(input, {
+        ...init,
+        redirect: 'error',
+        signal: AbortSignal.any([
+          deadline,
+          AbortSignal.timeout(60_000),
+          ...(init?.signal ? [init.signal] : []),
+        ]),
+      });
+      observation.status = response.status;
+      return response;
+    } catch {
+      throw Error('live_tools_transport_failed');
+    }
+  };
   const sdk = createSdkModelAdapter({
     models: new Map([
       [

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { desktopConversationMessages, desktopMessages } from '../src/native-presentation';
 
 const message = (id: string, createdAt?: number): Message => ({

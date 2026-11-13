@@ -1,8 +1,9 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   createProfileBackup,
@@ -325,7 +326,7 @@ test('restore publishes a new Store, preserves origins and fences pending facts 
 test('SIGKILL after journal removal still holds exclusive lock until exit and leaves verified new Store', async () => {
   const f = await fixture(),
     module = new URL('../../../src/maintenance/restore.ts', import.meta.url).href;
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
       '-e',
@@ -471,7 +472,7 @@ for (const point of [
   test(`SIGKILL at ${point} retains stable lock and journal, then exact complete or rollback`, async () => {
     const f = await fixture();
     const module = new URL('../../../src/maintenance/restore.ts', import.meta.url).href;
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
         '-e',

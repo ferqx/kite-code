@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
@@ -14,6 +14,8 @@ import { createMcpCredentialBroker, type McpCredentialRef } from '@kite-ai/agent
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -112,7 +114,7 @@ async function fixture() {
   let vault!: ReturnType<typeof createCredentialVault>;
   const providerRequests: Record<string, unknown>[] = [];
   const steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -135,7 +137,7 @@ async function fixture() {
         connecting && step === 0
           ? {
               name: 'connect_mcp_server',
-              input: { server_id: 'local', key: marker.includes('-b') ? 'first-b' : 'first-a' },
+              input: { server_id: 'local' },
             }
           : (connecting ? step === 1 : step === 0) && remote
             ? { name: remote.function.name, input: {} }
@@ -456,7 +458,7 @@ test('default Model can propose connection while durable approval retains zero s
       ).interactions[0];
       if (card) break;
       if (Date.now() > deadline) throw Error('card_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(f.providerCount).toBe(1);
     expect(f.lookups).toBe(0);

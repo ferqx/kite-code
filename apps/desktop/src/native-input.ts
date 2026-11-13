@@ -2,6 +2,7 @@ import { ClientError } from '@kite-ai/client';
 import type { Message as DesktopMessage } from '@kite-ai/ui/desktop';
 import type { InputRequest } from './input';
 import type { NativeSelection } from './native-bridge';
+import { nativeModelFailure } from './native-model-failure';
 import type { NativeModelChoice } from './native-model-picker';
 
 export function nativeAskUserAwaitingAnswer(selection: NativeSelection | undefined): boolean {
@@ -44,18 +45,22 @@ export function nativeAskUserAwaitingAnswer(selection: NativeSelection | undefin
 
 /** A rejected original Command can fail before any Run exists. */
 export function nativeInputFailureMessage(commandId: string, reason?: string): DesktopMessage {
+  const model = nativeModelFailure(reason);
   const environment = reason === 'shell_asset_unavailable' || reason === 'native_asset_unavailable';
-  const summary = environment ? '本地执行环境尚未就绪，本轮未能启动' : '本轮未能启动';
+  const summary =
+    model?.summary ?? (environment ? '本地执行环境尚未就绪，本轮未能启动' : '本轮未能启动');
   return {
     id: `native-input-failure:${commandId}`,
     role: 'system',
     systemKind: 'turn_failure',
-    text: environment
-      ? '原消息已保留。请在本地执行环境恢复后重新发送。'
-      : '原消息已保留，请检查模型和执行环境后重新发送。',
+    text: model
+      ? `${model.text} 原消息已保留。`
+      : environment
+        ? '原消息已保留。请在本地执行环境恢复后重新发送。'
+        : '原消息已保留，请检查模型和执行环境后重新发送。',
     settled: true,
     status: 'failed',
-    failure: { summary },
+    failure: { summary, ...(model ? { reasonCode: model.reasonCode } : {}) },
   };
 }
 

@@ -1,14 +1,17 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
+import { nodeServiceFixture } from '../fixtures/node-service-process';
 
 interface AssemblyObservation {
   stage(phase: string): void;
@@ -56,9 +59,9 @@ function assemblyObservation(requestCount: () => number, started: number): Assem
   };
 }
 
-function endpoint(calls: ({ name: string; input: unknown } | undefined)[]) {
+async function endpoint(calls: ({ name: string; input: unknown } | undefined)[]) {
   const requests: Record<string, unknown>[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -108,7 +111,7 @@ function endpoint(calls: ({ name: string; input: unknown } | undefined)[]) {
   };
 }
 async function setup(
-  provider: ReturnType<typeof endpoint>,
+  provider: Awaited<ReturnType<typeof endpoint>>,
   tools: string[],
   skills: unknown[] = [],
   gate = false,
@@ -132,7 +135,8 @@ async function setup(
   if (gate) writeFileSync(join(profile.profilePath, 'gate-enabled'), 'enabled');
   observation?.stage('setup.service');
   const handle = await launchPairedService({
-    entrypoint: join(import.meta.dir, '../fixtures/assembled-child.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, '../fixtures/assembled-child.ts'),
     profile,
     instanceId: 'assembled',
     buildId: 'assembled-test',
@@ -208,7 +212,7 @@ async function until(read: () => Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > deadline) throw new Error('assembly_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function run(f: Awaited<ReturnType<typeof setup>>) {
@@ -244,7 +248,7 @@ async function finished(f: Awaited<ReturnType<typeof setup>>, observation?: Asse
 
 test('paired default assembly binds real files/source freshness and never dispatches old arguments after permission wait', async () => {
   const started = performance.now();
-  const provider = endpoint([
+  const provider = await endpoint([
     { name: 'write_file', input: { path: 'nested/output.txt', content: 'old' } },
     { name: 'write_file', input: { path: 'nested/output.txt', content: 'new' } },
   ]);
@@ -292,7 +296,7 @@ test('paired default assembly binds real files/source freshness and never dispat
 });
 
 test('paired Skills load/resource are ordinary Tools and knowledge/source IDs never execute linked scripts', async () => {
-  const provider = endpoint([
+  const provider = await endpoint([
     {
       name: 'load_skill',
       input: { skill_id: 'guide' },
@@ -346,7 +350,7 @@ test('paired Skills load/resource are ordinary Tools and knowledge/source IDs ne
 });
 
 test('Skill dependency claims do not grant a host capability and unknown selected Tool refuses only its Run', async () => {
-  const provider = endpoint([{ name: 'load_skill', input: { skill_id: 'guide' } }]);
+  const provider = await endpoint([{ name: 'load_skill', input: { skill_id: 'guide' } }]);
   const f = await setup(provider, ['skills.load'], []);
   try {
     const skill = join(f.workspace, 'skill');
@@ -391,7 +395,7 @@ test('Skill dependency claims do not grant a host capability and unknown selecte
 test('Skill tools reject removed description arguments, continue with selectors and preserve original historical calls', async () => {
   const oldLoad = { skill_id: 'guide', description: '读取任务技能' },
     oldResource = { skill_id: 'guide', path: 'reference.md', description: '阅读任务参考' };
-  const provider = endpoint([
+  const provider = await endpoint([
     { name: 'load_skill', input: oldLoad },
     { name: 'load_skill', input: { skill_id: 'guide' } },
     { name: 'read_skill_resource', input: oldResource },
@@ -470,7 +474,7 @@ test('Skill tools reject removed description arguments, continue with selectors 
 });
 
 test('a newly disabled file capability affects the next Run while an admitted waiting Run retains its original binding', async () => {
-  const provider = endpoint([
+  const provider = await endpoint([
     { name: 'write_file', input: { path: 'old.txt', content: 'old binding' } },
     undefined,
     {

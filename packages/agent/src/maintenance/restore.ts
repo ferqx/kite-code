@@ -1,4 +1,3 @@
-import { constants as sqliteConstants } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -18,6 +17,7 @@ import {
   type ProfileOptions,
   selectProfile,
 } from '../platform/profile';
+import { constants as sqliteConstants } from '../runtime-sqlite';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
 import type { Json } from '../storage/types';
 import { restoreAssets } from './assets';

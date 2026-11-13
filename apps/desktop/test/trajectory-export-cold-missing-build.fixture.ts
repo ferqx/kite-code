@@ -1,15 +1,20 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { buildNativeDesktop } from '../scripts/build-native';
 
 const directory = realpathSync(
-  mkdtempSync(resolve(import.meta.dir, '../../../.cache/trajectory-export-cold-missing-')),
+  mkdtempSync(resolve(import.meta.dirname, '../../../.cache/trajectory-export-cold-missing-')),
 );
 const original = JSON.parse(
   readFileSync(
     process.argv[2] ??
-      resolve(import.meta.dir, '../../../.cache/trajectory-export-native-Xgpl5a/fixture.json'),
+      resolve(import.meta.dirname, '../../../.cache/trajectory-export-native-Xgpl5a/fixture.json'),
     'utf8',
   ),
 ) as { directory: string };
@@ -24,8 +29,8 @@ await buildNativeDesktop(
     kind: 'development',
     serviceEntrypoint: service,
     serviceSha256: hash(service),
-    bunExecutable: runtime,
-    bunSha256: hash(runtime),
+    runtimeExecutable: runtime,
+    runtimeSha256: hash(runtime),
     buildId: 'trajectory-export-cold-missing',
     apiMajor: 1,
     requiredCapabilities: ['trajectory'],
@@ -35,8 +40,8 @@ await buildNativeDesktop(
   { testDiagnostics: false },
 );
 mkdirSync(join(directory, 'driver'), { mode: 0o700 });
-const build = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'trajectory-export-cold-missing.fixture.ts')],
+const build = await buildFixture({
+  entrypoints: [resolve(import.meta.dirname, 'trajectory-export-cold-missing.fixture.ts')],
   outdir: join(directory, 'driver'),
   naming: 'driver.mjs',
   target: 'node',
@@ -45,15 +50,15 @@ const build = await Bun.build({
 if (!build.success) throw new AggregateError(build.logs, 'cold_missing_driver_build_failed');
 const fixturePath = join(directory, 'fixture.json');
 writeFileSync(fixturePath, JSON.stringify({ directory, outdir, bundle, profile }, null, 2));
-const node = Bun.which('node');
+const node = findFixtureExecutable('node');
 if (!node) throw Error('node_driver_required');
 console.log(JSON.stringify({ directory, bundle }));
-const child = Bun.spawn(
+const child = spawnFixtureProcess(
   [
     node,
     join(directory, 'driver/driver.mjs'),
     fixturePath,
-    resolve(import.meta.dir, '../package.json'),
+    resolve(import.meta.dirname, '../package.json'),
   ],
   { cwd: directory, stdout: 'inherit', stderr: 'inherit' },
 );

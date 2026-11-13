@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
 
 test('Windows Native file-only terminal copy restores v1 empty worker assets before verification', () => {
   const modulePath = fileURLToPath(new URL('../../scripts/build-native.ts', import.meta.url));
@@ -9,7 +9,7 @@ test('Windows Native file-only terminal copy restores v1 empty worker assets bef
   );
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import {createHash} from 'node:crypto';
 import {chmodSync,copyFileSync,existsSync,mkdirSync,mkdtempSync,readdirSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -37,7 +37,7 @@ try{
   const absolute=join(source,path);mkdirSync(dirname(absolute),{recursive:true});const bytes=Buffer.from('integrity-only inert asset '+path);writeFileSync(absolute,bytes);const mode=path===entries.runtime?493:420;chmodSync(absolute,mode);files.push({path,size:bytes.length,sha256:hash(bytes),mode});
  }
  mkdirSync(join(source,directory,'empty-hooks'));
- const manifest={version:1,apiMajor:1,target:{platform:process.platform,arch:process.arch},bunVersion:Bun.version,sqlite:fixtureTerminalSqlite(source,files),productVersion:'0.1.0',source:{commit:'a'.repeat(40),dirty:true},entries,files,links:[]};
+ const manifest={version:1,apiMajor:1,target:{platform:process.platform,arch:process.arch},bunVersion:"1.4.4",sqlite:fixtureTerminalSqlite(source,files),productVersion:'0.1.0',source:{commit:'a'.repeat(40),dirty:true},entries,files,links:[]};
  writeFileSync(join(source,'terminal-manifest.json'),JSON.stringify(manifest));
  const verified=verify(source);
  copyWindowsNativeTerminal(verified,target);

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   linkSync,
   mkdirSync,
@@ -12,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import type { CandidateDirectory, CandidateIgnoreFile } from '../../host/file-candidate-filesystem';
 import { openWindowsCandidateDirectory } from '../../host/file-candidate-windows';
 

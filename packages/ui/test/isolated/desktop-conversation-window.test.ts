@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
+import { expect, test } from '#kite-test';
 import {
   CONVERSATION_WINDOW_THRESHOLD,
   captureConversationScrollAnchor,

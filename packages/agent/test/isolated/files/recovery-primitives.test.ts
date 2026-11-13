@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -15,6 +14,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as bundle } from '../../../../../scripts/tooling/build';
+import { spawnSync as spawnProcessSync } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { buildNativeFilesFixture } from '../../../../../tests/fixtures/build-tool-environment';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
 
@@ -76,9 +79,6 @@ test('trusted byte primitives preserve binary, BOM/CRLF and full baseline withou
       'files.read',
       'files.write',
       'files.edit',
-      'files.list',
-      'files.glob',
-      'files.search',
     ]);
     const created = await f.files.restore({
       path: 'created',
@@ -238,23 +238,25 @@ test('original Workspace identity and explicit host size bound survive new primi
 test('native sync and close boundary failures distinguish zero publication, committed restore/remove unknown, and last-check drift', () => {
   const entry = new URL('../../../src/files.ts', import.meta.url).href;
   const binding = fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url));
-  const child = Bun.spawnSync(
+  const child = spawnProcessSync(
     [
       process.execPath,
+      ...testRuntimeFlags,
+      '--input-type=module',
       '--eval',
       `
-    import {mock} from 'bun:test';
+    import {mock} from '#kite-test';
     import * as fs from 'node:fs';
     import {tmpdir} from 'node:os';
     import {join} from 'node:path';
-    import {createNativeWorkspaceFileIo} from ${JSON.stringify(pathToFileURL(binding).href)};
+    import * as nativeBinding from ${JSON.stringify(pathToFileURL(binding).href)};
     const actual = {...fs};
-    const actualNative = createNativeWorkspaceFileIo;
+    const actualNative = nativeBinding.createNativeWorkspaceFileIo;
     let mode = '';
     let target = '';
     let writtenFd = -1;
     let directorySynced = false;
-    mock.module(${JSON.stringify(binding)}, () => ({createNativeWorkspaceFileIo(...args) {
+    mock.module(${JSON.stringify(binding)}, () => ({...nativeBinding,createNativeWorkspaceFileIo(...args) {
       const io = actualNative(...args);
       return {...io, sync(id) {
         const stat = io.stat(id);
@@ -296,7 +298,7 @@ test('native sync and close boundary failures distinguish zero publication, comm
     ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
-  expect(child.exitCode).toBe(0);
+  expect(child.exitCode, child.stderr.toString()).toBe(0);
   expect(JSON.parse(child.stdout.toString())).toEqual(
     [
       undefined,
@@ -321,21 +323,23 @@ test('parent creation races, access denial and unknown handles keep accurate out
   const entry = new URL('../../../src/files.ts', import.meta.url).href;
   const binding = fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url));
   const types = new URL('../../../src/storage/types.ts', import.meta.url).href;
-  const child = Bun.spawnSync(
+  const child = spawnProcessSync(
     [
       process.execPath,
+      ...testRuntimeFlags,
+      '--input-type=module',
       '--eval',
       `
-    import {mock} from 'bun:test';
+    import {mock} from '#kite-test';
     import * as fs from 'node:fs';
     import {tmpdir} from 'node:os';
     import {join} from 'node:path';
     import {AgentError} from ${JSON.stringify(types)};
-    import {createNativeWorkspaceFileIo} from ${JSON.stringify(pathToFileURL(binding).href)};
-    const actualNative = createNativeWorkspaceFileIo;
+    import * as nativeBinding from ${JSON.stringify(pathToFileURL(binding).href)};
+    const actualNative = nativeBinding.createNativeWorkspaceFileIo;
     const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'kite-parent-races-')));
     let mode = '', workspace = '', outside = '', createdCount = 0;
-    mock.module(${JSON.stringify(binding)}, () => ({createNativeWorkspaceFileIo(...args) {
+    mock.module(${JSON.stringify(binding)}, () => ({...nativeBinding,createNativeWorkspaceFileIo(...args) {
       const io = actualNative(...args);
       return {...io, openAt(parent, name, kind, strict) {
         if(kind === 'create-directory') {
@@ -418,13 +422,10 @@ test('built public byte leaf executes outside the source tree with exact restore
   try {
     const entry = fileURLToPath(new URL('../../../src/files.ts', import.meta.url));
     const built = join(root, 'files.js');
-    const build = Bun.spawnSync(
-      [process.execPath, 'build', entry, '--target=bun', '--outfile', built],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
-    expect(build.exitCode, build.stderr.toString()).toBe(0);
+    const build = await bundle({ entrypoints: [entry], target: 'node', outfile: built });
+    if (!build.success) throw new AggregateError(build.logs, 'fixture_build_failed');
     await buildNativeFilesFixture(root);
-    const child = Bun.spawnSync(
+    const child = spawnProcessSync(
       [
         process.execPath,
         '--eval',

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
@@ -14,7 +12,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectProfileBackup, type RestoreProfileBackupInput } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const repository = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -132,11 +135,11 @@ async function built(root: string) {
   for (const definition of definitions) {
     const packageRoot = join(root, 'node_modules', '@kite-ai', definition.name),
       source = join(repository, definition.workspace, definition.source);
-    const result = await Bun.build({
+    const result = await testBuild({
       entrypoints: definition.entries.map((entry) => join(source, entry)),
       root: source,
       outdir: packageRoot,
-      target: 'bun',
+      target: 'node',
       packages: 'external',
     });
     if (!result.success)
@@ -173,7 +176,7 @@ async function built(root: string) {
   return join(root, 'node_modules', '@kite-ai', 'cli', 'host', 'main.js');
 }
 async function argv(entry: string, args: string[]) {
-  const child = Bun.spawn([process.execPath, entry, ...args], {
+  const child = testSpawn([process.execPath, ...testRuntimeFlags, entry, ...args], {
     cwd: dirname(entry),
     stdout: 'pipe',
     stderr: 'pipe',

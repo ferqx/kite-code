@@ -2,18 +2,24 @@ import { lstatSync, realpathSync } from 'node:fs';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { preflightSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
-import { type ConfigureProcessHost, startupLimitBytes } from './bootstrap';
+import {
+  type ConfigureProcessHost,
+  reserveProcessStdout,
+  startupLimitBytes,
+  startupStdin,
+} from './bootstrap';
 import { bootstrapSchema } from './daemon/bootstrap';
 import { reserveDaemonEndpoint, selectDaemonEndpoint } from './daemon/endpoint';
 import { DaemonEndpointCleanupError, endpointCleanupUnknown } from './daemon/reservation';
 import { loadDaemonWebAssets } from './daemon/web-assets';
 import { type DaemonStartup, daemonPreflightSchema, daemonStartupSchema } from './daemon-startup';
-import { startDevelopmentWeb } from './development-web';
+import { startDaemonWeb } from './development-web';
 import { retainFailedProcess } from './process-failure';
 import { assembleProcessService, ProcessServiceCleanupError } from './process-service';
 import { retainWindowsPairedArtifact } from './windows-paired-artifact';
 
 export async function runDaemonProcess(options: { configure?: ConfigureProcessHost } = {}) {
+  reserveProcessStdout();
   let artifact: ReturnType<typeof retainWindowsPairedArtifact> | undefined;
   try {
     return await runDaemonProcessInner(options, (startup) => {
@@ -62,7 +68,7 @@ export async function runDaemonProcess(options: { configure?: ConfigureProcessHo
 }
 
 async function readStartup(): Promise<DaemonStartup> {
-  const reader = Bun.stdin.stream().getReader();
+  const reader = startupStdin().getReader();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let text = '',
     bytes = 0;
@@ -140,7 +146,7 @@ async function runDaemonProcessInner(
     workspace: input.workspace,
   });
   let service: Awaited<ReturnType<typeof assembleProcessService>> | undefined;
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDaemonWeb>> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
   let signalled = false;
   let ready = false;
@@ -176,7 +182,7 @@ async function runDaemonProcessInner(
       bootstrap: service.bootstrap,
     });
     await client.connect();
-    gateway = startDevelopmentWeb({ admittedClient: client, assets });
+    gateway = await startDaemonWeb({ admittedClient: client, assets });
     await owner.listen({
       httpEndpoint: service.endpoint,
       token: startup.token,
@@ -223,7 +229,10 @@ async function runDaemonProcessInner(
   }
 }
 
-if (import.meta.main) {
+const direct =
+  Reflect.get(import.meta, 'main') === true &&
+  /(?:^|[\\/])daemon-main\.(?:[cm]?js|ts)$/.test(process.argv[1] ?? '');
+if (direct) {
   try {
     await runDaemonProcess();
   } catch {

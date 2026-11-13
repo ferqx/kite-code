@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { PublicView } from '@kite-ai/client';
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { expect, test } from '#kite-test';
 import { PublicViewCard, projectPublicView } from '../src';
 import { Button } from '../src/desktop/components/ui/button';
 

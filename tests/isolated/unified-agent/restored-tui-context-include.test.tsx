@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,13 +13,14 @@ import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { TuiController, type TuiManagementIntent, type TuiPort, TuiSession } from '@kite-ai/ui/tui';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { getCompleteContext, includeHistoricalResult } from '../../../apps/cli/src/context';
 
 async function settle(check: () => boolean) {
   const deadline = Date.now() + 5000;
   while (!check()) {
     if (Date.now() >= deadline) throw Error('restored_tui_include_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 
@@ -180,7 +181,7 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
     let job = await original.getExecution(jobId);
     while (job.status !== 'succeeded') {
       if (Date.now() >= deadline) throw Error('original_job_not_complete');
-      await Bun.sleep(5);
+      await fixtureDelay(5);
       job = await original.getExecution(jobId);
     }
     const initial = await original.getContext('session', { storeId: originalStoreId });
@@ -233,7 +234,7 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
         methods.push(init?.method ?? (url instanceof Request ? url.method : 'GET'));
         return originalFetch(url, init);
       },
-      { preconnect: originalFetch.preconnect },
+      {},
     );
     expect(current.serverInfo?.storeId).toBe(restored.storeId);
     expect(await current.getExecution(jobId)).toEqual(job);
@@ -295,12 +296,12 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
       controller = new TuiController(portFor(actual));
       await controller.select('session');
       app = render(<TuiSession testDiagnostics controller={controller} />);
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       controller.setDraft('/context');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       app.stdin.write('\r');
       await settle(() => controller!.state.panel === 'context' && !!controller!.state.context);
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     };
     await mountContext(current);
     expect(controller!.state.context!.selection).toEqual(rewound.selection);
@@ -314,7 +315,7 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
     expect(index).toBeGreaterThanOrEqual(0);
     for (let arrow = 0; arrow < index; arrow++) {
       app!.stdin.write('\u001b[B');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     }
     app!.stdin.write('i');
     await settle(
@@ -384,7 +385,7 @@ test('restored TUI Context explicitly includes the original suppressed Job and t
     }
     await settle(() => !controller!.state.stale && !!controller!.state.snapshot);
     controller!.setDraft('Use the explicitly included saved result');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app!.stdin.write('\r');
     await settle(() => submissions.length === 1);
     await currentRuntime.waitForCommand(submissions[0]!.commandId, { timeoutMs: 5000 });

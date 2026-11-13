@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   parseUnifiedMcpSmoke,
   runUnifiedMcpLiveSmoke,
@@ -10,6 +10,8 @@ import {
   parseSessionLogAclArgs,
   runUnifiedSessionLogAcl,
 } from '../../../scripts/runtime/unified-session-log-acl';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
 test('MCP live gate is closed by default and is not network qualification', async () => {
@@ -50,7 +52,7 @@ test('actual native private SQLite session log and cold observer preserve origin
     expect(evidence.qualified).toBe(true);
     if (evidence.status !== 'passed' || !evidence.sqlite || !evidence.objectIds || !evidence.checks)
       throw Error(JSON.stringify(evidence));
-    expect(evidence.driver).toBe('bun:sqlite');
+    expect(evidence.driver).toBe('node-api:sqlite');
     expect(evidence.sqlite.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(evidence.sqlite.sourceId.length).toBeGreaterThan(10);
     expect(evidence.objectIds).toContain('original-work');
@@ -79,12 +81,12 @@ test('actual native private SQLite session log and cold observer preserve origin
 
 // The two new scripts must resolve the emitted public package graph, including
 // SQLite Worker/engine assets, rather than falling back to repository TypeScript.
-test('source-free runtime smokes use the candidate Bun and actual public SQLite assets', async () => {
+test('source-free runtime smokes use the candidate Node and actual public SQLite assets', async () => {
   const { buildTerminalBundle } = await import('../../../scripts/release/terminal-bundle');
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-smokes-built-')));
-  const repository = resolve(import.meta.dir, '../../..');
+  const repository = resolve(import.meta.dirname, '../../..');
   async function child(argv: string[], cwd: string, home: string, expectedCode = 0) {
-    const process = Bun.spawn(argv, {
+    const process = spawnFixtureProcess(argv, {
       cwd,
       env: { HOME: home, PATH: globalThis.process.env.PATH ?? '', KITE_RUN_LIVE_MCP_SMOKE: '0' },
       stdout: 'pipe',
@@ -122,21 +124,22 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
       process.platform === 'win32' ? 'junction' : 'dir',
     );
     await child(
-      [
-        process.execPath,
-        'build',
+      testNodeCommand(join(repository, 'scripts/tooling/build-command.ts'), [
         join(repository, 'scripts/runtime/unified-session-log-acl.ts'),
         join(repository, 'scripts/runtime/unified-mcp-live-smoke.ts'),
-        '--target=bun',
+        '--target=node',
         '--packages=external',
         `--outdir=${app}`,
-      ],
+      ]),
       repository,
       home,
     );
     const acl = JSON.parse(
       await child(
-        [join(candidate.root, 'runtime/bun'), join(app, 'unified-session-log-acl.js')],
+        [
+          join(candidate.root, candidate.manifest.entries.runtime),
+          join(app, 'unified-session-log-acl.js'),
+        ],
         app,
         home,
         process.platform === 'win32' && process.arch !== 'x64' ? 1 : 0,
@@ -160,7 +163,10 @@ test('source-free runtime smokes use the candidate Bun and actual public SQLite 
     }
     const mcp = JSON.parse(
       await child(
-        [join(candidate.root, 'runtime/bun'), join(app, 'unified-mcp-live-smoke.js')],
+        [
+          join(candidate.root, candidate.manifest.entries.runtime),
+          join(app, 'unified-mcp-live-smoke.js'),
+        ],
         app,
         home,
       ),
@@ -179,13 +185,11 @@ test('actual entrypoint invalid argv exits nonzero before creating evidence or p
   try {
     for (const script of ['unified-mcp-live-smoke.ts', 'unified-session-log-acl.ts']) {
       const output = join(root, `${script}.json`);
-      const owned = Bun.spawn(
-        [
-          process.execPath,
-          resolve(import.meta.dir, '../../../scripts/runtime', script),
+      const owned = spawnFixtureProcess(
+        testNodeCommand(resolve(import.meta.dirname, '../../../scripts/runtime', script), [
           `--output=${output}`,
           '--force',
-        ],
+        ]),
         {
           cwd: root,
           env: {

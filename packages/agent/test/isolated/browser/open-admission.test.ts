@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import type { ExtensionRecordWrite, ToolContext, ToolResult } from '../../../src/extensions';
 import { type BrowserController, createBrowserExtension } from '../../../src/tools/browser';
 
@@ -49,7 +50,7 @@ test('an unanswered explicit page question creates no browser Job; acceptance co
     return question;
   });
   const result = f.tool.execute(input, f.context);
-  await Bun.sleep(0);
+  await sleepTimer(0);
   expect(questions).toBe(1);
   expect(f.requests).toHaveLength(0);
   accept(undefined);

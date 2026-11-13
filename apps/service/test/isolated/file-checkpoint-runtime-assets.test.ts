@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -20,6 +19,7 @@ import { createWorkspaceFiles } from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import type { ExecutionGroupSafety, ExtensionRecord, Json } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { createDefaultFileCheckpointConfiguration } from '../../src/file-checkpoint-configuration';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');

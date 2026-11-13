@@ -1,0 +1,9 @@
+env = false
+
+[install]
+linker = "isolated"
+globalStore = false
+auto = "disable"
+
+[run]
+bun = false

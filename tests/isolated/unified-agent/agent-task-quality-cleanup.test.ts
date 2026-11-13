@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 // Each process owns its mocks, real SQLite worker and Files resources. No user
 // configuration, credentials or Provider are consulted by the replaced fixture.
 const probe = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import * as fs from 'node:fs';
 import { basename } from 'node:path';
 import * as agent from '@kite-ai/agent';
@@ -83,7 +84,7 @@ for (const mode of [
       // Resolve fixture URLs relative to this file, keeping the subprocess mock
       // entirely outside the live runner and its product-facing configuration.
       const script = probe.replaceAll('import.meta.url', JSON.stringify(import.meta.url));
-      const child = Bun.spawn([process.execPath, '--eval', script], {
+      const child = spawnFixtureProcess([process.execPath, '--eval', script], {
         cwd: process.cwd(),
         env: {
           ...process.env,

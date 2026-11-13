@@ -1,11 +1,14 @@
-import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 for (const mode of ['workspace', 'workspace-closing', 'profile'])
   test(`actual ${mode} unlock failure rejects close and preserves a successful release retry`, async () => {
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./workspace-release-fault.fixture.ts', import.meta.url)),
         mode,
       ],

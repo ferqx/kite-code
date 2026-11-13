@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type {
   Command,
   FollowUpCommandRequest,
@@ -7,6 +7,7 @@ import type {
   SteerCommandRequest,
 } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 import { isFixedTuiCommandName, parseTuiCommand } from '../../src/tui/commands';
 
@@ -126,7 +127,7 @@ test('empty slash and ShiftTab toggle only original scope draft with zero comman
   expect(f.controller.state.planning).toBe(true);
   const ui = render(<TuiSession controller={f.controller} />);
   ui.stdin.write('\u001b[Z');
-  await Bun.sleep(10);
+  await fixtureDelay(10);
   expect(f.controller.state.planning).toBe(false);
   expect(f.posts).toHaveLength(0);
   ui.unmount();

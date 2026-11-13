@@ -1,12 +1,15 @@
-import { expect, spyOn, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
+import undici from 'undici/index.js';
+import { expect, spyOn, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
@@ -32,7 +35,7 @@ async function namingSettled(store: Store, sessionId: string) {
       return;
     if (Date.now() >= deadline)
       throw new Error(`naming did not settle: ${JSON.stringify({ attempt, job })}`);
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -69,7 +72,7 @@ for (const policy of [
         policy === 'title-body' ? `${' '.repeat(4096)}“${title}”${' '.repeat(4096)}` : `“${title}”`;
       const original = `${' \r\n'.repeat(3000)}请帮我调整新会话的   自动命名，\n\n让列表里的名称能概括任务内容。\t `;
       const titleInput = '请帮我调整新会话的 自动命名， 让列表里的名称能概括任务内容。';
-      const provider = Bun.serve({
+      const provider = await fixtureServe({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -168,7 +171,7 @@ for (const policy of [
           requiredCapabilities: ['commands', 'sessions'],
         },
       });
-      const closedSessions = spyOn(Bun.FetchSession.prototype, 'close');
+      const closedPools = spyOn(undici.Agent.prototype, 'close');
       try {
         await client.connect();
         await client.createSession({
@@ -342,10 +345,15 @@ for (const policy of [
         try {
           await service.close();
           // The title's model-only binding and the business Run each own a pool.
-          expect(closedSessions).toHaveBeenCalledTimes(requests.length);
+          // Undici's Promise overload calls close again with an internal callback.
+          const ownedClosures = closedPools.mock.contexts.filter(
+            (_, index) => closedPools.mock.calls[index]!.length === 0,
+          );
+          expect(ownedClosures).toHaveLength(requests.length);
+          expect(new Set(ownedClosures).size).toBe(requests.length);
         } finally {
           titleAdmission.release.resolve();
-          closedSessions.mockRestore();
+          closedPools.mockRestore();
           provider.stop(true);
           rmSync(root, { recursive: true, force: true });
         }
@@ -362,7 +370,7 @@ test.each([
   const original = ` \r\n“请核对这段🙂原始引用正文，不能擅自修改任务关系。”\t `;
   const fallback = '“请核对这段🙂原始引';
   const requests: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -475,7 +483,7 @@ test.each([
       )
         break;
       if (Date.now() >= deadline) throw Error('quoted_first_input_did_not_settle');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     await namingSettled(store, 's');
     const command = await client.getCommand(input.commandId);

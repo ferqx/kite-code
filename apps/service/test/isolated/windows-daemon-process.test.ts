@@ -1,15 +1,17 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { retainWindowsProcess } from '../../src/daemon/windows-process';
 
 test('lazy Windows process observer retains exact HANDLE birth, bounded complete census and failed close', () => {
   const module = fileURLToPath(new URL('../../src/daemon/windows-process.ts', import.meta.url));
   const code = `
-import * as nativeFFI from 'bun:ffi';
-import { mock } from 'bun:test';
+import * as nativeFFI from '@kite-ai/agent/runtime-ffi';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-assert.equal(typeof require('bun:ffi').dlopen, 'function');
+assert.equal(typeof require('@kite-ai/agent/runtime-ffi').dlopen, 'function');
 Object.defineProperty(process, 'platform', { value: 'win32' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
 let loads = 0, nextHandle = 1n, closeFailure, error = 18, rows = [0, 7, 41], incomplete = false;
@@ -33,7 +35,7 @@ const symbols = {
    new DataView(bytes.buffer).setUint32(8, snapshot.rows[snapshot.index++], true); return true; },
  GetLastError() { return error; },
 };
-mock.module('bun:ffi', () => ({ ...nativeFFI, ptr: value => value,
+mock.module('@kite-ai/agent/runtime-ffi', () => ({ ...nativeFFI, ptr: value => value,
  dlopen(name) { assert.equal(name, 'kernel32.dll'); loads++; return { symbols, close() {} }; },
 }));
 const { retainWindowsProcess, readWindowsProcessStartIdentity, inspectWindowsProcess } = await import(${JSON.stringify(module)});
@@ -68,11 +70,15 @@ assert.equal(retainWindowsProcess(-1).inspect(), 'uncertain');
 assert.equal(handles.size, 0);
 console.log('windows_process_contract_passed');
 `;
-  const result = spawnSync(process.execPath, ['-e', code], {
-    encoding: 'utf8',
-    timeout: 5000,
-    env: { ...process.env, BUN_BE_BUN: undefined },
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env, BUN_BE_BUN: undefined },
+    },
+  );
   expect(result.error).toBeUndefined();
   expect(result.status).toBe(0);
   expect(result.stderr).toBe('');
@@ -83,12 +89,21 @@ const windowsTest = process.platform === 'win32' && process.arch === 'x64' ? tes
 windowsTest(
   'actual Windows child original HANDLE reports native birth and signaled exit after stdin EOF',
   async () => {
-    const child = Bun.spawn([process.execPath, '-e', 'await Bun.stdin.text()'], {
-      stdin: 'pipe',
-      stdout: 'ignore',
-      stderr: 'ignore',
-      env: { ...process.env, BUN_BE_BUN: undefined },
-    });
+    const child = spawnProcess(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        '--input-type=module-typescript',
+        '-e',
+        'for await (const _ of process.stdin) {}',
+      ],
+      {
+        stdin: 'pipe',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        env: { ...process.env, BUN_BE_BUN: undefined },
+      },
+    );
     const owner = retainWindowsProcess(child.pid);
     try {
       expect(owner.identity).toMatch(/^windows:filetime:[1-9][0-9]+$/);

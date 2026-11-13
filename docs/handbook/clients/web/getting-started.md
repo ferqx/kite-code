@@ -5,14 +5,13 @@ Web 是本机浏览器中的只读入口，用于查看工作区、已有会话�
 
 ## 打开页面
 
-从源码运行时，在仓库根目录执行：
+从源码运行时，先按[本地开发](../../../development/local-development.md)安装依赖并构建 Terminal 候选，然后在仓库根目录执行：
 
 ```sh
-bun install
 bun run server
 ```
 
-该命令构建 Web 资源、显式启动本机 App Server daemon，并打印根地址。在浏览器打开该地址。
+该命令使用候选内的 Web 资源，显式启动本机 App Server daemon 并打印根地址。在浏览器打开该地址。
 
 已有匹配服务时，`bun run agent web` 只打印已运行服务的地址，不隐式启动或升级进程。安装版使用对应的 `kite server start`、`kite web`。详细操作见[服务生命周期](../../server/lifecycle.md)。
 

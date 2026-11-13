@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +13,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createConfigurationManagement } from '../../src/configuration-management';
 import { schemas } from '../../src/http/schema';
 import { startService } from '../../src/index';

@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import {
   desktopContentSecurityPolicy,
   parseDesktopDevelopment,
@@ -82,7 +83,7 @@ test('parent reload protocol rejects arbitrary paths and serializes the actual r
     ok: false,
   });
   finish!();
-  await Bun.sleep(1);
+  await fixtureDelay(1);
   expect(JSON.parse(replies[1]!)).toEqual({ kind: 'service.reloaded', id: request.id, ok: true });
   stop();
   stream.write(frame);

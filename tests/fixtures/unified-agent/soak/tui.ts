@@ -1,17 +1,21 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { CLIServiceArtifact } from '@kite-ai/cli/host';
+import { spawnNodePairedChild } from '@kite-ai/service/node-process';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 import type {
   CaseEvidence,
   ResourceObservation,
 } from '../../../../scripts/runtime/unified-soak-cases';
+import { startLoopbackHttpServer } from '../../loopback-http-server';
 import { loopbackModelEnvironment } from '../../loopback-model-environment';
-import { privateDirectory } from '../../test-filesystem';
 import { check } from './common';
 export async function runTuiCase(
   root: string,
@@ -41,25 +45,19 @@ export async function runTuiCase(
   const workspace = join(root, 'workspace');
   privateDirectory(workspace);
   let calls = 0;
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    async fetch(request) {
-      await request.json();
-      calls++;
-      const data = {
-        id: 'owned',
-        object: 'chat.completion.chunk',
-        created: 1,
-        model: 'fixed',
-        choices: [
-          { index: 0, delta: { content: 'OWNED_SOAK_PTY_COMPLETE' }, finish_reason: 'stop' },
-        ],
-      };
-      return new Response(`data: ${JSON.stringify(data)}\n\ndata: [DONE]\n\n`, {
-        headers: { 'content-type': 'text/event-stream' },
-      });
-    },
+  const server = await startLoopbackHttpServer(async (request) => {
+    await request.json();
+    calls++;
+    const data = {
+      id: 'owned',
+      object: 'chat.completion.chunk',
+      created: 1,
+      model: 'fixed',
+      choices: [{ index: 0, delta: { content: 'OWNED_SOAK_PTY_COMPLETE' }, finish_reason: 'stop' }],
+    };
+    return new Response(`data: ${JSON.stringify(data)}\n\ndata: [DONE]\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    });
   });
   Object.assign(userConfiguration.homeEnvironment, loopbackModelEnvironment(server.url));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'soak-tui' });
@@ -79,10 +77,15 @@ export async function runTuiCase(
     }),
     { mode: 0o600 },
   );
-  let child: Bun.Subprocess | undefined;
+  let child: ChildProcess | undefined;
+  let exited: Promise<number> | undefined;
   try {
     const seed = await launchPairedService({
-      spawnChild: userConfiguration.spawnChild,
+      spawnChild(command, { env }) {
+        return spawnNodePairedChild(command, {
+          env: { ...env, ...userConfiguration.homeEnvironment },
+        });
+      },
       profile,
       ...artifact,
       instanceId: randomUUID(),
@@ -125,30 +128,23 @@ export async function runTuiCase(
     } finally {
       await seed.close();
     }
-    const entry = join(root, 'observed-tui.ts'),
-      main = join(root, 'observed-tui.js');
+    const main = join(root, 'observed-tui.mjs');
     const requestPath = join(root, 'sample-request.json'),
       responsePath = join(root, 'sample-response.json');
     const instrumentation = `import {readFileSync,writeFileSync} from 'node:fs';
 import {runTUIProcess} from '@kite-ai/cli/tui-main';
-import {sampleSoakResources} from ${JSON.stringify(samplerModule)};
+import {sampleSoakResources} from ${JSON.stringify(pathToFileURL(samplerModule).href)};
+if(typeof globalThis.gc!=='function')throw Error('tui_node_gc_required');
 let seen='';
 const timer=setInterval(()=>{let request;try{request=JSON.parse(readFileSync(${JSON.stringify(requestPath)},'utf8'));}catch{return;}
-if(typeof request.key!=='string'||request.key===seen)return;seen=request.key;Bun.gc(true);
+if(typeof request.key!=='string'||request.key===seen)return;seen=request.key;globalThis.gc();
 writeFileSync(${JSON.stringify(responsePath)},JSON.stringify({key:seen,sample:sampleSoakResources()}),{mode:0o600});},5);
 try { process.exitCode=await runTUIProcess(${JSON.stringify({ argv: ['--thread', 's'], testDiagnostics: true, artifact, dataRoot: profile.dataRoot, profile: profile.profile, cwd: workspace })}); }
 finally { clearInterval(timer); }`;
-    writeFileSync(entry, instrumentation, { mode: 0o600 });
-    const built = await Bun.build({
-      entrypoints: [entry],
-      target: 'bun',
-      packages: 'external',
-      outdir: root,
-    });
-    if (!built.success) throw Error('tui_instrumentation_build_failed');
+    writeFileSync(main, instrumentation, { mode: 0o600 });
     const python = `import os,pty,subprocess,select,time,fcntl,termios,struct,json,re
 m,s=pty.openpty();fcntl.ioctl(s,termios.TIOCSWINSZ,struct.pack('HHHH',24,100,0,0))
-p=subprocess.Popen([${JSON.stringify(artifact.executable)},${JSON.stringify(main)}],stdin=s,stdout=s,stderr=s,start_new_session=True);os.close(s);b=b'';points=[]
+p=subprocess.Popen([${JSON.stringify(artifact.executable)},'--no-global-search-paths','--expose-gc',${JSON.stringify(main)}],stdin=s,stdout=s,stderr=s,start_new_session=True);os.close(s);b=b'';points=[]
 def wait(text):
  global b
  deadline=time.monotonic()+60
@@ -183,18 +179,23 @@ finally:
  if p.poll() is None:p.kill();p.wait(timeout=5)
  os.close(m)
 `;
-    child = Bun.spawn(['python3', '-c', python], {
+    const controller = spawn('python3', ['-c', python], {
       cwd: root,
-      stdout: 'pipe',
-      stderr: 'pipe',
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { PATH: process.env.PATH ?? '', ...userConfiguration.homeEnvironment, TMPDIR: root },
     });
-    const stdout = new Response(child.stdout as ReadableStream<Uint8Array>).text(),
-      stderr = new Response(child.stderr as ReadableStream<Uint8Array>).text();
-    const exit = await child.exited;
-    const error = await stderr;
+    child = controller;
+    exited = new Promise((resolve, reject) => {
+      controller.once('error', reject);
+      controller.once('close', (code) => resolve(code ?? 1));
+    });
+    const [exit, stdout, error] = await Promise.all([
+      exited,
+      text(controller.stdout),
+      text(controller.stderr),
+    ]);
     if (exit !== 0) throw Error(`owned_pty_failed:${error.slice(-2000)}`);
-    const facts = JSON.parse(await stdout) as {
+    const facts = JSON.parse(stdout) as {
       pty: boolean;
       input: boolean;
       exit: number;
@@ -230,11 +231,11 @@ finally:
     e.status = 'failed';
     e.unavailable.push(error instanceof Error ? error.message : 'tui_failed');
   } finally {
-    if (child?.exitCode === null) {
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
-      await child.exited;
+      await exited;
     }
-    server.stop(true);
+    await server.close();
     e.durationMs = performance.now() - start;
     e.workloadDurationMs = e.durationMs;
   }

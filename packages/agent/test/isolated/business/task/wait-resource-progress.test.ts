@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import type { Extension, OperationRef } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
@@ -186,7 +187,7 @@ test('parent and direct child waits release the Model slot while a controlled Jo
       const result = await read();
       if (result !== undefined) return result;
       if (Date.now() >= deadline) throw Error('original_wait_resource_boundary_not_reached');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   };
   try {

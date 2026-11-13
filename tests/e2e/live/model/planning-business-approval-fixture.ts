@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -14,6 +15,7 @@ import type { ExecutionRecord, InteractionRecord, SessionRecord } from '@kite-ai
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../../../apps/service/src';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { readLiveExecutionDirectory } from './approval-execution-fixture';
 import { createDefaultApprovalObservation } from './approval-feedback-fixture';
 import { createLivePermissionHost } from './collaboration-permissions.live';
@@ -409,7 +411,7 @@ export async function runPlanningBusinessCase(options: {
           row.status === 'succeeded',
       );
       // Preserve the actual failed Tool receipt in the evidence instead of
-      // throwing from Bun's test-provider callback before the owner can close.
+      // throwing from the test-provider callback before the owner can close.
       if (!operation) return null;
       assert(sessions.length >= 1);
       return {
@@ -428,7 +430,7 @@ export async function runPlanningBusinessCase(options: {
   }
   const provider =
     options.provider === 'fixed-loopback'
-      ? Bun.serve({
+      ? await serveFixture({
           hostname: '127.0.0.1',
           port: 0,
           async fetch(request) {
@@ -864,7 +866,7 @@ export async function runPlanningBusinessCase(options: {
         verifyPlanningBusinessEvidence(completed);
         break;
       }
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
   } catch (error) {
     failure = error;
@@ -887,7 +889,7 @@ export async function runPlanningBusinessCase(options: {
     }
     cleanupConfirmed = cleanupFailures.length === 0;
     restore?.();
-    provider?.stop(true);
+    await provider?.stop(true);
   }
   let cold: unknown = null;
   if (cleanupConfirmed && evidence) {

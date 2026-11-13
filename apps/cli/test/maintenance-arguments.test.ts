@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { parseCLIArguments } from '../src/arguments';
 
 test('offline maintenance arguments require explicit profile, selected backup, observed identities and data-loss flag', () => {

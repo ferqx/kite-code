@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { CLIServiceArtifact } from '../../host';
 
-const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'), 'utf8')) as {
+const settings = JSON.parse(readFileSync(join(import.meta.dirname, 'settings.json'), 'utf8')) as {
   root: string;
   workspace: string;
   dataRoot: string;
@@ -89,32 +89,29 @@ if (!process.stdin.isTTY) {
 } else {
   const { runTUIHost } = await import('@kite-ai/cli/tui-host');
   const actual = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      const options = args[1],
-        url = new URL(String(args[0]));
-      log('ui-http.jsonl', {
-        method: options?.method ?? 'GET',
-        path: url.pathname,
-        ...(typeof options?.body === 'string' ? { body: JSON.parse(options.body) } : {}),
-      });
-      const response = await actual(...args);
-      if (url.pathname === '/v1/server' && response.ok) {
-        const authorization = new Headers(options?.headers).get('authorization');
-        if (!authorization?.startsWith('Bearer ')) throw Error('owned_tools_observer_missing');
-        writeFileSync(
-          join(settings.root, 'observer-private.json'),
-          JSON.stringify({
-            endpoint: url.origin,
-            token: authorization.slice(7),
-          }),
-          { mode: 0o600 },
-        );
-      }
-      return response;
-    },
-    { preconnect: actual.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const options = args[1],
+      url = new URL(String(args[0]));
+    log('ui-http.jsonl', {
+      method: options?.method ?? 'GET',
+      path: url.pathname,
+      ...(typeof options?.body === 'string' ? { body: JSON.parse(options.body) } : {}),
+    });
+    const response = await actual(...args);
+    if (url.pathname === '/v1/server' && response.ok) {
+      const authorization = new Headers(options?.headers).get('authorization');
+      if (!authorization?.startsWith('Bearer ')) throw Error('owned_tools_observer_missing');
+      writeFileSync(
+        join(settings.root, 'observer-private.json'),
+        JSON.stringify({
+          endpoint: url.origin,
+          token: authorization.slice(7),
+        }),
+        { mode: 0o600 },
+      );
+    }
+    return response;
+  }, {});
   const exit = new AbortController();
   process.once('SIGTERM', () => exit.abort());
   process.exitCode = await runTUIHost({

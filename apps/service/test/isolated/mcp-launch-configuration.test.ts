@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { resolveMcpLaunchEntry } from '../../src/mcp-launch-configuration';
 
 test('a named launcher resolves only through explicit absolute PATH directories and keeps argv separate', () => {

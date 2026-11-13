@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError, type Message, type SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createTuiHistoryReader } from '../host/tui-history';
 
 const message = (id: string, seq: string, content = id) =>

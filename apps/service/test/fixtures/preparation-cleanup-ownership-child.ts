@@ -1,12 +1,13 @@
-import { mock } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentRuntime } from '@kite-ai/agent';
 import * as filesModule from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { mock } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { createPermissionManagement } from '../../src/permission-management';
@@ -141,7 +142,7 @@ try {
     const command = await client.getCommand('work');
     if (command?.status === 'rejected') break;
     if (Date.now() >= deadline) throw Error('original preparation fixture deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   if (!runtime || !originalFiles) throw Error('original preparation owner missing');
   const storedView = await runtime.getView('s');

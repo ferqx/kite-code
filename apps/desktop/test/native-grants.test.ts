@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import {
   type AgentClient,
   ClientError,
   type PermissionGrantPage,
   type PermissionMutation,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativePermissionGrants } from '../electron/permission-grants';
 
 const page = (sessionId: string, revision = '4'): PermissionGrantPage => ({

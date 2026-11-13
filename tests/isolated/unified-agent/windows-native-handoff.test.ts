@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 
 test('Windows Native certificate binds original creator and actual child, retaining unknown pipe closes', () => {
   const leaf = fileURLToPath(
@@ -16,8 +17,7 @@ test('Windows Native certificate binds original creator and actual child, retain
     new URL('../../../apps/service/src/daemon/windows-process.ts', import.meta.url),
   );
   const code = `
-import {mock} from 'bun:test';import assert from 'node:assert/strict';
-assert.equal(typeof require('bun:ffi').dlopen,'function');
+import {mock} from '#kite-test';import assert from 'node:assert/strict';
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
 let next=1n,lastError=0,serverPID=77,peerPID=777,certPID=123,certBirth=100n,failClose,closedParents=0,closedChildren=0,loaded=0;
 let connected=false,cancelled=false,readOffset=0,processAlive=true,blockConnect=false;
@@ -42,7 +42,7 @@ GetNamedPipeClientProcessId(h,pid){assert.equal(handles.get(h),'pipe');pid[0]=pe
 DisconnectNamedPipe(h){assert.equal(handles.get(h),'pipe');calls.push('disconnect');return true;},
 CloseHandle(h){assert.ok(handles.has(h));if(h===failClose)return false;handles.delete(h);return true;}
 };
-mock.module('bun:ffi',()=>({ptr:value=>value,dlopen(name){assert.equal(name,'kernel32.dll');loaded++;return {symbols};}}));
+mock.module('@kite-ai/agent/runtime-ffi',()=>({ptr:value=>value,dlopen(name){assert.equal(name,'kernel32.dll');loaded++;return {symbols};}}));
 const {retainWindowsNativeLaunchCertificate,createWindowsNativeMainHandoff}=await import(${JSON.stringify(leaf)});
 assert.equal(loaded,0);
 const pipe=String.raw\`\\\\.\\pipe\\kite-native-launch-0123456789abcdef0123456789abcdef\`;
@@ -59,7 +59,17 @@ blockConnect=true;const early=createWindowsNativeMainHandoff();await early.close
 peerPID=778;const foreign=createWindowsNativeMainHandoff();foreign.bind(777);await new Promise(r=>setTimeout(r,30));await assert.rejects(foreign.close(),/close_unknown/);assert.equal(handles.size,0);peerPID=777;
 const before=closedParents;failClose=next;await assert.rejects(retainWindowsNativeLaunchCertificate('C:\\\\Original','desktop',pipe),/close_unknown/);assert.equal(closedParents,before);assert.equal(handles.get(failClose),'pipe');
 `;
-  const child = spawnSync(process.execPath, ['--eval', code], { encoding: 'utf8', timeout: 4000 });
+  const child = spawnSync(
+    process.execPath,
+    [
+      ...testRuntimeFlags,
+      '--disable-warning=ExperimentalWarning',
+      '--input-type=module',
+      '--eval',
+      code,
+    ],
+    { encoding: 'utf8', timeout: 4000 },
+  );
   if (child.status !== 0)
     throw Error(
       `Windows Native handoff mock failed: ${child.error?.message ?? ''}\n${child.stderr}`,

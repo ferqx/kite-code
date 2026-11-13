@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ToolContext } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { createConfiguredSkillSource } from '../../src/skill-source';

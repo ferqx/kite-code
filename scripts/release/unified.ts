@@ -7,7 +7,7 @@ import {
   validateReleaseSourceArguments,
 } from './release-arguments';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 const options = {
   build: [
     'product',
@@ -16,10 +16,18 @@ const options = {
     'terminal',
     'electron',
     'sqlite-library',
+    'node-distribution',
     'desktop-only',
   ],
-  'macos-dmg': ['directory', 'native', 'electron', 'signing-identity', 'notary-profile'],
-  'windows-setup': ['directory', 'zstd-archive', 'bun', 'electron'],
+  'macos-dmg': [
+    'directory',
+    'native',
+    'electron',
+    'node-distribution',
+    'signing-identity',
+    'notary-profile',
+  ],
+  'windows-setup': ['directory', 'zstd-archive', 'node', 'electron'],
   pack: ['product', 'directory', 'archive'],
   unpack: ['product', 'directory', 'archive', 'sha256'],
   verify: ['product', 'directory', 'source-commit', 'clean-source'],
@@ -32,21 +40,24 @@ const options = {
 } as const;
 const help = `Unified Agent release tooling
   build [--product terminal|native] [--directory <new-directory>] [--archive <new-archive>]
-  macos-dmg [--directory <new-directory>] [--native <verified-native> | --electron <installed-dist>]
+  macos-dmg [--directory <new-directory>] [--native <verified-desktop-node-candidate> |
+            [--electron <installed-dist>] [--node-distribution <pinned Node archive>]]
             [--signing-identity <Developer-ID-SHA1> --notary-profile <keychain-profile>]
   windows-setup [--directory <new-directory>] [--zstd-archive <zstd-1.5.7.tar.gz>]
-                [--bun <private-bun.exe>] [--electron <private-electron-dist>]
+                [--node <private-node.exe>] [--electron <private-electron-dist>]
   verify|smoke [--product terminal|native] [--directory <candidate>]
   pack [--product terminal|native] [--directory <candidate>] --archive <new-archive>
   unpack [--product terminal|native] --archive <archive> --sha256 <SHA256> --directory <new-directory>
   install [--product terminal|native] --archive <archive> --sha256 <SHA256> --prefix <managed-directory> [--cli-prefix <independent-terminal>]
   rollback|uninstall [--product terminal|native] --prefix <managed-directory>
 Default product: terminal. Build destinations: dist/unified-terminal and dist/unified-native.
-Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
+Archive compression: .tar.zst for Zstandard or .tar.gz for gzip. For the macOS Node Native installer, use .zip.
 Native build additionally accepts --terminal <verified-terminal> and --electron <installed-dist>.
 Native defaults to the desktop runtime on macOS arm64 and Windows x64; --terminal selects a complete Terminal.
 Windows x64 desktop installer: bun run release:windows-setup.
-Terminal build accepts --sqlite-library <reviewed macOS library>; the selected library is copied into the bundle.
+Prepare build inputs with bun run prepare:node-inputs.
+Terminal build accepts --sqlite-library <reviewed library>; the selected library is copied into the bundle.
+Terminal and desktop-only Native builds accept --node-distribution <pinned Node archive>.
 Verify additionally accepts --source-commit <40-hex-commit> and --clean-source true.
 Native register-cli --prefix <desktop> --cli-prefix <terminal>; unregister-cli --prefix <desktop>.
 Checksums establish integrity, not publisher authenticity. Profiles and legacy data are preserved.
@@ -112,6 +123,7 @@ export async function runUnifiedRelease(
       destination: directory,
       repositoryRoot: root,
       ...(values['sqlite-library'] ? { sqliteLibrary: values['sqlite-library'] } : {}),
+      ...(values['node-distribution'] ? { nodeDistribution: values['node-distribution'] } : {}),
     });
     if (values.archive) {
       const { packTerminalBundle } = await import('./terminal-archive');

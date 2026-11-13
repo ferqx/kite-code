@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { TrajectorySnapshot } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import {
   initialTrajectoryViewState,
   trajectoryViewStateKey,

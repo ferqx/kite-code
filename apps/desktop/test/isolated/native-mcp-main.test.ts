@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -11,6 +11,8 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { type AgentClient, createClient, type Json } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createPermissionManagement } from '../../../service/src/permission-management';
 import { NativeMcpSettings } from '../../electron/mcp-settings';
@@ -32,7 +34,7 @@ async function fixture() {
     gets = 0,
     queries = 0,
     drop = false;
-  const remote = Bun.serve({
+  const remote = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -348,7 +350,7 @@ async function settle(
       );
       throw Error(`native_mcp_settle_deadline:${JSON.stringify(result)}`);
     }
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 async function operate(

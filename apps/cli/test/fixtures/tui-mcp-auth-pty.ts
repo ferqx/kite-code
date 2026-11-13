@@ -5,7 +5,7 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { CLIServiceArtifact } from '../../host';
 
-const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'), 'utf8')) as {
+const settings = JSON.parse(readFileSync(join(import.meta.dirname, 'settings.json'), 'utf8')) as {
   root: string;
   workspace: string;
   dataRoot: string;
@@ -103,50 +103,46 @@ if (!process.stdin.isTTY) {
 } else {
   const { runTUIHost } = await import('@kite-ai/cli/tui-host');
   const original = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      const options = args[1],
-        url = new URL(String(args[0]));
-      const body =
-        typeof options?.body === 'string'
-          ? (JSON.parse(options.body) as Record<string, unknown>)
-          : undefined;
-      const answer = body?.answer as
-        | { kind?: string; answers?: { decision?: string }; decision?: string }
-        | undefined;
-      log('ui-http.jsonl', {
-        method: options?.method ?? 'GET',
-        path: url.pathname,
-        ...(body
-          ? {
-              body: {
-                kind:
-                  body.kind ??
-                  (url.pathname.endsWith('/answer') ? 'interaction.answer' : undefined),
-                commandId: body.commandId,
-                extensionId: body.extensionId,
-                actionId: body.actionId,
-                requestSha256: digest(body),
-                answerKind: answer?.kind,
-                decision: answer?.answers?.decision ?? answer?.decision,
-              },
-            }
-          : {}),
-      });
-      const response = await original(...args);
-      if (url.pathname === '/v1/server' && response.ok) {
-        const token = new Headers(options?.headers).get('authorization');
-        if (!token?.startsWith('Bearer ')) throw Error('owned_auth_observer_missing');
-        writeFileSync(
-          join(settings.root, 'observer-private.json'),
-          JSON.stringify({ endpoint: url.origin, token: token.slice(7) }),
-          { mode: 0o600 },
-        );
-      }
-      return response;
-    },
-    { preconnect: original.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const options = args[1],
+      url = new URL(String(args[0]));
+    const body =
+      typeof options?.body === 'string'
+        ? (JSON.parse(options.body) as Record<string, unknown>)
+        : undefined;
+    const answer = body?.answer as
+      | { kind?: string; answers?: { decision?: string }; decision?: string }
+      | undefined;
+    log('ui-http.jsonl', {
+      method: options?.method ?? 'GET',
+      path: url.pathname,
+      ...(body
+        ? {
+            body: {
+              kind:
+                body.kind ?? (url.pathname.endsWith('/answer') ? 'interaction.answer' : undefined),
+              commandId: body.commandId,
+              extensionId: body.extensionId,
+              actionId: body.actionId,
+              requestSha256: digest(body),
+              answerKind: answer?.kind,
+              decision: answer?.answers?.decision ?? answer?.decision,
+            },
+          }
+        : {}),
+    });
+    const response = await original(...args);
+    if (url.pathname === '/v1/server' && response.ok) {
+      const token = new Headers(options?.headers).get('authorization');
+      if (!token?.startsWith('Bearer ')) throw Error('owned_auth_observer_missing');
+      writeFileSync(
+        join(settings.root, 'observer-private.json'),
+        JSON.stringify({ endpoint: url.origin, token: token.slice(7) }),
+        { mode: 0o600 },
+      );
+    }
+    return response;
+  }, {});
   const exit = new AbortController();
   process.once('SIGTERM', () => exit.abort());
   process.exitCode = await runTUIHost({

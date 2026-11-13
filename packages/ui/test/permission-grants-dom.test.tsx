@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { type PermissionGrantFacts, PermissionGrantsPanel } from '../src/permissions';
 
 const facts = (sessionId = 'child', observationId = 1): PermissionGrantFacts => ({

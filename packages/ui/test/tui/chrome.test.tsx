@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import stringWidth from 'string-width';
+import { expect, test } from '#kite-test';
 import { TuiFooter, TuiHeader, TuiOverlayFrame, truncateDisplayWidth } from '../../src/tui/chrome';
 import { TuiText as Text } from '../../src/tui/presentation';
 

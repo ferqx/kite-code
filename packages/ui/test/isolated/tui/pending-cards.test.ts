@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../../scripts/tooling/process';
 
 for (const order of ['root-first', 'job-first'] as const) {
   test(`real 80x24 ${order} four pending cards preserve independent approval and unknown original answer`, async () => {
     const program = `import os,pty,subprocess,select,time,signal,json,re,tempfile,fcntl,termios,struct
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-cards-');facts=os.path.join(temporary.name,'facts.json');cardsfile=os.path.join(temporary.name,'cards.json');wire=os.path.join(temporary.name,'wire.jsonl');reviews=os.path.join(temporary.name,'reviews.json');env=dict(os.environ);env.update(KITE_TUI_VIEWPORT=os.path.join(temporary.name,'viewport.txt'),KITE_TUI_FACTS=facts,KITE_TUI_CARDS=cardsfile,KITE_TUI_WIRE=wire,KITE_TUI_REVIEWS=reviews,KITE_LOSE_CARD='1',KITE_TUI_ROOT=os.path.join(temporary.name,'runtime'));os.mkdir(env['KITE_TUI_ROOT'],0o700)
 transcript_fd,transcript=tempfile.mkstemp(prefix='kite-pending-cards-${order}-',suffix='.pty.log');os.close(transcript_fd)
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dir, 'pending-cards.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
+p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dirname, 'pending-cards.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
 def pump():
  global buffer,full
  if select.select([master],[],[],.08)[0]:
@@ -76,7 +77,10 @@ finally:
  open(transcript,'wb').write(full);print('PTY_TRANSCRIPT '+transcript)
  os.close(master);temporary.cleanup()
 `;
-    const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    const child = spawnFixtureProcess(['python3', '-c', program], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const [out, err, exit] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),

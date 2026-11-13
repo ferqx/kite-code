@@ -1,9 +1,11 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
+import { spawnSync as testSpawnSync } from '../../../../scripts/tooling/process';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -169,7 +171,7 @@ const scan = (bytes: Uint8Array) => {
 const pty = spawnTuiPTY({
   cmd: [
     input.executable,
-    join(import.meta.dir, 'tui-diagnostics-entry.ts'),
+    join(import.meta.dirname, 'tui-diagnostics-entry.ts'),
     input.entrypoint,
     '--workspace',
     input.workspace,
@@ -236,7 +238,7 @@ const wait = async (text: string) => {
     if (dataRevision > actionRevision && observed) return;
     if (pty.ended || Date.now() > end)
       throw Error(`expected ${text} tail=${buffer.subarray(-2000).toString('utf8')}`);
-    await Bun.sleep(100);
+    await testSleep(100);
   }
 };
 // Static output remains original native terminal material until an actual 3J.
@@ -250,7 +252,7 @@ const waitNative = async (text: string) => {
       return text;
     if (pty.ended || Date.now() > end)
       throw Error(`expected native printed history ${text} tail=${nativeTail.slice(-2000)}`);
-    await Bun.sleep(100);
+    await testSleep(100);
   }
 };
 // The prompt follows the giant Static body. Wait for its actual completed
@@ -263,7 +265,7 @@ const waitCompletePaint = async (currentAction: boolean) => {
     await observe();
     if (currentBodyVerified && (currentAction ? actionFrameReady : nativeFrameReady)) return;
     if (pty.ended || Date.now() > end) throw Error('original body/composer paint did not complete');
-    await Bun.sleep(100);
+    await testSleep(100);
   }
 };
 const toolResult = () => {
@@ -279,7 +281,7 @@ const files = () =>
     .map((name) => join(input.profilePath, name));
 async function childProcessIds(parentPid: number): Promise<number[]> {
   if (process.platform !== 'win32') {
-    const listing = Bun.spawnSync(['ps', '-axo', 'pid,ppid'], { stdout: 'pipe', stderr: 'pipe' });
+    const listing = testSpawnSync(['ps', '-axo', 'pid,ppid'], { stdout: 'pipe', stderr: 'pipe' });
     assert.equal(listing.exitCode, 0, Buffer.from(listing.stderr).toString());
     return Buffer.from(listing.stdout)
       .toString()
@@ -291,7 +293,7 @@ async function childProcessIds(parentPid: number): Promise<number[]> {
   }
   // Observe the same direct children without launching PowerShell, whose first
   // use can create protected INetCache junctions in the fixture's isolated HOME.
-  const { dlopen, ptr } = await import('bun:ffi');
+  const { dlopen, ptr } = await import('@kite-ai/agent/runtime-ffi');
   const kernel = dlopen('kernel32.dll', {
     CreateToolhelp32Snapshot: { args: ['u32', 'u32'], returns: 'u64' },
     Process32FirstW: { args: ['u64', 'ptr'], returns: 'bool' },
@@ -340,7 +342,7 @@ try {
   assert(owned.length > 0, 'original paired Service child required');
   for (const pid of owned) process.kill(pid, 0);
   await key('owned task');
-  await Bun.sleep(100);
+  await testSleep(100);
   await key('\r');
   await wait('9000025 bytes, complete');
   stage('complete_metadata');
@@ -389,10 +391,10 @@ try {
     console.log('FIRST_EXPORT_FROZEN_VERIFIED_FULL');
   }
   reset();
-  await Bun.sleep(100);
+  await testSleep(100);
   await key('\x0f');
-  await Bun.sleep(400);
-  await Bun.sleep(1000);
+  await testSleep(400);
+  await testSleep(1000);
   await waitNative(input.tail);
   assert(bodyVerified, 'complete original Model body was not painted to native terminal history');
   await waitNative('New Run >');
@@ -439,7 +441,7 @@ try {
     abort.signal.throwIfAborted();
     if (Date.now() > exportDeadline)
       throw Error(`second export missing tail=${buffer.subarray(-2000).toString('utf8')}`);
-    await Bun.sleep(100);
+    await testSleep(100);
   }
   exported = files();
   assert.equal(exported.length, 2, 'second export paths');
@@ -471,7 +473,7 @@ try {
   const exitDeadline = Date.now() + 6000;
   while (!pty.ended && Date.now() < exitDeadline) {
     abort.signal.throwIfAborted();
-    await Bun.sleep(100);
+    await testSleep(100);
   }
   const code = await ptyDeadline(
     Promise.all([pty.host.exited, pty.eof]),

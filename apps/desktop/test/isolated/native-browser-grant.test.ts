@@ -1,10 +1,24 @@
-import { expect, setSystemTime, test } from 'bun:test';
+import { mock } from 'node:test';
+import { expect, test } from '#kite-test';
 import { createBrowserGrantRequestId } from '../../../service/src/desktop-browser-authorization';
 import {
   type BrowserPagePort,
   NativeBrowserPageHost,
   serializeBrowserPageFailure,
 } from '../../electron/browser-page-host';
+
+let clockEnabled = false;
+function setSystemTime(date?: Date): void {
+  if (!date) {
+    mock.timers.reset();
+    clockEnabled = false;
+  } else if (!clockEnabled) {
+    mock.timers.enable({ apis: ['Date'], now: date });
+    clockEnabled = true;
+  } else {
+    mock.timers.setTime(date.getTime());
+  }
+}
 
 type Grant = {
   requestId: string;

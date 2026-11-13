@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,14 +10,23 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient, type Interaction } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const detail = '  原文 / @ café e\u0301 🧭\n第二行保持空格  ';
 const custom = 'q3-o1';
@@ -28,7 +36,7 @@ async function until<T>(label: string, read: () => Promise<T | undefined>): Prom
     const value = await read();
     if (value !== undefined) return value;
     if (performance.now() > deadline) throw Error(`owned_question_deadline:${label}`);
-    await Bun.sleep(15);
+    await testSleep(15);
   }
 }
 type Wire = { method: string; path: string; body?: Record<string, unknown> };
@@ -50,11 +58,11 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
   const wire = () => rows('ui-http.jsonl') as Wire[];
   const answers = () =>
     wire().filter((row) => row.method === 'POST' && row.path.endsWith('/answer'));
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-  let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let build: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let observer: ReturnType<typeof createClient> | undefined;
-  let control: ReturnType<typeof Bun.serve> | undefined;
-  let provider: ReturnType<typeof Bun.serve> | undefined;
+  let control: FixtureServer | undefined;
+  let provider: FixtureServer | undefined;
   const modelRequests: {
     messages: { role: string; content: string }[];
     tools?: {
@@ -72,17 +80,14 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
   const cleanupErrors: unknown[] = [];
   const observerReads: { method: string; path: string }[] = [];
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      const request = args[0];
-      observerReads.push({
-        method: args[1]?.method ?? 'GET',
-        path: new URL(request instanceof Request ? request.url : String(request)).pathname,
-      });
-      return originalFetch(...args);
-    },
-    { preconnect: originalFetch.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const request = args[0];
+    observerReads.push({
+      method: args[1]?.method ?? 'GET',
+      path: new URL(request instanceof Request ? request.url : String(request)).pathname,
+    });
+    return originalFetch(...args);
+  }, {});
   try {
     const sourceSha256 = Object.fromEntries(
       [
@@ -103,9 +108,10 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         'apps/cli/test/fixtures/tui-question-driver.ts',
       ].map((path) => [path, sha(readFileSync(join(repo, path)))]),
     );
-    build = Bun.spawn(
+    build = testSpawn(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -126,11 +132,11 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const compiled = await Bun.build({
+    const compiled = await testBuild({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-question-pty.ts')],
       outdir: root,
       naming: 'host.js',
-      target: 'bun',
+      target: 'node',
       packages: 'external',
     });
     expect(compiled.success).toBe(true);
@@ -157,7 +163,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
-    provider = Bun.serve({
+    provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -481,7 +487,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         );
       }
     }
-    control = Bun.serve({
+    control = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch(request) {
@@ -491,10 +497,10 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
         return work;
       },
     });
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         join(repo, 'apps/cli/test/fixtures/tui-question-driver.ts'),
         control.url.href,
         artifact.executable,

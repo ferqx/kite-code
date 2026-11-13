@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act, type ComponentProps, useLayoutEffect } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBrowserMenuAction,
   NativeBrowserMenuRequest,
@@ -279,7 +280,7 @@ async function fixture(
   const flush = (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     });
   const show = (next: Partial<typeof props> = {}) =>
     flush(() => {

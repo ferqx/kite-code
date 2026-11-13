@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./paired": "./src/paired.ts",
+    "./node-process": "./src/node-process.ts",
     "./bootstrap": "./src/bootstrap.ts",
     "./configuration": "./src/configuration.ts",
     "./runtime-assets": "./src/runtime-assets.ts",
@@ -20,16 +21,20 @@
     "./daemon-main": "./src/daemon-main.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/paired.ts ./src/main.ts ./src/bootstrap.ts ./src/configuration.ts ./src/runtime-assets.ts ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ./src/sqlite-release-assets.ts ./src/mcp-http-port.ts ./src/development-web.ts ./src/daemon.ts ./src/daemon-main.ts --target=bun --splitting --packages=bundle --external=@kite-ai/agent --external=@kite-ai/ai --external=@kite-ai/client --external=@kite-ai/trajectory --root=./src --outdir=dist && bun ./src/trace-extensions/engine/build-assets.ts dist && bun ./src/trace-integrations/opentelemetry/build-assets.ts dist",
-    "typecheck": "bun check -p tsconfig.json",
-    "test": "bun run ../../scripts/run-owned-tests.ts ."
+    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts ./src/paired.ts ./src/node-process.ts ./src/main.ts ./src/bootstrap.ts ./src/configuration.ts ./src/runtime-assets.ts ./src/native-runtime-assets.ts ./src/windows-native-bootstrap.ts ./src/runtime-protection.ts ./src/sqlite-release-assets.ts ./src/mcp-http-port.ts ./src/development-web.ts ./src/daemon.ts ./src/daemon-main.ts ./src/macos-model-keychain.ts ./src/linux-model-keyring.ts --target=node --splitting --packages=bundle --external=@kite-ai/agent --external=@kite-ai/ai --external=@kite-ai/client --external=@kite-ai/trajectory --root=./src --outdir=dist && node --import ../../scripts/tooling/register.mjs ./src/trace-extensions/engine/build-assets.ts dist && node --import ../../scripts/tooling/register.mjs ./src/trace-integrations/opentelemetry/build-assets.ts dist && node --import ../../scripts/tooling/register.mjs ./scripts/development-entrypoints.ts dist",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "@kite-ai/agent": "workspace:*",
     "@kite-ai/ai": "workspace:*",
     "@kite-ai/client": "workspace:*",
+    "@hono/node-server": "1.19.14",
+    "@iarna/toml": "2.2.5",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "hono": "4.13.12",
+    "undici": "7.28.0",
+    "ws": "8.21.0",
     "zod": "4.3.6",
     "@kite-ai/trajectory": "workspace:*",
     "quickjs-emscripten-core": "0.32.0",
@@ -42,6 +47,7 @@
     "@opentelemetry/resources": "3.1.0"
   },
   "devDependencies": {
-    "@kite-ai/trace-extension-sdk": "workspace:*"
+    "@kite-ai/trace-extension-sdk": "workspace:*",
+    "@types/ws": "8.5.12"
   }
 }

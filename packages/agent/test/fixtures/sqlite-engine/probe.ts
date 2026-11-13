@@ -1,5 +1,7 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
+import { nativeRuntime } from '../../../src/runtime-native';
 import {
   getLoadedSqliteEngine,
   initializeDefaultSqliteEngine,
@@ -9,11 +11,12 @@ import {
 const [root, manifestSha256, mode] = process.argv.slice(2);
 assert(root && manifestSha256 && mode);
 if (mode === 'late') {
-  const db = new Database(':memory:');
-  db.close(true);
+  const native = nativeRuntime();
+  assert.equal(native.sqliteSelect(join(root, 'libsqlite3.dylib'), true), true);
+  native.sqliteClose(native.sqliteOpen(':memory:', 6));
   assert.throws(
     () => initializeSqliteEngine({ root, manifestSha256 }),
-    /sqlite_engine_initialization_failed/,
+    /sqlite_engine_load_failed/,
   );
   assert.equal(getLoadedSqliteEngine(), null);
   console.log('late_rejected');
@@ -21,25 +24,25 @@ if (mode === 'late') {
   const selected = initializeSqliteEngine({ root, manifestSha256 });
   assert.equal(selected.version, '3.51.3');
   assert.equal(initializeSqliteEngine({ root, manifestSha256 }), selected);
-  const worker = new Worker(new URL('./worker.js', import.meta.url).href);
+  const worker = new Worker(new URL('./worker.js', import.meta.url));
   const timer = setTimeout(() => {
     worker.terminate();
     throw Error('sqlite_engine_worker_deadline');
   }, 5000);
   worker.postMessage({ root, manifestSha256 });
   await new Promise<void>((resolve, reject) => {
-    worker.onmessage = (event) => {
+    worker.once('message', (message) => {
       try {
-        assert.deepEqual(event.data, selected);
+        assert.deepEqual(message, selected);
         resolve();
       } catch (error) {
         reject(error);
       }
-    };
-    worker.onerror = (event) => reject(Error(event.message));
+    });
+    worker.once('error', reject);
   }).finally(() => {
     clearTimeout(timer);
-    worker.terminate();
+    return worker.terminate();
   });
   console.log(JSON.stringify(selected));
 } else if (mode === 'identity') {

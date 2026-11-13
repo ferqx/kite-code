@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Database } from '../runtime-sqlite';
 import { MaintenanceError } from './types';
 
 /** Frozen DB10 caller metadata. Restore retains original Store binding; never dispatches work. */

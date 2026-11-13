@@ -1,15 +1,16 @@
-import { expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
+import { expect, test } from '#kite-test';
+import { type Subprocess, spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { probeNativeSqliteEngine } from '../../scripts/sqlite-engine';
 
 test('failed probe stream retains its original error and waits for the actual owned child despite a failed signal', async () => {
   const streamFailure = Error('owned_probe_stream_failed');
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let scratch: string | undefined;
   let signals = 0;
-  const spawn = new Proxy(Bun.spawn, {
+  const spawn = new Proxy(spawnProcess, {
     apply(target, receiver, args) {
-      // The trusted fixture preserves the actual Bun child; it does not invent exit/reap.
+      // The trusted fixture preserves the actual child and its exit/reap evidence.
       scratch = args[1].env.HOME;
       child = Reflect.apply(target, receiver, [
         [process.execPath, '-e', 'setTimeout(() => process.exit(0), 150);'],

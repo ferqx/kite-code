@@ -1,12 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { dirname, join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createClient } from '@kite-ai/client';
 import {
   inspectProcess,
@@ -14,7 +14,12 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   temporarySocketDirectory,
@@ -40,11 +45,11 @@ beforeAll(async () => {
   // The UUID-scoped socket must fit macOS's original 103-byte Unix address budget.
   root = temporarySocketDirectory('kite-shared-skills-');
   const built = await buildOwnedDaemon(join(root, 'artifact'));
-  const result = await Bun.build({
+  const result = await testBuild({
     entrypoints: [
       fileURLToPath(new URL('../fixtures/shared-skills-daemon-child.ts', import.meta.url)),
     ],
-    target: 'bun',
+    target: 'node',
     packages: 'external',
     outdir: dirname(built),
   });
@@ -61,7 +66,7 @@ async function until<T>(read: () => Promise<T>, condition: (value: T) => boolean
     const value = await read();
     if (condition(value)) return value;
     if (Date.now() >= end) throw Error('shared_skills_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 function gate() {
@@ -85,7 +90,7 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
   const requests: { messages: OriginalMessage[]; tools?: unknown[] }[] = [];
   let titleCalls = 0;
   const issuedCalls = new Map<string, string>();
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -418,9 +423,9 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
       const driver = join(base, 'workflow-cli-driver.ts');
       writeFileSync(
         driver,
-        `import {runCLIProcess} from ${JSON.stringify(join(import.meta.dir, '../../host/main.ts'))}; try { process.exitCode=await runCLIProcess({dataRoot:${JSON.stringify(profile.dataRoot)},profile:${JSON.stringify(profile.profile)},cwd:${JSON.stringify(base)},resolveArtifact(){throw Error('shared_must_not_launch');}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }`,
+        `import {runCLIProcess} from ${JSON.stringify(join(import.meta.dirname, '../../host/main.ts'))}; try { process.exitCode=await runCLIProcess({dataRoot:${JSON.stringify(profile.dataRoot)},profile:${JSON.stringify(profile.profile)},cwd:${JSON.stringify(base)},resolveArtifact(){throw Error('shared_must_not_launch');}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }`,
       );
-      const child = Bun.spawn([process.execPath, driver, ...values], {
+      const child = testSpawn([process.execPath, ...testRuntimeFlags, driver, ...values], {
         cwd: base,
         stdin: 'pipe',
         stdout: 'pipe',

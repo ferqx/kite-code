@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
 import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
@@ -10,6 +10,13 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import type { AgentClient, Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { nativeFileReadBaseline } from '../native-file-result.fixture';
@@ -20,7 +27,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > end) throw Error('restored_files_original_run_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 async function history(client: AgentClient, sessionId: string): Promise<Message[]> {
@@ -64,7 +71,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
   const requests: ProviderBody[] = [];
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {
@@ -138,7 +145,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
   );
   const launch = (instanceId: string) =>
     launchPairedService({
-      entrypoint: resolve(import.meta.dir, '../../../service/src/main.ts'),
+      entrypoint: resolve(import.meta.dirname, '../../../service/src/main.ts'),
       spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId,
@@ -259,8 +266,10 @@ test('restored Native Files read original write/edit previews and read/write/edi
     expect(restored.storeId).not.toBe(originalStoreId);
     const currentContent = 'EXTERNAL_CURRENT_FILE_BYTES_原🌿\r\n';
     writeFileSync(filePath, currentContent);
-    const driver = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../native-restored-file-changes-node.fixture.ts')],
+    const driver = await buildFixture({
+      entrypoints: [
+        resolve(import.meta.dirname, '../native-restored-file-changes-node.fixture.ts'),
+      ],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
@@ -299,8 +308,8 @@ test('restored Native Files read original write/edit previews and read/write/edi
         }),
         { mode: 0o600 },
       );
-      const native = Bun.spawn(
-          [realpathSync(Bun.which('node')!), join(root, 'driver.js'), inputPath],
+      const native = spawnFixtureProcess(
+          [realpathSync(findFixtureExecutable('node')!), join(root, 'driver.js'), inputPath],
           {
             stdout: 'pipe',
             stderr: 'pipe',

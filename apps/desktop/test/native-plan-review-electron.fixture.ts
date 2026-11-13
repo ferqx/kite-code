@@ -253,17 +253,14 @@ try {
     const target = globalThis as typeof globalThis & { planPosts: number };
     target.planPosts = 0;
     const original = target.fetch;
-    target.fetch = Object.assign(
-      (...args: Parameters<typeof original>) => {
-        if (
-          args[1]?.method === 'POST' &&
-          /\/interactions\/[^/]+\/answer$/.test(new URL(String(args[0])).pathname)
-        )
-          target.planPosts++;
-        return original(...args);
-      },
-      { preconnect: original.preconnect },
-    );
+    target.fetch = Object.assign((...args: Parameters<typeof original>) => {
+      if (
+        args[1]?.method === 'POST' &&
+        /\/interactions\/[^/]+\/answer$/.test(new URL(String(args[0])).pathname)
+      )
+        target.planPosts++;
+      return original(...args);
+    }, {});
   });
   const posts = () =>
     app!.evaluate(() => (globalThis as typeof globalThis & { planPosts: number }).planPosts);

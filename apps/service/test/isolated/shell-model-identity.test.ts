@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -9,6 +9,9 @@ import type { AuthorizationRequest, PermissionDecision } from '@kite-ai/agent/ex
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -35,11 +38,14 @@ let supervisorPath: string;
 beforeAll(async () => {
   if (process.platform !== 'darwin') return;
   assetRoot = temporaryDirectory('kite-shell-model-assets-');
-  const built = await Bun.build({
+  const built = await buildBundle({
     entrypoints: [
-      join(import.meta.dir, '../../../../packages/agent/src/platform/process/shell-supervisor.ts'),
+      join(
+        import.meta.dirname,
+        '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
+      ),
     ],
-    target: 'bun',
+    ...fixtureRuntimeBuild(assetRoot),
     outdir: assetRoot,
     naming: 'shell-supervisor.js',
   });
@@ -94,7 +100,7 @@ async function scenario(input: {
               configurationId: 'model-identity-fixture',
               env: {},
               supervisorPath,
-              bunExecutable: process.execPath,
+              runtimeExecutable: process.execPath,
               shellExecutable: process.execPath,
             },
           }
@@ -189,7 +195,7 @@ async function scenario(input: {
               .map(({ definitionId, status, result }) => ({ definitionId, status, result })),
           )}`,
         );
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(child.requests).toHaveLength(1);
     expect(carrier.status).toBe('succeeded');

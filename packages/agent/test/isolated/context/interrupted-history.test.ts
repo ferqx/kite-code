@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -9,8 +8,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -18,16 +21,17 @@ async function until(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 10000;
   while (!(await check())) {
     if (Date.now() > deadline) throw Error('interrupted_history_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
 test('genuine SIGKILL history remains readable but an independent Model receives exact terminal historical input facts', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-interrupted-history-')));
   writeFileSync(join(directory, 'original.txt'), 'original reference content');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./interrupted-history-child.ts', import.meta.url)),
       directory,
     ],
@@ -320,9 +324,10 @@ for (const terminal of ['failed', 'cancelled'] as const)
 test('explicit original Run resume keeps its own input current after genuine SIGKILL reconciliation', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-resumed-history-')));
   writeFileSync(join(directory, 'original.txt'), 'original reference content');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./interrupted-history-child.ts', import.meta.url)),
       directory,
     ],

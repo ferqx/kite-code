@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Execution } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeBridge } from '../../src/native-bridge';
 import type {
   NativeBrowserBridge,
@@ -131,7 +132,7 @@ test('Native reveals the ordinary retained page for an owned browser Job and ann
   const flush = async (action: () => void = () => {}, ms = 20) =>
     act(async () => {
       action();
-      await Bun.sleep(ms);
+      await fixtureDelay(ms);
     });
   const until = async (check: () => boolean) => {
     const end = Date.now() + 3000;

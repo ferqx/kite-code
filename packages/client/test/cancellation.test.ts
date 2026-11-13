@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import {
   type CancelExecutionRequest,
   type CancelRunRequest,
@@ -17,12 +18,12 @@ const identity: ServerInfo = {
   dataAvailability: 'available',
   storeId: 'store-a',
 };
-function fixture() {
+async function fixture() {
   let info = identity;
   let output: unknown = { items: [], highWaterSeq: '0' };
   const posts: unknown[] = [];
   const urls: URL[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -81,13 +82,13 @@ function fixture() {
     },
     close() {
       client.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
 
 test('named cancellation methods preserve original target, Store and command identity; receipt is only accepted', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     const run: CancelRunRequest = {
       expectedStoreId: 'store-a',
@@ -130,12 +131,12 @@ test('named cancellation methods preserve original target, Store and command ide
     expect(f.posts.slice(3)).toEqual([run, run]);
     expect(f.posts).toHaveLength(5); // exactly caller invocations; SDK never retries/rebinds.
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('cancel requests are closed schema and invalid inputs make no business request', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.client.connect();
     expect(() =>
@@ -165,12 +166,12 @@ test('cancel requests are closed schema and invalid inputs make no business requ
     expect(f.posts).toHaveLength(0);
     expect(f.urls).toHaveLength(1);
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('output page preserves Decimal64 interval, clipped gap null and additive fields', async () => {
-  const f = fixture();
+  const f = await fixture();
   const page = {
     items: [
       {
@@ -226,6 +227,6 @@ test('output page preserves Decimal64 interval, clipped gap null and additive fi
       code: 'invalid_response',
     });
   } finally {
-    f.close();
+    await f.close();
   }
 });

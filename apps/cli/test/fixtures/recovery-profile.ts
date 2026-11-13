@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
@@ -10,10 +9,14 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { loopbackModelEnvironment } from '../../../../tests/fixtures/loopback-model-environment';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
@@ -31,7 +34,7 @@ export async function untilRecovery(check: () => Promise<boolean>) {
   const end = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() > end) throw Error('recovery_fixture_timeout');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 
@@ -65,9 +68,9 @@ export async function recoveryProfile(
     return observer;
   };
   const reviews: { body: Record<string, unknown>; input: Record<string, unknown> }[] = [];
-  const provider = (() => {
+  const provider = await (async () => {
     try {
-      return Bun.serve({
+      return await testServe({
         hostname: '127.0.0.1',
         port: 0,
         idleTimeout: 0,
@@ -244,9 +247,9 @@ function configure(startup, context) {
       );
       return entrypoint;
     });
-    const compiled = await Bun.build({
+    const compiled = await testBuild({
       entrypoints,
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: join(root, 'artifact'),
     });

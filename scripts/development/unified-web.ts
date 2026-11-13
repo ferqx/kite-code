@@ -8,11 +8,13 @@ import { startDevelopmentWeb } from '@kite-ai/service/development-web';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { validateTrustedAssets } from '@kite-ai/web';
 import type { AssetManifest, TrustedAsset } from '@kite-ai/web/assets';
+import { preparedDevelopmentNode } from '../release/node-inputs';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 export interface DevelopmentWebSelection {
   readonly profile: ProfileSelection;
   readonly entrypoint: string;
+  readonly executable?: string;
   readonly buildId: string;
   readonly instanceId: string;
   readonly apiMajor: 1;
@@ -50,6 +52,7 @@ export function selectDevelopmentWeb(
   return Object.freeze({
     profile: Object.freeze(selectProfile({ dataRoot, profile: 'development' })),
     entrypoint,
+    executable: preparedDevelopmentNode(root),
     // This binds the selected development entry bytes, not a complete release candidate.
     buildId: `development-${createHash('sha256').update(bytes).digest('hex')}`,
     instanceId: crypto.randomUUID(),
@@ -77,9 +80,9 @@ export async function launchDevelopmentWeb(input: {
   );
   await validateTrustedAssets(assets, structuredClone(input.manifest));
   const paired = await launchPairedService(selected);
-  let gateway: ReturnType<typeof startDevelopmentWeb>;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>>;
   try {
-    gateway = startDevelopmentWeb({ admittedClient: paired.client, assets });
+    gateway = await startDevelopmentWeb({ admittedClient: paired.client, assets });
   } catch (error) {
     await paired.close();
     throw error;

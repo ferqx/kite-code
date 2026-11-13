@@ -6,8 +6,8 @@
  * both sources exercise the real message area, Footer, and InputLine.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { activeInput, submitCurrentInput, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
@@ -22,7 +22,7 @@ describe('TUI PTY System — inline compaction input', () => {
     tui = await spawnReadyTui({
       cols: 120,
       rows: 20,
-      entryPath: resolve(import.meta.dir, '..', 'fixtures', 'compaction-status-input-tui.tsx'),
+      entryPath: resolve(import.meta.dirname, '..', 'fixtures', 'compaction-status-input-tui.tsx'),
     });
   });
 

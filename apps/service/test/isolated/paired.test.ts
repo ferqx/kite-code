@@ -1,6 +1,3 @@
-import { dlopen } from 'bun:ffi';
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   closeSync,
   existsSync,
@@ -12,16 +9,22 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { dlopen } from '@kite-ai/agent/runtime-ffi';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { AgentClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { pairedNodeChild } from '../../src/node-process';
 import {
   formatServiceStartupReport,
   launchPairedService,
   PairedServiceError,
 } from '../../src/paired';
+import { nodeServiceFixture, spawnFixtureNodeService } from '../fixtures/node-service-process';
 
 async function assertBusinessInput(
   client: AgentClient,
@@ -61,7 +64,7 @@ async function assertBusinessInput(
   return run;
 }
 
-const entrypoint = join(import.meta.dir, '../fixtures/paired-child.ts');
+const entrypoint = join(import.meta.dirname, '../fixtures/paired-child.ts');
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-paired-lifecycle-'));
   const profile = selectProfile({ dataRoot: join(root, 'new/data'), profile: 'disposable' });
@@ -73,6 +76,7 @@ function fixture() {
   });
   const launch = (instanceId: string, hostConfiguration = host(instanceId)) =>
     launchPairedService({
+      ...nodeServiceFixture,
       entrypoint,
       profile,
       instanceId,
@@ -89,7 +93,7 @@ async function until<T>(read: () => Promise<T> | T, condition: (value: T) => boo
     const value = await read();
     if (condition(value)) return value;
     if (Date.now() >= deadline) throw new Error('Fixture event deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 function lockAvailable(path: string) {
@@ -110,10 +114,9 @@ function lockAvailable(path: string) {
 test('a failed paired assembly exits while its original parent pipe is still open', async () => {
   const data = fixture();
   const main = new URL('../../src/main.ts', import.meta.url).href;
-  const child = Bun.spawn(
+  const processHandle = spawnFixtureNodeService(
     [
-      process.execPath,
-      '--no-install',
+      '--input-type=module',
       '--eval',
       `import { runServiceProcess } from ${JSON.stringify(main)};
 await runServiceProcess({
@@ -123,8 +126,9 @@ await runServiceProcess({
   },
 });`,
     ],
-    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', windowsHide: true },
+    process.env,
   );
+  const child = pairedNodeChild(processHandle);
   const stdout = new Response(child.stdout).text();
   const stderr = new Response(child.stderr).text();
   try {
@@ -140,7 +144,7 @@ await runServiceProcess({
     await child.stdin.flush();
     // A parent awaiting bootstrap leaves its liveness pipe open.
     await until(
-      () => child.exitCode,
+      () => processHandle.exitCode,
       (code) => code !== null,
     );
     expect(await child.exited).toBe(1);
@@ -153,7 +157,7 @@ await runServiceProcess({
     ).toEqual([{ code: 'fixture_assembly_started' }, { code: 'service_process_failed' }]);
     expect(existsSync(dataRoot)).toBe(false);
   } finally {
-    if (child.exitCode === null) {
+    if (processHandle.exitCode === null) {
       child.kill('SIGKILL');
       await child.exited;
     }
@@ -169,6 +173,7 @@ test.each([
   try {
     expect(existsSync(data.profile.dataRoot)).toBe(false);
     const failure = await launchPairedService({
+      ...nodeServiceFixture,
       entrypoint,
       profile: data.profile,
       instanceId: 'mismatch',
@@ -207,7 +212,8 @@ test('actual default Store failure survives failed admission as a bounded diagno
   else privateDirectory(data.profile.profilePath);
   writeFileSync(data.profile.databasePath, original, { mode: 0o600 });
   const options = {
-    entrypoint: join(import.meta.dir, '../../src/main.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, '../../src/main.ts'),
     profile: data.profile,
     instanceId: 'diagnostic',
     buildId: 'diagnostic-build',
@@ -344,6 +350,7 @@ test('two actual paired children distinguish network disconnect from parent EOF 
     const closingReader = closingStream.body!.getReader();
     expect((await closingReader.read()).done).toBe(false);
     const unrelatedFailure = await launchPairedService({
+      ...nodeServiceFixture,
       entrypoint,
       profile: data.profile,
       instanceId: 'failed-third',
@@ -426,7 +433,8 @@ test('oversized stdout bootstrap fails within its own bounded launch', async () 
   const data = fixture();
   try {
     const error = await launchPairedService({
-      entrypoint: join(import.meta.dir, '../fixtures/oversized-bootstrap.ts'),
+      ...nodeServiceFixture,
+      entrypoint: join(import.meta.dirname, '../fixtures/oversized-bootstrap.ts'),
       profile: data.profile,
       instanceId: 'oversized',
       buildId: 'fixture-build',

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createBuiltinComputerUseSkillSource } from '../../../src/skills';
 
 test('packaged computer-use knowledge is versioned, capability-gated and immutable', async () => {

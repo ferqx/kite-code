@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { additionalTuiCommands, fixedTuiCommands, parseTuiCommand } from '../../src/tui/commands';
 import { ComposerBuffer, composerDisplay } from '../../src/tui/composer';
 import { translateTuiLabel } from '../../src/tui/presentation';

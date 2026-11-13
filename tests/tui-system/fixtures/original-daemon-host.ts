@@ -10,8 +10,10 @@ import {
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
+import { spawn as testSpawn } from '../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 type Verified = ReturnType<typeof verifyTerminalBundle>;
 export async function buildOriginalDaemonCandidate() {
   const root = realpathSync(
@@ -20,9 +22,10 @@ export async function buildOriginalDaemonCandidate() {
     ),
   );
   const directory = join(root, 'candidate');
-  const child = Bun.spawn(
+  const child = testSpawn(
     [
       process.execPath,
+      ...testRuntimeFlags,
       join(repository, 'scripts/release/terminal.ts'),
       'build',
       '--directory',
@@ -98,8 +101,12 @@ export function createOriginalDaemonHost(input: {
     const argv = ['server', action, '--data-root', dataRoot, '--server', socket];
     if (action === 'start') argv.push('--workspace', input.workspace);
     if (cancel) argv.push('--cancel');
-    const child = Bun.spawn(
-      [process.execPath, join(import.meta.dir, 'original-daemon-command.ts')],
+    const child = testSpawn(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        join(import.meta.dirname, 'original-daemon-command.ts'),
+      ],
       {
         cwd: repository,
         stdin: 'pipe',

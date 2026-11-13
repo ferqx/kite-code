@@ -1,7 +1,9 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -29,9 +31,10 @@ async function ready(stream: ReadableStream<Uint8Array>) {
 for (const boundary of ['queued', 'planned'] as const)
   test(`SIGKILL legacy ${boundary} input remains readable and cannot dispatch or recover an interpreter`, async () => {
     const root = temporaryDirectory('kite-retired-input-crash-');
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./human-input-processing-crash-fixture.ts', import.meta.url)),
         root,
         boundary,
@@ -133,9 +136,10 @@ for (const boundary of ['queued', 'planned'] as const)
 for (const boundary of ['running', 'succeeded', 'prior'] as const)
   test(`SIGKILL in-band ${boundary} interpretation retires only the current checkpoint`, async () => {
     const root = temporaryDirectory('kite-retired-inband-crash-');
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./human-input-inband-crash-fixture.ts', import.meta.url)),
         root,
         boundary,

@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 import { retainWindowsProcess, type WindowsProcessObservation } from './daemon/windows-process';
 import { windowsDaemonSecurity } from './daemon/windows-security';
 import { retainWindowsNativeLauncherParent } from './windows-native-parent';
@@ -15,7 +16,6 @@ const wide = (value: string) => Buffer.from(`${value}\0`, 'utf16le');
 function native() {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw error('windows_native_handoff_platform_unsupported');
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetLastError: { args: [], returns: 'u32' },
     CreateNamedPipeW: {

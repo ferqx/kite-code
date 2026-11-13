@@ -1,6 +1,6 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { openSqliteStore, preflightSqliteStore } from '../../../src/sqlite';
 import { auditFixture, trackedAudit } from './run-resume-audit-fixture';
 

@@ -1,5 +1,6 @@
+import { parentPort } from 'node:worker_threads';
 import { assertSelectedSqliteEngine } from '../../../src/sqlite-engine';
 
-self.onmessage = (event) => {
-  self.postMessage(assertSelectedSqliteEngine(event.data));
-};
+parentPort?.on('message', (selection) =>
+  parentPort?.postMessage(assertSelectedSqliteEngine(selection)),
+);

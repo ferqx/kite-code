@@ -16,9 +16,9 @@
  * reducer 将探索生命周期聚合为 Thought，并在独立工具卡中保留本地细节。
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -101,11 +101,11 @@ function expectedFixtureToolResults(calls: readonly FixtureToolCall[]) {
 
 describe('TUI PTY System — Thought Text Header Merge (real-session replay)', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
 
     // fixture 工作区复刻真实日志的文件布局（搜索 **/tui/** 与读取均命中）
     const files: Record<string, string> = {

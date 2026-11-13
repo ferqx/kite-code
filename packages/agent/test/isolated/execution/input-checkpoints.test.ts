@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { Permissions, ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -65,7 +66,7 @@ async function until<T>(read: () => Promise<T | undefined>, label: string): Prom
   while (Date.now() < end) {
     const value = await read();
     if (value !== undefined) return value;
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   throw new Error(`Timed out: ${label}`);
 }
@@ -224,7 +225,7 @@ test('guidance preserves the original pending approval and executes its tool bef
     const old = await f.pending();
     const before = await f.store.getExecution(old.executionId);
     await f.steer('steer', '请先回复进度');
-    await Bun.sleep(50);
+    await sleepTimer(50);
     expect(model.requests).toHaveLength(1);
     expect(effects).toEqual([]);
     expect((await f.store.getCommand('steer'))?.status).toBe('accepted');

@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { ModelSettingsView, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import {
   TuiController,
   type TuiModelIntent,

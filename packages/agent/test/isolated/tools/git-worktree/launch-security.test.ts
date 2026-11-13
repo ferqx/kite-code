@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import {
   lstat,
   mkdir,
@@ -12,13 +12,21 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { expect, spyOn, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../../scripts/tooling/build';
+import { spawnSync as spawnProcessSync } from '../../../../../../scripts/tooling/process';
 import type { AuthorizationRequest, JobEvent, JobHandle } from '../../../../src/extensions';
 import { isReadOnlyTaskTool } from '../../../../src/extensions/task/roles';
 import * as launchIdentity from '../../../../src/jobs/launch-identity';
 import { createMacosHostShellJob, createShellJob } from '../../../../src/jobs/shell';
 import { hostReadOnlyTool, shellToolCapability } from '../../../../src/permissions/capabilities';
 import { createShellConfiguration } from '../../../../src/permissions/shell';
-import { buildWorkerCommand } from '../../../../src/tools/git-worktree/protocol';
+import { nodeRuntimeFlags } from '../../../../src/platform/runtime-flags';
+import {
+  buildWorkerCommand,
+  type WorktreeFrame,
+} from '../../../../src/tools/git-worktree/protocol';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../../fixtures/node-runtime';
 
 // No worktree or unknown linkage is removed by test cleanup.
 async function removeFixture(root: string) {
@@ -46,18 +54,16 @@ for (const backend of ['legacy', 'host'] as const)
       const home = join(root, 'home'),
         temporaryRoot = join(root, 'temp');
       for (const path of [workspace, assets, control, home, temporaryRoot]) await mkdir(path);
-      const config = join(assets, 'empty.toml'),
-        worker = join(assets, 'bytes.js');
-      await writeFile(config, '# Trusted empty configuration\n');
+      const worker = join(assets, 'bytes.js');
       await writeFile(
         worker,
         "process[process.argv[3]].write(Buffer.from(process.argv[2], 'hex'));\n",
       );
-      const built = await Bun.build({
+      const built = await buildBundle({
         entrypoints: [
-          join(import.meta.dir, '../../../../src/platform/process/shell-supervisor.ts'),
+          join(import.meta.dirname, '../../../../src/platform/process/shell-supervisor.ts'),
         ],
-        target: 'bun',
+        ...fixtureRuntimeBuild(assets),
         outdir: assets,
         naming: 'shell-supervisor.js',
       });
@@ -65,27 +71,20 @@ for (const backend of ['legacy', 'host'] as const)
       try {
         for (const stream of ['stdout', 'stderr'] as const) {
           for (const hex of ['ff', 'e282', 'efbfbd']) {
-            const command = [
-              process.execPath,
-              '--no-env-file',
-              `--config=${config}`,
-              worker,
-              hex,
-              stream,
-            ]
+            const command = [fixtureNodeExecutable(), ...nodeRuntimeFlags, worker, hex, stream]
               .map(quote)
               .join(' ');
             const options = {
               cwd: workspace,
               supervisorPath: join(assets, 'shell-supervisor.js'),
-              bunExecutable: process.execPath,
+              runtimeExecutable: fixtureNodeExecutable(),
               env: { PATH: '/usr/bin:/bin', HOME: home },
               trustedWorkerLaunch: (candidate: string) =>
                 candidate === command
                   ? {
                       version: 1 as const,
                       env: { PATH: '/usr/bin:/bin', HOME: home },
-                      bunFlags: ['--no-env-file', `--config=${config}`],
+                      runtimeFlags: nodeRuntimeFlags,
                       digest: 'a'.repeat(64),
                     }
                   : undefined,
@@ -97,7 +96,7 @@ for (const backend of ['legacy', 'host'] as const)
                     controlBase: control,
                     protectedRoots: [],
                     readonlyAssets: [assets],
-                    runtimeReadOnlyRoots: [dirname(await realpath(process.execPath))],
+                    runtimeReadOnlyRoots: [dirname(await realpath(fixtureNodeExecutable()))],
                     temporaryRoot,
                     filesystemScope: 'workspace_write',
                   })
@@ -132,9 +131,8 @@ for (const backend of ['legacy', 'host'] as const)
           }
         }
         const ordinaryCommand = [
-          process.execPath,
-          '--no-env-file',
-          `--config=${config}`,
+          fixtureNodeExecutable(),
+          ...nodeRuntimeFlags,
           worker,
           'ff',
           'stdout',
@@ -144,7 +142,7 @@ for (const backend of ['legacy', 'host'] as const)
         const ordinaryOptions = {
           cwd: workspace,
           supervisorPath: join(assets, 'shell-supervisor.js'),
-          bunExecutable: process.execPath,
+          runtimeExecutable: fixtureNodeExecutable(),
           env: { PATH: '/usr/bin:/bin', HOME: home },
         };
         const ordinary =
@@ -154,7 +152,7 @@ for (const backend of ['legacy', 'host'] as const)
                 controlBase: control,
                 protectedRoots: [],
                 readonlyAssets: [assets],
-                runtimeReadOnlyRoots: [dirname(await realpath(process.execPath))],
+                runtimeReadOnlyRoots: [dirname(await realpath(fixtureNodeExecutable()))],
                 temporaryRoot,
                 filesystemScope: 'workspace_write',
               })
@@ -200,52 +198,50 @@ test('multi-action worktree static capability stays conservative and roles bind 
 });
 
 posix(
-  'trusted launch isolates the first Bun guardian and worker from preload and project configuration',
+  'trusted launch isolates the first Node guardian and worker from preload and project configuration',
   async () => {
     const root = await mkdtemp(join(tmpdir(), 'kite-worktree-launch-'));
     let handle: Awaited<ReturnType<ReturnType<typeof createShellJob>['start']>> | undefined;
-    const config = join(root, 'empty.toml');
     const worker = join(root, 'worker.js');
     const poison = join(root, 'poison.js');
     const marker = join(root, 'poison-marker');
     const supervisor = join(root, 'shell-supervisor.js');
-    await writeFile(config, '# Trusted empty configuration\n');
     await writeFile(
       worker,
-      'console.log(JSON.stringify({injected:process.env.KITE_ENV_POISON??null,options:process.env.BUN_OPTIONS??null}));\n',
+      'console.log(JSON.stringify({injected:process.env.KITE_ENV_POISON??null,options:process.env.NODE_OPTIONS??null}));\n',
     );
-    await writeFile(poison, `await Bun.write(${JSON.stringify(marker)}, 'executed');\n`);
+    await writeFile(
+      poison,
+      `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'executed');\n`,
+    );
     await writeFile(join(root, '.env'), 'KITE_ENV_POISON=project-env\n');
-    await writeFile(join(root, 'bunfig.toml'), `preload = [${JSON.stringify(poison)}]\n`);
-    await writeFile(join(root, '.bunfig.toml'), `preload = [${JSON.stringify(poison)}]\n`);
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../../../src/platform/process/shell-supervisor.ts')],
-      target: 'bun',
+    const built = await buildBundle({
+      entrypoints: [
+        join(import.meta.dirname, '../../../../src/platform/process/shell-supervisor.ts'),
+      ],
+      ...fixtureRuntimeBuild(root),
       outdir: root,
       naming: 'shell-supervisor.js',
     });
     expect(built.success).toBe(true);
-    const command = [process.execPath, '--no-env-file', `--config=${config}`, worker]
-      .map(quote)
-      .join(' ');
+    const command = [fixtureNodeExecutable(), ...nodeRuntimeFlags, worker].map(quote).join(' ');
     const job = createShellJob({
       cwd: root,
       supervisorPath: supervisor,
-      bunExecutable: process.execPath,
+      runtimeExecutable: fixtureNodeExecutable(),
       env: {
         PATH: '/usr/bin:/bin',
         HOME: root,
-        BUN_OPTIONS: `--preload ${poison}`,
-        NODE_OPTIONS: `--import ${poison}`,
         BASH_ENV: poison,
         ENV: poison,
+        NODE_OPTIONS: `--import=${poison}`,
       },
       trustedWorkerLaunch: (candidate) =>
         candidate === command
           ? {
               version: 1,
               env: { PATH: '/usr/bin:/bin', HOME: root },
-              bunFlags: ['--no-env-file', `--config=${config}`],
+              runtimeFlags: nodeRuntimeFlags,
               digest: 'a'.repeat(64),
             }
           : undefined,
@@ -281,51 +277,50 @@ macos(
     const home = join(root, 'home'),
       temporaryRoot = join(root, 'temp');
     for (const path of [workspace, assets, control, home, temporaryRoot]) await mkdir(path);
-    const config = join(assets, 'empty.toml'),
-      worker = join(assets, 'worker.js');
+    const worker = join(assets, 'worker.js');
     const poison = join(workspace, 'poison.js'),
       marker = join(workspace, 'poison-marker');
-    await writeFile(config, '# Trusted empty configuration\n');
     await writeFile(
       worker,
-      'console.log(JSON.stringify({injected:process.env.KITE_ENV_POISON??null,options:process.env.BUN_OPTIONS??null}));\n',
+      'console.log(JSON.stringify({injected:process.env.KITE_ENV_POISON??null,options:process.env.NODE_OPTIONS??null}));\n',
     );
-    await writeFile(poison, `await Bun.write(${JSON.stringify(marker)}, 'executed');\n`);
+    await writeFile(
+      poison,
+      `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'executed');\n`,
+    );
     await writeFile(join(workspace, '.env'), 'KITE_ENV_POISON=project-env\n');
-    await writeFile(join(workspace, 'bunfig.toml'), `preload = [${JSON.stringify(poison)}]\n`);
-    await writeFile(join(home, '.bunfig.toml'), `preload = [${JSON.stringify(poison)}]\n`);
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../../../src/platform/process/shell-supervisor.ts')],
-      target: 'bun',
+    const built = await buildBundle({
+      entrypoints: [
+        join(import.meta.dirname, '../../../../src/platform/process/shell-supervisor.ts'),
+      ],
+      ...fixtureRuntimeBuild(assets),
       outdir: assets,
       naming: 'shell-supervisor.js',
     });
     expect(built.success).toBe(true);
-    const command = [process.execPath, '--no-env-file', `--config=${config}`, worker]
-      .map(quote)
-      .join(' ');
+    const command = [fixtureNodeExecutable(), ...nodeRuntimeFlags, worker].map(quote).join(' ');
     const job = createMacosHostShellJob({
       cwd: workspace,
       supervisorPath: join(assets, 'shell-supervisor.js'),
-      bunExecutable: process.execPath,
+      runtimeExecutable: fixtureNodeExecutable(),
       controlBase: control,
       protectedRoots: [],
       readonlyAssets: [assets],
-      runtimeReadOnlyRoots: [dirname(await realpath(process.execPath))],
+      runtimeReadOnlyRoots: [dirname(await realpath(fixtureNodeExecutable()))],
       temporaryRoot,
       filesystemScope: 'workspace_write',
       env: {
         PATH: '/usr/bin:/bin',
         HOME: home,
-        BUN_OPTIONS: `--preload ${poison}`,
         BASH_ENV: poison,
+        NODE_OPTIONS: `--import=${poison}`,
       },
       trustedWorkerLaunch: (candidate) =>
         candidate === command
           ? {
               version: 1,
               env: { PATH: '/usr/bin:/bin', HOME: home },
-              bunFlags: ['--no-env-file', `--config=${config}`],
+              runtimeFlags: nodeRuntimeFlags,
               digest: 'a'.repeat(64),
             }
           : undefined,
@@ -354,11 +349,121 @@ macos(
 );
 
 macos(
+  'trusted worktree preparation maps its authenticated native addon under the Workspace boundary',
+  async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-worktree-node-native-')));
+    const workspace = join(root, 'workspace');
+    const control = join(root, 'control');
+    const target = join(workspace, 'linked');
+    const permissions = { filesystem: 'workspace_write', network: 'none' } as const;
+    try {
+      await mkdir(workspace);
+      await mkdir(control);
+      const git = (...args: string[]) =>
+        execFileSync('/usr/bin/git', args, {
+          cwd: workspace,
+          env: { PATH: '/usr/bin:/bin', HOME: root },
+          stdio: 'ignore',
+        });
+      git('init', '-q');
+      await writeFile(join(workspace, 'tracked'), 'original content');
+      git('add', 'tracked');
+      git(
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '-qm',
+        'original',
+      );
+      git('worktree', 'add', '--detach', target, 'HEAD');
+      const configuration = await createShellConfiguration({
+        workspaceRoot: workspace,
+        toolIds: ['git.worktree'],
+        options: {
+          platform: 'darwin',
+          configurationId: 'worktree-native-node',
+          env: { PATH: '/usr/bin:/bin', HOME: root },
+          supervisorPath: join(
+            import.meta.dirname,
+            '../../../../dist/platform/process/shell-supervisor.js',
+          ),
+          runtimeExecutable: fixtureNodeExecutable(),
+          shellExecutable: '/bin/sh',
+          host: {
+            controlBase: control,
+            protectedRoots: [],
+            readonlyAssets: [],
+            runtimeReadOnlyRoots: [],
+          },
+        },
+      });
+      if (!('assets' in configuration.snapshot)) throw Error('shell_configuration_unavailable');
+      const fixed = configuration.snapshot.assets!.gitWorktree!.configuration;
+      const command = buildWorkerCommand(fixed, {
+        schemaVersion: 1,
+        configurationId: fixed.configurationId,
+        operationToken: 'a'.repeat(64),
+        phase: 'prepare_remove',
+        sourceCwd: fixed.sourceCwd,
+        git: fixed.git,
+        hooksPath: fixed.hooksPath,
+        input: { action: 'remove', key: 'fixture', path: target, timeoutMs: 10000, permissions },
+      });
+      const job = configuration.extensions[0]!.jobs![0]!;
+      const handle = await job.start(
+        { command, permissions },
+        {
+          sessionId: 's',
+          executionId: 'original-prepare',
+          signal: new AbortController().signal,
+          dispatchAuthorization: {
+            revision: 'fixture-approved',
+            snapshot: {
+              namespace: 'builtin.permissions',
+              version: '1',
+              data: {
+                workspaceTrust: true,
+                mode: 'accept_edits',
+                capability: {
+                  kind: 'job',
+                  definitionId: 'shell.command',
+                  definitionVersion: '1',
+                  hardAllowed: true,
+                  executionScope: permissions,
+                },
+              },
+            },
+          },
+        },
+      );
+      try {
+        let stdout = '';
+        let terminal: JobEvent | undefined;
+        for await (const event of job.observe(handle)) {
+          if (event.type === 'output' && event.stream === 'stdout') stdout += event.content;
+          if (event.type === 'terminal') terminal = event;
+        }
+        expect(terminal).toMatchObject({ supervision: 'ended', result: { outcome: 'succeeded' } });
+        const frame = JSON.parse(stdout) as WorktreeFrame;
+        expect(frame).toMatchObject({ phase: 'prepare_remove', businessOutcome: 'prepared' });
+        expect(await readFile(join(target, 'tracked'), 'utf8')).toBe('original content');
+      } finally {
+        await job.dispose(handle);
+      }
+    } finally {
+      await removeFixture(root);
+    }
+  },
+);
+
+macos(
   'only selected worktree registers its dependency and exact canonical list gets read-only proof',
   async () => {
     const root = await mkdtemp(join(tmpdir(), 'kite-worktree-permission-'));
     try {
-      const initialized = Bun.spawnSync(['/usr/bin/git', 'init', '-q'], {
+      const initialized = spawnProcessSync(['/usr/bin/git', 'init', '-q'], {
         cwd: root,
         stdout: 'pipe',
         stderr: 'pipe',
@@ -370,12 +475,12 @@ macos(
         options: {
           platform: 'darwin',
           configurationId: 'worktree-test',
-          env: { PATH: '/usr/bin:/bin', HOME: root, BUN_OPTIONS: '--preload untrusted' },
+          env: { PATH: '/usr/bin:/bin', HOME: root, NODE_OPTIONS: '--import=untrusted' },
           supervisorPath: join(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../../dist/platform/process/shell-supervisor.js',
           ),
-          bunExecutable: process.execPath,
+          runtimeExecutable: fixtureNodeExecutable(),
           shellExecutable: '/bin/sh',
         },
       });
@@ -442,11 +547,11 @@ macos(
         (
           await configuration.describeRequest({
             ...inner,
-            input: { command: `BUN_OPTIONS=--preload=evil ${command}` },
+            input: { command: `NODE_OPTIONS=--import=evil ${command}` },
           })
         )?.safeRead,
       ).not.toBe(true);
-      expect(assets.profile!.envKeys).not.toContain('BUN_OPTIONS');
+      expect(assets.profile!.envKeys).not.toContain('NODE_OPTIONS');
       expect(await configuration.commandDigest(inner)).toMatch(/^[a-f0-9]{64}$/);
       const reorderedEnvironment = await createShellConfiguration({
         workspaceRoot: root,
@@ -454,12 +559,12 @@ macos(
         options: {
           platform: 'darwin',
           configurationId: 'worktree-test',
-          env: { BUN_OPTIONS: '--preload untrusted', HOME: root, PATH: '/usr/bin:/bin' },
+          env: { NODE_OPTIONS: '--import=untrusted', HOME: root, PATH: '/usr/bin:/bin' },
           supervisorPath: join(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../../dist/platform/process/shell-supervisor.js',
           ),
-          bunExecutable: process.execPath,
+          runtimeExecutable: fixtureNodeExecutable(),
           shellExecutable: '/bin/sh',
         },
       });
@@ -545,10 +650,10 @@ macos(
           configurationId: 'custom-zsh',
           env: { PATH: '/usr/bin:/bin', HOME: root },
           supervisorPath: join(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../../dist/platform/process/shell-supervisor.js',
           ),
-          bunExecutable: process.execPath,
+          runtimeExecutable: fixtureNodeExecutable(),
           shellExecutable: '/bin/zsh',
         },
       });

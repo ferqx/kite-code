@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import type {
   AgentClient,
   Command,
@@ -6,6 +5,7 @@ import type {
   ExtensionCommandRequest,
   SessionView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { callerTextDigest, canonicalNativeCallerRequest } from '../../electron/caller-journal';
 import { NativeCaller } from '../../electron/native-caller';
 import type { NativeExtensionHead } from '../../src/extensions-bridge';

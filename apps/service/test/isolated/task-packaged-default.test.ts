@@ -1,9 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
@@ -14,7 +17,7 @@ async function until<T>(label: string, read: () => Promise<T>, done: (value: T) 
     if (done(value)) return value;
     if (Date.now() >= deadline)
       throw Error(`packaged_task_deadline:${label}:${JSON.stringify(value)}`);
-    await Bun.sleep(15);
+    await sleepTimer(15);
   }
 }
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -39,8 +42,8 @@ test('source-free default collaboration preserves full child result and emits ex
   );
   const built = await buildTerminalBundle({
     destination: join(root, 'bundle'),
-    repositoryRoot: resolve(import.meta.dir, '../../../..'),
-    bunExecutable: process.execPath,
+    repositoryRoot: resolve(import.meta.dirname, '../../../..'),
+    nodeExecutable: process.execPath,
   });
   expect(verifyTerminalBundle(built.root).digest).toBe(built.digest);
   for (const path of [
@@ -95,7 +98,7 @@ test('source-free default collaboration preserves full child result and emits ex
   let reportActive = () => false;
   const fullResult = `PACKAGED_RESULT_START\n${'中文é👋'.repeat(9000)}\nPACKAGED_RESULT_END`;
   expect(Buffer.byteLength(fullResult)).toBeGreaterThan(65536);
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -191,7 +194,7 @@ test('source-free default collaboration preserves full child result and emits ex
         'context',
       ],
       spawnChild: (argv, options) =>
-        Bun.spawn([...argv], {
+        spawnProcess([...argv], {
           cwd: workspace,
           env: {
             ...options.env,
@@ -518,7 +521,7 @@ test('source-free default collaboration preserves full child result and emits ex
         await client.getView(sessionId);
         await client.getModelOutput(carrier.childSessionId!, childModel.id, { expectedStoreId });
       }
-      await Bun.sleep(100);
+      await sleepTimer(100);
       expect({
         parentCalls,
         childCalls,
@@ -550,7 +553,7 @@ test('source-free default collaboration preserves full child result and emits ex
         sourceFreeCwd: workspace,
         platform: process.platform,
         arch: process.arch,
-        bunVersion: Bun.version,
+        nodeVersion: process.versions.node,
         servicePid: paired.pid,
         independentHome: home,
       }),

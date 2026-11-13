@@ -1,10 +1,18 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 // Per-probe processes contain fs/Buffer instrumentation; no global mocks enter other suites.
 async function probe(mode: string, consume = 'full') {
-  const child = Bun.spawn(
-    [process.execPath, join(import.meta.dir, 'artifact-files.fixture.ts'), mode, consume],
+  const child = spawnProcess(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      join(import.meta.dirname, 'artifact-files.fixture.ts'),
+      mode,
+      consume,
+    ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
   const [output, error, code] = await Promise.all([

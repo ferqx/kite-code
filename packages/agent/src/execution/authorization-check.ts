@@ -4,6 +4,7 @@ import type {
   AuthorizationCheckOutput,
 } from '../authorization-check-output';
 import { semanticDigest } from '../json';
+import { modelExecutionError } from '../model-attempt';
 import { bodyReference } from '../model-body';
 import { semanticDigestBytes } from '../model-body/digest';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
@@ -264,7 +265,8 @@ export async function runInternalModelCall(options: {
       executionId: execution.id,
       finishReason: 'stop',
     };
-  } catch (error) {
+  } catch (cause) {
+    const error = modelExecutionError(cause);
     const timedOut =
       signal.reason instanceof AgentError && signal.reason.code === 'authorization_check_timeout';
     const settled = await finish({

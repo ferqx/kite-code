@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -10,6 +10,10 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient, type ModelSettingsRequest } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { which as findExecutable } from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -42,7 +46,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean) {
     const value = await read();
     if (ready(value)) return value;
     if (Date.now() >= deadline) throw Error('codex_connection_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(
@@ -106,22 +110,22 @@ async function fixture(
         headers: { 'content-type': 'text/event-stream' },
       });
     },
-    { preconnect: globalThis.fetch.preconnect },
+    {},
   );
   const localCodex = createCodexLocalSource({ codexHome, fetch: fakeFetch });
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
   const supervisor =
     hostShell && process.platform === 'darwin'
-      ? await Bun.build({
+      ? await buildBundle({
           entrypoints: [
             join(
-              import.meta.dir,
+              import.meta.dirname,
               '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
             ),
           ],
           outdir: join(root, 'assets'),
-          target: 'bun',
+          ...fixtureRuntimeBuild(join(root, 'assets')),
           naming: 'shell-supervisor.js',
         })
       : undefined;
@@ -134,8 +138,8 @@ async function fixture(
     let supervisorPath: string;
     let bubblewrapPath: string | undefined;
     if (process.platform === 'linux') {
-      const compiler = Bun.which('cc');
-      bubblewrapPath = Bun.which('bwrap') ?? undefined;
+      const compiler = findExecutable('cc');
+      bubblewrapPath = findExecutable('bwrap') ?? undefined;
       if (!compiler || !bubblewrapPath) throw Error('codex_linux_shell_tools_missing');
       supervisorPath = join(root, 'assets/linux-shell-init');
       const compiled = spawnSync(
@@ -146,7 +150,7 @@ async function fixture(
           '-Wall',
           '-Wextra',
           '-Werror',
-          join(import.meta.dir, '../../../../packages/agent/native/linux-shell-init.c'),
+          join(import.meta.dirname, '../../../../packages/agent/native/linux-shell-init.c'),
           '-o',
           supervisorPath,
         ],
@@ -164,7 +168,7 @@ async function fixture(
       configurationId: 'codex-default-host-shell-fixture',
       env: { PATH: '/usr/bin:/bin' },
       supervisorPath,
-      bunExecutable: process.execPath,
+      runtimeExecutable: process.execPath,
       shellExecutable: '/bin/sh',
       ...(bubblewrapPath ? { linux: { bubblewrapPath } } : {}),
       host: {

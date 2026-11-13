@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { type McpRegistry, readMcpSelection, updateMcpSelection } from '../../../src/config';
 

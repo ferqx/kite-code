@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -11,12 +10,21 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
@@ -37,7 +45,7 @@ test.skipIf(process.platform !== 'darwin')(
       executable = join(workspace, 'tree'),
       effects = join(workspace, 'effects');
     const { installNativeBundle, uninstallNativeBundle } = await import(
-      resolve(import.meta.dir, '../../../../scripts/release/native-install.ts')
+      resolve(import.meta.dirname, '../../../../scripts/release/native-install.ts')
     );
     privateDirectory(workspace);
     const profile = selectProfile({
@@ -49,7 +57,7 @@ test.skipIf(process.platform !== 'darwin')(
       processes = new Map<number, NativeShellProcessIdentity>(),
       calls: { marker: string; content: string; tools: number }[] = [],
       controlEvidence: unknown[] = [];
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
       stdout: Promise<string> | undefined,
       stderr: Promise<string> | undefined,
       candidateRoot = '',
@@ -88,7 +96,7 @@ test.skipIf(process.platform !== 'darwin')(
       controlEvidence.push(evidence);
       return evidence;
     };
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       // Control observations have a 25 s bound; the fixture's HTTP server must
@@ -274,13 +282,13 @@ test.skipIf(process.platform !== 'darwin')(
       },
     });
     try {
-      const compiler = Bun.spawn(
+      const compiler = spawnFixtureProcess(
         [
           '/usr/bin/clang',
           '-Wall',
           '-Wextra',
           '-Werror',
-          resolve(import.meta.dir, '../native-shell-tree.fixture.c'),
+          resolve(import.meta.dirname, '../native-shell-tree.fixture.c'),
           '-o',
           executable,
         ],
@@ -290,7 +298,7 @@ test.skipIf(process.platform !== 'darwin')(
       await new Response(compiler.stdout).text();
       expect(await compiler.exited, compilerError).toBe(0);
       const { buildTerminalBundle } = await import(
-        resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+        resolve(import.meta.dirname, '../../../../scripts/release/terminal-bundle.ts')
       );
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
       const built = await buildNativeCandidate({
@@ -372,31 +380,34 @@ test.skipIf(process.platform !== 'darwin')(
       writeFileSync(
         fixture,
         readFileSync(
-          resolve(import.meta.dir, '../native-shell-lifecycle-electron.fixture.ts'),
+          resolve(import.meta.dirname, '../native-shell-lifecycle-electron.fixture.ts'),
           'utf8',
         )
           .replace(
             "'../../../tests/fixtures/loopback-model-environment'",
             JSON.stringify(
-              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+              resolve(
+                import.meta.dirname,
+                '../../../../tests/fixtures/loopback-model-environment.ts',
+              ),
             ),
           )
           .replace(
             "'./native-root-page.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-root-page.fixture.ts')),
           )
           .replace(
             "'./native-model-selection.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
           )
           .replace(
             "import { _electron } from 'playwright';",
-            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
           ),
       );
       expect(
         (
-          await Bun.build({
+          await buildFixture({
             entrypoints: [fixture],
             target: 'node',
             format: 'esm',
@@ -406,9 +417,9 @@ test.skipIf(process.platform !== 'darwin')(
           })
         ).success,
       ).toBe(true);
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           candidateRoot,
           home,
@@ -582,7 +593,7 @@ async function until(read: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 25000;
   while (!(await read())) {
     if (Date.now() >= deadline) throw Error('native_shell_observation_timeout');
-    await Bun.sleep(25);
+    await fixtureDelay(25);
   }
 }
 

@@ -81,7 +81,7 @@ export interface UserMcpManagementOptions {
   >;
   stdio?: Pick<
     McpStdioPortOptions,
-    'guardianPath' | 'bunExecutable' | 'limits' | 'controlBase' | 'linux'
+    'guardianPath' | 'runtimeExecutable' | 'limits' | 'controlBase' | 'linux'
   >;
   oauth?: Partial<
     Pick<McpOAuthSessionOptions, 'openBrowser' | 'network' | 'callbackTimeoutMs' | 'now'>

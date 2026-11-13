@@ -1,9 +1,12 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { fileRecoveryProfile } from '../fixtures/file-recovery-profile';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('compiled CLI actual argv both restore waits for original independent Ask, persists partial and explicitly continues original Fork', async () => {
   const f = await fileRecoveryProfile();
   try {
@@ -12,21 +15,24 @@ test('compiled CLI actual argv both restore waits for original independent Ask, 
       runner,
       `import {runCLIProcess} from ${JSON.stringify(join(repo, 'apps/cli/host/main.ts'))};process.exitCode=await runCLIProcess({argv:process.argv.slice(2),artifact:${JSON.stringify(f.artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned'});`,
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [runner],
       outdir: f.root,
-      target: 'bun',
+      target: 'node',
       external: ['react-devtools-core'],
     });
     expect(built.success).toBe(true);
     async function run(args: string[], answer = '') {
-      const child = Bun.spawn([process.execPath, join(f.root, 'argv.js'), ...args], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        cwd: f.workspace,
-        env: { ...process.env, HOME: f.home },
-      });
+      const child = testSpawn(
+        [process.execPath, ...testRuntimeFlags, join(f.root, 'argv.js'), ...args],
+        {
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          cwd: f.workspace,
+          env: { ...process.env, HOME: f.home },
+        },
+      );
       if (!answer) child.stdin.end();
       const [code, out, err] = await Promise.all([
         child.exited,
@@ -90,22 +96,25 @@ for (const scope of ['session', 'code'] as const)
       );
       expect(
         (
-          await Bun.build({
+          await testBuild({
             entrypoints: [runner],
             outdir: f.root,
-            target: 'bun',
+            target: 'node',
             external: ['react-devtools-core'],
           })
         ).success,
       ).toBe(true);
       async function run(args: string[]) {
-        const child = Bun.spawn([process.execPath, join(f.root, 'scope.js'), ...args], {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          cwd: f.workspace,
-          env: { ...process.env, HOME: f.home },
-        });
+        const child = testSpawn(
+          [process.execPath, ...testRuntimeFlags, join(f.root, 'scope.js'), ...args],
+          {
+            stdin: 'pipe',
+            stdout: 'pipe',
+            stderr: 'pipe',
+            cwd: f.workspace,
+            env: { ...process.env, HOME: f.home },
+          },
+        );
         let sent = false;
         const error = (async () => {
           let err = '';

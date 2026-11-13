@@ -333,7 +333,7 @@ const report = {
   finishedAt: '',
   durationMs: 0,
   platform: process.platform,
-  bunVersion: Bun.version,
+  nodeVersion: process.versions.node,
   syntheticOnly: true,
   shellExecuted: false,
   requestLimit: cases.length,

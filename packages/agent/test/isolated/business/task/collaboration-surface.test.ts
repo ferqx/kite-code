@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { modelIdentifier } from '../../../../src/model-identifier';
@@ -623,7 +624,7 @@ test('idle child mail sent in one ordinary parent turn is adopted once by a late
           ).items[0];
           if (item?.state === 'idle') break;
           if (Date.now() >= deadline) throw Error('cross_turn_child_timeout');
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
       } else {
         const mails = await store.listAgentMessages({ ...identity, sessionId: agentId });
@@ -914,7 +915,7 @@ test('later ordinary turn can guide, message and interrupt its existing direct c
     });
     await runtime.waitForCommand('A', { timeoutMs: 10000 });
     const activeDeadline = Date.now() + 5000;
-    while (childCalls !== 1 && Date.now() < activeDeadline) await Bun.sleep(5);
+    while (childCalls !== 1 && Date.now() < activeDeadline) await sleepTimer(5);
     expect(childCalls).toBe(1);
     await runtime.submitCommand({
       expectedStoreId: storeId,
@@ -1120,7 +1121,7 @@ test('mailbox wait wakes for a durable raw human input before business applicati
       const value = await read();
       if (value !== undefined) return value;
       if (Date.now() >= end) throw Error('human_wait_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   };
   try {

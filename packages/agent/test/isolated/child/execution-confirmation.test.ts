@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type {
   Extension,
@@ -183,7 +184,7 @@ for (const unsupported of [undefined, 'parent', 'child'] as const)
             expect(actual?.status).not.toBe('failed');
           }
           if (Date.now() >= deadline) throw Error('child_confirmation_card_unavailable');
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
       }
       await runtime.waitForCommand('work', { timeoutMs: 5000 });

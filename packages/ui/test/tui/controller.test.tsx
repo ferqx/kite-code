@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Command, Interaction, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import {
   activity,
   interactionAnswer,
@@ -260,7 +261,7 @@ for (const boundary of ['session return', 'reconnect'] as const) {
         status = 'rejected';
         c.observationReady('store');
       }
-      await Bun.sleep(0);
+      await fixtureDelay(0);
       expect(reads).toEqual([['id1', 'a']]);
       expect(c.startingRun).toBe(false);
       expect(c.pendingStartMessage).toBeUndefined();
@@ -308,12 +309,12 @@ test('a start disposition lookup ignores a later session and preserves a newer o
     await c.select('b');
     c.setDraft('other draft');
     complete({ ...command('id1', 'a'), kind: 'run.start', status: 'rejected' });
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(c.state.draft).toBe('other draft');
     expect(c.state.intent?.phase).toBe('accepted');
     expect(c.visibleTranscript).toEqual([]);
     await c.select('a');
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(reads).toBe(2);
     expect(c.state.draft).toBe('newer original draft');
     expect(c.state.intent?.phase).toBe('rejected');
@@ -346,7 +347,7 @@ test('an accepted original keeps waiting and a late failure read cannot displace
     await c.send();
     await c.select('b');
     await c.select('a');
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(c.startingRun).toBe(true);
     expect(c.state.intent?.phase).toBe('accepted');
     c.changed({
@@ -361,7 +362,7 @@ test('an accepted original keeps waiting and a late failure read cannot displace
     await c.refresh();
     expect(c.submittedRun?.id).toBe('run');
     complete({ ...command('id1', 'a'), kind: 'run.start', status: 'needs_review' });
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(reads).toBe(2);
     expect(c.startOutcomeUnknown).toBe(false);
     expect(c.state.intent?.phase).toBe('accepted');
@@ -553,9 +554,9 @@ test('Ink ordinary text and Return in one native input block submit the exact cu
   await c.select('a');
   const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('owned task\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(f.writes).toHaveLength(1);
     expect(f.writes[0]).toMatchObject({
       id: 'a',
@@ -587,18 +588,18 @@ test('Ink text plus Return preserves slash completion and routes the complete ex
   await c.select('a');
   const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('/exp\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(c.state.draft).toBe('');
     expect(exports).toHaveLength(1);
     expect(exports[0]).toMatchObject({ storeId: 'store', sessionId: 'a' });
     app.stdin.write('\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(exports).toHaveLength(1);
     expect(exports[0]).toMatchObject({ storeId: 'store', sessionId: 'a' });
     app.stdin.write('/export\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(exports).toHaveLength(2);
     expect(f.writes).toHaveLength(0);
     expect(f.cancels).toHaveLength(0);
@@ -616,14 +617,14 @@ test('Ink literal bracketed paste preserves CRLF and Ctrl bytes without submit o
   const app = render(<TuiSession testDiagnostics controller={c} />);
   const original = '原文\r\nline\u0003';
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write(`\u001b[200~${original}\u001b[201~`);
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(c.state.draft).toBe(original);
     expect(f.writes).toHaveLength(0);
     expect(f.cancels).toHaveLength(0);
     app.stdin.write('\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(f.writes).toHaveLength(1);
     expect(f.writes[0]).toMatchObject({ id: 'a', intent: { content: original } });
     expect(f.cancels).toHaveLength(0);
@@ -660,9 +661,9 @@ test('Ink text plus Return uses the updated file token and submits its ready com
     });
   };
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('@s\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(c.state.draft).toBe('@s');
     expect(f.writes).toHaveLength(0);
     expect(reads).toHaveLength(1);
@@ -671,22 +672,22 @@ test('Ink text plus Return uses the updated file token and submits its ready com
       scope: { storeId: 'store', sessionId: 'a', workspaceId: 'w' },
     });
     finish(0);
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('r\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(c.state.draft).toBe('@sr');
     expect(f.writes).toHaveLength(0);
     expect(reads).toHaveLength(2);
     expect(reads[1]?.query).toBe('sr');
     finish(1);
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(c.state.draft).toBe('');
     expect(f.writes).toHaveLength(1);
     expect(f.writes[0]).toMatchObject({ id: 'a', intent: { content: '@"src/文件 空格.txt"' } });
     app.stdin.write('\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(f.writes).toHaveLength(1);
     expect(f.writes[0]).toMatchObject({ id: 'a', intent: { content: '@"src/文件 空格.txt"' } });
     expect(f.cancels).toHaveLength(0);
@@ -708,27 +709,27 @@ for (const surface of ['approval', 'composer'] as const) {
     c.setDraft('kept main');
     const app = render(<TuiSession testDiagnostics controller={c} />);
     try {
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       if (surface === 'approval') {
         app.stdin.write('\x02');
-        await Bun.sleep(20);
+        await fixtureDelay(20);
         app.stdin.write('\r');
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
       app.stdin.write('\u001b[200~\u0003\u0003\u001b[201~');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       expect(f.cancels).toHaveLength(0);
       expect(f.writes).toHaveLength(0);
       const pastedDraft = surface === 'composer' ? 'kept main\u0003\u0003' : 'kept main';
       expect(c.state.draft).toBe(pastedDraft);
       app.stdin.write('\u0003\u0003');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       expect(f.cancels).toHaveLength(1);
       expect(f.cancels[0]).toMatchObject({ id: 'a', intent: { targetCommandId: 'original' } });
       expect(c.state.draft).toBe(pastedDraft);
       expect(app.lastFrame()).not.toContain('\\u0003\\u0003\\u0003\\u0003');
       app.stdin.write('\u0003');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       expect(f.cancels).toHaveLength(1);
       expect(f.writes).toHaveLength(0);
     } finally {
@@ -745,11 +746,11 @@ test('rapid native approval selection and Enter deny the offered execution rathe
   await c.select('a');
   const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('\x02');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     app.stdin.write('\r');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(app.lastFrame()).toContain('本 Session 相同命令');
     expect(f.writes).toHaveLength(0);
     // The frozen once option is selected by default. Two Down keys select deny;
@@ -757,7 +758,7 @@ test('rapid native approval selection and Enter deny the offered execution rathe
     app.stdin.write('\u001b[B');
     app.stdin.write('\u001b[B');
     app.stdin.write('\r');
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(f.writes).toHaveLength(1);
     expect(f.writes[0]).toMatchObject({
       card: 'card',
@@ -834,10 +835,10 @@ test('ordinary selected child approval Escape denies only the exact card, preser
   const app = render(<TuiSession controller={c} />);
   const key = async (value: string) => {
     app.stdin.write(value);
-    await Bun.sleep(25);
+    await fixtureDelay(25);
   };
   try {
-    await Bun.sleep(25);
+    await fixtureDelay(25);
     await key('\x02');
     expect(app.lastFrame()).toContain('Pending cards · 2');
     await key('\r');
@@ -865,7 +866,7 @@ test('ordinary selected child approval Escape denies only the exact card, preser
     });
     expect(c.state.draft).toBe('keep parent draft');
     release();
-    await Bun.sleep(50);
+    await fixtureDelay(50);
     await c.select('a');
     await key('\x02');
     expect(app.lastFrame()).toContain('Pending cards · 1');
@@ -909,7 +910,7 @@ test('actual latest Run cancellation remains visible alongside historical unknow
   await c.select('a');
   const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(app.lastFrame()).toContain('Unknown — verify original work');
     expect(app.lastFrame()).toContain('Current task · Cancelled');
     current = {
@@ -923,7 +924,7 @@ test('actual latest Run cancellation remains visible alongside historical unknow
       },
     };
     await c.select('a');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(app.lastFrame()).toContain('Unknown — verify original work');
     expect(app.lastFrame()).not.toContain('Current task · Cancelled');
   } finally {
@@ -972,16 +973,16 @@ test('Ink actual keyboard session selection and full terminal-safe history prese
     c = new TuiController(f.port);
   await c.select('a');
   const rendered = render(<TuiSession testDiagnostics controller={c} />);
-  await Bun.sleep(40);
+  await fixtureDelay(40);
   expect(rendered.lastFrame()).toContain('full正文尾部\\u001b[2J');
   expect(rendered.lastFrame()).toContain('Waiting for required result');
   rendered.stdin.write('\u0012');
-  await Bun.sleep(20);
+  await fixtureDelay(20);
   expect(rendered.lastFrame()).toContain('Select Session');
   rendered.stdin.write('\u001b[B');
-  await Bun.sleep(20);
+  await fixtureDelay(20);
   rendered.stdin.write('\r');
-  await Bun.sleep(50);
+  await fixtureDelay(50);
   expect(c.state.sessionId).toBe('b');
   expect(terminalText('\u0000x\u202e')).toBe('\\u0000x\\u202e');
   rendered.unmount();
@@ -1184,7 +1185,7 @@ test('independent Markdown AST renders structures and keeps HTML, media, relativ
   const content =
     '# Title\n\nParagraph **bold** and `code`.\n\n- item\n\n> quote\n\n```ts\nconst x=1;\n```\n\n| A | B |\n|---|---|\n| left | right |\n\n<script>unsafe()</script>\n\n![alt](https://invalid.example/image) [file](./relative.ts)\n\n\u001b]8;;https://invalid.example\u0007full tail';
   const terminal = render(<TerminalMarkdown content={content} />);
-  await Bun.sleep(30);
+  await fixtureDelay(30);
   const frame = terminal.lastFrame()!;
   expect(frame).toContain('Title');
   expect(frame).toContain('const x=1;');
@@ -1308,9 +1309,9 @@ test('Ink Ctrl+L does nothing; explicit /clear changes only display and preserve
     };
   };
   const rendered = render(<TuiSession testDiagnostics controller={c} />);
-  await Bun.sleep(25);
+  await fixtureDelay(25);
   rendered.stdin.write('\u000c');
-  await Bun.sleep(40);
+  await fixtureDelay(40);
   expect(events).toEqual([]);
   expect(c.state.sessionId).toBe('b');
   expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'unknown' });
@@ -1320,7 +1321,7 @@ test('Ink Ctrl+L does nothing; explicit /clear changes only display and preserve
   expect(f.writes).toEqual([]);
   expect(f.cancels).toEqual([]);
   rendered.stdin.write('/clear\r');
-  await Bun.sleep(40);
+  await fixtureDelay(40);
   expect(events).toEqual([]);
   expect(c.state.sessionId).toBe('b');
   expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'unknown' });
@@ -1445,11 +1446,11 @@ for (const blocked of ['stale', 'unknown'] as const)
     const before = f.writes.length,
       app = render(<TuiSession testDiagnostics controller={c} />);
     try {
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       app.stdin.write('编辑🙂');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       app.stdin.write('\r');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       expect(c.state.draft).toContain('编辑🙂');
       expect(f.writes).toHaveLength(before);
       expect(f.cancels).toHaveLength(0);
@@ -1472,10 +1473,10 @@ test('pending chooser preserves independent original card drafts and clears only
   const app = render(<TuiSession testDiagnostics controller={c} />);
   const key = async (input: string) => {
     app.stdin.write(input);
-    await Bun.sleep(20);
+    await fixtureDelay(20);
   };
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     await key('\x02');
     await key('\r');
     await key('A独立草稿');
@@ -1491,7 +1492,7 @@ test('pending chooser preserves independent original card drafts and clears only
     expect(app.lastFrame()).not.toContain('B独立草稿');
     cards = cards.map((item) => (item.id === 'sibling-a' ? { ...item, revision: '8' } : item));
     await c.select('a');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(app.lastFrame()).not.toContain('A独立草稿');
     await key('\x02');
     await key('\x1b[B');
@@ -1578,17 +1579,17 @@ test('open pending chooser freezes exact original rows when the paged directory 
   const app = render(<TuiSession testDiagnostics controller={c} />);
   const key = async (input: string) => {
     app.stdin.write(input);
-    await Bun.sleep(20);
+    await fixtureDelay(20);
   };
   try {
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     await key('\x02');
     await key('\r');
     await key('\x02');
     await key('\x1b[B');
     cards = [{ ...cards[0]! }, { ...cards[1]!, revision: '8' }, { ...card, id: 'new-card' }];
     await c.select('a');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(app.lastFrame()!.replace(/\s+/g, ' ')).toContain('changed; reopen to select');
     await key('\r');
     expect(app.lastFrame()).toContain('approval [one]');
@@ -1662,7 +1663,7 @@ for (const blocked of ['unknown-observation', 'preparation-close', 'preparation-
       await c.stopJob('job-one');
     } else {
       const pending = c.stopJob('job-one');
-      await Bun.sleep(0);
+      await fixtureDelay(0);
       if (blocked === 'preparation-close') c.closePanel();
       else await c.select('b');
       finish(actual);
@@ -2152,13 +2153,13 @@ test('a proven stopped-target steer rejection keeps the original input and refre
       submissionFailure: { commandId: 'id1', reason: 'input_target_stopped' },
     });
     ui = render(<TuiSession controller={c} />);
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(ui.lastFrame()).toContain('This input was not applied; the original Run has ended.');
     expect(ui.lastFrame()).not.toContain('input_target_stopped');
     expect(c.state.snapshot?.view.runs).toHaveLength(0);
     expect(reconciliations).toBe(1);
     expect(submitted).toHaveLength(1);
-    await Bun.sleep(550);
+    await fixtureDelay(550);
     expect(commandReads).toBe(0);
     c.setDraft('next explicit user input');
     await c.send();

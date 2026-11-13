@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Json, ToolContext } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
+import { expect, test } from '#kite-test';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { createMockModelServer, parseDraftSavedPlan } from './fixtures';
 import { migrateOriginalToolCall, originalToolName } from './original-tool-contract';
@@ -86,7 +86,7 @@ test('non-equivalent shell deadlines, grep regex, unowned baselines and ignored 
 
 test('workspace-bound mock emits migrated input while retaining original queue and real Tool result contracts', async () => {
   const { root, scope } = await ownedFixture();
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   try {
     server.bindWorkspace(scope);
     server.setResponses([
@@ -131,7 +131,7 @@ test('workspace-bound mock emits migrated input while retaining original queue a
     expect(() => server.assertComplete()).not.toThrow();
     expect(() => server.bindWorkspace(scope)).toThrow();
   } finally {
-    server.stop();
+    await server.stop();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -144,7 +144,7 @@ test('new planning identity is decoded without inventing legacy outcome text', (
 });
 
 test('automatic title requests remain visible without consuming ordinary work responses', async () => {
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   server.setResponses([{ message: { content: 'ORIGINAL_WORK_RESULT' } }]);
   const invoke = (messages: Array<{ role: string; content: string }>) =>
     fetch(`${server.baseURL}/chat/completions`, {
@@ -169,7 +169,7 @@ test('automatic title requests remain visible without consuming ordinary work re
     expect(server.hasRequestMessage('Original work', 0, 'work')).toBe(true);
     expect(() => server.assertComplete()).not.toThrow();
   } finally {
-    server.stop();
+    await server.stop();
   }
 });
 

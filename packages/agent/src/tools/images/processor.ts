@@ -3,13 +3,14 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { desktopAsset } from '../../platform/desktop-assets';
 import {
   startWindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../../platform/process/windows-owned-child';
+import { nodeRuntimeFlags } from '../../platform/runtime-flags';
 import { AgentError, type Json } from '../../storage/types';
 import { imageInputBytes, imageOutputBytes, imageTimeoutMs } from './format';
 
@@ -40,14 +41,23 @@ export function imageAssets(): ImageAssets {
     for (const name of Object.keys(pkg.dependencies ?? {}))
       visit(require.resolve(`${name}/package.json`));
     for (const name of Object.keys(pkg.optionalDependencies ?? {})) {
+      let optional: string;
       try {
-        visit(require.resolve(`${name}/package.json`));
-      } catch {
-        /* Uninstalled platform companions. */
+        // Sharp's native companion packages expose the manifest under "/package".
+        optional = require.resolve(`${name}/package`);
+      } catch (error) {
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'MODULE_NOT_FOUND')
+          throw error;
+        continue;
       }
+      visit(optional);
     }
   };
-  visit(createRequire(import.meta.url).resolve('sharp/package.json'));
+  const sharp = createRequire(import.meta.url).resolve('sharp');
+  const manifest = join(dirname(dirname(sharp)), 'package.json');
+  if (JSON.parse(readFileSync(manifest, 'utf8')).name !== 'sharp')
+    throw new AgentError('image_assets_invalid');
+  visit(manifest);
   return { child, checksum, dependencies: [...dependencies] };
 }
 
@@ -174,15 +184,7 @@ async function execute(
   for (const key of ['SystemRoot', 'WINDIR', 'SystemDrive', 'TEMP', 'TMP'])
     if (process.env[key]) env[key] = process.env[key]!;
   // A fixed codec must not load cwd preloads or tsconfig aliases before its checked program.
-  const emptyConfig = process.platform === 'win32' ? '\\\\.\\NUL' : '/dev/null';
-  const argv = [
-    `--config=${emptyConfig}`,
-    `--tsconfig-override=${emptyConfig}`,
-    '--no-env-file',
-    '--no-install',
-    '--smol',
-    asset.child,
-  ];
+  const argv = [...nodeRuntimeFlags, asset.child];
   let owner: {
     stdout: AsyncIterable<Uint8Array>;
     stderr: AsyncIterable<Uint8Array>;

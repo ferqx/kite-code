@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { persistentWorktreeDirectory } from '../../fixtures/worktree-filesystem';
 
 const runner = fileURLToPath(new URL('../../e2e/live/model/git-worktree.live.ts', import.meta.url));
@@ -16,7 +17,7 @@ for (const selectedCase of ['primary', 'child-default'])
       mkdirSync(bootstrapHome, { mode: 0o700 });
       const output = join(root, 'case');
       const execute = async () => {
-        const child = Bun.spawn(
+        const child = spawnFixtureProcess(
           [
             process.execPath,
             runner,

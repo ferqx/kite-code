@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiErrorBoundary } from '../../src/tui/error-boundary';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 25));

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +8,7 @@ import { createSkillSource } from '@kite-ai/agent/skills';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createConfiguredSkillSource } from '../../src/skill-source';

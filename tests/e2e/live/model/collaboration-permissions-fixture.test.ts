@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { taskQualityPresentedRead } from './agent-task-quality-fixture';
 import {
   isLivePermissionShellApproval,
@@ -167,7 +168,7 @@ for (const mode of modes)
       const root = mkdtempSync(join(tmpdir(), 'kite-live-permission-contract-'));
       const requests: ModelRequest[] = [];
       const reviewerRequests: Record<string, unknown>[] = [];
-      const provider = Bun.serve({
+      const provider = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -244,7 +245,7 @@ for (const mode of modes)
         );
         passed = true;
       } finally {
-        provider.stop(true);
+        await provider.stop(true);
         if (passed) rmSync(root, { recursive: true, force: true });
         else console.error(`controlled_permission_evidence_retained:${root}`);
       }

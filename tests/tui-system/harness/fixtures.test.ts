@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { createMockModelServer } from './fixtures';
 
 async function requestModel(
@@ -14,7 +14,7 @@ async function requestModel(
 
 describe('mock model fixture', () => {
   test('interleaves reasoning chunks around visible content before terminal SSE frames', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([
         {
@@ -45,12 +45,12 @@ describe('mock model fixture', () => {
       expect(frames[4]).toBe('[DONE]');
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('consumes configured responses once instead of wrapping the queue', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([{ message: { content: 'only response' } }]);
 
@@ -69,12 +69,12 @@ describe('mock model fixture', () => {
       expect(second.status).toBe(500);
       expect(() => server.assertComplete()).toThrow('response queue exhausted');
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('keeps request history monotonic across response phases', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       for (const content of ['first', 'second']) {
         server.setResponses([{ message: { content } }]);
@@ -91,12 +91,12 @@ describe('mock model fixture', () => {
       expect(server.hasRequestMessage('second', 1)).toBe(true);
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('matches only the current user turn, not history or injected project/runtime context', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([{ message: { content: 'ok' } }]);
       await fetch(`${server.baseURL}/chat/completions`, {
@@ -125,24 +125,24 @@ describe('mock model fixture', () => {
       expect(server.hasRequestMessage('current target', 0)).toBe(true);
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
-  test('rejects phase replacement and teardown while configured responses remain', () => {
-    const server = createMockModelServer();
+  test('rejects phase replacement and teardown while configured responses remain', async () => {
+    const server = await createMockModelServer();
     try {
       server.setResponses([{ message: { content: 'must be consumed' } }]);
       expect(() => server.setResponses([])).toThrow('unconsumed response');
       expect(() => server.assertComplete()).toThrow('were unconsumed');
       expect(() => server.assertComplete({ allowUnconsumedResponses: true })).not.toThrow();
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('accepts a matching tool result in the continuation request', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([
         {
@@ -173,12 +173,12 @@ describe('mock model fixture', () => {
       ).toHaveProperty('status', 200);
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('resolves a queued response from the matching plan tool result', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     let resolverCalls = 0;
     try {
       server.setResponses([
@@ -262,12 +262,12 @@ describe('mock model fixture', () => {
       });
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('rejects a tool continuation without an explicit outcome contract', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([
         {
@@ -295,12 +295,12 @@ describe('mock model fixture', () => {
       expect(await response.text()).toContain('without an expectedRequest.toolResults outcome');
       expect(() => server.assertComplete()).toThrow('without an expectedRequest.toolResults');
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('keeps a missing tool result unresolved across interleaved model requests', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([
         {
@@ -319,12 +319,12 @@ describe('mock model fixture', () => {
       expect(interleavedRequest.status).toBe(200);
       expect(() => server.assertComplete()).toThrow('tool result(s) are still pending');
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('refuses a canned success response when the actual tool result misses its marker', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([
         {
@@ -357,12 +357,12 @@ describe('mock model fixture', () => {
       expect(await rejected.text()).toContain('does not include');
       expect(() => server.assertComplete()).toThrow('request contract violation');
     } finally {
-      server.stop();
+      await server.stop();
     }
   });
 
   test('reports an unresolved tool call at teardown unless the turn is explicitly aborted', async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     try {
       server.setResponses([
         {
@@ -374,10 +374,10 @@ describe('mock model fixture', () => {
       await requestModel(server.baseURL, [{ role: 'user', content: 'read the file' }]);
       expect(() => server.assertComplete()).toThrow('tool result(s) are still pending');
     } finally {
-      server.stop();
+      await server.stop();
     }
 
-    const abortedServer = createMockModelServer();
+    const abortedServer = await createMockModelServer();
     try {
       abortedServer.setResponses([
         {
@@ -392,7 +392,7 @@ describe('mock model fixture', () => {
       await requestModel(abortedServer.baseURL, [{ role: 'user', content: 'deny it' }]);
       expect(() => abortedServer.assertComplete()).not.toThrow();
     } finally {
-      abortedServer.stop();
+      await abortedServer.stop();
     }
   });
 });

@@ -1,6 +1,6 @@
-import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../json';
+import type { Database } from '../runtime-sqlite';
 import type { Json } from '../storage/types';
 import { verifyCallerIntentRecords } from './caller-intents';
 import { MaintenanceError } from './types';

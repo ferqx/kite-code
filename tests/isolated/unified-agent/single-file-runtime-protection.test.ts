@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   cpSync,
   existsSync,
@@ -12,12 +11,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 async function execute(argv: string[], cwd: string, home: string) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd,
     env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
     stdin: 'ignore',
@@ -47,7 +50,7 @@ test('actual single-file default Service protects loader companions without prot
   const home = join(root, 'home');
   privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
-  let provider: ReturnType<typeof Bun.serve> | undefined;
+  let provider: FixtureServer | undefined;
   let runtime = '';
   let completed = false;
   try {
@@ -68,7 +71,7 @@ test('actual single-file default Service protects loader companions without prot
       : await buildTerminalBundle({
           destination: join(root, 'candidate'),
           repositoryRoot,
-          bunExecutable: process.execPath,
+          nodeExecutable: process.execPath,
         });
     const proof = built.artifact.runtimeProtection!;
     expect(Object.keys(proof).sort()).toEqual(['kind', 'manifestSha256', 'root']);
@@ -83,11 +86,11 @@ test('actual single-file default Service protects loader companions without prot
     runtime = join(built.root, built.manifest.entries.runtime);
 
     const single = join(root, 'single-file-service.js');
-    const output = await Bun.build({
+    const output = await buildFixture({
       entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
       outdir: root,
       naming: 'single-file-service.js',
-      target: 'bun',
+      target: 'node',
       packages: 'bundle',
     });
     expect(output.success).toBe(true);
@@ -160,7 +163,7 @@ test('actual single-file default Service protects loader companions without prot
       ]),
     ];
     const messages: unknown[][] = [];
-    provider = Bun.serve({
+    provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -221,11 +224,13 @@ test('actual single-file default Service protects loader companions without prot
       driver,
       `
 import assert from 'node:assert/strict';
+import {setTimeout as sleep} from 'node:timers/promises';
+import {spawn} from ${JSON.stringify(new URL('../../../scripts/tooling/process.ts', import.meta.url).href)};
 import {readFileSync,writeFileSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
 import {launchPairedService} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/service/paired.js'))};
 const p=JSON.parse(readFileSync(process.argv[2],'utf8'));
-const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){const child=Bun.spawn(argv,{env:{...env,...${JSON.stringify(userConfiguration.homeEnvironment)}},stdin:'pipe',stdout:'pipe',stderr:'pipe'});const [copy,stderr]=child.stderr.tee();void new Response(copy).text().then(text=>{writeFileSync(${JSON.stringify(join(root, 'child-stderr-'))}+instanceId+'.log',text);if(text)console.error(text)});return {stdin:child.stdin,stdout:child.stdout,stderr,pid:child.pid,exited:child.exited,kill:signal=>child.kill(signal)};}});
+const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){const child=spawn(argv,{env:{...env,...${JSON.stringify(userConfiguration.homeEnvironment)}},stdin:'pipe',stdout:'pipe',stderr:'pipe'});const [copy,stderr]=child.stderr.tee();void new Response(copy).text().then(text=>{writeFileSync(${JSON.stringify(join(root, 'child-stderr-'))}+instanceId+'.log',text);if(text)console.error(text)});return {stdin:child.stdin,stdout:child.stdout,stderr,pid:child.pid,exited:child.exited,kill:signal=>child.kill(signal)};}});
 let h;const ownedPids=[];
 try {
  h=await launch('runtime-paired');ownedPids.push(h.pid);
@@ -238,7 +243,7 @@ try {
  await c.setPermissionMode('s',{expectedStoreId:s,commandId:'full',mode:'full',ifRevision:mode.revision,makeDefault:false,ifDefaultRevision:mode.defaultRevision});
  await c.startRun('s',{kind:'run.start',expectedStoreId:s,commandId:'work',content:'verify protected runtime assets'});
  const deadline=Date.now()+15000;let command,run;
- while(true){command=await c.getCommand('work');if(command.receipt?.runId){run=await c.getRun(command.receipt.runId);if(!run.isActive)break;}if(Date.now()>deadline)throw Error('runtime_run_deadline');await Bun.sleep(10);}
+ while(true){command=await c.getCommand('work');if(command.receipt?.runId){run=await c.getRun(command.receipt.runId);if(!run.isActive)break;}if(Date.now()>deadline)throw Error('runtime_run_deadline');await sleep(10);}
  assert.equal(run.status,'completed');assert.equal(run.originCommandId,'work');
  await h.close();h=undefined;
  h=await launch('runtime-cold');ownedPids.push(h.pid);const original=await h.client.getCommand('work');assert.equal(original.id,'work');assert.equal(original.originStoreId,s);assert.equal(original.receipt?.runId,run.id);assert.equal((await h.client.getRun(run.id)).status,'completed');
@@ -291,11 +296,11 @@ const path=${JSON.stringify(join(root, 'custom-parser/extractor-worker.js'))};
 await runServiceProcess({async configure(startup){const extractor=createPassiveWebExtractor({workerPath:path});const prepared=await extractor.prepare();const extracted=await extractor.extract({html:'<html><title>Actual custom parser</title><body><article>Original custom parser content.</article></body></html>',url:'https://example.invalid/'},{signal:new AbortController().signal}).catch(error=>{console.error(error);throw error;});writeFileSync(${JSON.stringify(join(root, 'custom-extractor-proof.json'))},JSON.stringify({prepared,extracted}));return createDefaultProcessConfiguration({userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',profile:selectProfile(startup.profile),webFetch:{extractor,network:{policy:{mode:'public'},admitHop:async()=>({allowed:true,revision:'default-public-network-1'})}},runtimeAssets:[process.argv[1],webExtractorAssets(path).worker,webExtractorAssets(path).checksum]});}});
 `,
     );
-    const customBuild = await Bun.build({
+    const customBuild = await buildFixture({
       entrypoints: [customSource],
       outdir: root,
       naming: 'custom-runtime-service.js',
-      target: 'bun',
+      target: 'node',
       packages: 'bundle',
     });
     expect(customBuild.success).toBe(true);
@@ -381,6 +386,8 @@ await runServiceProcess({async configure(startup){const extractor=createPassiveW
       failureDriver,
       `
 import assert from 'node:assert/strict';
+import {setTimeout as sleep} from 'node:timers/promises';
+import {spawn} from ${JSON.stringify(new URL('../../../scripts/tooling/process.ts', import.meta.url).href)};
 import {selectProfile} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/agent/profile.js'))};
 import {openSqliteStore} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/agent/sqlite.js'))};
 import {createRuntime} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/agent/index.js'))};
@@ -397,8 +404,8 @@ const h=await startService({runtime,profile,instanceId:'after-resource-failure',
 let closed=false;void h.closedPromise.then(()=>{closed=true;});
 const c=createServiceLifecycleClient({endpoint:h.endpoint,token:h.bootstrap.token,expected:{profile,instanceId:'after-resource-failure'}});
 assert.equal((await c.shutdown('if_idle')).accepted,true);
-const deadline=Date.now()+5000;while((await c.getStatus()).state!=='drain_failed'){if(Date.now()>deadline)throw Error('failure_lifecycle_deadline');await Bun.sleep(10);}
-await Bun.sleep(25);assert.equal(closed,false);assert.equal(hookCalls,1);
+const deadline=Date.now()+5000;while((await c.getStatus()).state!=='drain_failed'){if(Date.now()>deadline)throw Error('failure_lifecycle_deadline');await sleep(10);}
+await sleep(25);assert.equal(closed,false);assert.equal(hookCalls,1);
 assert.equal((await c.getStatus()).state,'drain_failed');
 assert.throws(()=>acquireArtifactAccess({root,mode:'exclusive'}),error=>error.code==='owner_busy');
 console.log(JSON.stringify({fault:'trusted_host_afterResourceClose',closedPromise:'pending',listener:'drain_failed',lease:'owner_busy',hookCalls}));

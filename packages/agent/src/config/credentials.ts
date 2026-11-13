@@ -61,6 +61,14 @@ export function createTemporaryCredentialBackend(): CredentialBackend {
     },
   };
 }
+function credentialFailure(error: unknown): ConfigurationError {
+  if (
+    error instanceof ConfigurationError &&
+    ['model_credentials_locked', 'model_credentials_backend_unavailable'].includes(error.code)
+  )
+    return error;
+  return new ConfigurationError('credential_unavailable');
+}
 export function createCredentialVault(options: { backend?: CredentialBackend } = {}) {
   const selectedBackend = options.backend;
   const revoked = new Set<string>();
@@ -152,8 +160,8 @@ export function createCredentialVault(options: { backend?: CredentialBackend } =
       const id = `credential:${crypto.randomUUID()}`;
       try {
         await selected.put(id, secret);
-      } catch {
-        throw new ConfigurationError('credential_unavailable');
+      } catch (error) {
+        throw credentialFailure(error);
       }
       return Object.freeze({ id, persistence: selected.kind });
     },
@@ -167,8 +175,8 @@ export function createCredentialVault(options: { backend?: CredentialBackend } =
       let secret: string | null;
       try {
         secret = await selected.resolve(ref.id);
-      } catch {
-        throw new ConfigurationError('credential_unavailable');
+      } catch (error) {
+        throw credentialFailure(error);
       }
       if (revoked.has(ref.id)) throw new ConfigurationError('credential_revoked');
       if (typeof secret !== 'string' || !secret || Buffer.byteLength(secret) > 65536)
@@ -184,8 +192,8 @@ export function createCredentialVault(options: { backend?: CredentialBackend } =
       if (selected.kind !== ref.persistence) throw new ConfigurationError('credential_unavailable');
       try {
         await selected.remove(ref.id);
-      } catch {
-        throw new ConfigurationError('credential_unavailable');
+      } catch (error) {
+        throw credentialFailure(error);
       }
     },
   };

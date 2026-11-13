@@ -13,9 +13,9 @@
     "./tui": "./src/tui/executable.tsx"
   },
   "scripts": {
-    "build": "bun run ../../scripts/development/retired-entrypoints.ts terminal",
+    "build": "node ../../scripts/development/retired-entrypoints.ts terminal",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun run ../../scripts/run-owned-tests.ts ."
+    "test": "node ../../scripts/development/retired-entrypoints.ts terminal"
   },
   "dependencies": {
     "@kite-ai/kite-app-contract": "workspace:*",

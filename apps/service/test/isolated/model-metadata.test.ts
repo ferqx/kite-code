@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { launchPairedService } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
@@ -23,7 +25,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
     const value = await read();
     if (ready(value)) return value;
     if (Date.now() >= deadline) throw new Error('model_metadata_fixture_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -38,7 +40,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
   const entered = barrier(),
     release = barrier();
   const requests: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -83,11 +85,11 @@ test('production paired Service freezes actual SDK settings and dispatch control
     );
   save('a', 0.1);
   let host: Awaited<ReturnType<typeof launchPairedService>> | undefined;
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let browser: ReturnType<typeof createBrowserClient> | undefined;
   try {
     host = await launchPairedService({
-      entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      entrypoint: join(import.meta.dirname, '../../src/main.ts'),
       spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: 'metadata-host',
@@ -211,7 +213,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
     });
     expect(requests).toHaveLength(2);
     expect(requests[1]).toMatchObject({ model: 'remote-b', temperature: 0.75 });
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const document = await fetch(gateway.endpoint);
     await document.body?.cancel();
     const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -228,7 +230,7 @@ test('production paired Service freezes actual SDK settings and dispatch control
               origin: gateway!.endpoint,
             },
           }),
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     await browser.connect();

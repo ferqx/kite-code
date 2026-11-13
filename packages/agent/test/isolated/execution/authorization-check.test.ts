@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
@@ -10,6 +10,7 @@ import {
   type ModelEvent,
 } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import { authorizationCheckInstructions } from '../../../src/execution/authorization-check-feedback';
 import type { Permissions } from '../../../src/extensions';
@@ -298,7 +299,7 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
   while (Date.now() < end) {
     const value = await read();
     if (value !== null) return value;
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
   throw new Error('Timed out waiting for actual check state');
 }
@@ -906,7 +907,7 @@ test('an HTTP 200 Responses failure keeps its sanitized SDK cause through the or
               requests.push(JSON.parse(String(init?.body)));
               return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
             },
-            { preconnect: globalThis.fetch.preconnect },
+            {},
           ),
         }),
       ],

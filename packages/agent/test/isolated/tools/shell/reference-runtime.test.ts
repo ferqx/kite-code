@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../../src';
 import type { JobDefinition, JobEvent } from '../../../../src/extensions';
 import { modelIdentifier } from '../../../../src/model-identifier';

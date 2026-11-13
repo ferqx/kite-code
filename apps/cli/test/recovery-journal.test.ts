@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { AgentClient, Command } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { openRecoveryJournal } from '../host/recovery-journal';
 import { lookupRecovery, type RecoveryIntent, submitRecovery } from '../src/recovery';

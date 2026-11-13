@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import type { UserSkillCataloguePage } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeRequest,

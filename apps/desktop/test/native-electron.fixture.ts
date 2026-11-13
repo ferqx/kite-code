@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { nativeRootPage } from './native-root-page.fixture';
 
 async function openSettings(page: import('playwright').Page) {
   if (!(await page.locator('.desktop-settings-dialog').isVisible()))
@@ -31,7 +32,7 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-const [outdir, root, dataRoot, storeId, endpoint, electronExecutable, control, bunExecutable] =
+const [outdir, root, dataRoot, storeId, endpoint, electronExecutable, control, runtimeExecutable] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string];
 function expect(value: unknown) {
   return {
@@ -78,7 +79,7 @@ let observedGeneration = 1;
 const diagnostics: string[] = [];
 application.process().stderr?.on('data', (chunk) => diagnostics.push(String(chunk).slice(0, 1000)));
 try {
-  const page = await application.firstWindow();
+  const page = await nativeRootPage(application, 10000);
   page.setDefaultTimeout(10000);
   page.on('console', (message) => {
     const text = message.text();
@@ -317,7 +318,7 @@ try {
   const ps = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']));
   const line = ps.split('\n').find((line) => {
     const parts = line.trim().split(/\s+/);
-    return Number(parts[1]) === electronPid && parts.slice(2).join(' ') === bunExecutable;
+    return Number(parts[1]) === electronPid && parts.slice(2).join(' ') === runtimeExecutable;
   });
   servicePid = line ? Number(line.trim().split(/\s+/)[0]) : 0;
   expect(servicePid).toBeGreaterThan(0);
@@ -331,7 +332,7 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText()).toBe(
+  expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue()).toBe(
     'PRIVATE NATIVE DRAFT',
   );
   // A second real BrowserWindow with the same preload/document is still not the admitted sender.
@@ -398,7 +399,7 @@ try {
   console.error('native_error', error instanceof Error ? error.stack : error);
   console.error(
     'native_state',
-    await (await application.firstWindow()).evaluate(async (generation) => {
+    await (await nativeRootPage(application, 10000)).evaluate(async (generation) => {
       try {
         return await window.kiteNative!.request({ method: 'state', generation });
       } catch (error) {
@@ -410,7 +411,7 @@ try {
     'native_page',
     (
       await (
-        await application.firstWindow()
+        await nativeRootPage(application, 10000)
       )
         .locator('body')
         .innerText()

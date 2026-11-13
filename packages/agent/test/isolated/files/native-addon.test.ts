@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   linkSync,
@@ -13,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { createNativeWorkspaceFileIo } from '../../../src/files-native-binding';
 import { defaultWindowsPathSecurity } from '../../../src/platform/windows-path-security';
 

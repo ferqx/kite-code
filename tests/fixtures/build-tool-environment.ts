@@ -1,10 +1,15 @@
 import { realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../scripts/tooling/process';
+import { testNodeCommand } from '../../scripts/tooling/test-command';
 
 /** Build children use the installed toolchain; runtime children keep their isolated HOME. */
 export function hostBuildEnvironment(): NodeJS.ProcessEnv {
-  const cargo = Bun.which('cargo');
+  const cargo = findFixtureExecutable('cargo');
   const standardRustupHome =
     cargo &&
     basename(dirname(cargo)) === 'bin' &&
@@ -25,12 +30,11 @@ export function hostBuildEnvironment(): NodeJS.ProcessEnv {
 
 /** Run the real native build in a child without changing the test process environment. */
 export async function buildNativeFilesFixture(outdir: string): Promise<void> {
-  const child = Bun.spawn(
-    [
-      process.execPath,
+  const child = spawnFixtureProcess(
+    testNodeCommand(
       fileURLToPath(new URL('../../packages/agent/scripts/build-native-files.ts', import.meta.url)),
-      outdir,
-    ],
+      [outdir],
+    ),
     { env: hostBuildEnvironment(), stdout: 'pipe', stderr: 'pipe' },
   );
   try {

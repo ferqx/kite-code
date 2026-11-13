@@ -1,4 +1,3 @@
-import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
 import * as actualChild from 'node:child_process';
 import { EventEmitter } from 'node:events';
@@ -15,6 +14,7 @@ import * as actualNet from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { mock } from '#kite-test';
 
 const bootstrapUnknown = process.argv[2] === 'bootstrap-unknown';
 const calls: string[][] = [];

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -8,7 +8,7 @@ import { waitForOutputQuiescence, waitForText } from '../harness/terminal-screen
 import { createTestWorkspace } from '../harness/test-workspace';
 
 test('live two-turn delegation keeps Thinking after its prompt while scrolled', async () => {
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   const workspace = createTestWorkspace({
     configOverrides: {
       provider: {

@@ -5,7 +5,6 @@
  * The TUI subprocess connects to this server as its model provider.
  * Responses are pre-configured per test scenario and consumed sequentially.
  *
- * Uses Bun.serve() — zero additional dependencies.
  */
 
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
@@ -142,7 +141,7 @@ export interface MockModelServer {
   /** Fail when requests exceeded the queue or configured responses remain unused. */
   assertComplete(options?: { readonly allowUnconsumedResponses?: boolean }): void;
   /** Stop the server */
-  stop(): void;
+  stop(): Promise<void>;
 }
 
 /**
@@ -155,7 +154,7 @@ export interface MockModelServer {
  * Supports both non-streaming (application/json) and streaming
  * (text/event-stream SSE) responses based on the request's `stream` field.
  */
-export function createMockModelServer(): MockModelServer {
+export async function createMockModelServer(): Promise<MockModelServer> {
   let workspaceScope: OriginalToolWorkspace | undefined;
   const toolMigrations: { original: OriginalToolCall; emitted: OriginalToolCall }[] = [];
   let responses: MockResponse[] = [];
@@ -173,7 +172,7 @@ export function createMockModelServer(): MockModelServer {
     models: ['mock-model'],
   };
 
-  const server = startTestHttpServer({
+  const server = await startTestHttpServer({
     async fetch(req) {
       const url = new URL(req.url);
       if (req.method === 'GET') modelRequests.push(url.href);

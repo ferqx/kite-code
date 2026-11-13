@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeRequest,
@@ -10,8 +10,16 @@ import type {
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<!doctype html><div></div>');
-const initialGlobals = { window: globalThis.window, document: globalThis.document };
-Object.assign(globalThis, { window: bootstrap.window, document: bootstrap.window.document });
+const initialGlobals = {
+  window: globalThis.window,
+  document: globalThis.document,
+  navigator: globalThis.navigator,
+};
+Object.assign(globalThis, {
+  window: bootstrap.window,
+  document: bootstrap.window.document,
+  navigator: bootstrap.window.navigator,
+});
 const { createRoot } = await import('react-dom/client');
 const { MessageContent } = await import('@kite-ai/ui/desktop');
 const { NativeGeneralSettings } = await import('../../src/native-general-settings');

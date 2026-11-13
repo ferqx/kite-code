@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { AuthorizationRequest } from '@kite-ai/agent/extensions';
@@ -13,6 +13,7 @@ import {
 } from '@kite-ai/agent/permissions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 
 test('uncertain effects require this call’s human approval in every mode', async () => {
   const capability = {
@@ -288,7 +289,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw new Error('Permission fixture deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 async function fixture(

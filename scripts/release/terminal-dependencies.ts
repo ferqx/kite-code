@@ -10,9 +10,17 @@ import {
   realpathSync,
   symlinkSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { agentBrowserExecutableName } from '../../packages/agent/src/tools/browser/assets';
+import {
+  type BunLockPackage,
+  type BunPackageMetadata,
+  bunDependencyKey,
+  bunDependencySections,
+  bunLockfile,
+  parseBunLock,
+} from './bun-lock';
 
 export interface TerminalWorkspacePackage {
   name: string;
@@ -29,7 +37,10 @@ export interface TerminalDependencyCopy {
 type Manifest = {
   name: string;
   version: string;
+  workspaces?: string[];
+  patchedDependencies?: Record<string, string>;
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
@@ -54,8 +65,8 @@ function inside(root: string, path: string) {
   const part = relative(root, path);
   return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith(`..${sep}`));
 }
-function fail(code: string): never {
-  throw new Error(`terminal_dependency_${code}`);
+function fail(code: string, dependency?: { name: string; source: string }): never {
+  throw new Error(`terminal_dependency_${code}`, { cause: dependency });
 }
 function readManifest(source: string) {
   const manifestPath = realpathSync(join(source, 'package.json'));
@@ -126,15 +137,191 @@ function dependencies(manifest: Manifest) {
   }
   return result;
 }
-function resolvePackage(name: string, from: string) {
-  // A declared npm dependency may share a built-in name, e.g. punycode -> require('punycode/').
-  for (const search of createRequire(join(from, 'package.json')).resolve.paths(
-    `${name}/package.json`,
-  ) ?? []) {
-    const path = join(search, name);
+function resolveFixturePackage(name: string, from: string, repository: string) {
+  for (let directory = from; inside(repository, directory); directory = dirname(directory)) {
+    const path = join(
+      basename(directory) === 'node_modules' ? directory : join(directory, 'node_modules'),
+      name,
+    );
     if (existsSync(join(path, 'package.json'))) return realpathSync(path);
+    if (directory === repository) break;
   }
   return undefined;
+}
+
+type LockedContext = {
+  key: string;
+  metadata: BunPackageMetadata;
+  peerProviders: ReadonlyMap<string, string>;
+};
+
+function patchMarker(bytes: Buffer) {
+  // Bun 1.4.4 uses the little-endian first eight bytes of the patch's SHA-1.
+  return `.bun-tag-${createHash('sha1').update(bytes).digest().readBigUInt64LE().toString(16)}`;
+}
+
+function installedGraph(repository: string) {
+  const modules = join(repository, 'node_modules');
+  const lockPath = join(repository, bunLockfile);
+  const manifestPath = join(repository, 'package.json');
+  // Standalone synthetic release fixtures have neither a checkout manifest nor a lock.
+  if (!existsSync(lockPath) && !existsSync(manifestPath))
+    return (name: string, from: string) => resolveFixturePackage(name, from, repository);
+  if (!existsSync(lockPath) || realpathSync(lockPath) !== lockPath) fail('lock_unavailable');
+  const store = join(modules, '.bun');
+  const lock = parseBunLock(readFileSync(lockPath));
+  if (lock.configVersion !== 1 || !existsSync(store) || realpathSync(store) !== store)
+    fail('layout_invalid');
+  const root = readManifest(repository).manifest;
+  const workspacePaths = Object.keys(lock.workspaces).filter(Boolean).sort();
+  if (!isDeepStrictEqual([...(root.workspaces ?? [])].sort(), workspacePaths))
+    fail('lock_mismatch');
+  if (!isDeepStrictEqual({ ...root.patchedDependencies }, { ...lock.patchedDependencies }))
+    fail('lock_patch_mismatch');
+  const patchFiles = Object.entries(lock.patchedDependencies).map(([id, path]) => {
+    const file = join(repository, path);
+    if (!existsSync(file) || realpathSync(file) !== file || !lstatSync(file).isFile())
+      fail('lock_patch_mismatch');
+    return [id, patchMarker(readFileSync(file))] as const;
+  });
+  const markers = new Map(patchFiles);
+  const workspaceContexts = new Map<string, LockedContext>();
+  for (const [path, workspace] of Object.entries(lock.workspaces)) {
+    const directory = join(repository, path);
+    if (realpathSync(directory) !== directory)
+      fail('workspace_resolution_mismatch', { name: workspace.name, source: directory });
+    const current = readManifest(directory).manifest;
+    if (
+      workspace.name !== current.name ||
+      (workspace.version !== undefined && workspace.version !== current.version) ||
+      bunDependencySections.some(
+        (field) => !isDeepStrictEqual({ ...workspace[field] }, { ...current[field] }),
+      )
+    )
+      fail('lock_mismatch', { name: workspace.name, source: directory });
+    workspaceContexts.set(directory, {
+      key: path ? workspace.name : '',
+      metadata: workspace,
+      peerProviders: new Map(),
+    });
+  }
+
+  const peerNames = new Set(
+    Object.values(lock.packages).flatMap(({ metadata }) =>
+      Object.keys(metadata?.peerDependencies ?? {}),
+    ),
+  );
+  const checkedPackages = new Set<string>();
+  const checkedContexts = new Set<string>();
+  const verifiedEdges = new Map<string, Map<string, string | undefined>>();
+  function dependencyKey(name: string, source: LockedContext) {
+    const { metadata, key, peerProviders } = source;
+    const isPeer =
+      Object.hasOwn(metadata.peerDependencies ?? {}, name) &&
+      !Object.hasOwn(metadata.dependencies ?? {}, name) &&
+      !Object.hasOwn(metadata.optionalDependencies ?? {}, name) &&
+      !Object.hasOwn(metadata.devDependencies ?? {}, name);
+    return (isPeer && peerProviders.get(name)) || bunDependencyKey(lock, key, name);
+  }
+
+  function inheritedProviders(source: LockedContext) {
+    const providers = new Map(source.peerProviders);
+    for (const field of ['dependencies', 'optionalDependencies', 'devDependencies'] as const) {
+      for (const name of Object.keys(source.metadata[field] ?? {})) {
+        if (!peerNames.has(name)) continue;
+        const key = bunDependencyKey(lock, source.key, name);
+        if (key) providers.set(name, key);
+      }
+    }
+    return providers;
+  }
+
+  function verifyRegistryPackage(expected: BunLockPackage, source: string) {
+    const id = `${expected.name}@${expected.version}`;
+    if (checkedPackages.has(`${source}\0${id}`)) return;
+    const { manifest } = readManifest(source);
+    if (manifest.name !== expected.name || manifest.version !== expected.version)
+      fail('lock_resolution_mismatch', { name: expected.name, source });
+    const storeEntry = relative(store, source).split(sep)[0]!;
+    const entryPrefix = id.replace('/', '+');
+    if (
+      !inside(store, source) ||
+      source !== join(store, storeEntry, 'node_modules', expected.name) ||
+      (storeEntry !== entryPrefix &&
+        !(
+          storeEntry.startsWith(`${entryPrefix}+`) &&
+          /^[0-9a-f]{16}$/u.test(storeEntry.slice(entryPrefix.length + 1))
+        ))
+    )
+      fail('lock_snapshot_mismatch', { name: expected.name, source });
+    const marker = markers.get(id);
+    const markerNames = readdirSync(source).filter((name) => /^\.bun-tag-[a-f0-9]+$/u.test(name));
+    if (marker ? markerNames.length !== 1 || markerNames[0] !== marker : markerNames.length !== 0)
+      fail('lock_patch_mismatch', { name: expected.name, source });
+    if (marker) {
+      const stamp = lstatSync(join(source, marker));
+      if (!stamp.isFile() || stamp.isSymbolicLink() || stamp.size !== 0)
+        fail('lock_patch_mismatch', { name: expected.name, source });
+    }
+    checkedPackages.add(`${source}\0${id}`);
+  }
+
+  function dependencySlot(name: string, from: string) {
+    const parentDirectory = dirname(from);
+    const dependencyDirectory = workspaceContexts.has(from)
+      ? join(from, 'node_modules')
+      : basename(parentDirectory).startsWith('@')
+        ? dirname(parentDirectory)
+        : parentDirectory;
+    const slot = join(dependencyDirectory, name);
+    if (!existsSync(join(slot, 'package.json'))) return undefined;
+    if (realpathSync(dependencyDirectory) !== dependencyDirectory)
+      fail('lock_snapshot_mismatch', { name, source: from });
+    return realpathSync(slot);
+  }
+
+  function verifyEdge(name: string, from: string, context: LockedContext): string | undefined {
+    const actual = dependencySlot(name, from);
+    const key = dependencyKey(name, context);
+    if (!key || !Object.hasOwn(lock.packages, key)) {
+      if (!actual) return undefined;
+      fail('lock_resolution_mismatch', { name, source: from });
+    }
+    const expected = lock.packages[key]!;
+    if (!actual) return undefined;
+    if (expected.workspace !== undefined) {
+      if (actual !== join(repository, expected.workspace) || !workspaceContexts.has(actual))
+        fail('workspace_resolution_mismatch', { name, source: from });
+      return actual;
+    }
+    if (!inside(store, actual)) fail('source_escape', { name, source: from });
+    verifyRegistryPackage(expected, actual);
+    const peerProviders = inheritedProviders(context);
+    const signature = JSON.stringify([actual, key, [...peerProviders].sort()]);
+    if (checkedContexts.has(signature)) return actual;
+    checkedContexts.add(signature);
+    const { manifest } = readManifest(actual);
+    const child = { key, metadata: expected.metadata, peerProviders };
+    const edges = verifiedEdges.get(actual) ?? new Map<string, string | undefined>();
+    for (const [dependency, options] of dependencies(manifest)) {
+      if (dependency.startsWith('node:') || dependency.startsWith('bun:')) continue;
+      const source = verifyEdge(dependency, actual, child);
+      if (!source && !options.optional) fail('missing', { name: dependency, source: actual });
+      if (edges.has(dependency) && edges.get(dependency) !== source)
+        fail('lock_snapshot_mismatch', { name: dependency, source: actual });
+      edges.set(dependency, source);
+    }
+    verifiedEdges.set(actual, edges);
+    return actual;
+  }
+
+  return (name: string, from: string) => {
+    const workspace = workspaceContexts.get(from);
+    if (workspace) return verifyEdge(name, from, workspace);
+    const edges = verifiedEdges.get(from);
+    if (!edges?.has(name)) fail('lock_source_missing', { name, source: from });
+    return edges.get(name);
+  };
 }
 
 /** Notices cover the installed declared graph of proven bundled roots, conservatively
@@ -145,15 +332,17 @@ export function terminalBundledNotices(input: {
   workspaceRoot: string;
   names: readonly string[];
 }) {
-  const allowed = realpathSync(join(input.repositoryRoot, 'node_modules'));
+  const repository = realpathSync(input.repositoryRoot);
+  const allowed = realpathSync(join(repository, 'node_modules'));
+  const resolveInstalled = installedGraph(repository);
   const workspace = realpathSync(input.workspaceRoot),
     root = readManifest(workspace).manifest;
   const pending: string[] = [];
   for (const name of input.names) {
     if (!validPackageName(name) || !Object.hasOwn(root.dependencies ?? {}, name))
       fail('bundled_dependency_invalid');
-    const source = resolvePackage(name, workspace);
-    if (!source) fail('missing');
+    const source = resolveInstalled(name, workspace);
+    if (!source) fail('missing', { name, source: workspace });
     pending.push(source);
   }
   const seen = new Set<string>();
@@ -199,9 +388,9 @@ export function terminalBundledNotices(input: {
     for (const [name, options] of dependencies(manifest)) {
       if (name.startsWith('node:') || name.startsWith('bun:') || name.startsWith('@kite-ai/'))
         continue;
-      const child = resolvePackage(name, source);
+      const child = resolveInstalled(name, source);
       if (!child) {
-        if (!options.optional) fail('missing');
+        if (!options.optional) fail('missing', { name, source });
         continue;
       }
       pending.push(child);
@@ -239,6 +428,7 @@ export function copyTerminalDependencies(input: {
   if (inside(repository, destination) && inside(join(repository, 'node_modules'), destination))
     fail('destination_invalid');
   const allowed = realpathSync(join(repository, 'node_modules'));
+  const resolveInstalled = installedGraph(repository);
   const nodes = new Map<string, Node>();
   const workspaces = new Map<string, Node>();
   const report = process.platform === 'linux' ? process.report?.getReport() : undefined;
@@ -301,10 +491,10 @@ export function copyTerminalDependencies(input: {
       if (name.startsWith('node:') || name.startsWith('bun:')) continue;
       if (node.bundledDependencies?.has(name)) continue;
       if (name.startsWith('@kite-ai/') && !workspaces.has(name)) fail('workspace_unknown');
-      const installed = resolvePackage(name, node.source);
+      const installed = resolveInstalled(name, node.source);
       if (!installed) {
         if (options.optional) continue;
-        fail('missing');
+        fail('missing', { name, source: node.source });
       }
       const workspace = workspaces.get(name);
       if (workspace) {
@@ -383,7 +573,13 @@ export function copyTerminalDependencies(input: {
         if (process.platform !== 'win32')
           mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
         copyFileSync(canonical, target);
-        if (process.platform !== 'win32') chmodSync(target, stat.mode & 0o777);
+        if (process.platform !== 'win32')
+          chmodSync(
+            target,
+            browserBin && dirname(target) === browserBin && basename(target) === browserExecutable
+              ? 0o755
+              : stat.mode & 0o777,
+          );
       } else fail('asset_invalid');
     };
     copy(node.source, packageTarget, new Set());

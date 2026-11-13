@@ -186,6 +186,8 @@ export type NativeCallerMetadata = Omit<NativeCallerIntent, 'request'> & {
     queuedInputCommandId?: string;
   };
   phase: NativeCallerRecord['phase'];
+  /** Present only after a verified rejected run.start receipt was read. */
+  rejectionReason?: string | null;
 };
 export type NativeCallerBody = {
   kind: 'caller.body';

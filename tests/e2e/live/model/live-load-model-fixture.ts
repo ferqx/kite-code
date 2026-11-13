@@ -103,40 +103,40 @@ export async function createLiveLoadModelFixture(options: {
       ? (configuration.resolveCredential(selected.credentialRef) ??
         (await vault.resolve(selected.credentialRef)))
       : undefined;
-  const fetchProvider: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      check(wire.length < options.requestLimit, 'request_budget_exhausted');
-      deadline.throwIfAborted();
-      const body = JSON.parse(String(init?.body)) as {
-        tools?: { type: string; name?: string; function?: { name: string } }[];
-      };
-      const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
-      check(
-        tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
-        'wire_name_invalid',
-      );
-      const observation = { status: 0, tools };
-      wire.push(observation);
-      const physicalAttempt = physical.begin(requestContext.getStore() ?? null);
-      try {
-        const response = await fetch(input, {
-          ...init,
-          redirect: 'error',
-          signal: AbortSignal.any([
-            deadline,
-            AbortSignal.timeout(60_000),
-            ...(init?.signal ? [init.signal] : []),
-          ]),
-        });
-        observation.status = response.status;
-        return physical.response(physicalAttempt, response);
-      } catch {
-        physical.transportFailed(physicalAttempt);
-        throw Error('live_model_transport_failed');
-      }
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const fetchProvider: typeof fetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    check(wire.length < options.requestLimit, 'request_budget_exhausted');
+    deadline.throwIfAborted();
+    const body = JSON.parse(String(init?.body)) as {
+      tools?: { type: string; name?: string; function?: { name: string } }[];
+    };
+    const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
+    check(
+      tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
+      'wire_name_invalid',
+    );
+    const observation = { status: 0, tools };
+    wire.push(observation);
+    const physicalAttempt = physical.begin(requestContext.getStore() ?? null);
+    try {
+      const response = await fetch(input, {
+        ...init,
+        redirect: 'error',
+        signal: AbortSignal.any([
+          deadline,
+          AbortSignal.timeout(60_000),
+          ...(init?.signal ? [init.signal] : []),
+        ]),
+      });
+      observation.status = response.status;
+      return physical.response(physicalAttempt, response);
+    } catch {
+      physical.transportFailed(physicalAttempt);
+      throw Error('live_model_transport_failed');
+    }
+  };
   const sdk = createSdkModelAdapter({
     models: new Map([
       [

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import type { Page } from 'playwright';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 
 export async function verifySemanticTrajectory(input: {
   page: Page;
@@ -1365,7 +1366,7 @@ export async function verifySemanticTrajectory(input: {
     initialFacts,
   );
   verification.semanticNoOriginalFactMutation = true;
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'semantic-verification.json'),
     JSON.stringify(verification, null, 2),
   );

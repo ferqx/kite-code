@@ -1,5 +1,5 @@
-import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
 import { constants, fstatSync, openSync } from 'node:fs';
+import { dlopen, ptr, toArrayBuffer } from '../../runtime-ffi';
 
 const retained = new Set<object>();
 /** Darwin dirent/stat ABI; all names and metadata remain relative to retained directory FDs. */

@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { type CompressContextRequest, createClient, validateRequest } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 
@@ -10,7 +11,7 @@ test('compression SDK seals full original intent, rejects hidden authority befor
     tamper = '';
   const received: unknown[] = [],
     saved = new Map<string, object>();
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -158,7 +159,7 @@ test('Native and Cookie Context readers preserve original compression provenance
     };
   let patch: Partial<typeof compression> = {},
     posts = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

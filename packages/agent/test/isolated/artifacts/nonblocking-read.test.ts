@@ -1,9 +1,9 @@
-import { afterEach, expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { afterEach, expect, mock, test } from '#kite-test';
 import type { ArtifactStore } from '../../../src/artifacts';
 import type { Store } from '../../../src/storage/port';
 

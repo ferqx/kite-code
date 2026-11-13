@@ -642,9 +642,11 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
   auto frontdoors = property(env, bootstrap, "files");
   const auto frontdoorCount = arrayLength(env, frontdoors);
   const bool desktopOnly = frontdoorCount == 2;
-  need(frontdoorCount == 4 || (desktopOnly && bootstrapId == id));
-  const wchar_t* nativeNames[] = {L"kite.exe", L"kite-tui.exe", L"kite-desktop.exe", L"native-verifier.exe"};
-  const wchar_t* desktopNames[] = {L"kite-desktop.exe", L"native-verifier.js"};
+  need(frontdoorCount == 4 || frontdoorCount == 5 || (desktopOnly && bootstrapId == id));
+  const bool nodeDesktop = desktopOnly &&
+    argument(env, property(env, element(env, frontdoors, 1), "name")) == L"native-verifier.mjs";
+  const wchar_t* nativeNames[] = {L"kite.exe", L"kite-tui.exe", L"kite-desktop.exe", L"native-verifier.exe", L"runtime-native.node"};
+  const wchar_t* desktopNames[] = {L"kite-desktop.exe", nodeDesktop ? L"native-verifier.mjs" : L"native-verifier.js"};
   const auto names = desktopOnly ? desktopNames : nativeNames;
   lease.pin(prefix + L"\\bin", false, true);
   for (uint32_t i = 0; i < frontdoorCount; ++i) {
@@ -656,7 +658,9 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
     const auto bytes = readFile(lease.pinFile(prefix + L"\\bin\\" + names[i], true), 512 * 1048576);
     need(bytes.size() == size && digestBytes(bytes) == hash);
   }
-  const auto broker = desktopOnly ? root + L"\\terminal\\runtime\\bun.exe" : prefix + L"\\bin\\native-verifier.exe";
+  const auto broker = desktopOnly
+    ? root + (nodeDesktop ? L"\\terminal\\runtime\\node.exe" : L"\\terminal\\runtime\\bun.exe")
+    : prefix + L"\\bin\\native-verifier.exe";
   originalBroker(lease, broker);
   // The broker holds the full candidate throughout startup. Consume its bounded
   // handoff before the independent scan, and return only after both locks verify.
@@ -699,9 +703,11 @@ static void candidate(napi_env env, Lease& lease, const std::wstring& root, cons
     pinEmptyDirectory(canonical(root + L"\\" + relative));
   }
   // Terminal v1 declares the Worktree files. Its empty hooks directory is derived from those exact admitted files.
+  const bool nodeTerminal = paths.count(root + L"\\terminal\\runtime\\node.exe") != 0;
   for (const auto* layout : {L"code", L"node_modules"}) {
     const auto worktree = root + L"\\terminal\\" + layout + L"\\@kite-ai\\agent\\tools\\git-worktree";
-    if (paths.count(worktree + L"\\worker.js") && paths.count(worktree + L"\\empty-bunfig.toml") && paths.count(worktree + L"\\manifest.json"))
+    if (paths.count(worktree + L"\\worker.js") && paths.count(worktree + L"\\manifest.json") &&
+        (nodeTerminal || paths.count(worktree + L"\\empty-bunfig.toml")))
       pinEmptyDirectory(worktree + L"\\empty-hooks");
   }
   lease.candidateRoot = root;

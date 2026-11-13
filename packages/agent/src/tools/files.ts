@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import ignore, { type Ignore } from 'ignore';
+import { Minimatch } from 'minimatch';
 import { AgentError } from '../storage/types';
 import { fileChangePreview } from './files-diff';
 import { createWorkspaceFileIo } from './files-io';
@@ -157,7 +158,7 @@ const fail = (code: string): never => {
   throw new AgentError(code);
 };
 /** Shared lexical contract for path discovery and content filtering. */
-function compileFileGlob(pattern: unknown): Bun.Glob {
+function compileFileGlob(pattern: unknown): { match(path: string): boolean } {
   if (
     typeof pattern !== 'string' ||
     !pattern ||
@@ -172,7 +173,13 @@ function compileFileGlob(pattern: unknown): Bun.Glob {
   )
     return fail('file_glob_invalid');
   try {
-    return new Bun.Glob(pattern);
+    return new Minimatch(pattern, {
+      dot: true,
+      nocomment: true,
+      // A leading !(...) is an extglob. Ordinary ! and !! retain negation.
+      nonegate: pattern.startsWith('!('),
+      platform: 'linux', // All callers use slash-delimited relative paths.
+    });
   } catch {
     return fail('file_glob_invalid');
   }
@@ -1056,7 +1063,7 @@ export function createWorkspaceFiles(options: {
       }
       const limit = pageLimit(input.limit);
       // Only complete literal directory components can exclude a subtree. Basename
-      // patterns still match at every depth, and all wildcard semantics stay with Bun.
+      // Patterns without a directory component still match at every depth.
       const prefix: string[] = [];
       if (input.pattern.includes('/')) {
         for (const part of input.pattern.split('/').slice(0, -1)) {

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +5,9 @@ import { pathToFileURL } from 'node:url';
 import type { CompressionInput } from '@kite-ai/agent';
 import { createConfigurationSnapshot, type JsonObject } from '@kite-ai/agent/config';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { createSummaryCompressor } from '../../src/compression-configuration';
 import { providerSettingsFacts } from '../../src/model-providers';
 import { createUserConfiguration } from '../../src/user-configuration';
@@ -488,13 +490,15 @@ test('actual default paired Services share the host user file across Profiles wi
     privateDirectory(join(dataRoot, 'default'));
     writeFileSync(join(dataRoot, 'default', 'config.jsonc'), '{"models":[{"id":"retired"}]}');
     const original = readFileSync(f.path, 'utf8');
-    const moduleUrl = (path: string) => pathToFileURL(join(import.meta.dir, path)).href;
+    const moduleUrl = (path: string) => pathToFileURL(join(import.meta.dirname, path)).href;
     const program = `
       import { selectProfile } from '@kite-ai/agent/profile';
       import { launchPairedService } from ${JSON.stringify(moduleUrl('../../src/paired.ts'))};
+      import { spawnNodeServiceFixture } from ${JSON.stringify(moduleUrl('../fixtures/node-service-process.ts'))};
       for (const name of ['default', 'development']) {
         const handle = await launchPairedService({
-          entrypoint: ${JSON.stringify(join(import.meta.dir, '../../src/main.ts'))},
+          entrypoint: ${JSON.stringify(join(import.meta.dirname, '../../src/main.ts'))},
+          spawnChild: spawnNodeServiceFixture,
           profile: selectProfile({ dataRoot: ${JSON.stringify(dataRoot)}, profile: name }),
           instanceId: crypto.randomUUID(), buildId: 'user-source-test', apiMajor: 1,
           requiredCapabilities: ['commands'],
@@ -505,16 +509,19 @@ test('actual default paired Services share the host user file across Profiles wi
         } finally { await handle.close(); }
       }
     `;
-    const child = Bun.spawn([process.execPath, '--no-install', '-e', program], {
-      cwd: join(import.meta.dir, '../../../..'),
-      env: {
-        ...process.env,
-        ...f.homeEnvironment,
+    const child = spawnProcess(
+      [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '-e', program],
+      {
+        cwd: join(import.meta.dirname, '../../../..'),
+        env: {
+          ...process.env,
+          ...f.homeEnvironment,
+        },
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
       },
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    );
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),

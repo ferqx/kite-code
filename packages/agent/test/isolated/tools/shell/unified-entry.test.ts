@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
@@ -9,6 +9,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../../src';
 import type {
   JobDefinition,
@@ -66,7 +67,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean):
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('unified_shell_fixture_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(responses: ModelEvent[][], hold = false, reenter = false) {

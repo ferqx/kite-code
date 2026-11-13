@@ -1,8 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { UnifiedExecution } from '../../../src/execution';
 import { ExecutionResources } from '../../../src/execution/resources';
 import { privateDirectory } from '../../../src/platform/windows-path-security';

@@ -1,8 +1,8 @@
-import { expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { expect, setDefaultTimeout, test } from '#kite-test';
 import {
   type TerminalBundleManifest,
   terminalBundleEntries,
@@ -51,7 +51,7 @@ function fixture() {
       version: 1,
       apiMajor: 1,
       target: { platform: process.platform, arch: process.arch },
-      bunVersion: Bun.version,
+      bunVersion: '1.4.4',
       sqlite: fixtureTerminalSqlite(candidate, files),
       productVersion: '0.1.0',
       source: { commit: 'a'.repeat(40), dirty: true },

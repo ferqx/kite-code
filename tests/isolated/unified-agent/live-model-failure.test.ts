@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { describeLiveModelAttemptFailure } from '../../e2e/live/model/live-model-fixture';
 
 const secret = 'private-response https://private.invalid/token?key=fixture-secret';
@@ -31,29 +31,26 @@ for (const mode of [
 ] as const) {
   test(`live failure diagnostic retains only the real SDK classification: ${mode}`, async () => {
     let fetches = 0;
-    const fetcher = Object.assign(
-      async () => {
-        fetches++;
-        if (mode === 'connection')
-          throw Object.assign(new TypeError(secret, { cause: new Error(secret) }), {
-            code: 'ECONNRESET',
-          });
-        const body =
-          mode === 'response-failed'
-            ? created +
-              frame('response.failed', {
-                sequence_number: 1,
-                response: { error: { code: 'quota', message: secret } },
-              })
-            : mode === 'error-event'
-              ? created + frame('error', { sequence_number: 1, code: 'error', message: secret })
-              : mode === 'invalid-json'
-                ? 'data: not-json\n\n'
-                : created;
-        return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
-      },
-      { preconnect: fetch.preconnect },
-    );
+    const fetcher = Object.assign(async () => {
+      fetches++;
+      if (mode === 'connection')
+        throw Object.assign(new TypeError(secret, { cause: new Error(secret) }), {
+          code: 'ECONNRESET',
+        });
+      const body =
+        mode === 'response-failed'
+          ? created +
+            frame('response.failed', {
+              sequence_number: 1,
+              response: { error: { code: 'quota', message: secret } },
+            })
+          : mode === 'error-event'
+            ? created + frame('error', { sequence_number: 1, code: 'error', message: secret })
+            : mode === 'invalid-json'
+              ? 'data: not-json\n\n'
+              : created;
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+    }, {});
     const adapter = createSdkModelAdapter({
       models: new Map([
         [

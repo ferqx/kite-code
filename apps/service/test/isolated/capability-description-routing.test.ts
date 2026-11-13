@@ -1,9 +1,11 @@
-import { expect, mock, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AuthorizationRequest } from '@kite-ai/agent/extensions';
 import type { CapabilityDescription } from '@kite-ai/agent/permissions';
+import { expect, mock, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -592,8 +594,8 @@ if (process.argv[2] === '--fixture') {
     'custom-checker',
   ])
     test(`registered capability descriptions preserve ${kind} routing`, async () => {
-      const child = Bun.spawn(
-        [process.execPath, fileURLToPath(import.meta.url), '--fixture', kind],
+      const child = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, fileURLToPath(import.meta.url), '--fixture', kind],
         { stdout: 'pipe', stderr: 'pipe' },
       );
       const stdout = new Response(child.stdout).text();

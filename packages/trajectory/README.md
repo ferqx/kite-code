@@ -58,7 +58,7 @@ Model 与已核实 assistant Message 的第一方 `display` 可另带闭合 `out
 
 `trajectorySchemas` 为同源 HTTP 生成导出运行时 schema，`trajectoryJsonSchemas()` 从同一校验器生成 JSON Schema 2020-12。[公共设计 fixtures](fixtures/protocol.json)展示恢复后身份、空筛选页推进、非终态派发和部分 ACK；该文件不是 runtime export，不要求发行时保留源码目录。
 
-在仓库根运行 `bun run --cwd packages/trajectory test`、`bun run --cwd packages/trajectory typecheck`、`bun run --cwd packages/trajectory build`。owner 测试核精度、身份、canonical、闭合 attributes、未知版本、安全视图、无状态分页、部分 ACK 和确定性 provenance。六类独立 cursor oracle 覆盖正常完成、失败／重试、审批、并行子任务、中断恢复及缺失／未知事实，并有真实关联 Interaction／Verification 不替换 Execution 生命周期的反例。
+在仓库根运行 `bun --cwd=packages/trajectory run test`、`bun --cwd=packages/trajectory run typecheck`、`bun --cwd=packages/trajectory run build`。owner 测试核精度、身份、canonical、闭合 attributes、未知版本、安全视图、无状态分页、部分 ACK 和确定性 provenance。六类独立 cursor oracle 覆盖正常完成、失败／重试、审批、并行子任务、中断恢复及缺失／未知事实，并有真实关联 Interaction／Verification 不替换 Execution 生命周期的反例。
 
 [display 反例](test/display.test.ts)覆盖可选旧字段、有界闭合值、原位置投影、调用者改写隔离、消息新版本缺摘录不借用旧文，以及第三方 Trace schema 拒绝第一方摘要。2026-11-09，`e8a483d65` 加本轮工作树，macOS arm64／Bun 1.4.4：`bun test packages/trajectory/test` 为 35 项、242 断言通过；受影响包类型检查通过。实际原事务与 Shell／直接子 Agent 回执关联的验证归[Agent owner](../agent/src/trajectory/README.md)，本包纯测试不授予 Native 或外发运行资格。
 

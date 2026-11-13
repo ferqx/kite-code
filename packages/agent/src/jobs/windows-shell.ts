@@ -13,6 +13,7 @@ import type {
   ToolResult,
 } from '../extensions';
 import { JobStartError } from '../extensions';
+import { findHostExecutable } from '../platform/executable';
 import {
   startWindowsOwnedChild,
   type WindowsOwnedChild,
@@ -97,7 +98,7 @@ export async function windowsShellAssets(
     };
   };
   if (preference === 'powershell') {
-    const git = Bun.which('git');
+    const git = findHostExecutable('git.exe');
     return powerShellAssets(
       git && isAbsolute(git) && /^git\.exe$/i.test(basename(git)) ? git : undefined,
     );
@@ -159,7 +160,6 @@ export async function createWindowsShellJob(
   if (
     process.platform !== 'win32' ||
     process.arch !== 'x64' ||
-    !process.versions.bun ||
     ![
       options.cwd,
       workspaceRoot,

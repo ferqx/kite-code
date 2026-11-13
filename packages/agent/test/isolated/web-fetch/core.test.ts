@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type RequestListener } from 'node:http';
 import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -16,6 +16,7 @@ import {
   webExtractorAsset,
 } from '@kite-ai/agent/web-fetch';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { WorkerCleanupError } from '../../../src/platform/process/owned-worker';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
@@ -73,7 +74,7 @@ async function setup(
       : {}),
     resolveAddresses: async () => {
       dns++;
-      if (options.dnsDelayMs) await Bun.sleep(options.dnsDelayMs);
+      if (options.dnsDelayMs) await sleepTimer(options.dnsDelayMs);
       return [{ address: options.proxy ? '8.8.8.8' : '127.0.0.1', family: 4 }];
     },
     admitHop: async (hop) => {

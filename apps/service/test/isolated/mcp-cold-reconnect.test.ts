@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
@@ -18,11 +18,18 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import type { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { type AgentClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import type { FixtureServer } from '../../../../scripts/tooling/http';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import type { Subprocess } from '../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { verifyTerminalBundle } from '../../../cli/host/terminal-artifact';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const obj = (value: unknown) => value as Record<string, Json>;
 const sha = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 test('actual cold Service needs a new explicit MCP connection and independent approvals; old facts never reconnect or acquire new authority', async () => {
@@ -41,12 +48,12 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
   const effects: { phase: string; params: unknown }[] = [];
   const modelBodies: { phase: string; body: Record<string, unknown> }[] = [];
   const http: { phase: string; method: string; path: string; body?: unknown }[] = [];
-  const owned: Bun.Subprocess<'pipe', 'pipe', 'pipe'>[] = [];
+  const owned: Subprocess<'pipe', 'pipe', 'pipe'>[] = [];
   const pairs: Awaited<ReturnType<typeof launchPairedService>>[] = [];
   const facts: unknown[] = [];
   const modelSteps = { warm: 0, cold: 0 };
   let network: ReturnType<typeof createServer> | undefined;
-  let provider: ReturnType<typeof Bun.serve> | undefined;
+  let provider: FixtureServer | undefined;
   const originalFetch = globalThis.fetch;
   let success = false;
   let cleanupError: unknown;
@@ -69,7 +76,7 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
       assertOpen();
       if (value !== undefined) return value;
       if (performance.now() >= deadline) throw Error(`cold_reconnect_business_deadline:${label}`);
-      await Bun.sleep(10);
+      await sleepTimer(10);
     }
   }
   // Cleanup waits use the same 30s bound but never enter their own business-work tracker.
@@ -176,7 +183,7 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
     const address = network.address();
     if (!address || typeof address === 'string') throw Error('owned_http_address_missing');
     const url = `http://127.0.0.1:${address.port}/mcp`;
-    provider = Bun.serve({
+    provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -233,9 +240,10 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
       }),
       { mode: 0o600 },
     );
-    const build = Bun.spawn(
+    const build = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -260,11 +268,11 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../fixtures/mcp-cold-reconnect.ts')],
+    const built = await buildBundle({
+      entrypoints: [join(import.meta.dirname, '../fixtures/mcp-cold-reconnect.ts')],
       outdir: root,
       naming: 'host.js',
-      target: 'bun',
+      target: 'node',
       packages: 'external',
     });
     expect(built.success).toBe(true);
@@ -275,19 +283,16 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
       hostSha256: sha(hostBytes),
       executableSha256: candidate.artifact.executableSha256,
     });
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const path = new URL(String(args[0])).pathname;
-        http.push({
-          phase,
-          path,
-          method: args[1]?.method ?? 'GET',
-          ...(typeof args[1]?.body === 'string' ? { body: JSON.parse(args[1].body) } : {}),
-        });
-        return originalFetch(...args);
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const path = new URL(String(args[0])).pathname;
+      http.push({
+        phase,
+        path,
+        method: args[1]?.method ?? 'GET',
+        ...(typeof args[1]?.body === 'string' ? { body: JSON.parse(args[1].body) } : {}),
+      });
+      return originalFetch(...args);
+    }, {});
     const launch = async () => {
       assertOpen();
       writeFileSync(join(root, 'settings.json'), JSON.stringify({ root, phase }), { mode: 0o600 });
@@ -308,7 +313,7 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
         shutdownTimeoutMs: 10000,
         spawnChild: (argv, options) => {
           assertOpen();
-          const child = Bun.spawn([...argv], {
+          const child = spawnProcess([...argv], {
             cwd: root,
             env: { ...options.env, HOME: root, KITE_CODE_HOME: join(root, 'owned-home') },
             stdin: 'pipe',

@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
+import { createHash as fixtureHash } from 'node:crypto';
 import type { Message } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeEvent,
@@ -68,7 +69,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
   const imageData =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
   const imageBytes = Buffer.from(imageData, 'base64');
-  const imageHash = new Bun.CryptoHasher('sha256').update(imageBytes).digest('hex');
+  const imageHash = fixtureHash('sha256').update(imageBytes).digest('hex');
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,

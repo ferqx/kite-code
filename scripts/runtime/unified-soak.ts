@@ -20,7 +20,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { buildTerminalBundle, verifyTerminalBundle } from '../release/terminal-bundle';
+import { build as bundle } from '../tooling/build';
+import { type Subprocess, spawn as spawnProcess } from '../tooling/process';
 import { type CaseEvidence, sampleSoakResources, UNIFIED_SOAK_CASES } from './unified-soak-cases';
 import type { ContinuousEvidence } from './unified-soak-continuous';
 import {
@@ -72,6 +75,27 @@ export function parseUnifiedSoakArgs(args: readonly string[]) {
     candidate: values.get('candidate'),
     collectBlocked,
   } as const;
+}
+/** The Node controller compiles test instrumentation. Only verified candidate Node runs it. */
+export async function buildUnifiedSoakProbe(
+  root: string,
+  repositoryRoot = resolve(import.meta.dirname, '../..'),
+) {
+  const built = await bundle({
+    entrypoints: [
+      join(repositoryRoot, 'scripts/runtime/unified-soak-probe.ts'),
+      join(repositoryRoot, 'scripts/runtime/unified-soak-cases.ts'),
+    ],
+    target: 'node',
+    packages: 'external',
+    naming: '[name].mjs',
+    outdir: root,
+  });
+  if (!built.success) throw Error('unified_soak_probe_build_failed');
+  return {
+    probe: join(root, 'unified-soak-probe.mjs'),
+    sampler: join(root, 'unified-soak-cases.mjs'),
+  };
 }
 /** Only create missing report descendants of an observed owned, non-writable parent. */
 export function prepareUnifiedSoakReportPath(output: string) {
@@ -135,7 +159,7 @@ async function timeout<T>(promise: Promise<T>, ms: number) {
 export async function runStableCrashSeries(
   root: string,
   cycles: 2 | 9,
-  spawn: (directory: string, mode: 'crash' | 'recover') => Bun.Subprocess,
+  spawn: (directory: string, mode: 'crash' | 'recover') => Subprocess,
 ) {
   const started = performance.now();
   const points: NonNullable<CaseEvidence['points']> = [],
@@ -145,8 +169,9 @@ export async function runStableCrashSeries(
   for (let sequence = 0; sequence < cycles; sequence++) {
     const cycleRoot = join(root, String(sequence));
     mkdirSync(cycleRoot, { mode: 0o700 });
-    Bun.gc(true);
-    await Bun.sleep(0);
+    if (!globalThis.gc) throw Error('soak_gc_unavailable');
+    globalThis.gc();
+    await delay(0);
     const before = sampleSoakResources(),
       pointStarted = performance.now();
     const doomed = spawn(cycleRoot, 'crash');
@@ -168,7 +193,7 @@ export async function runStableCrashSeries(
         (async () => {
           while (!existsSync(join(cycleRoot, 'crash-entered'))) {
             if (crashSettled) throw Error('crash_probe_early_exit');
-            await Bun.sleep(10);
+            await delay(10);
           }
         })(),
         180_000,
@@ -296,8 +321,9 @@ export async function runStableCrashSeries(
       throw Error('crash_original_identity_invalid');
     identities.push(...(recovery.identities ?? []));
     rmSync(cycleRoot, { recursive: true });
-    Bun.gc(true);
-    await Bun.sleep(0);
+    if (!globalThis.gc) throw Error('soak_gc_unavailable');
+    globalThis.gc();
+    await delay(0);
     const after = sampleSoakResources();
     const assertions = [
       ...['unknown_retained', 'original_execution_ids'].map((id) => ({
@@ -351,7 +377,7 @@ export async function runStableCrashSeries(
 }
 export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSoakReport> {
   const options = parseUnifiedSoakArgs(args),
-    repositoryRoot = resolve(import.meta.dir, '../..');
+    repositoryRoot = resolve(import.meta.dirname, '../..');
   if (options.collectBlocked && process.platform !== 'darwin')
     throw Error('unified_soak_collection_platform_unsupported');
   const output = prepareUnifiedSoakReportPath(options.output);
@@ -392,6 +418,7 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
     const candidate = options.candidate
       ? verifyTerminalBundle(resolve(options.candidate))
       : await buildTerminalBundle({ destination: join(root, 'candidate'), repositoryRoot });
+    if (!candidate.manifest.nodeVersion) throw Error('unified_soak_node_candidate_required');
     candidateId = candidate.candidateId;
     candidateSource = candidate.manifest.source;
     symlinkSync(
@@ -399,30 +426,20 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const built = await Bun.build({
-      entrypoints: [
-        join(repositoryRoot, 'scripts/runtime/unified-soak-probe.ts'),
-        join(repositoryRoot, 'scripts/runtime/unified-soak-cases.ts'),
-      ],
-      target: 'bun',
-      packages: 'external',
-      outdir: root,
-    });
-    if (!built.success) throw Error('unified_soak_probe_build_failed');
-    const probe = join(root, 'unified-soak-probe.js');
+    const { probe, sampler } = await buildUnifiedSoakProbe(root, repositoryRoot);
     probeSha256 = createHash('sha256').update(readFileSync(probe)).digest('hex');
-    samplerSha256 = createHash('sha256')
-      .update(readFileSync(join(root, 'unified-soak-cases.js')))
-      .digest('hex');
+    samplerSha256 = createHash('sha256').update(readFileSync(sampler)).digest('hex');
     const spawn = (
       directory: string,
       mode: string,
       cycles: number,
       minimumMs: number | string = 0,
     ) =>
-      Bun.spawn(
+      spawnProcess(
         [
-          join(candidate.root, 'runtime/bun'),
+          candidate.artifact.executable,
+          '--no-global-search-paths',
+          '--expose-gc',
           probe,
           directory,
           mode,
@@ -678,7 +695,11 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
         : 'passed') as UnifiedSoakReport['status'],
     seed: 1729 as const,
     source: source(),
-    environment: { platform: process.platform, arch: process.arch, bunVersion: Bun.version },
+    environment: {
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.versions.node,
+    },
     durationMs: performance.now() - started,
     failures,
     unsupported,

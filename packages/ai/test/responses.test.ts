@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type { Json, ModelEvent, ModelRequest } from '../src';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '../src/sdk';
 
@@ -83,10 +84,10 @@ const request: ModelRequest = {
     },
   ],
 };
-function endpoint(respond: (n: number) => Response) {
+async function endpoint(respond: (n: number) => Response) {
   const bodies: Array<{ input: Array<Record<string, unknown>>; [key: string]: unknown }> = [];
   const paths: string[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -190,7 +191,6 @@ for (const family of ['openai', 'compatible', 'codex'] as const) {
                 bodies.push(JSON.parse(String(init?.body)));
                 return sse(output(bodies.length === 1, 'read_file', argumentsText));
               },
-              { preconnect: fetch.preconnect },
             ),
           }),
         ],
@@ -251,7 +251,7 @@ for (const family of ['openai', 'compatible', 'codex'] as const) {
 }
 
 test('Responses HTTP preserves streaming, tool call IDs, encrypted reasoning and stateless multi-turn history', async () => {
-  const data = endpoint((n) => sse(output(n === 1)));
+  const data = await endpoint((n) => sse(output(n === 1)));
   try {
     const first = await collect(data.adapter);
     expect(first).toContainEqual({ type: 'reasoning_delta', text: 'Checking' });
@@ -331,12 +331,12 @@ test('Responses HTTP preserves streaming, tool call IDs, encrypted reasoning and
       content: [{ type: 'input_text', text: 'Again' }],
     });
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses restored continuation re-encodes original call IDs when the wire-name collision set changes', async () => {
-  const data = endpoint((n) => sse(output(n === 1, 'files_read')));
+  const data = await endpoint((n) => sse(output(n === 1, 'files_read')));
   const input: ModelRequest = {
     ...request,
     tools: [{ ...request.tools[0]!, id: 'files.read' }],
@@ -436,12 +436,12 @@ test('Responses restored continuation re-encodes original call IDs when the wire
     expect(data.bodies).toHaveLength(before);
     expect(restored.describeRequest?.(next).transformation.version).toBe('7');
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses passes every configured effort, including ultar, to an alias without rewriting it', async () => {
-  const data = endpoint(() => sse(output()));
+  const data = await endpoint(() => sse(output()));
   try {
     for (const effort of [
       'none',
@@ -480,7 +480,7 @@ test('Responses passes every configured effort, including ultar, to an alias wit
     expect(data.bodies).toHaveLength(8);
     expect(data.paths.every((path) => path === '/v1/responses')).toBe(true);
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
@@ -494,7 +494,7 @@ test('Responses errors and incomplete streams cannot dispatch tools or leak prov
       }),
     created() + event('error', { sequence_number: 1, code: 'error', message: 'fixture-only' }),
   ]) {
-    const data = endpoint(() => sse(body));
+    const data = await endpoint(() => sse(body));
     try {
       const events: ModelEvent[] = [];
       let error: unknown;
@@ -513,14 +513,14 @@ test('Responses errors and incomplete streams cannot dispatch tools or leak prov
       );
       expect(data.bodies).toHaveLength(1);
     } finally {
-      data.close();
+      await data.close();
     }
   }
 });
 
 test('Responses cancellation reaches live HTTP stream without successful finish', async () => {
   const abort = new AbortController();
-  const data = endpoint(
+  const data = await endpoint(
     () =>
       new Response(
         new ReadableStream({
@@ -555,12 +555,12 @@ test('Responses cancellation reaches live HTTP stream without successful finish'
     expect(events.some((item) => item.type === 'finish')).toBe(false);
     expect(data.bodies).toHaveLength(1);
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses partial tool input is rejected even when provider sends completed', async () => {
-  const data = endpoint(() =>
+  const data = await endpoint(() =>
     sse(
       created() +
         event('response.output_item.added', {
@@ -584,13 +584,13 @@ test('Responses partial tool input is rejected even when provider sends complete
   try {
     await expect(collect(data.adapter)).rejects.toThrow('stream_incomplete');
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses opaque state is isolated from other endpoints and model routes', async () => {
-  const a = endpoint(() => sse(output(true)));
-  const b = endpoint(() => sse(output()));
+  const a = await endpoint(() => sse(output(true)));
+  const b = await endpoint(() => sse(output()));
   try {
     const finish = (await collect(a.adapter)).at(-1)!;
     if (finish.type !== 'finish') throw new Error('finish missing');
@@ -622,8 +622,8 @@ test('Responses opaque state is isolated from other endpoints and model routes',
     expect(JSON.stringify(finish.continuation)).not.toContain('fixture-only');
     expect(JSON.stringify(finish.continuation)).not.toContain('127.0.0.1');
   } finally {
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   }
 });
 
@@ -642,7 +642,6 @@ test('trusted Codex identity preserves opaque history across rotated bindings wh
         bodies.push(JSON.parse(String(init?.body)));
         return sse(output());
       },
-      { preconnect: fetch.preconnect },
     ),
   };
   const adapter = (change: Partial<Parameters<typeof createCompatibleModelBinding>[0]> = {}) =>
@@ -714,13 +713,10 @@ test('Codex continuation identity rejects invalid values and injection into ordi
     baseURL: 'https://codex-fixture.invalid/responses-api',
     modelId: 'fixture-codex',
     continuationIdentity: { kind: 'codex-local-auth' as const, value: 'a'.repeat(64) },
-    fetch: Object.assign(
-      async () => {
-        calls++;
-        return sse(output());
-      },
-      { preconnect: fetch.preconnect },
-    ),
+    fetch: Object.assign(async () => {
+      calls++;
+      return sse(output());
+    }),
   };
   for (const identity of [
     null,
@@ -749,7 +745,7 @@ test('Codex continuation identity rejects invalid values and injection into ordi
 });
 
 test('Responses preserves encrypted reasoning without a visible summary', async () => {
-  const data = endpoint((n) =>
+  const data = await endpoint((n) =>
     sse(
       n === 1
         ? output(true).replace(
@@ -787,12 +783,12 @@ test('Responses preserves encrypted reasoning without a visible summary', async 
       summary: [],
     });
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses changed credentials cannot replay opaque state to the same endpoint', async () => {
-  const data = endpoint((n) => sse(output(n === 1)));
+  const data = await endpoint((n) => sse(output(n === 1)));
   try {
     const finish = (await collect(data.adapter)).at(-1)!;
     if (finish.type !== 'finish') throw new Error('finish missing');
@@ -825,12 +821,12 @@ test('Responses changed credentials cannot replay opaque state to the same endpo
     });
     expect(data.bodies[1]!.input.some((item) => item.type === 'reasoning')).toBe(false);
   } finally {
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses SDK warnings never log encrypted continuation or history', async () => {
-  const data = endpoint((n) => sse(output(n === 1)));
+  const data = await endpoint((n) => sse(output(n === 1)));
   const warnings: unknown[] = [];
   const previous = globalThis.AI_SDK_LOG_WARNINGS;
   globalThis.AI_SDK_LOG_WARNINGS = (value) => {
@@ -868,13 +864,13 @@ test('Responses SDK warnings never log encrypted continuation or history', async
     expect(JSON.stringify(warnings)).not.toContain('encrypted-complete');
   } finally {
     globalThis.AI_SDK_LOG_WARNINGS = previous;
-    data.close();
+    await data.close();
   }
 });
 
 test('Responses compatible anonymous endpoints receive no synthesized Authorization header', async () => {
   let authorization: string | null | undefined;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(incoming) {

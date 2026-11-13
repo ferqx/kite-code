@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError, type Command, type Run } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { DesktopInput, type InputSubmission } from '../src/input';
 
 test('intent-only transport response loss and a full work cache preserve precise cancellation slots', async () => {

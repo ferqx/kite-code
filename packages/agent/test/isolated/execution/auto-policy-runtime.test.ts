@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
@@ -9,6 +9,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createPermissionPolicy } from '../../../src/permissions';
@@ -304,7 +305,7 @@ test('review timeout preserves the original independent human approval and execu
         card = (
           await f.runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
         ).interactions[0];
-        if (!card) await Bun.sleep(5);
+        if (!card) await sleepTimer(5);
       }
       expect(card).toBeDefined();
       expect(f.counts().effects).toBe(i);

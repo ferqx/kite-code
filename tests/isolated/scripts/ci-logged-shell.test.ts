@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -11,11 +10,14 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, test } from '#kite-test';
 import {
   parseLoggedShellArguments,
   powershellBootstrap,
   runLoggedShell,
 } from '../../../scripts/ci/logged-shell';
+import { spawnSync as runFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
 const roots: string[] = [];
 const log = 'dist/unified-evidence/step.log';
@@ -96,7 +98,7 @@ describe('CI logged shell', () => {
       "printf 'stdout\\n'\nsleep 0.1\nprintf 'stderr\\n' >&2\nexit 23\n",
     );
     const wrapper = new URL('../../../scripts/ci/logged-shell.ts', import.meta.url).pathname;
-    const result = Bun.spawnSync([process.execPath, 'run', wrapper, ...args], {
+    const result = runFixtureProcess(testNodeCommand(wrapper, args), {
       cwd,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -199,7 +201,7 @@ describe('CI logged shell', () => {
       const wrapper = fileURLToPath(
         new URL('../../../scripts/ci/logged-shell.ts', import.meta.url),
       );
-      const result = Bun.spawnSync([process.execPath, 'run', wrapper, ...args], {
+      const result = runFixtureProcess(testNodeCommand(wrapper, args), {
         cwd,
         stdout: 'pipe',
         stderr: 'pipe',

@@ -15,6 +15,8 @@ import {
 import {
   windowsDesktopFrontdoorNames,
   windowsNativeFrontdoorNames,
+  windowsNodeDesktopFrontdoorNames,
+  windowsNodeNativeFrontdoorNames,
 } from './platform/windows-native-frontdoors';
 import { defaultWindowsPathSecurity } from './platform/windows-path-security';
 
@@ -64,24 +66,25 @@ export function acquireArtifactAccess(input: {
       Object.keys(bootstrap).sort().join(',') !== 'candidateId,files' ||
       typeof Reflect.get(bootstrap, 'candidateId') !== 'string' ||
       !/^[a-f0-9]{64}$/.test(Reflect.get(bootstrap, 'candidateId')) ||
-      !Array.isArray(Reflect.get(bootstrap, 'files')) ||
-      ![windowsDesktopFrontdoorNames.length, windowsNativeFrontdoorNames.length].includes(
-        Reflect.get(bootstrap, 'files').length,
-      )
+      !Array.isArray(Reflect.get(bootstrap, 'files'))
     )
       throw Error('artifact_access_invalid');
     const files = Reflect.get(bootstrap, 'files');
-    const names =
-      files.length === windowsDesktopFrontdoorNames.length
-        ? windowsDesktopFrontdoorNames
-        : windowsNativeFrontdoorNames;
-    for (const [index, file] of files.entries()) {
+    const variants = [
+      windowsDesktopFrontdoorNames,
+      windowsNativeFrontdoorNames,
+      windowsNodeDesktopFrontdoorNames,
+      windowsNodeNativeFrontdoorNames,
+    ].filter((names) => names.length === files.length);
+    if (!variants.length) throw Error('artifact_access_invalid');
+    const names: string[] = [];
+    for (const file of files) {
       if (
         !file ||
         typeof file !== 'object' ||
         Array.isArray(file) ||
         Object.keys(file).sort().join(',') !== 'name,sha256,size' ||
-        Reflect.get(file, 'name') !== names[index] ||
+        typeof Reflect.get(file, 'name') !== 'string' ||
         !Number.isSafeInteger(Reflect.get(file, 'size')) ||
         Reflect.get(file, 'size') <= 0 ||
         Reflect.get(file, 'size') > 512 * 1048576 ||
@@ -89,7 +92,10 @@ export function acquireArtifactAccess(input: {
         !/^[a-f0-9]{64}$/.test(Reflect.get(file, 'sha256'))
       )
         throw Error('artifact_access_invalid');
+      names.push(Reflect.get(file, 'name'));
     }
+    if (!variants.some((variant) => variant.every((name, index) => names[index] === name)))
+      throw Error('artifact_access_invalid');
   }
   const coordination =
     managedNative ||
@@ -164,7 +170,7 @@ function artifactLockPath(root: string): string {
   return join(dirname(root), `.use-${basename(root)}.lock`);
 }
 
-/** Trusted Bun helper owns only its inherited fd copy; no Profile or execution authority. */
+/** The trusted helper owns only its inherited fd copy; no Profile or execution authority. */
 export function acquireInheritedArtifactAccess(input: { root: string; fd: number }): FileLock {
   if (!Number.isSafeInteger(input.fd) || input.fd < 0)
     throw Error('Invalid inherited lock descriptor.');

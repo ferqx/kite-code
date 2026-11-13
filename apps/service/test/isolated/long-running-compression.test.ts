@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +11,8 @@ import { ModelAttemptError } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 for (const window of [4096, undefined])
@@ -29,7 +30,7 @@ for (const window of [4096, undefined])
     const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
     let summaries = 0,
       decisions = 0;
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {

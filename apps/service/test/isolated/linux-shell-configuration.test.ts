@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 
 // The subprocess isolates both platform selection and public factory spies.
 // Actual Linux namespace/seccomp/FFI execution belongs to native qualification.
@@ -11,7 +12,7 @@ test('Linux Service Shell binds verified assets and final policy without group f
   );
   const hostStatus = fileURLToPath(new URL('../../src/host-status.ts', import.meta.url));
   const code = `
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdtempSync,realpathSync,mkdirSync,writeFileSync,chmodSync,readFileSync,existsSync,rmSync} from 'node:fs';
@@ -36,7 +37,7 @@ mock.module('@kite-ai/agent/jobs/shell',()=>({...publicJobs,
  createMacosHostShellJob:()=>{throw Error('unexpected_macos_host');},
  createMacosConfinedShellJob:()=>{throw Error('unexpected_macos_confined');},
  createShellJob:()=>{throw Error('unexpected_group_fallback');}}));
-mock.module('bun:ffi',()=>({dlopen(){ffiCalls++;throw Error('unexpected_native_ffi');}}));
+mock.module('@kite-ai/agent/runtime-ffi',()=>({dlopen(){ffiCalls++;throw Error('unexpected_native_ffi');}}));
 Object.defineProperty(process,'platform',{value:'linux'});
 const {selectProfile}=await import('@kite-ai/agent/profile');
 const {createShellConfiguration,inspectShellAssets,hostFilesystemScope}=await import(${JSON.stringify(shell)});
@@ -48,7 +49,7 @@ for(const path of [workspace,assetsRoot,control,temporary,profile.profilePath,pr
 process.env.TMPDIR=temporary;
 const makeAsset=name=>{const path=join(assetsRoot,name);writeFileSync(path,'original '+name);chmodSync(path,0o700);return path;};
 const options={platform:'linux',configurationId:'linux-fixture',env:{PATH:'/usr/bin:/bin',FIXED_VALUE:'original'},
- supervisorPath:makeAsset('linux-shell-init'),bunExecutable:makeAsset('bun'),shellExecutable:makeAsset('sh'),
+ supervisorPath:makeAsset('linux-shell-init'),runtimeExecutable:makeAsset('bun'),shellExecutable:makeAsset('sh'),
  linux:{bubblewrapPath:makeAsset('bwrap')},graceMs:20,maxQueuedBytes:4096,
  host:{controlBase:control,protectedRoots:[profile.dataRoot,profile.coordinationPath],protectedFiles:[join(root,'codex','auth.json')],readonlyAssets:[assetsRoot],runtimeReadOnlyRoots:[assetsRoot]}};
 const leaf=(mode,id='shell.command')=>({namespace:'builtin.permissions',version:'1',data:{workspaceTrust:true,mode,capability:{kind:'job',definitionId:id,definitionVersion:'1',hardAllowed:true}}});
@@ -57,7 +58,7 @@ const context=(snapshot,id='execution')=>({sessionId:'s',executionId:id,signal:n
 try {
  const original=await inspectShellAssets(options);
  assert.equal(original.length,4);
- assert.deepEqual(original.map(a=>a.path),[options.supervisorPath,options.bunExecutable,options.shellExecutable,options.linux.bubblewrapPath]);
+ assert.deepEqual(original.map(a=>a.path),[options.supervisorPath,options.runtimeExecutable,options.shellExecutable,options.linux.bubblewrapPath]);
  for(const asset of original)assert.equal(asset.digest,createHash('sha256').update(readFileSync(asset.path)).digest('hex'));
  const status=await createDefaultHostStatusSource({shell:options}).snapshot({subjectId:'owned',storeId:null});
  assert.deepEqual(status.execution.shell,{configured:true,available:true,supervision:'linux_pid_namespace',qualification:'linux_host_boundary_unqualified',reason:null});
@@ -92,10 +93,14 @@ try {
  console.log(JSON.stringify({factoryKinds:calls.map(c=>c.kind),starts:starts.length,ffiCalls,scope:'pure Service factory assembly, not Linux native qualification'}));
 } finally {rmSync(root,{recursive:true,force:true});}
 `;
-  const child = spawnSync(process.execPath, ['--eval', code], {
-    encoding: 'utf8',
-    timeout: 4000,
-  });
+  const child = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+    {
+      encoding: 'utf8',
+      timeout: 4000,
+    },
+  );
   if (child.status !== 0)
     throw new Error(
       `Linux Service assembly failed: ${child.error?.message ?? ''}\n${child.stderr}`,

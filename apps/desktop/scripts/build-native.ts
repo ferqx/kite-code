@@ -14,7 +14,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess, retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import {
@@ -34,6 +36,7 @@ import {
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build as buildRenderer } from 'vite';
+import { type BunBuildPlugin, build as bundle } from '../../../scripts/tooling/bun-build';
 import { type DesktopDevelopment, parseDesktopDevelopment } from '../electron/development';
 import type { MacosElectronResize } from '../electron/macos-electron-resize';
 import { type NativeAssets, parseNativeAssets, verifyNativeAsset } from '../electron/native-assets';
@@ -44,6 +47,17 @@ import {
 } from './macos-electron-runtime';
 import { desktopMarkdownDecoderAlias } from './markdown-worker-resolution';
 import { probeNativeSqliteEngine } from './sqlite-engine';
+
+const jsoncParser: BunBuildPlugin = {
+  name: 'native-jsonc-parser',
+  setup(build) {
+    // The UMD entry receives require as a factory argument, hiding its relative imports.
+    const manifest = createRequire(import.meta.url).resolve('jsonc-parser/package.json');
+    build.onResolve({ filter: /^jsonc-parser$/u }, () => ({
+      path: join(dirname(manifest), 'lib/esm/main.js'),
+    }));
+  },
+};
 
 /** The v1 file inventory omits fixed empty assets; preserve them in file-only copies. */
 export function copyWindowsNativeTerminal(
@@ -66,19 +80,31 @@ export async function buildNativeDesktop(
     readonly development?: DesktopDevelopment;
     readonly testDiagnostics?: boolean;
     readonly macosResize?: MacosElectronResize | null;
+    /** Trusted checkout-built Node addon used by the development helpers. */
+    readonly runtimeAddon?: string;
   } = {},
 ) {
   const assets = parseNativeAssets(input);
   const prepared = parseDesktopDevelopment(options.development, assets.kind === 'development');
   if (!isAbsolute(outdir)) throw Error('native_outdir_must_be_absolute');
   verifyNativeAsset(assets.serviceEntrypoint, assets.serviceSha256);
-  verifyNativeAsset(assets.bunExecutable, assets.bunSha256);
+  verifyNativeAsset(assets.runtimeExecutable, assets.runtimeSha256);
+  let helperAddon: { path: string; sha256: string } | undefined;
+  if (options.runtimeAddon) {
+    if (assets.kind !== 'development' || !isAbsolute(options.runtimeAddon))
+      throw Error('development_runtime_addon_invalid');
+    const path = realpathSync.native(options.runtimeAddon);
+    const sha256 = createHash('sha256').update(readFileSync(path)).digest('hex');
+    verifyNativeAsset(path, sha256);
+    helperAddon = { path: pathToFileURL(path).href, sha256 };
+  }
   await buildNativeApp(
     assets,
     outdir,
     options.testDiagnostics === true,
     prepared,
     options.macosResize ?? null,
+    helperAddon,
   );
 }
 async function buildNativeApp(
@@ -87,31 +113,31 @@ async function buildNativeApp(
   testDiagnostics = false,
   development: DesktopDevelopment | null = null,
   macosResize: MacosElectronResize | null = null,
+  helperAddon?: { readonly path: string; readonly sha256: string },
 ) {
   if (process.platform === 'win32') privateDirectory(outdir);
   else await mkdir(outdir, { recursive: true });
-  const root = resolve(import.meta.dir, '..');
+  const root = resolve(import.meta.dirname, '..');
   await writeFile(join(outdir, 'app-icon.ico'), await readFile(join(root, 'app-icon.ico')));
   const windowsAccessAsset = process.platform === 'win32' ? await buildWindowsAccess(outdir) : null;
-  const helper = await Bun.build({
-    entrypoints: [join(root, 'electron/profile-access-helper.ts')],
-    target: 'bun',
-    format: 'esm',
-    packages: 'bundle',
-    outdir,
-    naming: 'profile-access.js',
-  });
-  if (!helper.success) throw new AggregateError(helper.logs, 'native_profile_helper_build_failed');
-  const artifactHelper = await Bun.build({
-    entrypoints: [join(root, 'electron/artifact-access-helper.ts')],
-    target: 'bun',
-    format: 'esm',
-    packages: 'bundle',
-    outdir,
-    naming: 'artifact-access.js',
-  });
-  if (!artifactHelper.success)
-    throw new AggregateError(artifactHelper.logs, 'native_artifact_helper_build_failed');
+  for (const kind of ['profile', 'artifact']) {
+    const result = await bundle({
+      entrypoints: [join(root, 'electron', `${kind}-access-helper.ts`)],
+      target: 'node',
+      format: 'esm',
+      packages: 'bundle',
+      plugins: [jsoncParser],
+      outdir,
+      naming: `${kind}-access.js`,
+      // Before the helper obtains the first shared lock, its JS is self-contained
+      // and the only native addon is bound to a digest from the verified inventory.
+      ...(helperAddon
+        ? { define: { __KITE_EMBEDDED_RUNTIME_NATIVE__: JSON.stringify(helperAddon) } }
+        : {}),
+    });
+    if (!result.success)
+      throw new AggregateError(result.logs, `native_${kind}_helper_build_failed`);
+  }
   const profileAccessAsset = {
     relativePath: 'profile-access.js',
     sha256: createHash('sha256')
@@ -119,11 +145,12 @@ async function buildNativeApp(
       .digest('hex'),
   };
   for (const entry of ['main', 'preload', 'global-dialog-preload', 'trajectory-preload']) {
-    const result = await Bun.build({
+    const result = await bundle({
       entrypoints: [join(root, 'electron', `${entry}.ts`)],
       target: 'node',
       format: 'cjs',
       external: ['electron'],
+      plugins: [jsoncParser],
       outdir,
       naming: `${entry}.cjs`,
       define: {
@@ -132,6 +159,7 @@ async function buildNativeApp(
         __KITE_DESKTOP_PROFILE_ACCESS__: JSON.stringify(profileAccessAsset),
         __KITE_DESKTOP_WINDOWS_ACCESS__: JSON.stringify(windowsAccessAsset),
         __KITE_DESKTOP_MACOS_RESIZE__: JSON.stringify(macosResize),
+        ...(helperAddon ? { __KITE_EMBEDDED_RUNTIME_NATIVE__: JSON.stringify(helperAddon) } : {}),
       },
     });
     if (!result.success) throw new AggregateError(result.logs, 'native_build_failed');
@@ -178,7 +206,12 @@ async function buildNativeApp(
     });
   await writeFile(
     join(outdir, 'package.json'),
-    JSON.stringify({ name: 'kite-native', version: '0.1.0', main: 'main.cjs' }),
+    JSON.stringify({
+      name: 'kite-native',
+      version: '0.1.0',
+      main: 'main.cjs',
+      ...(helperAddon ? { type: 'module' } : {}),
+    }),
   );
 }
 export type WindowsNativeBuildResource = { verify?(): void; release(): void };
@@ -322,12 +355,24 @@ export async function buildNativeCandidate(input: {
     });
     if (verifyEmbeddedRuntimeBundle(join(root, 'terminal')).digest !== terminal.digest)
       throw Error('native_terminal_copy_mismatch');
+    const helperAddonPath = posix.join(
+      posix.dirname(terminal.manifest.entries.service),
+      '../agent/runtime-native.node',
+    );
+    const helperAddon =
+      'nodeVersion' in terminal.manifest
+        ? terminal.manifest.files.find((file) => file.path === helperAddonPath)
+        : null;
+    if (helperAddon === undefined) throw Error('native_runtime_helper_addon_missing');
     await buildNativeApp(
       { kind: 'candidate' },
       join(root, 'app'),
       input.testDiagnostics === true,
       null,
       macosResize,
+      helperAddon
+        ? { path: `../terminal/${helperAddonPath}`, sha256: helperAddon.sha256 }
+        : undefined,
     );
     if (process.platform === 'win32') {
       await input.windowsBuildPort!.buildFrontdoors(root, terminal, resources);

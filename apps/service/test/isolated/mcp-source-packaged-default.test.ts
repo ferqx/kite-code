@@ -1,10 +1,17 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import {
+  which as findExecutable,
+  spawn as spawnProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
@@ -14,7 +21,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
     const value = await read();
     if (done(value)) return value;
     if (Date.now() > deadline) throw new Error('packaged_source_deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 function alive(pid: number) {
@@ -32,13 +39,13 @@ test('sealed default process discovers and executes owned stdio sources using pe
   const home = join(root, 'home');
   mkdirSync(workspace);
   mkdirSync(home);
-  if (process.platform === 'linux' && (!Bun.which('cc') || !Bun.which('bwrap')))
+  if (process.platform === 'linux' && (!findExecutable('cc') || !findExecutable('bwrap')))
     throw Error('linux_mcp_qualification_dependencies_unavailable');
   const { buildTerminalBundle } = await import('../../../../scripts/release/terminal-bundle');
   const built = await buildTerminalBundle({
     destination: join(root, 'bundle'),
-    repositoryRoot: resolve(import.meta.dir, '../../../..'),
-    bunExecutable: process.execPath,
+    repositoryRoot: resolve(import.meta.dirname, '../../../..'),
+    nodeExecutable: process.execPath,
   });
   const runtime = join(built.root, built.manifest.entries.runtime);
   for (const asset of [
@@ -59,11 +66,11 @@ test('sealed default process discovers and executes owned stdio sources using pe
   )) as typeof import('../../src/paired');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
-  const fixture = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../fixtures/mcp-source-packaged-server.ts')],
+  const fixture = await buildBundle({
+    entrypoints: [join(import.meta.dirname, '../fixtures/mcp-source-packaged-server.ts')],
     outdir: join(root, 'fixture'),
     naming: 'server.js',
-    target: 'bun',
+    target: 'node',
   });
   expect(fixture.success).toBe(true);
   const serverPath = fixture.outputs[0]!.path;
@@ -88,7 +95,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
   let step = 0;
   let ordinary = false;
   const bodies: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -173,7 +180,7 @@ test('sealed default process discovers and executes owned stdio sources using pe
       apiMajor: 1,
       requiredCapabilities: ['commands', 'extension_queries'],
       spawnChild: (argv, options) =>
-        Bun.spawn([...argv], {
+        spawnProcess([...argv], {
           cwd: workspace,
           env: {
             ...options.env,

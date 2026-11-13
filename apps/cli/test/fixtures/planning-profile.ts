@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -21,7 +22,7 @@ export async function planningProfile() {
   });
   const requests: Record<string, unknown>[] = [],
     titleRequests: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

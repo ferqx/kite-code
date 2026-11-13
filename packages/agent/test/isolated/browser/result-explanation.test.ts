@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { Json, ToolResult } from '../../../src/extensions';
 import { explainBrowserExecutionResult } from '../../../src/tools/browser/result-explanation';
 

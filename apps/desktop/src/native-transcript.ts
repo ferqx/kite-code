@@ -4,6 +4,7 @@ import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/deskto
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { nativeModelConnections } from './native-model-connections';
+import { nativeModelFailure } from './native-model-failure';
 import { desktopMessages } from './native-presentation';
 import {
   desktopToolMessage,
@@ -599,8 +600,10 @@ export function desktopTranscript({
             : (run.status as 'completed' | 'failed' | 'cancelled'),
       });
     if (!run.isActive && (run.status === 'failed' || run.status === 'interrupted')) {
+      const modelFailure = run.status === 'failed' ? nativeModelFailure(run.reason) : undefined;
       const failure =
-        run.reason === 'context_source_unavailable'
+        modelFailure ??
+        (run.reason === 'context_source_unavailable'
           ? {
               summary: '工作区上下文读取失败',
               text: '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。',
@@ -618,7 +621,7 @@ export function desktopTranscript({
               : {
                   summary: '本轮异常结束',
                   text: '本轮未能生成最终回复，当前记录未提供可核实的错误原因。请检查模型连接和配置；重新发送前，先核对本轮工具执行结果，避免重复操作。',
-                };
+                });
       let last = -1;
       for (let index = 0; index < modeled.length; index++) {
         const message = modeled[index]!;

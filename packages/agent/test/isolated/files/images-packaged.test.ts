@@ -1,12 +1,16 @@
-import { expect, test } from 'bun:test';
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createCanvas } from '@napi-rs/canvas';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../../tests/fixtures/test-filesystem';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
 import { imageAssets } from '../../../src/tools/images/processor';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 test('offline image codec and physical sharp/native closure run outside the source tree, and tampering recovers', async () => {
   const root = temporaryDirectory('kite-image-package-');
@@ -16,8 +20,10 @@ test('offline image codec and physical sharp/native closure run outside the sour
       entry,
       `import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync,unlinkSync} from 'node:fs';
-import {processImage,imageAssets} from ${JSON.stringify(resolve(import.meta.dir, '../../../src/tools/images/processor.ts').replaceAll('\\', '/'))};
+import {processImage,imageAssets} from ${JSON.stringify(resolve(import.meta.dirname, '../../../src/tools/images/processor.ts').replaceAll('\\', '/'))};
 const bytes=readFileSync(new URL('./input.png',import.meta.url));
+process.env.NODE_OPTIONS = '--import=' + new URL('./tools/images/poison.js', import.meta.url).href;
+process.env.NODE_PATH = new URL('./tools/images/', import.meta.url).pathname;
 const read=()=>processImage(async()=>({bytes}),new AbortController().signal);
 const first=await read(),assets=imageAssets();
 for(const path of [assets.child,assets.checksum]) {
@@ -30,10 +36,10 @@ try {await assert.rejects(read(),{code:'image_assets_invalid'});} finally {write
 assert.equal((await read()).metadata.width,80);
 console.log(JSON.stringify({metadata:first.metadata,signature:Buffer.from(first.png).subarray(0,8).toString('hex')}));`,
     );
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [entry],
       outdir: root,
-      target: 'bun',
+      ...fixtureRuntimeBuild(root),
       packages: 'bundle',
       naming: 'reader.js',
     });
@@ -42,8 +48,7 @@ console.log(JSON.stringify({metadata:first.metadata,signature:Buffer.from(first.
     mkdirSync(join(root, 'tools/images'), { recursive: true });
     cpSync(assets.child, join(root, 'tools/images/image-child.js'));
     cpSync(assets.checksum, join(root, 'tools/images/image-child.sha256'));
-    // The fixed codec must not execute cwd preloads or remap sharp through ambient tsconfig.
-    writeFileSync(join(root, 'tools/images/bunfig.toml'), 'preload = ["./poison.js"]\n');
+    // The fixed codec must not use an ambient Node preload or remap its native dependency.
     writeFileSync(
       join(root, 'tools/images/poison.js'),
       'throw Error("fixture_config_was_executed");',
@@ -59,12 +64,15 @@ console.log(JSON.stringify({metadata:first.metadata,signature:Buffer.from(first.
       cpSync(source, target, { recursive: true, dereference: true });
     }
     writeFileSync(join(root, 'input.png'), await createCanvas(80, 40).encode('png'));
-    const child = Bun.spawn([process.execPath, '--no-install', join(root, 'reader.js')], {
-      cwd: root,
-      env: { ...process.env, PATH: '', NODE_PATH: '' },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const child = spawnProcess(
+      [fixtureNodeExecutable(), ...nodeRuntimeFlags, join(root, 'reader.js')],
+      {
+        cwd: root,
+        env: { PATH: '', NODE_PATH: '' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),

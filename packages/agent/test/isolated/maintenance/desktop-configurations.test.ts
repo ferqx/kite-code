@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -12,6 +10,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../src/json';
 import {
   createProfileBackup,

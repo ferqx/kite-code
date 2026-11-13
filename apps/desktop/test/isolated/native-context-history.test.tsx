@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,6 +13,7 @@ import { startService } from '@kite-ai/service';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { NativeContext } from '../../electron/context';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
@@ -23,7 +24,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() >= deadline) throw Error('native_context_history_dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -191,7 +192,7 @@ test('Native Context finds and explicitly includes a real suppressed Job beyond 
     let job = await original.getExecution(jobId);
     while (job.status !== 'succeeded') {
       if (Date.now() >= deadline) throw Error('original_job_not_complete');
-      await Bun.sleep(5);
+      await fixtureDelay(5);
       job = await original.getExecution(jobId);
     }
     const initial = await original.getContext('session', { storeId: originalStoreId });
@@ -252,7 +253,7 @@ test('Native Context finds and explicitly includes a real suppressed Job beyond 
         methods.push(init?.method ?? (url instanceof Request ? url.method : 'GET'));
         return originalFetch(url, init);
       },
-      { preconnect: originalFetch.preconnect },
+      {},
     );
     expect(current.serverInfo?.storeId).toBe(restored.storeId);
     expect(await current.getExecution(jobId)).toEqual(job);

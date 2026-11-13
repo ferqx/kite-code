@@ -1,12 +1,14 @@
-import { Database } from 'bun:sqlite';
 import { strict as assert } from 'node:assert';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { decodeShellProcessEvidence } from '@kite-ai/agent/jobs/shell';
 import {
   type OwnedProcessIdentity,
   observeOwnedProcessIdentity,
 } from '@kite-ai/agent/process-observation';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import type { MixedShellLedger } from '../../service/test/isolated/multi-session-shell-load.shared';
 
 type Role =
@@ -42,7 +44,7 @@ const sameBirth = (a: OwnedProcessIdentity, b: OwnedProcessIdentity) =>
   a.birth.microseconds === b.birth.microseconds;
 
 async function command(executable: string, args: string[], timeoutMs = 5000) {
-  const child = Bun.spawn([executable, ...args], {
+  const child = spawnFixtureProcess([executable, ...args], {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -115,7 +117,7 @@ export class NativeMemoryCensus {
       );
       if (report.originalExited === report.total) return report;
       assert.ok(Date.now() < deadline, 'all original identities must exit without test cleanup');
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     }
   }
 

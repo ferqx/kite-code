@@ -1,10 +1,15 @@
-import { expect, test } from 'bun:test';
 import { cpSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { simplePdf } from '../../../../../tests/fixtures/pdf';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { ownedWorkerPreloadAsset } from '../../../src/platform/process/owned-worker';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
 import { pdfAssets } from '../../../src/tools/documents/pdf';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 test('PDF worker and pinned native dependency closure read outside the source tree offline', async () => {
   const root = temporaryDirectory('kite-pdf-package-');
@@ -14,8 +19,8 @@ test('PDF worker and pinned native dependency closure read outside the source tr
       entry,
       `import assert from 'node:assert/strict';
 import {readFileSync,unlinkSync,writeFileSync} from 'node:fs';
-import {readPdf,pdfAssets} from ${JSON.stringify(resolve(import.meta.dir, '../../../src/tools/documents/pdf.ts').replaceAll('\\', '/'))};
-const bytes = new Uint8Array(await Bun.file(new URL('./input.pdf', import.meta.url)).arrayBuffer());
+import {readPdf,pdfAssets} from ${JSON.stringify(resolve(import.meta.dirname, '../../../src/tools/documents/pdf.ts').replaceAll('\\', '/'))};
+const bytes = readFileSync(new URL('./input.pdf', import.meta.url));
 const text = await readPdf(bytes, {}, new AbortController().signal);
 const image = await readPdf(bytes, {mode:'image'}, new AbortController().signal);
 const assets = pdfAssets();
@@ -40,10 +45,10 @@ try {
 recovered.push((await readPdf(bytes, {}, new AbortController().signal)).pages[0].text);
 console.log(JSON.stringify({text, recovered, signature:Buffer.from(image.pages[0].image).subarray(0,8).toString('hex')}));`,
     );
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [entry],
       outdir: root,
-      target: 'bun',
+      ...fixtureRuntimeBuild(root),
       packages: 'bundle',
       naming: 'reader.js',
     });
@@ -60,21 +65,19 @@ console.log(JSON.stringify({text, recovered, signature:Buffer.from(image.pages[0
       cpSync(source, target, { recursive: true, dereference: true });
     }
     if (process.platform === 'darwin') {
-      const preload = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../../../src/storage/worker/observer-preload.ts')],
-        outdir: join(root, 'storage/worker'),
-        target: 'bun',
-        packages: 'bundle',
-      });
-      expect(preload.success).toBe(true);
+      mkdirSync(join(root, 'storage/worker'), { recursive: true });
+      cpSync(ownedWorkerPreloadAsset(), join(root, 'storage/worker/observer-preload.js'));
     }
     writeFileSync(join(root, 'input.pdf'), simplePdf());
-    const child = Bun.spawn([process.execPath, '--no-install', join(root, 'reader.js')], {
-      cwd: root,
-      env: { ...process.env, PATH: '', NODE_PATH: '' },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const child = spawnProcess(
+      [fixtureNodeExecutable(), ...nodeRuntimeFlags, join(root, 'reader.js')],
+      {
+        cwd: root,
+        env: { PATH: '', NODE_PATH: '' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const [stdout, stderr, status] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),

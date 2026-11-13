@@ -20,6 +20,10 @@ on:
       - "tests/fixtures/formal-optional-capabilities/**"
       - "package.json"
       - "bun.lock"
+      - "bunfig.toml"
+      - "scripts/tooling/**"
+      - "scripts/run-test-files.ts"
+      - "scripts/development/node-loader.mjs"
       - ".github/workflows/mcp-native-keyring-smoke.yml"
   pull_request:
     paths:
@@ -38,6 +42,10 @@ on:
       - "tests/fixtures/formal-optional-capabilities/**"
       - "package.json"
       - "bun.lock"
+      - "bunfig.toml"
+      - "scripts/tooling/**"
+      - "scripts/run-test-files.ts"
+      - "scripts/development/node-loader.mjs"
       - ".github/workflows/mcp-native-keyring-smoke.yml"
 
 permissions:
@@ -60,22 +68,36 @@ jobs:
       KITE_RUN_UNIFIED_KEYRING_SMOKE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: '26.13.1'
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.4
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
+      - name: Prepare verified Node and SQLite inputs for the keyring candidate
+        run: bun run prepare:node-inputs
+      - if: runner.os == 'Linux'
+        name: Prepare native build and Secret Service dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential pkg-config libffi-dev dbus-x11 gnome-keyring libsecret-1-0 libglib2.0-bin
+      - if: runner.os == 'Linux'
+        name: Prepare the Node native addon for the source keyring smoke
+        run: bun run prepare:node-runtime --if-missing
       - if: runner.os != 'Linux'
-        run: bun test tests/isolated/unified-agent/native-credential-platform.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts tests/isolated/unified-agent/native-credential-platform.test.ts
       - if: runner.os == 'Linux'
         name: Start isolated Secret Service and run actual native smoke
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes dbus-x11 gnome-keyring
-          dbus-run-session -- bash -euo pipefail -c '
+          dbus-run-session -- bash -euo pipefail <<'KEYRING'
             export XDG_RUNTIME_DIR="${RUNNER_TEMP}/keyring-runtime"
-            mkdir -p "$XDG_RUNTIME_DIR"
-            chmod 700 "$XDG_RUNTIME_DIR"
-            eval "$(printf %s ci-keyring | gnome-keyring-daemon --unlock --components=secrets)"
-            bun test tests/isolated/unified-agent/native-credential-platform.test.ts
-          '
+            export XDG_DATA_HOME="${RUNNER_TEMP}/keyring-data"
+            export KITE_LINUX_MODEL_KEYRING_FIXTURE="$XDG_DATA_HOME"
+            install -d -m 700 "$XDG_RUNTIME_DIR" "$XDG_DATA_HOME"
+            printf %s ci-keyring | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            login=/org/freedesktop/secrets/collection/login
+            gdbus call --session --dest org.freedesktop.secrets --object-path /org/freedesktop/secrets --method org.freedesktop.Secret.Service.SetAlias default "$login"
+            node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts apps/service/test/isolated/linux-model-keyring.test.ts
+            node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts tests/isolated/unified-agent/native-credential-platform.test.ts
+          KEYRING

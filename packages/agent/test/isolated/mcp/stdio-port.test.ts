@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFile, spawn } from 'node:child_process';
 import {
   existsSync,
@@ -11,9 +10,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
 import { createMcpAdapter, createMcpLifecycle } from '../../../src/mcp';
 import {
@@ -26,6 +28,11 @@ import {
 } from '../../../src/mcp/stdio-process-evidence';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import {
+  fixtureNodeExecutable,
+  fixtureNodeLoader,
+  fixtureRuntimeBuild,
+} from '../../fixtures/node-runtime';
 
 const macTest = process.platform === 'darwin' ? test : test.skip;
 function alive(pid: number) {
@@ -40,7 +47,7 @@ async function until(read: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 6000;
   while (!(await read())) {
     if (Date.now() > deadline) throw new Error('stdio_test_deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 async function kernelState(pid: number): Promise<string> {
@@ -96,34 +103,34 @@ async function registrationAbsent(domain: string, label: string): Promise<boolea
 }
 async function fixture(mode = 'normal') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-mcp-stdio-')));
-  const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../../src/mcp/stdio-guardian.ts')],
+  const built = await buildBundle({
+    entrypoints: [join(import.meta.dirname, '../../../src/mcp/stdio-guardian.ts')],
     outdir: root,
-    target: 'bun',
+    ...fixtureRuntimeBuild(root),
     naming: 'stdio-guardian.js',
   });
   expect(built.success).toBe(true);
-  const script = join(root, 'server.js');
+  const script = join(root, 'server.mjs');
   writeFileSync(
     script,
     `
- import {spawn} from 'node:child_process';import{writeFileSync,existsSync}from'node:fs';import{join}from'node:path';
+ import {setTimeout as sleep} from 'node:timers/promises';import {spawn} from 'node:child_process';import{writeFileSync,existsSync}from'node:fs';import{join}from'node:path';
  const root=process.env.LEDGER;const mode=process.env.MODE;
  process.stderr.write('fixture-sensitive-stderr'+('x'.repeat(mode==='stderr_limit'?8192:4096)));
  const childSource=\`import{spawn}from'node:child_process';import{writeFileSync}from'node:fs';process.on('SIGTERM',()=>{});const grand=spawn(process.execPath,['-e',"import{writeFileSync}from'node:fs';process.on('SIGTERM',()=>{});writeFileSync(process.argv[1],String(process.pid));setInterval(()=>{},1000)",process.argv[1]+'.grand.ready'],{env:{},stdio:'ignore',detached:process.argv[2]==='escape'});writeFileSync(process.argv[1],JSON.stringify({child:process.pid,grand:grand.pid}));if(process.argv[2]==='escape')process.exit(0);setInterval(()=>{},1000);\`;
  const tree=join(root,String(process.pid)+'.tree');const child=spawn(process.execPath,['-e',childSource,tree,mode==='exit'?'escape':'normal'],{env:{},stdio:'ignore',detached:mode==='exit'});
  writeFileSync(join(root,String(process.pid)+'.leader'),JSON.stringify({leader:process.pid,guardian:process.ppid,tree,visible:process.env.FIXTURE_VISIBLE??null,ambient:process.env.PORT_SECRET??null,proxy:process.env.HTTP_PROXY??null}));
  let buf='';for await(const chunk of process.stdin){buf+=chunk.toString();while(buf.includes('\\n')){const at=buf.indexOf('\\n'),line=buf.slice(0,at);buf=buf.slice(at+1);const rpc=JSON.parse(line);if(rpc.id===undefined)continue;let result;
- if(rpc.method==='initialize'){while(!existsSync(tree+'.grand.ready'))await Bun.sleep(5);result={protocolVersion:'2024-11-05',serverInfo:{name:'local',version:'1'},capabilities:{tools:{}}};}
+ if(rpc.method==='initialize'){while(!existsSync(tree+'.grand.ready'))await sleep(5);result={protocolVersion:'2024-11-05',serverInfo:{name:'local',version:'1'},capabilities:{tools:{}}};}
  else if(rpc.method==='tools/list')result={tools:[{name:'effect',inputSchema:{type:'object'}}]};
  else {writeFileSync(join(root,String(process.pid)+'.called'),'one');if(mode==='hang')await new Promise(()=>{});if(mode==='large'){process.stdout.write('x'.repeat(4096));continue;}result={content:[{type:'text',text:'actual local response'}]};}
- await new Promise(resolve=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n',resolve));if(mode==='exit'&&rpc.method==='tools/call'){while(!existsSync(join(root,String(process.pid)+'.exit')))await Bun.sleep(5);process.exit(0);}
+ await new Promise(resolve=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n',resolve));if(mode==='exit'&&rpc.method==='tools/call'){while(!existsSync(join(root,String(process.pid)+'.exit')))await sleep(5);process.exit(0);}
  }}
  `,
   );
   const configuration = {
     type: 'stdio' as const,
-    command: process.execPath,
+    command: fixtureNodeExecutable(),
     args: [script],
     cwd: root,
     env: { LEDGER: root, MODE: mode, FIXTURE_VISIBLE: 'selected' },
@@ -139,7 +146,7 @@ async function fixture(mode = 'normal') {
       servers: [{ id: 'local', configuration }],
       guardianPath: built.outputs[0]!.path,
       controlBase: root,
-      bunExecutable: process.execPath,
+      runtimeExecutable: fixtureNodeExecutable(),
       allowedEnvNames: ['LEDGER', 'MODE', 'FIXTURE_VISIBLE'],
       admit,
       limits,
@@ -354,7 +361,7 @@ macTest(
       servers: [{ id: 'local', configuration: f.configuration }],
       guardianPath: join(f.root, 'stdio-guardian.js'),
       controlBase: f.root,
-      bunExecutable: process.execPath,
+      runtimeExecutable: fixtureNodeExecutable(),
       allowedEnvNames: ['LEDGER', 'MODE', 'FIXTURE_VISIBLE'],
       async admit(actual) {
         admissions++;
@@ -419,7 +426,7 @@ macTest(
       client = new Client({ name: 'fixture', version: '1' });
     const foreignLedger = join(f.root, 'foreign-tree.json');
     const unrelated = spawn(
-      process.execPath,
+      fixtureNodeExecutable(),
       [
         '-e',
         `import {spawn} from 'node:child_process';import {writeFileSync} from 'node:fs';
@@ -738,7 +745,7 @@ macTest(
         createMcpStdioTransportPort({
           servers: [{ id: 'local', configuration: f.configuration }],
           guardianPath: join(f.root, 'stdio-guardian.js'),
-          bunExecutable: process.execPath,
+          runtimeExecutable: fixtureNodeExecutable(),
           allowedEnvNames: ['HTTP_PROXY'],
           admit: async () => {},
         }),
@@ -775,13 +782,13 @@ macTest(
       const script = join(f.root, 'parent.ts');
       writeFileSync(
         script,
-        `import{createMcpStdioTransportPort}from${JSON.stringify(join(import.meta.dir, '../../../src/mcp/stdio-port.ts'))};import{Client}from${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/client/index.js'))};const port=createMcpStdioTransportPort({servers:[{id:'local',configuration:${JSON.stringify(f.configuration)}}],guardianPath:${JSON.stringify(join(f.root, 'stdio-guardian.js'))},controlBase:${JSON.stringify(f.root)},bunExecutable:${JSON.stringify(process.execPath)},allowedEnvNames:['LEDGER','MODE','FIXTURE_VISIBLE'],admit:async()=>{}});const owned=await port.open(${JSON.stringify(f.binding())},{signal:new AbortController().signal});const client=new Client({name:'parent',version:'1'});await client.connect(owned.transport);process.stdout.write('owned-broker '+JSON.stringify(owned.readProcessEvidence().broker)+'\\nready\\n');process.stdin.resume();process.stdin.once('end',()=>process.exit(0));`,
+        `import{createMcpStdioTransportPort}from${JSON.stringify(join(import.meta.dirname, '../../../src/mcp/stdio-port.ts'))};import{Client}from${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/client/index.js'))};const port=createMcpStdioTransportPort({servers:[{id:'local',configuration:${JSON.stringify(f.configuration)}}],guardianPath:${JSON.stringify(join(f.root, 'stdio-guardian.js'))},controlBase:${JSON.stringify(f.root)},runtimeExecutable:${JSON.stringify(fixtureNodeExecutable())},allowedEnvNames:['LEDGER','MODE','FIXTURE_VISIBLE'],admit:async()=>{}});const owned=await port.open(${JSON.stringify(f.binding())},{signal:new AbortController().signal});const client=new Client({name:'parent',version:'1'});await client.connect(owned.transport);process.stdout.write('owned-broker '+JSON.stringify(owned.readProcessEvidence().broker)+'\\nready\\n');process.stdin.resume();process.stdin.once('end',()=>process.exit(0));`,
       );
-      const parent = spawn(process.execPath, [script], {
+      const parent = spawn(fixtureNodeExecutable(), ['--import', fixtureNodeLoader, script], {
           env: {},
           stdio: ['pipe', 'pipe', 'pipe'],
         }),
-        unrelated = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+        unrelated = spawn(fixtureNodeExecutable(), ['-e', 'setInterval(()=>{},1000)'], {
           env: {},
           stdio: 'ignore',
         });
@@ -830,7 +837,8 @@ macTest(
     writeFileSync(
       asset,
       `import {writeFileSync as writeBootstrap,renameSync as publishBootstrap,existsSync as gateExists} from 'node:fs';
-if(process.argv[2]==='--launchd-owned'){writeBootstrap(${JSON.stringify(`${marker}.writing`)},JSON.stringify({pid:process.pid,root:process.argv[3]}));publishBootstrap(${JSON.stringify(`${marker}.writing`)},${JSON.stringify(marker)});while(!gateExists(${JSON.stringify(gate)}))await Bun.sleep(5);}
+import {setTimeout as sleep} from 'node:timers/promises';
+if(process.argv[2]==='--launchd-owned'){writeBootstrap(${JSON.stringify(`${marker}.writing`)},JSON.stringify({pid:process.pid,root:process.argv[3]}));publishBootstrap(${JSON.stringify(`${marker}.writing`)},${JSON.stringify(marker)});while(!gateExists(${JSON.stringify(gate)}))await sleep(5);}
 ${readFileSync(asset, 'utf8')}`,
     );
     const pending = await bootstrap

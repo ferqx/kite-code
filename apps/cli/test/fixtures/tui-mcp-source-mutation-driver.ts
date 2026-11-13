@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { closeSync, constants, fsyncSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 const [controlUrl, executable, hostPath, root, evidence, storeId] = process.argv.slice(2) as [
@@ -83,7 +84,7 @@ const wait = async (text: string, compact = false) => {
     }
     if (Date.now() > end) throw Error(`owned_source_mutation_frame_deadline:${text}`);
     if (active!.ended) throw Error('owned_source_mutation_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const waitAbsent = async (text: string) => {
@@ -97,7 +98,7 @@ const waitAbsent = async (text: string) => {
     }
     if (Date.now() > end) throw Error(`owned_source_mutation_absent_deadline:${text}`);
     if (active!.ended) throw Error('owned_source_mutation_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string, retain = false) => {
@@ -117,7 +118,7 @@ const choose = async (label: string, top = 'Add source entry') => {
       const frame = await current();
       if (selectedLabel(frame.text) !== undefined) return frame;
       if (Date.now() > end) throw Error(`owned_source_mutation_selection_absent:${label}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   };
   const initial = await selection();
@@ -130,7 +131,7 @@ const choose = async (label: string, top = 'Add source entry') => {
       const frame = await current();
       if (frame.fresh && normalized(frame.text).includes(`❯ ${top}`)) break;
       if (Date.now() > end) throw Error(`owned_source_mutation_top_deadline:${top}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   for (;;) {
@@ -144,7 +145,7 @@ const choose = async (label: string, top = 'Add source entry') => {
       const selected = selectedLabel(after.text);
       if (after.fresh && selected !== undefined && selected !== previous) break;
       if (Date.now() > end) throw Error(`owned_source_mutation_navigation_frame_deadline:${label}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
 };
@@ -153,7 +154,7 @@ const start = async (phase: string) => {
   decodeFailure = undefined;
   retained = undefined;
   active = spawnTuiPTY({
-    cmd: [executable, '--no-install', hostPath],
+    cmd: [executable, '--no-global-search-paths', hostPath],
     cwd: root,
     env: {
       HOME: root,
@@ -206,7 +207,7 @@ const outcome = async (id: string, phase: 'saved' | 'outcome_unknown') => {
     }
     if (Date.now() > end) throw Error(`owned_source_mutation_outcome_deadline:${id}:${phase}`);
     if (active!.ended) throw Error('owned_source_mutation_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const selectOriginal = async (id: string) => {
@@ -226,7 +227,7 @@ const leave = async (parent = 'MCP · w', pending = false) => {
 const close = async (phase: string) => {
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!active!.ended && Date.now() < end) await Bun.sleep(50);
+  while (!active!.ended && Date.now() < end) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([active!.host.exited, active!.eof]),
     3000,

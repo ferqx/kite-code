@@ -1,5 +1,9 @@
 import { basename, dirname, join } from 'node:path';
-import { windowsTerminalRuntimeArguments } from '@kite-ai/service/runtime-assets';
+import {
+  windowsDesktopRuntimeEntries,
+  windowsNodeDesktopRuntimeEntries,
+  windowsTerminalRuntimeArguments,
+} from '@kite-ai/service/runtime-assets';
 import type { RuntimeProtection } from '@kite-ai/service/runtime-protection';
 import { loadWindowsAccess } from './windows-access';
 
@@ -17,6 +21,8 @@ const admissions = new WeakMap<
     root: string;
     id: string;
     serviceEntrypoint: string;
+    runtimeExecutable: string;
+    runtime: 'node' | 'bun';
     borrowers: Set<object>;
     closed: boolean;
     lease: ReturnType<ReturnType<typeof loadWindowsAccess>['candidateShared']>;
@@ -37,7 +43,7 @@ export function retainWindowsNativePairedArtifact(
     proof.root !== state.root ||
     proof.manifestSha256 !== state.id ||
     actual.buildId !== `native-${state.id}` ||
-    actual.executable !== join(state.root, 'terminal/runtime/bun.exe') ||
+    actual.executable !== state.runtimeExecutable ||
     actual.entrypoint !== state.serviceEntrypoint
   )
     unavailable();
@@ -45,7 +51,7 @@ export function retainWindowsNativePairedArtifact(
   const borrower = {};
   state.borrowers.add(borrower);
   return Object.freeze({
-    arguments: windowsTerminalRuntimeArguments(join(state.root, 'terminal')),
+    arguments: windowsTerminalRuntimeArguments(join(state.root, 'terminal'), state.runtime),
     release() {
       state.borrowers.delete(borrower);
     },
@@ -86,6 +92,7 @@ export function parseWindowsNativeHandoff(argv: readonly string[]): WindowsNativ
 export function acquireWindowsNativeCandidate(input: {
   root: string;
   serviceEntrypoint: string;
+  runtimeExecutable: string;
   windowsAsset: { path: string; sha256: string };
   files: readonly (readonly [string, string, string])[];
   handoff: WindowsNativeHandoff;
@@ -93,6 +100,13 @@ export function acquireWindowsNativeCandidate(input: {
   const prefix = dirname(dirname(input.root)),
     id = basename(input.root);
   if (basename(dirname(input.root)) !== 'releases' || !/^[0-9a-f]{64}$/.test(id)) unavailable();
+  const terminal = join(input.root, 'terminal');
+  const runtime: 'node' | 'bun' =
+    input.runtimeExecutable === join(terminal, windowsNodeDesktopRuntimeEntries.runtime)
+      ? 'node'
+      : input.runtimeExecutable === join(terminal, windowsDesktopRuntimeEntries.runtime)
+        ? 'bun'
+        : unavailable();
   const lease = loadWindowsAccess(input.windowsAsset).candidateShared(
     input.root,
     prefix,
@@ -105,6 +119,8 @@ export function acquireWindowsNativeCandidate(input: {
     root: input.root,
     id,
     serviceEntrypoint: input.serviceEntrypoint,
+    runtimeExecutable: input.runtimeExecutable,
+    runtime,
     borrowers: new Set<object>(),
     closed: false,
     lease,

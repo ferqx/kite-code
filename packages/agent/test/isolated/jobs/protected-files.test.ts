@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
 import { captureProtectedFiles } from '../../../src/jobs/protected-files';

@@ -92,8 +92,14 @@ import {
   createMcpSourceConfiguration,
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
+import { createModelCredentialBackend } from './model-credential-backend';
 import { parseModelPreset } from './model-options';
-import { isSupportedModelProvider, modelProtocol, providerModelFetch } from './model-providers';
+import {
+  isSupportedModelProvider,
+  modelProtocol,
+  modelProviders,
+  providerModelFetch,
+} from './model-providers';
 import { resolveModelTransport } from './model-transport';
 import {
   createDefaultPermissionConfiguration,
@@ -472,14 +478,12 @@ export function createDefaultProcessConfiguration(options: {
         accountNamespace: `profile-${options.profile.profileAccessKey}`,
       }),
   });
-  const userModelVault = options.credentialBackend
-    ? vault
-    : createCredentialVault({
-        backend: createOsCredentialBackend({
-          service: 'kite-agent',
-          accountNamespace: 'user-models',
-        }),
-      });
+  const modelCredentialBackend = options.credentialBackend
+    ? undefined
+    : createModelCredentialBackend(userConfiguration.path);
+  const userModelVault = modelCredentialBackend
+    ? createCredentialVault({ backend: modelCredentialBackend })
+    : vault;
   const modelVault: typeof vault = {
     ...userModelVault,
     async resolve(reference) {
@@ -520,10 +524,14 @@ export function createDefaultProcessConfiguration(options: {
         ...assets.observerModules,
       ]),
       ...(options.shell
-        ? [options.shell.supervisorPath, options.shell.bunExecutable, options.shell.shellExecutable]
+        ? [
+            options.shell.supervisorPath,
+            options.shell.runtimeExecutable,
+            options.shell.shellExecutable,
+          ]
         : []),
       ...(options.mcpSources?.stdio
-        ? [options.mcpSources.stdio.guardianPath, options.mcpSources.stdio.bunExecutable]
+        ? [options.mcpSources.stdio.guardianPath, options.mcpSources.stdio.runtimeExecutable]
         : []),
       ...(options.webFetch?.extractor ? [] : [extractor.worker, extractor.checksum]),
       pdf.worker,
@@ -754,6 +762,16 @@ export function createDefaultProcessConfiguration(options: {
         supportsCheckOutputLimit: false,
         supportsCheckReasoning: true,
       });
+    }
+    if (selected.credentialRef === undefined) {
+      const provider = modelProviders.find(
+        (entry) => entry.id === selected.provider && entry.requiresCredential,
+      );
+      if (
+        provider &&
+        URL.parse(selected.baseURL!)?.origin === new URL(provider.defaultBaseURL).origin
+      )
+        throw new ConfigurationError('model_authentication_required');
     }
     const apiKey =
       selected.credentialRef === undefined
@@ -1759,6 +1777,15 @@ export function createDefaultProcessConfiguration(options: {
         profile: options.profile,
         runtime,
         vault: modelVault,
+        ...(modelCredentialBackend
+          ? {
+              authorizeModelCredentials(ref?: string) {
+                if (ref && userConfiguration.resolveCredential(ref) !== undefined)
+                  return Promise.resolve();
+                return modelCredentialBackend.authorize(ref);
+              },
+            }
+          : {}),
         persistence: options.credentialBackend?.kind ?? 'os',
         explicit: () => explicitConfiguration(explicit),
       }),

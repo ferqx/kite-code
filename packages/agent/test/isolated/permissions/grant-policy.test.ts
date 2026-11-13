@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { AuthorizationRequest, Permissions } from '../../../src/extensions';
 import { type GrantCandidate, grantDigest, grantScopeDigest } from '../../../src/permission-grants';
 import { createPermissionPolicy } from '../../../src/permissions';

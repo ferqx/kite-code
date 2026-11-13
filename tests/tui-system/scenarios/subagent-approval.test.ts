@@ -1,4 +1,5 @@
 import { publicAgentResponses } from '../harness/public-agent-responses';
+
 /**
  * PTY System Test — Sub-agent External Write Approval
  *
@@ -14,10 +15,10 @@ import { publicAgentResponses } from '../harness/public-agent-responses';
  * permission intersection; the PTY and actual durable receipts prove the journey.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import {
   createMockModelServer,
@@ -56,12 +57,12 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let externalFile: string;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         interactionMode: 'accept_edits',
@@ -300,13 +301,13 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
 describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let externalFile: string;
   let cancelledResponses: MockResponse[];
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         interactionMode: 'accept_edits',
@@ -477,12 +478,12 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
 
 describe('TUI PTY System — Sub-agent Automatic Review', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let externalFile: string;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         interactionMode: 'auto',
@@ -702,11 +703,11 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
 
 describe('TUI PTY System — Sub-agent Read File Flow', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
 
     // Write a file inside the workspace so the sub-agent can read it
@@ -812,12 +813,12 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
 
 describe('TUI PTY System — Sub-agent Multi-round Natural Summary', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let summaryRetainedReadCapability = false;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     const evidenceFiles = Array.from({ length: EXPLORATION_FIXTURE_READS }, (_, index) => {
       const filename = `bounded-evidence-${index + 1}.txt`;
@@ -921,11 +922,11 @@ describe('TUI PTY System — Sub-agent Multi-round Natural Summary', () => {
 
 describe('TUI PTY System — Concurrent Sub-agent Aggregation', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     server.setResponses(
       publicAgentResponses(workspace, [
@@ -1009,11 +1010,11 @@ describe('TUI PTY System — Concurrent Sub-agent Aggregation', () => {
 
 describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     const childStarts = new Set<number>();
     let searchContinued = false;
@@ -1086,7 +1087,7 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       rows: 40,
       mockServer: server,
       workspace,
-      entryPath: resolve(import.meta.dir, '..', 'fixtures', 'four-subagents-tui.tsx'),
+      entryPath: resolve(import.meta.dirname, '..', 'fixtures', 'four-subagents-tui.tsx'),
     });
   });
 

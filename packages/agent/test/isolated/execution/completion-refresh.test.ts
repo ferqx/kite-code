@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { fixtureGrant, fixtureScopeOption } from '../../../../../tests/fixtures/permission-grant';
 import { AgentError, createRuntime } from '../../../src';
 import { Semaphore } from '../../../src/execution/resources';
@@ -31,7 +32,7 @@ async function fact<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() >= until) throw Error('completion_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(

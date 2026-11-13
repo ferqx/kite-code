@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   object,
   planningBusinessCases,

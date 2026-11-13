@@ -16,7 +16,7 @@ import { type OtelAdapterAssets, verifyOtelAdapterAssets } from './assets';
 import type { OtelExportOutcome, OtelSendAuthorization } from './exporter';
 import type { OtelAdapterStore, OtelGrantStamp } from './store';
 
-export { buildOtelAdapterAssets, type OtelAdapterAssets } from './assets';
+export type { OtelAdapterAssets } from './assets';
 export { type OtelIntegrationConfig, otelIntegrationConfigSchema } from './configuration';
 export type { OtelGrantStamp } from './store';
 export interface OtelSendRequest {
@@ -31,6 +31,8 @@ export interface OtelIntegrationOptions {
   endpoint: string;
   grant: OtelGrantStamp;
   assets: OtelAdapterAssets;
+  /** Trusted in-process composition. Profile data cannot select an executable. */
+  executable?: string;
   sampleRate?: number;
   /** Host checks the current task/grant, exact Origin and target; credentials stay in trusted code. */
   authorizeSend(request: OtelSendRequest, signal: AbortSignal): Promise<OtelSendAuthorization>;
@@ -87,14 +89,8 @@ export async function createOtelIntegration(
   let child: ChildProcessWithoutNullStreams;
   try {
     child = spawn(
-      realpathSync.native(process.execPath),
-      [
-        '--no-env-file',
-        '--no-install',
-        `--config=${join(assets, 'empty-bunfig.toml')}`,
-        `--tsconfig-override=${join(assets, 'empty-tsconfig.json')}`,
-        join(assets, 'runner.js'),
-      ],
+      realpathSync.native(options.executable ?? process.execPath),
+      ['--no-global-search-paths', join(assets, 'runner.js')],
       {
         cwd: root,
         env: {
@@ -175,7 +171,9 @@ export async function createOtelIntegration(
     closed = true;
     abort.abort();
     rejectAll('otel_adapter_closed');
-    resolveExit();
+    // Node emits the process close callback from its final stdio close
+    // listener, before this owner's listener on that same pipe has returned.
+    queueMicrotask(resolveExit);
   });
   const send = (packet: unknown) => {
     const bytes = `${JSON.stringify(packet)}\n`;
@@ -291,6 +289,7 @@ export async function createOtelIntegration(
       retiring = true;
       abort.abort();
       if (!closed) child.kill('SIGTERM');
+      child.stdin.destroy();
       const timer = setTimeout(() => child.kill('SIGKILL'), 1000);
       let deadline: ReturnType<typeof setTimeout> | undefined;
       try {

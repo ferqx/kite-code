@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -9,16 +8,20 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { nodeServiceFixture } from '../../service/test/fixtures/node-service-process';
 import { includeHistoricalResult, lookupContextOutcome, rewindContext, run } from '../src';
 
 test('active include is queued for original Run; actual checkpoint supplies exact source without replay', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-active-context-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const handle = await launchPairedService({
-    entrypoint: join(import.meta.dir, 'fixtures/context-active-child.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, 'fixtures/context-active-child.ts'),
     profile,
     instanceId: 'active-context',
     buildId: 'active-context',
@@ -33,7 +36,7 @@ test('active include is queued for original Run; actual checkpoint supplies exac
     while (Date.now() < deadline) {
       const value = await read();
       if (ready(value)) return value;
-      await Bun.sleep(5);
+      await testSleep(5);
     }
     throw new Error('bounded fixture wait');
   }

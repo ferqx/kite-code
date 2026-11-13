@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import {
   projectTrajectory,
   type TrajectoryEvent,
   TrajectoryProjector,
   trajectoryEventSchema,
 } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import {
   buildTrajectoryTree,
   filterTrajectoryTree,

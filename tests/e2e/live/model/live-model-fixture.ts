@@ -228,70 +228,70 @@ export async function createLiveModelFixture(options: {
       ? (configuration.resolveCredential(selected.credentialRef) ??
         (await vault.resolve(selected.credentialRef)))
       : undefined);
-  const fetchProvider: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  const fetchProvider: typeof fetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    check(
+      options.requestLimit === undefined || wire.length < options.requestLimit,
+      'request_budget_exhausted',
+    );
+    deadline.throwIfAborted();
+    const body = JSON.parse(String(init?.body)) as {
+      tools?: { type: string; name?: string; function?: { name: string } }[];
+    };
+    const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
+    if (options.model) {
+      const actual = body as Record<string, unknown>;
+      check(actual.model === options.model, 'selected_wire_model_changed');
       check(
-        options.requestLimit === undefined || wire.length < options.requestLimit,
-        'request_budget_exhausted',
+        actual.reasoning &&
+          typeof actual.reasoning === 'object' &&
+          (actual.reasoning as Record<string, unknown>).effort === options.reasoningEffort,
+        'selected_wire_reasoning_changed',
       );
-      deadline.throwIfAborted();
-      const body = JSON.parse(String(init?.body)) as {
-        tools?: { type: string; name?: string; function?: { name: string } }[];
-      };
-      const tools = (body.tools ?? []).map((tool) => tool.function?.name ?? tool.name ?? '');
-      if (options.model) {
-        const actual = body as Record<string, unknown>;
-        check(actual.model === options.model, 'selected_wire_model_changed');
-        check(
-          actual.reasoning &&
-            typeof actual.reasoning === 'object' &&
-            (actual.reasoning as Record<string, unknown>).effort === options.reasoningEffort,
-          'selected_wire_reasoning_changed',
-        );
-      }
-      check(
-        tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
-        'wire_name_invalid',
-      );
-      const observation = { status: 0, tools };
-      const physicalIndex = wire.length;
-      options.beforeWireRequest?.({
+    }
+    check(
+      tools.every((name) => /^[a-z][a-z0-9_]{0,63}$/.test(name)),
+      'wire_name_invalid',
+    );
+    const observation = { status: 0, tools };
+    const physicalIndex = wire.length;
+    options.beforeWireRequest?.({
+      physicalIndex,
+      requestId: requestContext.getStore() ?? null,
+      body: String(init?.body),
+    });
+    if (options.captureWireRequests)
+      wireRequests.push({
         physicalIndex,
         requestId: requestContext.getStore() ?? null,
         body: String(init?.body),
+        bytes: Buffer.byteLength(String(init?.body)),
       });
-      if (options.captureWireRequests)
-        wireRequests.push({
-          physicalIndex,
-          requestId: requestContext.getStore() ?? null,
-          body: String(init?.body),
-          bytes: Buffer.byteLength(String(init?.body)),
-        });
-      wire.push(observation);
-      observe('http_dispatch_intent');
-      try {
-        const response = await (localCredentials?.fetch ?? fetch)(input, {
-          ...init,
-          redirect: 'error',
-          signal: AbortSignal.any([
-            deadline,
-            ...(requestTimeoutMs === null ? [] : [AbortSignal.timeout(requestTimeoutMs)]),
-            ...(init?.signal ? [init.signal] : []),
-          ]),
-        });
-        observation.status = response.status;
-        observe('http_headers');
-        return options.transportResponse
-          ? await options.transportResponse(response, physicalIndex)
-          : response;
-      } catch (error) {
-        observe('http_transport_failed');
-        if (options.preserveSdkAttemptErrors) throw error;
-        throw Error('live_model_transport_failed');
-      }
-    },
-    { preconnect: fetch.preconnect },
-  );
+    wire.push(observation);
+    observe('http_dispatch_intent');
+    try {
+      const response = await (localCredentials?.fetch ?? fetch)(input, {
+        ...init,
+        redirect: 'error',
+        signal: AbortSignal.any([
+          deadline,
+          ...(requestTimeoutMs === null ? [] : [AbortSignal.timeout(requestTimeoutMs)]),
+          ...(init?.signal ? [init.signal] : []),
+        ]),
+      });
+      observation.status = response.status;
+      observe('http_headers');
+      return options.transportResponse
+        ? await options.transportResponse(response, physicalIndex)
+        : response;
+    } catch (error) {
+      observe('http_transport_failed');
+      if (options.preserveSdkAttemptErrors) throw error;
+      throw Error('live_model_transport_failed');
+    }
+  };
   const sdk = createSdkModelAdapter({
     models: new Map([
       [

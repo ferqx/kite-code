@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   retainWindowsNativeRuntimeFiles,
@@ -109,7 +109,10 @@ export function retainWindowsPairedArtifact(
     files.push(terminalFiles);
     state.verify();
     const access = Object.freeze({
-      arguments: windowsTerminalRuntimeArguments(terminalRoot),
+      arguments: windowsTerminalRuntimeArguments(
+        terminalRoot,
+        basename(state.actual.executable).toLowerCase() === 'node.exe' ? 'node' : 'bun',
+      ),
       release: owner.release,
     });
     admissions.set(access, state);

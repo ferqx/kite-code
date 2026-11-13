@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 
 test('Windows selected endpoint keeps the complete private discovery contract and original cleanup authority', () => {
-  const modulePath = (name: string) => resolve(import.meta.dir, '../../src/daemon', name);
+  const modulePath = (name: string) => resolve(import.meta.dirname, '../../src/daemon', name);
   const code = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import {existsSync,mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -78,7 +79,11 @@ try {
  console.log('complete-windows-discovery-contract');
 }finally {rmSync(workspace,{recursive:true,force:true});}
 `;
-  const result = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 5000 });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    { encoding: 'utf8', timeout: 5000 },
+  );
   if (result.status !== 0) process.stderr.write(result.stderr || String(result.error));
   expect(result.error).toBeUndefined();
   expect(result.status).toBe(0);
@@ -87,10 +92,10 @@ try {
 });
 
 test('Windows daemon keeps an unconfirmed initial artifact admission before endpoint or Store access', () => {
-  const source = (name: string) => resolve(import.meta.dir, '../../src', name);
+  const source = (name: string) => resolve(import.meta.dirname, '../../src', name);
   const code = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 Object.defineProperty(process,'platform',{value:'win32'});
 const original=new AggregateError([Error('original_native_close_failed')],'paired_artifact_close_unknown');
 const retained=Error('retained_original_owner');let admissions=0,retentions=0;
@@ -122,11 +127,15 @@ console.log('initial-artifact-owner-retained');
       },
     },
   };
-  const result = spawnSync(process.execPath, ['-e', code], {
-    input: `${JSON.stringify(input)}\n`,
-    encoding: 'utf8',
-    timeout: 5000,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    {
+      input: `${JSON.stringify(input)}\n`,
+      encoding: 'utf8',
+      timeout: 5000,
+    },
+  );
   if (result.status !== 0) process.stderr.write(result.stderr || String(result.error));
   expect(result.error).toBeUndefined();
   expect(result.status).toBe(0);

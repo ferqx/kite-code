@@ -5,10 +5,12 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium, type Locator } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { promptText } from './prompt-editor-text.fixture';
 import type {} from './prompt-send-browser.fixture';
 
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'prompt-send-browser-'));
@@ -37,10 +39,10 @@ if (!existing)
       target: 'esnext',
     },
   });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
     if (pathname === '/')
@@ -50,7 +52,7 @@ const server = Bun.serve({
       );
     const file = path.resolve(output, `.${pathname}`);
     return file.startsWith(output + path.sep)
-      ? new Response(Bun.file(file))
+      ? new Response(await openFixtureFile(file))
       : new Response(null, { status: 404 });
   },
 });
@@ -328,7 +330,7 @@ async function verifySendingInput(theme: 'light' | 'dark', width: number) {
         state.observing = false;
         return state.frames;
       });
-      await Bun.write(
+      await writeFixtureFile(
         path.join(artifact, `${theme}-${width}-${first ? 'first' : 'existing'}-input-frames.json`),
         JSON.stringify(frames, null, 2),
       );
@@ -716,7 +718,7 @@ try {
       const inputSending = await verifySendingInput(theme, width);
       cases.push({ theme, width, initial, capture, cold, edges, inputSending });
     }
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'report.json'),
     JSON.stringify({ browser: browser.version(), cases }, null, 2),
   );

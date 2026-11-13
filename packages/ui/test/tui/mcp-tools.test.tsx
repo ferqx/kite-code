@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { McpToolMetadata, McpToolsPage, McpToolsSnapshot, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, TuiSession } from '../../src/tui';
 import { mcpTextRows, mcpTextWindow } from '../../src/tui/mcp-tools';
 

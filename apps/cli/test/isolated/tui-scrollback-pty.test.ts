@@ -1,17 +1,26 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { inspectProcess } from '@kite-ai/service/daemon';
-import { Terminal } from '@xterm/headless';
+import xterm from '@xterm/headless';
+import { expect, test } from '#kite-test';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+  spawnSync as testSpawnSync,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline } from '../fixtures/tui-pty';
+
+const { Terminal } = xterm;
 
 type Event =
   | { kind: 'data'; hex: string }
   | { kind: 'resize'; cols: number; rows: number }
   | { kind: 'mark'; name: string; ack: { storedMessages: number; mutationCalls: number } | null };
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 
 test('80x24 current material versions preserve native history through status/input, active bodies and long pending questions', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-tui-scrollback-'));
@@ -23,7 +32,7 @@ test('80x24 current material versions preserve native history through status/inp
     scrollback: 20000,
     allowProposedApi: true,
   });
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let driverExited = false;
   let fixtureIdentity: { pid: number; start: string } | undefined;
   let failure: unknown;
@@ -77,10 +86,10 @@ test('80x24 current material versions preserve native history through status/inp
     cursorCells: { column: number; text: string }[];
   }[] = [];
   try {
-    child = Bun.spawn(
+    child = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         join(repository, 'apps/cli/test/fixtures/tui-scrollback-driver.ts'),
         root,
         process.execPath,
@@ -310,7 +319,7 @@ test('80x24 current material versions preserve native history through status/inp
         const state = inspectProcess(fixtureIdentity.pid, fixtureIdentity.start);
         if (state === 'alive') {
           if (process.platform === 'win32') {
-            const terminated = Bun.spawnSync(
+            const terminated = testSpawnSync(
               ['taskkill.exe', '/pid', String(fixtureIdentity.pid), '/f'],
               { stdout: 'pipe', stderr: 'pipe' },
             );
@@ -323,7 +332,7 @@ test('80x24 current material versions preserve native history through status/inp
               cleanupErrors.push(Error('scrollback_owned_fixture_exit_unknown'));
               break;
             }
-            await Bun.sleep(20);
+            await testSleep(20);
           }
           cleanupErrors.push(Error('scrollback_fixture_required_parent_force_cleanup'));
         } else if (state !== 'dead')
@@ -350,7 +359,7 @@ test('80x24 current material versions preserve native history through status/inp
           failure: failure ? String(failure) : null,
           cleanupErrors: cleanupErrors.map(String),
           retainedRoot: success ? null : root,
-          scope: `public source TUI + finite UI port + actual ${process.platform === 'win32' ? 'Bun ConPTY' : 'Bun POSIX PTY'} 80x24 bytes + installed headless VT; no Service/Provider/installed artifact qualification`,
+          scope: `public source TUI + finite UI port + actual ${process.platform === 'win32' ? 'ConPTY' : 'POSIX PTY'} 80x24 bytes + installed headless VT; no Service/Provider/installed artifact qualification`,
         },
         null,
         2,

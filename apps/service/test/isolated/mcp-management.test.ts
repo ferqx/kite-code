@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
@@ -28,6 +28,9 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createConfigurationManagement } from '../../src/configuration-management';
@@ -44,7 +47,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw Error('mcp_management_fixture_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'registered' | 'empty') {
@@ -85,7 +88,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
   writeFileSync(cataloguePath, JSON.stringify([oldDescriptor]));
   const wire: { method: string; params?: unknown }[] = [];
   let hold: { entered: () => void; wait: Promise<void> } | undefined;
-  const network = Bun.serve({
+  const network = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -112,7 +115,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
   });
   const providerBodies: Record<string, unknown>[] = [];
   let modelRefresh = false;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -191,7 +194,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
           type: 'stdio' as const,
           command: process.execPath,
           args: [
-            join(import.meta.dir, '../../../../tests/fixtures/mcp-leaf/catalogue-refresh.ts'),
+            join(import.meta.dirname, '../../../../tests/fixtures/mcp-leaf/catalogue-refresh.ts'),
             cataloguePath,
             ledger,
           ],
@@ -207,13 +210,13 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
   };
   const built =
     transport === 'stdio'
-      ? await Bun.build({
+      ? await buildBundle({
           entrypoints: [
-            join(import.meta.dir, '../../../../packages/agent/src/mcp/stdio-guardian.ts'),
+            join(import.meta.dirname, '../../../../packages/agent/src/mcp/stdio-guardian.ts'),
           ],
           outdir: root,
           naming: 'guardian.js',
-          target: 'bun',
+          target: 'node',
         })
       : undefined;
   const port =
@@ -260,7 +263,7 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
       : createMcpStdioTransportPort({
           servers: [{ id: 'local', configuration }],
           guardianPath: built!.outputs[0]!.path,
-          bunExecutable: process.execPath,
+          runtimeExecutable: process.execPath,
           allowedEnvNames: [],
           admit,
         });
@@ -898,7 +901,7 @@ test('refresh deny/Ask cancellation before wire is known; cancellation after act
       }),
     ).toBeNull();
     release();
-    await Bun.sleep(20);
+    await sleepTimer(20);
     expect(await f.binding()).toEqual(original);
   } finally {
     release?.();

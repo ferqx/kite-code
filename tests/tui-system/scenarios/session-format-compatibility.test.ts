@@ -1,8 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -341,14 +341,14 @@ describe('TUI PTY System — State 26 legacy Service source isolation', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let checkpointPath: string;
   let sourcePath: string;
   let sourceFingerprint: readonly { readonly hex: string; readonly mtimeMs: number }[];
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
     // The source is deliberately bound to this Workspace. The default Coordinator/Worker path
@@ -415,13 +415,13 @@ describe('TUI PTY System — malformed legacy Service source isolation', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let sourcePath: string;
   let sourceHex: string;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     sourcePath = seedMalformedState26Session(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),

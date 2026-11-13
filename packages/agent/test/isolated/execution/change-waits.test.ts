@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { ChangeWaits } from '../../../src/execution/change-waits';
 import type { Store } from '../../../src/storage/port';
 import { AgentError, type ChangeEvent } from '../../../src/storage/types';

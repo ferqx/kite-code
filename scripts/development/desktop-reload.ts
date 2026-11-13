@@ -1,12 +1,17 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { createServer, type Socket } from 'node:net';
 import { homedir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { DevelopmentServiceReload } from '../../apps/desktop/electron/development';
+import { runtimeBuildOptions } from '../../packages/agent/scripts/runtime-build-options';
+import { preparedDevelopmentNode } from '../release/node-inputs';
+import { build as bundle } from '../tooling/bun-build';
+import { spawn as spawnProcess } from '../tooling/process';
 
 export {
   startDesktopRenderer,
@@ -169,11 +174,16 @@ function developmentSourceSha256(root: string): string {
 }
 
 /** Load the actual external dependency graph in a fresh process, without executing import.meta.main. */
-async function verifyDevelopmentService(entrypoint: string, root: string): Promise<void> {
-  const child = Bun.spawn(
+async function verifyDevelopmentService(
+  entrypoint: string,
+  root: string,
+  executable: string,
+): Promise<void> {
+  const child = spawnProcess(
     [
-      process.execPath,
-      '--no-install',
+      executable,
+      '--no-global-search-paths',
+      '--input-type=module',
       '--eval',
       `await import(${JSON.stringify(pathToFileURL(entrypoint).href)})`,
     ],
@@ -184,7 +194,6 @@ async function verifyDevelopmentService(entrypoint: string, root: string): Promi
         HOME: homedir(),
         LANG: 'C.UTF-8',
         ...(process.platform === 'win32' ? { USERPROFILE: homedir() } : {}),
-        BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
       },
       stdin: 'ignore',
       stdout: 'ignore',
@@ -222,6 +231,7 @@ async function verifyDevelopmentService(entrypoint: string, root: string): Promi
 export async function buildDevelopmentService(
   root: string,
   outdir: string,
+  executable = preparedDevelopmentNode(root),
 ): Promise<DevelopmentServiceReload & { readonly sourceSha256: string }> {
   const sourceSha256 = developmentSourceSha256(root);
   const id = randomUUID().replaceAll('-', ''),
@@ -231,40 +241,48 @@ export async function buildDevelopmentService(
   privateDirectory(services);
   privateDirectory(directory);
   const browserConfiguration = join(root, 'apps/service/src/browser-configuration.ts');
+  const agentBuild = join(root, 'packages/agent/dist');
+  const loader = pathToFileURL(resolve(import.meta.dirname, 'node-loader.mjs')).href;
+  const traceSource = join(root, 'apps/service/dist/trace-extensions');
+  const otelSource = join(root, 'apps/service/dist/trace-integrations');
+  const wrapper = join(directory, 'main.js');
   if (existsSync(browserConfiguration)) {
     // Both locators are compiled into this exact Service entry. Its guardian and
     // executor worker must share the same current sources on first load and reload.
     try {
-      const assets = await Bun.build({
+      const assets = await bundle({
         entrypoints: [
           join(root, 'packages/agent/src/mcp/stdio-guardian.ts'),
           join(root, 'packages/agent/src/mcp/windows-stdio-guardian.ts'),
         ],
-        target: 'bun',
+        ...runtimeBuildOptions(directory, agentBuild),
         outdir: directory,
         naming: '[name].js',
       });
       if (!assets.success) throw new AggregateError(assets.logs);
       // Same build contract as tools/browser/executor/build-assets.ts, scoped to
       // this immutable Service version rather than the checkout's earlier dist.
-      const executor = await Bun.build({
+      const executor = await bundle({
         entrypoints: [join(root, 'packages/agent/src/tools/browser/executor/worker.ts')],
-        target: 'bun',
+        ...runtimeBuildOptions(join(directory, 'tools/browser/executor'), agentBuild),
         outdir: join(directory, 'tools/browser/executor'),
-        naming: 'worker.js',
+        naming: 'worker.mjs',
       });
       if (!executor.success) throw new AggregateError(executor.logs);
     } catch (error) {
       throw new AggregateError([error], 'development_browser_assets_build_failed');
     }
   }
-  let result: Awaited<ReturnType<typeof Bun.build>>;
+  let result: Awaited<ReturnType<typeof bundle>>;
   try {
-    result = await Bun.build({
-      entrypoints: [join(root, 'apps/service/src/main.ts')],
-      target: 'bun',
+    result = await bundle({
+      entrypoints: [
+        join(root, 'apps/service/src/main.ts'),
+        join(root, 'apps/service/src/macos-model-keychain.ts'),
+        join(root, 'apps/service/src/linux-model-keyring.ts'),
+      ],
+      target: 'node',
       packages: 'bundle',
-      external: ['@kite-ai/*'],
       define: { __KITE_SERVICE_STARTUP_TIMING__: 'true' },
       plugins: [
         {
@@ -289,25 +307,55 @@ export async function buildDevelopmentService(
               path: pathToFileURL(join(root, 'packages/agent/dist/jobs/shell.js')).href,
               external: true,
             }));
+            build.onResolve({ filter: /^@kite-ai\// }, (args) => {
+              // Resolve in the original importing workspace so every new Service
+              // sees the current code, including export changes in its dependencies.
+              const source = createRequire(args.importer).resolve(args.path);
+              return {
+                path: pathToFileURL(source).href,
+                external: true,
+              };
+            });
           },
         },
       ],
       outdir: directory,
-      naming: 'main.js',
+      naming: '[name].js',
     });
   } catch (error) {
     throw new AggregateError([error], 'development_service_build_failed');
   }
   if (!result.success) throw new AggregateError(result.logs, 'development_service_build_failed');
-  await verifyDevelopmentService(join(directory, 'main.js'), root);
+  renameSync(wrapper, join(directory, 'implementation.js'));
+  const implementationHash = createHash('sha256')
+    .update(readFileSync(join(directory, 'implementation.js')))
+    .digest('hex');
+  // This app-private wrapper loads only the fixed checkout loader. No argv or
+  // environment-provided loaders reach the paired child.
+  writeFileSync(
+    wrapper,
+    `import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import ${JSON.stringify(loader)};
+const implementation = new URL('./implementation.js', import.meta.url);
+if (createHash('sha256').update(readFileSync(implementation)).digest('hex') !== ${JSON.stringify(implementationHash)}) throw Error('development_service_implementation_changed');
+const service = await import(implementation.href);
+if (Reflect.get(import.meta, 'main') === true && typeof service.runServiceProcess === 'function') await service.runServiceProcess();
+`,
+  );
+  for (const [source, name] of [
+    [traceSource, 'trace-extensions'],
+    [otelSource, 'trace-integrations'],
+  ] as const)
+    if (existsSync(source))
+      cpSync(source, join(directory, name), { recursive: true, errorOnExist: true });
+  await verifyDevelopmentService(wrapper, root, executable);
   if (developmentSourceSha256(root) !== sourceSha256)
     throw Error('development_service_source_changed');
   return {
     id,
     sourceSha256,
-    sha256: createHash('sha256')
-      .update(readFileSync(join(directory, 'main.js')))
-      .digest('hex'),
+    sha256: createHash('sha256').update(readFileSync(wrapper)).digest('hex'),
   };
 }
 

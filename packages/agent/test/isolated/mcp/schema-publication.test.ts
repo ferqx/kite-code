@@ -1,7 +1,8 @@
-import { afterAll, expect, mock, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { afterAll, expect, mock, test } from '#kite-test';
 import type { JobContext, Json, ToolContext } from '../../../src/extensions';
 import * as workerModule from '../../../src/platform/process/owned-worker';
 
@@ -76,7 +77,7 @@ async function until(read: () => boolean) {
   const deadline = Date.now() + 3000;
   while (!read()) {
     if (Date.now() >= deadline) throw Error('schema_publication_fixture_timeout');
-    await Bun.sleep(1);
+    await sleepTimer(1);
   }
 }
 async function fixture() {

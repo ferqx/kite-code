@@ -1,17 +1,19 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -51,7 +53,7 @@ async function fixture(
   const requests: Record<string, unknown>[] = [];
   let completionWaiting = false;
   let releaseCompletion: (() => void) | undefined;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -242,7 +244,7 @@ async function fixture(
       const deadline = Date.now() + 5000;
       while (!completionWaiting) {
         if (Date.now() > deadline) throw Error('ask_user_completion_model_deadline');
-        await Bun.sleep(10);
+        await sleepTimer(10);
       }
     },
     resumeCompletionModel() {
@@ -346,7 +348,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
         expect(page.interactions.some((item) => item.kind === 'approval')).toBe(false);
         card = page.interactions.find((item) => item.kind === 'question');
         if (Date.now() > deadline) throw Error(JSON.stringify(await f.client.getView('s')));
-        if (!card) await Bun.sleep(10);
+        if (!card) await sleepTimer(10);
       }
       const tools = f.requests[0]!.tools as {
         function: { name: string; description: string; parameters: unknown };
@@ -528,7 +530,7 @@ for (const explicitChild of [false, true])
         f.requests.filter((body) => body.model === 'child').length < 2 &&
         Date.now() < deadline
       )
-        await Bun.sleep(10);
+        await sleepTimer(10);
       const child = f.requests.filter((body) => body.model === 'child');
       expect(child).toHaveLength(2);
       const tools = child[0]!.tools as { function: { name: string } }[] | undefined;
@@ -542,7 +544,7 @@ for (const explicitChild of [false, true])
         (await f.client.getView(childSessionId!)).runs.some((run) => run.isActive) &&
         Date.now() < deadline
       )
-        await Bun.sleep(10);
+        await sleepTimer(10);
       const view = await f.client.getView(childSessionId!);
       await assertUnavailableRecovery(f, childSessionId!, child);
       const configuration = view.runs[0]!.configuration as { tools: { id: string }[] };

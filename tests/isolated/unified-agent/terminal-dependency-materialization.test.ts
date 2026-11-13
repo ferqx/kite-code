@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   lstatSync,
@@ -15,9 +14,11 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { agentBrowserExecutableAsset } from '../../../packages/agent/src/tools/browser/assets';
 import { desktopBundledDependencies } from '../../../packages/ui/scripts/bundled-dependencies';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
+import { type Subprocess, spawn } from '../../../scripts/tooling/process';
 
 function pkg(path: string, manifest: Record<string, unknown>, code?: string) {
   mkdirSync(path, { recursive: true });
@@ -52,7 +53,7 @@ function physicalTree(path: string) {
 
 test('physical dependency ancestry preserves exact versions, peers, aliases, cycles and package-local bins after independent relocation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-terminal-materialized-'));
-  const children: Bun.Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
+  const children: Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
   let failed = false;
   let businessError: unknown;
   const cleanupErrors: unknown[] = [];
@@ -185,7 +186,7 @@ test('physical dependency ancestry preserves exact versions, peers, aliases, cyc
     expect(existsSync(join(built, 'node_modules/left/node_modules/right'))).toBe(false);
     physicalTree(bundle);
     const run = async (cwd: string, arguments_: string[]) => {
-      const child = Bun.spawn([process.execPath, ...arguments_], {
+      const child = spawn([process.execPath, ...arguments_], {
         cwd,
         env: {
           ...process.env,
@@ -296,7 +297,7 @@ test(
   () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-actual-materialized-')));
     try {
-      const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
+      const repositoryRoot = realpathSync(join(import.meta.dirname, '../../..'));
       const destination = join(root, 'node_modules');
       const workspacePackages = [
         'packages/trajectory',

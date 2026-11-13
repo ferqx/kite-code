@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { decodeNativeRequest } from '../electron/native-ipc';
 
 test('image IPC accepts bounded chunks and image-only staged inputs, rejects paths and renderer references', () => {

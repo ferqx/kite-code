@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentRuntime } from '@kite-ai/agent';
 import type {
@@ -7,6 +6,7 @@ import type {
   Json,
   ToolContext,
 } from '@kite-ai/agent/extensions';
+import { expect, test } from '#kite-test';
 import { createDesktopBrowserAuthorization } from '../../src/desktop-browser-authorization';
 
 const intent = { key: 'original', url: 'https://example.test/destination' };

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { type ImagePreviewWorker, NativeImagePreviews } from '../src/native-image-previews';
 
 const source = new Blob(['original'], { type: 'image/png' });

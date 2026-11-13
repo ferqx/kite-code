@@ -1,10 +1,16 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
 const modulePath = (path: string) => fileURLToPath(new URL(`../../../${path}`, import.meta.url));
 function subprocess(code: string) {
-  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  const [node, ...args] = testNodeCommand('--disable-warning=ExperimentalWarning', [
+    '--input-type=module',
+    '-e',
+    code,
+  ]);
+  const child = spawnSync(node!, args, { encoding: 'utf8', timeout: 4000 });
   if (child.error || child.status !== 0)
     process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
   expect(child.error).toBeUndefined();
@@ -23,14 +29,16 @@ test('Windows DELETE acquisition unknown retains every original EX while ordinar
 
 function installerScript(scenario: 'selection' | 'removal') {
   return `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import * as fileSystem from 'node:fs';
+import { posix, win32 } from 'node:path';
+const { default: _fsDefault, ...fs } = fileSystem;
 Object.defineProperty(process, 'platform', { value: 'win32' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
-mock.module('node:path', () => ({ ...path, ...path.posix }));
-const { WindowsInstallationRemovalAcquireUnknownError } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))});
+mock.module('node:path', () => ({ ...posix, posix, win32 }));
+const removal = await import(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))});
+const { WindowsInstallationRemovalAcquireUnknownError } = removal;
 const a = 'a'.repeat(64), b = 'b'.repeat(64);
 const regions = new Set(), events = [];
 let mode = ${JSON.stringify(scenario)};
@@ -49,6 +57,8 @@ mock.module('node:fs', () => ({ ...fs,
   },
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))}, () => ({
+  acquireInheritedSharedFileLock() { throw Error('unexpected-inherited'); },
+  attachLockResource() { throw Error('unexpected-lock-resource'); },
   acquireFileLock(path, kind) {
     assert.equal(kind, 'exclusive');
     assert.equal(regions.has(path), false);
@@ -58,6 +68,7 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))
   },
 }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-coordination.ts'))}, () => ({
+  deriveNativeWindowsUseKeys() { throw Error('unexpected-native-use-keys'); },
   windowsInstallationCoordination(prefix) {
     return { prefix, root: prefix + '-coord', selectionLockPath: prefix + '-selection',
       candidateLockPath: id => prefix + '-use-' + id, verify() {},
@@ -77,12 +88,13 @@ mock.module(${JSON.stringify(modulePath('apps/cli/host/windows-terminal-installa
   readWindowsTerminalInstallation(root) { return { root, bootstrap: { candidateId: a, files: [] } }; },
   retainWindowsTerminalFrontdoor() { return { verify() { throw primary; }, release() { events.push('frontdoor-close'); } }; },
   parseWindowsTerminalInstallationMarker: value => value,
+  windowsNodeTerminalFrontdoorNames: [],
   windowsTerminalFrontdoorNames: [],
 }));
 mock.module(${JSON.stringify(modulePath('apps/cli/host/terminal-artifact.ts'))}, () => ({ verifyTerminalBundle(root) { return { digest: root.endsWith(b) ? b : a }; } }));
 mock.module(${JSON.stringify(modulePath('apps/service/src/runtime-assets.ts'))}, () => ({ retainWindowsTerminalRuntimeFiles() {}, verifyTerminalRuntimeBundle() {} }));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))}, () => ({
-  WindowsInstallationRemovalAcquireUnknownError,
+  ...removal,
   retainWindowsInstallationRemoval() { throw mode === 'unknown' ? unknown : primary; },
 }));
 const { rollbackWindowsTerminalBundle, uninstallWindowsTerminalBundle } = await import(${JSON.stringify(modulePath('scripts/release/windows-terminal-install.ts'))});
@@ -114,12 +126,13 @@ console.log('owned-close-confirmed');
 
 test('Windows failed artifact admission closes resources before SH and preserves unknown original owners', () => {
   subprocess(`
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import * as fileSystem from 'node:fs';
+import { posix, win32 } from 'node:path';
+const { default: _fsDefault, ...fs } = fileSystem;
 Object.defineProperty(process, 'platform', { value: 'win32' });
-mock.module('node:path', () => ({ ...path, ...path.posix }));
+mock.module('node:path', () => ({ ...posix, posix, win32 }));
 const id = 'a'.repeat(64), regions = new Set(), events = [];
 let failScope = true;
 const original = Error('original-attachment-rejected'), cleanup = Error('original-scope-close-unknown');

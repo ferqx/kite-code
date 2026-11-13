@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -11,6 +9,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { Database as Inspector } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -22,6 +22,7 @@ import {
   restoreProfileBackup,
 } from '../../../src/maintenance';
 import { selectProfile } from '../../../src/platform/profile';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import { configBytes, nodeAssets, seedAssets, seedRecoveryAsset } from './assets-fixture';
 
@@ -152,7 +153,7 @@ test('unknown or damaged private UI format and SQL journal fail closed', async (
       await seedAssets(f.root, f.profile, f.storeId);
       const parent = join(f.selected.profilePath, 'desktop-private');
       const path = join(parent, 'data.sqlite');
-      const db = new Database(path);
+      const db = new Inspector(path);
       if (kind === 'schema') db.exec('CREATE TABLE unexpected(id TEXT);');
       if (kind === 'application') db.exec('PRAGMA application_id=123;');
       if (kind === 'version') db.exec('PRAGMA user_version=7;');
@@ -221,7 +222,7 @@ test('actual Node private UI snapshot and cold restored reader preserve 133 draf
     await reject(inspectProfileBackup(backup), 'backup_unexpected_asset');
     rmSync(extra);
     const path = join(backup.directory, 'desktop-private/data.sqlite');
-    const db = new Database(path);
+    const db = new Inspector(path);
     db.query('UPDATE drafts SET content=?').run(JSON.stringify('tampered'));
     db.close(true);
     await reject(inspectProfileBackup(backup), 'backup_asset_mismatch');
@@ -265,7 +266,7 @@ test('cleanly closed actual private UI and Core backup/inspect preserve complete
     });
     expect((await inspectProfileBackup(backup)).manifest).toEqual(backup.manifest);
     unchanged();
-    const candidate = new Database(join(backup.directory, 'desktop-private/data.sqlite'), {
+    const candidate = new Inspector(join(backup.directory, 'desktop-private/data.sqlite'), {
       readonly: true,
     });
     try {
@@ -318,11 +319,11 @@ test('cleanly closed actual private UI and Core backup/inspect preserve complete
 
 test('private UI snapshot includes WAL facts without changing original DB or WAL bytes', async () => {
   const f = await fixture();
-  let writer: Database | undefined;
+  let writer: Inspector | undefined;
   try {
     await seedAssets(f.root, f.profile, f.storeId);
     const path = join(f.selected.profilePath, 'desktop-private/data.sqlite');
-    writer = new Database(path);
+    writer = new Inspector(path);
     writer.exec('PRAGMA journal_mode=WAL;PRAGMA wal_autocheckpoint=0;');
     writer
       .query('UPDATE drafts SET content=? WHERE root_session_id=?')
@@ -333,7 +334,7 @@ test('private UI snapshot includes WAL facts without changing original DB or WAL
     expect(readFileSync(path)).toEqual(before);
     expect(readFileSync(`${path}-wal`)).toEqual(wal);
     expect((await inspectProfileBackup(backup)).manifest).toEqual(backup.manifest);
-    const candidate = new Database(join(backup.directory, 'desktop-private/data.sqlite'), {
+    const candidate = new Inspector(join(backup.directory, 'desktop-private/data.sqlite'), {
       readonly: true,
     });
     try {
@@ -650,7 +651,7 @@ test('Desktop current recovery fields and declared actual format are closed; leg
     await reject(inspectProfileBackup(backup), 'backup_asset_mismatch');
     phase('declared_format_rejected');
     const path = join(f.selected.profilePath, 'desktop-private/data.sqlite');
-    let db = new Database(path);
+    let db = new Inspector(path);
     const row = db.query<{ state: string }, []>('SELECT state FROM recovery_intents').get()!;
     db.query('UPDATE recovery_intents SET state=?').run(
       JSON.stringify({ ...JSON.parse(row.state), runtime: 'forged' }),
@@ -660,7 +661,7 @@ test('Desktop current recovery fields and declared actual format are closed; leg
     await reject(createProfileBackup(f), 'backup_ui_invalid');
     phase('forged_recovery_rejected');
     expect(readFileSync(path)).toEqual(bytes);
-    db = new Database(path);
+    db = new Inspector(path);
     db.exec(
       'DROP TABLE answer_intents; DROP TABLE recovery_intents; DROP TABLE caller_intents; DROP TABLE file_recovery_intents; PRAGMA user_version=1',
     );

@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -23,7 +24,7 @@ async function pending(runtime: ReturnType<typeof createRuntime>, storeId: strin
       state: 'pending',
     });
     if (page.interactions[0]) return page.interactions[0];
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
   throw new Error('approval not created');
 }

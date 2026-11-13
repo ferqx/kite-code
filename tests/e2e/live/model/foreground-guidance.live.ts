@@ -15,6 +15,8 @@ import type { NativeSelection } from '../../../../apps/desktop/src/native-bridge
 import { nativeTextIntent } from '../../../../apps/desktop/src/native-input';
 import { memoryPrivateData } from '../../../../apps/desktop/test/private-data.fixture';
 import { agentContractSource } from '../../../../packages/agent/src/model-context';
+import { openFixtureFile } from '../../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { temporaryDirectory } from '../../../fixtures/test-filesystem';
 import { createLiveModelFixture } from './live-model-fixture';
 
@@ -161,7 +163,7 @@ async function selection(): Promise<NativeSelection> {
   } as unknown as NativeSelection;
 }
 const website = join(output, 'site');
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   idleTimeout: 60,
@@ -273,7 +275,7 @@ const server = Bun.serve({
       const path = join(website, url.pathname === '/' ? 'index.html' : url.pathname.slice(1));
       if (!resolve(path).startsWith(resolve(website)))
         return new Response('bad path', { status: 400 });
-      return new Response(Bun.file(path), {
+      return new Response(await openFixtureFile(path), {
         headers: {
           'content-type':
             (
@@ -294,7 +296,7 @@ writeFileSync(join(output, 'server.json'), JSON.stringify({ url: server.url.href
 console.log(JSON.stringify({ url: server.url.href, output }));
 process.on('SIGINT', async () => {
   release();
-  server.stop();
+  await server.stop();
   await queue.close();
   client.disposeNetwork();
   await service.close();

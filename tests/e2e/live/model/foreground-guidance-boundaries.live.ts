@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -39,7 +40,7 @@ function gate() {
 async function until(check: () => boolean, signal: AbortSignal) {
   while (!check()) {
     signal.throwIfAborted();
-    await Bun.sleep(20);
+    await fixtureDelay(20);
   }
 }
 const results: unknown[] = [];

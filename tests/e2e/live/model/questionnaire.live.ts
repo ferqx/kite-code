@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,6 +14,8 @@ import type { ModelAdapter, ModelRequest, ModelUsage } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createUserConfiguration, parseModelPreset } from '@kite-ai/service/configuration';
 import { createWorkspaceAssembly } from '../../../../apps/service/src/assembly';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 
 // Explicit, isolated fixture only. No ordinary app switch can enable this driver.
 if (process.env.KITE_RUN_LIVE_QUESTIONNAIRE !== '1')
@@ -29,7 +32,7 @@ const deadline = AbortSignal.timeout(180_000);
 const report: Record<string, unknown> = {
   date: new Date().toISOString(),
   platform: process.platform,
-  bunVersion: Bun.version,
+  nodeVersion: process.versions.node,
   scenarios: [],
   requestLimit: 10,
   timeoutMs: 180_000,
@@ -63,24 +66,24 @@ async function main() {
         (await vault.resolve(selected.credentialRef)))
       : undefined;
   const preset = parseModelPreset(selected.options);
-  const fetchProvider: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      check(statuses.length < 10, 'request_budget');
-      statuses.push(0);
-      const response = await fetch(input, {
-        ...init,
-        redirect: 'error',
-        signal: AbortSignal.any([
-          deadline,
-          AbortSignal.timeout(60_000),
-          ...(init?.signal ? [init.signal] : []),
-        ]),
-      });
-      statuses[statuses.length - 1] = response.status;
-      return response;
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const fetchProvider: typeof fetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    check(statuses.length < 10, 'request_budget');
+    statuses.push(0);
+    const response = await fetch(input, {
+      ...init,
+      redirect: 'error',
+      signal: AbortSignal.any([
+        deadline,
+        AbortSignal.timeout(60_000),
+        ...(init?.signal ? [init.signal] : []),
+      ]),
+    });
+    statuses[statuses.length - 1] = response.status;
+    return response;
+  };
   const sdk = createSdkModelAdapter({
     models: new Map([
       [
@@ -157,8 +160,8 @@ async function main() {
     .map(([, source]) => String(source))
     .join('\n');
   check(css.length > 0, 'css_empty');
-  const bundle = await Bun.build({
-    entrypoints: [join(import.meta.dir, 'questionnaire-browser.fixture.tsx')],
+  const bundle = await buildFixture({
+    entrypoints: [join(import.meta.dirname, 'questionnaire-browser.fixture.tsx')],
     target: 'browser',
     format: 'iife',
     minify: true,
@@ -203,7 +206,7 @@ async function main() {
     | Awaited<ReturnType<typeof runtime.listInteractions>>['interactions'][number]
     | undefined;
   let posts = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -275,7 +278,7 @@ async function main() {
             );
             if (found) current = found;
             deadline.throwIfAborted();
-            await Bun.sleep(25);
+            await fixtureDelay(25);
           }
           check(current.kind === 'question', 'question_kind');
           await page.goto(`http://127.0.0.1:${server.port}`);

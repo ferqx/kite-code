@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -22,6 +22,8 @@ import type {
   TuiMcpConnectionPort,
   TuiMcpSnapshot,
 } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createPermissionManagement } from '../../../service/src/permission-management';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
@@ -34,7 +36,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw Error('actual_connection_host_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 const original = (facts: TuiMcpSnapshot, commandId: string): TuiMcpConnectionIntent => ({
@@ -67,7 +69,7 @@ async function fixture(ask = false) {
     rpc: string[] = [],
     models = 0,
     credentials = 0;
-  const peer = Bun.serve({
+  const peer = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -96,7 +98,7 @@ async function fixture(ask = false) {
       return Response.json({ jsonrpc: '2.0', id: body.id, result });
     },
   });
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -516,18 +518,15 @@ test('public backup v16 and restore A→B retain original source and connection 
     let httpGets = 0,
       httpPosts = 0,
       otherHttp = 0;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const method = String(
-          args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET'),
-        ).toUpperCase();
-        if (method === 'GET') httpGets++;
-        else if (method === 'POST') httpPosts++;
-        else otherHttp++;
-        return originalFetch(...args);
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const method = String(
+        args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET'),
+      ).toUpperCase();
+      if (method === 'GET') httpGets++;
+      else if (method === 'POST') httpPosts++;
+      else otherHttp++;
+      return originalFetch(...args);
+    }, {});
     try {
       const listed = await portB.list();
       expect(listed.map((row) => row.intent)).toEqual([intent]);

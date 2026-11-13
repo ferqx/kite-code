@@ -183,7 +183,7 @@ export function acquireProfileAccess(
     throw error;
   }
 }
-/** Trusted Bun helper: adopt its copy of the Node-owned fd; do not create namespace or profile. */
+/** The trusted helper adopts its copy of the parent's fd without creating a namespace or Profile. */
 export function acquireInheritedProfileAccess(options: {
   dataRoot: string;
   profile: string;

@@ -20,6 +20,8 @@ Status: implemented
 
 原兼容整例的三真实任务、完整正文／原身份／冷读／后续工作、真实双builder和Mac Main／renderer差异保留；原360／420秒整例、120秒driver、15秒窗口、60秒冷段及Windows1140000ms绝对期限不变。新增旧版拒绝整例独立有限预算，不延长原链。
 
+2026-11-13 随包 Node 迁移的兼容对使用 `a45ca81cf` 的 Bun 制品。它与当前代码实际使用同一份合并 Core Schema；旧六迁移的见证和 `a2b6441f` 不兼容负例继续核其原摘要。发布 CI 在独立 checkout 按固定提交自己的锁文件调用原构建器，并将核过的路径与摘要提供给原测试。Windows 的 Bun 和 Node 前门各在自己的 managed prefix，同前缀安装的拒绝及旧选择保留属于验收，回到旧前门仍使用同一 Profile。具体输入和执行范围见[当前发布约束](../../../../docs/active/release-control.md#当前发行与源身份)。
+
 ## Alternatives considered
 
 - 改旧reader／切换为合成标签或恢复旧DB：破坏原始来源或同Store完整数据链，未采用。

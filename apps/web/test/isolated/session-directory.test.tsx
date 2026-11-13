@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { ClientError, type SessionDirectoryActivity } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { installGlobals } from '../globals.fixture';
 
 function item(id: string, workspaceId = 'w', updatedAt: number | null = null) {
@@ -104,7 +105,7 @@ async function fixture() {
   const root = createRoot(dom.window.document.getElementById('root')!);
   async function pause(ms = 0) {
     await act(async () => {
-      await Bun.sleep(ms);
+      await fixtureDelay(ms);
     });
   }
   async function render(suspended = false) {
@@ -117,7 +118,7 @@ async function fixture() {
           pollIntervalMs={10000}
         />,
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   await render();
@@ -135,7 +136,7 @@ async function fixture() {
       element.dispatchEvent(
         new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }),
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   async function key(element: Element, key: string) {
@@ -143,13 +144,13 @@ async function fixture() {
       element.dispatchEvent(
         new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   async function focus(element: HTMLElement) {
     await act(async () => {
       element.focus();
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   async function hover(element: Element, enter: boolean) {
@@ -164,14 +165,14 @@ async function fixture() {
         Object.defineProperty(event, 'pointerType', { value: 'mouse' });
         element.dispatchEvent(event);
       }
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
     if (!enter) {
       await act(async () => {
         document.body.dispatchEvent(
           new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 1000, clientY: 1000 }),
         );
-        await Bun.sleep(0);
+        await fixtureDelay(0);
       });
     }
   }
@@ -179,7 +180,7 @@ async function fixture() {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value });
     await act(async () => {
       document.dispatchEvent(new dom.window.Event('visibilitychange'));
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   const tooltip = () => document.querySelector('[role="tooltip"]');

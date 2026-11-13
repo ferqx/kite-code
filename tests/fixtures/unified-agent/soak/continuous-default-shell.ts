@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -14,13 +15,13 @@ import {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
+import { defaultTaskRoleId } from '@kite-ai/agent/task';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { spawnNodePairedChild } from '@kite-ai/service/node-process';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
-import {
-  buildTerminalBundle,
-  verifyTerminalBundle,
-} from '../../../../scripts/release/terminal-bundle';
 import {
   busyDuration,
   CONTINUOUS_OPERATION_MS,
@@ -36,8 +37,8 @@ import {
   observeOwnedProcessExit,
 } from '../../../../scripts/runtime/unified-soak-native';
 import type { PairedServiceResources } from '../../../../scripts/runtime/unified-soak-service-resources';
+import { startLoopbackHttpServer } from '../../loopback-http-server';
 import { loopbackModelEnvironment } from '../../loopback-model-environment';
-import { privateDirectory } from '../../test-filesystem';
 import {
   parseShellModelFeedback,
   preDispatchRefreshFeedbackMatches,
@@ -108,11 +109,17 @@ export async function selectContinuousParentTool(
   if (received.size !== originalCalls.size) throw Error('continuous_tool_result_missing');
   let completed = 0;
   let agentId: string | undefined;
+  let workRef: string | undefined;
   let shellId: string | undefined;
   let shellExecutionId: string | undefined;
   let childSettled = false,
     shellSettled = false,
-    afterSeq = '0';
+    cursor: string | undefined;
+  const childWaitInput = () => ({
+    work_refs: [workRef],
+    ...(cursor === undefined ? {} : { cursor }),
+    wait_ms: 4000,
+  });
   for (const result of paired) {
     if (completed < 3) {
       const expected = calls[completed]!;
@@ -129,9 +136,14 @@ export async function selectContinuousParentTool(
       if (completed === 0 && body.path !== (expected.input as { path: string }).path)
         throw Error('continuous_original_file_result_changed');
       if (completed === 1) {
-        if (body.accepted !== true || typeof body.agent_id !== 'string')
+        if (
+          body.accepted !== true ||
+          typeof body.agent_id !== 'string' ||
+          typeof body.work_ref !== 'string'
+        )
           throw Error('continuous_child_spawn_not_accepted');
         agentId = body.agent_id;
+        workRef = body.work_ref;
       }
       if (completed === 2) {
         const feedback = parseShellModelFeedback(result.content);
@@ -160,13 +172,17 @@ export async function selectContinuousParentTool(
       continue;
     }
     if (result.name === 'wait_agent_events') {
+      if (!isDeepStrictEqual(result.input, childWaitInput()))
+        throw Error('continuous_original_child_observation_changed');
       const observed = JSON.parse(result.content);
-      if (observed.error) throw Error('continuous_child_observation_failed');
-      if (observed.next_seq !== undefined) afterSeq = observed.next_seq;
+      if (observed.error || typeof observed.next_cursor !== 'string')
+        throw Error('continuous_child_observation_failed');
+      cursor = observed.next_cursor;
       if (
         observed.events?.some(
-          (event: { agent_id: string; kind: string; outcome?: string }) =>
+          (event: { agent_id: string; work_ref?: string; kind: string; outcome?: string }) =>
             event.agent_id === agentId &&
+            event.work_ref === workRef &&
             event.kind === 'completed' &&
             event.outcome === 'succeeded',
         )
@@ -187,10 +203,8 @@ export async function selectContinuousParentTool(
     } else throw Error('continuous_original_tool_sequence_changed');
   }
   if (completed < 3) return calls[completed];
-  if (!childSettled)
-    return { name: 'wait_agent_events', input: { after_seq: afterSeq, wait_ms: 4000 } };
-  if (!shellSettled)
-    return { name: 'shell_wait', input: { shell_id: shellId, wait_timeout_ms: 4000 } };
+  if (!childSettled) return { name: 'wait_agent_events', input: childWaitInput() };
+  if (!shellSettled) return { name: 'shell_wait', input: { shell_id: shellId, wait_ms: 4000 } };
   return undefined;
 }
 
@@ -198,6 +212,9 @@ export async function selectContinuousParentTool(
 export async function openDefaultShellContinuousFixture(root: string, candidateRoot?: string) {
   if (!['darwin', 'linux'].includes(process.platform))
     throw Error('continuous_qualified_background_shell_required');
+  if (!candidateRoot) throw Error('continuous_terminal_candidate_required');
+  const candidate = verifyTerminalRuntimeBundle(candidateRoot);
+  if (!candidate.manifest.nodeVersion) throw Error('continuous_node_candidate_required');
   const cleanup: (() => Promise<unknown>)[] = [];
   let closing: Promise<void> | undefined;
   const close = () => {
@@ -218,201 +235,198 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const workspace = join(root, 'workspace');
     privateDirectory(join(workspace, 'effects'));
-    const candidate = candidateRoot
-      ? verifyTerminalBundle(candidateRoot)
-      : await buildTerminalBundle({ destination: join(root, 'candidate') });
     const access = acquireArtifactAccess({ root: candidate.root, mode: 'shared' });
     cleanup.push(async () => access.release());
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'continuous' });
     privateDirectory(profile.profilePath);
     let childCalls = 0,
       providerCalls = 0;
-    const provider = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      async fetch(request) {
-        const body = (await request.json()) as {
-          messages: ContinuousModelMessage[];
-        };
-        providerCalls++;
-        const last = body.messages.reduce(
-          (found, row, index) =>
-            row.role === 'user' &&
-            /(?:^(?:New task: )?load-parent:|load-child:)[a-f0-9-]{36}/.test(row.content)
-              ? index
-              : found,
-          -1,
-        );
-        const content = body.messages[last]?.content ?? '';
-        const childMatch = /load-child:([a-f0-9-]{36})/.exec(content);
-        const parentMatch = /^(?:New task: )?load-parent:([a-f0-9-]{36})$/.exec(content);
-        const child = childMatch !== null;
-        const nonce = (childMatch ?? parentMatch)?.[1];
-        if (!nonce) {
-          writeFileSync(join(root, 'model-input-failure.json'), JSON.stringify({ content }), {
-            mode: 0o600,
-          });
-          throw Error('continuous_original_model_input_missing');
-        }
-        if (child) childCalls++;
-        const results = body.messages.slice(last + 1).filter((row) => row.role === 'tool');
-        const calls: { name: string; input: unknown }[] = [
-          {
-            name: 'write_file',
-            input: { path: `effects/${nonce}.txt`, base: null, content: nonce },
+    const provider = await startLoopbackHttpServer(async (request) => {
+      const body = (await request.json()) as {
+        messages: ContinuousModelMessage[];
+      };
+      providerCalls++;
+      const last = body.messages.reduce(
+        (found, row, index) =>
+          row.role === 'user' &&
+          /(?:^(?:New task: )?load-parent:|load-child:)[a-f0-9-]{36}/.test(row.content)
+            ? index
+            : found,
+        -1,
+      );
+      const content = body.messages[last]?.content ?? '';
+      const childMatch = /load-child:([a-f0-9-]{36})/.exec(content);
+      const parentMatch = /^(?:New task: )?load-parent:([a-f0-9-]{36})$/.exec(content);
+      const child = childMatch !== null;
+      const nonce = (childMatch ?? parentMatch)?.[1];
+      if (!nonce) {
+        writeFileSync(join(root, 'model-input-failure.json'), JSON.stringify({ content }), {
+          mode: 0o600,
+        });
+        throw Error('continuous_original_model_input_missing');
+      }
+      if (child) childCalls++;
+      const results = body.messages.slice(last + 1).filter((row) => row.role === 'tool');
+      const calls: { name: string; input: unknown }[] = [
+        {
+          name: 'write_file',
+          input: { path: `effects/${nonce}.txt`, content: nonce },
+        },
+        {
+          name: 'spawn_agent',
+          input: { prompt: `load-child:${nonce}` },
+        },
+        {
+          name: 'shell_execute',
+          input: {
+            background: true,
+            command: `${quote(join(candidate.root, candidate.manifest.entries.runtime))} --input-type=module -e ${quote(CONTINUOUS_SHELL_SOURCE)} ${quote(nonce)}`,
           },
-          {
-            name: 'spawn_agent',
-            input: { prompt: `load-child:${nonce}` },
-          },
-          {
-            name: 'shell_execute',
-            input: {
-              background: true,
-              command: `${quote(join(candidate.root, candidate.manifest.entries.runtime))} -e ${quote(CONTINUOUS_SHELL_SOURCE)} ${quote(nonce)}`,
-            },
-          },
-        ];
-        const selected = child
-          ? undefined
-          : await selectContinuousParentTool(
-              body.messages.slice(last + 1),
-              calls,
-              async (callId, name, input, content) => {
-                const definitions: Record<string, string> = {
-                  shell_execute: 'shell.execute',
-                  shell_wait: 'shell.wait',
-                  wait_agent_events: 'task.events',
-                };
-                const definitionId = definitions[name];
-                if (!definitionId) return false;
-                const wireInput = input as Record<string, unknown>;
-                const coreInput =
-                  name === 'shell_wait'
-                    ? { shellId: wireInput.shell_id, timeoutMs: wireInput.wait_timeout_ms }
-                    : name === 'wait_agent_events'
-                      ? { afterSeq: wireInput.after_seq, waitMs: wireInput.wait_ms }
-                      : input;
-                const operation = operations.find((operation) => operation.commandId === nonce);
-                if (!operation) return false;
-                const view = await clients[0]!.getView(operation.sessionId);
-                const run = view.runs.find((run) => run.originCommandId === operation.commandId);
-                const matches = view.executions.filter(
-                  (execution) =>
-                    execution.runId === run?.id &&
-                    execution.kind === 'tool' &&
-                    execution.definitionId === definitionId &&
-                    execution.definitionVersion === '1' &&
-                    execution.toolCallId === callId,
-                );
-                if (
-                  view.storeId !== storeId ||
-                  view.session.id !== operation.sessionId ||
-                  !run ||
-                  matches.length !== 1
-                )
-                  return false;
-                const execution = matches[0]!;
-                const result = execution.result as {
-                  outcome?: string;
-                  content?: string;
-                  details?: {
-                    code?: string;
-                    adapterAttempted?: boolean;
-                    dispatchCommitted?: boolean;
-                  };
-                } | null;
-                return (
-                  execution.originStoreId === storeId &&
-                  execution.rootWorkCommandId === operation.commandId &&
-                  execution.status === 'failed' &&
-                  execution.authorization?.dispatched === false &&
-                  isDeepStrictEqual(execution.toolInput, coreInput) &&
-                  result?.outcome === 'failed' &&
-                  preDispatchRefreshFeedbackMatches(content, result)
-                );
-              },
-              async (callId, name, input, feedback) => {
-                const operation = operations.find((operation) => operation.commandId === nonce);
-                if (!operation) return;
-                const view = await clients[0]!.getView(operation.sessionId);
-                const run = view.runs.find((run) => run.originCommandId === nonce);
-                const matches = view.executions.filter(
-                  (execution) =>
-                    execution.kind === 'tool' &&
-                    execution.runId === run?.id &&
-                    execution.toolCallId === callId,
-                );
-                if (view.storeId !== storeId || !run || matches.length !== 1) return;
-                const tool = matches[0]!;
-                const wireInput = input as Record<string, unknown>;
-                const expectedInput =
-                  name === 'shell_wait'
-                    ? { shellId: wireInput.shell_id, timeoutMs: wireInput.wait_timeout_ms }
+        },
+      ];
+      const selected = child
+        ? undefined
+        : await selectContinuousParentTool(
+            body.messages.slice(last + 1),
+            calls,
+            async (callId, name, input, content) => {
+              const definitions: Record<string, string> = {
+                shell_execute: 'shell.execute',
+                shell_wait: 'shell.wait',
+                wait_agent_events: 'task.events',
+              };
+              const definitionId = definitions[name];
+              if (!definitionId) return false;
+              const wireInput = input as Record<string, unknown>;
+              const coreInput =
+                name === 'shell_wait'
+                  ? { shellId: wireInput.shell_id, timeoutMs: wireInput.wait_ms }
+                  : name === 'wait_agent_events'
+                    ? {
+                        workRefs: wireInput.work_refs,
+                        ...(wireInput.cursor === undefined ? {} : { cursor: wireInput.cursor }),
+                        waitMs: wireInput.wait_ms,
+                      }
                     : input;
-                if (
-                  tool.definitionId !== (name === 'shell_wait' ? 'shell.wait' : 'shell.execute') ||
-                  tool.definitionVersion !== '1' ||
-                  tool.originStoreId !== storeId ||
-                  tool.rootWorkCommandId !== nonce ||
-                  !isDeepStrictEqual(tool.toolInput, expectedInput) ||
-                  !shellModelFeedbackMatchesResult(feedback, tool.result)
-                )
-                  return;
-                const result = tool.result as {
-                  details: {
-                    ref: {
-                      extensionId: string;
-                      executionId: string;
-                      sessionId: string;
-                      originStoreId: string;
-                    };
+              const operation = operations.find((operation) => operation.commandId === nonce);
+              if (!operation) return false;
+              const view = await clients[0]!.getView(operation.sessionId);
+              const run = view.runs.find((run) => run.originCommandId === operation.commandId);
+              const matches = view.executions.filter(
+                (execution) =>
+                  execution.runId === run?.id &&
+                  execution.kind === 'tool' &&
+                  execution.definitionId === definitionId &&
+                  execution.definitionVersion === '1' &&
+                  execution.toolCallId === callId,
+              );
+              if (
+                view.storeId !== storeId ||
+                view.session.id !== operation.sessionId ||
+                !run ||
+                matches.length !== 1
+              )
+                return false;
+              const execution = matches[0]!;
+              const result = execution.result as {
+                outcome?: string;
+                content?: string;
+                details?: {
+                  code?: string;
+                  adapterAttempted?: boolean;
+                  dispatchCommitted?: boolean;
+                };
+              } | null;
+              return (
+                execution.originStoreId === storeId &&
+                execution.rootWorkCommandId === operation.commandId &&
+                execution.status === 'failed' &&
+                execution.authorization?.dispatched === false &&
+                isDeepStrictEqual(execution.toolInput, coreInput) &&
+                result?.outcome === 'failed' &&
+                preDispatchRefreshFeedbackMatches(content, result)
+              );
+            },
+            async (callId, name, input, feedback) => {
+              const operation = operations.find((operation) => operation.commandId === nonce);
+              if (!operation) return;
+              const view = await clients[0]!.getView(operation.sessionId);
+              const run = view.runs.find((run) => run.originCommandId === nonce);
+              const matches = view.executions.filter(
+                (execution) =>
+                  execution.kind === 'tool' &&
+                  execution.runId === run?.id &&
+                  execution.toolCallId === callId,
+              );
+              if (view.storeId !== storeId || !run || matches.length !== 1) return;
+              const tool = matches[0]!;
+              const wireInput = input as Record<string, unknown>;
+              const expectedInput =
+                name === 'shell_wait'
+                  ? { shellId: wireInput.shell_id, timeoutMs: wireInput.wait_ms }
+                  : input;
+              if (
+                tool.definitionId !== (name === 'shell_wait' ? 'shell.wait' : 'shell.execute') ||
+                tool.definitionVersion !== '1' ||
+                tool.originStoreId !== storeId ||
+                tool.rootWorkCommandId !== nonce ||
+                !isDeepStrictEqual(tool.toolInput, expectedInput) ||
+                !shellModelFeedbackMatchesResult(feedback, tool.result)
+              )
+                return;
+              const result = tool.result as {
+                details: {
+                  ref: {
+                    extensionId: string;
+                    executionId: string;
+                    sessionId: string;
+                    originStoreId: string;
                   };
                 };
-                const ref = result.details.ref;
-                const job = view.executions.find((execution) => execution.id === ref.executionId);
-                const starter = view.executions.find(
-                  (execution) => execution.id === job?.parentExecutionId,
-                );
-                if (
-                  ref.extensionId !== 'builtin.shell' ||
-                  ref.sessionId !== operation.sessionId ||
-                  ref.originStoreId !== storeId ||
-                  job?.kind !== 'job' ||
-                  job.definitionId !== 'shell.command' ||
-                  job.definitionVersion !== '1' ||
-                  job.sessionId !== operation.sessionId ||
-                  job.originStoreId !== storeId ||
-                  starter?.definitionId !== 'shell.execute' ||
-                  starter.definitionVersion !== '1' ||
-                  starter.runId !== run.id ||
-                  (name === 'shell_execute' && starter.id !== tool.id)
-                )
-                  return;
-                return job.id;
+              };
+              const ref = result.details.ref;
+              const job = view.executions.find((execution) => execution.id === ref.executionId);
+              const starter = view.executions.find(
+                (execution) => execution.id === job?.parentExecutionId,
+              );
+              if (
+                ref.extensionId !== 'builtin.shell' ||
+                ref.sessionId !== operation.sessionId ||
+                ref.originStoreId !== storeId ||
+                job?.kind !== 'job' ||
+                job.definitionId !== 'shell.command' ||
+                job.definitionVersion !== '1' ||
+                job.sessionId !== operation.sessionId ||
+                job.originStoreId !== storeId ||
+                starter?.definitionId !== 'shell.execute' ||
+                starter.definitionVersion !== '1' ||
+                starter.runId !== run.id ||
+                (name === 'shell_execute' && starter.id !== tool.id)
+              )
+                return;
+              return job.id;
+            },
+          );
+      const delta = selected
+        ? {
+            tool_calls: [
+              {
+                index: 0,
+                id: `load-${nonce}-${results.length}`,
+                type: 'function',
+                function: { name: selected.name, arguments: JSON.stringify(selected.input) },
               },
-            );
-        const delta = selected
-          ? {
-              tool_calls: [
-                {
-                  index: 0,
-                  id: `load-${nonce}-${results.length}`,
-                  type: 'function',
-                  function: { name: selected.name, arguments: JSON.stringify(selected.input) },
-                },
-              ],
-            }
-          : { content: child ? `child-complete:${nonce}` : `parent-complete:${nonce}` };
-        const frame = (delta: unknown, reason: string | null) =>
-          `data: ${JSON.stringify({ id: 'continuous-default', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-        return new Response(
-          `${frame(delta, null)}${frame({}, selected ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
-          { headers: { 'content-type': 'text/event-stream' } },
-        );
-      },
+            ],
+          }
+        : { content: child ? `child-complete:${nonce}` : `parent-complete:${nonce}` };
+      const frame = (delta: unknown, reason: string | null) =>
+        `data: ${JSON.stringify({ id: 'continuous-default', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+      return new Response(
+        `${frame(delta, null)}${frame({}, selected ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
     });
-    cleanup.push(async () => provider.stop(true));
+    cleanup.push(async () => provider.close());
     writeFileSync(
       userConfiguration.path,
       JSON.stringify({
@@ -447,10 +461,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         instanceId: `continuous-default-${index}`,
         spawnChild(command, options) {
           // Default spawn with owned user configuration; observation supplies no runtime/Tool/permission adapter.
-          const child = Bun.spawn([...command], {
-            stdin: 'pipe',
-            stdout: 'pipe',
-            stderr: 'pipe',
+          const child = spawnNodePairedChild(command, {
             env: {
               ...options.env,
               ...userConfiguration.homeEnvironment,
@@ -594,7 +605,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         const value = await read();
         if (test(value)) return value;
         if (performance.now() > deadline) throw Error('continuous_default_operation_deadline');
-        await Bun.sleep(10);
+        await sleep(10);
       }
     };
     return {
@@ -668,9 +679,14 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                   );
                   const child = view.executions.find(
                     (row) =>
-                      row.definitionId === 'agent/worker' &&
+                      row.definitionId === `agent/${defaultTaskRoleId}` &&
                       row.parentExecutionId &&
-                      rows.some((parent) => parent.id === row.parentExecutionId),
+                      rows.some(
+                        (parent) =>
+                          parent.id === row.parentExecutionId &&
+                          parent.definitionId === 'task.spawn' &&
+                          parent.status === 'succeeded',
+                      ),
                   );
                   const job = view.executions.find(
                     (row) =>

@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { build as bundle } from '../../../../../scripts/tooling/bun-build';
 import { desktopModulePlugin } from '../../../scripts/desktop-bundling';
+import { runtimeBuildOptions } from '../../../scripts/runtime-build-options';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'tools/images');
 mkdirSync(destination, { recursive: true });
-const result = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'child.ts')],
+const result = await bundle({
+  entrypoints: [resolve(import.meta.dirname, 'child.ts')],
   outdir: destination,
-  target: 'bun',
+  ...runtimeBuildOptions(destination),
   packages: 'bundle',
   external: ['sharp'],
   plugins: process.argv[3] === '--desktop' ? [desktopModulePlugin(['sharp'])] : [],

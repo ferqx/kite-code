@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
@@ -9,7 +9,7 @@ import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
-const fixture = (name: string) => resolve(import.meta.dir, '..', '..', 'fixtures', name);
+const fixture = (name: string) => resolve(import.meta.dirname, '..', '..', 'fixtures', name);
 const envReference = (name: string) => `\${${name}}`;
 
 describe('TUI PTY System — project MCP approval', () => {
@@ -25,7 +25,7 @@ describe('TUI PTY System — project MCP approval', () => {
   });
 
   test('records keyboard approval but keeps unqualified local stdio stopped', async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     server.setResponses([]);
     const markerName = 'project-mcp-started';
     workspace = createTestWorkspace({
@@ -57,7 +57,7 @@ describe('TUI PTY System — project MCP approval', () => {
       rows: 40,
       mockServer: server,
       workspace,
-      entryPath: join(import.meta.dir, '../fixtures/mcp-project-tui.tsx'),
+      entryPath: join(import.meta.dirname, '../fixtures/mcp-project-tui.tsx'),
     });
 
     expect(existsSync(markerPath)).toBe(false);

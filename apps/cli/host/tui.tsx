@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { type acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { ClientError } from '@kite-ai/client';
@@ -895,7 +896,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           }
         }
         if (!ended && !observer.signal.aborted)
-          await Bun.sleep(Math.min(5000, 250 * 2 ** Math.min(reconnectAttempt++, 5)));
+          await sleep(Math.min(5000, 250 * 2 ** Math.min(reconnectAttempt++, 5)));
       }
     })();
     void paired?.exited.then(() => {

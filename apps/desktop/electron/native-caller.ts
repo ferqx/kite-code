@@ -1297,7 +1297,8 @@ export class NativeCaller {
 
   private callerState() {
     try {
-      return { callerSubmissions: this.requireCaller().records().map(callerMetadata) };
+      const journal = this.requireCaller();
+      return { callerSubmissions: journal.records(true).map((row) => journal.metadata(row)) };
     } catch {
       return { callerSubmissions: [], callerUnavailable: true };
     }
@@ -2681,12 +2682,14 @@ export class NativeCaller {
         }
         break;
       }
-      case 'caller.list':
+      case 'caller.list': {
+        const journal = this.requireCaller();
         result = {
           kind: 'caller.directory',
-          records: this.requireCaller().records().map(callerMetadata),
+          records: journal.records().map((row) => journal.metadata(row)),
         };
         break;
+      }
       case 'caller.prepare': {
         if (request.intent.kind === 'command.cancel' || request.intent.kind === 'execution.cancel')
           this.writableScope(request.sessionId);
@@ -2710,12 +2713,11 @@ export class NativeCaller {
       }
       case 'caller.submit':
       case 'caller.lookup': {
-        const stored = this.requireCaller()
-          .records()
-          .find((row) => row.intent.request.commandId === request.commandId);
+        const journal = this.requireCaller();
+        const stored = journal.record(request.commandId);
+        if (!stored) throw new ClientError('caller_intent_missing');
         if (
           request.method === 'caller.submit' &&
-          stored &&
           stored.intent.request.kind !== 'command.cancel' &&
           stored.intent.request.kind !== 'execution.cancel' &&
           this.controller.snapshot?.workspaceUnavailable &&
@@ -2724,23 +2726,21 @@ export class NativeCaller {
           throw new ClientError('workspace_identity_unavailable');
         let verified = true;
         try {
-          const original = this.requireCaller()
-            .records()
-            .find((row) => row.intent.request.commandId === request.commandId);
           if (
             request.method === 'caller.submit' &&
-            original?.intent.request.kind !== 'extension.invoke'
+            stored.intent.request.kind !== 'extension.invoke'
           )
-            await this.requireCaller().submit(request.commandId);
-          else await this.requireCaller().lookup(request.commandId);
+            await journal.submit(request.commandId);
+          else await journal.lookup(request.commandId);
         } catch {
           verified = false;
         }
-        const row = this.requireCaller()
-          .records()
-          .find((r) => r.intent.request.commandId === request.commandId);
+        const row = journal.record(request.commandId);
         if (!row) throw new ClientError('caller_intent_missing');
-        result = { ...callerMetadata(row), ...(!verified ? { phase: 'unknown' as const } : {}) };
+        result = {
+          ...journal.metadata(row),
+          ...(!verified ? { phase: 'unknown' as const } : {}),
+        };
         break;
       }
       case 'caller.clear':
@@ -2748,9 +2748,7 @@ export class NativeCaller {
         result = null;
         break;
       case 'caller.body': {
-        const row = this.requireCaller()
-          .records()
-          .find((r) => r.intent.request.commandId === request.commandId);
+        const row = this.requireCaller().record(request.commandId);
         if (!row) throw new ClientError('caller_intent_missing');
         let read = this.callerReads.get(request.readId);
         if (!read) {

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   cpSync,
   existsSync,
@@ -12,6 +11,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import {
+  which as findExecutable,
+  spawn as spawnProcess,
+} from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('relocated native companion loads in Bun and Node without a compiler/source fallback; missing or changed assets fail closed', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-package-')));
@@ -39,7 +45,7 @@ test('relocated native companion loads in Bun and Node without a compiler/source
       expect(loadConfig).toBeGreaterThanOrEqual(0);
       expect(bytes.readUInt16LE(loadConfig + 78)).toBe(0x800);
     }
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [
         fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url)),
       ],
@@ -83,11 +89,11 @@ try{
 finally{io?.close();}
 `,
     );
-    const node = Bun.which('node');
+    const node = findExecutable('node');
     expect(node).not.toBeNull();
-    const runtimes = [process.execPath, node!];
+    const runtimes = [process.execPath, ...testRuntimeFlags, node!];
     const run = async (runtime: string) => {
-      const child = Bun.spawn([runtime, script], {
+      const child = spawnProcess([runtime, script], {
         cwd: root,
         env: { ...process.env, PATH: '', NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },
         stdout: 'pipe',

@@ -15,17 +15,19 @@ import {
   verifyNativeRuntimeBundle,
 } from '@kite-ai/service/native-runtime-assets';
 import type { SqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
+
 export interface NativeAssets {
   readonly kind?: 'development';
   readonly serviceEntrypoint: string;
-  readonly bunExecutable: string;
   readonly serviceSha256: string;
-  readonly bunSha256: string;
+  readonly runtimeExecutable: string;
+  readonly runtimeSha256: string;
   readonly buildId: string;
   readonly apiMajor: number;
   readonly requiredCapabilities: readonly string[];
   readonly profile?: { readonly dataRoot: string; readonly profile: string };
 }
+
 export function resolveNativeCandidate(appPath: string): NativeAssets & {
   runtimeProtection: NativeRuntimeProtection;
   candidateRoot: string;
@@ -66,13 +68,13 @@ export function resolveNativeCandidate(appPath: string): NativeAssets & {
   const terminal = bundle.terminal,
     files = new Map(bundle.manifest.files.map((file) => [file.path, file]));
   const serviceEntrypoint = join(terminal.root, terminal.manifest.entries.service),
-    bunExecutable = join(terminal.root, terminal.manifest.entries.runtime);
+    runtimeExecutable = join(terminal.root, terminal.manifest.entries.runtime);
   const inner = new Map(terminal.manifest.files.map((file) => [file.path, file]));
   return Object.freeze({
     serviceEntrypoint,
-    bunExecutable,
+    runtimeExecutable,
     serviceSha256: inner.get(terminal.manifest.entries.service)!.sha256,
-    bunSha256: inner.get(terminal.manifest.entries.runtime)!.sha256,
+    runtimeSha256: inner.get(terminal.manifest.entries.runtime)!.sha256,
     buildId: `native-${bundle.digest}`,
     apiMajor: 1,
     requiredCapabilities: Object.freeze(['file_recovery']),
@@ -121,9 +123,9 @@ export function parseNativeAssets(value: unknown): NativeAssets {
       (key) =>
         ![
           'serviceEntrypoint',
-          'bunExecutable',
+          'runtimeExecutable',
           'serviceSha256',
-          'bunSha256',
+          'runtimeSha256',
           'buildId',
           'apiMajor',
           'requiredCapabilities',
@@ -135,13 +137,18 @@ export function parseNativeAssets(value: unknown): NativeAssets {
     throw Error('invalid_native_assets');
   if (input.kind !== undefined && input.kind !== 'development')
     throw Error('invalid_native_assets');
-  for (const key of ['serviceEntrypoint', 'bunExecutable'])
-    if (typeof input[key] !== 'string' || !isAbsolute(input[key] as string))
-      throw Error('invalid_native_assets');
-  if (!/\.m?js$/.test(input.serviceEntrypoint as string)) throw Error('invalid_native_assets');
-  for (const key of ['serviceSha256', 'bunSha256'])
-    if (typeof input[key] !== 'string' || !/^[0-9a-f]{64}$/.test(input[key] as string))
-      throw Error('invalid_native_assets');
+  if (
+    typeof input.serviceEntrypoint !== 'string' ||
+    !isAbsolute(input.serviceEntrypoint) ||
+    !/\.m?js$/.test(input.serviceEntrypoint) ||
+    typeof input.runtimeExecutable !== 'string' ||
+    !isAbsolute(input.runtimeExecutable) ||
+    typeof input.serviceSha256 !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(input.serviceSha256) ||
+    typeof input.runtimeSha256 !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(input.runtimeSha256)
+  )
+    throw Error('invalid_native_assets');
   if (
     typeof input.buildId !== 'string' ||
     !input.buildId.length ||
@@ -168,7 +175,7 @@ export function parseNativeAssets(value: unknown): NativeAssets {
     )
       throw Error('invalid_native_assets');
   }
-  return { ...structuredClone(input), kind: 'development' } as unknown as NativeAssets;
+  return { ...structuredClone(input), kind: 'development' } as NativeAssets;
 }
 export function verifyNativeAsset(path: string, expected: string): void {
   let current = path;

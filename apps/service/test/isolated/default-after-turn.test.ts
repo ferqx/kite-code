@@ -1,8 +1,7 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
@@ -11,9 +10,12 @@ import {
 } from '@kite-ai/agent/permissions';
 import { planningExtensionId } from '@kite-ai/agent/planning';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Json } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -269,7 +271,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const result = await read();
     if (result !== undefined) return result;
     if (Date.now() > end) throw Error('default_after_turn_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(
@@ -306,7 +308,7 @@ async function fixture(
   let currentReport = async () => false;
   let planningCall: (index: number) => Promise<{ name: string; input: Json } | null> = async () =>
     null;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

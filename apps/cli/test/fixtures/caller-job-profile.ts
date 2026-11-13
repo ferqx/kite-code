@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import {
@@ -31,7 +32,7 @@ export async function callerJobProfile() {
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   symlinkSync(
-    join(import.meta.dir, '../../node_modules'),
+    join(import.meta.dirname, '../../node_modules'),
     join(root, 'node_modules'),
     process.platform === 'win32' ? 'junction' : 'dir',
   );
@@ -42,7 +43,7 @@ export async function callerJobProfile() {
     mode: 0o600,
   });
   let calls = 0;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {

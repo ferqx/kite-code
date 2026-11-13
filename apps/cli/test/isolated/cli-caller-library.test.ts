@@ -1,8 +1,15 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, linkSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+  spawnSync as testSpawnSync,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { openCallerJournal } from '../../host/caller-journal';
 import { createCLICallerPort, createTuiCallerPort } from '../../host/caller-port';
 import { observeCommand, runNonInteractive } from '../../src';
@@ -10,7 +17,7 @@ import { callerJobProfile } from '../fixtures/caller-job-profile';
 import { recoveryProfile } from '../fixtures/recovery-profile';
 
 const readFileSyncSafe = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : '');
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('actual library run requires durable host port; original new Work request survives separately from UI drafts', async () => {
   const f = await recoveryProfile(),
     warm = await f.launch(),
@@ -99,7 +106,7 @@ test('actual library exact Job Stop POST loss + producer SIGKILL; cold first GET
     runner = join(f.root, 'cli-job.ts'),
     wire = `${base}.wire.jsonl`,
     journal = join(f.profile.profilePath, 'ui/caller-intents.json');
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   try {
     const parent = (await f.client.getView('s')).runs.filter((r) => r.originCommandId === 'work');
     expect(parent).toHaveLength(1);
@@ -115,9 +122,9 @@ test('actual library exact Job Stop POST loss + producer SIGKILL; cold first GET
     for (const cold of [false, true]) {
       writeFileSync(
         runner,
-        `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{createClient}from'@kite-ai/client';import{acquireProfileAccess,acquireProfileDataLock}from'@kite-ai/agent/profile-access';import{openCallerJournal}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/caller-journal.ts')).href)};import{createCLICallerPort}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/caller-port.ts')).href)};import{runNonInteractive}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/index.ts')).href)};const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',cold:${cold},method:req.method,response:await response.json()})+'\\n');res.socket!.destroy();${cold ? '' : "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');"}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',cold:${cold},method,path:url.pathname})+'\\n');if(drop&&${cold ? "method==='GET'&&url.pathname==='/v1/commands/cli-job-stop'" : "method==='POST'"}){drop=false;forwarding=url.href;return actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);}return actual(...args);},{preconnect:actual.preconnect});const client=createClient({endpoint:process.env.OWNED_ENDPOINT!,token:process.env.OWNED_TOKEN!,expected:{profile:${JSON.stringify(f.serviceProfile)},apiMajor:1,requiredCapabilities:['commands','inputs']}});await client.connect();const access=acquireProfileAccess(${JSON.stringify({ dataRoot: f.profile.dataRoot, profile: 'owned' })}),j=openCallerJournal({access,acquireWriteLock:()=>acquireProfileDataLock(access,'tui_private')}),options={client,caller:createCLICallerPort({client,storeId:${JSON.stringify(f.storeId)},journal:j}),write:()=>{}};try{const args=['work','s',${JSON.stringify(JSON.stringify(request))}];${cold ? 'const first=await runNonInteractive(args,options),second=await runNonInteractive(args,options);console.log(JSON.stringify({first,second}));' : "await runNonInteractive(args,options);throw Error('kill expected');"}}finally{j.close();access.lock.release();client.disposeNetwork();relay.close();}`,
+        `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{createClient}from'@kite-ai/client';import{acquireProfileAccess,acquireProfileDataLock}from'@kite-ai/agent/profile-access';import{openCallerJournal}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/caller-journal.ts')).href)};import{createCLICallerPort}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/caller-port.ts')).href)};import{runNonInteractive}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/index.ts')).href)};const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',cold:${cold},method:req.method,response:await response.json()})+'\\n');res.socket!.destroy();${cold ? '' : "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');"}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',cold:${cold},method,path:url.pathname})+'\\n');if(drop&&${cold ? "method==='GET'&&url.pathname==='/v1/commands/cli-job-stop'" : "method==='POST'"}){drop=false;forwarding=url.href;return actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);}return actual(...args);});const client=createClient({endpoint:process.env.OWNED_ENDPOINT!,token:process.env.OWNED_TOKEN!,expected:{profile:${JSON.stringify(f.serviceProfile)},apiMajor:1,requiredCapabilities:['commands','inputs']}});await client.connect();const access=acquireProfileAccess(${JSON.stringify({ dataRoot: f.profile.dataRoot, profile: 'owned' })}),j=openCallerJournal({access,acquireWriteLock:()=>acquireProfileDataLock(access,'tui_private')}),options={client,caller:createCLICallerPort({client,storeId:${JSON.stringify(f.storeId)},journal:j}),write:()=>{}};try{const args=['work','s',${JSON.stringify(JSON.stringify(request))}];${cold ? 'const first=await runNonInteractive(args,options),second=await runNonInteractive(args,options);console.log(JSON.stringify({first,second}));' : "await runNonInteractive(args,options);throw Error('kill expected');"}}finally{j.close();access.lock.release();client.disposeNetwork();relay.close();}`,
       );
-      child = Bun.spawn([process.execPath, runner], {
+      child = testSpawn([process.execPath, ...testRuntimeFlags, runner], {
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -128,11 +135,11 @@ test('actual library exact Job Stop POST loss + producer SIGKILL; cold first GET
         while (!readFileSyncSafe(wire).includes('physical_loss')) {
           if (child.exitCode !== null || Date.now() > deadline)
             throw Error('committed loss barrier missing');
-          await Bun.sleep(20);
+          await testSleep(20);
         }
         if (child.exitCode !== null) throw Error('producer exited before native dispatcher');
         process.kill(child.pid, 0);
-        const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+        const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
           stdout: 'pipe',
           stderr: 'pipe',
         });
@@ -207,13 +214,10 @@ test('actual ordinary library full/corrupt/hardlinked private journal reports lo
     path = join(f.profile.profilePath, 'ui/caller-intents.json'),
     actual = globalThis.fetch;
   const wire: { method: string; path: string }[] = [];
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      wire.push({ method: args[1]?.method ?? 'GET', path: new URL(String(args[0])).pathname });
-      return actual(...args);
-    },
-    { preconnect: actual.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    wire.push({ method: args[1]?.method ?? 'GET', path: new URL(String(args[0])).pathname });
+    return actual(...args);
+  }, {});
   try {
     const port = createTuiCallerPort({ client: warm.client, storeId: f.storeId, journal: j });
     for (let n = 0; n < 128; n++)

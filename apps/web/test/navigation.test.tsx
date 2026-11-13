@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { installGlobals } from './globals.fixture';
 
 async function fixture(preference?: string, width = 1024, unavailableStorage = false) {
@@ -102,7 +103,7 @@ async function fixture(preference?: string, width = 1024, unavailableStorage = f
       root.render(
         <WebPage client={client} window={browser} suspended={suspended} pollIntervalMs={10000} />,
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   await render();
@@ -116,7 +117,7 @@ async function fixture(preference?: string, width = 1024, unavailableStorage = f
       element.dispatchEvent(
         new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }),
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   async function key(element: Element, name: string) {

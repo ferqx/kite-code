@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { which as findExecutable } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   LinuxOwnedProgramStartError,
@@ -11,8 +12,8 @@ import {
 
 /** Actual Linux owner only; missing native prerequisites are failures, never availability skips. */
 export async function qualifyLinuxOwnedProgram() {
-  const compiler = Bun.which('cc'),
-    bubblewrap = Bun.which('bwrap');
+  const compiler = findExecutable('cc'),
+    bubblewrap = findExecutable('bwrap');
   assert.ok(compiler, 'linux_stdio_compiler_unavailable');
   assert.ok(bubblewrap, 'linux_stdio_bubblewrap_unavailable');
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-linux-stdio-owner-')));
@@ -35,7 +36,7 @@ export async function qualifyLinuxOwnedProgram() {
         '-fPIE',
         '-pie',
         '-Wl,-z,relro,-z,now',
-        join(import.meta.dir, '../../../native/linux-stdio-init.c'),
+        join(import.meta.dirname, '../../../native/linux-stdio-init.c'),
         '-o',
         init,
       ],

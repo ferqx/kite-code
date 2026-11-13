@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type { ArtifactContentStore } from '../../../src/artifact-port';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -467,7 +468,7 @@ test('directory navigates more than two hundred real Store Model intents with a 
     const until = Date.now() + 5000;
     while (!owner) {
       if (Date.now() > until) throw new Error('actual owner handoff missing');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       owner = await f.store.acquireSessionOwner('s', 'directory-fixture');
     }
     await f.store.acceptCommand({

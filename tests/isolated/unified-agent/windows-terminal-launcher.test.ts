@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { sealWindowsSystemImportSearch } from '../../../scripts/release/build-windows-terminal-launcher';
 
 function image() {

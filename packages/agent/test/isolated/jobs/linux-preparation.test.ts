@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -14,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import type { JobContext } from '../../../src/extensions';
 import {

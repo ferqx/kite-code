@@ -1,7 +1,7 @@
-import { afterAll, expect, mock, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, Children, type ComponentProps, isValidElement } from 'react';
 import type { PanelImperativeHandle } from 'react-resizable-panels';
+import { afterAll, expect, mock, test } from '#kite-test';
 import type { SessionPageProps } from '../../src/desktop/SessionPage';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', {

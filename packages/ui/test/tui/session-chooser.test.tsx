@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiManagementIntent, type TuiPort, TuiSession } from '../../src/tui';
 
 function fixture() {
@@ -86,7 +87,7 @@ function fixture() {
     },
   };
 }
-const settle = () => Bun.sleep(50);
+const settle = () => fixtureDelay(50);
 
 test('selection reconciles before history while ordinary refresh can skip reconciliation', async () => {
   const f = fixture();
@@ -534,16 +535,20 @@ test('normal conversation has no anomaly chrome and recovers a lost submission b
     expect(f.controller.state.intent?.phase).toBe('unknown');
     const original = f.controller.state.intent!.commandId;
     f.controller.observationUnavailable('network');
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(app.lastFrame()).not.toContain('Observation unknown');
-    expect(app.lastFrame()).not.toContain('Outcome unknown');
+    expect(app.lastFrame()).toMatch(
+      /❯ one task\s*\n\s*Outcome unknown · Checking the original request/,
+    );
     expect(app.lastFrame()).not.toContain('Ctrl+L');
     expect(app.lastFrame()).not.toContain('Error:');
     const deadline = Date.now() + 2000;
     while (f.controller.state.intent?.phase === 'unknown') {
       if (Date.now() > deadline) throw Error('automatic_receipt_lookup_deadline');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
+    await settle();
+    expect(app.lastFrame()).not.toContain('Outcome unknown');
     expect(reads).toEqual([original]);
     expect(posts).toBe(1);
     // Receipt recovery does not grant health to a failed observation stream.
@@ -570,7 +575,7 @@ test('a rejected original input stays in its message item and keeps the draft ed
   const app = render(<TuiSession controller={f.controller} />);
   try {
     await f.controller.send();
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(f.controller.state.localMessages).toHaveLength(1);
     expect(f.controller.state.localMessages[0]?.content).toBe('original input');
     expect(f.controller.state.localMessages[0]?.submissionFailure?.reason).toBe(
@@ -613,11 +618,11 @@ test('unknown original submission survives repeated GET failures and stops after
     const deadline = Date.now() + 11000;
     while (f.controller.state.intent?.phase === 'unknown') {
       if (Date.now() > deadline) throw Error('automatic_receipt_lookup_deadline');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     }
     expect(reads).toEqual([original, original, original, original]);
     expect(posts).toBe(1);
-    await Bun.sleep(550);
+    await fixtureDelay(550);
     expect(reads).toHaveLength(4);
   } finally {
     f.controller.dispose();
@@ -641,7 +646,7 @@ test('switching Session before the automatic receipt read retires the old scope 
     f.controller.setDraft('original scope');
     await f.controller.send();
     await f.controller.select('b');
-    await Bun.sleep(600);
+    await fixtureDelay(600);
     expect(reads).toBe(0);
     expect(posts).toBe(1);
     expect(f.controller.state.sessionId).toBe('b');

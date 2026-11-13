@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import type { TuiController } from '../../src/tui/controller';
 import { TuiModelPanel } from '../../src/tui/model-panel';
 

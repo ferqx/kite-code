@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +10,7 @@ import { createMcpAdapter, createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { createPlanningValidation } from '@kite-ai/agent/planning';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { createMcpToolsSearchTool } from '../../../packages/agent/src/mcp/tools-search';
 import { createModelToolSurface } from '../../../packages/agent/src/model-tools';
 import { createMockModelServer, type MockChatRequest } from './fixtures';
@@ -20,7 +20,7 @@ import { migrateOriginalToolCall } from './original-tool-contract';
 test('actual SDK mock calls execute real Runtime Files tools with original identities, complete baselines and persisted inputs', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-model-tools-runtime-')));
   const scope = { workspace: root, home: root };
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   server.bindWorkspace(scope);
   server.setResponses([
     {
@@ -111,9 +111,9 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
     });
     const command = await runtime.waitForCommand('work', { timeoutMs: 10000 });
     expect(command.status).toBe('applied');
-    expect((await store.getRun((command.receipt as { runId: string }).runId))?.status).toBe(
-      'completed',
-    );
+    const run = await store.getRun((command.receipt as { runId: string }).runId);
+    server.assertComplete();
+    expect(run?.status, run?.reason ?? undefined).toBe('completed');
     expect(await readFile(join(root, 'sample.txt'), 'utf8')).toBe('changed 雪\nsecond\n');
     const executions = (await store.listExecutions('s')).filter((row) => row.kind === 'tool');
     expect(executions.map((row) => [row.callId, row.definitionId, row.status])).toEqual([
@@ -122,13 +122,23 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
       ['original-edit', 'files.edit', 'succeeded'],
     ]);
     expect(executions[0]!.input).toEqual({ path: 'sample.txt', offset: 2, limit: 1 });
-    expect(executions[1]!.input).toMatchObject({
-      base: { hash: expect.stringMatching(/^[a-f0-9]{64}$/), size: 19 },
+    const receipt = (index: number) =>
+      JSON.parse((executions[index]!.result as { content: string }).content);
+    expect(receipt(0)).toMatchObject({
+      baseline: { hash: expect.stringMatching(/^[a-f0-9]{64}$/), size: 19 },
+      base_ref: expect.stringMatching(/^file\./),
     });
-    expect(executions[2]!.input).toMatchObject({
+    expect(executions[1]!.input).toEqual({
+      path: 'sample.txt',
+      content: 'full 🪁\nsecond\n',
+      baseRef: receipt(0).base_ref,
+    });
+    expect(executions[2]!.input).toEqual({
+      path: 'sample.txt',
       find: 'full 🪁',
       replace: 'changed 雪',
       occurrences: 1,
+      baseRef: receipt(1).base_ref,
     });
     expect(
       server.getToolContractMigrations().map(({ emitted }) => [emitted.id, emitted.name]),
@@ -153,7 +163,7 @@ test('actual SDK mock calls execute real Runtime Files tools with original ident
     await runtime.close();
     await files.close();
     await store.close();
-    server.stop();
+    await server.stop();
     await rm(root, { recursive: true, force: true });
   }
 }, 20000);
@@ -170,7 +180,7 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
       name: 'planning.write',
       args: {
         planId: 'exact',
-        expectedVersion: null,
+        expectedPlanRef: 'pr_original_fixture-plan-reference',
         title: 'Goal',
         body: 'Full body 🪁',
         steps: [{ id: 'one', title: 'Exact step' }],
@@ -179,20 +189,12 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
     {
       id: 'review',
       name: 'planning.review',
-      args: { planId: 'exact', version: 1, digest: 'a'.repeat(64) },
+      args: { planRef: 'pr_original_fixture-plan-reference' },
     },
     {
       id: 'resource',
       name: 'mcp.resources.read',
-      args: {
-        serverId: 'server',
-        connectionKey: 'connection',
-        configDigest: 'a'.repeat(64),
-        generation: 1,
-        uri: 'fixture://full',
-        catalogueExecutionId: 'original-catalogue',
-        descriptorDigest: 'b'.repeat(64),
-      },
+      args: { resourceRef: 'mr_original_fixture-resource-reference' },
     },
   ];
   for (const call of cases) {
@@ -221,13 +223,11 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
   }
   expect(projectOriginalModelToolCall(cases[0]!, request).args).toMatchObject({
     plan_id: 'exact',
-    expected_version: null,
+    expected_plan_ref: 'pr_original_fixture-plan-reference',
     steps: [{ id: 'one', title: 'Exact step' }],
   });
   expect(projectOriginalModelToolCall(cases[2]!, request).args).toMatchObject({
-    connection_key: 'connection',
-    catalogue_execution_id: 'original-catalogue',
-    descriptor_digest: 'b'.repeat(64),
+    resource_ref: 'mr_original_fixture-resource-reference',
   });
   expect(() =>
     projectOriginalModelToolCall({ id: 'hidden', name: 'task.execute', args: {} }, request),
@@ -265,7 +265,7 @@ test('planning and MCP metadata round-trip exact CAS and connection identity wit
 
 test('dynamic MCP adopts the actual frozen public name and preserves remote JSON; invalid JSON bytes remain raw', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-model-mcp-')));
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   const ledger = join(root, 'ledger');
   const catalogue = join(root, 'catalogue');
   await writeFile(
@@ -288,7 +288,7 @@ test('dynamic MCP adopts the actual frozen public name and preserves remote JSON
     transport: {
       type: 'stdio',
       command: process.execPath,
-      args: [join(import.meta.dir, '../../fixtures/mcp-leaf/stdio.ts'), ledger, catalogue, ''],
+      args: [join(import.meta.dirname, '../../fixtures/mcp-leaf/stdio.ts'), ledger, catalogue, ''],
       cwd: root,
       env: { PATH: process.env.PATH ?? '' },
     },
@@ -396,7 +396,7 @@ test('dynamic MCP adopts the actual frozen public name and preserves remote JSON
   } finally {
     await remote.release();
     await adapter.close();
-    server.stop();
+    await server.stop();
     await rm(root, { recursive: true, force: true });
   }
 });

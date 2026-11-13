@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';

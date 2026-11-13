@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +8,7 @@ import { estimateModelContext } from '@kite-ai/agent/context-estimate';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createSummaryCompressor } from '../../src/compression-configuration';
 
 async function fixture(summary: string, options: Partial<RuntimeOptions> = {}) {

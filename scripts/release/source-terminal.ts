@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { runInstalledTerminalCLI } from './entrypoints/terminal-cli';
 import { releaseErrorCode, sourceCandidateBuildHint } from './release-arguments';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 /** Trusted checkout selection, never an argv override or a development fallback. */
 export function sourceTerminalRoot(root = repositoryRoot): string {
   return resolve(root, 'dist/unified-terminal');

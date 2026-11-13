@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { AgentError } from '@kite-ai/agent';
 import type { ToolContext } from '@kite-ai/agent/extensions';
 import { createFileTools, type WorkspaceFiles } from '@kite-ai/agent/files';
+import { expect, test } from '#kite-test';
 import { createChildConfiguration } from '../../src/child-configuration';
 import { createTaskConfiguration, defaultTaskRoles } from '../../src/task-configuration';
 

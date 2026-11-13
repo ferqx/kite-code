@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   closeSync,
@@ -14,12 +13,15 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { presentedFileRead } from '../../../agent/test/fixtures/presented-file-read';
 import { createClient, type ExtensionCommandRequest, type ForkSessionRequest } from '../../src';
@@ -40,7 +42,7 @@ async function until<T>(read: () => Promise<T>, match: (value: T) => boolean) {
     const v = await read();
     if (match(v)) return v;
     if (Date.now() > deadline) throw Error('actual_file_recovery_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 
@@ -58,7 +60,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
   privateDirectory(profile.profilePath);
   const providerBodies: unknown[] = [],
     steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -163,12 +165,12 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
     }),
   );
   const { buildTerminalBundle } = (await import(
-    pathToFileURL(join(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')).href
+    pathToFileURL(join(import.meta.dirname, '../../../../scripts/release/terminal-bundle.ts')).href
   )) as {
     buildTerminalBundle(input: {
       destination: string;
       repositoryRoot: string;
-      bunExecutable: string;
+      runtimeExecutable: string;
     }): Promise<{
       buildId: string;
       artifact: {
@@ -183,8 +185,8 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
   privateDirectory(artifactParent);
   const built = await buildTerminalBundle({
     destination: join(artifactParent, 'candidate'),
-    repositoryRoot: realpathSync(join(import.meta.dir, '../../../..')),
-    bunExecutable: process.execPath,
+    repositoryRoot: realpathSync(join(import.meta.dirname, '../../../..')),
+    runtimeExecutable: process.execPath,
   });
   const launch = (p: ReturnType<typeof selectProfile>, instanceId: string) =>
     launchPairedService({

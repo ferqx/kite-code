@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -15,6 +15,7 @@ import { startDevelopmentWeb } from '@kite-ai/service/development-web';
 import { mountWebPage } from '@kite-ai/web';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -27,7 +28,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() >= deadline) throw Error('restored_web_dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -88,7 +89,7 @@ test('actual restored Web page reads original plain and sealed full Model bodies
   });
   let service: Awaited<ReturnType<typeof startService>> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let browser: ReturnType<typeof createBrowserClient> | undefined;
   let dom: JSDOM | undefined;
   let handle: Awaited<ReturnType<typeof mountWebPage>> | undefined;
@@ -247,7 +248,7 @@ test('actual restored Web page reads original plain and sealed full Model bodies
           if (target.includes('/model-output') && outputBarrier) await outputBarrier;
           return originalFetch(url, init);
         },
-        { preconnect: originalFetch.preconnect },
+        {},
       );
       client = createClient({
         endpoint: service.endpoint,
@@ -257,7 +258,7 @@ test('actual restored Web page reads original plain and sealed full Model bodies
       });
       await client.connect();
       expect(client.serverInfo?.storeId).toBe(restored.storeId);
-      gateway = startDevelopmentWeb({ admittedClient: client });
+      gateway = await startDevelopmentWeb({ admittedClient: client });
       const document = await fetch(gateway.endpoint);
       await document.body?.cancel();
       const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -272,7 +273,7 @@ test('actual restored Web page reads original plain and sealed full Model bodies
             headers.set('origin', endpoint);
             return fetch(url, { ...init, headers });
           },
-          { preconnect: fetch.preconnect },
+          {},
         ),
       });
       await browser.connect();

@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,13 +14,33 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { spawnNodePairedChild } from '@kite-ai/service/node-process';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { fixtureNodeExecutable } from '../../../apps/service/test/fixtures/node-service-process';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { runtimeBuildOptions } from '../../../packages/agent/scripts/runtime-build-options';
 import { mcpStdioGuardianAsset } from '../../../packages/agent/src/mcp/stdio-port';
 import { buildDevelopmentService } from '../../../scripts/development/desktop-reload';
+import { preparedDevelopmentNode } from '../../../scripts/release/node-inputs';
+import { build as buildFixture } from '../../../scripts/tooling/bun-build';
+import { spawnSync as runFixtureProcess } from '../../../scripts/tooling/process';
 
-const repository = realpathSync(join(import.meta.dir, '../../..'));
+const repository = realpathSync(join(import.meta.dirname, '../../..'));
 const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+
+function readBrowserLocators(executable: string, entrypoint: string) {
+  const implementation = new URL('./implementation.js', pathToFileURL(entrypoint).href);
+  const result = runFixtureProcess([
+    executable,
+    '--no-global-search-paths',
+    '--input-type=module',
+    '--eval',
+    `await import(${JSON.stringify(pathToFileURL(entrypoint).href)});const {locate,locateWorker,marker}=await import(${JSON.stringify(implementation.href)});console.log(JSON.stringify({guardian:locate(),worker:locateWorker(),marker}));`,
+  ]);
+  if (result.exitCode !== 0) throw Error(result.stderr.toString());
+  return JSON.parse(result.stdout.toString());
+}
 
 test('development Browser guardian and executor assets share the fresh Service closure and failures cannot reuse an earlier build', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite dev browser \u96ea-')));
@@ -32,12 +52,12 @@ test('development Browser guardian and executor assets share the fresh Service c
       join(dependency, 'package.json'),
       JSON.stringify({
         type: 'module',
-        exports: { './mcp': './mcp.ts', './browser/executor': './executor.ts' },
+        exports: { './mcp': './mcp.js', './browser/executor': './executor.js' },
       }),
     );
-    writeFileSync(join(dependency, 'mcp.ts'), "export const marker = 'source-MCP';");
+    writeFileSync(join(dependency, 'mcp.js'), "export const marker = 'source-MCP';");
     writeFileSync(
-      join(dependency, 'executor.ts'),
+      join(dependency, 'executor.js'),
       "export function browserExecutorWorkerAsset(){return 'stale-root-dist-worker';}",
     );
     const service = join(root, 'apps/service/src'),
@@ -46,10 +66,21 @@ test('development Browser guardian and executor assets share the fresh Service c
     mkdirSync(service, { recursive: true });
     mkdirSync(mcp, { recursive: true });
     mkdirSync(executor, { recursive: true });
+    const native = join(root, 'packages/agent/dist');
+    mkdirSync(native, { recursive: true });
+    copyFileSync(
+      join(repository, 'packages/agent/dist/runtime-native.node'),
+      join(native, 'runtime-native.node'),
+    );
     writeFileSync(
       join(service, 'main.ts'),
       "export {locate,locateWorker} from './browser-configuration'; export {marker} from '@kite-ai/agent/mcp';",
     );
+    for (const entry of ['macos-model-keychain', 'linux-model-keyring'])
+      writeFileSync(
+        join(service, `${entry}.ts`),
+        'export const modelKeyringOperation = () => null;',
+      );
     writeFileSync(
       join(service, 'browser-configuration.ts'),
       "export {mcpStdioGuardianAsset as locate} from '@kite-ai/agent/mcp'; export {browserExecutorWorkerAsset as locateWorker} from '@kite-ai/agent/browser/executor';",
@@ -71,34 +102,38 @@ test('development Browser guardian and executor assets share the fresh Service c
       "export {browserExecutorWorkerAsset} from './assets';",
     );
     writeFileSync(join(executor, 'worker.ts'), 'export const revision = 1;');
+    const executable = fixtureNodeExecutable();
     const output = join(root, 'output'),
-      first = await buildDevelopmentService(root, output);
+      first = await buildDevelopmentService(root, output, executable);
     const firstGuardian = join(output, 'services', first.id, 'stdio-guardian.js'),
       original = readFileSync(firstGuardian);
     const firstEntry = join(output, 'services', first.id, 'main.js');
-    const loaded = await import(pathToFileURL(firstEntry).href);
-    expect(loaded.locate()).toBe(firstGuardian);
-    const firstWorker = join(output, 'services', first.id, 'tools/browser/executor/worker.js');
+    const loaded = readBrowserLocators(executable, firstEntry);
+    expect(loaded.guardian).toBe(firstGuardian);
+    const firstWorker = join(output, 'services', first.id, 'tools/browser/executor/worker.mjs');
     expect(existsSync(firstWorker)).toBe(true);
-    expect(loaded.locateWorker()).toBe(firstWorker);
+    expect(loaded.worker).toBe(firstWorker);
     const originalWorker = readFileSync(firstWorker);
     expect(loaded.marker).toBe('source-MCP');
-    expect(readFileSync(firstEntry, 'utf8')).toContain('@kite-ai/agent/mcp');
+    expect(readFileSync(join(output, 'services', first.id, 'implementation.js'), 'utf8')).toContain(
+      'node_modules/@kite-ai/agent/mcp.js',
+    );
     writeFileSync(join(mcp, 'stdio-guardian.ts'), 'export const revision = 2;');
     writeFileSync(join(executor, 'worker.ts'), 'export const revision = 2;');
-    const second = await buildDevelopmentService(root, output),
+    const second = await buildDevelopmentService(root, output, executable),
       secondGuardian = join(output, 'services', second.id, 'stdio-guardian.js');
     expect(sha(secondGuardian)).not.toBe(sha(firstGuardian));
-    const secondWorker = join(output, 'services', second.id, 'tools/browser/executor/worker.js');
+    const secondWorker = join(output, 'services', second.id, 'tools/browser/executor/worker.mjs');
     expect(sha(secondWorker)).not.toBe(sha(firstWorker));
     expect(readFileSync(firstWorker)).toEqual(originalWorker);
-    const reloaded = await import(
-      pathToFileURL(join(output, 'services', second.id, 'main.js')).href
+    const reloaded = readBrowserLocators(
+      executable,
+      join(output, 'services', second.id, 'main.js'),
     );
-    expect(reloaded.locateWorker()).toBe(secondWorker);
+    expect(reloaded.worker).toBe(secondWorker);
     const currentWorker = readFileSync(secondWorker);
     writeFileSync(join(executor, 'worker.ts'), 'export const revision = ;');
-    await expect(buildDevelopmentService(root, output)).rejects.toThrow(
+    await expect(buildDevelopmentService(root, output, executable)).rejects.toThrow(
       'development_browser_assets_build_failed',
     );
     expect(readFileSync(firstWorker)).toEqual(originalWorker);
@@ -107,7 +142,7 @@ test('development Browser guardian and executor assets share the fresh Service c
     expect(second.sourceSha256).not.toBe(first.sourceSha256);
     expect(readFileSync(firstGuardian)).toEqual(original);
     writeFileSync(join(mcp, 'stdio-guardian.ts'), 'export const revision = ;');
-    await expect(buildDevelopmentService(root, output)).rejects.toThrow(
+    await expect(buildDevelopmentService(root, output, executable)).rejects.toThrow(
       'development_browser_assets_build_failed',
     );
     expect(readFileSync(firstGuardian)).toEqual(original);
@@ -121,24 +156,31 @@ test('actual development Service builds the current browser executor worker besi
   try {
     const built = await buildDevelopmentService(repository, output);
     const directory = join(output, 'services', built.id),
-      worker = join(directory, 'tools/browser/executor/worker.js');
+      worker = join(directory, 'tools/browser/executor/worker.mjs');
     expect(readFileSync(worker).length).toBeGreaterThan(1000);
     // Independent same-source compilation proves this version did not copy the
     // checkout's pre-existing dist worker. Nothing executes the generated worker.
-    const expected = await Bun.build({
+    const comparison = join(output, 'comparison');
+    const expected = await buildFixture({
       entrypoints: [join(repository, 'packages/agent/src/tools/browser/executor/worker.ts')],
-      target: 'bun',
-      naming: 'worker.js',
+      ...runtimeBuildOptions(
+        join(directory, 'tools/browser/executor'),
+        join(repository, 'packages/agent/dist'),
+      ),
+      naming: 'worker.mjs',
+      outdir: comparison,
+      write: false,
     });
     expect(expected.success).toBe(true);
     expect(expected.outputs).toHaveLength(1);
+    expect(existsSync(comparison)).toBe(false);
     expect(sha(worker)).toBe(
       createHash('sha256')
         .update(Buffer.from(await expected.outputs[0]!.arrayBuffer()))
         .digest('hex'),
     );
-    const main = readFileSync(join(directory, 'main.js'), 'utf8');
-    expect(main).toContain('./tools/browser/executor/worker.js');
+    const main = readFileSync(join(directory, 'implementation.js'), 'utf8');
+    expect(main).toContain('./tools/browser/executor/worker.mjs');
     expect(main).not.toMatch(/from ["']@kite-ai\/agent\/browser\/executor["']/);
   } finally {
     rmSync(output, { recursive: true, force: true });
@@ -178,22 +220,17 @@ test.skipIf(
         mkdirSync(workspace, { recursive: true });
         service = await launchPairedService({
           entrypoint: entry,
-          executable: realpathSync(process.execPath),
+          executable: preparedDevelopmentNode(repository),
           buildId: `development-${built.sha256}`,
           instanceId: `development-browser-${label}`,
           apiMajor: 1,
           profile,
           spawnChild: (command, { env }) => {
-            const isolated: NodeJS.ProcessEnv = { ...env, ...user.homeEnvironment };
+            const isolated: Record<string, string> = { ...env, ...user.homeEnvironment };
             delete isolated.CODEX_HOME;
-            return Bun.spawn([...command], {
-              stdin: 'pipe',
-              stdout: 'pipe',
-              stderr: 'pipe',
-              env: isolated,
-            });
+            return spawnNodePairedChild(command, { env: isolated });
           },
-          requiredCapabilities: ['commands', 'extension_queries'],
+          requiredCapabilities: ['commands', 'extension_queries', 'trace_extensions'],
         });
         const client = service.client,
           expectedStoreId = service.bootstrap.storeId!;

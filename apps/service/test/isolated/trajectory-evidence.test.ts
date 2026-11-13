@@ -1,12 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient, readTrajectoryEvidence } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createTrajectorySource } from '../../src/trajectory';

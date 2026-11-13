@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,6 +5,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   createDesktopShellEnvironments,
@@ -161,7 +161,10 @@ test('Shell settings retry failed preparation without writing a preference or re
   const profile = selectProfile({ dataRoot: root, profile: 'shell' });
   privateDirectory(profile.profilePath);
   const store = await openSqliteStore(profile);
-  const ready = Promise.withResolvers<void>();
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   try {
     const storeId = (await store.getMetadata()).storeId;
     const failure = Error('windows_shell_asset_changed');
@@ -173,7 +176,7 @@ test('Shell settings retry failed preparation without writing a preference or re
         return undefined;
       }
       if (++powerShellLoads === 1) throw failure;
-      await ready.promise;
+      await ready;
       return undefined;
     });
     const settings = environments.settings(store);
@@ -183,7 +186,7 @@ test('Shell settings retry failed preparation without writing a preference or re
 
     const pending = Promise.all([settings.read(storeId), settings.read(storeId)]);
     await store.saveDesktopShellPreference(storeId, 'powershell');
-    ready.resolve();
+    release();
     const [first, second] = await pending;
     expect(first).toMatchObject({ preference: 'powershell', powerShellAvailable: false });
     expect(second).toEqual(first);
@@ -193,7 +196,7 @@ test('Shell settings retry failed preparation without writing a preference or re
     expect(await store.readDesktopShellPreference(storeId)).toBe('auto');
     expect(powerShellLoads).toBe(2);
   } finally {
-    ready.resolve();
+    release();
     await store.close();
     rmSync(root, { recursive: true, force: true });
   }

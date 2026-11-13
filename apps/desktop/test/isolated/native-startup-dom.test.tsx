@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeDirectory,
@@ -152,7 +152,7 @@ test('retained startup hides the entire product until admitted attach and the co
     );
     expect(f.host.textContent).not.toContain('正在准备');
     expect(f.host.querySelector('.shell')).toBeNull();
-    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
+    expect(f.host.querySelector('textarea.prompt-editor')).toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     expect(f.host.querySelector('[role="menubar"]')).toBeNull();
     await act(async () => {
@@ -194,29 +194,32 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.host.querySelector('.connection')).toBeNull();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
     expect(f.host.textContent).not.toContain('本地 Agent');
-    expect(f.host.textContent).not.toContain('没有已启用且配置可用的默认模型，请选择模型。');
     const button = (label: string) =>
       [...f.host.querySelectorAll('button')].find(
         (entry) => entry.textContent === label || entry.getAttribute('aria-label') === label,
       );
+    const expectUnselectedModel = () => {
+      expect(button('模型：选择模型')?.textContent).toBe('选择模型');
+      expect(f.host.textContent).not.toContain('请选择模型。');
+      expect(button('发送首条消息')?.disabled).toBe(true);
+    };
     expect(button('会话工具')).toBeUndefined();
     expect(button('设置')).toBeUndefined();
     expect(button('重新读取目录')).toBeUndefined();
     expect(button('用户菜单')).toBeDefined();
-    expect(button('发送首条消息')?.disabled).toBe(true);
+    expectUnselectedModel();
     const ordinaryCalls = [...f.calls];
     await f.render(true, true);
     expect(button('会话工具')).toBeDefined();
     expect(button('设置')).toBeDefined();
     expect(button('重新读取目录')).toBeDefined();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).not.toBeNull();
-    expect(f.host.textContent).toContain('请选择模型。');
-    expect(button('发送首条消息')?.disabled).toBe(true);
+    expectUnselectedModel();
     expect(f.calls).toEqual(ordinaryCalls);
     await f.render(false, true);
     expect(f.host.querySelector('.connection')).toBeNull();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
-    expect(f.host.textContent).not.toContain('请选择模型。');
+    expectUnselectedModel();
     expect(f.calls).toEqual(ordinaryCalls);
     expect(
       f.calls.every((request) =>

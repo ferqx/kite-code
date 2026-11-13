@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createCanvas } from '@napi-rs/canvas';
+import { expect, test } from '#kite-test';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,

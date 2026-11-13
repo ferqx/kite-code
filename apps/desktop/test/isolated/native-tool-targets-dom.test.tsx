@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import type { Execution, Message, Run } from '@kite-ai/client';
 import { type Message as DesktopMessage, ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { nativeLiveShellInputFact, nativeToolMessageFact } from '../../electron/tool-message-fact';
 import {
   completeNativeToolMessages,

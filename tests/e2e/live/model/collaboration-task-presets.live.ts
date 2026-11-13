@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -73,7 +74,7 @@ export async function runLiveTaskPreset(options: Options) {
       const v = await read();
       if (v !== undefined) return v;
       if (Date.now() >= deadline) throw new Boundary('original_600second_branch_not_reached');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
   }
   try {

@@ -1,17 +1,18 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { mcpCanonical } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src/index';
 import { createMcpSourceConfiguration } from '../../src/mcp-source-configuration';
@@ -24,7 +25,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const v = await read();
     if (v !== null) return v;
     if (Date.now() > end) throw Error('source_result_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(

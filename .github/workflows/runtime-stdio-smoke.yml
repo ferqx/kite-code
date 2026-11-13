@@ -20,6 +20,10 @@ on:
       - "tests/isolated/scripts/ci-logged-shell.test.ts"
       - "package.json"
       - "bun.lock"
+      - "bunfig.toml"
+      - "scripts/tooling/**"
+      - "scripts/run-test-files.ts"
+      - "scripts/development/node-loader.mjs"
       - ".github/workflows/runtime-stdio-smoke.yml"
   workflow_dispatch:
 
@@ -48,21 +52,27 @@ jobs:
           persist-credentials: false
           ref: ${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}
           repository: ${{ env.KITE_CANDIDATE_REPOSITORY }}
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: '26.13.1'
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.4
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Linux'
         name: Prepare Linux native MCP dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential pkg-config libffi-dev bubblewrap
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
-        run: bun run scripts/release/prepare-windows-native-ci.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts
+      - name: Build the Node Agent runtime
+        run: bun --cwd=packages/agent run build
       - name: Check native qualification log and exit propagation
-        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/runtime-stdio-shell.log "{0}"
-        run: bun test --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts
+        shell: node --import ./scripts/tooling/register.mjs scripts/ci/logged-shell.ts --log=dist/unified-evidence/runtime-stdio-shell.log "{0}"
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts
       - run: bun run test:runtime:stdio
-        shell: bun run scripts/ci/logged-shell.ts --log=dist/unified-evidence/runtime-stdio.log "{0}"
+        shell: node --import ./scripts/tooling/register.mjs scripts/ci/logged-shell.ts --log=dist/unified-evidence/runtime-stdio.log "{0}"
       - name: Preserve complete native MCP and paired lifecycle logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

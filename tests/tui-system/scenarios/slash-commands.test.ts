@@ -6,10 +6,10 @@
  * behavior independently filterable and repeatable.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { fixedTuiCommands } from '../../../packages/ui/src/tui/commands';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -30,11 +30,11 @@ const BUILTIN_COMMAND_COUNT = fixedTuiCommands.length;
 
 describe('TUI PTY System — Slash Commands', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({ configOverrides: { thinkingMode: 'max' } });
     // Keep this journey's original starting theme so Down selects purple.
     const preferencePath = join(workspace.profilePath, 'ui', 'preferences.jsonc');

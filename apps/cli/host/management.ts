@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
@@ -413,7 +414,7 @@ export async function runSelectedManagement(input: {
       if (saved.status === 'failed') return 1;
       if (saved.status === 'applied') return 0;
       if (saved.status === 'delete_requested') return 2; // durable request is not confirmed group stop
-      await Bun.sleep(100);
+      await sleep(100);
       saved =
         'intent' in saved
           ? await lookupManagementOutcome(saved.intent, options)

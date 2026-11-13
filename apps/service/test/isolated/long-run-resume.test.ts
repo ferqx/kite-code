@@ -1,11 +1,14 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { semanticDigest } from '../../../../packages/agent/src/json';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import {
@@ -21,7 +24,7 @@ async function until(check: () => Promise<boolean>, milliseconds: number) {
   const deadline = performance.now() + milliseconds;
   while (!(await check())) {
     if (performance.now() >= deadline) throw Error('long_run_resume_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function closeWithin<T>(operation: Promise<T>, deadline: number): Promise<T> {
@@ -58,9 +61,10 @@ test('public cold resume preserves over 4096 genuine original executions and dis
   const ledger = join(root, 'ledger');
   writeFileSync(ledger, '');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('../fixtures/long-run-resume-child.ts', import.meta.url)),
       root,
     ],

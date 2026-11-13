@@ -13,6 +13,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -128,7 +129,7 @@ export async function runLivePermissionBoundaries(options: Options) {
           return value;
         }
         if (Date.now() >= end) throw new Boundary('branch_not_hit', stage);
-        await Bun.sleep(30);
+        await fixtureDelay(30);
       }
     };
     try {
@@ -801,7 +802,7 @@ if (import.meta.main) {
     caseId,
     date: new Date().toISOString(),
     platform: process.platform,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     code: liveCodeEvidence(),
     requestLimit: 40,
     timeoutMs: 600_000,

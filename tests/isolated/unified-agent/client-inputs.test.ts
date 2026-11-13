@@ -1,17 +1,19 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { NativeCallerJournal } from '../../../apps/desktop/electron/caller-journal';
 import { NativeCaller } from '../../../apps/desktop/electron/native-caller';
 import type { NativeEvent, NativeState } from '../../../apps/desktop/src/native-bridge';
 import { memoryPrivateData } from '../../../apps/desktop/test/private-data.fixture';
 import { startService } from '../../../apps/service/src';
 import { createClient, readOrdinaryCommandApplication } from '../../../packages/client/src';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 
 async function until<T>(read: () => Promise<T>, valid: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5000;
@@ -19,7 +21,7 @@ async function until<T>(read: () => Promise<T>, valid: (value: T) => boolean): P
     const value = await read();
     if (valid(value)) return value;
     if (Date.now() > deadline) throw new Error(`Input deadline: ${JSON.stringify(value)}`);
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 async function code(work: Promise<unknown>, expected: string) {
@@ -336,7 +338,7 @@ test('guidance cannot abort or overtake any foreground sibling; the next Model s
       targetRunId: f.run.id,
       contextSelectionId: f.contextSelectionId,
     });
-    await Bun.sleep(50);
+    await fixtureDelay(50);
     expect(f.model.requests).toHaveLength(1);
     expect(signals.every((signal) => !signal.aborted)).toBe(true);
     expect((await f.client.getCommand('during-tools')).status).toBe('accepted');
@@ -418,7 +420,7 @@ test('queue-to-guidance is atomic, preserves exact text, rejects stale/changed i
 test('a lost queue-to-guidance HTTP receipt is recovered by its original durable caller ID without another POST or duplicate Run', async () => {
   const f = await fixture(true);
   let posts = 0;
-  const relay = Bun.serve({
+  const relay = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

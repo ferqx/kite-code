@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { AgentError, createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createFileTools, createWorkspaceFiles, type FileChangePreview } from '../../../src/files';

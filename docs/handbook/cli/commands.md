@@ -99,7 +99,7 @@ Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 也按�
 当前范围包括SQLite与被引用不可变媒体，并分别采集实际profile的config.jsonc原字节、Desktop私有UI一致副本、真实TUI未提交文本文件和终端显示偏好 `ui/preferences.jsonc` 原字节；每项记录存在/缺失、采集时间与摘要，不能当作跨介质同一瞬间原子。原配置可能含敏感内容，备份按私有0600保存，不解析vault或自动脱敏。恢复发布备份中存在的这些文件，保留原草稿/创建身份，不重放旧意图。credentials/vault及未采集宿主私有文件仍排除，旧当前字节保存在保留目录。TUI草稿保留原Store/Workspace/Session且不自动发送或改绑，JSON保留 `coverage.profileComplete:false`；本命令尚不满足整个W19或三平台发行资格。实现与实际临时制品验证见 [CLI owner](../../../apps/cli/README.md#开发-cli-离线维护)。
 
 
-Windows Bun x64 的开发维护和安装版标准命令源码已接入同一备份、检查、恢复、GC及明确 journal 决定；私有权限由当前用户 SID/DACL 核验，既有不安全文件会拒绝且不修权限。正式安装版要求通过 `kite.exe` 核完整制品后执行，原生 Windows 安装及维护流程尚未验收；macOS 或 Linux 结果不代表 Windows 通过。准确实现与平台范围见[维护 owner](../../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
+Windows x64 的开发维护和安装版标准命令源码已接入同一备份、检查、恢复、GC及明确 journal 决定；私有权限由当前用户 SID/DACL 核验，既有不安全文件会拒绝且不修权限。正式安装版要求通过 `kite.exe` 核完整制品后执行，原生 Windows 安装及维护流程尚未验收；macOS 或 Linux 结果不代表 Windows 通过。准确实现与平台范围见[维护 owner](../../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
 
 ## 通用开发入口核实原 Job
 
@@ -136,7 +136,7 @@ Windows Bun x64 的开发维护和安装版标准命令源码已接入同一备�
 
 ## 安装 Native 与标准命令恢复
 
-独立 Terminal 安装的标准前门可以显式登记 Native。登记后实际 CLI/TUI、Bun 与配套 Service 均来自完整 Native；源码或明确 candidate 选择不参与登记。Native 卸载以原 nonce 撤销自己仍拥有的登记，独立前门恢复 Terminal，不改变业务 Profile 或当前 Run。若父 shell 缓存的是已删除 Native-bin 路径，执行 `hash -r` 或使用新 shell 后恢复 PATH 查找。安装器不修改 PATH/RC，也不能清除父 shell 缓存。当前操作及平台限制见[Native owner](../../../apps/desktop/docs/native-release.md)。
+独立 Terminal 安装的标准前门可以显式登记 Native。登记后实际 CLI/TUI、Node 与配套 Service 均来自完整 Native；旧候选按原运行时启动。源码或明确 candidate 选择不参与登记。Native 卸载以原 nonce 撤销自己仍拥有的登记，独立前门恢复 Terminal，不改变业务 Profile 或当前 Run。若父 shell 缓存的是已删除 Native-bin 路径，执行 `hash -r` 或使用新 shell 后恢复 PATH 查找。安装器不修改 PATH/RC，也不能清除父 shell 缓存。当前操作及平台限制见[Native owner](../../../apps/desktop/docs/native-release.md)。
 
 独立 Terminal 正常卸载后，Native 可继续通过自己的入口使用和升级。省略 `--cli-prefix` 的升级不会重建已删除的 Terminal 或自动重新登记。明确指定的登记目标仍必须是合法安装；重新使用独立前门时，先安装 Terminal，再明确登记。
 

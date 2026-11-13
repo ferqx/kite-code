@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -18,8 +18,12 @@ import { startService } from '../../../../apps/service/src';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../../../apps/service/src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
 import { readModelExecutionId } from '../../../../packages/agent/src/model-identifier';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import { spawnSync as runFixtureProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../fixtures/test-filesystem';
 import { liveModelSelection, liveReasoningEffort } from './approval-feedback-fixture';
 import { liveCodeEvidence } from './live-code-evidence';
@@ -153,7 +157,7 @@ const report: Record<string, unknown> = {
   transportQualification:
     'test-injected configured-model SDK adapters; not default SDK latency qualification',
   platform: process.platform,
-  bun: Bun.version,
+  node: process.versions.node,
   startedAt: new Date().toISOString(),
   selectedScenario: selectedScenario ?? (extended ? 'extended' : 'all'),
   requestLimit: null,
@@ -195,7 +199,7 @@ try {
   writeFileSync(join(workspace, 'skill/reference.txt'), `skill-${marker}\n`);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'live-all-tools' });
   privateDirectory(profile.profilePath);
-  const remote = Bun.serve({
+  const remote = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -288,7 +292,7 @@ try {
   });
   cleanup.push({ name: 'mcp_server', close: () => remote.stop(true) });
   let webRequests = 0;
-  const web = Bun.serve({
+  const web = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -454,15 +458,18 @@ try {
   const assets = process.platform === 'win32' ? await windowsShellFixture() : undefined;
   let supervisorPath = assets?.runner;
   if (!supervisorPath) {
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [
         join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
       outdir: join(root, 'assets'),
-      target: 'bun',
+      ...runtimeBuildOptions(
+        join(root, 'assets'),
+        resolve(import.meta.dirname, '../../../../packages/agent/dist'),
+      ),
       naming: 'shell-supervisor.js',
     });
     check(built.success && built.outputs[0], 'native_supervisor_build_failed');
@@ -506,7 +513,7 @@ try {
         ),
       ).env,
       supervisorPath,
-      bunExecutable: process.execPath,
+      runtimeExecutable: process.execPath,
       shellExecutable: assets?.shell ?? '/bin/sh',
       ...(assets
         ? {
@@ -1011,13 +1018,13 @@ try {
       GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
       GIT_TERMINAL_PROMPT: '0',
     };
-    const initialized = Bun.spawnSync([git, 'init', '-q', workspace], {
+    const initialized = runFixtureProcess([git, 'init', '-q', workspace], {
       env: gitEnvironment,
       stdout: 'pipe',
       stderr: 'pipe',
     });
     check(initialized.exitCode === 0, 'owned_git_init_failed');
-    const committed = Bun.spawnSync(
+    const committed = runFixtureProcess(
       [
         git,
         '-C',

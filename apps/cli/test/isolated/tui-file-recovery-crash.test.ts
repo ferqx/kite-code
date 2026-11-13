@@ -1,13 +1,13 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { compileFileRecoveryTUI, fileRecoveryProfile } from '../fixtures/file-recovery-profile';
 import { runFileRecoveryPTY } from '../fixtures/file-recovery-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 for (const window of ['before_post', 'between_legs'] as const)
   test(`80x24 compiled TUI SIGKILL ${window} reopens original journal and cold lookup only GET`, async () => {
     const f = await fileRecoveryProfile();
@@ -38,7 +38,7 @@ globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{
     appendFileSync(${JSON.stringify(observations)},JSON.stringify({request,observed,status:response.status,response:await response.clone().json()})+'\\n');
   }
   return response;
-},{preconnect:actual.preconnect});
+});
 import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};
 await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'service.pid'))},String(pid),{mode:0o600})});`,
       );

@@ -1,12 +1,14 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { CommandRecord, SessionView, StoreMetadata } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
-const childEntry = resolve(import.meta.dir, '../../fixtures/unified-agent/process.ts');
+const childEntry = resolve(import.meta.dirname, '../../fixtures/unified-agent/process.ts');
 const extensionEntry = resolve(
-  import.meta.dir,
+  import.meta.dirname,
   '../../fixtures/extensions/counted-tool/src/index.ts',
 );
 interface Evidence {
@@ -24,7 +26,7 @@ async function processEvidence(
   root: string,
   extensionPath: string,
 ): Promise<Evidence> {
-  const child = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
       process.execPath,
       childEntry,
@@ -63,9 +65,9 @@ async function processEvidence(
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-unified-p1-'));
-  const build = await Bun.build({
+  const build = await buildFixture({
     entrypoints: [extensionEntry],
-    target: 'bun',
+    target: 'node',
     outdir: join(root, 'extension'),
   });
   if (!build.success) {

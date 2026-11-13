@@ -1,5 +1,6 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -258,6 +259,6 @@ if (import.meta.main) {
       throw Error(
         `current_service_child_boundary_missing:${JSON.stringify({ roots: root.runs.map((row) => [row.status, row.reason]), children: child?.runs.map((row) => [row.status, row.reason]), effect, cards: pending.interactions.length })}`,
       );
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }

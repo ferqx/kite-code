@@ -1,6 +1,6 @@
-export {};
+import { spawn as spawnFixtureProcess } from '../../scripts/tooling/process';
 
-const nested = Bun.spawn(
+const nested = spawnFixtureProcess(
   ['/bin/sh', '-c', 'sleep 30 & grandchild=$!; printf "%s\\n" "$grandchild"; wait'],
   {
     detached: true,

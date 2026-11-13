@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { projectTrajectory, trajectoryEventSchema } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import {
   loopModelLabel,
   loopPartSnippet,

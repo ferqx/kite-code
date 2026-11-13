@@ -1,6 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type { QueryResponse } from '../src/generated/api';
 import {
   createClient,
@@ -118,7 +120,7 @@ async function wire(data = fixture()) {
     [];
   const profile = { dataRoot: '/owned-fixture', name: 'mcp-tools', accessKey: 'fixture-key' };
   let releaseLate: (() => void) | undefined;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -282,7 +284,7 @@ async function until(check: () => boolean) {
   const end = Date.now() + 1000;
   while (!check()) {
     if (Date.now() >= end) throw Error('owned_http_observation_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 

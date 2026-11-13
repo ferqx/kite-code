@@ -1,20 +1,30 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
 import {
   parseWindowsNativeInstallationMarker,
   windowsNativeFrontdoorNames,
 } from '../../../apps/cli/host/windows-native-installation';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
 const modulePath = (path: string) => fileURLToPath(new URL(`../../../${path}`, import.meta.url));
 function subprocess(code: string) {
-  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  const child = runFixture(code);
   if (child.error || child.status !== 0)
     process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
   expect(child.error).toBeUndefined();
   expect(child.status).toBe(0);
   expect(child.stderr).toBe('');
   expect(child.stdout).toBe('owned-close-confirmed\n');
+}
+
+function runFixture(code: string) {
+  const [node, ...args] = testNodeCommand('--disable-warning=ExperimentalWarning', [
+    '--input-type=module',
+    '-e',
+    code,
+  ]);
+  return spawnSync(node!, args, { encoding: 'utf8', timeout: 4000 });
 }
 
 // These isolated mocks observe actual public-owner control flow, not Windows native qualification.
@@ -36,7 +46,7 @@ reportSetupFailure(Object.assign(Error('private file path'),{code:'native_window
 reportSetupFailure(Error('var bundled = private data'));
 reportSetupFailure(Error('windows_installation_removal_unknown'));
 `;
-  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  const child = runFixture(code);
   expect(child.status).toBe(0);
   expect(child.stderr.trim().split(/\r?\n/u)).toEqual([
     'KITE_SETUP_FAILURE native_windows_candidate_in_use',
@@ -55,14 +65,15 @@ test('Windows Native completed publication with unknown original HANDLE close re
 
 function installerScript(scenario: 'selection' | 'removal' | 'registration' | 'move' | 'busy') {
   return `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import * as fileSystem from 'node:fs';
+import { posix, win32 } from 'node:path';
+const { default: _fsDefault, ...fs } = fileSystem;
 Object.defineProperty(process, 'platform', { value: 'win32' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
-mock.module('node:path', () => ({ ...path, ...path.posix }));
+mock.module('node:path', () => ({ ...posix, posix, win32 }));
 const { WindowsInstallationRemovalAcquireUnknownError } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))});
 const { LockBusyError } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))});
 const a = 'a'.repeat(64), b = 'b'.repeat(64);

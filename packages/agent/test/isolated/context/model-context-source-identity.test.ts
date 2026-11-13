@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { ContextSource } from '../../../src/context';
@@ -144,7 +145,7 @@ for (const placement of ['prefix', 'after_history'] as const)
       const deadline = Date.now() + 6000;
       while (tools !== 1) {
         expect(Date.now()).toBeLessThan(deadline);
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       const run = (await store.getView('s')).runs[0]!;
       for (const [id, content] of [

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -11,12 +9,15 @@ import {
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type Permissions, type ToolDefinition } from '@kite-ai/agent/extensions';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 
 async function assertDirectInput(
@@ -210,7 +211,7 @@ test('HTTP message change pages and generated SDK reproduce saved public history
     let after = await client.getView('session');
     while (!after.runs.some((run) => run.status === 'completed')) {
       if (Date.now() > deadline) throw Error('message_change_completion_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       after = await client.getView('session');
     }
     const query = {
@@ -270,6 +271,40 @@ function rawHostStatus(endpoint: string, token: string): Promise<number> {
     );
   });
 }
+
+test('real HTTP sends the oversized rejection and closes a stalled upload', async () => {
+  const data = await fixture();
+  const url = new URL(data.service.endpoint);
+  const socket = createConnection({ host: url.hostname, port: Number(url.port) });
+  try {
+    const status = await new Promise<number>((resolve, reject) => {
+      let response = '';
+      socket.setTimeout(5000, () => socket.destroy(Error('Rejected upload stayed open')));
+      socket.on('error', reject);
+      socket.on('data', (chunk) => {
+        response += chunk.toString();
+      });
+      socket.on('close', () => resolve(Number(response.split(' ')[1])));
+      socket.on('connect', () =>
+        socket.write(
+          [
+            'POST /v1/workspaces HTTP/1.1',
+            `Host: ${url.host}`,
+            `Authorization: Bearer ${data.service.bootstrap.token}`,
+            'Content-Length: 1048577',
+            '',
+            '',
+          ].join('\r\n'),
+        ),
+      );
+    });
+    expect(status).toBe(413);
+    expect((await data.store.getMetadata()).lastChangeCursor).toBe(data.startup.lastChangeCursor);
+  } finally {
+    socket.destroy();
+    await data.close();
+  }
+});
 
 test('real HTTP exposes projected facts, distinguishes initialization writes and rejects invalid business requests locally', async () => {
   const data = await fixture();

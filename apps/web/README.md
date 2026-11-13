@@ -36,7 +36,7 @@ DOM 测试共用私有 [global descriptor 夹具](test/globals.fixture.ts)安装
 
 [制品测试](test/isolated/assets.test.ts)实际执行完整 build，将 assets module 复制到没有源码的临时目录后动态 import，按 manifest 核对固定路径、hash、metadata，并拒绝额外路径、内容损坏及重复项。构建不连接 Provider，不携带 cookie、Native token 或配置路径。Service library 不必依赖 Web runtime；Root 的显式开发入口决定何时 build/load 和装配。
 
-验证入口：`bun run --cwd apps/web typecheck`、`bun run --cwd apps/web build`、`bun test apps/web/test`。新源文件加入[依赖边界检查](../../scripts/check-unified-agent-boundary.ts)、统一测试与 workspace build/typecheck。正式入口装配本包；仓库中的 `apps/kite-web` 旧源码仍待完整迁移审查与最终退役，不能把保留目录当作现行正式启动路由。
+验证入口：`bun --cwd=apps/web run typecheck`、`bun --cwd=apps/web run build`、`bun --cwd=apps/web run test`。新源文件加入[依赖边界检查](../../scripts/check-unified-agent-boundary.ts)、统一测试与 workspace build/typecheck。正式入口装配本包；仓库中的 `apps/kite-web` 旧源码仍待完整迁移审查与最终退役，不能把保留目录当作现行正式启动路由。
 
 2026-10-02 在 macOS 的实际 Codex In-app Browser 中用[本机预览夹具](../../tests/fixtures/unified-agent/web-preview.ts)复核了编译资产、真实 Service/SQLite、Cookie 准入、目录与直接会话链接、有效 GFM 表格与无脚本/自动图片、完整正文复制和 Cmd+A 的历史范围。A→B→A 恢复原 scrollTop，追加一条真实消息并显式刷新后仍保留该位置；原 Context 与 Job 三种输出均按需显示。首次现场发现运行时 AJV 编译被严格 CSP 拒绝，已改为构建时静态校验器并实际重验。该证据覆盖本机默认窄视口，不能代替其他浏览器、尺寸矩阵、Electron 或正式 launcher 资格。
 

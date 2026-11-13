@@ -10,12 +10,15 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { buildDevelopmentService } from '../../../scripts/development/desktop-reload';
 import { initializeDesktopBuildEnvironment } from '../../../scripts/development/windows-desktop-environment';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { createPermissionManagement } from '../../service/src/permission-management';
 import { ownedUserConfiguration } from '../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../scripts/build-native';
 
 if (process.platform !== 'win32') throw Error('manual_prompt_client_fixture_windows_only');
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 const root = join(repository, '.cache', `native-prompt-client-${randomUUID()}`);
 privateDirectory(root);
 const home = join(root, 'home'),
@@ -31,7 +34,7 @@ const token = randomUUID();
 let quitting = false,
   restarting = false,
   requests = 0;
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -91,7 +94,7 @@ const server = Bun.serve({
   },
 });
 const control = server.url.toString().replace(/\/$/, '');
-await Bun.write(
+await writeFixtureFile(
   configuration.path,
   JSON.stringify({
     modelId: 'prompt-check',
@@ -160,8 +163,8 @@ await buildNativeDesktop(
     kind: 'development',
     serviceEntrypoint: join(outdir, 'services', service.id, 'main.js'),
     serviceSha256: service.sha256,
-    bunExecutable,
-    bunSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
+    runtimeExecutable: bunExecutable,
+    runtimeSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
     buildId: `prompt-client-${service.sha256}`,
     apiMajor: 1,
     requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
@@ -172,7 +175,7 @@ await buildNativeDesktop(
 );
 
 // Only the fixture's Main entry can delay an already validated IPC reply. The product is unchanged.
-await Bun.write(
+await writeFixtureFile(
   join(outdir, 'prompt-check-main.cjs'),
   `
 const {app, ipcMain} = require('electron');
@@ -202,7 +205,7 @@ timer.unref();
 require('./main.cjs');
 `,
 );
-await Bun.write(
+await writeFixtureFile(
   join(outdir, 'package.json'),
   JSON.stringify({
     name: 'kite-prompt-client-fixture',
@@ -220,16 +223,19 @@ try {
     quitting = false;
     restarting = false;
     round++;
-    const child = Bun.spawn([electron, outdir, `--user-data-dir=${join(root, 'electron-data')}`], {
-      cwd: outdir,
-      env,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const child = spawnFixtureProcess(
+      [electron, outdir, `--user-data-dir=${join(root, 'electron-data')}`],
+      {
+        cwd: outdir,
+        env,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const stdout = new Response(child.stdout).text();
     const stderr = new Response(child.stderr).text();
-    await Bun.write(
+    await writeFixtureFile(
       join(root, 'control.json'),
       JSON.stringify({
         control,
@@ -243,10 +249,10 @@ try {
     );
     console.log(JSON.stringify({ phase: 'launched', root, pid: child.pid }));
     const exitCode = await child.exited;
-    await Bun.write(join(root, `stdout-${round}.log`), await stdout);
-    await Bun.write(join(root, `stderr-${round}.log`), await stderr);
+    await writeFixtureFile(join(root, `stdout-${round}.log`), await stdout);
+    await writeFixtureFile(join(root, `stderr-${round}.log`), await stderr);
     events.push({ kind: 'exit', round, pid: child.pid, exitCode });
-    await Bun.write(
+    await writeFixtureFile(
       join(root, 'events.json'),
       JSON.stringify({ exitCode, storeId, requests, events }, null, 2),
     );

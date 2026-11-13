@@ -1,18 +1,19 @@
-import { expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 
 test('sidebar reveal stays independent of button disabled styles in the production browser build', async () => {
-  const child = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
       process.execPath,
-      resolve(import.meta.dir, '../session-shell-browser-runner.fixture.ts'),
+      resolve(import.meta.dirname, '../session-shell-browser-runner.fixture.ts'),
       '--sidebar-actions',
       ...(existsSync(chromium.executablePath()) ? ['--bundled-chromium'] : []),
     ],
     {
-      cwd: resolve(import.meta.dir, '../../../..'),
+      cwd: resolve(import.meta.dirname, '../../../..'),
       // Bun tests set NODE_ENV=test; this child builds the actual production React runtime.
       env: { ...process.env, NODE_ENV: 'production' },
       stdout: 'pipe',

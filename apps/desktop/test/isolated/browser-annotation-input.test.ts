@@ -1,13 +1,14 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import type { AgentClient, InputImage, StartCommandRequest } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeCallerJournal, nativeDraftProof } from '../../electron/caller-journal';
 import { composeBrowserDraft } from '../../src/browser-annotation-content';
 import { annotationFixture } from '../browser-annotation.fixture';
@@ -17,7 +18,7 @@ async function until(check: () => boolean) {
   const end = Date.now() + 5000;
   while (!check()) {
     if (Date.now() > end) throw Error('annotation_input_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 test('Main recomputes both send/steer proof, rejects altered content/image order and never accepts renderer raw-prompt proof', async () => {
@@ -120,16 +121,13 @@ test('first real Runtime ModelInput and SDK Provider request contain exact promp
   const barrier = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const transport = Object.assign(
-    async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)));
-      return new Response(
-        'data: {"id":"note","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{"content":"Recorded reply"},"finish_reason":null}]}\n\ndata: {"id":"note","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
-        { headers: { 'content-type': 'text/event-stream' } },
-      );
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const transport = Object.assign(async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(
+      'data: {"id":"note","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{"content":"Recorded reply"},"finish_reason":null}]}\n\ndata: {"id":"note","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }, {});
   const sdk = createSdkModelAdapter({
     models: new Map([
       [

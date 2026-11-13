@@ -1,5 +1,28 @@
 /** Sanitized transport-only failure; never contains Provider bodies, URLs or credentials. */
 const marker = Symbol.for('@kite-ai/ai.ModelAttemptError.v1');
+const accessMarker = Symbol.for('@kite-ai/ai.ModelAccessError.v1');
+type ModelAccessCode = 'model_authentication_required' | 'model_access_denied';
+
+/** A Provider HTTP refusal that a reconnection cannot resolve. */
+export class ModelAccessError extends Error {
+  readonly code: ModelAccessCode;
+  constructor(code: ModelAccessCode) {
+    super(code);
+    this.name = 'ModelAccessError';
+    this.code = code;
+    Object.defineProperty(this, accessMarker, { value: true });
+  }
+  static isInstance(error: unknown): error is ModelAccessError {
+    if (!(error instanceof Error)) return false;
+    const value = error as ModelAccessError & { [accessMarker]?: boolean };
+    return (
+      value[accessMarker] === true &&
+      (value.code === 'model_authentication_required' || value.code === 'model_access_denied') &&
+      value.message === value.code
+    );
+  }
+}
+
 const details = [
   'connection_refused',
   'connection_timeout',

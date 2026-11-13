@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -8,6 +9,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
 import { ExecutionResources } from '../../../../packages/agent/src/execution/resources';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
@@ -92,7 +94,7 @@ ExecutionResources.prototype.acquireTitleModel = async function (signal) {
     release();
   };
 };
-const provider = Bun.serve({
+const provider = await fixtureServe({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -119,7 +121,7 @@ const provider = Bun.serve({
     else sample.providerEntered = performance.now();
     const chunk = (content: string, finish: string | null) =>
       `data: ${JSON.stringify({ id: 'performance-fixture', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta: { content }, finish_reason: finish }] })}\n\n`;
-    await Bun.sleep(naming ? titleDelayMs : 10);
+    await sleepTimer(naming ? titleDelayMs : 10);
     if (naming) sample.titleProviderFinished = performance.now();
     return new Response(
       `${chunk(naming ? '会话性能测量' : '完成', null)}${chunk('', 'stop')}data: [DONE]\n\n`,
@@ -357,7 +359,7 @@ async function titleSettled(sessionId: string) {
     )
       return;
     if (Date.now() >= deadline) throw Error('title_not_settled');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 let drainMs: number | undefined;
@@ -394,7 +396,7 @@ try {
     environment: {
       platform: process.platform,
       arch: process.arch,
-      bun: Bun.version,
+      node: process.versions.node,
       model: 'local compatible fixture',
       mainLatencyMs: 10,
       titleLatencyMs: [100, 1000],

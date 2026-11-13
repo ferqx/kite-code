@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { ArtifactContentStore } from '../../../src/artifact-port';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -487,7 +488,7 @@ test('exact cancellation during complete scoped body read prevents the next Prov
   try {
     await f.start();
     const end = Date.now() + 5000;
-    while (!f.readEntered() && Date.now() < end) await Bun.sleep(10);
+    while (!f.readEntered() && Date.now() < end) await sleepTimer(10);
     expect(f.readEntered()).toBe(true);
     await f.runtime.cancelCommand({
       expectedStoreId: f.expectedStoreId,
@@ -562,7 +563,7 @@ test('large Auto ask_user preserves a real bounded human card with the exact com
           state: 'pending',
         })
       ).interactions[0];
-      if (!interaction) await Bun.sleep(10);
+      if (!interaction) await sleepTimer(10);
     }
     expect(interaction).toBeDefined();
     expect(f.effects()).toBe(0);
@@ -680,7 +681,7 @@ test('cancellation during sealed approval-request publication prevents reviewer 
   try {
     await f.start();
     const end = Date.now() + 5000;
-    while (!f.readEntered() && Date.now() < end) await Bun.sleep(10);
+    while (!f.readEntered() && Date.now() < end) await sleepTimer(10);
     expect(f.readEntered()).toBe(true);
     await f.runtime.cancelCommand({
       expectedStoreId: f.expectedStoreId,

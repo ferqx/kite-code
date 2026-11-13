@@ -1,20 +1,22 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { assetManifest, getTrustedAssets } from '@kite-ai/web/assets';
+import { expect, test } from '#kite-test';
 import {
   type DevelopmentWebSelection,
   launchDevelopmentWeb,
   selectDevelopmentWeb,
 } from '../../../scripts/development/unified-web';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 const fixtureEntrypoint = join(
-  import.meta.dir,
+  import.meta.dirname,
   '../../fixtures/unified-agent/web-launcher-service.ts',
 );
 function selection(root: string): DevelopmentWebSelection {
@@ -32,7 +34,7 @@ async function until(check: () => Promise<boolean> | boolean) {
   const limit = Date.now() + 6000;
   while (!(await check())) {
     if (Date.now() > limit) throw new Error('fixture_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 function alive(pid: number) {
@@ -78,7 +80,7 @@ test('pure development selection is separate from old data, closed arguments, fi
     expect(() => selectDevelopmentWeb([], root)).toThrow('development_service_asset_unavailable');
     // Merely selecting an unavailable development artifact does not make a data directory.
     expect(existsSync(join(root, '.kite-code'))).toBe(false);
-    const chosen = selectDevelopmentWeb([], join(import.meta.dir, '../../..'));
+    const chosen = selectDevelopmentWeb([], join(import.meta.dirname, '../../..'));
     expect(chosen.profile.profile).toBe('development');
     expect(chosen.profile.dataRoot).toBe(
       selectProfile({
@@ -139,7 +141,7 @@ test('actual paired Service/Gateway serves only verified assets; Browser close d
               origin: host!.endpoint,
             },
           }),
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     await browser.connect();
@@ -187,10 +189,10 @@ test('actual paired Service/Gateway serves only verified assets; Browser close d
 for (const stop of ['eof', 'signal'] as const)
   test(`real launcher stdout contains only Browser endpoint, ${stop} closes only its paired child`, async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-web-launch-process-'));
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
         process.execPath,
-        join(import.meta.dir, '../../fixtures/unified-agent/web-launcher-host.ts'),
+        join(import.meta.dirname, '../../fixtures/unified-agent/web-launcher-host.ts'),
         root,
       ],
       {
@@ -208,7 +210,7 @@ for (const stop of ['eof', 'signal'] as const)
       while (!output.includes('\n')) {
         const part = await Promise.race([
           reader.read(),
-          Bun.sleep(Math.max(1, deadline - Date.now())).then(() => {
+          fixtureDelay(Math.max(1, deadline - Date.now())).then(() => {
             throw new Error('endpoint_deadline');
           }),
         ]);

@@ -8,7 +8,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -19,6 +20,8 @@ import { createShellExtension } from '@kite-ai/agent/shell';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
 import { observeContextPreparation } from './live-context-prepare-evidence';
 
@@ -132,7 +135,7 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
       const value = await read();
       if (test(value)) return value;
       if (Date.now() >= deadline) throw new Boundary('branch_not_reached', point);
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     }
   }
   async function hold() {
@@ -169,15 +172,18 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
   let childSessionId: string | undefined,
     modelEvidenceRetained = false;
   try {
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [
         join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
       outdir: join(root, 'assets'),
-      target: 'bun',
+      ...runtimeBuildOptions(
+        join(root, 'assets'),
+        resolve(import.meta.dirname, '../../../../packages/agent/dist'),
+      ),
       naming: 'shell-supervisor.js',
     });
     branch(built.success && built.outputs.length === 1, 'original_guardian_build_failed');

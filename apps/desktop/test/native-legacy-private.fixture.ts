@@ -15,8 +15,8 @@ const [profilePath, runtime, runtimeHash, helper, helperHash, storeId, sessionId
   process.argv.slice(2) as [string, string, string, string, string, string, string];
 const access = await acquireDesktopProfileAccess({
   profile: { dataRoot: join(profilePath, '..'), profile: 'default' },
-  bunExecutable: runtime,
-  bunSha256: runtimeHash,
+  runtimeExecutable: runtime,
+  runtimeSha256: runtimeHash,
   helperPath: helper,
   helperSha256: helperHash,
 });

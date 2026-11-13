@@ -1,9 +1,11 @@
-import { expect, mock, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Json, ToolResult } from '@kite-ai/agent/extensions';
+import { expect, mock, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 
 // Module/asset stand-ins live only in a child process. No Native, interpreter,
 // SDK request, local HTTP server or external network is launched by this test.
@@ -44,13 +46,10 @@ async function scenario(kind: string) {
   ]);
   let networkRequests = 0;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async () => {
-      networkRequests++;
-      throw Error('network_forbidden_in_configuration_fixture');
-    },
-    { preconnect: originalFetch.preconnect },
-  );
+  globalThis.fetch = Object.assign(async () => {
+    networkRequests++;
+    throw Error('network_forbidden_in_configuration_fixture');
+  }, {});
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-browser-execution-config-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -90,7 +89,7 @@ async function scenario(kind: string) {
             executable,
             browserPath: executable,
             linux: { bubblewrapPath: executable, initExecutable: executable },
-            darwin: { guardianPath: executable, bunExecutable: executable },
+            darwin: { guardianPath: executable, runtimeExecutable: executable },
             runtimeDirectory: join(root, 'browser-private'),
           },
   });
@@ -381,8 +380,14 @@ if (process.argv[2] === '--fixture') {
     nativeTest(
       `Native configuration ${kind} keeps one accurate browser model surface and frozen recovery`,
       async () => {
-        const child = Bun.spawn(
-          [process.execPath, fileURLToPath(import.meta.url), '--fixture', kind],
+        const child = spawnProcess(
+          [
+            process.execPath,
+            ...testRuntimeFlags,
+            fileURLToPath(import.meta.url),
+            '--fixture',
+            kind,
+          ],
           { stdout: 'pipe', stderr: 'pipe' },
         );
         const output = new Response(child.stdout).text();

@@ -46,20 +46,17 @@ async function launch() {
     const t = globalThis as FixtureGlobals,
       original = globalThis.fetch;
     t.mcpPhysical = [];
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0])),
-          method = args[1]?.method ?? 'GET';
-        t.mcpPhysical.push({ path: url.pathname, method });
-        const response = await original(...args);
-        if (t.mcpDropNext && method === 'POST' && url.pathname === '/v1/config/user/mcp') {
-          t.mcpDropNext = false;
-          throw Error('owned_reply_lost');
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0])),
+        method = args[1]?.method ?? 'GET';
+      t.mcpPhysical.push({ path: url.pathname, method });
+      const response = await original(...args);
+      if (t.mcpDropNext && method === 'POST' && url.pathname === '/v1/config/user/mcp') {
+        t.mcpDropNext = false;
+        throw Error('owned_reply_lost');
+      }
+      return response;
+    }, {});
   });
   return page;
 }

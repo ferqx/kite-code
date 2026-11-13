@@ -1,19 +1,28 @@
-import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
-import type { JsonObject } from '@kite-ai/agent/config';
+import { ConfigurationError, createCredentialVault, type JsonObject } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient, type ProviderSettingsRequest } from '@kite-ai/client';
+import undici from 'undici/index.js';
+import { expect, spyOn, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createConfigurationManagement } from '../../src/configuration-management';
+import { createEncryptedModelCredentialBackend } from '../../src/encrypted-model-credentials';
 import { startService } from '../../src/index';
+import { createUserConfiguration } from '../../src/user-configuration';
 
-async function fixture(hostConfiguration?: JsonObject) {
+async function fixture(
+  hostConfiguration?: JsonObject,
+  wrappingKey?: Parameters<typeof createEncryptedModelCredentialBackend>[0]['wrappingKey'],
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-provider-settings-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
@@ -53,7 +62,23 @@ async function fixture(hostConfiguration?: JsonObject) {
     permissions: host.permissions!,
     resolveRunConfiguration: host.resolveRunConfiguration,
   });
-  const manager = host.configurationManagement!(runtime);
+  const encrypted =
+    wrappingKey &&
+    createEncryptedModelCredentialBackend({
+      configurationPath: file,
+      wrappingKey,
+    });
+  const manager = encrypted
+    ? createConfigurationManagement({
+        profile,
+        runtime,
+        userConfiguration: createUserConfiguration(file),
+        vault: createCredentialVault({ backend: encrypted }),
+        authorizeModelCredentials: encrypted.authorize,
+        persistence: 'os',
+        explicit: () => ({}),
+      })
+    : host.configurationManagement!(runtime);
   const service = await startService({
     runtime,
     configurationManagement: manager,
@@ -211,7 +236,7 @@ test('blank-name discovery is explicit, complete beyond 512 models and same orig
   const f = await fixture();
   let discoveries = 0;
   const names = Array.from({ length: 520 }, (_, index) => `discovered-${index}`);
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -342,11 +367,87 @@ test('uncertain vault write remains original outcome_unknown and no configuratio
   }
 });
 
+test('provider save retries an interrupted initial wrapping-key creation without replaying the failed submission', async () => {
+  const material = new Map<string, Buffer>();
+  const creationAttempts: string[] = [];
+  let available = false;
+  const f = await fixture(undefined, {
+    async read(id) {
+      const key = material.get(id);
+      return key ? Buffer.from(key) : null;
+    },
+    async create(id, key) {
+      creationAttempts.push(id);
+      if (!available) throw new ConfigurationError('model_credentials_locked');
+      expect(material.has(id)).toBe(false);
+      material.set(id, Buffer.from(key));
+    },
+    async authorize(id) {
+      return material.has(id);
+    },
+  });
+  try {
+    const original = await f.input('locked-keyring', manual('openai'), 'synthetic-provider-key');
+    const bytes = readFileSync(f.file);
+    const failed = await f.client.updateProviderSettings(original);
+    expect(failed).toMatchObject({
+      state: 'failed',
+      receipt: {
+        code: 'model_credentials_locked',
+        credentialState: 'unchanged',
+        configurationState: 'not_attempted',
+      },
+    });
+    expect(readFileSync(f.file)).toEqual(bytes);
+    expect(material.size).toBe(0);
+    expect(creationAttempts).toHaveLength(1);
+    available = true;
+    expect(await f.client.updateProviderSettings(original)).toEqual(failed);
+    expect(creationAttempts).toHaveLength(1);
+    const retry = await f.input('restored-keyring', manual('openai'), original.secret);
+    const applied = await f.client.updateProviderSettings(retry);
+    expect(applied).toMatchObject({
+      state: 'applied',
+      receipt: { credentialState: 'stored', configurationState: 'published' },
+    });
+    expect(creationAttempts).toEqual([creationAttempts[0], creationAttempts[0]]);
+    expect(material.size).toBe(1);
+    const saved = readFileSync(f.file, 'utf8');
+    expect(saved).toContain('credential:');
+    expect(saved).not.toContain(original.secret!);
+    material.clear();
+    const current = (await f.client.getProviderSettings({ storeId: f.storeId })).providers.find(
+      (provider) => provider.id === 'openai',
+    )!.connections[0]!;
+    const missingKey = await f.input(
+      'lost-ready-key',
+      {
+        ...manual('openai'),
+        connectionId: current.id,
+      },
+      'synthetic-replacement',
+    );
+    expect(await f.client.updateProviderSettings(missingKey)).toMatchObject({
+      state: 'failed',
+      receipt: {
+        code: 'credential_unavailable',
+        credentialState: 'unchanged',
+        configurationState: 'not_attempted',
+      },
+    });
+    expect(creationAttempts).toHaveLength(2);
+    expect(readFileSync(f.file, 'utf8')).toBe(saved);
+  } finally {
+    for (const key of material.values()) key.fill(0);
+    await f.close();
+  }
+});
+
 test('public discovery reads the actual provider once, writes no credential/configuration/mutation, then publishes exact discovered names without another RPC', async () => {
   const f = await fixture();
   let requests = 0;
   const secret = 'hot-discovery-key';
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -424,7 +525,9 @@ test('public discovery reads the actual provider once, writes no credential/conf
 
 test('public read-only discovery returns accurate HTTP classes, cancels its source, and rejects stale metadata before contacting a provider', async () => {
   const f = await fixture();
-  const closedSessions = spyOn(Bun.FetchSession.prototype, 'close');
+  const closedPools = spyOn(undici.Agent.prototype, 'close');
+  // Undici delegates a Promise-style close to the same method with a callback.
+  const closeRequests = () => closedPools.mock.calls.filter((args) => args.length === 0).length;
   let status = 401,
     requests = 0;
   let entered!: () => void, released!: () => void;
@@ -434,7 +537,7 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -474,7 +577,7 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
     await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
       code: 'provider_discovery_auth_failed',
     });
-    expect(closedSessions).toHaveBeenCalledTimes(1);
+    expect(closeRequests()).toBe(1);
     status = 403;
     await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
       code: 'provider_discovery_auth_failed',
@@ -483,7 +586,7 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
     await expect(f.client.discoverProviderSettings(input)).rejects.toMatchObject({
       code: 'provider_discovery_failed',
     });
-    expect(closedSessions).toHaveBeenCalledTimes(3);
+    expect(closeRequests()).toBe(3);
     const cancelled = new AbortController();
     status = 200;
     const pending = f.client.discoverProviderSettings(input, { signal: cancelled.signal });
@@ -497,8 +600,8 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
       ]),
     ).toBe(true);
     const cleanupDeadline = Date.now() + 1000;
-    while (closedSessions.mock.calls.length < 4 && Date.now() < cleanupDeadline) await Bun.sleep(5);
-    expect(closedSessions).toHaveBeenCalledTimes(4);
+    while (closeRequests() < 4 && Date.now() < cleanupDeadline) await sleepTimer(5);
+    expect(closeRequests()).toBe(4);
     expect(f.puts).toBe(0);
     expect(f.keys.size).toBe(0);
     const before = requests;
@@ -507,13 +610,13 @@ test('public read-only discovery returns accurate HTTP classes, cancels its sour
       code: 'configuration_read_set_conflict',
     });
     expect(requests).toBe(before);
-    expect(closedSessions).toHaveBeenCalledTimes(4);
+    expect(closeRequests()).toBe(4);
   } finally {
     provider.stop(true);
     try {
       await f.close();
     } finally {
-      closedSessions.mockRestore();
+      closedPools.mockRestore();
     }
   }
 }, 10_000);
@@ -1174,7 +1277,7 @@ test('deleted user aliases are never recycled and a saved old route cannot bind 
     let command = await f.client.getCommand('run-deleted-route');
     while (command.status !== 'rejected' && command.status !== 'applied') {
       if (Date.now() > deadline) throw Error('old_route_command_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       command = await f.client.getCommand('run-deleted-route');
     }
     expect(command).toMatchObject({ status: 'rejected', receipt: { reason: 'model_unavailable' } });

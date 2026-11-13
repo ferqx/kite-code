@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { compressionPresentationSchema, toolResultPresentationSchema } from '../src';
 
 test('compression observation is optional, finite and closed; local comparison never masquerades as usage', () => {

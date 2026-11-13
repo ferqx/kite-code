@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -12,8 +11,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { which as findExecutable } from '../../../../../scripts/tooling/process';
 import { fixtureGrant, fixtureScopeOption } from '../../../../../tests/fixtures/permission-grant';
 import { persistentWorktreeDirectory } from '../../../../../tests/fixtures/worktree-filesystem';
 import { createRuntime } from '../../../src';
@@ -49,7 +51,7 @@ const commonDir = join(sourceCwd, '.git');
 const config: GitWorktreeConfiguration = {
   configurationId: 'inert-authorization',
   sourceCwd,
-  bunPath: join(trustedRoot, 'bun'),
+  runtimePath: join(trustedRoot, 'bun'),
   workerPath: join(trustedRoot, 'worker.js'),
   configPath: join(trustedRoot, 'empty.toml'),
   hooksPath: join(trustedRoot, 'hooks'),
@@ -614,7 +616,7 @@ async function fixture(
             parentExecutions,
           };
         if (Date.now() > deadline) throw Error('inert_worktree_authorization_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     },
     async close() {
@@ -866,7 +868,7 @@ for (const drift of ['none', 'head', 'parent'] as const)
       hooks = join(persistent, 'hooks'),
       target = join(parent, 'target');
     for (const path of [source, parent, hooks]) mkdirSync(path);
-    const gitPath = realpathSync(Bun.which('git')!);
+    const gitPath = realpathSync(findExecutable('git')!);
     const git = (args: string[]) =>
       execFileSync(gitPath, args, {
         cwd: source,
@@ -888,7 +890,7 @@ for (const drift of ['none', 'head', 'parent'] as const)
     const configuration: GitWorktreeConfiguration = {
       configurationId: 'real-scope-sql',
       sourceCwd: source,
-      bunPath: process.execPath,
+      runtimePath: process.execPath,
       workerPath: join(persistent, 'unused-worker'),
       configPath: join(persistent, 'unused-config'),
       git: { path: gitPath, sha256: sha256(readFileSync(gitPath)) },
@@ -1062,7 +1064,7 @@ for (const drift of ['none', 'head', 'parent'] as const)
         if (run && !run.isActive) break;
         if (Date.now() > until)
           throw Error(`scope_sql_timeout:${JSON.stringify(await store.listExecutions('s'))}`);
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       expect(cards).toHaveLength(1);
       const grants = await store.listPermissionGrants({

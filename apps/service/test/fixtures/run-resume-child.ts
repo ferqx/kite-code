@@ -1,3 +1,4 @@
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createResumeRuntime } from './run-resume-binding';
@@ -49,6 +50,6 @@ for (;;) {
     break;
   }
   if (Date.now() > deadline) throw Error('run_resume_child_pending_timeout');
-  await Bun.sleep(1);
+  await sleepTimer(1);
 }
 setInterval(() => {}, 1000);

@@ -1,7 +1,7 @@
-import { afterAll, expect, mock, test } from 'bun:test';
 import { Folder01Icon, Folder02Icon } from '@hugeicons/core-free-icons';
 import { JSDOM } from 'jsdom';
 import { act, type ComponentProps } from 'react';
+import { afterAll, expect, mock, test } from '#kite-test';
 import type { DirectoryProps, PageActions } from '../../src/desktop/Sidebar';
 import type { WorkspaceSummary } from '../../src/desktop/types';
 

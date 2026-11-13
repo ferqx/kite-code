@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { ToolDefinition } from '../../../src/extensions';
@@ -379,7 +380,7 @@ test('repeated child Tool failures allow the child to explain without changing t
     let run = (await f.store.getView(childSessionId)).runs[0];
     while (!run || run.isActive) {
       if (Date.now() > end) throw Error('child terminal missing');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       run = (await f.store.getView(childSessionId)).runs[0];
     }
     expect(run).toMatchObject({ status: 'completed' });

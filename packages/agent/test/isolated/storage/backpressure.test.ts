@@ -1,45 +1,41 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { WorkerRequest } from '../../../src/storage/worker/protocol';
-
-const NativeWorker = globalThis.Worker;
+import { NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
 /** Real SQLite Worker; only selected reply delivery is held at the host boundary. */
 class GatedWorker extends NativeWorker {
   readonly posted: WorkerRequest[] = [];
-  readonly held: MessageEvent[] = [];
+  readonly held: unknown[] = [];
   readonly queries = new Set<number>();
   holdQueries = false;
   holdAll = false;
   private heldThreshold: { count: number; resolve: () => void } | undefined;
   private postedThreshold: { count: number; resolve: () => void } | undefined;
-  constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-    super(...args);
-    this.addEventListener('message', (event: MessageEvent) => {
-      if (this.holdAll || (this.holdQueries && this.queries.has(event.data.id))) {
-        event.stopImmediatePropagation();
-        this.held.push(event);
-        if (this.heldThreshold && this.held.length >= this.heldThreshold.count) {
-          this.heldThreshold.resolve();
-          this.heldThreshold = undefined;
-        }
+  override emit(event: string | symbol, ...args: unknown[]): boolean {
+    const data = args[0] as { id?: number } | undefined;
+    if (
+      event === 'message' &&
+      data?.id !== undefined &&
+      (this.holdAll || (this.holdQueries && this.queries.has(data.id)))
+    ) {
+      this.held.push(data);
+      if (this.heldThreshold && this.held.length >= this.heldThreshold.count) {
+        this.heldThreshold.resolve();
+        this.heldThreshold = undefined;
       }
-    });
+      return true;
+    }
+    return super.emit(event, ...args);
   }
-  override postMessage(message: unknown, transfer: Transferable[]): void;
-  override postMessage(message: unknown, options?: StructuredSerializeOptions): void;
-  override postMessage(
-    message: unknown,
-    options?: Transferable[] | StructuredSerializeOptions,
-  ): void {
-    const frame = message as WorkerRequest;
+  override postMessage(...args: Parameters<NativeWorker['postMessage']>): void {
+    const frame = args[0] as WorkerRequest;
     this.posted.push(frame);
     if (frame.method === 'getMetadata') this.queries.add(frame.id);
-    if (Array.isArray(options)) super.postMessage(message, options);
-    else super.postMessage(message, options);
+    super.postMessage(...args);
     if (this.postedThreshold && this.posted.length >= this.postedThreshold.count) {
       this.postedThreshold.resolve();
       this.postedThreshold = undefined;
@@ -48,7 +44,7 @@ class GatedWorker extends NativeWorker {
   releaseQueries(): void {
     this.holdQueries = false;
     this.holdAll = false;
-    for (const event of this.held.splice(0)) this.onmessage?.(event);
+    for (const event of this.held.splice(0)) super.emit('message', event);
   }
   waitForHeld(count: number): Promise<void> {
     if (this.held.length >= count) return Promise.resolve();
@@ -57,7 +53,7 @@ class GatedWorker extends NativeWorker {
     });
   }
   releaseHeld(count: number): void {
-    for (const event of this.held.splice(0, count)) this.onmessage?.(event);
+    for (const event of this.held.splice(0, count)) super.emit('message', event);
   }
   waitForPosted(count: number): Promise<void> {
     if (this.posted.length >= count) return Promise.resolve();
@@ -77,7 +73,7 @@ async function fixture() {
       worker = this;
     }
   }
-  globalThis.Worker = SelectedWorker;
+  useFixtureWorker(SelectedWorker);
   const profile = { dataRoot, profile: 'owned' };
   try {
     const store = await openSqliteStore(profile);
@@ -88,12 +84,12 @@ async function fixture() {
       async dispose() {
         worker!.releaseQueries();
         await store.close().catch(() => {});
-        globalThis.Worker = NativeWorker;
+        useFixtureWorker();
         rmSync(dataRoot, { recursive: true, force: true });
       },
     };
   } catch (error) {
-    globalThis.Worker = NativeWorker;
+    useFixtureWorker();
     rmSync(dataRoot, { recursive: true, force: true });
     throw error;
   }
@@ -223,7 +219,7 @@ test('Worker failure rejects both posted and capacity-waiting calls without repl
     const before = f.worker.posted.length;
     const calls = Promise.allSettled(Array.from({ length: 226 }, () => f.store.getMetadata()));
     expect(f.worker.posted).toHaveLength(before + 224);
-    f.worker.onerror?.(new ErrorEvent('error', { message: 'controlled Worker failure event' }));
+    f.worker.emit('error', new Error('controlled Worker failure event'));
     const results = await calls;
     expect(results).toHaveLength(226);
     expect(results.every((result) => result.status === 'rejected')).toBe(true);

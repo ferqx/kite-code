@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+import { spawn as spawnProcess } from '../tooling/process';
 
 const projectRoot = resolve(import.meta.dirname, '..', '..');
 const cargoHome = resolve(process.env.CARGO_HOME ?? join(homedir(), '.cargo'));
@@ -32,7 +33,7 @@ for (const manifest of [
   'native/windows-sandbox-runner/Cargo.toml',
   'native/windows-msys-compat/Cargo.toml',
 ]) {
-  const build = Bun.spawn(
+  const build = spawnProcess(
     ['cargo', 'build', '--release', '--manifest-path', manifest, ...targetArgs],
     {
       cwd: projectRoot,

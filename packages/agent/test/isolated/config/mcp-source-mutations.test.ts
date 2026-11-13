@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import {
   type McpSourceEntryMutation,
@@ -10,6 +10,10 @@ import {
   writeMcpSourceEntry,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
+import { expect, test } from '#kite-test';
+import type { Subprocess } from '../../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   expectPrivateMode,
   privateDirectory,
@@ -432,7 +436,7 @@ for (const window of ['after-rename', 'successful-publication', 'before-publicat
       // Every acquired lock and every file mutation below is real; only failures after real close,
       // or the platform's post-rename verification/sync, are injected.
       const program = `
-        import { mock } from 'bun:test';
+        import { mock } from '#kite-test';
         const fs = await import('node:fs');
         const actualRename = fs.renameSync, actualSync = fs.fsyncSync, actualStat = fs.fstatSync;
         const locks = await import(${JSON.stringify(lockModule)});
@@ -510,12 +514,21 @@ for (const window of ['after-rename', 'successful-publication', 'before-publicat
           }));
         } finally { for (const lock of acquired) lock.release(); }
       `;
-      const child = Bun.spawn([process.execPath, '--eval', program], {
-        cwd: f.base,
-        env: process.env,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const child = spawnProcess(
+        [
+          process.execPath,
+          ...testRuntimeFlags,
+          '--input-type=module-typescript',
+          '--eval',
+          program,
+        ],
+        {
+          cwd: f.base,
+          env: process.env,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
       const [stdout, stderr, exit] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
@@ -673,21 +686,22 @@ test('Unicode, whitespace and empty source keys remove by original ID while publ
 
 test('two actual processes share Source locks and original CAS; at most one add publishes', async () => {
   const f = fixture();
-  const children: Bun.Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
+  const children: Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
   try {
     const expected = readMcpSources(f.options).readSet;
     const script = join(f.base, 'writer.ts'),
       go = join(f.base, 'go');
     writeFileSync(
       script,
-      `import {existsSync,writeFileSync} from 'node:fs'; import {writeMcpSourceEntry} from ${JSON.stringify(import.meta.resolve('@kite-ai/agent/config'))};
-      const name=process.argv[2]!;writeFileSync(${JSON.stringify(f.base)}+'/'+name+'.ready','ready');while(!existsSync(${JSON.stringify(go)}))await Bun.sleep(5);
+      `import {setTimeout as sleepTimer} from 'node:timers/promises';
+import {existsSync,writeFileSync} from 'node:fs'; import {writeMcpSourceEntry} from ${JSON.stringify(import.meta.resolve('@kite-ai/agent/config'))};
+      const name=process.argv[2]!;writeFileSync(${JSON.stringify(f.base)}+'/'+name+'.ready','ready');while(!existsSync(${JSON.stringify(go)}))await sleepTimer(5);
       try{writeMcpSourceEntry({...${JSON.stringify(f.options)},expectedReadSet:${JSON.stringify(expected)},mutation:{kind:'add',scope:'user',name,entry:${JSON.stringify(http)}},operationId:name,validatePublication(){}});console.log('published')}catch(e){console.log(e instanceof Error?e.message:'error')}`,
       { mode: 0o600 },
     );
     for (const name of ['one', 'two'])
       children.push(
-        Bun.spawn([process.execPath, script, name], {
+        spawnProcess([process.execPath, ...testRuntimeFlags, script, name], {
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'pipe',
@@ -696,7 +710,7 @@ test('two actual processes share Source locks and original CAS; at most one add 
     const deadline = Date.now() + 5000;
     while (!['one', 'two'].every((name) => existsSync(join(f.base, `${name}.ready`)))) {
       if (Date.now() > deadline) throw Error('writer_start_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     writeFileSync(go, 'go', { mode: 0o600 });
     const results = await Promise.all(

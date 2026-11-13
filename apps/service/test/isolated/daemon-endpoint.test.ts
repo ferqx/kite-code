@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -14,6 +13,13 @@ import {
 import { createConnection, createServer } from 'node:net';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import {
+  which as findExecutable,
+  spawn as spawnProcess,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   clearDeadDaemonEndpoint,
@@ -127,10 +133,11 @@ test('reservation reader waits for the original held-FD publication instead of p
     owner = await reserveDaemonEndpoint(f.endpoint, f.identity);
   const original = owner.reservation;
   const bytes = readFileSync(f.endpoint.record);
-  const writer = Bun.spawn(
+  const writer = spawnProcess(
     [
       process.execPath,
-      join(import.meta.dir, '../fixtures/daemon-endpoint-child.ts'),
+      ...testRuntimeFlags,
+      join(import.meta.dirname, '../fixtures/daemon-endpoint-child.ts'),
       f.root,
       f.endpoint.socket,
       'held-record-publication',
@@ -205,10 +212,11 @@ test('lock wait and native bootstrap response share the original absolute five-s
     socket: { dev: String(stat.dev), ino: String(stat.ino) },
   };
   writeFileSync(f.endpoint.record, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: 'wx' });
-  const writer = Bun.spawn(
+  const writer = spawnProcess(
     [
       process.execPath,
-      join(import.meta.dir, '../fixtures/daemon-endpoint-child.ts'),
+      ...testRuntimeFlags,
+      join(import.meta.dirname, '../fixtures/daemon-endpoint-child.ts'),
       f.root,
       f.endpoint.socket,
       'held-record-publication-slow',
@@ -256,20 +264,20 @@ test('POSIX record lock rejects unknown descriptor errors without entering the o
 test('POSIX record leaf imports under pure Node without loading native FFI', async () => {
   const f = fixture();
   try {
-    const node = Bun.which('node');
+    const node = findExecutable('node');
     expect(node).not.toBeNull();
     if (!node) throw Error('fixture_node_unavailable');
     const outdir = join(f.root, 'node-leaf');
     mkdirSync(outdir);
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../src/daemon/posix-record.ts')],
+    const built = await buildBundle({
+      entrypoints: [join(import.meta.dirname, '../../src/daemon/posix-record.ts')],
       target: 'node',
       packages: 'external',
       naming: '[name].mjs',
       outdir,
     });
     expect(built.success).toBe(true);
-    const child = Bun.spawn([node, join(outdir, 'posix-record.mjs')], {
+    const child = spawnProcess([node, join(outdir, 'posix-record.mjs')], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -332,9 +340,9 @@ test('unsafe existing parent and symlink namespace are rejected without chmod or
 });
 test('actual two processes compete; alive evidence survives, kill then exact cold dead cleanup is explicit', async () => {
   const f = fixture(),
-    entry = join(import.meta.dir, '../fixtures/daemon-endpoint-child.ts');
+    entry = join(import.meta.dirname, '../fixtures/daemon-endpoint-child.ts');
   const launch = (id: string) =>
-    Bun.spawn([process.execPath, entry, f.root, f.endpoint.socket, id], {
+    spawnProcess([process.execPath, ...testRuntimeFlags, entry, f.root, f.endpoint.socket, id], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',

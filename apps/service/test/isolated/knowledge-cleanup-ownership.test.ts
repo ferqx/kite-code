@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +6,10 @@ import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import type { Subprocess } from '../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 async function within<T>(work: Promise<T>, milliseconds: number, phase: string): Promise<T> {
@@ -65,7 +68,7 @@ for (const mode of ['prep', 'tool', 'ordinary', 'late'])
       within(work, deadline - Date.now(), phase);
     const cleanupBounded = <T>(work: Promise<T>, milliseconds: number, phase: string) =>
       within(work, Math.min(milliseconds, cleanupDeadline - Date.now()), phase);
-    let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+    let child: Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let cold: Store | undefined;
     let coldRuntime: ReturnType<typeof createRuntime> | undefined;
@@ -73,10 +76,10 @@ for (const mode of ['prep', 'tool', 'ordinary', 'late'])
     let draining = false;
     const failures: unknown[] = [];
     try {
-      child = Bun.spawn(
+      child = spawnProcess(
         [
           process.execPath,
-          '--no-install',
+          ...testRuntimeFlags,
           fileURLToPath(
             new URL('../fixtures/knowledge-cleanup-ownership-child.ts', import.meta.url),
           ),

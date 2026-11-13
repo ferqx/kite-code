@@ -1,22 +1,28 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 for (const mode of ['paired', 'shared'] as const)
   test(`actual ${mode} TUI model/default/effort CAS preserves held Run and lost original reply never resubmits`, async () => {
@@ -38,7 +44,7 @@ for (const mode of ['paired', 'shared'] as const)
     const held = new Promise<void>((r) => {
       release = r;
     });
-    const provider = Bun.serve({
+    const provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 30,
@@ -65,7 +71,7 @@ for (const mode of ['paired', 'shared'] as const)
         );
       },
     });
-    let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+    let daemon: TestSubprocess<'pipe', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
     let stopShared: (() => Promise<void>) | undefined;
     let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -74,7 +80,7 @@ for (const mode of ['paired', 'shared'] as const)
     let passed = false;
     const ownedPath = join(root, 'owned-service.json');
     const transcript = `${root}.models.pty`;
-    let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let python: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       writeFileSync(
         userConfiguration.path,
@@ -145,9 +151,10 @@ for (const mode of ['paired', 'shared'] as const)
         const manifest = JSON.stringify(assets);
         writeFileSync(join(web, 'manifest.json'), manifest);
         const instanceId = randomUUID();
-        daemon = Bun.spawn(
+        daemon = testSpawn(
           [
             process.execPath,
+            ...testRuntimeFlags,
             join(root, 'service-artifact/node_modules/@kite-ai/service/daemon-main.js'),
           ],
           {
@@ -258,12 +265,12 @@ for (const mode of ['paired', 'shared'] as const)
         lookupCount = join(root, 'lookup-count');
       writeFileSync(
         runner,
-        `import {appendFileSync,writeFileSync} from 'node:fs';import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const originalSpawn=Bun.spawn.bind(Bun);Bun.spawn=(...args)=>{const child=originalSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(entrypoint)})){const record={pid:child.pid,start:readProcessStartIdentity(child.pid)};void child.exited.then(code=>writeFileSync(${JSON.stringify(`${ownedPath}.exit`)},JSON.stringify({...record,code})));}return child;};const actual=globalThis.fetch;let lost=false;globalThis.fetch=async(...args)=>{const response=await actual(...args);const u=String(args[0]);if(u.includes('/host-mutations/'))appendFileSync(${JSON.stringify(lookupCount)},'get\\n');if(args[1]?.method==='POST'&&u.endsWith('/models')){appendFileSync(${JSON.stringify(count)},'post\\n');if(!lost){lost=true;throw Error('owned_lost_reply')}}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({testDiagnostics:true,exitSignal:exit.signal,onLaunched:c=>{const record={pid:c.pid,start:readProcessStartIdentity(c.pid)};writeFileSync(${JSON.stringify(ownedPath)},JSON.stringify(record));},${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
+        `import {appendFileSync,writeFileSync} from 'node:fs';import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};process.env.KITE_MANAGEMENT_SERVICE_ENTRY=${JSON.stringify(entrypoint)};process.env.KITE_MANAGEMENT_OBSERVATION=${JSON.stringify(`${ownedPath}`)};await import(${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/test/fixtures/tui-management-observation.ts')).href)});const actual=globalThis.fetch;let lost=false;globalThis.fetch=async(...args)=>{const response=await actual(...args);const u=String(args[0]);if(u.includes('/host-mutations/'))appendFileSync(${JSON.stringify(lookupCount)},'get\\n');if(args[1]?.method==='POST'&&u.endsWith('/models')){appendFileSync(${JSON.stringify(count)},'post\\n');if(!lost){lost=true;throw Error('owned_lost_reply')}}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({testDiagnostics:true,exitSignal:exit.signal,onLaunched:c=>{const record={pid:c.pid,start:readProcessStartIdentity(c.pid)};writeFileSync(${JSON.stringify(ownedPath)},JSON.stringify(record));},${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
       );
-      python = Bun.spawn(
+      python = testSpawn(
         [
           process.execPath,
-          '--no-install',
+          ...testRuntimeFlags,
           fileURLToPath(new URL('../fixtures/tui-models-driver.ts', import.meta.url)),
           JSON.stringify({
             runner,

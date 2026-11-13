@@ -1,6 +1,7 @@
 /** Explicit isolated measurement; no timing threshold or production diagnostic entry. */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -74,7 +75,7 @@ try {
   // restricted-token ACL/Job supervision and cleanup. It is only a lower bound.
   for (let index = 0; index < 8; index++) {
     const at = performance.now();
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [runtime.fullShell, '--noprofile', '--norc', '-c', 'printf measurement-marker'],
       {
         cwd,
@@ -104,7 +105,7 @@ try {
   const median = (values: number[]) =>
     [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
   const result = {
-    environment: { platform: process.platform, arch: process.arch, bun: Bun.version },
+    environment: { platform: process.platform, arch: process.arch, node: process.versions.node },
     scope: 'isolated local measurement; direct Bash is a lower bound without product enforcement',
     factoryMs,
     maxHeartbeatMs,
@@ -120,7 +121,7 @@ try {
     },
   };
   const artifact = resolve(
-    import.meta.dir,
+    import.meta.dirname,
     '../../../../.cache',
     `shell-timing-${crypto.randomUUID()}`,
   );

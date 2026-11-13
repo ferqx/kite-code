@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { ClientError, type SessionLogEntry, type SessionLogPage } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { ModelInputPort } from '../src/model-input';
 import type { RuntimeLogPort } from '../src/runtime-logs';
 import { installGlobals } from './globals.fixture';
@@ -174,7 +175,7 @@ async function fixture(
           <Panel key={session} session={session} suspended={suspended} />
         ),
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   await render();
@@ -187,7 +188,7 @@ async function fixture(
   async function click(label: string) {
     await act(async () => {
       button(label).click();
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   async function visible(value: 'hidden' | 'visible') {
@@ -301,7 +302,7 @@ test('cancel, close, hidden, suspended and changed Session abort original read a
       expect(signal.aborted).toBe(true);
       await act(async () => {
         resolve(page([entry('1', true)]));
-        await Bun.sleep(0);
+        await fixtureDelay(0);
       });
       expect(f.text()).not.toContain('Actual metadata');
       expect(f.modelReads).toHaveLength(0);
@@ -412,7 +413,7 @@ test('actual Page wires log target to Model confirmation while directory, Histor
     async function select(id: string) {
       await act(async () => {
         f.document.querySelector<HTMLAnchorElement>(`a[href="/sessions/${id}"]`)!.click();
-        await Bun.sleep(0);
+        await fixtureDelay(0);
       });
     }
     await select('next');

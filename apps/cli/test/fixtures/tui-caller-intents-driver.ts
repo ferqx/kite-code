@@ -1,6 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { spawnSync as testSpawnSync } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -28,7 +31,7 @@ process.once('SIGTERM', interrupted);
 if (process.platform === 'win32') process.on('message', stop);
 const output: Uint8Array[] = [];
 const owned = spawnTuiPTY({
-  cmd: [process.execPath, '--no-install', input.runner],
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
   cwd: input.root,
   onData: (bytes) => output.push(bytes.slice()),
 });
@@ -41,10 +44,10 @@ const key = async (value: string) => {
   abort.signal.throwIfAborted();
   await owned.key(value);
   // Preserve the original 100ms pump after every key.
-  await Bun.sleep(100);
+  await testSleep(100);
 };
 const pump = async () => {
-  await Bun.sleep(100);
+  await testSleep(100);
   await owned.drain();
 };
 const wait = async (text: string) => {
@@ -87,7 +90,7 @@ const serviceGone = async () => {
       throw error;
     }
     if (Date.now() > end) throw Error('owned_caller_service_exit_unconfirmed');
-    await Bun.sleep(20);
+    await testSleep(20);
   }
 };
 try {
@@ -178,7 +181,7 @@ try {
       assert.equal(ready.crash, input.crash);
       assert.equal(owned.ended, false);
       process.kill(owned.host.pid, 0);
-      const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(owned.host.pid), '/f'], {
+      const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(owned.host.pid), '/f'], {
         stdout: 'pipe',
         stderr: 'pipe',
       });

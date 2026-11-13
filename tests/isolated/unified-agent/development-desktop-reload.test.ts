@@ -1,12 +1,14 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { serveDevelopmentReload } from '../../../apps/desktop/electron/development';
+import { fixtureNodeExecutable } from '../../../apps/service/test/fixtures/node-service-process';
 import {
   buildDevelopmentService,
   createDesktopReloadChannel,
@@ -17,6 +19,12 @@ import {
   startDesktopRenderer,
   startDevelopmentServiceWatcher,
 } from '../../../scripts/development/desktop-reload';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+
+function writeFixtureKeyringEntrypoints(serviceSource: string) {
+  for (const entry of ['macos-model-keychain', 'linux-model-keyring'])
+    writeFileSync(join(serviceSource, `${entry}.ts`), 'export {};');
+}
 
 test('runtime workspace exports are checked before publishing a development Service version', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-exports-')));
@@ -25,12 +33,13 @@ test('runtime workspace exports are checked before publishing a development Serv
     const agent = join(root, 'packages/agent/src');
     const dependency = join(root, 'node_modules/@kite-ai/agent');
     for (const directory of [source, agent, dependency]) mkdirSync(directory, { recursive: true });
+    writeFixtureKeyringEntrypoints(source);
     writeFileSync(
       join(dependency, 'package.json'),
-      JSON.stringify({ type: 'module', main: 'index.ts' }),
+      JSON.stringify({ type: 'module', main: 'index.js' }),
     );
     writeFileSync(
-      join(dependency, 'index.ts'),
+      join(dependency, 'index.js'),
       "export * from '../../../packages/agent/src/index.ts';",
     );
     writeFileSync(join(agent, 'model-result.ts'), 'export const available = 1;');
@@ -40,23 +49,25 @@ test('runtime workspace exports are checked before publishing a development Serv
       "import {revision} from '@kite-ai/agent'; export {revision};",
     );
     const output = join(root, 'output');
-    const first = await buildDevelopmentService(root, output);
+    const first = await buildDevelopmentService(root, output, fixtureNodeExecutable());
     const firstPath = join(output, 'services', first.id, 'main.js');
     const bytes = readFileSync(firstPath);
     writeFileSync(
       join(agent, 'index.ts'),
-      "import {formatFileListResult} from './model-result'; export const revision = formatFileListResult();",
+      "import {formatFileListResult} from './model-result.ts'; export const revision = formatFileListResult();",
     );
-    await expect(buildDevelopmentService(root, output)).rejects.toMatchObject({
+    await expect(
+      buildDevelopmentService(root, output, fixtureNodeExecutable()),
+    ).rejects.toMatchObject({
       code: 'development_service_load_failed',
       message: expect.stringContaining('formatFileListResult'),
     });
     expect(readFileSync(firstPath)).toEqual(bytes);
     writeFileSync(join(agent, 'index.ts'), 'export const revision = 2;');
-    const repaired = await buildDevelopmentService(root, output);
+    const repaired = await buildDevelopmentService(root, output, fixtureNodeExecutable());
     expect(repaired.sha256).toBe(first.sha256);
     expect(repaired.sourceSha256).not.toBe(first.sourceSha256);
-    const unchanged = await buildDevelopmentService(root, output);
+    const unchanged = await buildDevelopmentService(root, output, fixtureNodeExecutable());
     expect(unchanged.sourceSha256).toBe(repaired.sourceSha256);
     for (const path of [
       'packages/agent/src/tools/files-tools.ts',
@@ -90,7 +101,7 @@ test('a connected Desktop is not ready until Service startup succeeds; authentic
   );
   try {
     await new Promise<void>((resolve) => peer.once('connect', resolve));
-    await Bun.sleep(5);
+    await fixtureDelay(5);
     expect(ready).toBe(false);
     peer.write(
       `${JSON.stringify({ kind: 'desktop.failed', token: control.configuration.token, code: 'required_capability_missing' })}\n`,
@@ -192,7 +203,7 @@ test('an acknowledged failed reload waits for a new save before the actual paren
     queue.changed();
     await failed;
     expect(failures[0]).toMatchObject({ message: 'development_service_reload_failed' });
-    await Bun.sleep(5);
+    await fixtureDelay(5);
     expect(calls).toEqual(['1'.repeat(32)]);
     queue.changed();
     const next = await Promise.race([applied.then(() => 'applied'), stopped.then(() => 'failed')]);
@@ -312,21 +323,21 @@ test('reload queue coalesces saves, waits for the previous update and recovers f
   queue.changed();
   queue.changed();
   queue.changed();
-  await Bun.sleep(20);
+  await fixtureDelay(20);
   expect(calls).toBe(1);
   queue.changed();
   queue.changed();
   release!();
-  await Bun.sleep(20);
+  await fixtureDelay(20);
   expect(calls).toBe(2);
   expect(failures).toHaveLength(1);
   queue.changed();
-  await Bun.sleep(20);
+  await fixtureDelay(20);
   expect(calls).toBe(3);
   expect(maximum).toBe(1);
   await queue.close();
   queue.changed();
-  await Bun.sleep(10);
+  await fixtureDelay(10);
   expect(calls).toBe(3);
 });
 
@@ -414,20 +425,25 @@ test('actual source rebuild creates independent immutable versions; syntax failu
   try {
     const source = join(root, 'apps/service/src');
     mkdirSync(source, { recursive: true });
+    writeFixtureKeyringEntrypoints(source);
     const entry = join(source, 'main.ts');
     writeFileSync(entry, 'export const revision = 1;');
-    const first = await buildDevelopmentService(root, join(root, 'output'));
+    const first = await buildDevelopmentService(
+      root,
+      join(root, 'output'),
+      fixtureNodeExecutable(),
+    );
     const firstPath = join(root, 'output/services', first.id, 'main.js');
     const bytes = readFileSync(firstPath);
     expect(first.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
     writeFileSync(entry, 'export const revision = 2;');
-    const next = await buildDevelopmentService(root, join(root, 'output'));
+    const next = await buildDevelopmentService(root, join(root, 'output'), fixtureNodeExecutable());
     expect(next.id).not.toBe(first.id);
     expect(next.sha256).not.toBe(first.sha256);
     writeFileSync(entry, 'export const revision = ;');
-    await expect(buildDevelopmentService(root, join(root, 'output'))).rejects.toThrow(
-      'development_service_build_failed',
-    );
+    await expect(
+      buildDevelopmentService(root, join(root, 'output'), fixtureNodeExecutable()),
+    ).rejects.toThrow('development_service_build_failed');
     expect(readFileSync(firstPath)).toEqual(bytes);
     expect(isDevelopmentServiceSource(root, entry)).toBe(true);
     expect(isDevelopmentServiceSource(root, join(root, 'apps/service/dist/main.js'))).toBe(false);
@@ -445,6 +461,7 @@ test('development rebuild preserves the built Shell locator module URL including
     const source = join(root, 'apps/service/src');
     const jobs = join(root, 'packages/agent/dist/jobs');
     mkdirSync(source, { recursive: true });
+    writeFixtureKeyringEntrypoints(source);
     mkdirSync(jobs, { recursive: true });
     writeFileSync(
       join(source, 'main.ts'),
@@ -458,9 +475,13 @@ console.log(JSON.stringify([shellSupervisorAsset(),linuxShellInitAsset()]));`,
 export const linuxShellInitAsset=()=>new URL('../platform/process/linux-shell-init',import.meta.url).href;`,
     );
     for (let revision = 0; revision < 2; revision++) {
-      const built = await buildDevelopmentService(root, join(root, 'output'));
-      const child = Bun.spawn(
-        [process.execPath, join(root, 'output/services', built.id, 'main.js')],
+      const built = await buildDevelopmentService(
+        root,
+        join(root, 'output'),
+        fixtureNodeExecutable(),
+      );
+      const child = spawnFixtureProcess(
+        [fixtureNodeExecutable(), join(root, 'output/services', built.id, 'main.js')],
         { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
       );
       const [code, stdout, stderr] = await Promise.all([
@@ -482,7 +503,7 @@ export const linuxShellInitAsset=()=>new URL('../platform/process/linux-shell-in
 test('Vite serves a nonce-bearing hot renderer on loopback with scoped sourcemaps and file access', async () => {
   // Vite's raw filesystem middleware serves the current drive on Windows.
   // Keep the fixture on that drive so the request exercises a real file, not SPA fallback.
-  const fixtures = join(import.meta.dir, '../../../.cache');
+  const fixtures = join(import.meta.dirname, '../../../.cache');
   mkdirSync(fixtures, { recursive: true });
   const root = realpathSync(mkdtempSync(join(fixtures, 'kite-development-renderer-')));
   let renderer: Awaited<ReturnType<typeof startDesktopRenderer>> | undefined;
@@ -559,7 +580,7 @@ test('Vite serves a nonce-bearing hot renderer on loopback with scoped sourcemap
     }
     const watched = () => Object.values(renderer!.server.watcher.getWatched()).flat();
     const deadline = Date.now() + 2000;
-    while (!watched().includes('public-probe.txt') && Date.now() < deadline) await Bun.sleep(5);
+    while (!watched().includes('public-probe.txt') && Date.now() < deadline) await fixtureDelay(5);
     expect(watched()).toContain('public-probe.txt');
     expect(watched()).not.toContain('.cache');
     expect(watched()).not.toContain('generated-probe.txt');
@@ -603,7 +624,7 @@ test('a fresh Service watcher finishes its own scan before immediate writes and 
     const observed = async (file: string) => {
       const deadline = Date.now() + 2000;
       while (!events.some((event) => event.file === file) && Date.now() < deadline)
-        await Bun.sleep(5);
+        await fixtureDelay(5);
       expect(events.some((event) => event.file === file)).toBe(true);
     };
     await observed(existing);
@@ -625,7 +646,7 @@ test('a fresh Service watcher finishes its own scan before immediate writes and 
     await watcher.close();
     const before = events.length;
     writeFileSync(existing, 'export const value = 3;');
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(events).toHaveLength(before);
     expect(failures).toEqual([]);
   } finally {

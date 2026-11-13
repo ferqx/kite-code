@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { formatFileReadResult } from '../../../../packages/agent/src/tools/files/model-result';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { taskQualityResearchPrompt } from './agent-task-quality.live';
 import {
   taskQualityCompleteFixtureRead,
@@ -89,6 +90,7 @@ test('independent parser accepts actual production full/window/empty read render
       path: 'config.txt',
       content,
       baseline,
+      base_ref: 'file-ref-fixture',
       selection,
       executionId: 'read',
       runId: 'run',
@@ -99,7 +101,7 @@ test('independent parser accepts actual production full/window/empty read render
       evidenceRef: undefined,
       path: 'config.txt',
       content,
-      baseline,
+      baseRef: 'file-ref-fixture',
       selection,
       whole,
     });
@@ -285,12 +287,13 @@ test('complete read accepts raw and compact exact source, rejects window/body/id
     path: 'config.txt',
     content,
     baseline,
+    base_ref: 'file-ref-fixture',
     executionId: 'read-id',
     runId: 'run-id',
     selection: { fromLine: 1, toLine: 1, totalLines: 1, nextOffset: null },
   };
   const original = JSON.stringify(raw);
-  const compact = `Read "config.txt"; from_line=1; lines=1-1/1; next_line=null; complete file.\nbaseline=${JSON.stringify(baseline)}\nContent (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`;
+  const compact = `Read "config.txt"; from_line=1; lines=1-1/1; next_line=null; complete file.\nbase_ref="file-ref-fixture"\nContent (${Buffer.byteLength(content)} UTF-8 bytes; starts on next line):\n${content}`;
   const read = {
     id: 'read-id',
     callId: 'call-id',
@@ -422,9 +425,12 @@ test('child framing preserves complete Unicode body/excerpt and exact recorded p
 // Process-local mocks never read user configuration/credentials or call a Provider.
 async function probe(script: string, mode = '') {
   const root = mkdtempSync(join(tmpdir(), 'quality-ab-probe-'));
-  const child = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
       process.execPath,
+      ...process.execArgv,
+      '--disable-warning=ExperimentalWarning',
+      '--input-type=module',
       '--eval',
       script.replaceAll('import.meta.url', JSON.stringify(import.meta.url)),
     ],
@@ -462,13 +468,13 @@ async function probe(script: string, mode = '') {
 
 test('wire evidence stays paired across concurrent requests and preflight blocks dispatch', async () => {
   const result = await probe(`
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import * as configurationExports from '@kite-ai/agent/config';
 import * as sdkExports from '@kite-ai/ai/sdk';
 const actualConfiguration = { ...configurationExports };
 const actualSdk = { ...sdkExports };
 let fetches = 0, closes = 0;
-globalThis.fetch = Object.assign(async () => { fetches++; await Bun.sleep(2); return new Response('{}'); }, { preconnect() {} });
+globalThis.fetch = async () => { fetches++; await new Promise(resolve => setTimeout(resolve, 2)); return new Response('{}'); };
 mock.module('@kite-ai/agent/config', () => ({ ...actualConfiguration, createCredentialVault: () => ({ resolve: async () => { throw Error('credential_forbidden'); } }), createOsCredentialBackend: () => ({}) }));
 mock.module('@kite-ai/service/configuration', () => ({ parseModelPreset: () => ({ reasoningEffort:'high' }), createUserConfiguration: () => ({ read: () => ({ value: { modelId:'owned', models:[{ id:'owned', model:'synthetic', provider:'compatible', baseURL:'https://owned.invalid' }] } }) }) }));
 mock.module('@kite-ai/ai/sdk', () => ({ ...actualSdk, createCompatibleModelBinding: value => value, createSdkModelAdapter: options => ({ async *stream(request) {
@@ -495,7 +501,7 @@ console.log(JSON.stringify({ fetches, closes, blocked, wire:fixture.wireRequests
 
 test('driver keeps planned quality failures but stops binding drift before dispatch', async () => {
   const script = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 let attempts = 0, dispatches = 0;

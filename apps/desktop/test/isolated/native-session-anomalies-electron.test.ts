@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -14,7 +12,16 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -144,7 +151,7 @@ test.skipIf(process.platform !== 'darwin')(
     };
     const frame = (delta: unknown, finish_reason: string | null) =>
       `data: ${JSON.stringify({ id: 'session-anomaly', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 0,
@@ -246,7 +253,7 @@ test.skipIf(process.platform !== 'darwin')(
         }
       },
     });
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     let warm: Awaited<ReturnType<typeof launchPairedService>> | undefined;
     try {
       const configuration = JSON.stringify({
@@ -270,13 +277,13 @@ test.skipIf(process.platform !== 'darwin')(
       const serviceOutdir = join(root, 'apps/service/dist');
       mkdirSync(serviceOutdir, { recursive: true });
       directoryLink(
-        resolve(import.meta.dir, '../../../service/node_modules'),
+        resolve(import.meta.dirname, '../../../service/node_modules'),
         join(root, 'apps/service/node_modules'),
       );
       const serviceEntrypoint = join(serviceOutdir, 'service.js'),
-        serviceBuild = await Bun.build({
-          entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
-          target: 'bun',
+        serviceBuild = await buildFixture({
+          entrypoints: [resolve(import.meta.dirname, '../../../service/src/main.ts')],
+          target: 'node',
           format: 'esm',
           packages: 'external',
           outdir: serviceOutdir,
@@ -354,9 +361,9 @@ test.skipIf(process.platform !== 'darwin')(
       await buildNativeDesktop(
         {
           serviceEntrypoint,
-          bunExecutable,
+          runtimeExecutable: bunExecutable,
           serviceSha256: artifact.entrypointSha256,
-          bunSha256: artifact.executableSha256,
+          runtimeSha256: artifact.executableSha256,
           buildId: artifact.buildId,
           apiMajor: 1,
           requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
@@ -371,7 +378,7 @@ test.skipIf(process.platform !== 'darwin')(
           {
             sourceCommit: String(
               execFileSync('git', ['rev-parse', 'HEAD'], {
-                cwd: resolve(import.meta.dir, '../../../..'),
+                cwd: resolve(import.meta.dirname, '../../../..'),
               }),
             ).trim(),
             sourceFiles: Object.fromEntries(
@@ -383,7 +390,7 @@ test.skipIf(process.platform !== 'darwin')(
               ].map((path) => [
                 path,
                 createHash('sha256')
-                  .update(readFileSync(resolve(import.meta.dir, '../../../..', path)))
+                  .update(readFileSync(resolve(import.meta.dirname, '../../../..', path)))
                   .digest('hex'),
               ]),
             ),
@@ -399,8 +406,10 @@ test.skipIf(process.platform !== 'darwin')(
           2,
         ),
       );
-      const driverBuild = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../native-session-anomalies-electron.fixture.ts')],
+      const driverBuild = await buildFixture({
+        entrypoints: [
+          resolve(import.meta.dirname, '../native-session-anomalies-electron.fixture.ts'),
+        ],
         target: 'node',
         format: 'esm',
         packages: 'external',
@@ -409,12 +418,12 @@ test.skipIf(process.platform !== 'darwin')(
       });
       if (!driverBuild.success) throw new AggregateError(driverBuild.logs, 'anomaly_driver_build');
       directoryLink(
-        resolve(import.meta.dir, '../../../../node_modules'),
+        resolve(import.meta.dirname, '../../../../node_modules'),
         join(root, 'node_modules'),
       );
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           outdir,
           home,
@@ -423,7 +432,7 @@ test.skipIf(process.platform !== 'darwin')(
           evidence,
           profile.databasePath,
           bunExecutable,
-          resolve(import.meta.dir, '../../package.json'),
+          resolve(import.meta.dirname, '../../package.json'),
         ],
         { stdout: 'pipe', stderr: 'pipe', env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } },
       );

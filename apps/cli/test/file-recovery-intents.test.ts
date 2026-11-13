@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
@@ -6,6 +5,7 @@ import {
   type FileRecoveryIntent,
   planFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
+import { expect, test } from '#kite-test';
 import {
   expectPrivateMode,
   privateDirectory,

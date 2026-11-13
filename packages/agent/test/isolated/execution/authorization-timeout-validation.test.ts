@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { maximumAuthorizationCheckTimeoutMs } from '../../../src/execution/authorization-timing';

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { parseRobots, robotsAllows } from '../../../src/tools/web-fetch/robots';
 
 test('robots merges matching agent groups and uses the wildcard only as a fallback', () => {

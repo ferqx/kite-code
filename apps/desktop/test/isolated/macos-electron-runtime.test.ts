@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -16,6 +15,8 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 import {
   macosElectronResize,
   verifyMacosElectronFramework,
@@ -98,8 +99,8 @@ test.skipIf(!supported)(
       expect(() =>
         patchMacosElectronRuntime({ sourceDist: source, targetDist: join(root, 'electron') }),
       ).toThrow('runtime_input_invalid');
-      const build = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../../electron/macos-electron-resize.ts')],
+      const build = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, '../../electron/macos-electron-resize.ts')],
         target: 'node',
         format: 'cjs',
         outdir: root,

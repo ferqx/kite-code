@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -12,6 +11,7 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
@@ -24,6 +24,14 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import {
   directoryLink,
   privateDirectory,
@@ -60,7 +68,7 @@ test.skipIf(process.platform !== 'darwin')(
     let baseline: Awaited<ReturnType<typeof snapshot>> | undefined,
       restoredStoreId: string | undefined;
     let restoreStarted = false;
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -208,7 +216,7 @@ test.skipIf(process.platform !== 'darwin')(
         });
       },
     });
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
       out: Promise<string> | undefined,
       err: Promise<string> | undefined,
       completed = false,
@@ -219,10 +227,10 @@ test.skipIf(process.platform !== 'darwin')(
       cleanupFailures: unknown[] = [];
     try {
       const { buildTerminalBundle, installTerminalBundle, uninstallTerminalBundle } = await import(
-        resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+        resolve(import.meta.dirname, '../../../../scripts/release/terminal-bundle.ts')
       );
       const { installNativeBundle, uninstallNativeBundle } = await import(
-        resolve(import.meta.dir, '../../../../scripts/release/native-install.ts')
+        resolve(import.meta.dirname, '../../../../scripts/release/native-install.ts')
       );
       // Production default process Service: no source, resolver, Runtime, credential,
       // model, OAuth, network-policy or processHostFixture injection.
@@ -308,29 +316,35 @@ test.skipIf(process.platform !== 'darwin')(
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(resolve(import.meta.dir, '../native-background-electron.fixture.ts'), 'utf8')
+        readFileSync(
+          resolve(import.meta.dirname, '../native-background-electron.fixture.ts'),
+          'utf8',
+        )
           .replace(
             "'./native-model-selection.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
           )
           .replace(
             "'./native-root-page.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-root-page.fixture.ts')),
           )
           .replace(
             "'../../../tests/fixtures/loopback-model-environment'",
             JSON.stringify(
-              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+              resolve(
+                import.meta.dirname,
+                '../../../../tests/fixtures/loopback-model-environment.ts',
+              ),
             ),
           )
           .replace(
             "import { _electron } from 'playwright';",
-            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
           ),
       );
       expect(
         (
-          await Bun.build({
+          await buildFixture({
             entrypoints: [fixture],
             target: 'node',
             format: 'esm',
@@ -354,9 +368,9 @@ test.skipIf(process.platform !== 'darwin')(
           producer: 'six-tool default collaborator via compatible SDKHTTP',
         }),
       );
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           moved,
           home,
@@ -768,7 +782,7 @@ process.exitCode = await runNativeTerminalCLI(process.argv.slice(3), process.arg
             }
           })
         )
-          await Bun.sleep(20);
+          await fixtureDelay(20);
         const forced: number[] = [];
         for (const pid of owned)
           try {
@@ -794,7 +808,7 @@ process.exitCode = await runNativeTerminalCLI(process.argv.slice(3), process.arg
         const disappearanceDeadline = Date.now() + 5000;
         let remaining = remainingOwned();
         while (remaining.length && Date.now() < disappearanceDeadline) {
-          await Bun.sleep(50);
+          await fixtureDelay(50);
           remaining = remainingOwned();
         }
         cleanupUnconfirmed = remaining.length > 0;
@@ -844,7 +858,7 @@ process.exitCode = await runNativeTerminalCLI(process.argv.slice(3), process.arg
 );
 
 async function execute(argv: string[], home: string) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd: home,
     env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     stdin: 'ignore',

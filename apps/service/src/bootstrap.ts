@@ -1,3 +1,5 @@
+import { Console } from 'node:console';
+import { Readable } from 'node:stream';
 import type { AgentRuntime, RuntimeOptions } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
@@ -12,6 +14,16 @@ import type { UserMcpManagementPort } from './user-mcp-management';
 
 export const startupLimitBytes = 64 * 1024;
 export const bootstrapLimitBytes = 16 * 1024;
+export function startupStdin(): ReadableStream<Uint8Array> {
+  return Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>;
+}
+/** The executable owns stdout's single private readiness record. */
+export function reserveProcessStdout(): void {
+  globalThis.console = new Console({
+    stdout: process.stderr,
+    stderr: process.stderr,
+  }) as typeof globalThis.console;
+}
 const runtimeProtectionSchema = z.unknown().transform((value, context) => {
   try {
     return parseRuntimeProtection(value);

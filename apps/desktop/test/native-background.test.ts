@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type {
   AgentClient,
   BackgroundExecutionItem,
@@ -8,6 +8,7 @@ import type {
   Message,
   ModelOutputSnapshot,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeBackground } from '../electron/background';
 import { NativeCallerJournal } from '../electron/caller-journal';
 import { decodeNativeRequest } from '../electron/native-ipc';
@@ -473,7 +474,7 @@ test('closed Native observations reject authority injection and releasing a held
       resolve = done;
     });
   const read = f.main.open('held').catch((cause) => cause);
-  await Bun.sleep(0);
+  await fixtureDelay(0);
   f.main.release();
   resolve([backgroundItem()]);
   expect(await read).toMatchObject({ code: 'background_observation_changed' });
@@ -772,7 +773,7 @@ function pendingChildDirectoryFixture() {
         return gate;
       };
       const pending = f.environment.open('pending-directory').catch((cause: unknown) => cause);
-      await Bun.sleep(0);
+      await fixtureDelay(0);
       expect(entered).toBe(true);
       return { original, pending };
     },

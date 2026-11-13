@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import {
   type ClearPermissionGrantsRequest,
   createClient,
@@ -53,9 +54,9 @@ function page(after = '0'): PermissionGrantPage {
     snapshotCursor: revision,
   };
 }
-function fixture(read: (request: Request) => Promise<Response> | Response) {
+async function fixture(read: (request: Request) => Promise<Response> | Response) {
   const requests: { path: string; method: string }[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -77,7 +78,7 @@ function fixture(read: (request: Request) => Promise<Response> | Response) {
     requests,
     close() {
       client.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
@@ -99,7 +100,7 @@ test('complete grant directory keeps one original epoch and fixed upper through 
   const waiting = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const f = fixture(async (request) => {
+  const f = await fixture(async (request) => {
     const query = new URL(request.url).searchParams;
     if (!query.has('afterSeq')) {
       entered();
@@ -127,13 +128,13 @@ test('complete grant directory keeps one original epoch and fixed upper through 
     });
   } finally {
     release();
-    f.close();
+    await f.close();
   }
 });
 
 test('epoch drift and malformed original grant scope never publish a partial directory; invalid decimal input sends no business request', async () => {
   let value: PermissionGrantPage | undefined;
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     const after = new URL(request.url).searchParams.get('afterSeq');
     return Response.json(
       value ?? { ...page(after ?? '0'), ...(after ? { revision: '9007199254740994' } : {}) },
@@ -162,7 +163,7 @@ test('epoch drift and malformed original grant scope never publish a partial dir
     value = { ...page(), snapshotCursor: '9223372036854775808' };
     await rejected(f.client.listPermissionGrants('s', { storeId: 'store' }), 'invalid_response');
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
@@ -179,7 +180,7 @@ test('invalid clear receipt after a committed POST is unknown and only the origi
     receipt: { status: 'applied', sessionId: 's', revision: '9007199254740994' },
   };
   const posts: unknown[] = [];
-  const f = fixture(async (request) => {
+  const f = await fixture(async (request) => {
     if (request.method === 'POST') {
       posts.push(await request.json());
       return new Response('{', { headers: { 'content-type': 'application/json' } });
@@ -197,6 +198,6 @@ test('invalid clear receipt after a committed POST is unknown and only the origi
     expect(posts).toEqual([original]);
     expect(f.requests.filter((row) => row.method === 'POST')).toHaveLength(1);
   } finally {
-    f.close();
+    await f.close();
   }
 });

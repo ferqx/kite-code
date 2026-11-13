@@ -1,15 +1,16 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
+import { Database } from '../../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../../src/sqlite';
 import type { Store } from '../../../../src/storage/port';
 import { listAgentMessages } from '../../../../src/storage/sqlite/agent-mail-operations';
@@ -65,7 +66,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw Error('unified_inbox_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(

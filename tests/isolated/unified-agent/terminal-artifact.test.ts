@@ -1,14 +1,16 @@
-import { expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { chmodSync, linkSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { expect, setDefaultTimeout, test } from '#kite-test';
 import {
   parseTerminalBundleManifest,
   type TerminalBundleManifest,
   terminalBundleEntries,
   verifyTerminalBundle,
 } from '../../../apps/cli/host/terminal-artifact';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 import {
   releaseCopy as cpSync,
   directoryAlias,
@@ -46,7 +48,7 @@ function fixture() {
     version: 1,
     apiMajor: 1,
     target: { platform: process.platform, arch: process.arch },
-    bunVersion: Bun.version,
+    bunVersion: '1.4.4',
     sqlite: fixtureTerminalSqlite(root, files),
     productVersion: '0.1.0',
     source: { commit: 'a'.repeat(40), dirty: true },
@@ -244,12 +246,11 @@ test('new terminal entrypoints pure help/version and nonterminal TUI reject with
       ['terminal-tui.ts', ['--version'], 0],
       ['terminal-tui.ts', [], 1],
     ] as const) {
-      const child = Bun.spawn(
-        [
-          process.execPath,
-          resolve(import.meta.dir, '../../../scripts/release/entrypoints', entry),
-          ...argv,
-        ],
+      const child = spawnFixtureProcess(
+        testNodeCommand(
+          resolve(import.meta.dirname, '../../../scripts/release/entrypoints', entry),
+          argv,
+        ),
         { env: { ...process.env, HOME: home }, stdout: 'pipe', stderr: 'pipe' },
       );
       const [exit, stdout, stderr] = await Promise.all([

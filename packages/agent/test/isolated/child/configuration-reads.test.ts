@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { type ChildAgentConfiguration, createRuntime, type RuntimeOptions } from '../../../src';
 import type { Extension, OperationRef, Permissions, ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -393,7 +394,7 @@ for (const boundary of [
       if (boundary === 'permission_wait') {
         await Promise.race([
           waiting,
-          Bun.sleep(5000).then(() => {
+          sleepTimer(5000).then(() => {
             throw new Error('permission wait not entered');
           }),
         ]);

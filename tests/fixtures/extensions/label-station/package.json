@@ -19,7 +19,7 @@
     "jsdom": "^29.1.1"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/host.ts --target=bun --packages=external --outdir=dist",
+    "build": "node --import ../../../../scripts/tooling/register.mjs ../../../../scripts/tooling/build-command.ts ./src/index.ts ./src/host.ts --target=node --packages=external --outdir=dist",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "files": [

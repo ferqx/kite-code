@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -19,6 +20,7 @@ import type {
   TuiMcpReconnectionIntent,
   TuiMcpReconnectionObservation,
 } from '@kite-ai/ui/tui';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createPermissionManagement } from '../../../service/src/permission-management';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
@@ -70,7 +72,7 @@ export async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw Error('owned_reconnection_host_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 export function reconnect(
@@ -177,7 +179,7 @@ export async function reconnectionHostFixture(ask = false, many = false) {
   globalThis.fetch = ownedFetch;
   // Keep the complete original descriptor inside the public Source adapter's 1MiB wire limit.
   const description = `原始完整描述🙂\r\n${'x'.repeat(700 * 1024)}完整原尾部`;
-  const peer = Bun.serve({
+  const peer = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -234,7 +236,7 @@ export async function reconnectionHostFixture(ask = false, many = false) {
       return Response.json({ jsonrpc: '2.0', id: body.id, result });
     },
   });
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {

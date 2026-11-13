@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -9,6 +9,8 @@ import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import type { ModelEvent } from '@kite-ai/ai';
 import { createClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../scripts/tooling/http';
 import { observeCommand, run } from '../src';
 
 test('real HTTP ordinary business lineage and saved progress Model terminate CLI without replay', async () => {
@@ -182,7 +184,7 @@ test('real HTTP ambiguous input reaches the ordinary Agent and cold GET-only obs
     });
   let service = await launch();
   const wire: { method: string; path: string }[] = [];
-  const proxy = Bun.serve({
+  const proxy = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -258,7 +260,7 @@ test('real HTTP ambiguous input reaches the ordinary Agent and cold GET-only obs
     const deadline = Date.now() + 1000;
     while ((await store.getView('s')).runs.some((run) => run.isActive)) {
       if (Date.now() > deadline) throw Error('unresolved_processing_did_not_settle');
-      await Bun.sleep(5);
+      await testSleep(5);
     }
     expect((await store.getView('s')).runs).toHaveLength(2);
     expect((await store.listExecutions('s')).every((execution) => execution.kind === 'model')).toBe(

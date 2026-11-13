@@ -1,9 +1,14 @@
-import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
+import { expect, mock, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import type { Subprocess } from '../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const flag = '--owned-source-publication-child';
@@ -15,7 +20,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw Error('source_publication_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -154,7 +159,7 @@ async function faultChild(root: string, packetPath: string) {
   const { openSqliteStore } = await import('@kite-ai/agent/sqlite');
   const { getLoadedSqliteEngine } = await import('@kite-ai/agent/sqlite-engine');
   const { createClient } = await import('@kite-ai/client');
-  const { Database } = await import('bun:sqlite');
+  const { Database } = await import('@kite-ai/agent/runtime-sqlite');
   const { createDefaultProcessConfiguration } = await import('../../src/configuration');
   const { startService } = await import('../../src/index');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -162,7 +167,7 @@ async function faultChild(root: string, packetPath: string) {
   actual.writeFileSync(join(profile.profilePath, 'mcp.json'), '{"mcpServers":{}}\n', {
     mode: 0o600,
   });
-  const remote = Bun.serve({
+  const remote = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -414,14 +419,17 @@ if (process.argv.includes(flag)) {
       fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
       0o600,
     );
-    let child: Bun.Subprocess | undefined;
+    let child: Subprocess | undefined;
     let passed = false;
     try {
-      child = Bun.spawn([process.execPath, import.meta.path, flag, root, packetPath], {
-        stdin: 'ignore',
-        stdout: logFd,
-        stderr: logFd,
-      });
+      child = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, import.meta.filename, flag, root, packetPath],
+        {
+          stdin: 'ignore',
+          stdout: logFd,
+          stderr: logFd,
+        },
+      );
       const exit = await child.exited;
       const p = JSON.parse(fs.readFileSync(packetPath, 'utf8'));
       console.log(`source-publication-evidence ${evidence}`);

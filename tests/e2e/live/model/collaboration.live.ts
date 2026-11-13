@@ -306,7 +306,7 @@ const report: Record<string, unknown> = {
   date: new Date().toISOString(),
   platform: process.platform,
   arch: process.arch,
-  bunVersion: Bun.version,
+  nodeVersion: process.versions.node,
   group,
   caseId,
   entryLayer:

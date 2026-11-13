@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { Activity, act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { ConversationActivityContext } from '../../src/conversation-activity';
 import { MessageContent } from '../../src/desktop/MessageContent';
 import { StreamingTextReveal } from '../../src/desktop/streaming-text-reveal';

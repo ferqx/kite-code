@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { openNativeShellObservation } from './native-shell-observation.fixture';
 
 type Observation = Pick<
@@ -126,7 +127,7 @@ export async function cleanupNativeCaller(
     }
   const deadline = Date.now() + 2000;
   while (observed.some((identity) => observation.present(identity)) && Date.now() < deadline)
-    await Bun.sleep(20);
+    await fixtureDelay(20);
   for (const identity of observed)
     if (observation.present(identity)) {
       observation.signal(identity, 9);
@@ -134,7 +135,7 @@ export async function cleanupNativeCaller(
     }
   const stopped = Date.now() + 5000;
   while (observed.some((identity) => observation.present(identity)) && Date.now() < stopped)
-    await Bun.sleep(20);
+    await fixtureDelay(20);
   const remaining = observed.filter((identity) => observation.present(identity));
   const remainingRows = rows().filter(related);
   const confirmed = !remaining.length && !remainingRows.length;

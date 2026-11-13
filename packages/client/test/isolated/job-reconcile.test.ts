@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
+import { expect, test } from '#kite-test';
 import {
   createClient,
   decodeJobReconcileCommand,

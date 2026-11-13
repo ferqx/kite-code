@@ -1,13 +1,14 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { observeCommand } from '../../src';
 
 test('actual CLI answers original second-page question while 20 unrelated earlier Job cards remain pending', async () => {
@@ -164,21 +165,21 @@ test('actual CLI answers original second-page question while 20 unrelated earlie
     const commandDeadline = Date.now() + 5000;
     while (!(previousCommand.receipt as { runId?: string } | null)?.runId) {
       if (Date.now() > commandDeadline) throw Error('previous_command_timeout');
-      await Bun.sleep(5);
+      await testSleep(5);
       previousCommand = await client.getCommand(previous.commandId);
     }
     const previousRunId = (previousCommand.receipt as { runId: string }).runId;
     const previousDeadline = Date.now() + 15000;
     while ((await client.getRun(previousRunId)).isActive) {
       if (Date.now() > previousDeadline) throw Error('previous_run_timeout');
-      await Bun.sleep(5);
+      await testSleep(5);
     }
     expect((await client.getRun(previousRunId)).status).toBe('completed');
     const deadline = Date.now() + 5000;
     let first = await client.listInteractions('s', { storeId, state: 'pending', limit: 20 });
     while (first.interactions.length !== 20) {
       if (Date.now() > deadline) throw Error('previous_pending_timeout');
-      await Bun.sleep(5);
+      await testSleep(5);
       first = await client.listInteractions('s', { storeId, state: 'pending', limit: 20 });
     }
     const original = {

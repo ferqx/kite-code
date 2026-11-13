@@ -1,6 +1,6 @@
-import { expect, jest, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
+import { expect, jest, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeModelSettingsFacts,

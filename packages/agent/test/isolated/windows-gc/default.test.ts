@@ -1,20 +1,21 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('Windows GC owns the original DELETE reader through full hash, role checks and failed close', () => {
   const module = fileURLToPath(
     new URL('../../../src/platform/windows-artifact-files.ts', import.meta.url),
   );
   const code = `
-import * as nativeFFI from 'bun:ffi';
-import { mock } from 'bun:test';
+import * as nativeFFI from '@kite-ai/agent/runtime-ffi';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 assert.equal(typeof nativeFFI.dlopen, 'function');
-assert.equal(typeof require('bun:ffi').dlopen, 'function');
+assert.equal(typeof require('@kite-ai/agent/runtime-ffi').dlopen, 'function');
 Object.defineProperty(process, 'platform', { value: 'win32' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
 mock.module('node:path', () => ({ ...path, ...path.posix }));
@@ -77,7 +78,7 @@ const symbols = {
  GetFileAttributesW(buffer) { return files.has(text(buffer)) ? 0 : 0xffffffff; },
  GetLastError: () => 2,
 };
-mock.module('bun:ffi', () => ({ ...nativeFFI, ptr: value => value,
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)}, () => ({ ...nativeFFI, ptr: value => value,
  toArrayBuffer(address) { return address === 3000 ? acl : ace; },
  CString: class { toString() { return 'S-1-5-21-1'; } },
  dlopen() { return { symbols, close() {} }; },
@@ -119,7 +120,11 @@ assert.equal(files.has(location), true); assert.equal(handles.size, 0);
 assert.equal(typeof WindowsGcArtifactAcquireUnknownError, 'function');
 console.log('original-gc-owner-confirmed');
 `;
-  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  const child = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    { encoding: 'utf8', timeout: 4000 },
+  );
   if (child.error || child.status !== 0)
     process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
   expect(child.error).toBeUndefined();
@@ -131,8 +136,8 @@ console.log('original-gc-owner-confirmed');
 test('public Windows GC retains Profile EX only when original acquisition cleanup is unknown', () => {
   const module = (path: string) => fileURLToPath(new URL(`../../../src/${path}`, import.meta.url));
   const code = `
-import * as nativeFFI from 'bun:ffi';
-import { mock } from 'bun:test';
+import * as nativeFFI from '@kite-ai/agent/runtime-ffi';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -208,7 +213,11 @@ assert.deepEqual(portNames, [
 ]);
 console.log('public-gc-owner-confirmed');
 `;
-  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  const child = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    { encoding: 'utf8', timeout: 4000 },
+  );
   if (child.error || child.status !== 0)
     process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
   expect(child.error).toBeUndefined();

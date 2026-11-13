@@ -1,6 +1,6 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { afterAll, afterEach, expect, test } from '#kite-test';
 import { markdownMarkup } from '../markdown-dom.fixture';
 import { setEditorText } from '../prompt-editor.fixture';
 

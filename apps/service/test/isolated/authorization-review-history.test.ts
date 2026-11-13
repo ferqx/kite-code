@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -12,14 +10,17 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, preflightSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Json } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../../packages/agent/src/json';
 import { startService } from '../../src';
 
@@ -163,7 +164,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask'] as const)
           const body = await response.text();
           expect(body).not.toContain(marker);
           card = JSON.parse(body).interactions[0];
-          if (!card) await Bun.sleep(10);
+          if (!card) await sleepTimer(10);
         }
         expect(card).toBeDefined();
         expect(effects).toBe(0);

@@ -1,4 +1,5 @@
 import { closeSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
 // A failed unlock/close must not discard the original descriptor or permit inode cleanup.
 const retained = new Map<number, Error>();
@@ -10,7 +11,9 @@ function native() {
   if (process.platform !== 'darwin' && process.platform !== 'linux')
     throw fail('daemon_platform_unsupported');
   // This leaf is also imported by trusted Node hosts; load FFI only for an actual POSIX operation.
-  const { dlopen, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
+  const { dlopen, toArrayBuffer } = createRequire(import.meta.url)(
+    '@kite-ai/agent/runtime-ffi',
+  ) as typeof import('@kite-ai/agent/runtime-ffi');
   const library = dlopen(
     process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6',
     {

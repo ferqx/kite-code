@@ -1,39 +1,15 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export interface OtelAdapterAssets {
   directory: string;
   manifestSha256: string;
 }
-const names = ['runner.js', 'empty-bunfig.toml', 'empty-tsconfig.json'] as const;
+export const otelAdapterAssetNames = ['runner.js'] as const;
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-export async function buildOtelAdapterAssets(directory: string): Promise<OtelAdapterAssets> {
-  mkdirSync(directory, { recursive: true });
-  const build = await Bun.build({
-    entrypoints: [fileURLToPath(new URL('./runner.ts', import.meta.url))],
-    outdir: directory,
-    target: 'bun',
-    packages: 'bundle',
-    naming: 'runner.js',
-  });
-  if (!build.success) throw new AggregateError(build.logs, 'otel_adapter_build_failed');
-  writeFileSync(join(directory, 'empty-bunfig.toml'), '');
-  writeFileSync(join(directory, 'empty-tsconfig.json'), '{}');
-  const manifest = {
-    schema: 'kite.otel-adapter-assets',
-    version: 1,
-    files: names.map((name) => {
-      const bytes = readFileSync(join(directory, name));
-      return { name, size: bytes.byteLength, sha256: hash(bytes) };
-    }),
-  };
-  const bytes = JSON.stringify(manifest);
-  writeFileSync(join(directory, 'manifest.json'), bytes);
-  return { directory: realpathSync.native(directory), manifestSha256: hash(bytes) };
-}
 export function verifyOtelAdapterAssets(assets: OtelAdapterAssets): string {
+  const names = otelAdapterAssetNames;
   const root = realpathSync.native(assets.directory),
     bytes = readFileSync(join(root, 'manifest.json'));
   if (hash(bytes) !== assets.manifestSha256) throw Error('otel_assets_changed');

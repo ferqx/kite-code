@@ -1,5 +1,5 @@
-import { Database } from 'bun:sqlite';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage/types';

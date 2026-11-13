@@ -2,7 +2,12 @@ import stringWidth from 'string-width';
 import { tuiSystemDelay } from './cancellation';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
-import { stripAnsi, waitForOutputQuiescence } from './terminal-screen';
+import {
+  screenHasSessionRow,
+  stripAnsi,
+  waitForCondition,
+  waitForOutputQuiescence,
+} from './terminal-screen';
 import { tuiPollInterval, tuiWaitTimeout } from './timing';
 
 export async function sleep(ms: number): Promise<void> {
@@ -157,8 +162,9 @@ export function activeInput(viewport: string): ActiveInput | undefined {
     }
   }
 
-  if (lines.some((line) => line.includes('会话列表'))) {
-    const searchLine = lines.find((line) => line.includes('搜索:'));
+  const sessionPanel = lines.findLastIndex((line) => line.includes('会话列表'));
+  if (sessionPanel >= 0) {
+    const searchLine = lines.slice(sessionPanel + 1).find((line) => line.includes('搜索:'));
     if (searchLine) {
       const value = searchLine
         .slice(searchLine.indexOf('搜索:') + '搜索:'.length)
@@ -208,6 +214,35 @@ export async function activateSessionSearch(tui: PtyProcess, timeoutMs = 5_000):
   }
   throw new Error(
     `Timeout (${effectiveTimeout}ms) activating session search. Input viewport:\n${tui.inputViewport().slice(-1_000)}`,
+  );
+}
+
+/**
+ * Filter by the original title, observe the selected row, then send one
+ * Enter and confirm the caller's conversation is open.
+ */
+export async function openSessionByTitle(
+  tui: PtyProcess,
+  title: string,
+  accept: (viewport: string) => boolean,
+  timeoutMs: number,
+): Promise<void> {
+  await activateSessionSearch(tui);
+  await typeText(tui, title);
+  tui.write('\x1b[B');
+  await waitForCondition(
+    () => screenHasSessionRow(tui.viewport(), title, { selected: true, active: false }),
+    'the original Session row to become selected',
+    5_000,
+  );
+  tui.write('\r');
+  await waitForCondition(
+    () => {
+      const viewport = tui.viewport();
+      return !stripAnsi(viewport).includes('会话列表') && accept(viewport);
+    },
+    'the original selected Session to open',
+    timeoutMs,
   );
 }
 
@@ -336,7 +371,7 @@ export async function typeText(
   ) {
     // Internal spaces are not projected consistently enough for a safe
     // per-character receipt on every Ink/PTY surface. Wait for the focused
-    // handler, then deliver the complete replacement once. Bun's byte-count
+    // handler, then deliver the complete replacement once. The PTY byte-count
     // result cannot authorize a replay across supported runtime versions.
     await pasteText(tui, text, {
       echoTimeoutMs: options.testTiming?.echoTimeoutMs,
@@ -357,7 +392,7 @@ export async function typeText(
         delivered += ch;
         if (delayMs > 0) await sleep(delayMs);
 
-        // `terminal.write()` is fire-and-forget. On a busy Bun CI runner,
+        // `terminal.write()` is fire-and-forget. On a busy CI runner,
         // a later character can still be queued while the viewport
         // has already advanced.  Confirm each prefix before sending the next
         // byte so a retry can never race an undrained input transaction.

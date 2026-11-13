@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
 import { waitForTuiProfileAccess } from '../../../apps/cli/host/tui-startup-wait';
 import { acquireProfileMaintenanceAccess } from '../../../packages/agent/src/platform/profile';
 

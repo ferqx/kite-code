@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
@@ -9,6 +9,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { defineExtension, type JobEvent, type OperationRef } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -48,7 +49,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   while (Date.now() < end) {
     const value = await read();
     if (value !== undefined) return value;
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   throw new Error('result_checkpoint_missing_fact');
 }

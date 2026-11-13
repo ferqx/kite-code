@@ -1,9 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -16,6 +18,7 @@ import {
 } from '../../../src/maintenance';
 import { selectProfile } from '../../../src/platform/profile';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 let selected: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>>;
 beforeAll(async () => {
@@ -39,26 +42,27 @@ test.skipIf(process.platform !== 'darwin')(
       await store.close();
       const directory = join(root, 'node');
       privateDirectory(directory);
-      for (const [entry, name, target] of [
+      for (const [entry, name] of [
         [
-          resolve(import.meta.dir, '../../../../../apps/desktop/electron/profile-access-helper.ts'),
+          resolve(
+            import.meta.dirname,
+            '../../../../../apps/desktop/electron/profile-access-helper.ts',
+          ),
           'helper.js',
-          'bun',
         ],
         [
           resolve(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../../../apps/desktop/test/workspace-removal-private.fixture.ts',
           ),
           'driver.js',
-          'node',
         ],
       ] as const)
         expect(
           (
-            await Bun.build({
+            await buildBundle({
               entrypoints: [entry],
-              target,
+              ...fixtureRuntimeBuild(directory),
               packages: 'bundle',
               format: 'esm',
               outdir: directory,
@@ -67,20 +71,20 @@ test.skipIf(process.platform !== 'darwin')(
           ).success,
         ).toBe(true);
       const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-      const bun = realpathSync(process.execPath),
+      const executable = fixtureNodeExecutable(),
         helper = join(directory, 'helper.js');
       async function node(action: string, id: string) {
-        const child = Bun.spawn(
+        const child = spawnProcess(
           [
-            realpathSync(Bun.which('node')!),
+            fixtureNodeExecutable(),
             join(directory, 'driver.js'),
             JSON.stringify({
               action,
               storeId: id,
               access: {
                 profile,
-                bunExecutable: bun,
-                bunSha256: sha(bun),
+                runtimeExecutable: executable,
+                runtimeSha256: sha(executable),
                 helperPath: helper,
                 helperSha256: sha(helper),
               },

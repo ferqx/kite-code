@@ -1,5 +1,6 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -207,6 +208,6 @@ if (import.meta.main) {
           cards: cards.interactions.length,
         })}`,
       );
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }

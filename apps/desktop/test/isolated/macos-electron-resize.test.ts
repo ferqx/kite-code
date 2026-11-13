@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   configureMacosElectronResize,
   macosElectronResize,

@@ -1,6 +1,6 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { openSqliteStore } from '@kite-ai/agent/sqlite';
 
 type Store = Awaited<ReturnType<typeof openSqliteStore>>;

@@ -1,20 +1,21 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
+import {
+  getLoadedSqliteEngine,
+  initializeSqliteEngine,
+  verifySqliteEngineAsset,
+} from '@kite-ai/agent/sqlite-engine';
 
 const root = process.argv[2];
 assert(root);
-const db = new Database(':memory:');
-const identity = db
-  .query<{ version: string; sourceId: string }, []>(
-    'SELECT sqlite_version() version, sqlite_source_id() sourceId',
-  )
-  .get();
-assert(identity);
-db.close(true);
+// Historical verifier input, recorded from the supported Bun 3.53.2 source.
+const identity = {
+  version: '3.53.2',
+  sourceId: '2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24',
+};
+assert.equal(getLoadedSqliteEngine(), null);
 const bytes = Buffer.from(
   JSON.stringify({
     version: 1,
@@ -26,9 +27,9 @@ const bytes = Buffer.from(
 );
 writeFileSync(join(root, 'engine-manifest.json'), bytes, { mode: 0o600 });
 const selection = { root, manifestSha256: createHash('sha256').update(bytes).digest('hex') };
-const result = initializeSqliteEngine(selection);
-assert.equal(result.linkage, 'builtin');
-assert.equal(result.version, identity.version);
-assert.equal(result.sourceId, identity.sourceId);
-assert.equal(initializeSqliteEngine(selection), result);
-console.log(JSON.stringify({ linkage: result.linkage, identity, releaseQualified: false }));
+const verified = verifySqliteEngineAsset(selection).manifest;
+assert('linkage' in verified);
+assert.equal(verified.linkage, 'builtin');
+assert.deepEqual(verified.sqlite, identity);
+assert.throws(() => initializeSqliteEngine(selection), /sqlite_engine_runtime_unsupported/);
+console.log(JSON.stringify({ linkage: verified.linkage, identity, releaseQualified: false }));

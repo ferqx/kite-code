@@ -1,3 +1,4 @@
+import { setTimeout as testSleep } from 'node:timers/promises';
 /** Delivery ordering only: forwards and replays actual HTTP/SSE bytes, never result inventions. */
 export function installOriginalDeliveryRace(mode: string) {
   const actualFetch = globalThis.fetch;
@@ -62,7 +63,7 @@ export function installOriginalDeliveryRace(mode: string) {
             }).then((reply) => reply.json())) as { isActive?: boolean };
             if (run.isActive === false) break;
           }
-          await Bun.sleep(25);
+          await testSleep(25);
         }
       }
     }

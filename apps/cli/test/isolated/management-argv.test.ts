@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -15,11 +13,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('actual development argv uses paired public management and exact supplied intent without Model or Tool', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-management-argv-'))),
     dataRoot = join(root, 'data'),
@@ -48,7 +50,7 @@ test('actual development argv uses paired public management and exact supplied i
     `import {runDevelopmentCLI} from ${JSON.stringify(join(repo, 'scripts/development/unified-cli.ts'))};process.exitCode=await runDevelopmentCLI({root:${JSON.stringify(root)}});`,
   );
   async function argv(words: string[]) {
-    const child = Bun.spawn([process.execPath, driver, ...words], {
+    const child = testSpawn([process.execPath, ...testRuntimeFlags, driver, ...words], {
       stdout: 'pipe',
       stderr: 'pipe',
     });

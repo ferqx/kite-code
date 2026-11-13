@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { agentBrowserExecutableAsset } from '@kite-ai/agent/browser';
@@ -12,16 +13,22 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ExecutionRecord, Json } from '@kite-ai/agent/storage';
+import { defaultTaskRoleId } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../../../apps/service/src';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { readLiveExecutionDirectory, readLiveSessionLogPages } from './approval-execution-fixture';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
 import { liveCodeEvidence } from './live-code-evidence';
 import { createLiveModelFixture } from './live-model-fixture';
 
-type Role = 'worker' | 'explore' | 'review';
+const roles = [defaultTaskRoleId, 'explore'] as const;
+type Role = (typeof roles)[number];
+export const childSpawnReviewTimeoutMs = 8000;
 type Mode = 'accept_edits' | 'auto' | 'full';
 const object = (value: unknown): Record<string, Json> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -31,21 +38,19 @@ const save = (path: string, value: unknown) =>
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 
 async function sourceConfiguration(root: string) {
-  const source = resolve(import.meta.dir, '../../../../apps/service/src/configuration.ts');
-  const originalMcp = resolve(import.meta.dir, '../../../../packages/agent/src/mcp/index.ts');
-  const packagedMcp = resolve(import.meta.dir, '../../../../packages/agent/dist/mcp/index.js');
+  const source = resolve(import.meta.dirname, '../../../../apps/service/src/configuration.ts');
+  const originalMcp = resolve(import.meta.dirname, '../../../../packages/agent/src/mcp/index.ts');
+  const packagedMcp = resolve(import.meta.dirname, '../../../../packages/agent/dist/mcp/index.js');
   const directory = join(root, 'configuration-assets');
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const bridge = join(directory, 'mcp-assets.js');
   writeFileSync(
     bridge,
-    `export * from ${JSON.stringify(originalMcp)};\nexport { mcpStdioGuardianAsset } from ${JSON.stringify(packagedMcp)};\n`,
+    `export * from ${JSON.stringify(pathToFileURL(originalMcp).href)};\nexport { mcpStdioGuardianAsset } from ${JSON.stringify(pathToFileURL(packagedMcp).href)};\n`,
   );
-  const built = await Bun.build({
+  const built = await buildFixture({
     entrypoints: [source],
-    target: 'bun',
-    packages: 'external',
-    external: [originalMcp, packagedMcp],
+    target: 'node',
     outdir: directory,
     naming: 'configuration.js',
     plugins: [
@@ -53,14 +58,21 @@ async function sourceConfiguration(root: string) {
         name: 'owned-published-guardian-location',
         setup(build) {
           build.onResolve({ filter: /^@kite-ai\/agent\/mcp$/ }, () => ({
-            path: bridge,
+            path: pathToFileURL(bridge).href,
             external: true,
           }));
-          build.onResolve({ filter: /^[^./]/ }, ({ path }) => {
-            const resolved = import.meta.resolve(path);
+          build.onResolve({ filter: /^[^./]/ }, async (args) => {
+            if (!args.importer || isAbsolute(args.path) || args.pluginData?.resolvePackage) return;
+            const resolved = await build.resolve(args.path, {
+              importer: args.importer,
+              resolveDir: args.resolveDir,
+              kind: args.kind,
+              pluginData: { resolvePackage: true },
+            });
             return {
-              path: resolved.startsWith('file:') ? fileURLToPath(resolved) : resolved,
+              path: isAbsolute(resolved.path) ? pathToFileURL(resolved.path).href : resolved.path,
               external: true,
+              errors: resolved.errors,
             };
           });
         },
@@ -78,7 +90,7 @@ async function sourceConfiguration(root: string) {
     capabilityOrPermissionReplacement: false,
   });
   return (await import(
-    built.outputs[0]!.path
+    pathToFileURL(built.outputs[0]!.path).href
   )) as typeof import('../../../../apps/service/src/configuration');
 }
 
@@ -104,7 +116,7 @@ export async function createChildSpawnFixture(input: {
   };
   for (const [path, body] of Object.entries(originals)) writeFileSync(join(workspace, path), body);
   const browserRequests: string[] = [];
-  const browserEndpoint = Bun.serve({
+  const browserEndpoint = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -129,14 +141,17 @@ export async function createChildSpawnFixture(input: {
         },
       ],
     });
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [
         join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
-      target: 'bun',
+      ...runtimeBuildOptions(
+        join(input.root, 'assets'),
+        resolve(import.meta.dirname, '../../../../packages/agent/dist'),
+      ),
       outdir: join(input.root, 'assets'),
       naming: 'shell-supervisor.js',
     });
@@ -147,8 +162,11 @@ export async function createChildSpawnFixture(input: {
     const browserAssets = {
       executable: nativeBrowser,
       browserPath: nativeBrowser,
-      guardianPath: join(import.meta.dir, '../../../../packages/agent/dist/mcp/stdio-guardian.js'),
-      bunExecutable: process.execPath,
+      guardianPath: join(
+        import.meta.dirname,
+        '../../../../packages/agent/dist/mcp/stdio-guardian.js',
+      ),
+      runtimeExecutable: process.execPath,
     };
     const browserAssetEvidence = Object.fromEntries(
       Object.entries(browserAssets).map(([key, path]) => [
@@ -172,7 +190,7 @@ export async function createChildSpawnFixture(input: {
         browserPath: browserAssets.browserPath,
         darwin: {
           guardianPath: browserAssets.guardianPath,
-          bunExecutable: browserAssets.bunExecutable,
+          runtimeExecutable: browserAssets.runtimeExecutable,
         },
       },
       shell: {
@@ -180,7 +198,7 @@ export async function createChildSpawnFixture(input: {
         configurationId: 'owned-child-spawn-live',
         env: { PATH: `${dirname(rg)}:/usr/bin:/bin` },
         supervisorPath: built.outputs[0]!.path,
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: '/bin/sh',
         host: {
           controlBase: control,
@@ -227,7 +245,7 @@ export async function createChildSpawnFixture(input: {
         checkerTimeout: binding.authorizationCheck?.timeoutMs ?? null,
       });
       assert(
-        binding.authorizationCheck?.timeoutMs === 10000,
+        binding.authorizationCheck?.timeoutMs === childSpawnReviewTimeoutMs,
         'child-spawn-original-review-deadline',
       );
       return {
@@ -335,7 +353,7 @@ export async function createChildSpawnFixture(input: {
         try {
           await service.close();
         } finally {
-          browserEndpoint.stop(true);
+          await browserEndpoint.stop(true);
         }
       },
     };
@@ -348,7 +366,7 @@ export async function createChildSpawnFixture(input: {
         failures.push(failure);
       }
     }
-    browserEndpoint.stop(true);
+    await browserEndpoint.stop(true);
     if (failures.length > 1)
       throw new AggregateError(failures, 'child-spawn-setup-cleanup-failed', { cause: error });
     throw error;
@@ -357,21 +375,19 @@ export async function createChildSpawnFixture(input: {
 
 function task(role: Role) {
   const assignment =
-    role === 'worker'
-      ? '委派给一名默认 worker 协作者：读取 source.txt，把其完整原文写入工作区 result.txt 并核对。只创建这一业务文件；不修改其他资料。父 Agent 只负责委派、等待、独立核对 result.txt 和汇总，不代写。'
-      : role === 'explore'
-        ? '委派给一名 explore 只读探索协作者：追踪 entry.total 到最终计算函数，报告准确文件、函数以及 source.txt 的完整随机值。父 Agent 只负责委派、等待、核对原结果并汇总，不代做调查。'
-        : '委派给一名 review 只读审阅协作者：核对 entry.py/pricing.py 是否满足 README 的求和约定，给出真实缺陷的文件、行、最小触发输入和错误结果，同时报告 source.txt 的完整随机值。父 Agent 只负责委派、等待、核对原结果并汇总，不代做审查。';
+    role === defaultTaskRoleId
+      ? '委派给一名默认 general 协作者：读取 source.txt，把其完整原文写入工作区 result.txt 并核对。只创建这一业务文件；不修改其他资料。父 Agent 只负责委派、等待、独立核对 result.txt 和汇总，不代写。'
+      : '委派给一名 explore 只读探索协作者：追踪 entry.total 到最终计算函数，报告准确文件、函数以及 source.txt 的完整随机值。父 Agent 只负责委派、等待、核对原结果并汇总，不代做调查。';
   return `这是自有合成项目的真实委派验收。${assignment} 仅一名协作者，不再委派。工具、命令及参数由你们根据实际工具目录自行决定，不访问网络或用户目录；必要临时探索脚本可以在继承权限内使用，只读任务不得改业务源码、配置和数据。不要为了加载与本任务无关的技能扩权；不要调用浏览器。受理不代表完成，等实际结果再报告；如委派失败如实解释，不要换角色或重复创建来掩盖失败。`;
 }
 
 /** Summary coverage only; successful writing and independent readback need original effect evidence. */
 export function childSpawnReportChecks(
-  role: Role,
+  role: Role | 'worker' | 'review',
   report: string,
   token: string,
 ): Record<string, boolean> {
-  if (role === 'worker') return {};
+  if (role === defaultTaskRoleId || role === 'worker') return {};
   return {
     'child-reported-actual-random-source': report.includes(token),
     'child-reported-real-source-location':
@@ -411,7 +427,7 @@ export async function runChildSpawnCase(root: string, role: Role, mode: Mode, si
     childReportAndFinalParentReport: 'pending independent canonical full-text review',
     readonlyTemporaryAndNetworkEffects:
       'pending actual command/output review; no command-name inference',
-    ...(role === 'worker'
+    ...(role === defaultTaskRoleId
       ? {
           childOnlyDeliveryWrite: 'pending actual Files/Shell effect attribution review',
           parentIndependentReadback: 'pending actual Files/Shell readback review',
@@ -459,7 +475,7 @@ export async function runChildSpawnCase(root: string, role: Role, mode: Mode, si
           console.log(JSON.stringify({ event: 'operator-review', path }));
           while (!existsSync(`${path}.answer.json`)) {
             signal.throwIfAborted();
-            await Bun.sleep(80);
+            await fixtureDelay(80);
           }
           const answer = object(JSON.parse(readFileSync(`${path}.answer.json`, 'utf8')));
           assert(
@@ -493,7 +509,7 @@ export async function runChildSpawnCase(root: string, role: Role, mode: Mode, si
         if (safety.activeRunIds.length === 0 && safety.pendingCommandIds.length === 0) break;
       } else if (work && ['failed', 'rejected', 'outcome_unknown'].includes(work.status))
         throw Error('child-spawn-work-command-failed');
-      await Bun.sleep(40);
+      await fixtureDelay(40);
     }
     const { executions } = await f.directory();
     save(join(f.evidence, 'business-effect-review.json'), {
@@ -545,17 +561,17 @@ export async function runChildSpawnCase(root: string, role: Role, mode: Mode, si
     check(
       skills.requested === null &&
         JSON.stringify(skills.resolvedIds) ===
-          JSON.stringify(role === 'worker' ? ['computer-use'] : []),
+          JSON.stringify(role === defaultTaskRoleId ? ['computer-use'] : []),
       'child-compatible-automatic-skill-selection',
     );
     check(
-      childBinding?.toolIds.includes('browser.execute') === (role === 'worker'),
+      childBinding?.toolIds.includes('browser.execute') === (role === defaultTaskRoleId),
       'child-original-tool-intersection',
     );
     check(
       Array.isArray(object(childHost.actualCapabilities).skills) &&
         (object(childHost.actualCapabilities).skills as Json[]).length ===
-          (role === 'worker' ? 1 : 0),
+          (role === defaultTaskRoleId ? 1 : 0),
       'child-actual-skill-manifest',
     );
     const childModels = executions.filter(
@@ -629,7 +645,7 @@ export async function runChildSpawnCase(root: string, role: Role, mode: Mode, si
         `original-business-bytes-${path}`,
       );
     check(f.browserRequests.length === 0, 'no-unrequested-browser-call');
-    if (role === 'worker')
+    if (role === defaultTaskRoleId)
       check(
         readFileSync(join(f.workspace, 'result.txt'), 'utf8') === f.originals['source.txt'],
         'exact-worker-delivery',
@@ -763,7 +779,7 @@ if (import.meta.main) {
   const results = [];
   try {
     for (const mode of ['accept_edits', 'auto', 'full'] as const)
-      for (const role of ['worker', 'explore', 'review'] as const) {
+      for (const role of roles) {
         if (cancellation.signal.aborted) break;
         const result = await runChildSpawnCase(
           join(output, `${role}-${mode}`),
@@ -788,7 +804,7 @@ if (import.meta.main) {
     process.off('SIGTERM', interrupt);
   }
   process.exitCode =
-    results.length === 9 &&
+    results.length === roles.length * 3 &&
     results.every((row) => row.status === 'assertions_passed' && row.codeUnchanged)
       ? 0
       : 1;

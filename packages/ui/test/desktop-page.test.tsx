@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import { SessionPage, type SessionPageProps } from '../src/desktop';
 
 const base: SessionPageProps = {
@@ -35,7 +35,7 @@ test('read-only page permits reading and web links without exposing local or mut
   const html = renderToStaticMarkup(<SessionPage {...base} readOnlyReason="只读访问" />);
   expect(html).toContain('只读访问');
   expect(html).toContain('https://example.com');
-  expect(html).not.toContain('class="file-link"');
+  expect(html).toContain('<button type="button" class="file-link" aria-disabled="true">');
   expect(html).not.toContain('任务输入');
   expect(html).not.toContain('新对话');
   expect(html).not.toContain('模型与 Provider 设置');
@@ -109,7 +109,7 @@ test('new and running conversations share one composer prompt', () => {
         }}
       />,
     );
-    expect(html).toContain('placeholder="描述你想完成的工作…"');
+    expect(html).toContain('placeholder="任务输入"');
     expect(html).not.toContain('可以先写下下一步要求');
     expect(html).not.toContain('Enter 发送');
     expect(html).not.toContain('仅保留草稿');

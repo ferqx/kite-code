@@ -1,6 +1,8 @@
-import { expect, test } from 'bun:test';
-import { Terminal } from '@xterm/headless';
+import xterm from '@xterm/headless';
+import { expect, test } from '#kite-test';
 import { readTuiRender } from './fixtures/tui-pty';
+
+const { Terminal } = xterm;
 
 test('Files PTY keeps the full current card and discards erased renders with or without sync markers', async () => {
   for (const synchronized of [true, false]) {

@@ -1,18 +1,21 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { launchPairedService } from '../../src/paired';
 
-const entrypoint = join(import.meta.dir, '../fixtures/paired-shutdown-child.ts');
+const entrypoint = join(import.meta.dirname, '../fixtures/paired-shutdown-child.ts');
 async function until(check: () => boolean | Promise<boolean>, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (!(await check())) {
     if (Date.now() >= deadline) throw Error('paired_shutdown_boundary_timeout');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 function alive(pid: number) {
@@ -122,7 +125,7 @@ for (const mode of ['eof', 'SIGINT', 'SIGTERM'] as const)
         await until(() => existsSync(host.cancelled));
         // A repeated stop request must not bypass the original resource drain.
         if (mode !== 'eof') process.kill(service.pid, mode);
-        await Bun.sleep(Math.max(0, 5500 - (Date.now() - started)));
+        await sleepTimer(Math.max(0, 5500 - (Date.now() - started)));
         expect(exited).toBe(false);
         expect(alive(service.pid)).toBe(true);
         expect(closeSettled).toBe(false);
@@ -169,7 +172,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const)
       const root = mkdtempSync(join(tmpdir(), 'kite-paired-incomplete-'));
       const ready = join(root, 'ready');
       const dataRoot = join(root, 'data');
-      const child = Bun.spawn([process.execPath, entrypoint], {
+      const child = spawnProcess([process.execPath, ...testRuntimeFlags, entrypoint], {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',

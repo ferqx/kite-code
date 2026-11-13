@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { createMcpAdapter } from '@kite-ai/agent/mcp';
 import {
   discoverAuthorizationServerMetadata,
@@ -11,14 +11,19 @@ import {
   registerClient,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { expect, test } from '#kite-test';
+import {
+  which as findExecutable,
+  spawn as spawnProcess,
+} from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { createMcpOAuthNetwork } from '../../src/mcp-oauth-network';
 
 function opensslExecutable() {
-  const available = Bun.which('openssl');
+  const available = findExecutable('openssl');
   if (available) return realpathSync(available);
-  const git = process.platform === 'win32' ? Bun.which('git') : null;
+  const git = process.platform === 'win32' ? findExecutable('git') : null;
   if (git) {
     const bundled = join(dirname(dirname(realpathSync(git))), 'usr/bin/openssl.exe');
     if (existsSync(bundled)) return realpathSync(bundled);
@@ -106,7 +111,7 @@ async function until(read: () => boolean) {
   const deadline = Date.now() + 5000;
   while (!read()) {
     if (Date.now() > deadline) throw Error('oauth_network_test_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -219,7 +224,7 @@ test('close and original/request abort terminate held DNS and held response with
     await network.close();
     expect((await rejected).code).toBe('mcp_oauth_request_aborted');
     release([{ address: '127.0.0.1', family: 4 }]);
-    await Bun.sleep(0);
+    await sleepTimer(0);
     expect(f.seen).toHaveLength(0);
     const active = createMcpOAuthNetwork(options(lifetime.signal));
     const caller = new AbortController();
@@ -345,7 +350,7 @@ test('real pinned TLS uses original servername and rejects an untrusted certific
   const root = temporaryDirectory('kite-oauth-network-tls-');
   const key = join(root, 'key.pem'),
     cert = join(root, 'cert.pem');
-  const certificate = Bun.spawn(
+  const certificate = spawnProcess(
     [
       opensslExecutable(),
       'req',
@@ -364,7 +369,7 @@ test('real pinned TLS uses original servername and rejects an untrusted certific
     ],
     { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' },
   );
-  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let child: ReturnType<typeof spawnProcess> | undefined;
   let reader: Promise<void> | undefined;
   let network: ReturnType<typeof createMcpOAuthNetwork> | undefined;
   let port: number | undefined,
@@ -374,7 +379,7 @@ test('real pinned TLS uses original servername and rejects an untrusted certific
     const certificateOutput = new Response(certificate.stderr).text();
     expect(await certificate.exited).toBe(0);
     await certificateOutput;
-    const node = Bun.which('node');
+    const node = findExecutable('node');
     if (!node) throw new Error('owned_node_tls_fixture_unavailable');
     const source = `const fs=require('node:fs'), https=require('node:https'), tls=require('node:tls');
 const options={key:fs.readFileSync(process.argv[1]),cert:fs.readFileSync(process.argv[2])}, context=tls.createSecureContext(options), sockets=new Set();let http=0,tlsErrors=0;
@@ -383,7 +388,7 @@ const server=https.createServer({...options,SNICallback(name,cb){emit({sni:name}
 let stopped=false,reported=false;const finish=()=>{if(stopped&&!sockets.size&&!reported){reported=true;emit({closed:{http,tlsErrors,sockets:sockets.size}})}};
 server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>{sockets.delete(socket);finish()})});server.on('tlsClientError',()=>tlsErrors++);
 server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdin.resume();process.stdin.once('end',()=>{for(const socket of sockets)socket.destroy();server.close(()=>{stopped=true;finish()})});`;
-    child = Bun.spawn([node, '-e', source, key, cert], {
+    child = spawnProcess([node, '-e', source, key, cert], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -430,7 +435,7 @@ server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdi
     expect(literalFailure.code).toBe('mcp_oauth_request_failed');
     expect(literalFailure.cause).toEqual({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
     await network.close();
-    (child.stdin as import('bun').FileSink).end();
+    child.stdin!.end();
     await until(() => closed !== undefined && child!.exitCode !== null);
     await reader;
     await processOutput;
@@ -464,7 +469,7 @@ test('baked fixture certificate permits actual OAuth and MCP TLS while retaining
     config,
     '[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=ext\n[dn]\nCN=owned.invalid\n[ext]\nsubjectAltName=DNS:owned.invalid,IP:127.0.0.1\n',
   );
-  const certificate = Bun.spawn(
+  const certificate = spawnProcess(
     [
       opensslExecutable(),
       'req',
@@ -483,7 +488,7 @@ test('baked fixture certificate permits actual OAuth and MCP TLS while retaining
     ],
     { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' },
   );
-  let child: ReturnType<typeof Bun.spawn> | undefined,
+  let child: ReturnType<typeof spawnProcess> | undefined,
     reader: Promise<void> | undefined,
     network: ReturnType<typeof createMcpOAuthNetwork> | undefined,
     owned: Awaited<ReturnType<ReturnType<typeof createMcpHttpTransportPort>['open']>> | undefined;
@@ -504,7 +509,7 @@ test('baked fixture certificate permits actual OAuth and MCP TLS while retaining
     expect(() =>
       createMcpHttpTransportPort({ servers: [], admit: async () => {}, trustedTestCertificate }),
     ).toThrow('mcp_test_certificate_invalid');
-    const node = Bun.which('node');
+    const node = findExecutable('node');
     if (!node) throw Error('owned_node_tls_fixture_unavailable');
     const source = `const fs=require('node:fs'),https=require('node:https'),sockets=new Set();
 const emit=value=>process.stdout.write(JSON.stringify(value)+'\\n');
@@ -518,7 +523,7 @@ r.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({jsonrpc
 let stopped=false,reported=false;const finish=()=>{if(stopped&&!sockets.size&&!reported){reported=true;emit({closed:{sockets:sockets.size}})}};
 server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>{sockets.delete(socket);finish()})});server.on('tlsClientError',()=>{});
 server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdin.resume();process.stdin.once('end',()=>{for(const socket of sockets)socket.destroy();server.close(()=>{stopped=true;finish()})});`;
-    child = Bun.spawn([node, '-e', source, key, cert], {
+    child = spawnProcess([node, '-e', source, key, cert], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -588,7 +593,7 @@ server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdi
     expect(await owned.stop()).toEqual({ status: 'stopped' });
     expect(await owned.stopped).toEqual({ supervision: 'ended' });
     await network.close();
-    (child.stdin as import('bun').FileSink).end();
+    child.stdin!.end();
     await until(() => closed !== undefined && child!.exitCode !== null);
     await reader;
     await processOutput;

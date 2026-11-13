@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -111,7 +112,7 @@ export async function runLiveProviderLoad(options: { caseId: CaseId; output: str
         if (performance.now() >= deadline) throw new Boundary(point);
         const value = await read();
         if (value !== undefined) return value;
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
     }
     try {
@@ -495,7 +496,7 @@ export async function runLiveProviderLoad(options: { caseId: CaseId; output: str
       sample('warmup');
       for (let index = 0; index < (heavy ? 12 : 1); index++) {
         await readBatch();
-        if (heavy) await Bun.sleep(100);
+        if (heavy) await fixtureDelay(100);
       }
       if (heavy) {
         const state = await allViews();
@@ -557,7 +558,7 @@ export async function runLiveProviderLoad(options: { caseId: CaseId; output: str
               sample('middle');
               middle = true;
             }
-            await Bun.sleep(100);
+            await fixtureDelay(100);
           }
           assert(
             live.physical.longest(32) >= 30_000,
@@ -977,7 +978,7 @@ export async function runLiveProviderLoad(options: { caseId: CaseId; output: str
     caseId: options.caseId,
     status,
     code,
-    scriptSha256: sha(readFileSync(import.meta.path, 'utf8')),
+    scriptSha256: sha(readFileSync(import.meta.filename, 'utf8')),
     stages,
     requestCount: used,
     requestLimit: budget,

@@ -1,7 +1,8 @@
-import { expect } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect } from '#kite-test';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
 import { chinesePagedPdf, simplePdf } from '../../../../tests/fixtures/pdf';
 
 /** Execute only the candidate's public Files export and its real offline Worker. */
@@ -60,7 +61,7 @@ try{
 }
 `,
   );
-  const child = Bun.spawn([input.executable, '--no-install', entry, input.candidate], {
+  const child = testSpawn([input.executable, '--no-global-search-paths', entry, input.candidate], {
     cwd: input.scratch,
     env: { ...process.env, PATH: '', NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },
     stdin: 'ignore',

@@ -1,17 +1,20 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { build as bundle } from '../../../../scripts/tooling/bun-build';
+import { spawnSync, which } from '../../../../scripts/tooling/process';
+import { runtimeBuildOptions } from '../../scripts/runtime-build-options';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'mcp');
 mkdirSync(destination, { recursive: true });
-const result = await Bun.build({
+const result = await bundle({
   entrypoints: [
-    resolve(import.meta.dir, 'schema-worker.ts'),
-    resolve(import.meta.dir, 'stdio-guardian.ts'),
-    resolve(import.meta.dir, 'windows-stdio-guardian.ts'),
+    resolve(import.meta.dirname, 'schema-worker.ts'),
+    resolve(import.meta.dirname, 'stdio-guardian.ts'),
+    resolve(import.meta.dirname, 'windows-stdio-guardian.ts'),
   ],
   outdir: destination,
-  target: 'bun',
+  ...runtimeBuildOptions(destination),
   naming: '[name].js',
 });
 if (!result.success) throw new Error('mcp_stdio_guardian_build_failed');
@@ -22,10 +25,10 @@ writeFileSync(resolve(destination, 'schema-worker.sha256'), `${schemaHash}\n`);
 
 if (process.platform === 'linux') {
   if (!['x64', 'arm64'].includes(process.arch)) throw Error('linux_stdio_arch_unsupported');
-  const compiler = Bun.which(process.env.CC ?? 'cc');
+  const compiler = which(process.env.CC ?? 'cc');
   if (!compiler) throw Error('linux_stdio_compiler_unavailable');
   const output = resolve(destination, 'linux-stdio-init');
-  const compiled = Bun.spawnSync(
+  const compiled = spawnSync(
     [
       compiler,
       '-std=c11',
@@ -38,7 +41,7 @@ if (process.platform === 'linux') {
       '-fPIE',
       '-pie',
       '-Wl,-z,relro,-z,now',
-      resolve(import.meta.dir, '../../native/linux-stdio-init.c'),
+      resolve(import.meta.dirname, '../../native/linux-stdio-init.c'),
       '-o',
       output,
     ],

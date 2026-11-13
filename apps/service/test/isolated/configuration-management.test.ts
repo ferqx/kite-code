@@ -1,14 +1,16 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { launchPairedService } from '../../src/paired';
@@ -23,7 +25,7 @@ async function setup() {
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const launch = () =>
     launchPairedService({
-      entrypoint: join(import.meta.dir, '../fixtures/configured-child.ts'),
+      entrypoint: join(import.meta.dirname, '../fixtures/configured-child.ts'),
       profile,
       spawnChild: userConfiguration.spawnChild,
       instanceId: crypto.randomUUID(),
@@ -300,7 +302,7 @@ test('credential HTTP writes opaque receipts only and duplicate put never stores
 test('HTTP-created credential binds the default Run and revoke only prevents future lookup', async () => {
   const f = await setup();
   const received: string[] = [];
-  const endpoint = Bun.serve({
+  const endpoint = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -374,7 +376,7 @@ test('HTTP-created credential binds the default Run and revoke only prevents fut
         )
           return record;
         if (Date.now() > deadline) throw new Error('management_run_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     };
     const initial = await run('before-revoke');
@@ -1056,7 +1058,7 @@ for (const mode of ['default', 'effort'] as const)
     let release: (() => void) | undefined;
     const chunk = (content: string, finish: string | null) =>
       `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finish }] })}\n\n`;
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -1127,7 +1129,7 @@ for (const mode of ['default', 'effort'] as const)
       const deadline = Date.now() + 5000;
       while (!(await predicate())) {
         if (Date.now() > deadline) throw Error('actual_model_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     };
     try {
@@ -1284,7 +1286,7 @@ for (const initialDefault of ['b', 'a'] as const)
     let release: (() => void) | undefined;
     const chunk = (content: string, finish: string | null) =>
       `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finish }] })}\n\n`;
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -1313,7 +1315,7 @@ for (const initialDefault of ['b', 'a'] as const)
       const deadline = Date.now() + 5000;
       while (!(await predicate())) {
         if (Date.now() > deadline) throw Error('active_disabled_model_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     };
     const finishedRun = async (commandId: string) => {

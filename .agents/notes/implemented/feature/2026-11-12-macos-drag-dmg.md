@@ -12,6 +12,8 @@ DMG 放置可独立运行的 `Kite Desktop.app` 和指向 `/Applications` 的快
 
 复用 [Windows 桌面专用构建的模块链接方式](2026-11-12-windows-desktop-only-installer.md)，用私有模块映射加载桌面服务依赖，并随包保留 macOS arm64 原生绑定和运行资源。构建与嵌入运行时清单拒绝 `node_modules` 和独立 CLI/TUI/Terminal Web 入口。已有完整候选仍可由原 Native 验证器读取，Finder 可用新候选直接替换旧 `.app`。
 
+[随包 Node 决定](../architecture/2026-11-12-macos-desktop-dmg-node.md)更新桌面专用 Service 的运行时与签名顺序。Finder 布局和应用包外的数据边界沿用本决定。
+
 安装包的最低 macOS 版本来自打包后的 arm64 Mach-O 部署目标。SQLite 动态库等构建输入可以要求比 Electron 更新的系统版本，应用元数据必须反映随包交付的实际运行时。
 
 使用 Developer ID 构建时，签署嵌入的原生代码后才写入对应清单，再签署外层应用和 DMG。系统签名会改变程序文件的字节，按这一顺序可以同时保留包内校验和系统签名。Apple 公证票据附加到外层映像后，构建计算用于交付的 DMG 摘要。

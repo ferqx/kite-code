@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { accessSync, constants, existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
+import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -417,7 +417,7 @@ function packagedMcpSourceAssets() {
     return {
       stdio: {
         guardianPath: mcpStdioGuardianAsset(),
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         ...(process.platform === 'linux' ? { linux: mcpStdioLinuxAssets() } : {}),
       },
     };
@@ -433,7 +433,6 @@ async function packagedShellAssets(
   preference: DesktopShellPreference,
 ): Promise<ShellConfigurationOptions | undefined> {
   if (!['darwin', 'linux', 'win32'].includes(process.platform)) return;
-  if (process.platform === 'win32' && !process.versions.bun) return;
   let supervisorPath: string;
   let windows: Awaited<ReturnType<typeof windowsShellAssets>> | undefined;
   try {
@@ -456,7 +455,7 @@ async function packagedShellAssets(
       throw error;
     return;
   }
-  const bubblewrap = process.platform === 'linux' ? Bun.which('bwrap') : undefined;
+  const bubblewrap = process.platform === 'linux' ? findBubblewrap() : undefined;
   if (process.platform === 'linux' && !bubblewrap) return;
   const ripgrep = withBundledRipgrep(
     Object.fromEntries(
@@ -476,10 +475,10 @@ async function packagedShellAssets(
         : 'default.macos-host-shell-v1',
     env: ripgrep.env,
     supervisorPath,
-    bunExecutable: process.execPath,
+    runtimeExecutable: process.execPath,
     shellExecutable: windows?.shell ?? '/bin/sh',
     ...(windows ? { windows: windows.windows } : {}),
-    ...(bubblewrap ? { linux: { bubblewrapPath: realpathSync.native(bubblewrap) } } : {}),
+    ...(bubblewrap ? { linux: { bubblewrapPath: bubblewrap } } : {}),
     host: {
       controlBase: profile.coordinationPath,
       protectedRoots: [],
@@ -487,4 +486,19 @@ async function packagedShellAssets(
       runtimeReadOnlyRoots: [],
     },
   };
+}
+
+function findBubblewrap(): string | undefined {
+  for (const directory of process.env.PATH?.split(delimiter) ?? []) {
+    if (!directory) continue;
+    try {
+      const path = realpathSync.native(resolve(directory, 'bwrap'));
+      if (!statSync(path).isFile()) continue;
+      accessSync(path, constants.X_OK);
+      return path;
+    } catch {
+      // A missing or inaccessible candidate does not grant the Linux shell capability.
+    }
+  }
+  return undefined;
 }

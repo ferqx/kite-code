@@ -3,12 +3,12 @@ import { join, resolve } from 'node:path';
 import { parseTUIArguments, runTUIProcess } from '@kite-ai/cli/tui-main';
 import { selectDevelopmentServiceArtifact } from './unified-cli';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 /** Pure vocabulary first; help/version never inspect assets or a profile. */
 export function selectDevelopmentTUI(
   argv: readonly string[],
   root = repositoryRoot,
-  executable = process.execPath,
+  executable?: string,
 ) {
   const args = parseTUIArguments(argv);
   const selected = {

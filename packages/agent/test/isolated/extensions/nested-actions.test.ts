@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { type AgentRuntime, createRuntime } from '../../../src';
 import type { Extension, Permissions, ToolContext } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -18,7 +19,7 @@ async function until<T>(read: () => Promise<T | null>) {
   while (Date.now() < deadline) {
     const value = await read();
     if (value !== null) return value;
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   throw Error('nested_action_test_deadline');
 }

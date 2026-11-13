@@ -7,7 +7,7 @@ TUI 适合在终端中发起任务、查看执行过程并处理审批。需要�
 
 ## 第一次任务
 
-1. 在仓库根目录执行 `bun install --frozen-lockfile` 和 `npm run build`，开发时用 `npm run tui:dev -- --workspace .`。如果使用正式源码命令 `npm run tui`，还须先执行 `npm run release:build` 生成默认Terminal候选。已安装版本直接使用 `kite-tui`，自动启动发布包内配套服务，无需 Bun 或先运行 server start。
+1. 在仓库根目录执行 `bun install --frozen-lockfile` 和 `bun run build`，开发时用 `bun run tui:dev --workspace .`。如果使用正式源码命令 `bun run tui`，还须先执行 `bun run prepare:node-inputs` 和 `bun run release:build` 生成默认 Terminal 候选。已安装版本直接使用 `kite-tui`，自动启动发布包内配套服务，无需另装 Node 或 Bun。
 2. 如果工作区尚未信任，先阅读范围并明确确认；默认退出，不确认不会开始任务。
 3. 没有可用默认模型时，按原首次配置向导选择 Provider、连接、模型并保存凭据；已有配置可选择原模型并启用／设为默认。密码输入保持遮罩，保存结果未知时先查询原申请。配置错误时修正，不把启动失败当成空会话。
 4. 输入一个明确任务，例如“只阅读项目，解释启动入口”，按 Enter 提交。消息出现后，状态栏显示 `Working`。
@@ -36,4 +36,4 @@ TUI 适合在终端中发起任务、查看执行过程并处理审批。需要�
 
 如果只有事件流失效而普通读取仍可用，手动刷新可以更新读到的内容，但界面会继续标记失联；单次读取成功不表示后续事件已恢复。只有原服务的事件观察重新确认就绪后，才清除此失联状态。
 
-新通用终端候选的 `<prefix>/bin/kite-tui` 已可在独立安装目录启动，并复用上述 paired/shared 行为。它自带 Bun，默认使用独立 `~/.kite-code/unified-agent` 的 `default` profile；根 `bun run tui` 已选择同一新候选。构建、安装及当前本机验证范围见[终端制品说明](../../../../apps/cli/docs/terminal-release.md)。
+新通用终端候选的 `<prefix>/bin/kite-tui` 已可在独立安装目录启动，并复用上述 paired/shared 行为。它自带 Node，默认使用独立 `~/.kite-code/unified-agent` 的 `default` profile；根 `bun run tui` 已选择同一新候选。构建、安装及当前本机验证范围见[终端制品说明](../../../../apps/cli/docs/terminal-release.md)。

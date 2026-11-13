@@ -1,6 +1,8 @@
-import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { readTrace, renderTrace, runTrace } from '../../src/trace';
 
@@ -91,12 +93,13 @@ test('actual argv trace process reads only the explicit file without network/Ser
   try {
     writeFileSync(f.path, `${started}\n{"turn":9,"future":{"full":"last"}}\n`);
     const before = readdirSync(f.root).sort();
-    const child = Bun.spawn(
+    const child = testSpawn(
       [
         process.execPath,
-        '--preload',
-        join(import.meta.dir, '../fixtures/trace-readonly.ts'),
-        join(import.meta.dir, '../../host/main.ts'),
+        ...testRuntimeFlags,
+        '--import',
+        join(import.meta.dirname, '../fixtures/trace-readonly.ts'),
+        join(import.meta.dirname, '../../host/main.ts'),
         'trace',
         f.path,
         '--turn',
@@ -125,12 +128,13 @@ test('actual argv trace process reads only the explicit file without network/Ser
     expect(JSON.parse(stdout)).toEqual([{ turn: 9, future: { full: 'last' } }]);
     expect(readdirSync(f.root).sort()).toEqual(before);
     writeFileSync(f.path, '{"valid":true}\n{"partial":');
-    const invalid = Bun.spawn(
+    const invalid = testSpawn(
       [
         process.execPath,
-        '--preload',
-        join(import.meta.dir, '../fixtures/trace-readonly.ts'),
-        join(import.meta.dir, '../../host/main.ts'),
+        ...testRuntimeFlags,
+        '--import',
+        join(import.meta.dirname, '../fixtures/trace-readonly.ts'),
+        join(import.meta.dirname, '../../host/main.ts'),
         'trace',
         f.path,
       ],

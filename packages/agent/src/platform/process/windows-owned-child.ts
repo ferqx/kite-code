@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { win32 } from 'node:path';
+import { dlopen, ptr as nativePtr, ptr, toArrayBuffer } from '../../runtime-ffi';
 
 export interface WindowsOwnedChildEvidence {
   readonly version: 1;
@@ -73,7 +74,6 @@ function failure(operation: string, win32Error?: number) {
 function native() {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw failure('unsupported');
   // Fixed KnownDLL, lazy on import; no caller-provided DLL or native HANDLE.
-  const { dlopen, ptr, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     CreateJobObjectW: { args: ['ptr', 'ptr'], returns: 'u64' },
     SetInformationJobObject: { args: ['u64', 'u32', 'ptr', 'u32'], returns: 'bool' },
@@ -122,7 +122,6 @@ function native() {
     LocalFree: { args: ['u64'], returns: 'u64' },
   });
   const raw = kernel.symbols;
-  // Bun's u64 fast path may return a number when exactly representable.
   const api = {
     ...raw,
     CreateJobObjectW: (...args: Parameters<typeof raw.CreateJobObjectW>) =>
@@ -716,7 +715,6 @@ export function startWindowsOwnedChild(input: {
       );
     } else {
       // A private first-instance named pipe is needed: anonymous WriteFile cannot be overlapped.
-      const { dlopen, ptr: nativePtr } = require('bun:ffi') as typeof import('bun:ffi');
       const adv = dlopen('advapi32.dll', {
         OpenProcessToken: { args: ['u64', 'u32', 'ptr'], returns: 'bool' },
         GetTokenInformation: { args: ['u64', 'u32', 'ptr', 'u32', 'ptr'], returns: 'bool' },
@@ -754,7 +752,7 @@ export function startWindowsOwnedChild(input: {
       check(
         'sid_read',
         adv.symbols.ConvertSidToStringSidW(
-          Number(user.readBigUInt64LE(0)) as import('bun:ffi').Pointer,
+          Number(user.readBigUInt64LE(0)) as import('../../runtime-ffi').Pointer,
           nativePtr(sid),
         ),
       );
@@ -763,7 +761,11 @@ export function startWindowsOwnedChild(input: {
       let text = '';
       for (let index = 0; index < 184; index++) {
         const char = new DataView(
-          system.toArrayBuffer(Number(sid[0]!) as import('bun:ffi').Pointer, index * 2, 2),
+          system.toArrayBuffer(
+            Number(sid[0]!) as import('../../runtime-ffi').Pointer,
+            index * 2,
+            2,
+          ),
         ).getUint16(0, true);
         if (!char) break;
         text += String.fromCharCode(char);

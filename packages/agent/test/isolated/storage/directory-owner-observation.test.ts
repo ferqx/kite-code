@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { selectProfile } from '../../../src/profile';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';

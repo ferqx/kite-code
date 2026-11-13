@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   lstatSync,
@@ -11,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { type AuthorizationRequest, JobStartError } from '../../../src/extensions';
 import { ripgrepAsset } from '../../../src/jobs/ripgrep';
 import { discoverWindowsPowerShell } from '../../../src/jobs/windows-powershell';
@@ -147,10 +147,10 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
           platform: 'win32',
           configurationId: 'powershell-dispatch-fixture',
           supervisorPath: resolve(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../dist/platform/process/windows-shell/kite-windows-runner.exe',
           ),
-          bunExecutable: process.execPath,
+          runtimeExecutable: process.execPath,
           shellExecutable: powerShell.executable.canonical,
           env: { PATH: powerShell.systemDirectory, USERPROFILE: root },
           windows: { kind: 'powershell', powerShell, stateRoot },

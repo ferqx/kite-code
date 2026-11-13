@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { nativeModelPreferences } from '../../electron/model-preference';
 import { registerNativeModelPreferenceIpc } from '../../electron/native-ipc';
@@ -67,8 +68,8 @@ test('actual preload and host IPC persist only bounded model preferences from th
     preferences: () => preferences,
   });
   try {
-    const built = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
+    const built = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/preload.ts')],
       target: 'node',
       format: 'cjs',
       external: ['electron'],

@@ -1,14 +1,19 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import type { Subprocess } from '../../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createMcpAdapter } from '../../../src/mcp';
 import { createMcpStdioTransportPort } from '../../../src/mcp/stdio-port';
 import {
   decodeMcpStdioProcessEvidence,
   type McpStdioWindowsEvidence,
 } from '../../../src/mcp/stdio-process-evidence';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const binding = {
   originalStoreId: 'store',
@@ -110,7 +115,7 @@ test('Windows cold receipts bind the complete original scope and reject false tr
 
 test('Windows port mock uses the actual spawned child, preserves full RPC, and never upgrades unknown after late terminal', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-windows-stdio-port-'));
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let failure: unknown;
   try {
     const guardian = join(root, 'guardian.js'),
@@ -118,6 +123,7 @@ test('Windows port mock uses the actual spawned child, preserves full RPC, and n
     writeFileSync(
       guardian,
       `
+import {setTimeout as sleep} from 'node:timers/promises';
 let nonce,sequence=0,mode;const send=v=>process.stdout.write(JSON.stringify({...v,nonce,sequence:++sequence})+'\\n');
 const self=()=>({pid:process.pid,parentPid:process.ppid,creationTime:String(process.pid*1000)});
 const proof=terminal=>({version:1,coverage:'windows-job-members',root:{pid:process.pid+100000,creationTime:'132000000000000001',exitCode:terminal?0:null,waitConfirmed:terminal},job:{activeProcesses:terminal?0:1,treeStopped:terminal},closed:terminal,closeUnknown:false});
@@ -125,28 +131,29 @@ let buf='';for await(const chunk of process.stdin){buf+=chunk.toString();while(b
 if(f.type==='start'){nonce=f.nonce;mode=f.args[0];send({type:'ready',guardian:self(),evidence:proof(false)});}
 else if(f.type==='rpc'){const m=JSON.parse(f.content);
 const bytes=Buffer.from(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{text:'完整输出🙂'+('x'.repeat(40000))}})+'\\n');for(let i=0;i<bytes.length;i+=16384)send({type:'rpc',content:bytes.subarray(i,i+16384).toString('base64')});}
-else if(f.type==='cancel'){if(mode==='unknown'){const e=proof(false);e.closeUnknown=true;send({type:'terminal',guardian:self(),evidence:e,treeStopped:false});await Bun.sleep(20);}
+else if(f.type==='cancel'){if(mode==='unknown'){const e=proof(false);e.closeUnknown=true;send({type:'terminal',guardian:self(),evidence:e,treeStopped:false});await sleep(20);}
 send({type:'terminal',guardian:self(),evidence:proof(true),treeStopped:true});process.exit(0);}}}
 `,
     );
-    // Subprocess mock changes only the OS observation; the guardian is a real owned Bun child.
+    // Subprocess mock changes only the OS observation; the guardian is a real owned Node child.
     writeFileSync(
       runner,
-      `
-import {mock} from 'bun:test';import assert from 'node:assert/strict';
+      `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
+import {mock} from '#kite-test';import assert from 'node:assert/strict';
 Object.defineProperty(process,'platform',{value:'win32'});
-let closes=0;mock.module(${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/windows-owned-child.ts'))},()=>({retainWindowsOwnedProcessObservation(pid){return {pid,creationTime:String(pid*1000),verify:()=>true,inspect(){try{process.kill(pid,0);return 'alive'}catch{return 'dead'}},close(){closes++}}}}));
-const {createMcpStdioTransportPort}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/mcp/stdio-port.ts'))});
-const {createMcpAdapter}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/mcp/index.ts'))});
-const {decodeMcpStdioProcessEvidence}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/mcp/stdio-process-evidence.ts'))});
+let closes=0;mock.module(${JSON.stringify(join(import.meta.dirname, '../../../src/platform/process/windows-owned-child.ts'))},()=>({retainWindowsOwnedProcessObservation(pid){return {pid,creationTime:String(pid*1000),verify:()=>true,inspect(){try{process.kill(pid,0);return 'alive'}catch{return 'dead'}},close(){closes++}}}}));
+const {createMcpStdioTransportPort}=await import(${JSON.stringify(join(import.meta.dirname, '../../../src/mcp/stdio-port.ts'))});
+const {createMcpAdapter}=await import(${JSON.stringify(join(import.meta.dirname, '../../../src/mcp/index.ts'))});
+const {decodeMcpStdioProcessEvidence}=await import(${JSON.stringify(join(import.meta.dirname, '../../../src/mcp/stdio-process-evidence.ts'))});
 for(const mode of ['known','unknown']){
 const configuration={type:'stdio',command:${JSON.stringify(join(root, 'server.exe'))},args:[mode],cwd:${JSON.stringify(root)},env:{}};
 const digest=createMcpAdapter({id:'server',transport:configuration}).getCatalogue().configDigest;
 const binding={originalStoreId:'store',sessionId:'session',executionId:mode,serverId:'server',scopeId:JSON.stringify(['store','session','server']),configDigest:digest,configuration};
-const controller=new AbortController();const port=createMcpStdioTransportPort({servers:[{id:'server',configuration}],guardianPath:${JSON.stringify(guardian)},bunExecutable:process.execPath,allowedEnvNames:[],admit:async()=>{}});
+const controller=new AbortController();const port=createMcpStdioTransportPort({servers:[{id:'server',configuration}],guardianPath:${JSON.stringify(guardian)},runtimeExecutable:${JSON.stringify(fixtureNodeExecutable())},allowedEnvNames:[],admit:async()=>{}});
 const owned=await port.open(binding,{signal:controller.signal});let result;owned.transport.onmessage=m=>{result=m};
 await owned.transport.start();await owned.transport.send({jsonrpc:'2.0',id:1,method:'fixture'});
-const until=async f=>{const end=performance.now()+1000;while(!f()){if(performance.now()>end)throw Error('fixture_deadline');await Bun.sleep(2)}};
+const until=async f=>{const end=performance.now()+1000;while(!f()){if(performance.now()>end)throw Error('fixture_deadline');await sleepTimer(2)}};
 await until(()=>result);assert.equal(result.result.text,'完整输出🙂'+('x'.repeat(40000)));
 const ready=owned.readProcessEvidence();assert.equal(ready.version,3);assert.equal(ready.guardian.kernelState,'alive');assert.equal(ready.guardian.parentPid,process.pid);
 assert.equal((await owned.stop()).status,mode==='known'?'stopped':'unknown');assert.equal((await owned.stopped).supervision,mode==='known'?'ended':'unknown');
@@ -157,7 +164,11 @@ console.log('windows_stdio_mock_complete');
 `,
     );
     writeFileSync(join(root, 'server.exe'), 'fixture');
-    child = Bun.spawn([process.execPath, runner], { stdout: 'pipe', stderr: 'pipe', env: {} });
+    child = spawnProcess([process.execPath, ...testRuntimeFlags, runner], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: {},
+    });
     const stdout = new Response(child.stdout).text(),
       stderr = new Response(child.stderr).text();
     let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -219,10 +230,10 @@ winTest(
       confirmed = false;
     let failure: unknown;
     try {
-      const build = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../../src/mcp/windows-stdio-guardian.ts')],
+      const build = await buildBundle({
+        entrypoints: [join(import.meta.dirname, '../../../src/mcp/windows-stdio-guardian.ts')],
         outdir: root,
-        target: 'bun',
+        ...fixtureRuntimeBuild(root),
         naming: 'windows-stdio-guardian.js',
       });
       expect(build.success).toBe(true);
@@ -233,7 +244,7 @@ winTest(
       );
       const configuration = {
         type: 'stdio' as const,
-        command: process.execPath,
+        command: fixtureNodeExecutable(),
         args: [server],
         cwd: root,
         env: {},
@@ -244,7 +255,7 @@ winTest(
       owned = await createMcpStdioTransportPort({
         servers: [{ id: 'server', configuration }],
         guardianPath: join(root, 'windows-stdio-guardian.js'),
-        bunExecutable: process.execPath,
+        runtimeExecutable: fixtureNodeExecutable(),
         allowedEnvNames: [],
         admit: async () => {},
       }).open(actual, { signal: new AbortController().signal });

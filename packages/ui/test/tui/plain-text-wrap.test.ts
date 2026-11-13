@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createRequire } from 'node:module';
+import { expect, test } from '#kite-test';
 import { wrapPlainText } from '../../src/tui/ink/plain-text-wrap';
 
 // Compare the installed Ink dependency's actual wrapping contract, not a second fixture model.

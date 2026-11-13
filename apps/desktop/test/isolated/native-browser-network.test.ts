@@ -1,6 +1,6 @@
-import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, mock, test } from '#kite-test';
 import { nativeBrowserChannel } from '../../src/native-browser-bridge';
 import { FakePlainView } from '../native-plain-view.fixture';
 

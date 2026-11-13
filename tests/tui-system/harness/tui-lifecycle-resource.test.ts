@@ -1,16 +1,18 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 import {
   terminateOwnedProcessTree,
   verifiedOwnedProcessGroupId,
   waitForPtyExitCode,
 } from './pty-process';
 
-const fixture = join(import.meta.dir, '..', 'fixtures', 'tui-lifecycle-resource.tsx');
+const fixture = join(import.meta.dirname, '..', 'fixtures', 'tui-lifecycle-resource.tsx');
 
 test('runs repeated InputLine focus-reporting mount and unmount in one owned child process', async () => {
   const inheritsFaultSoakProcessGroup = Boolean(process.env.KITE_FAULT_SOAK_PROCESS_NONCE);
-  const proc = Bun.spawn([process.execPath, fixture], {
+  const proc = testSpawn([process.execPath, ...testRuntimeFlags, fixture], {
     cwd: process.cwd(),
     env: process.env,
     stdin: 'ignore',

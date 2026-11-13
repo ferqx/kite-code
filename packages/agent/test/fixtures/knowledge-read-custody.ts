@@ -1,4 +1,3 @@
-import { mock } from 'bun:test';
 import * as fs from 'node:fs';
 import {
   closeSync,
@@ -12,6 +11,7 @@ import {
 import * as promises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mock } from '#kite-test';
 
 const originalOpen = promises.open;
 const originalClose = closeSync;

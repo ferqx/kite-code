@@ -177,74 +177,71 @@ try {
     };
     global.childStreamReads = { total: 0, active: 0, peak: 0, bytes: 0, aborted: 0, paths: {} };
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const path = new URL(String(args[0])).pathname;
-        const tracked = /\/messages$|\/model-output$|\/background-executions$/.test(path);
-        const reads = global.childStreamReads;
-        if (tracked) {
-          reads.total++;
-          reads.active++;
-          reads.peak = Math.max(reads.peak, reads.active);
-          reads.paths[path] = (reads.paths[path] ?? 0) + 1;
-        }
-        const signal = args[1]?.signal;
-        let finished = false;
-        const finish = () => {
-          if (!tracked || finished) return;
-          finished = true;
-          reads.active--;
-          signal?.removeEventListener('abort', aborted);
-        };
-        const aborted = () => {
-          if (!finished && tracked) reads.aborted++;
-          finish();
-        };
-        if (tracked) signal?.addEventListener('abort', aborted, { once: true });
-        try {
-          const response = await original(...args);
-          if (tracked && response.body) {
-            // AgentClient consumes these finite JSON bodies with getReader. Observe its
-            // actual EOF/cancel/error without cloning or retaining any response bytes.
-            const body = response.body;
-            const getReader = body.getReader.bind(body);
-            Reflect.set(body, 'getReader', (...options: unknown[]) => {
-              const reader = Reflect.apply(
-                getReader,
-                body,
-                options,
-              ) as ReadableStreamDefaultReader<Uint8Array>;
-              const read = reader.read.bind(reader),
-                cancel = reader.cancel.bind(reader);
-              Reflect.set(reader, 'read', async () => {
-                try {
-                  const result = await read();
-                  if (result.done) finish();
-                  else reads.bytes += result.value.byteLength;
-                  return result;
-                } catch (cause) {
-                  finish();
-                  throw cause;
-                }
-              });
-              Reflect.set(reader, 'cancel', async (reason?: unknown) => {
-                try {
-                  return await cancel(reason);
-                } finally {
-                  finish();
-                }
-              });
-              return reader;
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const path = new URL(String(args[0])).pathname;
+      const tracked = /\/messages$|\/model-output$|\/background-executions$/.test(path);
+      const reads = global.childStreamReads;
+      if (tracked) {
+        reads.total++;
+        reads.active++;
+        reads.peak = Math.max(reads.peak, reads.active);
+        reads.paths[path] = (reads.paths[path] ?? 0) + 1;
+      }
+      const signal = args[1]?.signal;
+      let finished = false;
+      const finish = () => {
+        if (!tracked || finished) return;
+        finished = true;
+        reads.active--;
+        signal?.removeEventListener('abort', aborted);
+      };
+      const aborted = () => {
+        if (!finished && tracked) reads.aborted++;
+        finish();
+      };
+      if (tracked) signal?.addEventListener('abort', aborted, { once: true });
+      try {
+        const response = await original(...args);
+        if (tracked && response.body) {
+          // AgentClient consumes these finite JSON bodies with getReader. Observe its
+          // actual EOF/cancel/error without cloning or retaining any response bytes.
+          const body = response.body;
+          const getReader = body.getReader.bind(body);
+          Reflect.set(body, 'getReader', (...options: unknown[]) => {
+            const reader = Reflect.apply(
+              getReader,
+              body,
+              options,
+            ) as ReadableStreamDefaultReader<Uint8Array>;
+            const read = reader.read.bind(reader),
+              cancel = reader.cancel.bind(reader);
+            Reflect.set(reader, 'read', async () => {
+              try {
+                const result = await read();
+                if (result.done) finish();
+                else reads.bytes += result.value.byteLength;
+                return result;
+              } catch (cause) {
+                finish();
+                throw cause;
+              }
             });
-          } else finish();
-          return response;
-        } catch (cause) {
-          finish();
-          throw cause;
-        }
-      },
-      { preconnect: original.preconnect },
-    );
+            Reflect.set(reader, 'cancel', async (reason?: unknown) => {
+              try {
+                return await cancel(reason);
+              } finally {
+                finish();
+              }
+            });
+            return reader;
+          });
+        } else finish();
+        return response;
+      } catch (cause) {
+        finish();
+        throw cause;
+      }
+    }, {});
   });
   phase = 'send';
   const model = page.locator('[data-model-picker] [data-model-trigger]');
@@ -451,28 +448,25 @@ try {
     };
     host.coldChildDirectoryGate = gate;
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
-        if (!gate.released && method === 'POST') gate.businessPosts++;
-        const directory = method === 'GET' && url.pathname === '/v1/background-executions';
-        if (!gate.released && directory && url.searchParams.has('executionId')) gate.exactQueries++;
-        const response = await original(...args);
-        if (
-          !gate.released &&
-          directory &&
-          url.searchParams.get('rootSessionId') === 'parent' &&
-          !url.searchParams.has('executionId')
-        ) {
-          gate.heldFull++;
-          gate.status = response.status;
-          await pending;
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0]));
+      const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
+      if (!gate.released && method === 'POST') gate.businessPosts++;
+      const directory = method === 'GET' && url.pathname === '/v1/background-executions';
+      if (!gate.released && directory && url.searchParams.has('executionId')) gate.exactQueries++;
+      const response = await original(...args);
+      if (
+        !gate.released &&
+        directory &&
+        url.searchParams.get('rootSessionId') === 'parent' &&
+        !url.searchParams.has('executionId')
+      ) {
+        gate.heldFull++;
+        gate.status = response.status;
+        await pending;
+      }
+      return response;
+    }, {});
   });
   try {
     // Ordinary UI has no diagnostic refresh control. Publish a real streamed
@@ -783,20 +777,17 @@ try {
       };
       host.childToolMetadataGate = gate;
       const original = globalThis.fetch;
-      globalThis.fetch = Object.assign(
-        async (...args: Parameters<typeof fetch>) => {
-          const path = new URL(String(args[0])).pathname;
-          const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
-          const response = await original(...args);
-          if (!gate.released && method === 'GET' && path === gate.path) {
-            gate.held++;
-            gate.status = response.status;
-            await pending;
-          }
-          return response;
-        },
-        { preconnect: original.preconnect },
-      );
+      globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+        const path = new URL(String(args[0])).pathname;
+        const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
+        const response = await original(...args);
+        if (!gate.released && method === 'GET' && path === gate.path) {
+          gate.held++;
+          gate.status = response.status;
+          await pending;
+        }
+        return response;
+      }, {});
     }, toolTarget.id);
     try {
       // Formal readonly reselect creates a new real Main viewSelection. The
@@ -919,32 +910,29 @@ try {
       };
       host.navigationRefreshGate = gate;
       const original = globalThis.fetch;
-      globalThis.fetch = Object.assign(
-        async (...args: Parameters<typeof fetch>) => {
-          const path = new URL(String(args[0])).pathname;
-          const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
-          if (method === 'POST' && path === '/v1/sessions/parent/rename') {
-            gate.renameStarted = true;
-            gate.renamePosts++;
-          }
-          const hold =
-            gate.renameStarted &&
-            !gate.released &&
-            method === 'GET' &&
-            path === '/v1/sessions/parent/view';
-          if (hold) {
-            gate.held++;
-            gate.path = path;
-          }
-          const response = await original(...args);
-          if (hold) {
-            gate.status = response.status;
-            await pending;
-          }
-          return response;
-        },
-        { preconnect: original.preconnect },
-      );
+      globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+        const path = new URL(String(args[0])).pathname;
+        const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
+        if (method === 'POST' && path === '/v1/sessions/parent/rename') {
+          gate.renameStarted = true;
+          gate.renamePosts++;
+        }
+        const hold =
+          gate.renameStarted &&
+          !gate.released &&
+          method === 'GET' &&
+          path === '/v1/sessions/parent/view';
+        if (hold) {
+          gate.held++;
+          gate.path = path;
+        }
+        const response = await original(...args);
+        if (hold) {
+          gate.status = response.status;
+          await pending;
+        }
+        return response;
+      }, {});
     });
     try {
       // One owned same-title rename is an explicit persisted fixture mutation.

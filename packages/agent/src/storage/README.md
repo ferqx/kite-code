@@ -106,7 +106,7 @@ Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authori
 
 DB ACK 和原 Worker 退出均已确认后，若仅原生解锁失败，Store 保留尚未释放的准确锁；再次 `close()` 只重试这项剩余清理，不重新打开 Worker、数据库或业务准入。Session owner 的 SQL 逻辑释放与 OS 解锁也分别记录：SQL 已释放的旧 generation 不能再次写入或重取；原锁实际释放成功后才删除持有记录。Runtime 保留准确 OwnerRef 的失败事实并显示 cleanup busy，关闭时只进行一次准确释放重试；持续失败明确 `shutdown_cleanup_unconfirmed / drain_failed`，不改写已经完成的 Run，也不重放模型、工具或 disposer。[真实 OS 解锁故障回归](../../test/isolated/storage/session-owner-release.test.ts)核单次与持续失败、另一 Store 的实际锁竞争、准确重试和原完成正文。
 
-固定可信 preload 保持原 Worker main 与消息协议，只向其唯一父 owner 交接原身份。原身份取得与退出观察共用五秒收尾预算；缺身份、查询错误、超时或原权释放失败保 `worker_exit_unconfirmed`／清理错误，Bun close 不授死亡。源码的 preload、native leaf 和 owner，或 built 的共享 chunk／bundled preload均由准确 loader metadata 进入保护范围。Win/Linux 原调用路径保持，原线程与平台资格仍未闭合，不从 macOS 结果推定。
+[Worker owner](../platform/process/owned-worker.ts) 使用 `node:worker_threads` 的私有 `parentPort`。macOS 的固定 [observer](worker/observer-preload.ts) 先获取原 Mach 权并向唯一父 owner 交接身份，再从构造器传入的私有文件 URL 加载业务入口。所有平台以空环境及固定 Node 参数启动。原身份取得与退出观察共用五秒收尾预算。缺身份、查询错误、超时或原权释放失败保留 `worker_exit_unconfirmed` 及清理错误。macOS 使用 Mach dead name 和原权释放证明，Windows／Linux 等待原 Node 线程 join。原生平台资格以实际运行记录为准。
 
 Run resume／Job recovery lease同样分开记录SQL逻辑释放与原OS锁：逻辑释放后禁止旧lease commit/dispatch，重复exact release只重试物理解锁，确认成功才删除登记。resume commit先封住并发release，移交给普通owner的锁不能再由旧lease释放。begin恢复失败、recoverSession已提交后的finally、acquire owner失败等局部锁保留准确清理权。migration unlock也属于启动收尾：先确认原Worker终止，再释放migration/profile；持续失败保原业务与清理错误及准确retryCleanup，未知Worker不重复发terminate。[真实恢复锁回归](../../test/isolated/storage/recovery-lock-release.test.ts)核实际双Store排他、SQL一次、旧lease拒绝、启动失败及未知Worker保留。没有新增锁或修改SQL格式。
 
@@ -122,9 +122,9 @@ Run resume／Job recovery lease同样分开记录SQL逻辑释放与原OS锁：�
 
 ## Worker 请求内的原生语句
 
-`SqliteOperations` 持有同步请求创建的 `query` 和 `prepare` 原生语句，包括 Drizzle query helper 的 prepared statement。`row/rows` 直接使用 operation-owned `prepare`：每次 ACK 已 finalize，缓存该包装不能复用原生语句，因此不再进入 Bun query cache。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。safeIntegers、SQL／参数及原计时保持，连接初始化的原生语句仍由 strict close 收束。这项缓存 owner 精简不独立证明 RSS 原因或改善。
+`SqliteOperations` 通过 [SQLite 适配器](../runtime-sqlite.ts)持有请求创建的 `query` 和 `prepare` 原生语句。`row/rows` 直接使用同一请求的参数化 `prepare`，原生语句只在该请求内使用。具名操作在事务结束后返回已物化的值；Worker 在成功或失败 ACK 前逐项 finalize，在 strict close 前先释放本请求语句。safeIntegers、SQL／参数及原计时保持，连接初始化的原生语句仍由 strict close 收束。这项缓存 owner 精简不独立证明 RSS 原因或改善。
 
-释放计入 Worker total timing；原 SQL/COMMIT 分项、事务回滚、Command 身份和提交未知时查询规则保持。释放失败不能发送成功 ACK，也不重发原操作或效果。[原生 Worker 回归](../../test/isolated/storage/statement-lifecycle.test.ts)以真实 statement 的 `isFinalized` 在响应发送前核成功、错误与关闭路径，继续查询、只读重开和 cursor 保持。采用请求边界的理由见[语句 owner Note](../../../../.agents/notes/implemented/bug-fix/2026-10-08-request-scoped-sql-statements.md)；这项释放不代表完整 RSS 或全部 Runtime 资源资格。
+释放计入 Worker total timing；原 SQL/COMMIT 分项、事务回滚、Command 身份和提交未知时查询规则保持。释放失败不能发送成功 ACK，也不重发原操作或效果。[原生 Worker 回归](../../test/isolated/storage/statement-lifecycle.test.ts)在响应发送前以已释放的原生句柄拒绝 SQLite reset 核对成功、错误与关闭路径，继续查询、只读重开和 cursor 保持。采用请求边界的理由见[语句 owner Note](../../../../.agents/notes/implemented/bug-fix/2026-10-08-request-scoped-sql-statements.md)；这项释放不代表完整 RSS 或全部 Runtime 资源资格。
 
 Worker 的首次和积压 pump 使用 `setImmediate`，每个宏任务至多执行一个同步事务后让出。原控制/正文/查询加权队列、容量预留和 close 排空此前已接纳请求保持；不把积压改成连续 microtask。原长 Run 的有界 DbTiming 诊断显示 7850 个请求累计排队约 11.95s、SQL 约 2.06s、COMMIT 约 0.31s，原 `setTimeout(0)` 的排队中位数约 1.26ms；取消和关闭确认。原[双 Worker timing](../../test/isolated/storage/timing.test.ts)继续核 control/body 早于末尾 query及观察异常不影响写入，不能以纯 queue 测试替代。该调度修复不证明 RSS 或完整资源资格。
 
@@ -210,7 +210,7 @@ Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Ru
 
 Session 完整原始记录的只读导出与分块文本范围见 [export owner](sqlite/export/README.md)。SQL 冻结读集完成验证、完整下载 footer 和原 scope 媒体 EOF 是独立证明；导出不恢复或消费旧工作。
 
-`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的显式受支持 schema 与 checksum 校验，读取所选 Bun SQLite 引擎可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表。准确 `0001-baseline` 和 `0001-baseline`→`0002-trajectory-facts` 两种结构可只读打开；其他旧 major／schema／checksum 明确拒绝。已存在的私有 `profile.json` 必须声明当前 major 1 与这两种结构之一的 `schemaChecksum`，在打开 SQLite 前拒绝不匹配的标记，不创建或改动 WAL／SHM；这只用于提前拒绝，数据库实际 major、完整 schema 与 migration checksum 仍独立校验。缺失该文件时仍沿原未完成建库路径核实际数据库。其他 SQLite 只读 WAL 发现可能建立空 sidecar，不改变原库／profile 字节或业务记录。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
+`@kite-ai/agent/sqlite` 的 `preflightSqliteStore(ProfileOptions)` 是启动准备阶段的只读格式预检：持有选定 profile 的外置 shared profile-use lease，返回 `absent`、`uninitialized` 或 `{ status: 'compatible', storeId, formatMajor: 1 }`。它复用正式打开的显式受支持 schema 与 checksum 校验，读取[选定 SQLite 引擎](../sqlite-engine.README.md)可见的当前 WAL 状态；不启动 Worker/Runtime/Model，不创建 profile、core.db、profile.json，不初始化或迁移业务表。准确 `0001-baseline` 和 `0001-baseline`→`0002-trajectory-facts` 两种结构可只读打开；其他旧 major／schema／checksum 明确拒绝。已存在的私有 `profile.json` 必须声明当前 major 1 与这两种结构之一的 `schemaChecksum`，在打开 SQLite 前拒绝不匹配的标记，不创建或改动 WAL／SHM；这只用于提前拒绝，数据库实际 major、完整 schema 与 migration checksum 仍独立校验。缺失该文件时仍沿原未完成建库路径核实际数据库。其他 SQLite 只读 WAL 发现可能建立空 sidecar，不改变原库／profile 字节或业务记录。启动准备允许建立 dataRoot/协调锁目录；status 发现入口仍不使用此函数。
 
 未完成 restore journal、exclusive 维护占用、rollback journal、链接/非私有文件和未知/损坏格式明确拒绝。只读连接使用 strict close 后才释放 lease；若数据库关闭未获确认，返回 `store_preflight_cleanup_failed` 并保留该进程的 profile-use 锁，不能冒充已释放。`compatible` 仅证明该次观察的格式与身份，未来 launch 仍须重新执行正式格式和身份准入，也不是完整业务历史的健康证明。源码与发布 SQLite leaf 分别使用各自真实包内 migration SQL，不回退到源码树。
 
@@ -222,7 +222,7 @@ Windows 原生私有 ACL 拒绝 `windows_path_security_denied` 在公开预检�
 
 2026-11-09，Windows x64／Bun1.4.4：上述预检整文件12项／77断言全部通过，覆盖真实ACL拒绝与恢复、链接、两类journal及拒绝后的EX使用锁释放。[开发入口整文件](../../../../tests/isolated/unified-agent/development-desktop.test.ts)11项／185断言通过，另1项macOS专属跳过；新增实际公开ACL下零确认／零备份及原库字节保持断言。Store schema、数据格式版本和底层ACL准入政策均未改变，不据此授予其他平台或完整发布资格。
 
-`sqliteStorageAssets()` 是同一公开 leaf 的纯 metadata getter，返回实际 `module`、`worker`、`baseline` 及完整 `migrations` URL 清单。`openSqliteStore` 的 Worker 与 preflight 共用这些实际选择，source/built 分别选择 main.ts/main.js，不由 Service 猜私有路径，也不把 module 的任意父目录当专用 runtime root。它不打开库、读取文件或证明候选目录身份；完整安装 candidate 的 host-only closure 证明归[Service 资产 owner](../../../../apps/service/src/runtime-assets.ts)。
+`sqliteStorageAssets()` 是同一公开 leaf 的纯 metadata getter，返回 host module、Worker、observer 及 SQL 迁移的准确 URL。开发源码入口使用预构建的 `dist/storage/worker/{main,observer-preload}.js`，安装入口使用其包内对应路径。Worker 通过私有端口核对父进程选定的 SQLite 引擎，Node 子线程无需源码 loader。[源外包回归](../../test/isolated/storage/build.test.ts)使用固定 Node 验证实际 Worker、引擎和迁移文件，另验证父 `NODE_OPTIONS` 的 preload 不进入 Worker。完整安装 candidate 的资产闭包归 [Service owner](../../../../apps/service/src/runtime-assets.ts)。
 
 
 ## 原 active Run 的显式恢复

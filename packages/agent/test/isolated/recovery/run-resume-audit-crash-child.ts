@@ -1,5 +1,5 @@
-import { Database } from 'bun:sqlite';
 import { writeFileSync } from 'node:fs';
+import { Database } from '../../../src/runtime-sqlite';
 import { initializeDefaultSqliteEngine } from '../../../src/sqlite-engine';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 

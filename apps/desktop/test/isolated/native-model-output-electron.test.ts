@@ -1,14 +1,17 @@
-import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
+import { buildNativeTestService } from '../native-node-service.fixture';
 import { NativeOwnedProcesses } from '../native-owned-processes.fixture';
 
 const require = createRequire(import.meta.url);
@@ -66,7 +69,7 @@ test.skipIf(process.platform !== 'darwin')(
       });
     await store.close();
     let requests = 0;
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -133,194 +136,188 @@ test.skipIf(process.platform !== 'darwin')(
         return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
       },
     });
-    writeFileSync(
-      userConfiguration.path,
-      JSON.stringify({
-        modelId: 'local',
-        models: [
-          {
-            id: 'local',
-            provider: 'compatible',
-            model: 'local',
-            baseURL: `http://127.0.0.1:${provider.port}/v1`,
-          },
-        ],
-      }),
-    );
-    const serviceEntrypoint = join(root, 'apps/service/dist/service.js'),
-      bunExecutable = realpathSync(process.execPath),
-      outdir = join(root, 'app');
-    const serviceOutdir = join(root, 'apps/service/dist');
-    mkdirSync(serviceOutdir, { recursive: true });
-    directoryLink(
-      resolve(import.meta.dir, '../../../service/node_modules'),
-      join(root, 'apps/service/node_modules'),
-    );
-    const serviceBuild = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
-      target: 'bun',
-      format: 'esm',
-      packages: 'external',
-      outdir: serviceOutdir,
-      naming: 'service.js',
-    });
-    if (!serviceBuild.success)
-      throw new AggregateError(serviceBuild.logs, 'private_service_build_failed');
-    await buildNativeDesktop(
-      {
-        serviceEntrypoint,
-        bunExecutable,
-        serviceSha256: createHash('sha256').update(readFileSync(serviceEntrypoint)).digest('hex'),
-        bunSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
-        buildId: 'native-electron-fixture',
-        apiMajor: 1,
-        requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
-        profile: { dataRoot: profile.dataRoot, profile: profile.profile },
-      },
-      outdir,
-      { testDiagnostics: true },
-    );
-    const fixture = join(root, 'driver.ts'),
-      driverPath = join(root, 'driver.js');
-    writeFileSync(
-      fixture,
-      readFileSync(resolve(import.meta.dir, '../native-model-output-electron.fixture.ts'), 'utf8')
-        .replace(
-          "'./native-root-page.fixture'",
-          JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
-        )
-        .replace(
-          "'../../../tests/fixtures/loopback-model-environment'",
-          JSON.stringify(
-            resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
-          ),
-        )
-        .replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
-        ),
-    );
-    const built = await Bun.build({
-      entrypoints: [fixture],
-      target: 'node',
-      format: 'esm',
-      outdir: root,
-      naming: 'driver.js',
-      packages: 'external',
-    });
-    if (!built.success) throw new AggregateError(built.logs, 'driver_build_failed');
-    directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
-    const driver = Bun.spawn(
-      [
-        realpathSync(Bun.which('node')!),
-        driverPath,
+    try {
+      writeFileSync(
+        userConfiguration.path,
+        JSON.stringify({
+          modelId: 'local',
+          models: [
+            {
+              id: 'local',
+              provider: 'compatible',
+              model: 'local',
+              baseURL: `http://127.0.0.1:${provider.port}/v1`,
+            },
+          ],
+        }),
+      );
+      const outdir = join(root, 'app');
+      const service = await buildNativeTestService(outdir);
+      const runtimeExecutable = service.assets.runtimeExecutable;
+      await buildNativeDesktop(
+        {
+          ...service.assets,
+          buildId: 'native-electron-fixture',
+          apiMajor: 1,
+          requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
+          profile: { dataRoot: profile.dataRoot, profile: profile.profile },
+        },
         outdir,
-        root,
-        profile.dataRoot,
-        storeId,
-        `127.0.0.1:${provider.port}`,
-        require('electron') as string,
-        `http://127.0.0.1:${provider.port}`,
-        bunExecutable,
-      ],
-      {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
-      },
-    );
-    let owner: NativeOwnedProcesses | undefined,
-      completed = false,
-      failure: unknown;
-    const captureOwner = () => {
-      owner ??= new NativeOwnedProcesses({
-        pid: driver.pid,
-        nodeExecutable: realpathSync(Bun.which('node')!),
-        driverPath,
-        root,
+        { testDiagnostics: true, runtimeAddon: service.runtimeAddon },
+      );
+      const fixture = join(root, 'driver.ts'),
+        driverPath = join(root, 'driver.js');
+      writeFileSync(
+        fixture,
+        readFileSync(
+          resolve(import.meta.dirname, '../native-model-output-electron.fixture.ts'),
+          'utf8',
+        )
+          .replace(
+            "'./native-root-page.fixture'",
+            JSON.stringify(resolve(import.meta.dirname, '../native-root-page.fixture.ts')),
+          )
+          .replace(
+            "'../../../tests/fixtures/loopback-model-environment'",
+            JSON.stringify(
+              resolve(
+                import.meta.dirname,
+                '../../../../tests/fixtures/loopback-model-environment.ts',
+              ),
+            ),
+          )
+          .replace(
+            "import { _electron } from 'playwright';",
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
+          ),
+      );
+      const built = await buildFixture({
+        entrypoints: [fixture],
+        target: 'node',
+        format: 'esm',
+        outdir: root,
+        naming: 'driver.js',
+        packages: 'external',
       });
-      owner.capture();
-    };
-    const decoder = new TextDecoder();
-    let pendingLine = '',
-      truncatedLine = false,
-      observedLines = 0;
-    const observe = (text: string, flush = false) => {
-      const parts = text.split('\n');
-      for (let index = 0; index < parts.length; index++) {
-        if (!truncatedLine) {
-          const part = parts[index]!;
-          const available = 8192 - pendingLine.length;
-          pendingLine += part.slice(0, available);
-          truncatedLine = part.length > available;
-        }
-        if (index < parts.length - 1 || flush) {
-          if (
-            observedLines < 64 &&
-            /^(?:native_model_output_phase|native_model_output_error|native_permission_attempt) /.test(
-              pendingLine,
-            )
-          ) {
-            console.error(pendingLine);
-            const phase = pendingLine.match(/^native_model_output_phase (\w+)/)?.[1];
-            if (phase && ['launch_begin', 'window', 'run_completed'].includes(phase))
-              captureOwner();
-            observedLines++;
+      if (!built.success) throw new AggregateError(built.logs, 'driver_build_failed');
+      directoryLink(
+        resolve(import.meta.dirname, '../../../../node_modules'),
+        join(root, 'node_modules'),
+      );
+      const driver = spawnFixtureProcess(
+        [
+          runtimeExecutable,
+          driverPath,
+          outdir,
+          root,
+          profile.dataRoot,
+          storeId,
+          `127.0.0.1:${provider.port}`,
+          require('electron') as string,
+          `http://127.0.0.1:${provider.port}`,
+          runtimeExecutable,
+        ],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+        },
+      );
+      let owner: NativeOwnedProcesses | undefined,
+        completed = false,
+        failure: unknown;
+      const captureOwner = () => {
+        owner ??= new NativeOwnedProcesses({
+          pid: driver.pid,
+          nodeExecutable: runtimeExecutable,
+          driverPath,
+          root,
+        });
+        owner.capture();
+      };
+      const decoder = new TextDecoder();
+      let pendingLine = '',
+        truncatedLine = false,
+        observedLines = 0;
+      const observe = (text: string, flush = false) => {
+        const parts = text.split('\n');
+        for (let index = 0; index < parts.length; index++) {
+          if (!truncatedLine) {
+            const part = parts[index]!;
+            const available = 8192 - pendingLine.length;
+            pendingLine += part.slice(0, available);
+            truncatedLine = part.length > available;
           }
-          pendingLine = '';
-          truncatedLine = false;
+          if (index < parts.length - 1 || flush) {
+            if (
+              observedLines < 64 &&
+              /^(?:native_model_output_phase|native_model_output_error|native_permission_attempt) /.test(
+                pendingLine,
+              )
+            ) {
+              console.error(pendingLine);
+              const phase = pendingLine.match(/^native_model_output_phase (\w+)/)?.[1];
+              if (phase && ['launch_begin', 'window', 'run_completed'].includes(phase))
+                captureOwner();
+              observedLines++;
+            }
+            pendingLine = '';
+            truncatedLine = false;
+          }
+        }
+      };
+      const stderrPromise = new Response(
+        driver.stderr.pipeThrough(
+          new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, controller) {
+              controller.enqueue(chunk);
+              try {
+                observe(decoder.decode(chunk, { stream: true }));
+              } catch {
+                // Observation cannot alter the original stderr stream.
+              }
+            },
+            flush() {
+              try {
+                observe(decoder.decode(), true);
+              } catch {
+                // Observation cannot alter the original stderr EOF.
+              }
+            },
+          }),
+        ),
+      ).text();
+      try {
+        const exit = await bounded(driver.exited, 45000);
+        const stderr = await stderrPromise;
+        if (exit !== 0) console.error(stderr.slice(0, 5000));
+        expect(exit).toBe(0);
+        completed = true;
+      } catch (error) {
+        failure = error;
+      } finally {
+        barrier.release();
+        owner?.capture();
+        driver.kill('SIGKILL');
+        await driver.exited;
+        try {
+          await owner?.settle(completed);
+        } finally {
+          console.info('native_owned_processes', owner?.metadata);
+          if (owner?.confirmed) rmSync(root, { recursive: true, force: true });
+          else console.error('native_owned_root_retained', root);
         }
       }
-    };
-    const stderrPromise = new Response(
-      driver.stderr.pipeThrough(
-        new TransformStream<Uint8Array, Uint8Array>({
-          transform(chunk, controller) {
-            controller.enqueue(chunk);
-            try {
-              observe(decoder.decode(chunk, { stream: true }));
-            } catch {
-              // Observation cannot alter the original stderr stream.
-            }
-          },
-          flush() {
-            try {
-              observe(decoder.decode(), true);
-            } catch {
-              // Observation cannot alter the original stderr EOF.
-            }
-          },
-        }),
-      ),
-    ).text();
-    try {
-      const exit = await bounded(driver.exited, 45000);
-      const stderr = await stderrPromise;
-      if (exit !== 0) console.error(stderr.slice(0, 5000));
-      expect(exit).toBe(0);
-      completed = true;
-    } catch (error) {
-      failure = error;
+      if (!owner?.confirmed || owner.errors.length)
+        throw new AggregateError(
+          [...(failure === undefined ? [] : [failure]), ...(owner?.errors ?? [])],
+          'native_owned_cleanup_failed',
+        );
+      if (failure !== undefined) throw failure;
     } finally {
       barrier.release();
-      owner?.capture();
-      driver.kill('SIGKILL');
-      await driver.exited;
-      try {
-        await owner?.settle(completed);
-      } finally {
-        provider.stop(true);
-        console.info('native_owned_processes', owner?.metadata);
-        if (owner?.confirmed) rmSync(root, { recursive: true, force: true });
-        else console.error('native_owned_root_retained', root);
-      }
+      await provider.stop(true);
     }
-    if (!owner?.confirmed || owner.errors.length)
-      throw new AggregateError(
-        [...(failure === undefined ? [] : [failure]), ...(owner?.errors ?? [])],
-        'native_owned_cleanup_failed',
-      );
-    if (failure !== undefined) throw failure;
   },
   60000,
 );

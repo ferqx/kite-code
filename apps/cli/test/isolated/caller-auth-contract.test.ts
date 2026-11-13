@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
@@ -9,6 +8,8 @@ import {
   type ServerInfo,
 } from '@kite-ai/client';
 import type { TuiCallerRequest } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { callerDigest, callerRequestDigest, parseCallerIntent } from '../../host/caller-intents';
 import { openCallerJournal } from '../../host/caller-journal';
@@ -91,7 +92,7 @@ async function fixture(storeId = 'store', subjectId = 'subject') {
     cancelRequestedAt: null,
   };
   let mode: 'lost' | 'accepted' | 'applied' | 'missing' | 'wrong' = 'lost';
-  const server = Bun.serve({
+  const server = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {

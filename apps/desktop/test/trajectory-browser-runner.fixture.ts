@@ -5,13 +5,15 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium, type Page } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { verifyTrajectoryDetailLayout } from './trajectory-detail-layout-browser.fixture';
 import { verifyTrajectoryInputContext } from './trajectory-input-context-browser.fixture';
 import { verifyTrajectoryOutputState } from './trajectory-output-state-browser.fixture';
 import { verifySemanticTrajectory } from './trajectory-semantic-browser.fixture';
 import { verifyTrajectoryToolCatalog } from './trajectory-tool-catalog-browser.fixture';
 
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'trajectory-browser-'));
@@ -50,10 +52,10 @@ if (!reusedUrl)
   });
 const server = reusedUrl
   ? { url: reusedUrl, stop(_force?: boolean) {} }
-  : Bun.serve({
+  : await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
-      fetch(request) {
+      async fetch(request) {
         const pathname = new URL(request.url).pathname;
         if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
         if (pathname === '/')
@@ -63,7 +65,7 @@ const server = reusedUrl
           );
         const file = path.resolve(output, `.${pathname}`);
         if (!file.startsWith(output + path.sep)) return new Response(null, { status: 404 });
-        return new Response(Bun.file(file));
+        return new Response(await openFixtureFile(file));
       },
     });
 console.log(JSON.stringify({ url: server.url.href, artifact, reusedAssets: reusedUrl !== null }));
@@ -694,7 +696,10 @@ async function verifyWorkbench(page: Page) {
   verification.longHistoryAnchor = anchor;
   await bounds(page, 'long-history');
   verification.originalWorkbenchFacts = JSON.parse(initialFacts).length;
-  await Bun.write(path.join(artifact, 'verification.json'), JSON.stringify(verification, null, 2));
+  await writeFixtureFile(
+    path.join(artifact, 'verification.json'),
+    JSON.stringify(verification, null, 2),
+  );
 }
 if (process.argv.includes('--verify')) {
   const browser = await chromium.launch({
@@ -773,7 +778,7 @@ if (process.argv.includes('--verify')) {
     );
     if (errors.length) throw Error('trajectory_browser_errors');
   } catch (cause) {
-    await Bun.write(
+    await writeFixtureFile(
       path.join(artifact, 'failure.json'),
       JSON.stringify(
         { failure: cause instanceof Error ? cause.message : String(cause), errors, verification },

@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -43,11 +43,11 @@ async function expectCompletedScrollToStayIdle(tui: PtyProcess): Promise<void> {
 
 describe('TUI PTY System — terminal standalone tool Static ownership', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     const answer = longAnswer('STANDALONE_STATIC_LINE');
     server.setResponses([
@@ -113,11 +113,11 @@ describe('TUI PTY System — terminal standalone tool Static ownership', () => {
 
 describe('TUI PTY System — terminal concurrent Subagent Static ownership', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     const answer = longAnswer('SUBAGENT_STATIC_LINE');
     server.setResponses(

@@ -12,6 +12,8 @@
 
 ## 当前 V1.3 owner 与资格边界
 
+新候选的负载、Store、Service 和 TUI 探针由父 runner 选中的包内 Node 执行。外层调度和构建仍用 Bun；报告的 `environment.bunVersion` 只描述这个控制进程。探针以 Node 的显式 GC 保留原采样位置，窗口、断言、身份、退出和正式资格门禁保持。
+
 当前 Store 内具备原输入证明的同会话历史，在新任务的模型上下文中须包含其他已中断、取消或失败轮次的准确生命周期事实，不能仅将旧用户输入原样排列后让新模型把它当作未完成授权。投影、显式接续及 Fork 封存边界归[Agent owner](../../packages/agent/README.md#人类输入工作选择与可靠结果)，原 Command／Execution 幂等与新模型重新提出旧任务分别核验。真实模型桌面断线、回执丢失及 SIGKILL 重开的过程证据归[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)；本机有界实测不授其他模型、平台或完整发布资格。
 
 用户最新确认按业务与清理正常、重复运行的内存趋势和没有已确认持续保留问题结束当前开发实施；原32MiB正式门禁保留为尚未取得的发布资格，不作为当前开发完成的唯一标准。按[当前Goal范围](../plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)停止root校准、性能负载与完整来源扩展。原断言、阈值、unknown和缺项拒绝保持，开发交付完成不授完整观测或正式阶段资格；Win/Linux发布前实测仍后置。
@@ -76,7 +78,7 @@ Store strict-close 未确认时，[原锁 owner](../../packages/agent/src/storag
 
 同一归因的本机自身进程观察确认MADV_FREE_REUSABLE可让footprint下降而原RSS保持，真正munmap后RSS才下降；不能据此解释原负载全部增长。唯一 `MIMALLOC_ARENA_RESERVE=0` 启动控制恢复原未插桩Worker／probe／sampler，完成原450秒／九点业务后RSS仍增115.203125MiB，原三点与增长规则失败。参数未接入正式入口，此候选已收束，准确源码、实际进程、冻结核对与失败保留在上述进度。Bun完整全局观测、全Runtime后代与平台资格缺项继续保持，不重复关闭矩阵或将本控制建为独立目标。
 
-完整probe的default continuous现使用父runner已冻结且重新核验的Terminal候选，传递原canonical root，两个Service、包内Bun/SQLite、Shell producer和cold reader共享该完整包。源码外编译后不重新定位仓库或构建另一候选。普通独立fixture未提供候选时仍沿既有builder；实际完整8outer结果与当前编译验收归[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。采集probe失败保留私有原root与精确阶段日志以核原Job／DB／错误；它不建立新的执行authority或扩大生产启动行为。
+完整probe的default continuous现使用父runner已冻结且重新核验的Terminal候选，传递原canonical root，两个 Service、包内 Node／SQLite、Shell producer和cold reader共享该完整包。源码外编译后不重新定位仓库或构建另一候选。普通独立fixture未提供候选时仍沿既有builder；实际完整8outer结果与当前编译验收归[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。采集probe失败保留私有原root与精确阶段日志以核原Job／DB／错误；它不建立新的执行authority或扩大生产启动行为。
 
 持续lifecycle采样以首个真实周期为warmup，随后按原活动窗口分布固定观测点；每个窗口继续执行原完成／取消／重连／删除周期，而不是sleep等待。只在边界采样并保准确0—8序号，原180秒timer覆盖整个观测窗口，结束／异常均释放。旧滚动数组丢弃早期点的实现已移除；报告另核每个原point序号，不能把最后几次快速循环当整段资源稳定性。实际两秒红／绿与当前完整结果归同一[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
 
@@ -92,7 +94,7 @@ Linux每个原Job必须同时保存warm只读原Store取得的完整startup refe
 
 三平台原 `mcp_churn` stdio collector 现均接默认 Source→Core 准入→connection Job，保原实际 exit7／Tool outcome_unknown、HTTP catalogue drift／release、全部断言和180秒预算；非macOS旧直接stdio adapter回退已删除。每个point使用closed v1 [原 Job 交接](../../scripts/runtime/unified-soak-mcp-handoff.ts)，严核原 Store／Session／Job、独立 operation Command、原用户 Run 的 connect／call 身份、同平台原 progress→terminal，以及cold原完整 Execution／两个 Command／Run／输出／reference、cursor与Provider零重放。v2保原Mac三角色／coalition合取；v3核原FILETIME／root wait7／Job0及guardian实际exit0／reap／观察关闭；v4核原namespace devino／init-root birth／本地PID、root wait7／raw1792和wrapper实际exit0／双EOF／全FD关闭。Windows ready的active计数尚未采样时可为null，terminal必须实际0；ready与unknown不充作结束。
 
-top仅重复首point，不能借另一点身份或遗漏其余point收据。出现字段时CI及formal均严核；formal缺原Job交接另拒绝，旧无字段CI保诊断范围。compiled probe只从父runner同候选定位built guardian、Bun及Linux init／canonical Bubblewrap，无源码／构建／adapter回退；缺资产或正式owner失败保原失败。原Source关闭unknown时`cleanupConfirmed`保false，不因相邻旧fixture释放而覆盖。该有限Job交接不补整个Runtime census、Bun counters、原RSS、八outer／九点或全报告资格；Win/Linux实际原生／installed尚待既定验收。准确错误与本轮完整文件证据归[当前进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10三平台-mcp-正式-soak-调用者迁移)。
+top仅重复首point，不能借另一点身份或遗漏其余point收据。出现字段时CI及formal均严核；formal缺原Job交接另拒绝，旧无字段CI保诊断范围。compiled probe只从父runner同候选定位 built guardian、Node 及 Linux init／canonical Bubblewrap，无源码／构建／adapter回退；缺资产或正式owner失败保原失败。原Source关闭unknown时`cleanupConfirmed`保false，不因相邻旧fixture释放而覆盖。该有限Job交接不补整个Runtime census、Bun counters、原RSS、八outer／九点或全报告资格；Win/Linux实际原生／installed尚待既定验收。准确错误与本轮完整文件证据归[当前进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-10三平台-mcp-正式-soak-调用者迁移)。
 
 默认 Shell 原 Job 现交接完整 `shell-owned-coalition` 启动／终态事实：准确 root WNOWAIT／waitpid、原 guardian／coalition／注册清理及直接 broker 实际 exit/close；新 continuous producer 必须取得严格 ended 记录，并在 cold 原 Store 核完整 result 与 startup reference 身份不漂移。旧 v2 无字段保持原有限语义，新字段存在必核原 Session／Execution／coalition／Service owner；具体实现归[Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)。OAuth 原 Login 的 launcher 另随原 Auth result 保存实际出生及 exited/reap，cold Query 核原证明和完整 finalization digest，公开九字段 payload 保持，浏览器 external，范围归[认证 owner](mcp-authentication.md)。这些 owner 交接不合并成全部 Runtime descendant census，不替代原 RSS、activeResources／handles、八outer／九点或全报告门禁。
 

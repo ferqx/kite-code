@@ -8,6 +8,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 
 type Manifest = {
   name: string;
@@ -16,7 +18,7 @@ type Manifest = {
   scripts: { build: string };
   dependencies?: Record<string, string>;
 };
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 async function build(manifest: Manifest, source: string, destination: string) {
   for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
     const words = segment.trim().split(/\s+/);
@@ -28,7 +30,7 @@ async function build(manifest: Manifest, source: string, destination: string) {
     );
     const flag = args.indexOf('--outdir');
     if (flag >= 0) args[flag + 1] = destination;
-    const child = Bun.spawn([process.execPath, ...args], {
+    const child = spawnFixtureProcess([process.execPath, ...args], {
       cwd: source,
       env: { PATH: process.env.PATH ?? '' },
       stdout: 'pipe',
@@ -95,11 +97,11 @@ export async function buildOwnedDefaultArtifactConsumer(root: string) {
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(realpathSync(installed), target, process.platform === 'win32' ? 'junction' : 'dir');
   }
-  const compiled = await Bun.build({
-    entrypoints: [join(import.meta.dir, 'consumer.ts')],
+  const compiled = await buildFixture({
+    entrypoints: [join(import.meta.dirname, 'consumer.ts')],
     outdir: original,
     naming: 'consumer.js',
-    target: 'bun',
+    target: 'node',
     packages: 'external',
   });
   if (!compiled.success) throw new AggregateError(compiled.logs, 'owned_consumer_build_failed');

@@ -1,7 +1,7 @@
-import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, mock, test } from '#kite-test';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,

@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { createConfigurationSnapshot } from '@kite-ai/agent/config';
 import type { Execution, Interaction, Message, Run, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixture';
 import type {
   NativeBridge,
@@ -5389,11 +5390,215 @@ test('first accepted input observes a later rejection before Run creation, keeps
   }
 });
 
+function rejectedBody(commandId: string, content: string, imageOnly = false) {
+  const data = JSON.stringify({
+    kind: 'run.start',
+    commandId,
+    expectedStoreId: 'store',
+    content,
+    ...(imageOnly
+      ? {
+          images: [
+            {
+              name: 'original.png',
+              reference: {
+                id: 'original-image',
+                storeId: 'store',
+                sessionId: 'a',
+                subjectId: 'user',
+                scope: { kind: 'session', id: 'a' },
+                hash: 'a'.repeat(64),
+                size: '42',
+                mediaType: 'image/png',
+              },
+            },
+          ],
+        }
+      : {}),
+  });
+  const bodyDigest = createHash('sha256').update(data).digest('hex');
+  return {
+    bodyDigest,
+    read(input: Extract<NativeRequest, { method: 'caller.body' }>) {
+      expect(input.commandId).toBe(commandId);
+      expect(input.offset).toBe(0);
+      return {
+        kind: 'caller.body' as const,
+        commandId,
+        readId: input.readId,
+        bodyDigest,
+        offset: 0,
+        nextOffset: data.length,
+        bodyBytes: Buffer.byteLength(data),
+        eof: true,
+        data,
+      };
+    },
+  };
+}
+
+test('model authentication rejection stays in the reply position for the first and subsequent inputs without losing either draft', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request.bind(bridge);
+  bridge.request = async (input) => {
+    if (input.method === 'submit') {
+      f.calls.push(input);
+      return {
+        sessionId: input.sessionId,
+        intent: input.intent,
+        phase: 'rejected',
+        error: 'credential_unavailable',
+      };
+    }
+    return request(input);
+  };
+  const alert = () => f.host.querySelector('.turn-failure[role="alert"]');
+  const expectReplyPosition = (content: string) => {
+    const message = [...f.host.querySelectorAll('.message.user')].find((entry) =>
+      entry.textContent?.includes(content),
+    );
+    expect(message).toBeDefined();
+    expect(message!.compareDocumentPosition(alert()!) & 4).toBe(4);
+    expect(message!.querySelector('.delivery-status')).toBeNull();
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('首条草稿');
+    await f.chooseModel();
+    await f.click('发送首条消息');
+    await f.resolve('failed', true, 'model_authentication_required');
+    await f.until(() => alert()?.textContent?.startsWith('无认证。') ?? false);
+    expectReplyPosition('首条草稿');
+    expect(alert()?.textContent).toContain('提供商与模型');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('首条草稿');
+    expect(f.host.body.textContent).not.toContain('model_authentication_required');
+
+    await f.click('Original A');
+    await f.edit('后续草稿', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    await f.until(() => alert()?.textContent?.includes('无法读取所选提供商已配置的凭据') ?? false);
+    expectReplyPosition('后续草稿');
+    expect(alert()?.textContent).not.toContain('无认证');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('后续草稿');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  [false, 'steady'],
+  [true, 'steady'],
+  [false, 'retry'],
+  [true, 'retry'],
+  [true, 'retry while switching'],
+] as const)('cold rejected model input restores its exact selected original and reply (image only: %s, read path: %s)', async (imageOnly, readPath) => {
+  const commandId = 'cold-model-rejection';
+  const f = fixture(false, true, 'accept_edits', { withoutSelection: true });
+  const body = rejectedBody(commandId, imageOnly ? '' : '被拒绝的原始消息', imageOnly);
+  const record: NativeCallerMetadata = {
+    scope: { storeId: 'store', sessionId: 'a', workspaceId: 'w' },
+    subjectId: 'user',
+    request: { kind: 'run.start', commandId, expectedStoreId: 'store' },
+    target: { kind: 'session', id: 'a' },
+    phase: 'rejected',
+    bodyDigest: body.bodyDigest,
+    requestDigest: 'b'.repeat(64),
+  };
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request.bind(bridge);
+  const reads: string[] = [];
+  const closes: string[] = [];
+  const delayedRead = Promise.withResolvers<void>();
+  bridge.request = async (input) => {
+    if (input.method === 'caller.body') {
+      f.calls.push(input);
+      reads.push(input.readId);
+      if (readPath !== 'steady' && reads.length === 1) {
+        expect(f.host.querySelector('.message.user')).toBeNull();
+        expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+        throw Error('temporary_original_body_read');
+      }
+      if (readPath !== 'steady' && reads.length === 2) await delayedRead.promise;
+      return body.read(input);
+    }
+    if (input.method === 'caller.close') {
+      closes.push(input.readId);
+      return null;
+    }
+    if (input.method === 'caller.lookup') {
+      f.calls.push(input);
+      expect(input.commandId).toBe(commandId);
+      record.rejectionReason = 'model_authentication_required';
+      return { ...record };
+    }
+    const value = await request(input);
+    return value && 'generation' in value
+      ? { ...value, callerSubmissions: [{ ...record }] }
+      : value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Other B');
+    expect(f.calls.some((call) => call.method === 'caller.lookup')).toBe(false);
+    await f.click('Original A');
+    if (readPath !== 'steady') {
+      await f.until(() => reads.length === 2);
+      expect(closes).toEqual(reads.slice(0, 1));
+      expect(f.host.querySelector('.message.user')).toBeNull();
+      expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+      if (readPath === 'retry while switching') {
+        await f.click('Other B');
+        expect(closes).toEqual(reads);
+        await act(async () => delayedRead.resolve());
+        expect(f.host.querySelector('.message.user')).toBeNull();
+        expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+        await f.click('Original A');
+      } else {
+        await act(async () => delayedRead.resolve());
+      }
+    }
+    await f.until(() => !!f.host.querySelector('.turn-failure[aria-label="无认证"]'));
+    expect(reads).toHaveLength(readPath === 'steady' ? 1 : readPath === 'retry' ? 2 : 3);
+    expect(new Set(reads).size).toBe(reads.length);
+    expect(closes).toEqual(reads);
+    const original = f.host.querySelector('.message.user')!;
+    expect(original.textContent).toContain(imageOnly ? 'original.png' : '被拒绝的原始消息');
+    expect(original.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(original.compareDocumentPosition(f.host.querySelector('.turn-failure')!) & 4).toBe(4);
+    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
+    expect(f.host.querySelector('.turn-failure')?.textContent).toContain('原消息已保留');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved A');
+    expect(f.host.body.textContent).not.toContain('model_authentication_required');
+    await f.click('Other B');
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+    await f.click('Original A');
+    await f.until(() => !!f.host.querySelector('.turn-failure[aria-label="无认证"]'));
+    expect(f.host.querySelectorAll('.turn-failure[aria-label="无认证"]')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'caller.lookup')).toHaveLength(1);
+    expect(
+      f.calls.some((call) =>
+        ['conversation.send', 'submit', 'createSession', 'caller.submit'].includes(call.method),
+      ),
+    ).toBe(false);
+  } finally {
+    delayedRead.resolve();
+    await f.close();
+  }
+});
+
 test.each([
   true,
   false,
 ])('cold accepted caller records converge to a pre-Run rejection without replaying it (persisted input: %s)', async (persistedInput) => {
   const commandId = 'cold-accepted-original';
+  const body = rejectedBody(commandId, '你好');
   const f = fixture(false, true, 'accept_edits', {
     messages: persistedInput
       ? [
@@ -5417,16 +5622,18 @@ test.each([
     request: { kind: 'run.start', commandId, expectedStoreId: 'store' },
     target: { kind: 'session', id: 'a' },
     phase: 'accepted',
-    bodyDigest: 'a'.repeat(64),
+    bodyDigest: body.bodyDigest,
     requestDigest: 'b'.repeat(64),
   };
   const bridge = f.dom.window.kiteNative! as NativeBridge,
     originalRequest = bridge.request.bind(bridge);
   bridge.request = async (input) => {
+    if (input.method === 'caller.body') return body.read(input);
     if (input.method === 'caller.lookup') {
       f.calls.push(input);
       expect(input.commandId).toBe(commandId);
       record.phase = 'rejected';
+      record.rejectionReason = null;
       return { ...record };
     }
     const value = await originalRequest(input);
@@ -5438,7 +5645,8 @@ test.each([
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
     await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
-    expect(f.host.querySelectorAll('.message.user')).toHaveLength(persistedInput ? 1 : 0);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')?.textContent).toContain('你好');
     expect(f.host.body.textContent).not.toContain('从一个想法开始');
     const failure = f.host.querySelector('.turn-failure[role="alert"]');
     expect(failure?.getAttribute('aria-label')).toBe('本轮未能启动');
@@ -5454,6 +5662,7 @@ test.each([
     expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await f.click('Original A');
+    await f.until(() => !!f.host.querySelector('.turn-failure[role="alert"]'));
     expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
   } finally {
@@ -5461,8 +5670,9 @@ test.each([
   }
 });
 
-test('cold pre-Run rejection stays after prior successful history and before a later explicit input', async () => {
+test('cold pre-Run rejection stays with its original prompt until a later accepted input supersedes it', async () => {
   const commandId = 'cold-rejected-with-prior-history';
+  const body = rejectedBody(commandId, 'rejected credential request');
   const priorRun = {
     id: 'prior-successful-run',
     configuration: chatRunConfiguration(),
@@ -5507,17 +5717,23 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     request: { kind: 'run.start', commandId, expectedStoreId: 'store' },
     target: { kind: 'session', id: 'a' },
     phase: 'accepted',
-    bodyDigest: 'a'.repeat(64),
+    bodyDigest: body.bodyDigest,
     requestDigest: 'b'.repeat(64),
   };
   const bridge = f.dom.window.kiteNative! as NativeBridge,
     originalRequest = bridge.request.bind(bridge);
   let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+  let laterReceipt: NativeCallerMetadata | undefined;
   bridge.request = async (input) => {
+    if (input.method === 'caller.body') {
+      f.calls.push(input);
+      return body.read(input);
+    }
     if (input.method === 'caller.lookup') {
       f.calls.push(input);
       expect(input.commandId).toBe(commandId);
       record.phase = 'rejected';
+      record.rejectionReason = null;
       return { ...record };
     }
     if (input.method === 'submit') {
@@ -5530,8 +5746,14 @@ test('cold pre-Run rejection stays after prior successful history and before a l
       ? {
           ...value,
           callerSubmissions: [
+            {
+              ...record,
+              request: { ...record.request, commandId: 'earlier-accepted' },
+              phase: 'applied',
+            },
             { ...record },
             { ...record, scope: { ...record.scope, storeId: 'another-store' } },
+            ...(laterReceipt ? [laterReceipt] : []),
           ],
         }
       : value;
@@ -5548,7 +5770,7 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     await f.releaseHistory();
     await f.until(() => !!failure());
     expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
     expect(f.host.querySelector('.message.user')?.textContent).toContain(
       'prior successful request',
     );
@@ -5556,7 +5778,10 @@ test('cold pre-Run rejection stays after prior successful history and before a l
       message.textContent?.includes('prior successful reply'),
     );
     expect(priorReply).toBeDefined();
-    expectBefore(priorReply!, failure()!);
+    const originalRejectedPrompt = [...f.host.querySelectorAll('.message.user')].at(-1)!;
+    expect(originalRejectedPrompt.textContent).toContain('rejected credential request');
+    expectBefore(priorReply!, originalRejectedPrompt);
+    expectBefore(originalRejectedPrompt, failure()!);
     expect(f.host.body.textContent).not.toContain('从一个想法开始');
     expect(
       f.calls.some((input) =>
@@ -5567,18 +5792,24 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     expect(failure()).toBeNull();
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
     await f.click('Original A');
+    await f.until(() => !!failure());
     expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    const originalFailure = failure();
     await f.edit('later explicitly submitted request', '当前会话私有草稿');
     await f.click('发送明确的新轮次');
     expect(submitted?.intent.kind).toBe('run.start');
     expect(submitted?.intent.commandId).not.toBe(commandId);
-    expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
+    await f.until(() => !failure());
+    expect(f.host.body.textContent).not.toContain('rejected credential request');
     const laterRun = {
       ...priorRun,
       id: 'later-successful-run',
       originCommandId: submitted!.intent.commandId,
     } as Run;
+    laterReceipt = {
+      ...record,
+      request: { ...record.request, commandId: submitted!.intent.commandId },
+      phase: 'applied',
+    };
     await f.publishMessages(
       [
         ...priorMessages,
@@ -5603,14 +5834,16 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     const laterInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
     expect(laterInput.textContent).toContain('later explicitly submitted request');
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    expect(failure()).toBe(originalFailure);
-    expectBefore(failure()!, laterInput);
-    await f.click('Other B');
     expect(failure()).toBeNull();
+    const readsBeforeReopen = f.calls.filter((input) => input.method === 'caller.body').length;
+    await act(async () => f.root.render(<NativeDesktop key="cold-after-later-accepted" />));
     await f.click('Original A');
-    expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
-    expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
+    await f.until(() => f.host.body.textContent!.includes('later successful reply'));
+    expect(failure()).toBeNull();
+    expect(f.host.body.textContent).not.toContain('rejected credential request');
+    expect(f.calls.filter((input) => input.method === 'caller.body')).toHaveLength(
+      readsBeforeReopen,
+    );
     expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'submit')).toHaveLength(1);
     expect(

@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, test } from '#kite-test';
 import { testToolchainEnvironment } from '../../../scripts/test-environment';
 import { runTestPlan } from '../../../scripts/test-plan';
 import { runTestJob, runTestJobs } from '../../../scripts/test-suite';
+import { spawn } from '../../../scripts/tooling/process';
+import { testNodeCommand, testRuntimeFlags } from '../../../scripts/tooling/test-command';
 
 const roots: string[] = [];
 
@@ -41,7 +43,7 @@ describe('layered test runner', () => {
       await runTestJob(root, {
         label: 'owned-disposal',
         files: [],
-        command: [process.execPath, '--eval', program],
+        command: [process.execPath, ...testRuntimeFlags, '--input-type=module', '--eval', program],
       }),
     ).toBe(0);
     expect(readFileSync(join(outside, 'original.txt'), 'utf8')).toBe('keep original');
@@ -51,7 +53,10 @@ describe('layered test runner', () => {
     const root = fixture();
     const output = join(root, 'temporary.json');
     const scopeModule = pathToFileURL(
-      resolve(import.meta.dir, '../../../packages/agent/src/platform/windows-artifact-scope.ts'),
+      resolve(
+        import.meta.dirname,
+        '../../../packages/agent/src/platform/windows-artifact-scope.ts',
+      ),
     ).href;
     const program = `
       import assert from 'node:assert/strict';
@@ -75,7 +80,7 @@ describe('layered test runner', () => {
       await runTestJob(root, {
         label: 'private-temp',
         files: [],
-        command: [process.execPath, '--eval', program],
+        command: [process.execPath, ...testRuntimeFlags, '--input-type=module', '--eval', program],
       }),
     ).toBe(0);
     const result = JSON.parse(readFileSync(output, 'utf8'));
@@ -86,7 +91,7 @@ describe('layered test runner', () => {
     const entry = join(root, 'entry.ts');
     const output = join(root, 'runtime.json');
     const module = pathToFileURL(
-      resolve(import.meta.dir, '../../../scripts/test-environment.ts'),
+      resolve(import.meta.dirname, '../../../scripts/test-environment.ts'),
     ).href;
     writeFileSync(
       entry,
@@ -104,7 +109,7 @@ process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slic
     );
     const args = ['path with spaces', '中文参数', '--literal=value'];
     const toolchain = testToolchainEnvironment();
-    const child = Bun.spawn([process.execPath, entry, output, ...args], {
+    const child = spawn(testNodeCommand(entry, [output, ...args]), {
       env: { ...process.env, ...toolchain },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -138,7 +143,7 @@ process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slic
     const second = join(root, 'tests', 'second.test.ts');
     writeFileSync(
       first,
-      "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
+      "import { expect, test } from '#kite-test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
         "test('home', () => { writeFileSync(" +
         JSON.stringify(firstOutput) +
         ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code'));" +
@@ -151,7 +156,7 @@ process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slic
     );
     writeFileSync(
       second,
-      "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
+      "import { expect, test } from '#kite-test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
         "test('home', () => { writeFileSync(" +
         JSON.stringify(secondOutput) +
         ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code'));" +
@@ -184,7 +189,7 @@ process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slic
     const failure = join(root, 'tests', 'failure.test.ts');
     writeFileSync(
       failure,
-      "import { expect, test } from 'bun:test'; test('failure', () => expect(false).toBe(true));",
+      "import { expect, test } from '#kite-test'; test('failure', () => expect(false).toBe(true));",
     );
     expect(await runTestJob(root, { label: 'expected-failure', files: [failure] })).not.toBe(0);
   });
@@ -197,17 +202,17 @@ process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slic
     const neverScheduled = join(root, 'tests', 'never-scheduled.test.ts');
     writeFileSync(
       failure,
-      "import { expect, test } from 'bun:test'; test('failure', async () => { await Bun.sleep(250); expect(false).toBe(true); });",
+      "import { expect, test } from '#kite-test'; test('failure', async () => { await new Promise(resolve => setTimeout(resolve, 250)); expect(false).toBe(true); });",
     );
     writeFileSync(
       slow,
-      "import { test } from 'bun:test'; import { writeFileSync } from 'node:fs'; test('slow', async () => { await Bun.sleep(30000); writeFileSync(" +
+      "import { test } from '#kite-test'; import { writeFileSync } from 'node:fs'; test('slow', async () => { await new Promise(resolve => setTimeout(resolve, 30000)); writeFileSync(" +
         JSON.stringify(completed) +
         ", 'slow'); });",
     );
     writeFileSync(
       neverScheduled,
-      "import { test } from 'bun:test'; import { writeFileSync } from 'node:fs'; test('never', () => writeFileSync(" +
+      "import { test } from '#kite-test'; import { writeFileSync } from 'node:fs'; test('never', () => writeFileSync(" +
         JSON.stringify(completed) +
         ", 'never'));",
     );
@@ -235,10 +240,10 @@ process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slic
       const ended = join(root, `ended-${index}.txt`);
       writeFileSync(
         file,
-        `import { test } from 'bun:test'; import { writeFileSync } from 'node:fs';
+        `import { test } from '#kite-test'; import { writeFileSync } from 'node:fs';
 test('bounded', async () => {
   writeFileSync(${JSON.stringify(started)}, String(Date.now()));
-  await Bun.sleep(400);
+  await new Promise(resolve => setTimeout(resolve, 400));
   writeFileSync(${JSON.stringify(ended)}, String(Date.now()));
 });`,
       );
@@ -268,16 +273,16 @@ test('bounded', async () => {
     const queued = join(root, 'tests', 'queued.test.ts');
     writeFileSync(
       failure,
-      "import { expect, test } from 'bun:test'; test('failure', async () => { await Bun.sleep(150); expect(false).toBe(true); });",
+      "import { expect, test } from '#kite-test'; test('failure', async () => { await new Promise(resolve => setTimeout(resolve, 150)); expect(false).toBe(true); });",
     );
     writeFileSync(
       cleanup,
-      `import { test } from 'bun:test'; import { writeFileSync } from 'node:fs';
-test('cleanup', async () => { await Bun.sleep(450); writeFileSync(${JSON.stringify(completed)}, process.env.HOME!); });`,
+      `import { test } from '#kite-test'; import { writeFileSync } from 'node:fs';
+test('cleanup', async () => { await new Promise(resolve => setTimeout(resolve, 450)); writeFileSync(${JSON.stringify(completed)}, process.env.HOME!); });`,
     );
     writeFileSync(
       queued,
-      `import { test } from 'bun:test'; import { writeFileSync } from 'node:fs';
+      `import { test } from '#kite-test'; import { writeFileSync } from 'node:fs';
 test('queued', () => writeFileSync(${JSON.stringify(neverStarted)}, 'started'));`,
     );
     expect(
@@ -303,17 +308,17 @@ test('queued', () => writeFileSync(${JSON.stringify(neverStarted)}, 'started'));
     const completed = join(root, 'completed.jsonl');
     writeFileSync(
       priority,
-      `import { test } from 'bun:test'; import { writeFileSync, appendFileSync } from 'node:fs';
+      `import { test } from '#kite-test'; import { writeFileSync, appendFileSync } from 'node:fs';
 test('priority', () => { writeFileSync(${JSON.stringify(ready)}, 'ready'); appendFileSync(${JSON.stringify(completed)}, 'priority\\n'); });`,
     );
     const larger = ['first', 'second'].map((name) => {
       const file = join(root, 'tests', `${name}.test.ts`);
       writeFileSync(
         file,
-        `import { test, expect } from 'bun:test'; import { existsSync, appendFileSync } from 'node:fs';
+        `import { test, expect } from '#kite-test'; import { existsSync, appendFileSync } from 'node:fs';
 test('shared', async () => {
   const deadline = performance.now() + 1000;
-  while (!existsSync(${JSON.stringify(ready)}) && performance.now() < deadline) await Bun.sleep(5);
+  while (!existsSync(${JSON.stringify(ready)}) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
   expect(existsSync(${JSON.stringify(ready)})).toBe(true);
   appendFileSync(${JSON.stringify(completed)}, ${JSON.stringify(`${name}\n`)});
 });\n// ${'larger source '.repeat(200)}`,
@@ -346,16 +351,16 @@ test('shared', async () => {
     const exclusive = join(root, 'tests', 'exclusive.test.ts');
     writeFileSync(
       concurrent,
-      `import { test } from 'bun:test'; import { writeFileSync, rmSync } from 'node:fs';
+      `import { test } from '#kite-test'; import { writeFileSync, rmSync } from 'node:fs';
 test('concurrent', async () => {
   writeFileSync(${JSON.stringify(marker)}, 'active');
-  await Bun.sleep(400);
+  await new Promise(resolve => setTimeout(resolve, 400));
   rmSync(${JSON.stringify(marker)});
 });`,
     );
     writeFileSync(
       exclusive,
-      `import { expect, test } from 'bun:test'; import { existsSync } from 'node:fs';
+      `import { expect, test } from '#kite-test'; import { existsSync } from 'node:fs';
 test('exclusive', () => expect(existsSync(${JSON.stringify(marker)})).toBe(false));`,
     );
     expect(
@@ -374,18 +379,18 @@ test('exclusive', () => expect(existsSync(${JSON.stringify(marker)})).toBe(false
 });
 
 test('default and unified list argv enumerate identical files without invoking suites', async () => {
-  const repository = join(import.meta.dir, '../../..');
+  const repository = join(import.meta.dirname, '../../..');
   const lists: string[] = [];
   for (const runner of ['run-default-tests', 'run-unified-tests']) {
-    const child = Bun.spawn(
-      [process.execPath, join(repository, `scripts/${runner}.ts`), '--list'],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
+    const child = spawn(testNodeCommand(join(repository, `scripts/${runner}.ts`), ['--list']), {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const text = await new Response(child.stdout).text();
     expect(await child.exited).toBe(0);
     lists.push(text);
-    const bad = Bun.spawn(
-      [process.execPath, join(repository, `scripts/${runner}.ts`), '--list', 'extra'],
+    const bad = spawn(
+      testNodeCommand(join(repository, `scripts/${runner}.ts`), ['--list', 'extra']),
       { stdout: 'pipe', stderr: 'pipe' },
     );
     expect(await bad.exited).toBe(2);
@@ -394,7 +399,7 @@ test('default and unified list argv enumerate identical files without invoking s
   expect(lists[0]).toBe(lists[1]);
 });
 
-test('workspace runner dispatches only the eight current packages in order and stops at failure', async () => {
+test('workspace runner dispatches only the current runtime packages in order and stops at failure', async () => {
   const { runWorkspaceScript } = await import('../../../scripts/run-runtime-workspace-script');
   const { UNIFIED_RUNTIME_WORKSPACES } = await import('../../../scripts/unified-test-plan');
   const root = fixture();
@@ -404,12 +409,18 @@ test('workspace runner dispatches only the eight current packages in order and s
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, 'run.ts'),
-      `import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(ledger)}, ${JSON.stringify(`${workspace}\n`)}); process.exit(process.env.KITE_FIXTURE_FAIL === '${index}' ? 7 : 0);`,
+      `import assert from 'node:assert/strict';
+import { appendFileSync } from 'node:fs';
+assert.equal(process.versions.bun, undefined);
+assert.equal(process.version, ${JSON.stringify(process.version)});
+appendFileSync(${JSON.stringify(ledger)}, ${JSON.stringify(`${workspace}\n`)});
+process.exit(process.env.KITE_FIXTURE_FAIL === '${index}' ? 7 : 0);`,
     );
     writeFileSync(
       join(dir, 'package.json'),
-      JSON.stringify({ scripts: { build: 'bun run run.ts' } }),
+      JSON.stringify({ type: 'module', scripts: { build: 'node run.ts' } }),
     );
+    writeFileSync(join(dir, '.env'), `KITE_FIXTURE_FAIL=${index}\n`);
   }
   expect(await runWorkspaceScript(root, ['build', 'extra'])).toBe(2);
   expect(existsSync(ledger)).toBe(false);

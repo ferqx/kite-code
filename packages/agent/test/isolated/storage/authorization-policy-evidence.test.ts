@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import { fixtureGrant as basicFixtureGrant } from '../../../../../tests/fixtures/permission-grant';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { authorizationCheckInput } from '../../../src/authorization-check-input';
@@ -9,6 +9,7 @@ import { InteractionGate } from '../../../src/execution/interactions';
 import type { PermissionDecision } from '../../../src/extensions';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { approvalOptions } from '../../../src/permission-grants';
+import { Database } from '../../../src/runtime-sqlite';
 import { shellRiskInstructions } from '../../../src/shell-risk-review';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { AutoAuthorizationEvidence } from '../../../src/storage/port';
@@ -935,7 +936,7 @@ test('an actual human denial reaches compact task evidence without consuming an 
       ).interactions[0];
       if (card) break;
       if (Date.now() >= deadline) throw new Error('human_card_not_created');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     } while (!card);
     await f.store.answerInteraction({
       expectedStoreId: f.owned.expectedStoreId,

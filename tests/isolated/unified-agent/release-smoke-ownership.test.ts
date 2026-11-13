@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 import { releaseScratch } from '../../fixtures/unified-agent/release-filesystem';
 
 test.each([
@@ -15,15 +16,19 @@ test.each([
   const source = (name: string) => fileURLToPath(new URL(`../../../${name}`, import.meta.url));
   try {
     const code = `
-import {mock} from 'bun:test';import assert from 'node:assert/strict';
+import {mock} from '#kite-test';import assert from 'node:assert/strict';
 import {mkdirSync,existsSync} from 'node:fs';import {join,dirname} from 'node:path';
 const root=${JSON.stringify(root)},scenario=${JSON.stringify(scenario)},bundle=join(root,'candidate');mkdirSync(bundle);
 let releases=0,home,stopped=false;const lease={release(){assert(children.every(child=>child.exitCode!==null));releases++;}};
-mock.module('@kite-ai/agent/artifact-access',()=>({acquireArtifactAccess:()=>lease}));
+const actualArtifactAccess=await import('@kite-ai/agent/artifact-access');
+mock.module('@kite-ai/agent/artifact-access',()=>({...actualArtifactAccess,acquireArtifactAccess:()=>lease}));
 mock.module(${JSON.stringify(source('apps/cli/host/terminal-artifact.ts'))},()=>({verifyTerminalBundle:()=>({root:bundle,manifest:{entries:{runtime:'runtime/bun.exe',cli:'entrypoints/cli.js'}},candidateId:'a'.repeat(64),digest:'a'.repeat(64),buildId:'terminal-'+'a'.repeat(64)})}));
-const original=Bun.spawn,children=[];
-const server=scenario==='success'?Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response('<main id="root"></main>')}):undefined;
-Bun.spawn=(argv,options)=>{
+const processTool=${JSON.stringify(source('scripts/tooling/process.ts'))};
+const {spawn:original}=await import(processTool);
+const {serve}=await import(${JSON.stringify(source('scripts/tooling/http.ts'))});
+const children=[];
+const server=scenario==='success'?await serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response('<main id="root"></main>')}):undefined;
+const spawn=(argv,options)=>{
  home=options.env.HOME;
  let body;
  if(argv.includes('--help'))body='console.log("kite run --workspace");';
@@ -34,6 +39,7 @@ Bun.spawn=(argv,options)=>{
  }else body=argv.includes('start')?'console.error("PRIMARY_STARTUP_FAILURE");process.exitCode=1;':scenario==='failed'?'console.error("CLEANUP_STOP_FAILURE");process.exitCode=1;':'console.log(JSON.stringify({state:"absent"}));';
  const child=original([process.execPath,'--eval',body],options);children.push(child);return child;
 };
+mock.module(processTool,()=>({spawn}));
 try {
  const {smokeTerminalBundle}=await import(${JSON.stringify(source('scripts/release/release-smoke.ts'))});
  const error=await smokeTerminalBundle(bundle).catch(e=>e);
@@ -48,13 +54,17 @@ try {
  if(scenario!=='success'){assert.equal(releases,0);assert(existsSync(dirname(home)));assert.equal(children.length,4);}
  assert(children.every(child=>child.exitCode!==null));
  console.log('SMOKE_ORIGINAL_OWNERS_RETAINED');
-}finally{Bun.spawn=original;await server?.stop(true);for(const child of children)if(child.exitCode===null){child.kill();await child.exited;}}
+}finally{await server?.stop(true);for(const child of children)if(child.exitCode===null){child.kill();await child.exited;}}
 `;
-    const child = spawnSync(process.execPath, ['--eval', code], {
-      encoding: 'utf8',
-      timeout: 5000,
-      env: { ...process.env, TMP: root, TEMP: root, TMPDIR: root },
-    });
+    const child = spawnSync(
+      process.execPath,
+      [...testRuntimeFlags, '--input-type=module', '--eval', code],
+      {
+        encoding: 'utf8',
+        timeout: 5000,
+        env: { ...process.env, TMP: root, TEMP: root, TMPDIR: root },
+      },
+    );
     if (child.status !== 0) throw new Error(child.stderr, { cause: child.error });
     expect(child.stdout.trim()).toBe('SMOKE_ORIGINAL_OWNERS_RETAINED');
   } finally {

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -15,6 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ArtifactRef, Json } from '@kite-ai/agent/extensions';
 import type {
@@ -26,6 +26,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startDevelopmentWeb } from '../../src/development-web';
 import {
@@ -51,7 +52,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('default_file_checkpoint_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function stamp(path: string) {
@@ -75,7 +76,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
   writeFileSync(join(workspace, 'AGENTS.md'), agents);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
-  const { provider, requests, steps, model } = createFileCheckpointProvider();
+  const { provider, requests, steps, model } = await createFileCheckpointProvider();
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   writeFileSync(
     userConfiguration.path,
@@ -91,7 +92,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
   const launch = (id: string) =>
     launchPairedService({
       spawnChild: userConfiguration.spawnChild,
-      entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      entrypoint: join(import.meta.dirname, '../../src/main.ts'),
       profile,
       instanceId: id,
       buildId: 'default-checkpoint-main',
@@ -104,7 +105,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       ],
     });
   let child: Awaited<ReturnType<typeof launch>> | undefined, reader: Store | undefined;
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   try {
     child = await launch('live');
     const client = child.client,
@@ -373,22 +374,19 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       { expectedReference: { size: preimage.size, mediaType: preimage.mediaType } },
     );
     expect(Buffer.from(body.content)).toEqual(original);
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const pageResponse = await fetch(gateway.endpoint);
     const cookie = pageResponse.headers.get('set-cookie')!.split(';')[0]!;
     await pageResponse.body?.cancel();
     const browser = createBrowserClient({
       origin: gateway.endpoint,
       pageIdentity: gateway.pageIdentity,
-      fetch: Object.assign(
-        (url: URL | RequestInfo, init?: RequestInit) => {
-          const headers = new Headers(init?.headers);
-          expect(headers.has('authorization')).toBe(false);
-          headers.set('cookie', cookie);
-          return fetch(url, { ...init, headers });
-        },
-        { preconnect: fetch.preconnect },
-      ),
+      fetch: Object.assign((url: URL | RequestInfo, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        expect(headers.has('authorization')).toBe(false);
+        headers.set('cookie', cookie);
+        return fetch(url, { ...init, headers });
+      }, {}),
     });
     expect((await browser.connect()).capabilities).toContain('file_checkpoints');
     await client.createSession({
@@ -675,21 +673,18 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       { expectedReference: { size: preimage.size, mediaType: preimage.mediaType } },
     );
     expect(Buffer.from(coldBody.content)).toEqual(original);
-    gateway = startDevelopmentWeb({ admittedClient: child.client });
+    gateway = await startDevelopmentWeb({ admittedClient: child.client });
     const coldPage = await fetch(gateway.endpoint),
       coldCookie = coldPage.headers.get('set-cookie')!.split(';')[0]!;
     await coldPage.body?.cancel();
     const coldBrowser = createBrowserClient({
       origin: gateway.endpoint,
       pageIdentity: gateway.pageIdentity,
-      fetch: Object.assign(
-        (url: URL | RequestInfo, init?: RequestInit) => {
-          const headers = new Headers(init?.headers);
-          headers.set('cookie', coldCookie);
-          return fetch(url, { ...init, headers });
-        },
-        { preconnect: fetch.preconnect },
-      ),
+      fetch: Object.assign((url: URL | RequestInfo, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        headers.set('cookie', coldCookie);
+        return fetch(url, { ...init, headers });
+      }, {}),
     });
     await coldBrowser.connect();
     expect(
@@ -786,7 +781,7 @@ test('Cookie capability refuses future or incomplete Files Query registrations b
     instanceId: 'future',
     buildId: 'fixture',
   });
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   try {
     const client = createClient({
       endpoint: service.endpoint,
@@ -801,7 +796,7 @@ test('Cookie capability refuses future or incomplete Files Query registrations b
       },
     });
     await client.connect();
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const page = await fetch(gateway.endpoint),
       cookie = page.headers.get('set-cookie')!.split(';')[0]!;
     await page.body?.cancel();

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   mkdirSync,
@@ -15,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentClient, Execution, Json, Message } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, test } from '#kite-test';
 import { directoryLink } from '../../../tests/fixtures/test-filesystem';
 import { editorFileTarget } from '../electron/editor';
 import { NativeFileChanges } from '../electron/file-changes';

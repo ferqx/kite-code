@@ -209,26 +209,23 @@ async function launch() {
     const global = globalThis as FixtureGlobals;
     global.shellPhysical = [];
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0])),
-          row: Physical = {
-            method: args[1]?.method ?? 'GET',
-            path: url.pathname,
-            ...(typeof args[1]?.body === 'string' ? { body: args[1].body } : {}),
-          };
-        global.shellPhysical.push(row);
-        const response = await original(...args);
-        if (response.ok && url.pathname.endsWith('/output')) {
-          const text = await response.clone().text(),
-            value = JSON.parse(text);
-          row.bytes = Buffer.byteLength(text);
-          row.highWaterSeq = value.highWaterSeq;
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0])),
+        row: Physical = {
+          method: args[1]?.method ?? 'GET',
+          path: url.pathname,
+          ...(typeof args[1]?.body === 'string' ? { body: args[1].body } : {}),
+        };
+      global.shellPhysical.push(row);
+      const response = await original(...args);
+      if (response.ok && url.pathname.endsWith('/output')) {
+        const text = await response.clone().text(),
+          value = JSON.parse(text);
+        row.bytes = Buffer.byteLength(text);
+        row.highWaterSeq = value.highWaterSeq;
+      }
+      return response;
+    }, {});
   });
   await page.getByRole('button', { name: 'Default Host Shell', exact: true }).click();
   await page

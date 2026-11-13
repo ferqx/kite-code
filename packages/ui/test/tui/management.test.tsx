@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Command, SelectedContextPage, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   parseTuiCommand,
   TuiController,

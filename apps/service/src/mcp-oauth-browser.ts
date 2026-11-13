@@ -1,3 +1,4 @@
+import { spawn as spawnNode } from 'node:child_process';
 import {
   observeOwnedProcessIdentity,
   ownedProcessKernelState,
@@ -11,16 +12,40 @@ import { McpOAuthSessionError } from './mcp-oauth-session';
 /** Explicit Login only. The authorization URL is an argv element, never shell text or output. */
 export type McpOAuthLauncherObserver = (evidence: McpOAuthLauncherObservation) => void;
 /** Trusted host seam only. Raw source configuration cannot select an executable or spawner. */
-export type McpOAuthLauncherChild = Pick<
-  ReturnType<typeof Bun.spawn>,
-  'pid' | 'exited' | 'exitCode' | 'signalCode' | 'kill'
->;
+export interface McpOAuthLauncherChild {
+  readonly pid: number;
+  readonly exited: Promise<number>;
+  readonly exitCode: number | null;
+  readonly signalCode: string | number | null;
+  kill(signal: 'SIGTERM' | 'SIGKILL'): void;
+}
 export type McpOAuthLauncherSpawner = (
   argv: string[],
   options: { stdin: 'ignore'; stdout: 'ignore'; stderr: 'ignore' },
 ) => McpOAuthLauncherChild;
 export function createMcpOAuthBrowser(
-  spawn: McpOAuthLauncherSpawner = (argv, options) => Bun.spawn(argv, options),
+  spawn: McpOAuthLauncherSpawner = (argv) => {
+    const child = spawnNode(argv[0]!, argv.slice(1), { stdio: 'ignore', windowsHide: true });
+    const exited = new Promise<number>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code) => resolve(code ?? 1));
+    });
+    void exited.catch(() => {});
+    if (child.pid === undefined) throw Error('mcp_oauth_launcher_spawn_failed');
+    return {
+      pid: child.pid,
+      exited,
+      get exitCode() {
+        return child.exitCode;
+      },
+      get signalCode() {
+        return child.signalCode;
+      },
+      kill(signal) {
+        child.kill(signal);
+      },
+    };
+  },
 ) {
   return async function openBrowser(
     url: URL,

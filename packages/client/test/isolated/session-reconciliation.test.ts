@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, type ReconcileSessionRequest } from '../../src';
 import { backgroundSession } from '../fixtures/background-directory';
 
@@ -14,7 +15,7 @@ const report = {
   snapshotCursor: '3',
 };
 
-function fixture() {
+async function fixture() {
   const requests: { method: string; path: string; body?: ReconcileSessionRequest }[] = [];
   let mode = 'held',
     active = true,
@@ -65,7 +66,7 @@ function fixture() {
           ]
         : [],
   });
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -141,7 +142,7 @@ function fixture() {
 }
 
 test('explicit state handoff freezes the observed root generation, uses a stable ID, rereads child and keeps ordinary GETs read-only', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.client.connect();
     await f.client.getView('child');
@@ -187,7 +188,7 @@ test('explicit state handoff freezes the observed root generation, uses a stable
 });
 
 test('reconciliation rejects wrong scope before POST and invalid receipts stay unknown at the original ID', async () => {
-  const f = fixture();
+  const f = await fixture();
   const input = { expectedStoreId: 'store', commandId: 'original', expectedOwnerGeneration: '7' };
   try {
     await f.client.connect();

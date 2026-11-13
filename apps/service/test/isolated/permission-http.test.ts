@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 

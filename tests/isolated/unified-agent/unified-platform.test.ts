@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import {
   parseUnifiedPlatformArgs,
@@ -12,6 +12,7 @@ import {
   parseUnifiedPlatformVerifyArgs,
   verifyUnifiedPlatformReport,
 } from '../../../scripts/release/unified-platform-verify';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 test('platform argv is closed and cannot enable Shell, providers or capability claims', () => {
   for (const args of [
@@ -48,10 +49,10 @@ test('malformed/future report and unsupported production declarations are reject
 test('actual invalid argv performs no profile, candidate or report I/O', async () => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'kite-platform-invalid-')));
   try {
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
         process.execPath,
-        resolve(import.meta.dir, '../../../scripts/release/unified-platform-probe.ts'),
+        resolve(import.meta.dirname, '../../../scripts/release/unified-platform-probe.ts'),
         `--candidate=${join(home, 'candidate')}`,
         `--output=${join(home, 'report.json')}`,
         '--effectful',

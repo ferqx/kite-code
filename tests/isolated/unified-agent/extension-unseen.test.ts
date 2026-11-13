@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
@@ -11,10 +10,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { hostBuildEnvironment } from '../../fixtures/build-tool-environment';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 const priorSha = '6d9ffc07b069d4314970727c0a74ef0b62ed0990e4298805119953c25efda8ef';
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 type Manifest = {
@@ -71,7 +75,7 @@ async function child(
   deadlineMs = 20000,
   env: NodeJS.ProcessEnv = {},
 ) {
-  const process = Bun.spawn(command, { cwd, env, stdout: 'pipe', stderr: 'pipe' });
+  const process = spawnFixtureProcess(command, { cwd, env, stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => process.kill('SIGKILL'), deadlineMs);
   try {
     const [code, stdout, stderr] = await Promise.all([
@@ -165,7 +169,7 @@ async function distribution() {
   expect(existsSync(join(modules, '@kite-ai/agent/storage/migrations/0001-baseline.sql'))).toBe(
     true,
   );
-  const node = Bun.which('node');
+  const node = findFixtureExecutable('node');
   if (!node) throw Error('qualified_node_unavailable');
   const nodeProbe = join(directory, 'node-probe.mjs');
   writeFileSync(

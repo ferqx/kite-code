@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -12,6 +12,7 @@ import { type AgentClient, createClient, type Message } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { TuiController, type TuiPort, TuiSession } from '@kite-ai/ui/tui';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -274,7 +275,7 @@ test('restored TUI background directory and complete output/child readers preser
           methods.push(init?.method ?? (url instanceof Request ? url.method : 'GET'));
           return originalFetch(url, init);
         },
-        { preconnect: originalFetch.preconnect },
+        {},
       );
       const admitted = createClient({
         endpoint: service.endpoint,
@@ -326,7 +327,7 @@ test('restored TUI background directory and complete output/child readers preser
       await controller.select('session');
       await controller.routeCommand('/background');
       app = render(<TuiSession testDiagnostics controller={controller} />);
-      await Bun.sleep(50);
+      await fixtureDelay(50);
       console.log('restored-tui-directory', {
         currentStore: controller.state.snapshot?.storeId,
         jobOrigins: controller.state.snapshot?.view.executions
@@ -389,15 +390,15 @@ test('restored TUI background directory and complete output/child readers preser
       const full = child!.child!.modelOutputs.get(savedChildModels[0]!.id)!;
       expect(full).toEqual({ ...savedOutput, storeId, snapshotCursor: full.snapshotCursor });
       expect(full.output.content).toBe(childContent);
-      await Bun.sleep(50);
+      await fixtureDelay(50);
       // The child reader preserves its original list/detail navigation. Select
       // the actual assistant Message, open it, then inspect its complete tail.
       app.stdin.write('\u001b[B');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       app.stdin.write('\r');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       app.stdin.write('\u001b[F');
-      await Bun.sleep(20);
+      await fixtureDelay(20);
       expect(app.lastFrame()).toContain('TUI_RESTORED_CHILD_COMPLETE_TAIL');
       expect(app.lastFrame()).toContain(childReasoning);
       const beforeStop = methods.length;

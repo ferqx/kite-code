@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import { MessageContent } from '../src/desktop/MessageContent';
 import { parseDesktopMarkdown } from '../src/desktop/markdown-parser';
 import { SafeMessageMarkdown } from '../src/markdown';

@@ -2,7 +2,7 @@ import { relative, resolve, sep } from 'node:path';
 import { planSuiteTests, runTestPlan } from './test-plan';
 import { testParallelism } from './test-suite';
 
-const repositoryRoot = resolve(import.meta.dir, '..');
+const repositoryRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(process.cwd(), process.argv[2] ?? '.');
 const workspaceLabel = relative(repositoryRoot, workspaceRoot).split(sep).join('/');
 const concurrency = testParallelism();

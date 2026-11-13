@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -6,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
@@ -25,6 +26,13 @@ import {
 } from '../../../../apps/service/src/configuration';
 import { ordinaryHostConfigurationDefaults } from '../../../../apps/service/src/configuration-defaults';
 import { buildTerminalBundle } from '../../../../scripts/release/terminal-bundle';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { liveCodeEvidence } from './live-code-evidence';
 
 type Row = Record<string, string | number | null>;
@@ -90,8 +98,8 @@ export async function runLiveNativeWindow(options: {
   let canonicalUsage: Record<string, number | null>[] | null = null;
   const deadline = AbortSignal.timeout(600000);
   const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
-  let proxy: ReturnType<typeof Bun.serve> | undefined;
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let proxy: Awaited<ReturnType<typeof serveFixture>> | undefined;
+  let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
   let seedStore: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let stage = 'configuration',
     failure = false,
@@ -416,7 +424,7 @@ export async function runLiveNativeWindow(options: {
       }
     }
     stage = 'proxy_bind';
-    proxy = Bun.serve({
+    proxy = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 0,
@@ -514,7 +522,7 @@ export async function runLiveNativeWindow(options: {
     );
     stage = 'build';
     const require = createRequire(
-      resolve(import.meta.dir, '../../../../apps/desktop/package.json'),
+      resolve(import.meta.dirname, '../../../../apps/desktop/package.json'),
     );
     const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
     const built = await buildNativeCandidate({
@@ -576,10 +584,10 @@ export async function runLiveNativeWindow(options: {
     checks.workspaceAndEmptyRootSetupOnly = true;
     checks.setupNoModelRequests = wire.length === 0;
     stage = 'driver';
-    const driverBuild = await Bun.build({
+    const driverBuild = await buildFixture({
       entrypoints: [
         resolve(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../apps/desktop/test/live-collaboration-native-window.fixture.ts',
         ),
       ],
@@ -591,15 +599,15 @@ export async function runLiveNativeWindow(options: {
     });
     check(driverBuild.success, 'native_window_driver_build_failed');
     const receipt = join(root, 'window-receipt.json');
-    driver = Bun.spawn(
+    driver = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         join(root, 'driver.js'),
         candidate,
         home,
         `${proxy.url.href}${controlToken}`,
         receipt,
-        resolve(import.meta.dir, '../../../../apps/desktop/package.json'),
+        resolve(import.meta.dirname, '../../../../apps/desktop/package.json'),
       ],
       {
         cwd: home,
@@ -648,7 +656,7 @@ export async function runLiveNativeWindow(options: {
     } catch {
       cleanupSucceeded = false;
     }
-    proxy?.stop(true);
+    await proxy?.stop(true);
     for (const lease of leases.reverse()) {
       try {
         lease.release();
@@ -665,15 +673,19 @@ export async function runLiveNativeWindow(options: {
     } catch {
       cleanupSucceeded = false;
     }
-    // Closed, checkpointed Store only: inspect a private memory copy, never reopen a writer.
+    // Closed, checkpointed Store only: inspect a private readonly copy.
     if (existsSync(profile.databasePath) && !existsSync(`${profile.databasePath}-wal`)) {
-      let memory: Database | undefined;
+      const auditPath = join(root, 'canonical-usage.sqlite');
+      let audit: Database | undefined;
+      let auditCreated = false;
       try {
         const bytes = readFileSync(profile.databasePath);
         bytes[18] = 1;
         bytes[19] = 1;
-        memory = Database.deserialize(bytes);
-        canonicalUsage = memory
+        writeFileSync(auditPath, bytes, { flag: 'wx', mode: 0o600 });
+        auditCreated = true;
+        audit = new Database(auditPath, { readonly: true });
+        canonicalUsage = audit
           .query<{ result_json: string }, []>(
             "SELECT result_json FROM execution WHERE kind='model' ORDER BY rowid",
           )
@@ -698,7 +710,12 @@ export async function runLiveNativeWindow(options: {
       } catch {
         canonicalUsage = null;
       } finally {
-        memory?.close();
+        try {
+          audit?.close();
+          if (auditCreated) unlinkSync(auditPath);
+        } catch {
+          cleanupSucceeded = false;
+        }
       }
     }
     checks.physicalProviderRequests = wire.length;

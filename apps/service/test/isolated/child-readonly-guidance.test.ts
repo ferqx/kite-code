@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type ContextSource, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -10,6 +10,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -189,7 +190,7 @@ async function scenario(recoverSource: boolean, legacyParent = false) {
           throw Error(
             `child_guidance_deadline:${role}:${JSON.stringify((await store.listExecutions(role)).map((row) => ({ definition: row.definitionId, status: row.status, result: row.result })))}`,
           );
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       const readonly = role === 'explore';
       expect(parents.get(role)!.requests).toHaveLength(2);

@@ -1,7 +1,13 @@
-import { expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  type Subprocess,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -12,7 +18,7 @@ for (const kind of ['run', 'interrupt', 'report'])
     async () => {
       const module = await import(
         resolve(
-          import.meta.dir,
+          import.meta.dirname,
           kind === 'report'
             ? '../../../cli/test/fixtures/recovery-report-profile.ts'
             : '../../../cli/test/fixtures/recovery-profile.ts',
@@ -21,15 +27,15 @@ for (const kind of ['run', 'interrupt', 'report'])
       const f = await (kind === 'report'
         ? module.recoveryReportProfile()
         : module.recoveryProfile());
-      let driver: ReturnType<typeof Bun.spawn> | undefined;
+      let driver: Subprocess | undefined;
       try {
         const outdir = join(f.root, 'native');
         await buildNativeDesktop(
           {
             serviceEntrypoint: f.artifact.entrypoint,
             serviceSha256: f.artifact.entrypointSha256,
-            bunExecutable: f.artifact.executable,
-            bunSha256: f.artifact.executableSha256,
+            runtimeExecutable: f.artifact.executable,
+            runtimeSha256: f.artifact.executableSha256,
             buildId: 'native-recovery',
             apiMajor: 1,
             requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
@@ -38,8 +44,8 @@ for (const kind of ['run', 'interrupt', 'report'])
           outdir,
           { testDiagnostics: true },
         );
-        const built = await Bun.build({
-          entrypoints: [resolve(import.meta.dir, '../native-recovery-electron.fixture.ts')],
+        const built = await buildFixture({
+          entrypoints: [resolve(import.meta.dirname, '../native-recovery-electron.fixture.ts')],
           target: 'node',
           format: 'esm',
           packages: 'external',
@@ -48,12 +54,12 @@ for (const kind of ['run', 'interrupt', 'report'])
         });
         if (!built.success) throw new AggregateError(built.logs, 'native_driver_build');
         directoryLink(
-          resolve(import.meta.dir, '../../../../node_modules'),
+          resolve(import.meta.dirname, '../../../../node_modules'),
           join(f.root, 'node_modules'),
         );
-        const processDriver = Bun.spawn(
+        const processDriver = spawnFixtureProcess(
           [
-            realpathSync(Bun.which('node')!),
+            realpathSync(findFixtureExecutable('node')!),
             join(f.root, 'driver.js'),
             outdir,
             f.root,
@@ -64,7 +70,7 @@ for (const kind of ['run', 'interrupt', 'report'])
             kind,
             f.ledger,
             f.workspace,
-            resolve(import.meta.dir, '../../package.json'),
+            resolve(import.meta.dirname, '../../package.json'),
           ],
           {
             stdout: 'pipe',

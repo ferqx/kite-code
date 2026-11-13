@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { ModelEvent } from '@kite-ai/ai';
 import { runServiceProcess } from '@kite-ai/service/main';
@@ -56,7 +57,7 @@ await runServiceProcess({
               while (!existsSync(join(profile.profilePath, 'release-child'))) {
                 signal.throwIfAborted();
                 if (Date.now() > deadline) throw new Error('fixture_gate_deadline');
-                await Bun.sleep(5);
+                await fixtureDelay(5);
               }
               appendFileSync(join(profile.profilePath, 'child-finished'), 'one\n');
               yield finish;

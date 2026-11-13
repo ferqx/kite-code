@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { persistentWorktreeDirectory } from '../../../../../../tests/fixtures/worktree-filesystem';
 import type {
   ExtensionRecord,
@@ -30,7 +30,7 @@ import {
 const config: GitWorktreeConfiguration = {
   configurationId: 'fixture',
   sourceCwd: '/repo',
-  bunPath: '/trusted/bun',
+  runtimePath: '/trusted/bun',
   workerPath: '/trusted/worker.js',
   configPath: '/trusted/empty.toml',
   git: { path: '/trusted/git', sha256: 'a'.repeat(64) },

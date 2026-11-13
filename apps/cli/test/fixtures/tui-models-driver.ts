@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { retainProcessObservation } from '@kite-ai/service/daemon';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 type Input = {
@@ -18,7 +20,7 @@ type Input = {
 const input = JSON.parse(process.argv[2]!) as Input;
 const bytes: Uint8Array[] = [];
 const pty = spawnTuiPTY({
-  cmd: [process.execPath, '--no-install', input.runner],
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
   cwd: process.cwd(),
   env: { TERM: 'xterm-256color', FORCE_COLOR: '3' },
   onData: (chunk) => bytes.push(chunk.slice()),
@@ -41,7 +43,7 @@ const wait = async (text: string) => {
     const frame = await pty.projection();
     if (frame.fresh && frame.text.replace(/\s+/g, ' ').includes(text)) return;
     if (pty.ended) throw Error(`models host ended before ${text}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
   const db = new Database(input.databasePath, { readonly: true });
   try {
@@ -80,7 +82,7 @@ const waitSelectedWorkspaceTrust = async () => {
         return;
     }
     if (pty.ended) throw Error('models host ended before selected workspace trust frame');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
   throw Error(
     `expected complete selected workspace trust frame tail=${pty.sinceAction().slice(-5000)}`,
@@ -88,7 +90,7 @@ const waitSelectedWorkspaceTrust = async () => {
 };
 const key = async (value: string) => {
   await pty.key(value);
-  await Bun.sleep(150);
+  await testSleep(150);
 };
 const send = async (text: string) => {
   await key(text);
@@ -166,7 +168,7 @@ try {
   while ((await requests()).length !== 1) {
     abort.signal.throwIfAborted();
     if (Date.now() > end) throw Error('held provider not entered');
-    await Bun.sleep(20);
+    await testSleep(20);
   }
   await wait('Steer original active Run >');
   await send('/model');
@@ -234,7 +236,7 @@ try {
   assert.equal(readFileSync(input.count, 'utf8'), 'post\npost\n');
   await key('\x11');
   const exitEnd = Date.now() + 6000;
-  while (!pty.ended && Date.now() < exitEnd) await Bun.sleep(50);
+  while (!pty.ended && Date.now() < exitEnd) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([pty.host.exited, pty.eof]),
     3000,

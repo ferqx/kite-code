@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentClient, Message, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createTuiHistoryReader } from '../host/tui-history';
 import { createTuiWorkspaceObserver } from '../host/tui-workspace-observer';
 

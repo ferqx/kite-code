@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type CredentialBackend,
   createCredentialVault,
@@ -15,6 +14,7 @@ import {
   startAuthorization,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { expect, test } from '#kite-test';
 
 const scope = { namespace: 'mcp.oauth' as const, ownerDigest: 'a'.repeat(64) };
 const metadata = {

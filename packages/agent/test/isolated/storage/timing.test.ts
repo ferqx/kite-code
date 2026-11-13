@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { type DbTiming, openSqliteStore } from '../../../src/sqlite';

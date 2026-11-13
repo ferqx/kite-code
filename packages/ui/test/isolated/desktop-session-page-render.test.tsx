@@ -1,6 +1,7 @@
-import { afterAll, expect, mock, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act, Children, type ComponentProps, isValidElement } from 'react';
+import { afterAll, expect, mock, test } from '#kite-test';
 import type { SessionPageProps } from '../../src/desktop/SessionPage';
 
 const dom = new JSDOM('<!doctype html><div id="root"></div>', {
@@ -477,7 +478,7 @@ test('only a fresh host reveal restores the exact visible page once, without ove
     expect(expanded()).toBe('false');
     await act(async () => {
       release();
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
     expect(expanded()).toBe('false');
     expect(detailCloses).toBe(0);
@@ -822,7 +823,7 @@ for (const closing of ['pending', 'completed', 'settled'] as const)
         expect(f.animating()).toBe('true');
       }
       if (closing === 'settled') {
-        await act(() => Bun.sleep(260));
+        await act(() => fixtureDelay(260));
         expect(f.animating()).toBeNull();
         expect(f.width()).toBe(0);
       }
@@ -1045,7 +1046,7 @@ function collapseNotificationFixture() {
   const flush = (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(30);
+      await fixtureDelay(30);
     });
   const layout = (collapsed: boolean) => ({
     content: collapsed ? 100 : 50,

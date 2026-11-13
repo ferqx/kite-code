@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { build as bundle } from '../../../../scripts/tooling/bun-build';
+import { spawnSync, which } from '../../../../scripts/tooling/process';
+import { runtimeBuildOptions } from '../../scripts/runtime-build-options';
 import { ripgrepAsset } from './ripgrep';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'platform/process');
 mkdirSync(destination, { recursive: true });
-const result = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, '../platform/process/shell-supervisor.ts')],
+const result = await bundle({
+  entrypoints: [resolve(import.meta.dirname, '../platform/process/shell-supervisor.ts')],
   outdir: destination,
-  target: 'bun',
+  ...runtimeBuildOptions(destination),
   naming: 'shell-supervisor.js',
 });
 if (!result.success) throw new Error('shell_supervisor_build_failed');
@@ -22,7 +25,7 @@ copyFileSync(
   join(searchDirectory, 'LICENSE.vscode-ripgrep'),
 );
 for (const name of ['LICENSE-MIT.txt', 'LICENSE-PCRE2.txt', 'LICENSE-SLJIT.txt'])
-  copyFileSync(resolve(import.meta.dir, 'ripgrep-licenses', name), join(searchDirectory, name));
+  copyFileSync(resolve(import.meta.dirname, 'ripgrep-licenses', name), join(searchDirectory, name));
 writeFileSync(
   join(searchDirectory, 'manifest.json'),
   `${JSON.stringify({ platform: process.platform, arch: process.arch, rg: { version: '15.0.0', package: '@vscode/ripgrep', packageVersion: '1.18.0', sha256: createHash('sha256').update(readFileSync(sourceRg)).digest('hex') } }, null, 2)}\n`,
@@ -30,9 +33,14 @@ writeFileSync(
 
 if (process.platform === 'win32') {
   if (process.arch !== 'x64') throw Error('windows_shell_arch_unsupported');
-  const root = resolve(import.meta.dir, '../../../..');
-  const compiled = Bun.spawnSync(
-    [process.execPath, 'run', resolve(root, 'scripts/release/build-windows-runner.ts')],
+  const root = resolve(import.meta.dirname, '../../../..');
+  const compiled = spawnSync(
+    [
+      process.execPath,
+      '--import',
+      resolve(root, 'scripts/tooling/register.mjs'),
+      resolve(root, 'scripts/release/build-windows-runner.ts'),
+    ],
     { cwd: root, stdout: 'inherit', stderr: 'inherit' },
   );
   if (compiled.exitCode !== 0) throw Error('windows_shell_runner_build_failed');
@@ -59,10 +67,10 @@ if (process.platform === 'win32') {
 // never a compiler or a source fallback on the user's machine.
 if (process.platform === 'linux') {
   if (!['x64', 'arm64'].includes(process.arch)) throw Error('linux_shell_arch_unsupported');
-  const compiler = Bun.which(process.env.CC ?? 'cc');
+  const compiler = which(process.env.CC ?? 'cc');
   if (!compiler) throw Error('linux_shell_compiler_unavailable');
   const output = resolve(destination, 'linux-shell-init');
-  const compiled = Bun.spawnSync(
+  const compiled = spawnSync(
     [
       compiler,
       '-std=c11',
@@ -75,7 +83,7 @@ if (process.platform === 'linux') {
       '-fPIE',
       '-pie',
       '-Wl,-z,relro,-z,now',
-      resolve(import.meta.dir, '../../native/linux-shell-init.c'),
+      resolve(import.meta.dirname, '../../native/linux-shell-init.c'),
       '-o',
       output,
     ],

@@ -1,9 +1,12 @@
-import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { JobDefinition, JobEvent, JobHandle } from '@kite-ai/agent/extensions';
+import { afterEach, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { createShellJob } from '../../../src/jobs/shell';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -12,10 +15,10 @@ afterEach(() => {
 async function fixture(maxQueuedBytes?: number) {
   const root = mkdtempSync(join(tmpdir(), 'kite-shell-job-'));
   roots.push(root);
-  const result = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
+  const result = await buildBundle({
+    entrypoints: [join(import.meta.dirname, '../../../src/platform/process/shell-supervisor.ts')],
     outdir: join(root, 'platform/process'),
-    target: 'bun',
+    ...fixtureRuntimeBuild(root, join(root, 'platform/process')),
     naming: 'shell-supervisor.js',
   });
   expect(result.success).toBe(true);
@@ -24,6 +27,7 @@ async function fixture(maxQueuedBytes?: number) {
     cwd: root,
     env: { PATH: '/usr/bin:/bin', FIXTURE_ENV: 'selected' },
     supervisorPath: path,
+    runtimeExecutable: fixtureNodeExecutable(),
     maxQueuedBytes,
   });
   const start = (command: string) =>
@@ -86,7 +90,7 @@ posixTest(
   'cancel confirms descendant group termination without killing unrelated process',
   async () => {
     const f = await fixture();
-    const unrelated = Bun.spawn(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+    const unrelated = spawnProcess(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
     const pidFile = join(f.root, 'descendant.pid');
     const handle = await f.start(`sleep 30 & echo $! > ${quote(pidFile)}; wait`);
     try {
@@ -140,10 +144,10 @@ posixTest(
   'built shell leaf resolves packaged guardian after artifact leaves source tree',
   async () => {
     const f = await fixture();
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../../src/jobs/shell.ts')],
+    const built = await buildBundle({
+      entrypoints: [join(import.meta.dirname, '../../../src/jobs/shell.ts')],
       outdir: join(f.root, 'jobs'),
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       naming: 'shell.js',
     });
@@ -153,7 +157,11 @@ posixTest(
       shellSupervisorAsset(): string;
     };
     expect(realpathSync(leaf.shellSupervisorAsset())).toBe(realpathSync(f.path));
-    const job = leaf.createShellJob({ cwd: f.root, env: { PATH: '/usr/bin:/bin' } });
+    const job = leaf.createShellJob({
+      cwd: f.root,
+      env: { PATH: '/usr/bin:/bin' },
+      runtimeExecutable: fixtureNodeExecutable(),
+    });
     const handle = await job.start(
       { command: 'printf packaged' },
       { sessionId: 's', executionId: 'built', signal: new AbortController().signal },
@@ -178,25 +186,28 @@ for (const exitMode of ['parent_eof', 'parent_sigkill'] as const)
       const entry = join(f.root, 'host.ts');
       writeFileSync(
         entry,
-        `import { createShellJob } from ${JSON.stringify(join(import.meta.dir, '../../../src/jobs/shell.ts'))};
+        `import { createShellJob } from ${JSON.stringify(join(import.meta.dirname, '../../../src/jobs/shell.ts'))};
 const job = createShellJob({cwd:process.argv[3]!,env:{PATH:'/usr/bin:/bin'},supervisorPath:process.argv[2]!});
 const handle = await job.start({command:${JSON.stringify(`sleep 30 & echo $! > ${quote(pidFile)}; wait`)}},{sessionId:'s',executionId:'parent-lifetime',signal:new AbortController().signal});
 process.stdout.write(JSON.stringify(handle.reference)+'\\n');
 process.stdin.resume(); process.stdin.on('end',()=>process.exit(0));`,
       );
-      const built = await Bun.build({
+      const built = await buildBundle({
         entrypoints: [entry],
         outdir: join(f.root, 'host'),
-        target: 'bun',
+        target: 'node',
         naming: 'host.js',
       });
       expect(built.success).toBe(true);
-      const parent = Bun.spawn([process.execPath, built.outputs[0]!.path, f.path, f.root], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const unrelated = Bun.spawn(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+      const parent = spawnProcess(
+        [fixtureNodeExecutable(), built.outputs[0]!.path, f.path, f.root],
+        {
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+      const unrelated = spawnProcess(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
       let groupId: number | undefined;
       let supervisorPid: number | undefined;
       try {
@@ -303,7 +314,7 @@ posixTest(
   async () => {
     const f = await fixture();
     const signalsPath = join(f.root, 'signals.txt');
-    const guardian = Bun.spawn([process.execPath, f.path], {
+    const guardian = spawnProcess([fixtureNodeExecutable(), f.path], {
       cwd: f.root,
       stdin: 'pipe',
       stdout: 'pipe',

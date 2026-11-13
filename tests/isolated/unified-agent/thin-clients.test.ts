@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,10 +6,12 @@ import { createRuntime } from '@kite-ai/agent';
 import type { Extension } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { invokeExtension, queryExtension, run } from '../../../apps/cli/src';
 import { createDesktopController } from '../../../apps/desktop/src';
 import { startService } from '../../../apps/service/src';
 import { createClient, readOrdinaryCommandApplication } from '../../../packages/client/src';
+import { build as buildFixture } from '../../../scripts/tooling/build';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -253,10 +254,10 @@ test('Desktop selection generations reject old response; switching/network dispo
 
 test('thin CLI and Desktop use generic external analyze, view, mark/query and explicit rerun', async () => {
   const buildRoot = mkdtempSync(join(tmpdir(), 'kite-thin-review-'));
-  const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../fixtures/extensions/mini-review/src/index.ts')],
+  const built = await buildFixture({
+    entrypoints: [join(import.meta.dirname, '../../fixtures/extensions/mini-review/src/index.ts')],
     outdir: buildRoot,
-    target: 'bun',
+    target: 'node',
   });
   expect(built.success).toBe(true);
   const module = (await import(built.outputs[0]!.path)) as {

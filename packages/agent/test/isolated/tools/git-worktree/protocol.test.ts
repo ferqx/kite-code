@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import {
   buildWorkerCommand,
   decodeWorkerRequest,
@@ -16,9 +16,8 @@ import {
 const config: GitWorktreeConfiguration = {
   configurationId: 'fixture',
   sourceCwd: '/repo',
-  bunPath: "/trusted/Bun '中文'",
+  runtimePath: "/trusted/Node '中文'",
   workerPath: '/trusted/worker.js',
-  configPath: '/trusted/empty.toml',
   git: { path: '/trusted/git', sha256: 'a'.repeat(64) },
   hooksPath: '/trusted/hooks',
 };
@@ -115,7 +114,7 @@ test('canonical worker command binds exact trusted assets, cwd, closed payload a
     command + '; echo injected',
     command + ' > /tmp/out',
     'X=1 ' + command,
-    command.replace("'--no-env-file' ", ''),
+    command.replace("'--no-global-search-paths' ", ''),
     command.replace('worker.js', 'other.js'),
   ])
     expect(parseWorkerCommand(text, config)).toBeNull();
@@ -127,6 +126,17 @@ test('canonical worker command binds exact trusted assets, cwd, closed payload a
   expect(() => decodeWorkerRequest(payload)).toThrow();
   expect(() => decodeWorkerRequest('x'.repeat(limits.payloadBytes * 2))).toThrow();
   expect(digest({ a: 1, b: 2 })).toBe(digest({ b: 2, a: 1 }));
+});
+test('historical command matching retains the old flags without producing them for new work', () => {
+  const old = { ...config, configPath: '/trusted/empty.toml' };
+  const command = buildWorkerCommand(config, request);
+  const historical = command.replace(
+    "'--no-global-search-paths'",
+    "'--no-env-file' '--config=/trusted/empty.toml'",
+  );
+  expect(parseWorkerCommand(historical, old)).toEqual(request);
+  expect(parseWorkerCommand(historical, config)).toBeNull();
+  expect(buildWorkerCommand(old, request)).toBe(command);
 });
 test('frames enforce phase/token and prepare cannot represent business success', () => {
   const good = {

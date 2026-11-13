@@ -1,8 +1,13 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 
 let bundle = '';
 let runner = '';
@@ -16,7 +21,7 @@ beforeAll(async () => {
     entry,
     `import { createBrowserClient } from ${JSON.stringify(publicEntry)}; globalThis.createPublicBrowserClient = createBrowserClient;`,
   );
-  const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'iife' });
+  const build = await buildFixture({ entrypoints: [entry], target: 'browser', format: 'iife' });
   expect(build.success).toBe(true);
   if (!build.success) throw new Error('public_browser_bundle_failed');
   bundle = await build.outputs[0]!.text();
@@ -110,7 +115,7 @@ if(mode==='reads'){
 process.stdout.write(JSON.stringify({mode,checks,node:process.version}));
 `;
 async function runNode(mode: string, checks: number) {
-  const executable = Bun.which('node');
+  const executable = findFixtureExecutable('node');
   if (!executable) throw new Error('Actual Node/V8 is required for CSP qualification');
   if (!runner) {
     runner = join(directory, 'node-csp.mjs');
@@ -121,7 +126,7 @@ async function runNode(mode: string, checks: number) {
       JSON.stringify({ identity, serverInfo, selected }),
     );
   }
-  const child = Bun.spawn({
+  const child = spawnFixtureProcess({
     cmd: [
       executable,
       runner,

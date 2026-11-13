@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import Ajv from 'ajv';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { ExecutionResources } from '../../../src/execution/resources';
@@ -23,6 +25,7 @@ import {
   createBrowserExecution,
 } from '../../../src/tools/browser/execute';
 import { createBrowserExecutor } from '../../../src/tools/browser/executor';
+import { fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const png =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1eIAAAAASUVORK5CYII=';
@@ -87,17 +90,23 @@ async function fixture(
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-browser-execute-')));
   let realFactory = createBrowserExecutor;
   if (options.realCodes) {
-    const built = await Bun.build({
+    const buildOptions = fixtureRuntimeBuild(root);
+    const built = await buildBundle({
       entrypoints: [
-        join(import.meta.dir, '../../../src/tools/browser/executor/worker.ts'),
-        join(import.meta.dir, '../../../src/mcp/stdio-guardian.ts'),
-        join(import.meta.dir, '../../../src/tools/browser/executor/index.ts'),
+        join(import.meta.dirname, '../../../src/mcp/stdio-guardian.ts'),
+        join(import.meta.dirname, '../../../src/tools/browser/executor/index.ts'),
       ],
-      target: 'bun',
+      ...buildOptions,
       outdir: root,
       naming: '[name].js',
     });
-    if (!built.success) throw Error('fixture_build_failed');
+    const worker = await buildBundle({
+      entrypoints: [join(import.meta.dirname, '../../../src/tools/browser/executor/worker.ts')],
+      ...buildOptions,
+      outdir: root,
+      naming: 'worker.mjs',
+    });
+    if (!built.success || !worker.success) throw Error('fixture_build_failed');
     // Match the development Source facade: Host callback identity and result
     // discriminants must survive a separately bundled executor implementation.
     realFactory = (await import(pathToFileURL(join(root, 'index.js')).href)).createBrowserExecutor;
@@ -307,7 +316,7 @@ async function fixture(
           },
           async dispose() {
             await selected.dispose();
-            if (options.recoverInitialNavigation) await Bun.sleep(80);
+            if (options.recoverInitialNavigation) await sleepTimer(80);
             disposed = true;
           },
           releasedSharedPage() {
@@ -369,7 +378,7 @@ async function fixture(
             executorCalls.push(batch.code);
             real ??= realFactory({
               scope: 'runtime-real-fixture',
-              workerPath: join(root, 'worker.js'),
+              workerPath: join(root, 'worker.mjs'),
               guardianPath: join(root, 'stdio-guardian.js'),
             });
             const result = await (await real).execute(
@@ -581,14 +590,14 @@ async function fixture(
           !endedBeforeSnapshot
         ) {
           endedBeforeSnapshot = true;
-          while (controller.view('session')?.state !== 'agent') await Bun.sleep(5);
+          while (controller.view('session')?.state !== 'agent') await sleepTimer(5);
           resolveTransport({ confirmed: false });
           while (
             !(await store.listExecutions('session')).some(
               (row) => row.definitionId === 'browser.session' && row.status === 'outcome_unknown',
             )
           )
-            await Bun.sleep(5);
+            await sleepTimer(5);
           const ended = (await store.listExecutions('session')).find(
             (row) => row.definitionId === 'browser.session',
           )!;
@@ -860,7 +869,7 @@ for (const ending of ['completed', 'cancelled', 'unknown'] as const)
       const deadline = Date.now() + 2500;
       while (!(await predicate())) {
         if (Date.now() > deadline) throw Error('browser environment admission deadline');
-        await Bun.sleep(10);
+        await sleepTimer(10);
       }
     };
     try {
@@ -910,7 +919,7 @@ for (const ending of ['completed', 'cancelled', 'unknown'] as const)
           });
           await f.runtime.waitForCommand('second-work');
         }
-        await Bun.sleep(30);
+        await sleepTimer(30);
         expect(f.executorCalls).toHaveLength(1);
         expect(
           (await f.store.listExecutions('second')).filter((row) => row.kind === 'job'),
@@ -1001,7 +1010,7 @@ test('a normally completed Run closes its code Job without opening a page or rel
   const f = await fixture([async () => ({ complete: true })]);
   try {
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const executions = await f.store.listExecutions('session');
     const batch = executions.find((entry) => entry.definitionId === 'browser.execute')!;
     const job = executions.find((entry) => entry.definitionId === 'browser.code_session')!;
@@ -1022,7 +1031,7 @@ test('normal Run completion releases its exact browser lease when the model omit
   const f = await fixture([open]);
   try {
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const executions = await f.store.listExecutions('session');
     const batch = executions.find((entry) => entry.definitionId === 'browser.execute')!;
     expect((await f.store.getRun(batch.runId!))?.status).toBe('completed');
@@ -1047,7 +1056,7 @@ test('parallel model calls in one Run queue against one environment and preserve
     [
       async (batch, state) => {
         const result = await open(batch, state);
-        await Bun.sleep(50);
+        await sleepTimer(50);
         return result;
       },
       fill,
@@ -1056,7 +1065,7 @@ test('parallel model calls in one Run queue against one environment and preserve
   );
   try {
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const executions = await f.store.listExecutions('session');
     const batches = executions.filter((entry) => entry.definitionId === 'browser.execute');
     expect(f.states).toHaveLength(1);
@@ -1128,7 +1137,7 @@ test('open returns without a hidden snapshot; an explicit failed read keeps the 
     release();
     await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     expect(
       (await f.store.listExecutions('session')).find(
         (entry) => entry.definitionId === 'browser.session',
@@ -1192,7 +1201,7 @@ test('an ordinary executor TypeError closes only its VM and the next Model conti
       isActive: false,
     });
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     expect(f.executorCloses).toBe(2);
     expect(f.transportCloses).toBe(1);
     expect(f.runtime.getLifecycleState()).toMatchObject({ busy: false, reasons: [] });
@@ -1244,7 +1253,7 @@ test('capacity two with an externally occupied slot waits and cancels without la
   try {
     const admission = Date.now() + 2000;
     while (!f.authorizations.includes('browser.session') && Date.now() < admission)
-      await Bun.sleep(10);
+      await sleepTimer(10);
     expect(f.authorizations).toContain('browser.session');
     const before = (await f.store.listExecutions('session')).find(
       (entry) => entry.definitionId === 'browser.session',
@@ -1261,9 +1270,9 @@ test('capacity two with an externally occupied slot waits and cancels without la
     });
     await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
     f.releaseProcessSlot();
-    await Bun.sleep(50);
+    await sleepTimer(50);
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const executions = await f.store.listExecutions('session');
     expect(executions.find((entry) => entry.definitionId === 'browser.execute')?.status).toBe(
       'cancelled',
@@ -1288,7 +1297,7 @@ test('original browser Job authorization can exceed five seconds and still open 
   try {
     await f.browserAuthorizationEntered;
     expect(f.owners).toBe(0);
-    await Bun.sleep(5200);
+    await sleepTimer(5200);
     const before = await f.store.listExecutions('session');
     expect(before.find((entry) => entry.definitionId === 'browser.execute')?.status).toBe(
       'dispatching',
@@ -1301,7 +1310,7 @@ test('original browser Job authorization can exceed five seconds and still open 
     f.releaseBrowserAuthorization();
     await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const after = await f.store.listExecutions('session');
     expect(
       after
@@ -1333,7 +1342,7 @@ test('cancelling original browser Job authorization prevents a late allow from s
     await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
     f.releaseBrowserAuthorization();
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const executions = await f.store.listExecutions('session');
     expect(executions.find((entry) => entry.definitionId === 'browser.execute')?.status).toBe(
       'cancelled',
@@ -1355,7 +1364,7 @@ async function startingDecision(f: Awaited<ReturnType<typeof fixture>>, beforeNa
   const end = Date.now() + 2000;
   while (f.startingChecks < 2 && !f.authorizations.includes('browser.snapshot')) {
     if (Date.now() > end) throw Error('starting_decision_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -1592,7 +1601,7 @@ test('Run cancellation during dispatched input stops code and original browser w
   const f = await fixture([open, fill], { cancelDuringFill: true });
   try {
     const until = Date.now() + 2000;
-    while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+    while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
     const executions = await f.store.listExecutions('session');
     const batches = executions.filter((entry) => entry.definitionId === 'browser.execute');
     const affected = batches[1]!;
@@ -2368,7 +2377,7 @@ realTest(
       expect(f.realBoundaries.map((entry) => entry.state)).toEqual(['agent', 'agent']);
       expect(f.realBoundaries.map((entry) => entry.closes)).toEqual([0, 0]);
       const until = Date.now() + 2000;
-      while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+      while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
       expect(
         (await f.store.listExecutions('session'))
           .filter((row) => row.definitionId === 'browser.session')
@@ -2429,7 +2438,7 @@ realTest(
         isActive: false,
       });
       const until = Date.now() + 2000;
-      while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+      while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
       expect(f.executorCloses).toBe(2);
       expect(f.transportCloses).toBe(1);
       expect(f.runtime.getLifecycleState()).toMatchObject({ busy: false, reasons: [] });
@@ -2611,7 +2620,7 @@ for (const failure of ['read', 'code'] as const)
         expect(f.mainPage.value).toBe('second-run');
         expect(f.controller.releasedPage!('another-session')).toBeNull();
         const until = Date.now() + 2000;
-        while (f.runtime.getLifecycleState().busy && Date.now() < until) await Bun.sleep(20);
+        while (f.runtime.getLifecycleState().busy && Date.now() < until) await sleepTimer(20);
         expect(f.transportCloses).toBe(2);
         expect(f.executorCloses).toBe(2);
         expect(f.runtime.getLifecycleState()).toMatchObject({ busy: false, reasons: [] });

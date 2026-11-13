@@ -135,7 +135,7 @@ const client = createClient({
     requiredCapabilities: ['sessions', 'commands', 'history', 'context'],
   },
 });
-let web: ReturnType<typeof startDevelopmentWeb> | undefined;
+let web: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
 let stop!: () => void;
 const stopped = new Promise<void>((resolve) => {
   stop = resolve;
@@ -189,7 +189,7 @@ try {
   await runtime.waitForCommand('qa-output', { timeoutMs: 5000 });
   const assets = getTrustedAssets();
   await validateTrustedAssets(assets, assetManifest);
-  web = startDevelopmentWeb({ admittedClient: client, assets });
+  web = await startDevelopmentWeb({ admittedClient: client, assets });
   const output = (await client.getView('qa-markdown')).executions.find(
     (item) => item.definitionId === 'fixture.browser-output',
   );

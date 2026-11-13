@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { initialTrajectoryViewState } from '@kite-ai/ui/desktop';
+import { expect, test } from '#kite-test';
 import { mergeTrajectoryPresentation } from '../src/trajectory-presentation-state';
 
 const integrity = {

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { JobContext, ToolContext } from '../../../src/extensions';
 import { hostExecutionScope } from '../../../src/permissions/shell';
 

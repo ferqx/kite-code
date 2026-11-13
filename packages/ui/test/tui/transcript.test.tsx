@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Execution, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import type { TuiController } from '../../src/tui/controller';
 import { TuiExecutionPanel } from '../../src/tui/execution-panel';
 import { defaultTuiPreferences } from '../../src/tui/preferences';
@@ -219,14 +220,14 @@ test('execution reader accepts a selected Tool result but only exact Jobs can in
       expect(app.lastFrame()).toContain(text);
     for (const input of ['o', 'c', 's', '\r']) {
       app.stdin.write(input);
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     }
     expect(calls).toEqual([]);
     app.rerender(<TuiExecutionPanel controller={controller} initialExecutionId="job" />);
-    await Bun.sleep(20);
+    await fixtureDelay(20);
     expect(app.lastFrame()).toContain('old exact Job output');
     app.stdin.write('c');
-    await Bun.sleep(10);
+    await fixtureDelay(10);
     expect(calls).toEqual(['job:true']);
   } finally {
     app.unmount();

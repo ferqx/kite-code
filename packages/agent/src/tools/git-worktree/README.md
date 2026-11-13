@@ -1,6 +1,6 @@
 # Git Worktree 工具
 
-`builtin.shell` 注册 `git.worktree@1`，模型名为 `git_worktree`，提供 `list/create/remove/observe`。外层工具不持有进程槽或串行资源；全部 Git 调用由现有 `shell.command@1` 的受管 Bun worker 使用 argv 执行。创建返回路径，保留来源 checkout 和 Session cwd，不维护工作树数据库。
+`builtin.shell` 注册 `git.worktree@1`，模型名为 `git_worktree`，提供 `list/create/remove/observe`。外层工具不持有进程槽或串行资源；全部 Git 调用由现有 `shell.command@1` 的受管 Node worker 使用 argv 执行。创建返回路径，保留来源 checkout 和 Session cwd，不维护工作树数据库。
 
 ## 输入与产品边界
 
@@ -66,7 +66,7 @@ prepare 结束后、首次 remove ensure 之前，工具要求 `readRunExecution
 
 Windows 的 Git 子调用由[文件句柄捕获](windows-process.ts)替代 stdio pipe：本机 Bun1.4.4 的 pipe 创建在原 `workspace_write` 受限 token 下会因 `uv_spawn EPERM` 失败，相同原宿主继承普通 FD 可成功。本实现只在所属 Job 私有 TEMP 中独占创建文件，64KiB增量读取，保原 stdout 16MiB／stderr 256KiB、精确 hash 长度和最终 EOF／代际核验；借用 inputFd 不关闭，定点清理无法核实则保留失败。权限、环境允许集合、Git 安全配置、进程取消和工具／协议版本均未放宽，原因与备选见[取舍](../../../../../.agents/notes/implemented/bug-fix/2026-11-06-windows-worktree-git-stdio.md)。
 
-[构建](build-assets.ts)发布独立 `worker.js`、无 preload 的 `empty-bunfig.toml`、空 `empty-hooks/` 及 SHA256 manifest。Host 固定 Bun/Git/worker、cwd、配置身份和环境允许集合；严格识别规范化单一命令，派发前重验。macOS在首次装配只读核验root所有且祖先不可被group/world写入的系统native Git，不把`/usr/bin/git`的Apple调度桩当作实际实现身份；不依赖其沙箱外xcrun缓存写入。Bun1.4.4 实测使用 `--no-env-file --config=<absolute>`，分开的 config 参数会空执行，不能仅靠退出码断言成功。macOS 外层 supervisor 和 launchd 再启动、Linux 首次解释器以及 Windows 原生入口均应用该 profile；项目 .env/bunfig 和环境 preload 不得先执行。
+[构建](build-assets.ts)发布独立 `worker.js`、空 `empty-hooks/` 与 worker 的 SHA-256 清单。宿主固定 Node、Git、worker、原生 addon、cwd、配置身份和环境允许集合，派发前重验。可信 worker 以 `--no-global-search-paths` 启动。macOS 外层 guardian、launchd 交接及 Linux／Windows 原生入口使用同一固定 profile，排除环境注入的 preload。macOS 使用经过所有者与祖先权限验证的真实系统 Git。macOS／Linux 的可信 worktree Job 将已核验的 worker 资产绑定为只读，macOS 仅允许映射已核验的 `runtime-native.node` 等既有许可资产。普通 Shell 使用自己的原范围。历史 Bun 命令可按原记录核对，新的命令只由 Node 启动。2026-11-13 的 [macOS arm64 启动回归](../../../test/isolated/tools/git-worktree/launch-security.test.ts)以 Node 26.13.1 验证真实 launchd 下的环境隔离、输出和只读删除准备，包括映射 addon 与读取 mount 表。
 
 正式 Service 的合格 Shell host 支持三 action；自定义 POSIX zsh 等可加载启动文件的 Shell 不取得 worktree 能力。没有 scope-aware host 的 legacy POSIX 装配只支持 list，不能借它执行变更。资产或 Git 缺失局部不可用，不阻断普通 Session 启动。Linux/Windows 原生运行和安装资格分别取得，不能由源码检查或 macOS测试代证。
 

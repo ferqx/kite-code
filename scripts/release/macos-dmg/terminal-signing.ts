@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { isMachO } from './mach-o';
 
 export interface MacosTerminalSigning {
-  sign(path: string, role: 'bun' | 'code'): void;
+  sign(path: string, role: 'runtime' | 'code'): void;
 }
 
 const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -15,6 +15,7 @@ export function signMacosTerminalCode(
   executable: string,
   agent: string,
   signing: MacosTerminalSigning,
+  signedRuntimeAddonSha256?: string,
 ) {
   const files = join(agent, 'native/files');
   const search = join(agent, 'platform/process/tools');
@@ -33,6 +34,8 @@ export function signMacosTerminalCode(
     throw Error('terminal_macos_signing_asset_changed');
 
   const required = new Set([executable, filesBinary, searchBinary]);
+  const runtimeAddon = join(agent, 'runtime-native.node');
+  if (signedRuntimeAddonSha256) required.add(runtimeAddon);
   function walk(directory: string) {
     for (const name of readdirSync(directory).sort()) {
       const path = join(directory, name);
@@ -40,7 +43,11 @@ export function signMacosTerminalCode(
       if (stat.isDirectory()) walk(path);
       else if (stat.isFile() && isMachO(path, stat.size)) {
         if (stat.nlink !== 1) throw Error('terminal_macos_signing_asset_changed');
-        signing.sign(path, path === executable ? 'bun' : 'code');
+        if (path === runtimeAddon && signedRuntimeAddonSha256) {
+          // Worker bundles already embed the bytes signed immediately after compilation.
+          if (sha(path) !== signedRuntimeAddonSha256)
+            throw Error('terminal_macos_signing_asset_changed');
+        } else signing.sign(path, path === executable ? 'runtime' : 'code');
         required.delete(path);
       }
     }

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -12,10 +11,19 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import {
+  which as findExecutable,
+  spawn as spawnProcess,
+} from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   temporaryDirectory,
 } from '../../../../../tests/fixtures/test-filesystem';
+import { runtimeNativeAsset } from '../../../src/runtime-native';
 import {
   type DynamicSqliteEngineManifest,
   parseSqliteEngineManifest,
@@ -28,7 +36,7 @@ const sourceId =
   '2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618';
 const manifest = (bytes: Uint8Array): DynamicSqliteEngineManifest => ({
   version: 1,
-  driver: 'bun:sqlite',
+  driver: 'node-api:sqlite',
   target: { platform: process.platform, arch: process.arch },
   library: 'libsqlite3.dylib',
   size: bytes.length,
@@ -71,22 +79,24 @@ test.skipIf(process.platform !== 'darwin')(
         version: '3.51.3',
         sourceId,
       });
-      const node = Bun.which('node');
+      const node = findExecutable('node');
       if (!node) throw Error('sqlite_engine_test_node_unavailable');
-      const nodeBuild = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../../src/sqlite-engine.ts')],
+      const nodeBuild = await buildBundle({
+        entrypoints: [join(import.meta.dirname, '../../../src/sqlite-engine.ts')],
         outdir: join(root, 'node'),
         target: 'node',
         packages: 'external',
       });
       expect(nodeBuild.success).toBe(true);
-      const nodeProbe = Bun.spawn(
+      const legacyBytes = Buffer.from(JSON.stringify({ ...metadata, driver: 'bun:sqlite' }));
+      writeFileSync(join(selected, 'engine-manifest.json'), legacyBytes, { mode: 0o600 });
+      const nodeProbe = spawnProcess(
         [
           node,
           '--input-type=module',
           '-e',
           `import assert from 'node:assert/strict'; import {verifySqliteEngineAsset,getLoadedSqliteEngine,initializeSqliteEngine} from ${JSON.stringify(join(root, 'node/sqlite-engine.js'))}; const selected=JSON.parse(process.argv[1]);assert.equal(getLoadedSqliteEngine(),null);assert.equal(verifySqliteEngineAsset(selected).manifest.sqlite.version,'3.51.3');assert.throws(()=>initializeSqliteEngine(selected),/sqlite_engine_runtime_unsupported/);console.log('node_safe_verification_no_db');`,
-          JSON.stringify(selection),
+          JSON.stringify({ root: selected, manifestSha256: sha(legacyBytes) }),
         ],
         { cwd: root, env: { HOME: root, PATH: '/usr/bin:/bin' }, stdout: 'pipe', stderr: 'pipe' },
       );
@@ -98,22 +108,26 @@ test.skipIf(process.platform !== 'darwin')(
       expect(nodeExit).toBe(0);
       expect(nodeError).toBe('');
       expect(nodeOut).toContain('node_safe_verification_no_db');
-      const built = await Bun.build({
+      writeFileSync(join(selected, 'engine-manifest.json'), metadataBytes, { mode: 0o600 });
+      const built = await buildBundle({
         entrypoints: [
-          join(import.meta.dir, '../../fixtures/sqlite-engine/probe.ts'),
-          join(import.meta.dir, '../../fixtures/sqlite-engine/worker.ts'),
+          join(import.meta.dirname, '../../fixtures/sqlite-engine/probe.ts'),
+          join(import.meta.dirname, '../../fixtures/sqlite-engine/worker.ts'),
         ],
         outdir: join(root, 'probe'),
-        target: 'bun',
+        target: 'node',
         packages: 'bundle',
         naming: '[name].js',
       });
       expect(built.success).toBe(true);
+      copyFileSync(fileURLToPath(runtimeNativeAsset()), join(root, 'probe/runtime-native.node'));
       async function run(mode: string, digest = selection.manifestSha256) {
-        const child = Bun.spawn(
-          [process.execPath, join(root, 'probe/probe.js'), selected, digest, mode],
-          { cwd: root, env: { HOME: root, PATH: '/usr/bin:/bin' }, stdout: 'pipe', stderr: 'pipe' },
-        );
+        const child = spawnProcess([node!, join(root, 'probe/probe.js'), selected, digest, mode], {
+          cwd: root,
+          env: { HOME: root, PATH: '/usr/bin:/bin' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
         const timeout = setTimeout(() => child.kill('SIGKILL'), 10000);
         try {
           const [exit, stdout, stderr] = await Promise.all([
@@ -134,35 +148,6 @@ test.skipIf(process.platform !== 'darwin')(
         sourceId,
       });
       expect(await run('late')).toContain('late_rejected');
-      const publicChild = Bun.spawn(
-        [
-          process.execPath,
-          join(import.meta.dir, '../../fixtures/sqlite-engine/public-store.ts'),
-          selected,
-          selection.manifestSha256,
-          join(root, 'public-data'),
-        ],
-        { cwd: root, env: { HOME: root, PATH: '/usr/bin:/bin' }, stdout: 'pipe', stderr: 'pipe' },
-      );
-      const publicTimer = setTimeout(() => publicChild.kill('SIGKILL'), 15000);
-      try {
-        const [exit, out, error] = await Promise.all([
-          publicChild.exited,
-          new Response(publicChild.stdout).text(),
-          new Response(publicChild.stderr).text(),
-        ]);
-        expect(error).toBe('');
-        expect(exit).toBe(0);
-        expect(JSON.parse(out)).toMatchObject({
-          publicStores: 2,
-          walWrites: 24,
-          restored: true,
-          readonlyCold: true,
-        });
-      } finally {
-        clearTimeout(publicTimer);
-      }
-
       writeFileSync(join(selected, 'libsqlite3.dylib'), Buffer.from('changed'));
       expect(() => verifySqliteEngineAsset(selection)).toThrow('sqlite_engine_asset_changed');
       writeFileSync(join(selected, 'libsqlite3.dylib'), bytes);
@@ -196,11 +181,16 @@ test.skipIf(process.platform !== 'darwin')(
   30000,
 );
 
-test('builtin exact observation does not select a dynamic library or claim a release fix', async () => {
+test('legacy builtin exact identity verifies without establishing runtime qualification', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-sqlite-builtin-'));
   try {
-    const child = Bun.spawn(
-      [process.execPath, join(import.meta.dir, '../../fixtures/sqlite-engine/builtin.ts'), root],
+    const child = spawnProcess(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        join(import.meta.dirname, '../../fixtures/sqlite-engine/builtin.ts'),
+        root,
+      ],
       { cwd: root, env: { HOME: root, PATH: '/usr/bin:/bin' }, stdout: 'pipe', stderr: 'pipe' },
     );
     const [exit, out, error] = await Promise.all([
@@ -219,10 +209,10 @@ test('compiled default sidecar rejects missing manifest or changed asset before 
   const root = mkdtempSync(join(tmpdir(), 'kite-sqlite-sidecar-'));
   try {
     const output = join(root, 'package');
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../../src/sqlite.ts')],
+    const built = await buildBundle({
+      entrypoints: [join(import.meta.dirname, '../../../src/sqlite.ts')],
       outdir: output,
-      target: 'bun',
+      target: 'node',
       packages: 'bundle',
     });
     expect(built.success).toBe(true);
@@ -235,7 +225,7 @@ test('compiled default sidecar rejects missing manifest or changed asset before 
         script,
         `import assert from 'node:assert/strict';import {openSqliteStore} from ${JSON.stringify(join(output, 'sqlite.js'))}; let denied=false;try{await openSqliteStore({dataRoot:${JSON.stringify(data)},profile:'blocked'});}catch(e){denied=e.code.startsWith('sqlite_engine_');}assert(denied);console.log('engine_rejected_before_profile');`,
       );
-      const child = Bun.spawn([process.execPath, script], {
+      const child = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
         cwd: root,
         env: { HOME: root, PATH: '/usr/bin:/bin' },
         stdout: 'pipe',
@@ -271,14 +261,30 @@ test.skipIf(process.platform !== 'darwin')(
     const root = temporaryDirectory('kite-sqlite-default-');
     try {
       const output = join(root, 'package');
-      const built = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../../src/sqlite.ts')],
+      const node = findExecutable('node');
+      if (!node) throw Error('sqlite_engine_test_node_unavailable');
+      const built = await buildBundle({
+        entrypoints: [
+          join(import.meta.dirname, '../../../src/sqlite.ts'),
+          join(import.meta.dirname, '../../../src/runtime-native.ts'),
+          join(import.meta.dirname, '../../../src/maintenance/index.ts'),
+        ],
+        root: join(import.meta.dirname, '../../../src'),
         outdir: output,
-        target: 'bun',
+        target: 'node',
         packages: 'bundle',
+        splitting: true,
       });
       expect(built.success).toBe(true);
-      await buildStorageAssets(output);
+      copyFileSync(fileURLToPath(runtimeNativeAsset()), join(output, 'runtime-native.node'));
+      const previous = process.env.KITE_RELEASE_JS_RUNTIME;
+      process.env.KITE_RELEASE_JS_RUNTIME = 'node';
+      try {
+        await buildStorageAssets(output);
+      } finally {
+        if (previous === undefined) delete process.env.KITE_RELEASE_JS_RUNTIME;
+        else process.env.KITE_RELEASE_JS_RUNTIME = previous;
+      }
       const engine = join(output, 'storage/engine');
       privateDirectory(engine);
       const bytes = readFileSync('/opt/homebrew/Cellar/sqlite/3.51.3/lib/libsqlite3.3.51.3.dylib');
@@ -291,12 +297,20 @@ test.skipIf(process.platform !== 'darwin')(
         { mode: 0o600 },
       );
       const data = join(root, 'actual-profile');
-      const script = join(root, 'default.ts');
+      const script = join(root, 'default.mjs');
       writeFileSync(
         script,
-        `import assert from 'node:assert/strict';import {openSqliteStore,preflightSqliteStore} from ${JSON.stringify(join(output, 'sqlite.js'))};const profile={dataRoot:${JSON.stringify(data)},profile:'default'};const a=await openSqliteStore(profile),b=await openSqliteStore(profile);try{assert.equal((await a.getMetadata()).storeId,(await b.getMetadata()).storeId);}finally{await b.close();await a.close();}assert.equal((await preflightSqliteStore(profile)).status,'compatible');console.log('compiled_default_workers_selected');`,
+        readFileSync(
+          join(import.meta.dirname, '../../fixtures/sqlite-engine/public-store.ts'),
+          'utf8',
+        )
+          .replace(
+            "'@kite-ai/agent/maintenance'",
+            JSON.stringify(join(output, 'maintenance/index.js')),
+          )
+          .replace("'@kite-ai/agent/sqlite'", JSON.stringify(join(output, 'sqlite.js'))),
       );
-      const child = Bun.spawn([process.execPath, script], {
+      const child = spawnProcess([node, script, data], {
         cwd: root,
         env: { HOME: root, PATH: '/usr/bin:/bin' },
         stdout: 'pipe',
@@ -311,15 +325,20 @@ test.skipIf(process.platform !== 'darwin')(
         ]);
         expect(error).toBe('');
         expect(exit).toBe(0);
-        expect(out).toContain('compiled_default_workers_selected');
+        expect(JSON.parse(out)).toMatchObject({
+          publicStores: 2,
+          walWrites: 24,
+          restored: true,
+          readonlyCold: true,
+        });
         expect(existsSync(data)).toBe(true);
         const lateData = join(root, 'late-never-profile'),
-          lateScript = join(root, 'late.ts');
+          lateScript = join(root, 'late.mjs');
         writeFileSync(
           lateScript,
-          `import assert from 'node:assert/strict';import {Database} from 'bun:sqlite';import {openSqliteStore} from ${JSON.stringify(join(output, 'sqlite.js'))};const db=new Database(':memory:');db.close(true);let code='';try{await openSqliteStore({dataRoot:${JSON.stringify(lateData)},profile:'late'});}catch(e){code=e.code;}assert.equal(code,'sqlite_engine_initialization_failed');console.log('late_default_rejected_before_profile');`,
+          `import assert from 'node:assert/strict';import {nativeRuntime} from ${JSON.stringify(join(output, 'runtime-native.js'))};import {openSqliteStore} from ${JSON.stringify(join(output, 'sqlite.js'))};const native=nativeRuntime();assert(native.sqliteSelect(${JSON.stringify(join(engine, 'libsqlite3.dylib'))},true));native.sqliteClose(native.sqliteOpen(':memory:',6));let code='';try{await openSqliteStore({dataRoot:${JSON.stringify(lateData)},profile:'late'});}catch(e){code=e.code;}assert.equal(code,'sqlite_engine_load_failed');console.log('late_default_rejected_before_profile');`,
         );
-        const lateChild = Bun.spawn([process.execPath, lateScript], {
+        const lateChild = spawnProcess([node, lateScript], {
           cwd: root,
           env: { HOME: root, PATH: '/usr/bin:/bin' },
           stdout: 'pipe',

@@ -1,4 +1,3 @@
-import { expect, spyOn, test } from 'bun:test';
 import {
   linkSync,
   mkdirSync,
@@ -13,6 +12,7 @@ import { join } from 'node:path';
 import type { Json, ToolContext } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { agentContractSource } from '@kite-ai/agent/sources';
+import { expect, spyOn, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { discoverInstalledUserSkills } from '../../src/installed-user-skills';

@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -9,6 +9,7 @@ import { createFixedModel } from '@kite-ai/ai';
 import { createClient, type Interaction, type Json } from '@kite-ai/client';
 import { createDesktopController } from '@kite-ai/desktop';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { run } from '../src';
 
 const plan = {
@@ -130,7 +131,7 @@ async function fixture() {
         await client.listInteractions('s', { storeId, state: 'pending' })
       ).interactions.find((value) => value.kind === kind);
       if (card) return card;
-      await Bun.sleep(5);
+      await testSleep(5);
     }
     throw new Error('missing plan interaction');
   };

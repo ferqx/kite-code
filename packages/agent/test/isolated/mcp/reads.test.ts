@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import { createMcpAdapter } from '../../../src/mcp';
 
 async function fixture(limits?: Parameters<typeof createMcpAdapter>[0]['limits']) {
@@ -7,7 +8,7 @@ async function fixture(limits?: Parameters<typeof createMcpAdapter>[0]['limits']
   let opens = 0,
     large = false;
   let tools: { name: string; inputSchema: Record<string, unknown> }[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {

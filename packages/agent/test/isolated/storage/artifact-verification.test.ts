@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -12,8 +10,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { artifactPath } from '../../../src/artifacts-files';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureWorkerEntry, NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
 test('same Store metadata and query progress during complete blob verification; close drains original registration', async () => {
   const dataRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-register-progress-')));
@@ -96,8 +97,8 @@ for (const fault of ['bytes', 'scope', 'verified-bytes', 'begin-bytes'] as const
     const dataRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-register-drift-')));
     chmodSync(dataRoot, 0o700);
     const profile = { dataRoot, profile: 'owned' };
-    const NativeWorker = globalThis.Worker;
-    let fixtureWorker: Worker | undefined;
+
+    let fixtureWorker: NativeWorker | undefined;
     let armed!: () => void;
     let yielded!: () => void;
     let mutatedInsideTransaction = false;
@@ -110,26 +111,31 @@ for (const fault of ['bytes', 'scope', 'verified-bytes', 'begin-bytes'] as const
     });
     class AuditedWorker extends NativeWorker {
       constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-        super(new URL('./artifact-verification-worker-fixture.ts', import.meta.url).href, args[1]);
+        super(
+          ...fixtureWorkerEntry(
+            args,
+            new URL('./artifact-verification-worker-fixture.ts', import.meta.url),
+          ),
+        );
         fixtureWorker = this;
-        this.addEventListener('message', (event: MessageEvent) => {
-          if (event.data?.fixture === 'verification-armed') armed();
-          if (event.data?.fixture === 'verification-yielded') yielded();
-          if (event.data?.fixture === 'verified-writer-wait') yielded();
-          if (event.data?.fixture === 'after-successful-begin')
-            mutatedInsideTransaction = event.data.inTransaction === true;
-          if (event.data?.timing?.operation === 'registerArtifact')
-            registrationAcks.push({ id: event.data.id, code: event.data.error?.code });
+        this.on('message', (data) => {
+          if (data?.fixture === 'verification-armed') armed();
+          if (data?.fixture === 'verification-yielded') yielded();
+          if (data?.fixture === 'verified-writer-wait') yielded();
+          if (data?.fixture === 'after-successful-begin')
+            mutatedInsideTransaction = data.inTransaction === true;
+          if (data?.timing?.operation === 'registerArtifact')
+            registrationAcks.push({ id: data.id, code: data.error?.code });
         });
       }
     }
-    globalThis.Worker = AuditedWorker;
+    useFixtureWorker(AuditedWorker);
     let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let peer: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let writer: Database | undefined;
     try {
       store = await openSqliteStore(profile);
-      globalThis.Worker = NativeWorker;
+      useFixtureWorker();
       const expectedStoreId = (await store.getMetadata()).storeId;
       await store.createWorkspace({
         expectedStoreId,
@@ -233,7 +239,7 @@ for (const fault of ['bytes', 'scope', 'verified-bytes', 'begin-bytes'] as const
       }
       expect((await store.getMetadata()).storeId).toBe(expectedStoreId);
     } finally {
-      globalThis.Worker = NativeWorker;
+      useFixtureWorker();
       fixtureWorker?.postMessage({ fixture: 'resume-verification' });
       if (writer) {
         if (writer.inTransaction) writer.run('ROLLBACK');

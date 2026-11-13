@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Command, Interaction, PendingInputPage, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 import { callerTarget, type TuiCallerIntent, type TuiCallerRequest } from '../../src/tui/caller';
 import { hasPendingRootCancellation } from '../../src/tui/chrome';
 
-const tick = () => Bun.sleep(25);
+const tick = () => fixtureDelay(25);
 function fixture() {
   let next = 0,
     snapshot: TuiSnapshot;

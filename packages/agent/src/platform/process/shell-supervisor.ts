@@ -6,6 +6,7 @@ import {
   removeRuntimeTemp,
   verifyLaunchIdentities,
 } from '../../jobs/launch-identity';
+import { nodeRuntimeFlags } from '../runtime-flags';
 import {
   connectLaunchdControl,
   removeLaunchdRegistration,
@@ -32,9 +33,8 @@ interface Request {
 }
 const MAX_FRAME = 1024 * 1024;
 const trustedWorkerRuntime =
-  process.execArgv.length === 2 &&
-  process.execArgv[0] === '--no-env-file' &&
-  process.execArgv[1]?.startsWith('--config=/');
+  process.execArgv.length === nodeRuntimeFlags.length &&
+  nodeRuntimeFlags.every((flag, index) => process.execArgv[index] === flag);
 const launchdOwned = process.argv[2] === '--launchd-owned';
 const coalition = launchdOwned ? claimDarwinOwnedCoalition() : undefined;
 const launchdControl = launchdOwned ? await connectLaunchdControl(process.argv[3]!) : undefined;
@@ -203,7 +203,7 @@ async function start(): Promise<void> {
         ...(trustedWorkerRuntime
           ? {
               trustedRuntime: {
-                bunFlags: [...process.execArgv],
+                runtimeFlags: [...process.execArgv],
                 env: Object.fromEntries(
                   Object.entries(process.env).filter(
                     (entry): entry is [string, string] => typeof entry[1] === 'string',

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { fstatSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { Readable } from 'node:stream';
+import { dlopen, ptr, toArrayBuffer } from '../../runtime-ffi';
 
 export interface LinuxOwnedProgramEvidence {
   version: 1;
@@ -167,7 +168,6 @@ function processIdentity(value: number) {
 function native(admission: { nonce: string; purpose: 'stdio' }) {
   if (process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch))
     throw error('unsupported');
-  const { dlopen, ptr, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
   const library = dlopen('libc.so.6', {
     socketpair: { args: ['i32', 'i32', 'i32', 'ptr'], returns: 'i32' },
     setsockopt: { args: ['i32', 'i32', 'i32', 'ptr', 'u32'], returns: 'i32' },
@@ -566,7 +566,7 @@ export function startLinuxOwnedProgram(options: LinuxOwnedProgramOptions): Linux
     if (!cancelledInputError(cause)) unknown(cause);
   });
   configuration.once('error', unknown);
-  // Extra stdio is a duplex pipe on Node/Bun. Drain its read side to observe
+  // Extra stdio is a duplex pipe on Node. Drain its read side to observe
   // actual peer EOF/close; the configuration protocol never permits a reply.
   configuration.on('data', () => unknown(error('configuration_reply')));
   configuration.resume?.();

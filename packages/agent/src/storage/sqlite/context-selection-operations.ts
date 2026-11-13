@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type ContextSelection, type Json, type ResultContextSource } from '../types';
@@ -8,7 +6,6 @@ import { originalCompressionInput } from './compression-inputs';
 import { activeCompression, historyOnlyCompression } from './compression-operations';
 import { continuationReportProof } from './job-report-continuation';
 import type { SqliteOperations } from './operations';
-import { contextSnapshots } from './schema';
 import { retireReconciliationForRewind } from './session-reconciliation';
 
 type Row = Record<string, string | number | bigint | null>;
@@ -41,17 +38,11 @@ function subject(db: SqliteOperations, id: string): string {
   return String(creator.subject_id);
 }
 export function selected(db: SqliteOperations, row: Row): ContextSelection {
-  const snapshot = drizzle(db.db)
-    .select({ request_json: contextSnapshots.requestJson })
-    .from(contextSnapshots)
-    .where(
-      and(
-        eq(contextSnapshots.id, String(row.context_selection_id)),
-        eq(contextSnapshots.sessionId, String(row.id)),
-        eq(contextSnapshots.kind, 'selection'),
-      ),
-    )
-    .get();
+  const snapshot = db.row(
+    "SELECT request_json FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",
+    String(row.context_selection_id),
+    String(row.id),
+  );
   return snapshot
     ? parse(snapshot.request_json)
     : {

@@ -1,4 +1,4 @@
-/** Only bounded machine codes cross from Bun into the Windows dialogs. */
+/** Only bounded machine codes cross from the runtime into the Windows dialogs. */
 export function reportSetupFailure(error: unknown): void {
   const code = error instanceof Error ? ('code' in error ? error.code : error.message) : undefined;
   console.error(

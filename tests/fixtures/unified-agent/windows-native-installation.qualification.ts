@@ -4,6 +4,7 @@ import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { terminalEmptyAssetDirectories } from '../../../apps/service/src/runtime-assets';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import type { ProfileBackup } from '../../../packages/agent/src/maintenance';
 import { readModelOutput } from '../../../packages/agent/src/model-output';
@@ -13,7 +14,9 @@ import {
   WindowsOwnedChildStartError,
   type WindowsOwnedJobMember,
 } from '../../../packages/agent/src/platform/process/windows-owned-child';
-import { COMPATIBLE_PREDECESSOR_COMMIT } from './compatible-predecessor-input';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT } from './terminal-predecessor';
+import { windowsQualificationStore } from './windows-daemon-qualification';
 import { createWindowsNativeUIA, type WindowsNativeUIAElement } from './windows-native-uia';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -78,14 +81,26 @@ export async function qualifyWindowsNativeInstallation(
     ]);
     for (const directory of bundle.manifest.directories)
       privateDirectory(join(destination, directory));
+    for (const directory of terminalEmptyAssetDirectories(bundle.terminal.manifest))
+      privateDirectory(join(destination, 'terminal', directory));
   };
   const currentCandidate = verifyNativeRuntimeBundle(candidate);
   const predecessor = crossCode ? realpathSync(predecessorInput!) : candidate;
   const originalCandidate = crossCode ? verifyNativeRuntimeBundle(predecessor) : currentCandidate;
+  assert('cli' in originalCandidate.terminal.manifest.entries, 'full_native_candidate_required');
+  assert('cli' in currentCandidate.terminal.manifest.entries, 'full_native_candidate_required');
+  const separatePrefixes = Boolean(
+    crossCode &&
+      !originalCandidate.terminal.manifest.nodeVersion &&
+      currentCandidate.terminal.manifest.nodeVersion,
+  );
   assert(Date.now() < basicDeadline, 'windows_native_qualification_input_deadline');
   const agentEntry = 'node_modules/@kite-ai/agent/index.js';
   if (crossCode) {
-    assert.equal(originalCandidate.terminal.manifest.source.commit, COMPATIBLE_PREDECESSOR_COMMIT);
+    assert.equal(
+      originalCandidate.terminal.manifest.source.commit,
+      CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
+    );
     assert.equal(originalCandidate.terminal.manifest.source.dirty, false);
     assert.equal(currentCandidate.terminal.manifest.source.dirty, false);
     assert(
@@ -118,6 +133,7 @@ export async function qualifyWindowsNativeInstallation(
   const home = join(root, 'home'),
     workspace = join(root, 'workspace'),
     prefix = join(root, 'installed');
+  const currentPrefix = separatePrefixes ? join(root, 'installed-node') : prefix;
   privateDirectory(home);
   privateDirectory(workspace);
   const dataRoot = join(home, '.kite-code', 'unified-agent');
@@ -313,7 +329,7 @@ export async function qualifyWindowsNativeInstallation(
       ]
     : [{ input, body }];
   const completedTasks = [tasks[0]!];
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -409,12 +425,16 @@ export async function qualifyWindowsNativeInstallation(
     );
     assert.equal(installedA.candidateId, originalCandidate.digest);
     const a = installedA.releaseRoot;
-    const load = (leaf: string) =>
-      pathToFileURL(join(a, 'terminal', 'node_modules', '@kite-ai', 'agent', leaf)).href;
     // Core evidence is read using the actual selected candidate, with no source-module fallback.
-    const sqlite = (await import(
-      load('sqlite.js')
-    )) as typeof import('../../../packages/agent/src/sqlite');
+    const openStore = (releaseRoot: string, selected: typeof originalCandidate) =>
+      windowsQualificationStore({
+        root: join(releaseRoot, 'terminal'),
+        manifest: selected.terminal.manifest,
+        cwd: home,
+        env,
+        remaining,
+      });
+    const sqlite = openStore(a, originalCandidate);
     const usingStore = async <T>(
       store: Awaited<ReturnType<typeof sqlite.openSqliteStore>>,
       read: (store: Awaited<ReturnType<typeof sqlite.openSqliteStore>>) => Promise<T>,
@@ -478,9 +498,9 @@ export async function qualifyWindowsNativeInstallation(
     const configBytes = readFileSync(configPath);
     const userConfiguration = ownedUserConfiguration(home);
     security.writePrivateFile(userConfiguration.path, configBytes);
-    const readHistory = async () =>
+    const readHistory = async (selectedSqlite = sqlite) =>
       await usingStore(
-        await sqlite.openSqliteStore({
+        await selectedSqlite.openSqliteStore({
           dataRoot,
           profile: 'default',
           mode: 'readonly',
@@ -658,19 +678,26 @@ export async function qualifyWindowsNativeInstallation(
       assert.throws(() => uninstallNativeBundle(prefix), /busy|in.use/i);
       assert(existsSync(prefix));
     };
-    const launcher = join(prefix, 'bin', 'kite-desktop.exe');
-    const findMembers = async (child: WindowsOwnedChild, releaseRoot: string) => {
+    const findMembers = async (
+      child: WindowsOwnedChild,
+      releaseRoot: string,
+      candidateId: string,
+    ) => {
+      const selected = candidateId === originalCandidate.digest ? originalCandidate : witnessB;
+      assert.equal(selected.digest, candidateId);
+      const frontdoorPrefix = candidateId === originalCandidate.digest ? prefix : currentPrefix;
+      const runtime = join(releaseRoot, 'terminal', selected.terminal.manifest.entries.runtime);
       const target = Date.now() + Math.min(10000, remaining());
       while (Date.now() < target) {
         const members = child.retainMembers();
         const verifiers = members.filter((member) =>
-          samePath(member.executablePath, join(prefix, 'bin', 'native-verifier.exe')),
+          samePath(member.executablePath, join(frontdoorPrefix, 'bin', 'native-verifier.exe')),
         );
         const mains = members.filter(
           (member) =>
             samePath(
               member.executablePath,
-              join(releaseRoot, originalCandidate.manifest.entries.electron),
+              join(releaseRoot, selected.manifest.entries.electron),
             ) &&
             verifiers.some(
               (verifier) =>
@@ -680,7 +707,7 @@ export async function qualifyWindowsNativeInstallation(
         );
         const services = members.filter(
           (member) =>
-            samePath(member.executablePath, join(releaseRoot, 'terminal', 'runtime', 'bun.exe')) &&
+            samePath(member.executablePath, runtime) &&
             mains.some(
               (main) =>
                 member.parentPid === main.pid &&
@@ -744,14 +771,18 @@ export async function qualifyWindowsNativeInstallation(
       }
       throw Error(`windows_native_visible_text_required:${text}`);
     };
-    const waitCompletedRuns = async (main: WindowsOwnedJobMember, count: number) => {
+    const waitCompletedRuns = async (
+      main: WindowsOwnedJobMember,
+      count: number,
+      selectedSqlite = sqlite,
+    ) => {
       const target = Date.now() + Math.min(10000, remaining());
       while (Date.now() < target) {
         assert.equal(main.inspect(), 'alive', 'original_main_must_still_be_alive');
         // Normal clients hide completed-run diagnostics. Read the actual
         // candidate's Store; visible complete body remains a separate UIA gate.
         const view = await usingStore(
-          await sqlite.openSqliteStore({ dataRoot, profile: 'default', mode: 'readonly' }),
+          await selectedSqlite.openSqliteStore({ dataRoot, profile: 'default', mode: 'readonly' }),
           (store) => store.getView(sessionId),
         );
         if (view.runs.length === count && view.runs.every((run) => run.status === 'completed'))
@@ -774,11 +805,12 @@ export async function qualifyWindowsNativeInstallation(
         currentDriverDeadline = Math.min(deadline, Date.now() + 45000);
         uia = await createWindowsNativeUIA({ home, env, deadline: currentDriverDeadline });
       }
-      const child = await start(launcher, []);
+      const frontdoorPrefix = candidateId === originalCandidate.digest ? prefix : currentPrefix;
+      const child = await start(join(frontdoorPrefix, 'bin', 'kite-desktop.exe'), []);
       const completion = consume(child);
       let members: Awaited<ReturnType<typeof findMembers>>;
       try {
-        members = await findMembers(child, releaseRoot);
+        members = await findMembers(child, releaseRoot, candidateId);
       } catch (error) {
         // A startup rejection can leave Electron's error window alive. Preserve
         // the actual failure output after the original Job's confirmed cleanup.
@@ -873,7 +905,11 @@ export async function qualifyWindowsNativeInstallation(
     const visibleA: WindowsNativeUIAElement = await waitText(first.main, body, true);
     await waitCompletedRuns(first.main, 1);
     let originalHistory = await readHistory();
-    const appendTask = async (window: Awaited<ReturnType<typeof openWindow>>, index: number) => {
+    const appendTask = async (
+      window: Awaited<ReturnType<typeof openWindow>>,
+      index: number,
+      selectedSqlite: typeof sqlite,
+    ) => {
       const prior = originalHistory,
         task = tasks[index]!;
       const draft = await ui(window.main, {
@@ -889,9 +925,9 @@ export async function qualifyWindowsNativeInstallation(
         name: '发送明确的新轮次',
       });
       await waitText(window.main, task.body, true);
-      await waitCompletedRuns(window.main, completedTasks.length + 1);
+      await waitCompletedRuns(window.main, completedTasks.length + 1, selectedSqlite);
       completedTasks.push(task);
-      const current = await readHistory();
+      const current = await readHistory(selectedSqlite);
       for (const name of ['runs', 'messages', 'executions', 'commands'] as const)
         for (const row of prior[name]) {
           assert(row, 'original_history_row_required');
@@ -904,39 +940,60 @@ export async function qualifyWindowsNativeInstallation(
       assert(BigInt(current.metadata.lastChangeCursor) > BigInt(prior.metadata.lastChangeCursor));
       originalHistory = current;
     };
+    const selectionA = readFileSync(join(prefix, 'active'));
+    if (separatePrefixes) {
+      await stage('reject_node_in_bun_prefix', () =>
+        assert.throws(
+          () => installNativeBundle({ bundleRoot: sourceB, prefix }),
+          /native_windows_node_bootstrap_requires_new_prefix/u,
+        ),
+      );
+      assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
+    }
     const installedB = await stage('select_b_while_a_alive', () =>
-      installNativeBundle({ bundleRoot: sourceB, prefix }),
+      installNativeBundle({ bundleRoot: sourceB, prefix: currentPrefix }),
     );
     const b = installedB.releaseRoot;
+    const sqliteB = witnessB.terminal.manifest.nodeVersion ? openStore(b, witnessB) : sqlite;
     assert.equal(installedB.candidateId, witnessB.digest);
     assert.equal(first.main.inspect(), 'alive');
     assert.equal(first.service.inspect(), 'alive');
     leases(a, true);
     busyUninstall();
-    assert.equal(readFileSync(join(prefix, 'active'), 'utf8').split('\n')[0], witnessB.digest);
+    assert.equal(
+      readFileSync(join(currentPrefix, 'active'), 'utf8').split('\n')[0],
+      witnessB.digest,
+    );
+    if (separatePrefixes) {
+      assert.equal(installedB.previousCandidateId, null);
+      assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
+    }
     await waitText(first.main, body, true);
     sameHistory(await readHistory(), originalHistory, originalStoreId);
     await closeWindow(first, a);
     const second = await openWindow(b, installedB.candidateId);
     await waitText(second.main, body, true);
-    sameHistory(await readHistory(), originalHistory, originalStoreId);
-    if (crossCode) await appendTask(second, 1);
+    sameHistory(await readHistory(sqliteB), originalHistory, originalStoreId);
+    if (crossCode) await appendTask(second, 1, sqliteB);
     await closeWindow(second, b);
-    const rollback = await stage('rollback_a', () => rollbackNativeBundle(prefix));
-    assert.equal(rollback.candidateId, installedA.candidateId);
+    if (separatePrefixes) assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
+    else {
+      const rollback = await stage('rollback_a', () => rollbackNativeBundle(prefix));
+      assert.equal(rollback.candidateId, installedA.candidateId);
+    }
     const third = await openWindow(a, installedA.candidateId);
     await waitText(third.main, crossCode ? tasks[1]!.body : body, true);
     sameHistory(await readHistory(), originalHistory, originalStoreId);
-    if (crossCode) await appendTask(third, 2);
+    if (crossCode) await appendTask(third, 2, sqlite);
     await closeWindow(third, a);
     if (crossCode) {
       const selected = await stage('select_current_b_final_cold', () =>
-        installNativeBundle({ bundleRoot: sourceB, prefix }),
+        installNativeBundle({ bundleRoot: sourceB, prefix: currentPrefix }),
       );
       assert.equal(selected.candidateId, witnessB.digest);
       const fourth = await openWindow(b, selected.candidateId);
       for (const task of tasks) await waitText(fourth.main, task.body, true);
-      const finalCold = await readHistory();
+      const finalCold = await readHistory(sqliteB);
       sameHistory(finalCold, originalHistory, originalStoreId);
       assert.equal(
         finalCold.metadata.lastChangeCursor,
@@ -966,7 +1023,7 @@ export async function qualifyWindowsNativeInstallation(
     );
     leases(a, false);
     leases(b, false);
-    const cli = join(prefix, 'bin', 'kite.exe');
+    const cli = join(currentPrefix, 'bin', 'kite.exe');
     const scope = ['--data-root', dataRoot, '--profile', 'default'];
     const maintenance = async (action: string, args: string[]) => {
       const value = await execute(`maintenance_${action}`, [cli, 'maintenance', action, ...args]);
@@ -1016,7 +1073,11 @@ export async function qualifyWindowsNativeInstallation(
     assert.equal((await maintenance('status', scope)).restore, null);
     assert.equal(sha(readFileSync(configPath)), beforeBackup.config);
     assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
-    sameHistory(await readHistory(), originalHistory, restored.storeId as string);
+    sameHistory(
+      await readHistory(crossCode ? sqliteB : sqlite),
+      originalHistory,
+      restored.storeId as string,
+    );
     const restoreDriverDeadline = Math.min(deadline, Date.now() + 45000);
     currentDriverDeadline = restoreDriverDeadline;
     uia = await createWindowsNativeUIA({ home, env, deadline: restoreDriverDeadline });
@@ -1026,7 +1087,11 @@ export async function qualifyWindowsNativeInstallation(
       crossCode ? installedB.candidateId : installedA.candidateId,
     );
     await waitText(restoredWindow.main, crossCode ? tasks[2]!.body : body, true);
-    sameHistory(await readHistory(), originalHistory, restored.storeId as string);
+    sameHistory(
+      await readHistory(crossCode ? sqliteB : sqlite),
+      originalHistory,
+      restored.storeId as string,
+    );
     await closeWindow(restoredWindow, restoreRoot);
     assert(Date.now() <= restoreDriverDeadline, 'original_restore_driver_45s');
     if (uia) {
@@ -1041,8 +1106,14 @@ export async function qualifyWindowsNativeInstallation(
       native: sha(readFileSync(join(profile.profilePath, 'desktop-private', 'data.sqlite'))),
       config: sha(readFileSync(configPath)),
     };
-    await stage('single_uninstall', () => uninstallNativeBundle(prefix));
-    assert(!existsSync(prefix));
+    await stage('uninstall_current_prefix', () => uninstallNativeBundle(currentPrefix));
+    assert(!existsSync(currentPrefix));
+    if (separatePrefixes) {
+      assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
+      assert.equal(sha(readFileSync(profile.databasePath)), preserved.core);
+      await stage('uninstall_original_prefix', () => uninstallNativeBundle(prefix));
+      assert(!existsSync(prefix));
+    }
     assert.equal(sha(readFileSync(profile.databasePath)), preserved.core);
     assert.equal(
       sha(readFileSync(join(profile.profilePath, 'desktop-private', 'data.sqlite'))),
@@ -1067,6 +1138,7 @@ export async function qualifyWindowsNativeInstallation(
       candidateB: installedB.candidateId,
       selectionOnly: !crossCode,
       crossCodeQualified: crossCode,
+      separatePrefixes,
       ...(crossCode
         ? {
             predecessorSource: originalCandidate.terminal.manifest.source,
@@ -1098,7 +1170,7 @@ export async function qualifyWindowsNativeInstallation(
       completeOutputBytes: Buffer.byteLength(body),
       visibleA,
       providerCalls,
-      singleUninstall: true,
+      singleUninstall: !separatePrefixes,
       preserved,
       basicElapsedMs,
       maintenanceElapsedMs: Date.now() - maintenanceStarted,

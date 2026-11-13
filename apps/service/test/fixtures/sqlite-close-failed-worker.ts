@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Database } from '@kite-ai/agent/runtime-sqlite';
 import { SqliteOperations } from '../../../../packages/agent/src/storage/sqlite/operations';
 import '../../../../packages/agent/src/storage/worker/main';
 

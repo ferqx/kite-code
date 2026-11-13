@@ -5,8 +5,9 @@
  * This file keeps the production-flow boundaries that require a real TUI, local
  * HTTP model discovery, cancellation, and persisted configuration.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+
 import { readFileSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCurrentInput, typeMaskedText, typeText } from '../harness/input-helpers';
@@ -25,15 +26,15 @@ const DEFAULT_CUSTOM_ENDPOINT = 'http://localhost:8080/v1';
 
 describe('first-run — connection boundaries', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   function output(): string {
     return stripAnsi(tui.viewport());
   }
 
-  beforeEach(() => {
-    server = createMockModelServer();
+  beforeEach(async () => {
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         language: 'en-US',

@@ -1,28 +1,32 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { type BackgroundExecutionItem, createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { launchPairedService } from '../../src/paired';
+import { nodeServiceFixture } from '../fixtures/node-service-process';
 import type { LoadResourcePhase, LoadTelemetry } from './multi-session-stream-load.types';
 
 async function until(read: () => boolean | Promise<boolean>, name: string, timeout = 15000) {
   const deadline = Date.now() + timeout;
   while (!(await read())) {
     if (Date.now() > deadline) throw Error(`load_deadline:${name}`);
-    await Bun.sleep(20);
+    await sleepTimer(20);
   }
 }
-function provider() {
+async function provider() {
   type Live = { ticks: number; finish: () => void };
   const active = new Map<string, Live>();
   const started = new Set<string>();
   const canceled = new Set<string>();
   let maxActive = 0,
     calls = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     idleTimeout: 60,
@@ -255,7 +259,7 @@ function percentile(values: number[], fraction: number) {
 }
 async function descriptors(pid: number) {
   if (process.platform === 'win32') return null;
-  const child = Bun.spawn(['lsof', '-a', '-p', String(pid), '-Ff'], {
+  const child = spawnProcess(['lsof', '-a', '-p', String(pid), '-Ff'], {
     stdout: 'pipe',
     stderr: 'ignore',
   });
@@ -275,7 +279,7 @@ for (const stage of [
     mkdirSync(workspace);
     const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'load' });
     const metricsPath = join(directory, 'metrics.json');
-    const source = provider();
+    const source = await provider();
     let host: Awaited<ReturnType<typeof launchPairedService>> | undefined;
     const controllers = new Set<AbortController>();
     const observers: Promise<unknown>[] = [];
@@ -296,7 +300,8 @@ for (const stage of [
     let transport: ReturnType<typeof observeModelOutputTransport> | undefined;
     try {
       host = await launchPairedService({
-        entrypoint: join(import.meta.dir, 'multi-session-stream-load.fixture.ts'),
+        ...nodeServiceFixture,
+        entrypoint: join(import.meta.dirname, 'multi-session-stream-load.fixture.ts'),
         profile,
         instanceId: `load-${stage.roots}-${stage.slots}`,
         buildId: 'isolated-loopback-load',
@@ -504,7 +509,7 @@ for (const stage of [
           startObserver();
         }
         samples.push(JSON.parse(readFileSync(metricsPath, 'utf8')));
-        await Bun.sleep(pace);
+        await sleepTimer(pace);
       };
       for (let round = 0; round < 12; round++) await readBatch(round);
       // Reading cancellation cannot stop any task; all originally active streams still advance.
@@ -658,7 +663,7 @@ for (const stage of [
           settled = true;
           break;
         }
-        await Bun.sleep(30);
+        await sleepTimer(30);
       }
       expect(settled).toBe(true);
       const terminal = await client.listAllBackgroundExecutions();
@@ -732,7 +737,7 @@ for (const stage of [
         allObserversAwaited: true,
       };
       if (stage.slots === 32) {
-        await Bun.sleep(1000);
+        await sleepTimer(1000);
         expect(source.active.size).toBe(0);
         await snapshotResources('quiescent');
       }

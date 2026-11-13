@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { lstatSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +8,7 @@ import {
   type TuiMcpConnectionIntent,
   type TuiMcpSourceSnapshot,
 } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import type { McpConnectionRecord } from '../host/mcp-connection-intents';
 import type { McpConnectionJournal } from '../host/mcp-connection-journal';
 import { mcpCanonical, mcpSha } from '../host/mcp-selection-intents';

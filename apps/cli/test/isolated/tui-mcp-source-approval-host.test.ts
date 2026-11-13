@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -19,6 +20,8 @@ import { type AgentClient, createClient, type QueryResponse } from '@kite-ai/cli
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { TuiMcpSourceApprovalIntent, TuiMcpSourceSnapshot } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 import { mcpSha } from '../../host/mcp-selection-intents';
@@ -36,7 +39,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw Error('source_host_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 const intent = (
@@ -78,7 +81,7 @@ async function fixture(many = false) {
   let rpc = 0,
     models = 0,
     vault = 0;
-  const peer = Bun.serve({
+  const peer = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -86,7 +89,7 @@ async function fixture(many = false) {
       return new Response(null, { status: 500 });
     },
   });
-  const model = Bun.serve({
+  const model = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -862,5 +865,5 @@ test('public backup v10 A→B preserves original Source bytes and real current B
 }, 20000);
 
 function mcpShaFromBytes(bytes: Uint8Array) {
-  return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+  return createHash('sha256').update(bytes).digest('hex');
 }

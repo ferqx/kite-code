@@ -11,6 +11,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../fixtures/test-filesystem';
 
 // An explicit, synthetic-only test program. No production feature flag or live Provider.
@@ -75,11 +76,14 @@ const root = `${output}.workspace`;
 privateDirectory(root);
 const workspace = join(root, 'workspace');
 mkdirSync(workspace);
-const generator = Bun.spawn([process.execPath, import.meta.path, `--generate=${workspace}`], {
-  stdout: 'inherit',
-  stderr: 'inherit',
-  windowsHide: true,
-});
+const generator = spawnFixtureProcess(
+  [process.execPath, ...process.execArgv, import.meta.filename, `--generate=${workspace}`],
+  {
+    stdout: 'inherit',
+    stderr: 'inherit',
+    windowsHide: true,
+  },
+);
 if ((await generator.exited) !== 0) throw Error('image_benchmark_fixture_failed');
 const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
 privateDirectory(profile.profilePath);
@@ -188,7 +192,7 @@ const report: Record<string, unknown> = {
   date: new Date().toISOString(),
   platform: process.platform,
   arch: process.arch,
-  bunVersion: Bun.version,
+  nodeVersion: process.versions.node,
   synthetic: true,
   providerRequests: 0,
   perImageInputLimit: 16 * 1024 * 1024,

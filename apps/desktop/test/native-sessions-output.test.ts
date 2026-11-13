@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentClient, Message, ModelOutputSnapshot } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 

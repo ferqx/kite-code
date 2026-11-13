@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readdirSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { cleanup, render } from 'ink-testing-library';
 import InputLine from '../../../apps/kite-cli/src/tui/components/InputLine';
 import { terminalFocusStore } from '../../../apps/kite-cli/src/tui/hooks/terminal-focus-store';
 import { readOsProcessStartIdentity } from '../../../scripts/runtime/process-start-identity';
+import { spawnSync as testSpawnSync } from '../../../scripts/tooling/process';
 
 const telemetryFile = process.env.KITE_FAULT_SOAK_TELEMETRY_FILE;
 const requestedRepeats = Number(process.env.KITE_FAULT_SOAK_REPEAT_COUNT);
@@ -55,7 +57,7 @@ function sample(): ResourceSample {
 function descendantPids(rootPid: number): number[] | undefined {
   if (process.platform === 'win32') return undefined;
   try {
-    const listing = Bun.spawnSync(['ps', '-Ao', 'pid=,ppid='], {
+    const listing = testSpawnSync(['ps', '-Ao', 'pid=,ppid='], {
       stdout: 'pipe',
       stderr: 'ignore',
     });
@@ -89,7 +91,7 @@ for (let sequence = 1; sequence <= repeatCount; sequence += 1) {
   const view = render(
     <InputLine mode="prompt" onSubmit={() => {}} workspace={process.cwd()} disabled />,
   );
-  await Bun.sleep(5);
+  await testSleep(5);
   const mountedDiagnostics = terminalFocusStore.diagnostics();
   if (!mountedDiagnostics.reportingEnabled || mountedDiagnostics.subscriberCount === 0) {
     throw new Error(`TUI focus reporting did not activate: ${JSON.stringify(mountedDiagnostics)}`);
@@ -100,7 +102,7 @@ for (let sequence = 1; sequence <= repeatCount; sequence += 1) {
   view.unmount();
   view.cleanup();
   cleanup();
-  await Bun.sleep(5);
+  await testSleep(5);
   const diagnostics = terminalFocusStore.diagnostics();
   if (diagnostics.subscriberCount !== 0 || diagnostics.reportingEnabled) {
     throw new Error(`TUI listener cleanup failed: ${JSON.stringify(diagnostics)}`);

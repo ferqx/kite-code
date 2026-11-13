@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { build as bundle } from '../../../scripts/tooling/bun-build';
 import { plainInkOutput } from './ink-output';
 
 const [argument] = process.argv.slice(2);
@@ -14,14 +15,14 @@ if (manifest.name !== 'ink' || manifest.version !== '7.1.1')
   throw Error('tui_ink_build_version_unreviewed');
 const reconciler = realpathSync(join(inkDirectory, 'reconciler.js'));
 mkdirSync(outdir, { recursive: true });
-const result = await Bun.build({
+const result = await bundle({
   entrypoints: [
-    resolve(import.meta.dir, '../src/tui/index.tsx'),
-    resolve(import.meta.dir, '../src/tui/ink.ts'),
+    resolve(import.meta.dirname, '../src/tui/index.tsx'),
+    resolve(import.meta.dirname, '../src/tui/ink.ts'),
   ],
-  root: resolve(import.meta.dir, '../src/tui'),
+  root: resolve(import.meta.dirname, '../src/tui'),
   outdir,
-  target: 'bun',
+  target: 'node',
   splitting: true,
   packages: 'bundle',
   external: ['react', 'react-dom', '@kite-ai/client'],

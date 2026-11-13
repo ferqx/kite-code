@@ -1,13 +1,15 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type ContextCompressor, createRuntime, estimateModelContext } from '@kite-ai/agent';
 import type { Extension, OperationRef, Permissions } from '@kite-ai/agent/extensions';
 import type { PermissionPolicyOptions } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { type ChildRole, createChildConfiguration } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -26,12 +28,12 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() >= end) throw new Error('child_configuration_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
-function provider() {
+async function provider() {
   const requests: Record<string, unknown>[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -124,8 +126,8 @@ async function fixture(
   writeFileSync(join(workspace, 'AGENTS.md'), 'actual old Workspace instruction');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   privateDirectory(profile.profilePath);
-  const a = provider(),
-    b = provider();
+  const a = await provider(),
+    b = await provider();
   const userPath = join(profile.profilePath, 'config.jsonc'),
     projectPath = join(workspace, 'kite-agent.jsonc');
   const configuration = {

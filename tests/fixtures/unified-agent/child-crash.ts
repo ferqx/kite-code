@@ -1,4 +1,5 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { OperationRef } from '@kite-ai/agent/extensions';
@@ -166,7 +167,7 @@ while (true) {
     break;
   }
   if (Date.now() > deadline) throw new Error('Child crash evidence not ready.');
-  await Bun.sleep(10);
+  await fixtureDelay(10);
 }
 setInterval(() => {}, 1000);
 await new Promise<void>(() => {});

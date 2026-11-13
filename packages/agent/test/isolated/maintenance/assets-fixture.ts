@@ -1,15 +1,18 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { buildWindowsAccess } from '../../../../../apps/desktop/scripts/build-windows-access';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireProfileAccess,
   acquireProfileDataLock,
   selectProfile,
 } from '../../../src/platform/profile';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 type NodeWindowsAsset = { path: string; sha256: string };
@@ -96,9 +99,9 @@ export async function nodeAssets(
   const helper = join(directory, 'profile-access-helper.js'),
     driver = join(directory, 'driver.js');
   if (action === 'seed') {
-    const build = await Bun.build({
+    const build = await buildBundle({
       entrypoints: [join(repository, 'apps/desktop/electron/profile-access-helper.ts')],
-      target: 'bun',
+      ...fixtureRuntimeBuild(directory),
       packages: 'bundle',
       outdir: directory,
       naming: 'profile-access-helper.js',
@@ -133,7 +136,7 @@ try {
 `,
       { mode: 0o600 },
     );
-    const consumer = await Bun.build({
+    const consumer = await buildBundle({
       entrypoints: [source],
       target: 'node',
       packages: 'bundle',
@@ -145,9 +148,9 @@ try {
   }
   const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
   const selected = selectProfile(profile),
-    node = Bun.which('node');
-  if (!node) throw Error('owned_node_unavailable');
-  const child = Bun.spawn(
+    node = fixtureNodeExecutable();
+
+  const child = spawnProcess(
     [
       node,
       driver,
@@ -158,8 +161,8 @@ try {
         access: {
           ...(windowsAsset ? { windowsAsset } : {}),
           profile,
-          bunExecutable: process.execPath,
-          bunSha256: digest(process.execPath),
+          runtimeExecutable: fixtureNodeExecutable(),
+          runtimeSha256: digest(fixtureNodeExecutable()),
           helperPath: helper,
           helperSha256: digest(helper),
         },

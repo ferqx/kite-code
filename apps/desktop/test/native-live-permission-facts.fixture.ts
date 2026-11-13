@@ -1,6 +1,6 @@
-import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type {
   LivePermissionActor,
   LivePermissionFacts,

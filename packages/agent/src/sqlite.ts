@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { canonicalJson } from './json';
 import {
   acquireExistingSharedFileLock,
@@ -56,7 +57,9 @@ export function sqliteStorageAssets() {
   return Object.freeze({
     module: new URL(import.meta.url),
     worker: new URL(
-      import.meta.url.endsWith('.ts') ? './storage/worker/main.ts' : './storage/worker/main.js',
+      import.meta.url.endsWith('.ts')
+        ? '../dist/storage/worker/main.js'
+        : './storage/worker/main.js',
       import.meta.url,
     ),
     baseline: new URL('./storage/migrations/0001-baseline.sql', import.meta.url),
@@ -119,7 +122,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
   const selectedEngine = initializeDefaultSqliteEngine();
   const engine = selectedEngine.qualification === 'selected' ? selectedEngine.selection : null;
   const access = acquireProfileAccess(options);
-  let worker: Worker;
+  let worker: ReturnType<typeof createOwnedWorker>['worker'];
   let owned: ReturnType<typeof createOwnedWorker>;
   try {
     owned = createOwnedWorker(sqliteStorageAssets().worker.href);
@@ -358,7 +361,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
           break;
         } catch (error) {
           if (!(error instanceof LockBusyError) || Date.now() >= deadline) throw error;
-          await Bun.sleep(10);
+          await sleep(10);
         }
       }
     }

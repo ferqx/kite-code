@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 type Mode = 'both' | 'lost' | 'session' | 'code' | 'before_post' | 'between_legs';
@@ -33,10 +36,10 @@ export async function runFileRecoveryPTY(
   fixture: Omit<Configuration, 'mode' | 'transcript'>,
   input: Pick<Configuration, 'mode' | 'transcript'>,
 ) {
-  const child = Bun.spawn(
+  const child = testSpawn(
     [
       process.execPath,
-      '--no-install',
+      ...testRuntimeFlags,
       fileURLToPath(import.meta.url),
       JSON.stringify({
         root: fixture.root,
@@ -82,7 +85,7 @@ async function drive(config: Configuration) {
   function start(window?: string) {
     rmSync(join(config.root, 'service.pid'), { force: true });
     return spawnTuiPTY({
-      cmd: [process.execPath, '--no-install', join(config.root, 'tui.js')],
+      cmd: [process.execPath, ...testRuntimeFlags, join(config.root, 'tui.js')],
       cwd: config.workspace,
       env: {
         HOME: config.home,
@@ -115,7 +118,7 @@ async function drive(config: Configuration) {
         return;
       if (text === checkpoint && active.sinceAction().includes('server_reset')) await key('r');
       if (active.ended) throw Error(`host ended before ${text}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     throw Error(
       `expected ${text} viewport=${active.viewport()} tail=${active.text().slice(-8000)}`,
@@ -126,7 +129,7 @@ async function drive(config: Configuration) {
     while (Date.now() < end) {
       const value = read();
       if (matches(value)) return value;
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     throw Error(message);
   };
@@ -344,7 +347,7 @@ async function drive(config: Configuration) {
     }
     await key('\x11');
     const end = Date.now() + 10000;
-    while (!active.ended && Date.now() < end) await Bun.sleep(50);
+    while (!active.ended && Date.now() < end) await testSleep(50);
     const [code] = await ptyDeadline(
       Promise.all([active.host.exited, active.eof]),
       3000,

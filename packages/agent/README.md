@@ -106,7 +106,7 @@ Planning 只表示计划模式，不定义 Agent 的 planning/building 阶段。
 - [上下文选择与结果](src/storage/sqlite/context/README.md)：当前选择、完整历史和准确结果引用分开保存；双游标读取固定同一选择与顺序上界。
 - [Profile 入口](src/profile.ts)：`selectProfile({dataRoot, profile})` 只读确定规范 data-root、逻辑名称与稳定 `profileAccessKey`，供 launcher 在启动前固定目标；import 与选择均不创建目录、取得锁或打开数据库。
 - [离线维护入口](src/maintenance/README.md)：显式备份／恢复、DB9公共扩展申请的v18及DB8原Workspace申请的v17资产，以及持准确Store排他权的空间／单会话历史与无引用附件GC；维护自身连接／句柄关闭未确认时保原资源、临时目录及Profile排他权至实际宿主退出，安装维护和完整平台资格按实施进度记录。
-- [Profile 使用权入口](src/platform/README.md)：`@kite-ai/agent/profile-access` 供 Bun 宿主显式取得共享使用权，可信一次性 helper 可取得继承 fd 的同一锁；纯 Node 身份入口不引入 FFI 或 acquire。
+- [Profile 使用权入口](src/platform/README.md)：`@kite-ai/agent/profile-access` 供 Node 宿主显式取得共享使用权，可信一次性 helper 可取得继承 fd 的同一锁；纯 Node 身份入口不引入 FFI 或 acquire。
 - [制品使用权入口](src/artifact-access.ts)：显式候选 shared/exclusive OS 使用锁，import 不 acquire，不授予 Profile/Store/执行权限；终端安装器与运行中的宿主共享此协议。
 - [资源入口](src/resources.ts)：`createWorkspaceSerialLocks(profile)` 显式建立同 profile/Workspace 的共享 OS 串行键后端，宿主注入 Runtime；import 不打开资源，普通扩展不取得锁对象。
 - [执行资源](src/execution/resources.ts)发布冻结总容量，经 `ToolContext.resourceCapacity` 可信注入；它不是当前空闲量或授权。统一 Browser 入口须 process 总容量至少 2，不足时在代码／Browser Job 创建前准确返回 `browser_resource_capacity_unavailable`；有容量时仍受原审批、资源与取消边界约束。
@@ -365,7 +365,7 @@ Operation 等待共享持久变化水位，最多 64 个活动 wake registration
 
 可信宿主的有限 Runtime 生命周期入口见[lifecycle owner](src/lifecycle.README.md)：同步实际 busy 检查与 `if_idle` 封门、原实例取消/drain、同一关闭完成 Promise，以及 Service 在最终资源关闭前的排空回调。纯观察不制造 busy；未确认 Job 或清理失败保留真实 handle/permit 与 Store/profile 资源，不宣称成功退出。该入口不实现 daemon 发现或第二个任务管理器。
 
-[真实两进程闭环](../../tests/isolated/unified-agent/persistence.test.ts)将外部计数工具编译到临时独立目录，执行后关闭进程，新进程只读查同一结果且计数不增。固定模型与无害计数器不调用付费 Provider。存储测试位于[test](test)，架构检查通过 `bun run check:unified-agent-boundary`。
+[真实两进程闭环](../../tests/isolated/unified-agent/persistence.test.ts)将外部计数工具编译到临时独立目录，执行后关闭进程，新进程只读查同一结果且计数不增。固定模型与无害计数器不调用付费 Provider。存储测试位于[test](test)，架构检查使用 `bun run check:unified-agent-boundary`。
 
 [独立未见 label-station](../../tests/isolated/unified-agent/evolution-unseen-sample.test.ts)以公开 `extensions`、Runtime、SQLite/Store 入口注册普通 Tool/Action/Query，自有 resource 和 namespace CAS 回执，不修改 Loop/Session/schema/router。源码外真实通用 UI 点击、HTTP、受控 Tool 两次效果、读回与再次操作1项67断言通过，Action/Tool 拒绝均零效果、Model/Run为零；12个列明核心/公开基线 hash 保持原值。独立包声明依赖，测试使用已安装 npm 模块而非新 npm 安装；本机有限 E01/E02/E03/E14 的 Evolution Record、原 ID 和未验证范围归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-04mcp-冷原申请备份-v8-与未见扩展样本)，不把它作为全部演进或发行资格。
 
@@ -382,7 +382,7 @@ Operation 等待共享持久变化水位，最多 64 个活动 wake registration
 
 持久 mode/trust 权限决定使用有限 `controlReads`，不能只在宿主 authorize 时读取。真实 original subject、root Session、Workspace 和当前 Store 由 Execution/Command 派生，最终 markDispatching 同事务核对 session mode、user default 和 workspace trust 的准确 revision；审批和自动 review 返回必须保留这些 proof。批准后撤销或更新会在 adapter 前拒绝，不能由 human approval 擦除撤销资格。`getSession` 提供有限只读 Session 查询，权限范围读取不需拉取完整历史。事务入口与 journal 说明见[宿主控制 owner](src/storage/sqlite/host-mutations-README.md)。
 
-公共入口在 manifest 的同一次 Bun build 中使用 `--splitting` 共享领域类定义。SQLite leaf 从 Worker 回执重建的 `AgentError` 必须与根入口、storage 入口相同，否则 Service 的实际类判定会把 `command_conflict` 错投影为通用 503。完整包测试从源码树外核构造器身份、真实 Worker 错误和 HTTP 409，并继续实际执行 Worker、Shell/MCP guardian、Web parser 与备份，验证共享 chunk 后资产定位仍正确。此构建修复不以错误对象自报 code 放宽识别，也不代替正式发行资格。
+公共入口在 manifest 的同一次构建中以 Node 为目标，使用 `--splitting` 共享领域类定义。SQLite leaf 从 Worker 回执重建的 `AgentError` 必须与根入口、storage 入口相同，否则 Service 的实际类判定会把 `command_conflict` 错投影为通用 503。完整包测试从源码树外核构造器身份、真实 Worker 错误和 HTTP 409，并继续实际执行 Worker、Shell/MCP guardian、Web parser 与备份，验证共享 chunk 后资产定位仍正确。此构建修复不以错误对象自报 code 放宽识别，也不代替正式发行资格。
 
 
 ## 显式 Job 外部核实

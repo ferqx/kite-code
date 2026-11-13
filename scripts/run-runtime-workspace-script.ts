@@ -1,16 +1,22 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
+import { delimiter, dirname, join } from 'node:path';
+import { spawn as spawnProcess } from './tooling/process';
 import { UNIFIED_RUNTIME_WORKSPACES } from './unified-test-plan';
 
 const supportedScripts = new Set(['build', 'test', 'typecheck']);
 export async function runWorkspaceScript(root: string, args: readonly string[]): Promise<number> {
   const scriptName = args[0];
   if (args.length !== 1 || !scriptName || !supportedScripts.has(scriptName)) {
-    console.error('usage: bun run scripts/run-runtime-workspace-script.ts <build|test|typecheck>');
+    console.error('usage: bun run build|test|typecheck');
     return 2;
   }
 
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
+  };
+  delete env.BUN_BE_BUN;
+  delete env.BUN_OPTIONS;
   for (const workspace of UNIFIED_RUNTIME_WORKSPACES) {
     const workspaceRoot = join(root, workspace);
     const packageJsonPath = join(workspaceRoot, 'package.json');
@@ -29,13 +35,16 @@ export async function runWorkspaceScript(root: string, args: readonly string[]):
     }
 
     console.log(`\n[workspace:${packageJson.name ?? workspace}] ${scriptName}`);
-    const child = Bun.spawn([process.execPath, 'run', scriptName], {
-      cwd: workspaceRoot,
-      env: process.env,
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
+    const child = spawnProcess(
+      ['bun', 'run', '--no-config', '--no-env-file', '--no-install', scriptName],
+      {
+        cwd: workspaceRoot,
+        env,
+        stdin: 'inherit',
+        stdout: 'inherit',
+        stderr: 'inherit',
+      },
+    );
     const exitCode = await child.exited;
     if (exitCode !== 0) return exitCode;
   }

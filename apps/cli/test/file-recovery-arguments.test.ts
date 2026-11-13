@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { CLIArgumentError, parseCLIArguments } from '../src/arguments';
 
 const point = 'a'.repeat(64);

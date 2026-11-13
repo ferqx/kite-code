@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import {
   buildOriginalDaemonCandidate,
   createOriginalDaemonHost,
@@ -21,12 +21,12 @@ describe('TUI PTY System — explicit App Server daemon', () => {
   let tui: PtyProcess | undefined;
   let second: PtyProcess | undefined;
   let candidate: Awaited<ReturnType<typeof buildOriginalDaemonCandidate>>;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let daemon: ReturnType<typeof createOriginalDaemonHost>;
   beforeEach(async () => {
     candidate = await buildOriginalDaemonCandidate();
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         provider: { mock: { baseURL: server.baseURL } },

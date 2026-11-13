@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { closeSync, constants, fsyncSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 const [controlUrl, executable, hostPath, root, evidence] = process.argv.slice(2) as [
@@ -62,7 +63,7 @@ const wait = async (text: string, absent?: string) => {
       return;
     if (active!.ended) throw Error(`early exit ${active!.text().slice(-3000)}`);
     if (Date.now() > end) throw Error(`expected ${text} tail=${view.slice(-5000)}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string, preserveCurrentDetail = false) => {
@@ -79,7 +80,7 @@ const choose = async (label: string, top = 'Project sources', prefix = false) =>
       if (selectedLabel(frame.text) !== undefined) return frame;
       if (Date.now() > end) throw Error(`original MCP selection absent: ${label}`);
       if (active!.ended) throw Error('original MCP host ended');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   };
   const initial = await selection();
@@ -91,7 +92,7 @@ const choose = async (label: string, top = 'Project sources', prefix = false) =>
       const frame = await current();
       if (frame.fresh && selectedLabel(frame.text) === top) break;
       if (Date.now() > end) throw Error(`original MCP top unavailable: ${top}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   for (;;) {
@@ -105,7 +106,7 @@ const choose = async (label: string, top = 'Project sources', prefix = false) =>
       if (frame.fresh && selected !== undefined && selected !== previous) break;
       if (Date.now() > end) throw Error(`original MCP selection did not move: ${label}`);
       if (active!.ended) throw Error('original MCP host ended');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
 };
@@ -120,7 +121,7 @@ const check = async (path: string) => {
 const start = async () => {
   retained = undefined;
   active = spawnTuiPTY({
-    cmd: [executable, '--no-install', hostPath],
+    cmd: [executable, '--no-global-search-paths', hostPath],
     cwd: root,
     onData(bytes) {
       output.push(bytes.slice());
@@ -131,7 +132,7 @@ const start = async () => {
   if (process.platform === 'win32') {
     ownership = { pid: active.host.pid, ownership: 'windows-process-tree' };
   } else {
-    const { dlopen } = await import('bun:ffi');
+    const { dlopen } = await import('@kite-ai/agent/runtime-ffi');
     const library = dlopen(
       process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6',
       { getpgid: { args: ['i32'], returns: 'i32' } },
@@ -149,7 +150,7 @@ const start = async () => {
 const quit = async () => {
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!active!.ended && Date.now() < end) await Bun.sleep(50);
+  while (!active!.ended && Date.now() < end) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([active!.host.exited, active!.eof]),
     3000,

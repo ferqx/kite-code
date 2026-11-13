@@ -82,7 +82,7 @@ if (input.mode === 'repair-permissions') {
       service = await launchPairedService({
         profile,
         entrypoint: input.service,
-        executable: input.access.bunExecutable,
+        executable: input.access.runtimeExecutable,
         spawnChild: spawnNodePairedChild,
         instanceId: crypto.randomUUID(),
         buildId: 'owned-windows-holder',
@@ -177,7 +177,7 @@ if (input.mode === 'repair-permissions') {
     paired = await launchPairedService({
       profile,
       entrypoint: input.service,
-      executable: input.access.bunExecutable,
+      executable: input.access.runtimeExecutable,
       spawnChild: spawnNodePairedChild,
       instanceId: input.instanceId,
       buildId: 'owned-windows-holder',

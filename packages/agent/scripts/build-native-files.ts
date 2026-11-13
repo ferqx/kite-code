@@ -9,11 +9,12 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn, which } from '../../../scripts/tooling/process';
 import { filesNativeAbi } from '../src/files-native-binding';
 
 export async function buildNativeFiles(outdir: string) {
   const crate = fileURLToPath(new URL('../native/files/', import.meta.url));
-  const cargo = Bun.which('cargo');
+  const cargo = which('cargo');
   if (!cargo) throw Error('files_native_compiler_unavailable');
   const target = (
     {
@@ -38,7 +39,7 @@ export async function buildNativeFiles(outdir: string) {
   ])
     delete buildEnvironment[key];
   const run = async (args: string[]) => {
-    const child = Bun.spawn([cargo, ...args], {
+    const child = spawn([cargo, ...args], {
       cwd: crate,
       env: buildEnvironment,
       stdin: 'ignore',

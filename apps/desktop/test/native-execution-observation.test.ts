@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { NativeState } from '../src/native-bridge';
 import { nativeExecutionObservation } from '../src/native-execution-observation';
 

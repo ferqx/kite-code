@@ -1,11 +1,17 @@
-import { expect, test } from 'bun:test';
-import { ModelAttemptError, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import {
+  ModelAccessError,
+  ModelAttemptError,
+  type ModelEvent,
+  type ModelRequest,
+} from '@kite-ai/ai';
 import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
   reasoningEfforts,
   type SdkModelPreset,
 } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 
 const request: ModelRequest = {
   requestId: 'request',
@@ -37,14 +43,14 @@ const request: ModelRequest = {
 function chunk(delta: unknown, finish: string | null = null, usage?: unknown) {
   return `data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model: 'fake', choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`;
 }
-function endpoint(
+async function endpoint(
   response: (incoming: Request) => Response | Promise<Response>,
   preset?: SdkModelPreset,
 ) {
   const bodies: unknown[] = [];
   let calls = 0;
   let transportSignal: AbortSignal | null | undefined;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(incoming) {
@@ -62,7 +68,6 @@ function endpoint(
         transportSignal = init?.signal;
         return fetch(input, init);
       },
-      { preconnect: fetch.preconnect },
     ),
   });
   const adapter = createSdkModelAdapter({
@@ -98,7 +103,7 @@ async function collect(
 }
 
 test('one actual network attempt maps message history, complete tools, reasoning, text and known usage', async () => {
-  const data = endpoint((incoming) => {
+  const data = await endpoint((incoming) => {
     expect(incoming.headers.get('authorization')).toBe('Bearer fixture-secret');
     return sse(
       chunk({ role: 'assistant', reasoning_content: 'Reason' }) +
@@ -200,7 +205,7 @@ test('strict compatible endpoint round-trips namespaced, colliding, Unicode and 
     })),
   };
   const original = JSON.stringify(input);
-  const data = endpoint(async (incoming) => {
+  const data = await endpoint(async (incoming) => {
     const body = (await incoming.json()) as {
       tools: { function: { name: string } }[];
       messages: { tool_calls?: { function: { name: string } }[] }[];
@@ -259,7 +264,7 @@ test('separate usage-only chunk preserves reported totals, original nested detai
     prompt_tokens_details: { cache_write_tokens: 12, image_tokens: 8 },
     completion_tokens_details: { reasoning_tokens: 9, text_tokens: 36 },
   };
-  const data = endpoint(() =>
+  const data = await endpoint(() =>
     sse(
       chunk({ content: 'Done' }) +
         chunk({}, 'stop') +
@@ -295,7 +300,7 @@ test('separate usage-only chunk preserves reported totals, original nested detai
 test('repeated Provider usage is replaced by the final snapshot rather than added', async () => {
   const first = { prompt_tokens: 31, completion_tokens: 2, total_tokens: 33 };
   const last = { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 };
-  const data = endpoint(() =>
+  const data = await endpoint(() =>
     sse(`${chunk({ content: 'Partial' }, null, first)}${chunk({}, 'stop', last)}data: [DONE]\n\n`),
   );
   try {
@@ -315,7 +320,7 @@ test('repeated Provider usage is replaced by the final snapshot rather than adde
 test('received usage survives a failed or cancelled stream without successful finish or tool dispatch', async () => {
   for (const cancelled of [false, true]) {
     const usage = { prompt_tokens: 31, completion_tokens: 7, total_tokens: 38 };
-    const data = endpoint(() =>
+    const data = await endpoint(() =>
       sse(
         chunk({ content: 'Partial' }, null, usage) +
           'data: {"error":{"message":"fixture-secret"}}\n\n',
@@ -348,7 +353,7 @@ test('received usage survives a failed or cancelled stream without successful fi
 });
 
 test('missing Provider token usage remains null rather than zero', async () => {
-  const data = endpoint(() =>
+  const data = await endpoint(() =>
     sse(`${chunk({ content: 'Done' })}${chunk({}, 'stop')}data: [DONE]\n\n`),
   );
   try {
@@ -366,7 +371,7 @@ test('missing Provider token usage remains null rather than zero', async () => {
 });
 
 test('partial usage does not turn absent input/cache/reasoning measurements into zero', async () => {
-  const data = endpoint(() =>
+  const data = await endpoint(() =>
     sse(`${chunk({}, 'stop', { completion_tokens: 7 })}data: [DONE]\n\n`),
   );
   try {
@@ -391,7 +396,7 @@ test.each([
   'http-error',
   'stream-error',
 ] as const)('single attempt fails closed without synthesized successful finish: %s', async (mode) => {
-  const data = endpoint(() => {
+  const data = await endpoint(() => {
     if (mode === 'http-error')
       return new Response(
         JSON.stringify({ error: { message: 'fixture-secret must stay private' } }),
@@ -444,21 +449,18 @@ test.each([
   ['EHOSTUNREACH', 'connection_interrupted'],
   ['ConnectionClosed', 'connection_interrupted'],
   ['ConnectionRefused', 'connection_refused'],
-])('known transport code %s becomes finite safe detail without retaining the error', async (code, detail) => {
+] as const)('known transport code %s becomes finite safe detail without retaining the error', async (code, detail) => {
   let attempts = 0;
   const model = createCompatibleModelBinding({
     baseURL: 'http://127.0.0.1:1/v1',
     modelId: 'fixture',
     apiKey: 'fixture-secret',
-    fetch: Object.assign(
-      async () => {
-        attempts++;
-        throw new TypeError('private endpoint and fixture-secret', {
-          cause: Object.assign(new Error('private log'), { code }),
-        });
-      },
-      { preconnect: fetch.preconnect },
-    ),
+    fetch: Object.assign(async () => {
+      attempts++;
+      throw new TypeError('private endpoint and fixture-secret', {
+        cause: Object.assign(new Error('private log'), { code }),
+      });
+    }),
   });
   const adapter = createSdkModelAdapter({ models: new Map([['bound', model]]) });
   const result = await collect(adapter);
@@ -483,17 +485,14 @@ for (const protocol of ['chat-completions', 'responses'] as const) {
       baseURL: 'http://127.0.0.1:1/v1',
       modelId: 'fixture',
       protocol,
-      fetch: Object.assign(
-        async () => {
-          attempts++;
-          if (mode !== 'stream-error') throw failure;
-          return new Response(
-            new ReadableStream({ start: (controller) => controller.error(failure) }),
-            { headers: { 'content-type': 'text/event-stream' } },
-          );
-        },
-        { preconnect: fetch.preconnect },
-      ),
+      fetch: Object.assign(async () => {
+        attempts++;
+        if (mode !== 'stream-error') throw failure;
+        return new Response(
+          new ReadableStream({ start: (controller) => controller.error(failure) }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }),
     });
     const result = await collect(createSdkModelAdapter({ models: new Map([['bound', model]]) }));
     expect(attempts).toBe(1);
@@ -512,13 +511,13 @@ for (const protocol of ['chat-completions', 'responses'] as const) {
       baseURL: 'http://127.0.0.1:1/v1',
       modelId: 'fixture',
       protocol,
-      fetch: Object.assign(
-        async () => {
-          attempts++;
-          return Response.json({ error: { message: 'fixture-secret' } }, { status });
-        },
-        { preconnect: fetch.preconnect },
-      ),
+      fetch: Object.assign(async () => {
+        attempts++;
+        const headers = { 'www-authenticate': 'Bearer realm="fixture-secret"' };
+        return status === 401
+          ? new Response('fixture-secret', { status, headers })
+          : Response.json({ error: { message: 'fixture-secret' } }, { status, headers });
+      }),
     });
     const result = await collect(createSdkModelAdapter({ models: new Map([['bound', model]]) }));
     expect(attempts).toBe(1);
@@ -526,13 +525,20 @@ for (const protocol of ['chat-completions', 'responses'] as const) {
     expect(result.events.some((event) => ['tool_call', 'finish'].includes(event.type))).toBe(false);
     expect(String(result.error)).not.toContain('fixture-secret');
     expect(JSON.stringify(result.error)).not.toContain('fixture-secret');
+    if (status === 401 || status === 403) {
+      expect(ModelAccessError.isInstance(result.error)).toBe(true);
+      expect((result.error as ModelAccessError).code).toBe(
+        status === 401 ? 'model_authentication_required' : 'model_access_denied',
+      );
+      expect((result.error as ModelAccessError).cause).toBeUndefined();
+    }
     if (![401, 403, 408, 429].includes(status) && status < 500)
       expect(result.error).toMatchObject({ reason: 'provider_unavailable', detail: undefined });
   });
 }
 
 test('local history validation remains outside the reconnect boundary', async () => {
-  const data = endpoint(() => {
+  const data = await endpoint(() => {
     throw Error('must_not_send_invalid_history');
   });
   try {
@@ -556,7 +562,7 @@ test('unrecognized error detail cannot cross the safe model attempt boundary', (
 
 test('AbortSignal terminates the actual in-flight HTTP stream without retry or successful finish', async () => {
   let responseController: ReadableStreamDefaultController<Uint8Array> | undefined;
-  const data = endpoint(
+  const data = await endpoint(
     () =>
       new Response(
         new ReadableStream<Uint8Array>({
@@ -604,7 +610,7 @@ test('an unbound model or pre-aborted request does not open a Provider attempt',
 
 test('frozen per-model preset supplies actual non-secret Provider options and rejects unsupported or invalid numeric values', async () => {
   const preset = { temperature: 0.25, topP: 0.7, maxOutputTokens: 13 };
-  const data = endpoint(
+  const data = await endpoint(
     () => sse(`${chunk({ content: 'ok' })}${chunk({}, 'stop')}data: [DONE]\n\n`),
     preset,
   );
@@ -615,7 +621,7 @@ test('frozen per-model preset supplies actual non-secret Provider options and re
     expect(data.calls).toBe(1);
     expect(data.bodies[0]).toMatchObject({ temperature: 0.25, top_p: 0.7, max_tokens: 13 });
   } finally {
-    data.close();
+    await data.close();
   }
   for (const invalid of [
     { temperature: -1 },
@@ -635,7 +641,7 @@ test('frozen per-model preset supplies actual non-secret Provider options and re
 test('compatible effort is frozen and transmitted once; unsupported bindings fail before Provider I/O', async () => {
   for (const effort of reasoningEfforts) {
     const preset: SdkModelPreset = { reasoningEffort: effort };
-    const data = endpoint(
+    const data = await endpoint(
       () => sse(`${chunk({ content: 'ok' })}${chunk({}, 'stop')}data: [DONE]\n\n`),
       preset,
     );
@@ -649,7 +655,7 @@ test('compatible effort is frozen and transmitted once; unsupported bindings fai
       expect(data.bodies[0]).toMatchObject({ reasoning_effort: effort });
       expect(data.bodies[0]).not.toHaveProperty('reasoningEffort');
     } finally {
-      data.close();
+      await data.close();
     }
   }
   expect(() =>
@@ -671,7 +677,7 @@ test('compatible effort is frozen and transmitted once; unsupported bindings fai
 test.each([
   408, 429, 500, 502, 503, 504,
 ])('HTTP %i is explicitly classified without hidden retry or leaking Provider details', async (status) => {
-  const data = endpoint(
+  const data = await endpoint(
     () => new Response(JSON.stringify({ error: { message: 'fixture-secret' } }), { status }),
   );
   try {
@@ -695,7 +701,7 @@ test.each([
 
 test('a finished malformed Tool argument reaches Core unchanged for rejection; an unfinished call is withheld', async () => {
   const raw = '{"value":';
-  const data = endpoint(() =>
+  const data = await endpoint(() =>
     sse(
       chunk({
         tool_calls: [
@@ -724,7 +730,7 @@ test('a finished malformed Tool argument reaches Core unchanged for rejection; a
 });
 
 test('actual HTTP stream closure preserves partial text, withholds calls, and classifies native connection code once', async () => {
-  const data = endpoint(
+  const data = await endpoint(
     () =>
       new Response(
         new ReadableStream<Uint8Array>({

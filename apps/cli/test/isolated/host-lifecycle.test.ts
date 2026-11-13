@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -10,9 +9,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 
@@ -22,19 +26,19 @@ async function until<T>(read: () => T | Promise<T | undefined> | undefined): Pro
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw new Error('cli_host_lifecycle_deadline');
-    await Bun.sleep(10);
+    await testSleep(10);
   }
 }
 async function lifecycle(interleaveCancellation = false, loseCancelResponse = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-lifecycle-')));
   const workspace = join(root, 'workspace');
   privateDirectory(workspace);
-  directoryLink(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
+  directoryLink(join(import.meta.dirname, '../../../../node_modules'), join(root, 'node_modules'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const service = join(root, 'service.js');
-  const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../fixtures/interaction-child.ts')],
-    target: 'bun',
+  const built = await testBuild({
+    entrypoints: [join(import.meta.dirname, '../fixtures/interaction-child.ts')],
+    target: 'node',
     packages: 'external',
     outdir: root,
     naming: 'service.js',
@@ -58,7 +62,7 @@ async function lifecycle(interleaveCancellation = false, loseCancelResponse = fa
     apiMajor: 1,
     requiredCapabilities: ['sessions', 'commands', 'interactions'],
   });
-  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let child: ReturnType<typeof testSpawn> | undefined;
   try {
     const storeId = peer.bootstrap.storeId!;
     await peer.client.createWorkspace({
@@ -92,21 +96,30 @@ async function lifecycle(interleaveCancellation = false, loseCancelResponse = fa
       driver,
       interleaveCancellation
         ? `import { existsSync } from 'node:fs';
-import { runSelectedCLI } from ${JSON.stringify(join(import.meta.dir, '../../host/index.ts'))};
-import { parseCLIArguments } from ${JSON.stringify(join(import.meta.dir, '../../src/arguments.ts'))};
-import { withCtrlC } from ${JSON.stringify(join(import.meta.dir, '../../src/index.ts'))};
+import { runSelectedCLI } from ${JSON.stringify(join(import.meta.dirname, '../../host/index.ts'))};
+import { parseCLIArguments } from ${JSON.stringify(join(import.meta.dirname, '../../src/arguments.ts'))};
+import { withCtrlC } from ${JSON.stringify(join(import.meta.dirname, '../../src/index.ts'))};
 try { process.exitCode=await withCtrlC(signal => runSelectedCLI({arguments:parseCLIArguments(process.argv.slice(2)),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'new',cwd:${JSON.stringify(workspace)},stdin:process.stdin,signal,write:line=>process.stdout.write(line+'\\n'),prompt:line=>process.stderr.write(line),onLaunched({client}) {
 const cancel=client.cancelCommand.bind(client);let cancels=0;client.cancelCommand=async(...args)=>{cancels++;process.stdout.write('cancel calls '+cancels+'\\n');const response=await cancel(...args);if(${JSON.stringify(loseCancelResponse)})throw Error('lost_cancel_response');return response;};
 const original=client.listInteractions.bind(client);let interleaved=false;
 client.listInteractions=async (...args)=>{const page=await original(...args);if(!interleaved && existsSync(${JSON.stringify(signalPath)})){interleaved=true;const interrupted=new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));process.kill(process.pid,'SIGINT');await interrupted;process.stdout.write('cancel interleaved after pending read\\n');}return page;};
 }})); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }
 `
-        : `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dir, '../../host/main.ts'))};
+        : `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dirname, '../../host/main.ts'))};
 try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'new',cwd:${JSON.stringify(workspace)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }
 `,
     );
-    const running = Bun.spawn(
-      [process.execPath, driver, 'run', '--thread', 'cli', '--task', 'question'],
+    const running = testSpawn(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        driver,
+        'run',
+        '--thread',
+        'cli',
+        '--task',
+        'question',
+      ],
       {
         cwd: root,
         stdin: 'pipe',
@@ -137,7 +150,7 @@ try { process.exitCode=await runCLIProcess({artifact:${JSON.stringify(artifact)}
         .slice(12),
     ) as { commandId: string; storeId: string; sessionId: string };
     expect(intent).toMatchObject({ storeId, sessionId: 'cli' });
-    await Bun.sleep(200);
+    await testSleep(200);
     expect(child.exitCode).toBeNull();
     const original = await peer.client.getCommand(intent.commandId);
     expect(original.cancelRequestedAt).toBeNull();

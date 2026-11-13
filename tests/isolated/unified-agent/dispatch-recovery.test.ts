@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
 test('new work reconciles a proven orphaned Run once without replaying its original work', async () => {
@@ -126,7 +127,7 @@ test('new work reconciles a proven orphaned Run once without replaying its origi
     ).toBe('new-work');
     expect(acquisitions).toBe(1);
     // Past the owner handoff polling interval, the settled original work stays quiescent.
-    await Bun.sleep(320);
+    await fixtureDelay(320);
     expect(acquisitions).toBe(1);
     expect(model.requests).toHaveLength(1);
     await runtime.submitCommand({

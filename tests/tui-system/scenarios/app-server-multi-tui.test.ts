@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -20,11 +20,11 @@ describe('TUI PTY System — parent-owned App Servers', () => {
   const step = journey.step;
   let first: PtyProcess;
   let second: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
     server.setResponses([{ message: { content: 'Shared durable history is ready.' } }]);
     first = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });

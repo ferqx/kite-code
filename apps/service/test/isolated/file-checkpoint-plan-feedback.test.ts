@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
@@ -14,6 +14,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createDefaultFileCheckpointConfiguration } from '../../src/file-checkpoint-configuration';
 
 const object = (value: unknown) => value as Record<string, Json>;
@@ -221,7 +222,7 @@ for (const fault of [
           card = (
             await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
           ).interactions[0];
-          if (!card) await Bun.sleep(5);
+          if (!card) await sleepTimer(5);
           if (Date.now() > deadline) throw new Error('Plan feedback approval deadline');
         } while (!card);
         expect(readFileSync(path, 'utf8')).toBe('Original plan');

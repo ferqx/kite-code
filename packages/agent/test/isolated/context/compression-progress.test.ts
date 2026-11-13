@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -19,7 +20,7 @@ async function eventually(read: () => Promise<boolean>) {
   const until = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > until) throw Error('compression_progress_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(outcome: 'completed' | 'failed' | 'unpublished' = 'completed') {

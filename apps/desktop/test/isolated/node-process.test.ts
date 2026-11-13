@@ -1,10 +1,15 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { defaultWindowsPathSecurity } from '../../../../packages/agent/src/platform/windows-path-security';
 import { copyWindowsSystemExecutable } from '../../../../scripts/release/build-windows-terminal-launcher';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as FixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import {
   releaseDirectory,
   releaseScratch,
@@ -15,7 +20,7 @@ test.skipIf(process.platform !== 'win32')(
   'actual Electron Node paired adapter forwards only fixed candidate Bun config arguments and executes the Service body',
   async () => {
     const root = releaseScratch(join(tmpdir(), 'kite-node-paired-argv-'));
-    let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let child: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       const runtime = join(root, 'runtime'),
         input = join(root, 'input'),
@@ -56,9 +61,9 @@ test.skipIf(process.platform !== 'win32')(
         join(cwd, 'tsconfig.json'),
         Buffer.from(JSON.stringify({ compilerOptions: { paths: { '*': [poison] } } })),
       );
-      const adapter = resolve(import.meta.dir, '../../electron/node-process.ts');
-      const paired = resolve(import.meta.dir, '../../../service/src/paired.ts');
-      const profile = resolve(import.meta.dir, '../../../../packages/agent/src/profile.ts');
+      const adapter = resolve(import.meta.dirname, '../../electron/node-process.ts');
+      const paired = resolve(import.meta.dirname, '../../../service/src/paired.ts');
+      const profile = resolve(import.meta.dirname, '../../../../packages/agent/src/profile.ts');
       const fixed = windowsTerminalRuntimeArguments(root);
       const command = [executable, ...fixed, entry];
       const source = join(root, 'driver.ts');
@@ -88,7 +93,7 @@ for(const unknown of [false,true]){
 }
 console.log('NODE_PAIRED_FIXED_CONFIG_OK');`),
       );
-      const built = await Bun.build({
+      const built = await buildFixture({
         entrypoints: [source],
         target: 'node',
         format: 'esm',
@@ -97,10 +102,10 @@ console.log('NODE_PAIRED_FIXED_CONFIG_OK');`),
         naming: 'driver.mjs',
       });
       if (!built.success) throw new AggregateError(built.logs, 'node_paired_driver_build_failed');
-      const electron = createRequire(resolve(import.meta.dir, '../../package.json'))(
+      const electron = createRequire(resolve(import.meta.dirname, '../../package.json'))(
         'electron',
       ) as string;
-      child = Bun.spawn([electron, join(root, 'driver.mjs')], {
+      child = spawnFixtureProcess([electron, join(root, 'driver.mjs')], {
         cwd,
         env: { SystemRoot: process.env.SystemRoot, PATH: '', ELECTRON_RUN_AS_NODE: '1' },
         stdin: 'ignore',

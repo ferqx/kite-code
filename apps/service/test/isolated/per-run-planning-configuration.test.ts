@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
@@ -19,6 +19,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -37,7 +39,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw new Error('per_run_plan_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(
@@ -60,7 +62,7 @@ async function fixture(
   let reviewDecision: 'approve_once' | 'ask_user' = 'approve_once';
   let credentialReads = 0;
   let completionGate: { diagnostic: Record<string, unknown>; release(): void } | null = null;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {

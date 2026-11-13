@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { type ToolResultPresentation, toolResultPresentationSchema } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../src/json';
 import { mcpToolResultContent } from '../../../src/mcp/result-feedback';
 import type { Json } from '../../../src/storage/types';

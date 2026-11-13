@@ -52,7 +52,6 @@ tests/e2e/fixtures/
 .claude.kite-code-tmp/
 .claude/
 
-bun.lock
 # Rust native runner build artifacts
 native/windows-sandbox-runner/target/
 native/windows-sandbox-runner/target-*/

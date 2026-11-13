@@ -1,4 +1,3 @@
-import { describe, expect, spyOn, test } from 'bun:test';
 import * as childProcesses from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import * as filesystem from 'node:fs';
@@ -16,7 +15,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
+import { describe, expect, spyOn, test } from '#kite-test';
+import { which as findExecutable } from '../../../../../../scripts/tooling/process';
 import { persistentWorktreeDirectory } from '../../../../../../tests/fixtures/worktree-filesystem';
+import * as ffi from '../../../../src/runtime-ffi';
 import { Git, parseWorktrees } from '../../../../src/tools/git-worktree/git';
 import { mountTargets, sha256 } from '../../../../src/tools/git-worktree/paths';
 import {
@@ -37,7 +39,7 @@ function fixture(format?: 'sha256') {
     hooks = join(root, 'hooks');
   mkdirSync(source);
   mkdirSync(hooks);
-  const gitPath = Bun.which('git')!;
+  const gitPath = findExecutable('git')!;
   const run = (args: string[], cwd = source) =>
     execFileSync(gitPath, args, {
       cwd,
@@ -122,12 +124,11 @@ function success(frame: WorktreeFrame) {
 }
 function mockLateMountSnapshot(late: () => boolean, unavailable: boolean) {
   if (process.platform === 'darwin') {
-    const ffi = require('bun:ffi') as typeof import('bun:ffi');
     return spyOn(ffi, 'dlopen').mockImplementation((() => {
       if (late() && unavailable) throw Error('injected late mount denial');
       return {
         symbols: {
-          getfsstat64(pointer: import('bun:ffi').Pointer | null) {
+          getfsstat64(pointer: ffi.Pointer | null) {
             if (pointer === null) return 1;
             const bytes = new Uint8Array(ffi.toArrayBuffer(pointer, 0, 17 * 2168));
             bytes.fill(0);

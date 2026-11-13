@@ -21,7 +21,7 @@ assert.equal(args.get('model'), 'gpt-6-luna', 'explicit_luna_required');
 assert.equal(args.get('reasoning-effort'), 'medium', 'explicit_medium_required');
 const output = args.get('output');
 assert(output && isAbsolute(output) && !existsSync(output), 'new_absolute_output_required');
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const owned = relative(join(repo, 'dist/acceptance'), output);
 assert(owned && !owned.startsWith('..') && !isAbsolute(owned), 'output_must_be_in_acceptance');
 const root = `${output}.workspace`;

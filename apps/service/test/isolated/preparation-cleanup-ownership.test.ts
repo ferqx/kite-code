@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,10 @@ import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import type { Subprocess } from '../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 
 async function within<T>(work: Promise<T>, milliseconds: number, phase: string): Promise<T> {
   if (milliseconds <= 0) {
@@ -62,7 +65,7 @@ test('failed preparation retains its real directory owner until explicit process
     within(work, deadline - Date.now(), phase);
   const cleanupBounded = <T>(work: Promise<T>, milliseconds: number, phase: string) =>
     within(work, Math.min(milliseconds, cleanupDeadline - Date.now()), phase);
-  let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+  let child: Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let cold: Store | undefined;
   let coldRuntime: ReturnType<typeof createRuntime> | undefined;
@@ -70,10 +73,10 @@ test('failed preparation retains its real directory owner until explicit process
   let draining = false;
   const failures: unknown[] = [];
   try {
-    child = Bun.spawn(
+    child = spawnProcess(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         fileURLToPath(
           new URL('../fixtures/preparation-cleanup-ownership-child.ts', import.meta.url),
         ),

@@ -1,10 +1,11 @@
-import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as io from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { mock } from '#kite-test';
 
 /** Explicit isolated Windows load measurement; never a production diagnostic entry. */
 if (process.platform !== 'win32') throw Error('windows_shell_load_requires_windows');
@@ -104,7 +105,7 @@ const host = createDefaultProcessConfiguration({
     configurationId: 'windows-shell-load',
     env: { SystemRoot: process.env.SystemRoot!, Path: '' },
     supervisorPath: assets.runner,
-    bunExecutable: process.execPath,
+    runtimeExecutable: process.execPath,
     shellExecutable: assets.shell,
     windows: { fullShellExecutable: assets.fullShell, stateRoot },
     host: {
@@ -175,7 +176,7 @@ const until = async <T>(read: () => T | undefined | Promise<T | undefined>, labe
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw Error(`windows_shell_load_deadline:${label}`);
-    await Bun.sleep(25);
+    await sleepTimer(25);
   }
 };
 const events: { phase: string; ms: number; data?: unknown }[] = [];
@@ -400,7 +401,7 @@ try {
       Math.min(heartbeats.length - 1, Math.floor(heartbeats.length * p))
     ] ?? 0;
   const result = {
-    environment: { platform: process.platform, arch: process.arch, bun: Bun.version },
+    environment: { platform: process.platform, arch: process.arch, node: process.versions.node },
     observer:
       'asynchronous Core background directory; no synchronous SQLite on the measured thread',
     slots,
@@ -416,7 +417,7 @@ try {
     events,
   };
   const artifact = resolve(
-    import.meta.dir,
+    import.meta.dirname,
     '../../../../.cache',
     `windows-shell-load-${mode}-${crypto.randomUUID()}`,
   );

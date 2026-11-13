@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { Interaction } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { ComposerBuffer } from '../../src/tui/composer';
 import { TuiPlanReviewPanel } from '../../src/tui/plan-review-panel';
 

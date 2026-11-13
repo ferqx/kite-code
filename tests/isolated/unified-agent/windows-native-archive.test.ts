@@ -1,13 +1,24 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 
 const modulePath = (path: string) => fileURLToPath(new URL(`../../../${path}`, import.meta.url));
 function subprocess(scenario: string) {
-  const child = spawnSync(process.execPath, ['-e', script(scenario)], {
-    encoding: 'utf8',
-    timeout: 4000,
-  });
+  const child = spawnSync(
+    process.execPath,
+    [
+      ...testRuntimeFlags,
+      '--disable-warning=ExperimentalWarning',
+      '--input-type=module',
+      '-e',
+      script(scenario),
+    ],
+    {
+      encoding: 'utf8',
+      timeout: 4000,
+    },
+  );
   if (child.error || child.status !== 0)
     process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
   expect(child.error).toBeUndefined();
@@ -27,10 +38,11 @@ test('Windows Native unpack preserves large exact bytes and rejects links before
 });
 function script(scenario: string) {
   return `
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import * as fs from 'node:fs';
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
 import * as path from 'node:path';
 Object.defineProperty(process,'platform',{value:'win32'});
 mock.module('node:path',()=>({...path,...path.posix}));
@@ -43,12 +55,15 @@ const nativeBytes=Buffer.from(JSON.stringify(manifest));
 const archiveFiles=new Map([['native-manifest.json',nativeBytes],['terminal/terminal-manifest.json',terminalBytes],['app/payload',payload],['terminal/main.js',Buffer.from('end')]]);
 const files=new Map([...archiveFiles].map(([name,bytes])=>[root+'/'+name,bytes])), directories=new Set([root,'/','/source/app','/source/terminal','/archives']);
 const primary=Error('original-publication-close-unknown');
-mock.module('node:fs',()=>({...fs,
-  lstatSync(p,options){if(files.has(p))return{isFile:()=>true,isDirectory:()=>false,isSymbolicLink:()=>false,nlink:1,size:files.get(p).length};if(directories.has(p))return{isDirectory:()=>true,isFile:()=>false,isSymbolicLink:()=>false};if(options?.throwIfNoEntry===false)return undefined;throw Error('unexpected path:'+p);},
-  readFileSync:p=>{assert.ok(files.has(p));return files.get(p);},
+const actualRead=fs.readFileSync,actualStat=fs.lstatSync;
+const synthetic=p=>typeof p==='string'&&p.startsWith('/')&&!p.startsWith(${JSON.stringify(modulePath(''))});
+const fakeFiles={
+  lstatSync(p,options){if(!synthetic(p))return actualStat(p,options);if(files.has(p))return{isFile:()=>true,isDirectory:()=>false,isSymbolicLink:()=>false,nlink:1,size:files.get(p).length};if(directories.has(p))return{isDirectory:()=>true,isFile:()=>false,isSymbolicLink:()=>false};if(options?.throwIfNoEntry===false)return undefined;throw Error('unexpected path:'+p);},
+  readFileSync:(p,options)=>{if(!synthetic(p))return actualRead(p,options);assert.ok(files.has(p));return files.get(p);},
   rmSync(){throw Error('Windows must not path-delete');},
   mkdirSync(){throw Error('Windows must create private directories');},
-}));
+};
+Object.assign(fs,fakeFiles);syncBuiltinESMExports();
 const security={
   writePrivateFile(){throw Error('8MiB private writer cannot hold Native artifacts');},
   writePrivateArtifactFile(p,bytes){assert.equal(files.has(p),false);files.set(p,Buffer.from(bytes));events.push('write:'+p);if(scenario==='unknown')throw primary;},
@@ -74,11 +89,11 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-ins
   verify(){},remove(){assert.deepEqual(inventory.map(item=>root+'/'+item.path).sort(),[...files.keys(),...directories].filter(p=>p.startsWith(root+'/')).sort());for(const item of inventory){files.delete(root+'/'+item.path);directories.delete(root+'/'+item.path);}directories.delete(root);events.push('original-tree-delete');},release(){events.push('original-tree-close');}
 };}}));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-private-file-removal.ts'))},()=>({retainWindowsPrivateFileRemoval(){throw Error('unexpected failed pack cleanup');}}));
-const OriginalArchive=Bun.Archive;
-Bun.Archive=class{
+const MockArchive=class{
   constructor(values){this.values=values;}
   async bytes(){assert.deepEqual([...retained].sort(),['files:/source','files:/source/terminal','lease:/source','lease:/source/terminal']);await Promise.resolve();assert.equal(retained.size,4);events.push('compression-complete');return Buffer.from('compressed-original');}
 };
+mock.module(${JSON.stringify(modulePath('scripts/release/archive-compression.ts'))},()=>({async releaseArchiveBytes(values){return new MockArchive(values).bytes();}}));
 const {packNativeBundle,unpackNativeBundle}=await import(${JSON.stringify(modulePath('scripts/release/native-archive.ts'))});
 if(scenario==='unpack'){
   const progress=[];
@@ -112,7 +127,7 @@ if(scenario==='unpack'){
   assert.ok(events.indexOf('compression-complete')<events.indexOf('close:files:/source/terminal'));
   assert.equal(files.get('/archives/native.tgz.sha256').toString(),hash(Buffer.from('compressed-original'))+'  native.tgz\\n');
 }
-Bun.Archive=OriginalArchive;
+
 console.log('archive-owner-confirmed');
 `;
 }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { evaluateAutoCompactionAdmission } from '../../scripts/release/auto-compaction-admission';
 
 const digest = `sha256:${'b'.repeat(64)}` as const;

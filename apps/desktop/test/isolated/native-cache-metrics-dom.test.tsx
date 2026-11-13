@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
 import { SessionPage } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { useNativeCacheMetrics } from '../../src/native-cache-metrics';
 import { NativeDisplayCache } from '../../src/native-display-cache';
@@ -268,13 +268,13 @@ test('confirmed cache text and input nodes survive repeated calibration and the 
   try {
     await render();
     const rate = f.host.querySelector('.composer-context-usage')!,
-      input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
+      input = f.host.querySelector('.composer textarea.prompt-editor');
     expect(rate.getAttribute('aria-description')).toContain('缓存命中率 40%');
     for (let revision = 1; revision <= 8; revision++) {
       await render([{ ...original }], false, revision);
       expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
       expect(rate.getAttribute('aria-description')).toContain('缓存命中 40 / 100 tokens');
-      expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
+      expect(f.host.querySelector('.composer textarea.prompt-editor')).toBe(input);
       await render([{ ...original }], true, revision);
       expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
     }
@@ -294,7 +294,7 @@ test('confirmed cache text and input nodes survive repeated calibration and the 
     expect(f.host.querySelector('.composer-context-usage')).toBe(rate);
     expect(rate.getAttribute('aria-description')).toContain('缓存命中 200 / 300 tokens');
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('缓存指标未更新');
-    expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
+    expect(f.host.querySelector('.composer textarea.prompt-editor')).toBe(input);
   } finally {
     await f.close();
   }

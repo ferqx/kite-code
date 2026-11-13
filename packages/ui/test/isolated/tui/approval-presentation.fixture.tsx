@@ -12,7 +12,7 @@ import { TuiController, type TuiPort, TuiSession } from '../../../src/tui';
 type Offer = NonNullable<PermissionDecision['grantOffers']>[number];
 type Option = NonNullable<NonNullable<PermissionDecision['approval']>['options']>[number];
 const { approvalOptions, grantDigest, grantScopeDigest } = (await import(
-  join(import.meta.dir, '../../../../agent/src/permission-grants')
+  join(import.meta.dirname, '../../../../agent/src/permission-grants')
 )) as {
   approvalOptions(offers: readonly Offer[]): readonly Option[];
   grantDigest(value: unknown): string;

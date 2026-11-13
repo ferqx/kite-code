@@ -1,5 +1,5 @@
-import { Database } from 'bun:sqlite';
 import { collectProfileGarbage } from '../../../src/maintenance';
+import { Database } from '../../../src/runtime-sqlite';
 import { initializeSqliteEngine } from '../../../src/sqlite-engine';
 
 initializeSqliteEngine(JSON.parse(process.env.KITE_MAINTENANCE_ENGINE!));
@@ -24,5 +24,5 @@ if (failure !== 'maintenance_fixture_close_unconfirmed' || !retained)
 const metadata = retained.query('SELECT store_id FROM storage_meta WHERE singleton=1').get();
 console.log(JSON.stringify({ failure, connectionAlive: !!metadata, path: retained.filename }));
 // The real owning process exits after EOF; no fake close acknowledgement is sent.
-for await (const _ of Bun.stdin.stream()) break;
+for await (const _ of process.stdin) break;
 process.exit(0);

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -13,7 +11,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -30,7 +34,7 @@ async function fixture(body: string) {
   let calls = 0;
   let titleCalls = 0;
   const observed: string[][] = [];
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     maxRequestBodySize: 64 * 1024 * 1024,
@@ -101,13 +105,13 @@ async function fixture(body: string) {
   mkdirSync(outdir, { recursive: true });
   const service = join(outdir, 'service.js');
   directoryLink(
-    join(import.meta.dir, '../../../service/node_modules'),
+    join(import.meta.dirname, '../../../service/node_modules'),
     join(root, 'apps/service/node_modules'),
   );
-  directoryLink(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
-  const result = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../../service/src/main.ts')],
-    target: 'bun',
+  directoryLink(join(import.meta.dirname, '../../../../node_modules'), join(root, 'node_modules'));
+  const result = await testBuild({
+    entrypoints: [join(import.meta.dirname, '../../../service/src/main.ts')],
+    target: 'node',
     packages: 'external',
     outdir,
     naming: 'service.js',
@@ -124,11 +128,11 @@ async function fixture(body: string) {
   const driver = join(root, 'driver.ts');
   writeFileSync(
     driver,
-    `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dir, '../../host/main.ts'))};\ntry { process.exitCode = await runCLIProcess({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'driver',cwd:${JSON.stringify(workspace)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n'); process.exitCode=1; }\n`,
+    `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dirname, '../../host/main.ts'))};\ntry { process.exitCode = await runCLIProcess({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'driver',cwd:${JSON.stringify(workspace)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n'); process.exitCode=1; }\n`,
   );
-  const children: ReturnType<typeof Bun.spawn>[] = [];
+  const children: ReturnType<typeof testSpawn>[] = [];
   async function run(argv: string[]) {
-    const child = Bun.spawn([process.execPath, driver, ...argv], {
+    const child = testSpawn([process.execPath, ...testRuntimeFlags, driver, ...argv], {
       cwd: elsewhere,
       stdin: 'pipe',
       stdout: 'pipe',
@@ -337,7 +341,7 @@ test('help, version, invalid arguments and readonly daemon status do not open a 
   const driver = join(root, 'driver.ts');
   writeFileSync(
     driver,
-    `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dir, '../../host/main.ts'))};\ntry { process.exitCode=await runCLIProcess({dataRoot:${JSON.stringify(dataRoot)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }\n`,
+    `import { runCLIProcess } from ${JSON.stringify(join(import.meta.dirname, '../../host/main.ts'))};\ntry { process.exitCode=await runCLIProcess({dataRoot:${JSON.stringify(dataRoot)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n');process.exitCode=1; }\n`,
   );
   try {
     for (const [argv, expected] of [
@@ -346,7 +350,7 @@ test('help, version, invalid arguments and readonly daemon status do not open a 
       [['run', '--feature', 'x'], 1],
       [['server', 'status'], ['darwin', 'linux'].includes(process.platform) ? 0 : 1],
     ] as const) {
-      const child = Bun.spawn([process.execPath, driver, ...argv], {
+      const child = testSpawn([process.execPath, ...testRuntimeFlags, driver, ...argv], {
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',

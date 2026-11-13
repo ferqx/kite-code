@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import {
   projectTrajectory,
   type TrajectoryEvent,
   trajectoryEventSchema,
 } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { buildTrajectoryRequestMarkers } from '../src/desktop/trajectory/request-markers';
 import { buildTrajectoryTree } from '../src/desktop/trajectory/tree';
 import {

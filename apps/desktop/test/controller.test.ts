@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { type AgentClient, ClientError, type SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createDesktopController } from '../src/controller';
 
 function view(id: string): SessionView {
@@ -46,7 +47,7 @@ test('execution publishes before held admission and an invalidated late admissio
   });
   const pending = controller.selectSession('s');
   try {
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(execution).toEqual(['s']);
     expect(snapshots).toEqual([]);
     expect(controller.snapshot).toBeUndefined();
@@ -175,7 +176,7 @@ test('a retired missing-workspace trust read cannot publish into a later selecti
     onSnapshot: (snapshot) => visible.push(snapshot.sessionId),
   });
   const old = controller.selectSession('old');
-  while (!rejectOld) await Bun.sleep(1);
+  while (!rejectOld) await fixtureDelay(1);
   await controller.selectSession('new');
   rejectOld(new ClientError('workspace_identity_unavailable'));
   await old;

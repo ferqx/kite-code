@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +10,7 @@ import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '@kite-ai/service';
 import { startDevelopmentWeb } from '@kite-ai/service/development-web';
+import { expect, test } from '#kite-test';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -79,7 +79,7 @@ test('actual segmented Model output reaches next Model, Native and Cookie intact
     bootstrap: service.bootstrap,
     expected: { profile: host, apiMajor: 1, requiredCapabilities: ['model_outputs'] },
   });
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let browser: ReturnType<typeof createBrowserClient> | undefined;
   let coldRuntime: ReturnType<typeof createRuntime> | undefined;
   let closed = false;
@@ -147,7 +147,7 @@ test('actual segmented Model output reaches next Model, Native and Cookie intact
       expect(JSON.stringify(value)).not.toContain('"subjectId"');
       expect(JSON.stringify(value)).not.toContain(root);
     }
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const document = await fetch(gateway.endpoint);
     await document.body?.cancel();
     const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -164,7 +164,7 @@ test('actual segmented Model output reaches next Model, Native and Cookie intact
               origin: gateway!.endpoint,
             },
           }),
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     await browser.connect();

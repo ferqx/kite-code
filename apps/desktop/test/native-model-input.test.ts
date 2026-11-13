@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -14,6 +14,7 @@ import {
 } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { readModelDirectory } from '@kite-ai/ui';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { type ModelOutputViewScope, NativeModelOutputReads } from '../electron/model-output-reads';
 import { NativeCaller } from '../electron/native-caller';
@@ -274,6 +275,32 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
     expect(model.requests).toHaveLength(205);
+    // Exercise pagination against settled history, after the final Model and Run have committed.
+    const deadline = Date.now() + 5000;
+    while ((await runtime.getView('s')).runs.some((run) => run.isActive)) {
+      if (Date.now() > deadline) throw Error('model_input_fixture_run_not_settled');
+      await fixtureDelay(5);
+    }
+    // The pagination scenario starts from a read baseline, not a replay of all 205 Runs.
+    const baseline = (await client.getView('s')).snapshotCursor;
+    const baselineSignal = new AbortController();
+    const timeout = setTimeout(
+      () => baselineSignal.abort(Error('model_input_baseline_timeout')),
+      5000,
+    );
+    await client
+      .observe({
+        cursor: { storeId, sequence: baseline },
+        signal: baselineSignal.signal,
+        onReady: () => baselineSignal.abort('model_input_baseline_ready'),
+        onChange() {
+          throw Error('model_input_fixture_changed_after_baseline');
+        },
+      })
+      .catch((error: unknown) => {
+        if (baselineSignal.signal.reason !== 'model_input_baseline_ready') throw error;
+      })
+      .finally(() => clearTimeout(timeout));
     caller = new NativeCaller(client, () => {});
     const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
     await caller.invoke({ method: 'select', generation, sessionId: 's' });

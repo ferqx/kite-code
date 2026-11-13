@@ -1,19 +1,23 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { spawn as spawnChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createClient } from '@kite-ai/client';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 import {
   directoryLink,
   privateDirectory,
   temporarySocketDirectory,
 } from '../../../../tests/fixtures/test-filesystem';
-import specification from '../../generated/openapi.json';
+import specification from '../../generated/openapi.json' with { type: 'json' };
 import {
   type DaemonBootstrap,
   readDaemonReservation,
@@ -21,7 +25,7 @@ import {
   selectDaemonEndpoint,
 } from '../../src/daemon';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 let root: string;
 let artifact: string;
 let fixtureEntry: string;
@@ -41,7 +45,7 @@ async function deadline<T>(work: Promise<T>, ms = 10000): Promise<T> {
   }
 }
 async function runBuild(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], {
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, ...args], {
     cwd,
     env: hostBuildEnvironment(),
     stdout: 'pipe',
@@ -126,9 +130,9 @@ beforeAll(async () => {
     mkdirSync(dirname(target), { recursive: true });
     directoryLink(realpathSync(installed), target);
   }
-  const fixtureBuild = await Bun.build({
+  const fixtureBuild = await buildBundle({
     entrypoints: [fileURLToPath(new URL('../fixtures/daemon-process-child.ts', import.meta.url))],
-    target: 'bun',
+    target: 'node',
     packages: 'external',
     outdir: artifact,
   });
@@ -196,7 +200,7 @@ function selection() {
   return { directory, profile, host, input, identity, endpoint };
 }
 function spawn(input: ReturnType<typeof selection>['input']) {
-  const child = Bun.spawn([process.execPath, fixtureEntry], {
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, fixtureEntry], {
     cwd: artifact,
     stdin: 'pipe',
     stdout: 'pipe',
@@ -260,7 +264,7 @@ async function until(read: () => boolean) {
   const end = Date.now() + 5000;
   while (!read()) {
     if (Date.now() > end) throw Error('daemon_fixture_observation_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 nativeTest(
@@ -497,7 +501,7 @@ nativeTest(
             if (configured.length !== 0) throw Error('daemon_fixture_configure_identity_mismatch');
           }
           if (Date.now() > configuredDeadline) throw Error('daemon_fixture_configure_timeout');
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
         const end = Date.now() + 5000;
         for (;;) {
@@ -522,7 +526,7 @@ nativeTest(
             }
           }
           if (Date.now() > end) throw Error('daemon_fixture_discovery_timeout');
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
         expect(bootstrap).toMatchObject({
           instanceId: value.input.startup.instanceId,

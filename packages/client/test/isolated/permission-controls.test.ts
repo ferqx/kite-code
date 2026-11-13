@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import {
   createClient,
   type PermissionMutation,
@@ -58,9 +59,9 @@ async function rejected(work: Promise<unknown>, code: string) {
   }
   expect((error as { code?: string })?.code).toBe(code);
 }
-function fixture(handler: (request: Request) => Response | Promise<Response>) {
+async function fixture(handler: (request: Request) => Response | Promise<Response>) {
   const requests: { path: string; method: string; body?: unknown }[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -79,13 +80,13 @@ function fixture(handler: (request: Request) => Response | Promise<Response>) {
     requests,
     close: () => {
       client.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
 
 test('permission operations need admission/capability/original Store and validate closed choices before business network', async () => {
-  const f = fixture(() => Response.json({ ...identity, capabilities: ['sessions'] }));
+  const f = await fixture(() => Response.json({ ...identity, capabilities: ['sessions'] }));
   try {
     await rejected(
       f.client.getPermissionMode('s', { storeId: 'store' }),
@@ -97,9 +98,9 @@ test('permission operations need admission/capability/original Store and validat
     await rejected(f.client.getWorkspaceTrust('w', { storeId: 'store' }), 'capability_unavailable');
     expect(f.requests).toHaveLength(1);
   } finally {
-    f.close();
+    await f.close();
   }
-  const supported = fixture(() => Response.json(identity));
+  const supported = await fixture(() => Response.json(identity));
   try {
     await supported.client.connect();
     await rejected(
@@ -126,7 +127,7 @@ test('permission operations need admission/capability/original Store and validat
     );
     expect(supported.requests).toHaveLength(1);
   } finally {
-    supported.close();
+    await supported.close();
   }
 });
 
@@ -140,7 +141,7 @@ test('permission reads keep decimal64 and additive facts; writes seal the exact 
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const f = fixture(async (request) => {
+  const f = await fixture(async (request) => {
     const path = new URL(request.url).pathname;
     if (path === '/v1/server') {
       if (++probe === 5) {
@@ -176,14 +177,14 @@ test('permission reads keep decimal64 and additive facts; writes seal the exact 
     expect(await f.client.getPermissionMutation('mode', { storeId: 'store' })).toEqual(applied);
   } finally {
     release();
-    f.close();
+    await f.close();
   }
 });
 
 test('wrong scope, contradictory trust, malformed terminal receipt and changed admitted identity never publish permission facts', async () => {
   let value: unknown = { ...initial, sessionId: 'other' },
     current = identity;
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     Response.json(new URL(request.url).pathname === '/v1/server' ? current : value),
   );
   try {
@@ -223,7 +224,7 @@ test('wrong scope, contradictory trust, malformed terminal receipt and changed a
     );
     expect(f.requests.filter((r) => !r.path.endsWith('/server'))).toHaveLength(before);
   } finally {
-    f.close();
+    await f.close();
   }
 });
 

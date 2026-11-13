@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort } from '../../src/tui/controller';
 import OverlayChoiceList from '../../src/tui/ink/OverlayChoiceList';
 import OverlayFrame, {

@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -10,6 +10,7 @@ import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -189,7 +190,7 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
           )
             break;
           if (Date.now() >= deadline) throw Error('missing_single_level_child_completion');
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
         await runtime.waitForCommand('work', { timeoutMs: 5000 });
         expect(carrier).toBeDefined();

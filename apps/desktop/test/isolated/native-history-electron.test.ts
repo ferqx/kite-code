@@ -1,20 +1,27 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 // Resolve the existing Bun-only kernel observer without a cross-workspace TS rootDir import.
 const { inspectProcess, readProcessStartIdentity } = require(
-  resolve(import.meta.dir, '../../../service/src/daemon/process-identity.ts'),
+  resolve(import.meta.dirname, '../../../service/src/daemon/process-identity.ts'),
 ) as {
   readProcessStartIdentity(pid: number): string | undefined;
   inspectProcess(pid: number, expectedStart: string): 'alive' | 'dead' | 'uncertain';
@@ -111,7 +118,7 @@ test.skipIf(process.platform !== 'darwin')(
 
     let requests = 0;
     const bodies: Record<string, unknown>[] = [];
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -230,12 +237,12 @@ test.skipIf(process.platform !== 'darwin')(
     const serviceOutdir = join(root, 'apps/service/dist');
     mkdirSync(serviceOutdir, { recursive: true });
     directoryLink(
-      resolve(import.meta.dir, '../../../service/node_modules'),
+      resolve(import.meta.dirname, '../../../service/node_modules'),
       join(root, 'apps/service/node_modules'),
     );
-    const serviceBuild = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
-      target: 'bun',
+    const serviceBuild = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../../service/src/main.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'external',
       outdir: serviceOutdir,
@@ -246,9 +253,9 @@ test.skipIf(process.platform !== 'darwin')(
     await buildNativeDesktop(
       {
         serviceEntrypoint,
-        bunExecutable,
+        runtimeExecutable: bunExecutable,
         serviceSha256: createHash('sha256').update(readFileSync(serviceEntrypoint)).digest('hex'),
-        bunSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
+        runtimeSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
         buildId: 'native-electron-fixture',
         apiMajor: 1,
         requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
@@ -257,8 +264,8 @@ test.skipIf(process.platform !== 'darwin')(
       outdir,
       { testDiagnostics: true },
     );
-    const instrumentation = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../native-history-network.fixture.ts')],
+    const instrumentation = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../native-history-network.fixture.ts')],
       target: 'node',
       format: 'cjs',
       outdir: root,
@@ -276,15 +283,18 @@ test.skipIf(process.platform !== 'darwin')(
     writeFileSync(
       fixture,
       readFileSync(
-        resolve(import.meta.dir, '../native-history-electron.fixture.ts'),
+        resolve(import.meta.dirname, '../native-history-electron.fixture.ts'),
         'utf8',
       ).replace(
         "import { _electron } from 'playwright';",
-        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+        `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
       ),
     );
-    directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
-    const built = await Bun.build({
+    directoryLink(
+      resolve(import.meta.dirname, '../../../../node_modules'),
+      join(root, 'node_modules'),
+    );
+    const built = await buildFixture({
       entrypoints: [fixture],
       target: 'node',
       format: 'esm',
@@ -294,9 +304,9 @@ test.skipIf(process.platform !== 'darwin')(
     });
     if (!built.success) throw new AggregateError(built.logs, 'driver_build_failed');
     const electronExecutable = realpathSync(require('electron') as string);
-    const driver = Bun.spawn(
+    const driver = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         driverPath,
         outdir,
         root,
@@ -517,7 +527,7 @@ test.skipIf(process.platform !== 'darwin')(
           cleanupErrors.push(Error('native_history_cleanup_not_confirmed'));
           return false;
         }
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
     };
     const settleTree = async (normalExit: boolean) => {

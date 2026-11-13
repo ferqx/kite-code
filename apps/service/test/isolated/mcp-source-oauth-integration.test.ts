@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { chmodSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -19,6 +19,9 @@ import { createClient, decodeMcpAuthResult } from '@kite-ai/client';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
@@ -38,7 +41,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() >= end) throw Error('oauth_integration_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -87,7 +90,7 @@ async function peer(ownedLauncher = false) {
       active.delete(sdk);
     }
   }
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -279,7 +282,7 @@ async function fixture(
             signal.throwIfAborted();
             if (options.ownedLauncher) {
               const launcher = createMcpOAuthBrowser((argv, spawnOptions) =>
-                Bun.spawn(
+                spawnProcess(
                   [
                     process.execPath,
                     '-e',

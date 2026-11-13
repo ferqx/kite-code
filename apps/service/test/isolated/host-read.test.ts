@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setImmediate as turn } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,

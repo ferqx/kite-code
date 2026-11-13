@@ -106,7 +106,8 @@ export type PrivateData = NativeScheduledTaskData &
       phase: NativeRecoveryIntent['phase'],
       error?: string,
     ): NativeRecoveryIntent;
-    callers(): NativeCallerRecord[];
+    callers(inSubmissionOrder?: boolean): NativeCallerRecord[];
+    caller(commandId: string): NativeCallerRecord | undefined;
     beginCaller(input: NativeCallerRecord): { created: boolean; value: NativeCallerRecord };
     finishCaller(commandId: string, phase: NativeCallerRecord['phase']): NativeCallerRecord;
     clearCaller(commandId: string): void;
@@ -518,26 +519,33 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     }
     return rows;
   }
-  function callerRows() {
+  function storedCaller(row: { command_id?: unknown; state?: unknown }) {
+    if (typeof row.state !== 'string') throw Error('caller_storage_unavailable');
+    const value = validateCallerRecord(JSON.parse(row.state));
+    if (
+      value.intent.request.commandId !== row.command_id ||
+      ((value.intent.request.kind === 'extension.invoke' ||
+        (value.intent.request.kind === 'input.steer' &&
+          value.intent.request.queuedInputCommandId !== undefined)) &&
+        Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9)
+    )
+      throw Error('caller_storage_unavailable');
+    return value;
+  }
+  function callerRows(inSubmissionOrder = false) {
     const rows: NativeCallerRecord[] = [];
     let bytes = 0;
     for (const row of database()
-      .prepare('SELECT command_id,state FROM caller_intents ORDER BY command_id')
+      .prepare(
+        inSubmissionOrder
+          ? 'SELECT command_id,state FROM caller_intents ORDER BY rowid'
+          : 'SELECT command_id,state FROM caller_intents ORDER BY command_id',
+      )
       .iterate()) {
       if (typeof row.state !== 'string') throw Error('caller_storage_unavailable');
       bytes += Buffer.byteLength(row.state);
       if (bytes > 16777216 || rows.length >= 128) throw Error('caller_capacity_exceeded');
-      const value = validateCallerRecord(JSON.parse(row.state));
-      if (
-        (value.intent.request.kind === 'extension.invoke' ||
-          (value.intent.request.kind === 'input.steer' &&
-            value.intent.request.queuedInputCommandId !== undefined)) &&
-        Number(database().prepare('PRAGMA user_version').get()!.user_version) < 9
-      )
-        throw Error('caller_storage_unavailable');
-      if (value.intent.request.commandId !== row.command_id)
-        throw Error('caller_storage_unavailable');
-      rows.push(value);
+      rows.push(storedCaller(row));
     }
     return rows;
   }
@@ -1233,8 +1241,17 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         return value;
       });
     },
-    callers() {
-      return callerRows();
+    callers(inSubmissionOrder) {
+      return callerRows(inSubmissionOrder);
+    },
+    caller(commandId) {
+      const row = database()
+        .prepare('SELECT command_id,state FROM caller_intents WHERE command_id=?')
+        .get(commandId);
+      if (!row) return undefined;
+      if (typeof row.state === 'string' && Buffer.byteLength(row.state) > 16777216)
+        throw Error('caller_capacity_exceeded');
+      return storedCaller(row);
     },
     mcps() {
       return mcpRows().filter((row): row is NativeMcpRecord => row.version === 1);

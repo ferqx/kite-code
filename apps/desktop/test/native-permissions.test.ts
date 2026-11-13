@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import {
   type AgentClient,
   type Change,
@@ -7,6 +7,7 @@ import {
   type PermissionMutation,
   type SetPermissionModeRequest,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { createDesktopController } from '../src/controller';
@@ -124,7 +125,7 @@ async function until(predicate: () => boolean) {
   const deadline = Date.now() + 2000;
   while (!predicate()) {
     if (Date.now() >= deadline) throw Error('permission_observation_deadline');
-    await Bun.sleep(1);
+    await fixtureDelay(1);
   }
 }
 
@@ -181,7 +182,7 @@ for (const native of [false, true]) {
       const initialReads = reads;
       await notify(controlChange('foreign', 'permission.mode', 'session:foreign'));
       await notify(controlChange(null, 'workspace.trust', 'workspace:foreign'));
-      await Bun.sleep(130);
+      await fixtureDelay(130);
       expect(reads).toBe(initialReads);
       mode = 'full';
       await notify(controlChange('a', 'permission.mode', 'session:a'));
@@ -212,7 +213,7 @@ for (const native of [false, true]) {
       await select('other');
       release();
       await oldRefresh;
-      await Bun.sleep(130);
+      await fixtureDelay(130);
       expect(selected()).toBe('other');
       expect(facts()!.mode).toMatchObject({
         sessionId: 'other',

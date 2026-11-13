@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +6,10 @@ import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import type { Subprocess } from '../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 async function within<T>(work: Promise<T>, milliseconds: number, phase: string): Promise<T> {
@@ -31,7 +34,7 @@ async function within<T>(work: Promise<T>, milliseconds: number, phase: string):
 test('unconfirmed Service Store close retains original ownership until its process exits and cold reads preserve completed work', async () => {
   const root = temporaryDirectory('kite-store-close-ownership-');
   const profile = selectProfile({ dataRoot: root, profile: 'test' });
-  let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+  let child: Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
   let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let coldRuntime: ReturnType<typeof createRuntime> | undefined;
   const failures: unknown[] = [];
@@ -46,9 +49,10 @@ test('unconfirmed Service Store close retains original ownership until its proce
     within(work, deadline - Date.now(), phase);
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    child = Bun.spawn(
+    child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('../fixtures/store-close-ownership-child.ts', import.meta.url)),
         root,
       ],

@@ -7,7 +7,7 @@
 - Native 新 Run 的模型入口由 Service 选择 `browser.execute`，沿[内置 computer-use 技能](../../skills/builtin.ts)指导页面选择、准确控制绑定、观察、操作、核实与释放；浏览器不进入审批，技能不签发控制身份。默认目录、显式旧配置与冻结恢复选择归[Service owner](../../../../../apps/service/README.md#受管-browser-默认装配)。CLI/TUI 的独立浏览器兼容路径保留。
 - 兼容 `browser.open` 仍创建受原 Operations 管理的 `browser.session` Job，返回受理身份而不是伪造启动完成。只接受 HTTP(S)，不接受凭据 URL、可执行路径、任意 CLI 参数、脚本、CDP 地址或登录状态路径。
 - 兼容 `browser.snapshot` 获取该 Session 已拥有浏览器的当前 generation／seq／元素引用；`browser.navigate`、`browser.click`、`browser.fill`、`browser.scroll` 操作准确目标，`browser.close` 请求关闭。统一入口在宿主内生成这些内部身份，不要求模型维护代次、seq 或幂等 key。
-- 原生适配支持 Linux x64／arm64、Bun 下的 PID namespace，以及 macOS x64／arm64、Bun 下的独占 launchd resource coalition。Linux 需要 bubblewrap 和原生 init；macOS 复用固定 stdio guardian 资产，以独立 Browser 身份运行。独立浏览器路径还需系统 Chrome／Chromium 和宿主预查；Native 共享页复用 Main 的 Electron 页面。Windows 仍明确 unavailable，不降级为只杀命令行或进程组。Linux 实现与 macOS 本轮实测分别取得各自范围的证据，不相互代证。
+- 原生适配支持 Linux x64／arm64、Node 下的 PID namespace，以及 macOS x64／arm64、Node 下的独占 launchd resource coalition。Linux 需要 bubblewrap 和原生 init；macOS 复用固定 stdio guardian 资产，以独立 Browser 身份运行。独立浏览器路径还需系统 Chrome／Chromium 和宿主预查；Native 共享页复用 Main 的 Electron 页面。Windows 仍明确 unavailable，不降级为只杀命令行或进程组。Linux 实现与 macOS 本轮实测分别取得各自范围的证据，不相互代证。
 - 独立浏览器默认仅定位固定版本的已安装原生包、受支持系统 Chrome／Chromium 和原进程监督资产。缺失不使应用启动崩溃，也不自动下载浏览器、运行 npx 或开启外部调试端口。可信 Service 可禁用本能力；JSONC 不能供应运行时路径、策略或原始参数。
 - 发行包复用运行时的 `agent-browser` 可执行文件选择，按目标平台、架构和 Linux libc 交付对应二进制。资源与许可见 [Terminal 制品闭包](../../../../../apps/cli/docs/terminal-release.md#制品闭包与身份)。
 
@@ -45,7 +45,7 @@ Native默认不装配request_human／human_wait／respond_human／Resume及人�
 
 全局API资源现准确说明pages同时投影活动句柄与其他released候选，但每个任务仍只绑定一页。真实HTTPS新URL流程中，Model为核实另一保留页而直接snapshot候选，收到browser_page_already_open后误称无法确认原页；Main实际保留了两页。该已知拒绝现说明当前任务已有绑定、候选未取得控制，不能推断页面丢失或关闭。技能指导完成当前页、close释放并正常final；下一用户消息才以新任务重新绑定，不把close当同任务切页，也不要求审批／人工交还或Continue。结果说明只改文字，不改原outcome、dispatch、操作或未知结果，未增加API、工具或协议版本。
 
-[执行器 leaf](executor/index.ts) 当前仅提供 macOS Seatbelt 后端。生成代码运行在独立的固定 Bun worker 中；REPL 是语言设施，安全边界是 OS sandbox。固定策略拒绝网络和 fork，不授予 Workspace、Profile 或任意文件写入；系统读取只限 `/System/Library`、`/usr/lib`、`/usr/share` 等明确运行依赖与准确 Bun／worker 资产，不放行整个 `/System`。环境只接收必要的隔离 HOME／TMPDIR 和时区，没有宿主凭据。子进程通过有界 NDJSON 请求宿主 API，宿主不信任 worker 自报的完成、序号或方法。缺资产、平台或隔离条件时准确 unavailable，不回退普通进程、Shell、Node vm 或 Worker 线程。
+[执行器 leaf](executor/index.ts) 当前仅提供 macOS Seatbelt 后端。生成代码运行在独立的固定 Node 进程 中；REPL 是语言设施，安全边界是 OS sandbox。固定策略拒绝网络和 fork，不授予 Workspace、Profile 或任意文件写入；系统读取只限 `/System/Library`、`/usr/lib`、`/usr/share` 等明确运行依赖与准确 Node／worker 资产，不放行整个 `/System`。环境只接收必要的隔离 HOME／TMPDIR 和时区，没有宿主凭据。子进程通过有界 NDJSON 请求宿主 API，宿主不信任 worker 自报的完成、序号或方法。缺资产、平台或隔离条件时准确 unavailable，不回退普通进程、Shell、Node vm 或 Worker 线程。
 
 普通脚本异常和宿主确认的调用前参数／引用错误、已落定的 child Tool 失败，只封住当前批次，不自动销毁已取得的页面及解释器。宿主仅在原调用链结算、pending／waiting归零且原进程经内核确认SSTOP后返回可恢复失败；沿宿主私有错误身份分类，不信任worker报出的错误文字。下一批保留变量及同一Browser Job，仍核准确控制范围，并须重新观察、核对先前实际效果后只做剩余步骤；没有自动重放。首次打开尚未取得绑定句柄仍清理原申请；取消／控制释放／结果未知及进程故障分别收口，预算或协议故障先停止并隔离代码环境，Browser Job保有自己的任务与监督责任，原unknown不改写。代码的catch及已排队调用不能越过本批失败闩锁。
 
@@ -55,9 +55,9 @@ worker用私有求值来源隔离批次：旧timer／Promise不能借后续批�
 
 当前单批代码最多 16 KiB、32 次 API 和 16 KiB 文本输出；默认运行预算 15 秒，可信上限 30 秒。宿主核原 root 的身份与内核 CPU 时间；API 等待及批次返回前以原 audit token 暂停该进程并确认内核 SSTOP，下一批准入后才恢复。Host等待不消耗已暂停代码的wall预算，运行死循环仍受预算及硬停止约束；伪造 done 不能让代码在批次之间继续执行。原 guardian 的环境累计 stdout／stderr 64 KiB 限额继续适用。这些限制不承诺代码进程或浏览器总内存的硬配额。
 
-固定 Bun REPL 的顶层 await 拒绝可能分块写入诊断流。worker 在首个诊断块立即封住该批 API 派发，只收集当前事件循环内最多 2 KiB，再提取最多 512 UTF-8 字节的标准错误类型与消息；ANSI、代码帧、栈和任意拒绝对象不进入模型。无法提取时使用固定 `browser_executor_evaluation_failed`，不把不完整的 `Uncaught:` 当成完整原因；原结果帧和协议版本不变。[真实隔离执行器回归](../../../test/isolated/browser/executor.test.ts)核分块拒绝、后续批次恢复与隔离边界，整个文件19项111断言通过，不代替客户端流程。
+固定 Node REPL 的顶层 await 拒绝可能分块写入诊断流。worker 在首个诊断块立即封住该批 API 派发，只收集当前事件循环内最多 2 KiB，再提取最多 512 UTF-8 字节的标准错误类型与消息；ANSI、代码帧、栈和任意拒绝对象不进入模型。无法提取时使用固定 `browser_executor_evaluation_failed`，不把不完整的 `Uncaught:` 当成完整原因；原结果帧和协议版本不变。[真实隔离执行器回归](../../../test/isolated/browser/executor.test.ts)核分块拒绝、后续批次恢复与隔离边界。
 
-`browser.code_session` 复用原 process slot、Job 取消与绑定保留；独立 Bun 由[原 Darwin owner](darwin-owner.ts)及同一 stdio guardian／coalition 监督，不新增 Agent Loop 或进程监督引擎。代码环境close只终止VM及当前在途子调用，不取消已绑定Browser Job。Browser Job通过受信Runtime来源沿有限父链绑定原Run，自己监督原任务结束／取消并准确stop／dispose；预览间隔不延迟该监督，on-demand不因此增加捕获。新Run在任何VM／process准入前调用Controller.prepareRun，等待旧终态Job的真实stop／dispose再复核，避免旧lease／引用和容量2自等待；原unknown拒绝替换。明确close／用户接管后，同Run不能重新acquire，新消息的新Run才可复用同页；纯VM故障不等于页面释放。代码停止不能把原网页unknown改成成功，也不靠只读onRunEnd补造资源释放。Main 原页面是否保留及真实租约状态归[Desktop owner](../../../../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
+`browser.code_session` 复用原 process slot、Job 取消与绑定保留；独立 Node 进程由[原 Darwin owner](darwin-owner.ts)及同一 stdio guardian／coalition 监督，不新增 Agent Loop 或进程监督引擎。代码环境close只终止VM及当前在途子调用，不取消已绑定Browser Job。Browser Job通过受信Runtime来源沿有限父链绑定原Run，自己监督原任务结束／取消并准确stop／dispose；预览间隔不延迟该监督，on-demand不因此增加捕获。新Run在任何VM／process准入前调用Controller.prepareRun，等待旧终态Job的真实stop／dispose再复核，避免旧lease／引用和容量2自等待；原unknown拒绝替换。明确close／用户接管后，同Run不能重新acquire，新消息的新Run才可复用同页；纯VM故障不等于页面释放。代码停止不能把原网页unknown改成成功，也不靠只读onRunEnd补造资源释放。Main 原页面是否保留及真实租约状态归[Desktop owner](../../../../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
 
 PNG 与 JPEG 采集共用在途 capture 集合；关闭证明等待截图读取、文件关闭和删除完成，取消后不交付迟到图片，文件关闭未知继续拒绝释放资源。
 
@@ -130,7 +130,7 @@ Chrome 仅设置 32 MiB disk cache／8 MiB media cache 参数，不承诺浏览�
 
 2026-10-29工具可靠性修复的最新真实隔离worker／Runtime整文件为41项414断言通过；未变的执行器27项137断言及通用Loop16项133断言结果复用，共84项684断言，无跳过。覆盖已知脚本／参数／旧引用／读取失败后同解释器及原Browser Job继续、捕获异常与排队零误派发、未知原结果、超时／取消、旧异步来源、UTF8代码准入，以及65536字中文加转义／emoji／长元数据的快照直接作为最终值仍有界。它不启动Native窗口或付费模型；修后实时资格仍待核实。
 
-[统一入口 Runtime／SQLite 回归](../../../test/isolated/browser/execute.test.ts)覆盖同 Run 持久环境、并行模型批次顺序、原 child Operation 权限与 provenance、拒绝／旧引用／unknown 的后继零派发、初次观察失败与资源排队取消、Run 结束和取消收口，以及正式 PNG 的外层 scope 和下一模型请求。[执行器 OS 回归](../../../test/isolated/browser/executor.test.ts)使用隔离本机 Bun／Seatbelt，核持久变量、死循环／取消、原身份暂停、伪造帧、跨 scope、文件与同 inode Data 路径拒绝、本地 TCP／Unix 正对照及父进程强杀；它不启动 Chrome、Native UI 或付费模型。两类证据不能代替当前源码的实机或发布资格；普通客户端、模型、窗口与既有失败／unknown 的准确状态只在上述 Desktop owner 维护。
+[统一入口 Runtime／SQLite 回归](../../../test/isolated/browser/execute.test.ts)覆盖同 Run 持久环境、并行模型批次顺序、原 child Operation 权限与 provenance、拒绝／旧引用／unknown 的后继零派发、初次观察失败与资源排队取消、Run 结束和取消收口，以及正式 PNG 的外层 scope 和下一模型请求。[执行器 OS 回归](../../../test/isolated/browser/executor.test.ts)以 macOS arm64／Node 26.13.1 的真实 Seatbelt 与 launchd 运行，27 项通过，覆盖持久变量、死循环／取消、原进程暂停、伪造帧、跨 scope、文件与同 inode Data 路径拒绝、本地 TCP／Unix 正对照及父进程强杀。覆盖范围限于代码执行器及其宿主通道。两类证据不能代替当前源码的实机或发布资格；普通客户端、模型、窗口与既有失败／unknown 的准确状态只在上述 Desktop owner 维护。
 
 [Controller 回归](../../../test/isolated/browser/controller.test.ts)与[真实 Runtime／SQLite 回归](../../../test/isolated/browser/runtime.test.ts)断言无副作用 Query、原 Job 生命周期、同 key 去重、外部 scope／旧 generation 拒绝、人工接管竞争、未知结果及清理保留。[原生协议回归](../../../test/isolated/browser/native.test.ts)使用替身进程监督和内存 socket，核版本／会话绑定、消息限额、沙箱拒绝、目录采样和未知清理；[资产回归](../../../test/isolated/browser/assets.test.ts)核固定依赖与包内资产。测试存在及断言范围不等于本次执行通过。
 

@@ -1,4 +1,5 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync } from 'node:fs';
+import { dlopen, ptr, toArrayBuffer } from '../runtime-ffi';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
 export interface FileLock {
@@ -146,7 +147,6 @@ let flock: ((fd: number, operation: number) => number) | undefined;
 let flockError: (() => number) | undefined;
 function posixFlock(fd: number, operation: number, observation = false): number {
   if (!flock) {
-    const { dlopen, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
     const errorSymbol = process.platform === 'darwin' ? '__error' : '__errno_location';
     const api = dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
       flock: { args: ['i32', 'i32'], returns: 'i32' },
@@ -154,7 +154,7 @@ function posixFlock(fd: number, operation: number, observation = false): number 
     }).symbols;
     flock = api.flock!;
     flockError = () => {
-      const address = (api[errorSymbol]! as () => import('bun:ffi').Pointer | null)();
+      const address = (api[errorSymbol]! as () => import('../runtime-ffi').Pointer | null)();
       if (address === null) throw new Error('Lock observation unavailable.');
       return new DataView(toArrayBuffer(address, 0, 4)).getInt32(0, true);
     };
@@ -175,7 +175,6 @@ function acquireWindowsLock(
   native.verifyPath(path);
   if (create && !existsSync(path)) native.createFile(path);
   security.verifyFile(path);
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const api = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },

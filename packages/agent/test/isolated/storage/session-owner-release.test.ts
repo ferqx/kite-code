@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -184,7 +185,7 @@ async function until(check: () => boolean): Promise<void> {
   const deadline = Date.now() + 5000;
   while (!check()) {
     if (Date.now() >= deadline) throw Error('runtime_unlock_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 for (const persistent of [false, true])

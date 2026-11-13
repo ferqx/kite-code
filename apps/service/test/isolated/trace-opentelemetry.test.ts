@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -6,10 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TraceEventBatch, TraceEventView } from '@kite-ai/trajectory';
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import { expect, test } from '#kite-test';
+import { createOtelIntegration } from '../../src/trace-integrations/opentelemetry';
 import {
   buildOtelAdapterAssets,
-  createOtelIntegration,
-} from '../../src/trace-integrations/opentelemetry';
+  checkoutOtelModulePlugin,
+} from '../../src/trace-integrations/opentelemetry/build-assets';
 import { exportOtelSpans } from '../../src/trace-integrations/opentelemetry/exporter';
 import {
   eventSpanIdentity,
@@ -20,6 +21,7 @@ import {
   inspectOtelStore,
   OtelAdapterStore,
 } from '../../src/trace-integrations/opentelemetry/store';
+import { fixtureNodeExecutable, spawnFixtureNodeService } from '../fixtures/node-service-process';
 
 const stamp = { revision: '1', epoch: '1', active: true };
 function event(
@@ -415,13 +417,14 @@ test('trusted independent adapter process accepts durably, reopens without sourc
   });
   await new Promise<void>((resolve) => receiver.listen(0, '127.0.0.1', resolve));
   const endpoint = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}/v1/traces`;
-  const assets = await buildOtelAdapterAssets(join(root, 'assets'));
+  const assets = await buildOtelAdapterAssets(join(root, 'assets'), [checkoutOtelModulePlugin()]);
   const options = {
     installationId: 'fixture',
     path: join(root, 'adapter.db'),
     endpoint,
     grant: stamp,
     assets,
+    executable: fixtureNodeExecutable(),
     async authorizeSend(request: { endpoint: string }, signal: AbortSignal) {
       checks++;
       signal.throwIfAborted();
@@ -492,22 +495,25 @@ import {exportOtelSpans} from ${JSON.stringify(exporterUrl)};
 import {materializeSpan} from ${JSON.stringify(mappingUrl)};
 const store=new OtelAdapterStore(${JSON.stringify(options)});store.setGrant(${JSON.stringify(stamp)});store.consume(${JSON.stringify(delivery)});
 ${phase === 'remote_accept' ? `const row=store.next();store.admitSend(row);const result=await exportOtelSpans({endpoint:${JSON.stringify(endpoint)},spans:[materializeSpan(row.envelope)],authorizeSend:async()=>({headers:{},target:{address:'127.0.0.1',family:4}})});if(result.kind!=='full')throw Error('expected_full');` : ''}
-console.log('ready');await new Response(Bun.stdin.stream()).text();`;
-      const child = Bun.spawn(
-        [process.execPath, '--no-env-file', '--no-install', '--eval', script],
-        { cwd: root, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
-      );
+console.log('ready');for await (const _ of process.stdin){}`;
+      const child = spawnFixtureNodeService(['--input-type=module', '--eval', script], process.env);
+      const exited = new Promise<void>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', () => resolve());
+      });
+      void exited.catch(() => {});
       try {
-        const reader = child.stdout.getReader();
-        const output = await reader.read();
-        reader.releaseLock();
-        expect(new TextDecoder().decode(output.value)).toContain('ready');
+        const output = await new Promise<Buffer>((resolve, reject) => {
+          child.stdout.once('data', resolve);
+          child.stdout.once('end', () => reject(Error('fixture_otel_startup_failed')));
+        });
+        expect(output.toString()).toContain('ready');
         child.kill('SIGKILL');
-        await child.exited;
+        await exited;
       } finally {
         if (child.exitCode === null && child.signalCode === null) {
           child.kill('SIGKILL');
-          await child.exited;
+          await exited;
         }
       }
       const recovered = new OtelAdapterStore(options);

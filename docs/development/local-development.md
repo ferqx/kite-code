@@ -2,13 +2,19 @@
 
 Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当前 guardian 与隔离代码 worker 资产；源码 locator 的拒绝规则保持，具体接线和验证范围见 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。锁定 CLI 运行组件及系统 Chrome／Chromium 仍须先准备；开发构建不自动下载浏览器、不导入现有 Profile，只读观察也不会启动 Browser Job。
 
-仓库使用 Bun 1.4.4；本地类型检查、Required 与运行时／qualification workflow 均固定该版本，配套 `@types/bun` 也固定1.4.4。Windows 原1.4.3与新1.4.4的定向对照和既有失败归[测试体系](../../tests/README.md#运行时升级与模型连接池)；原平台／发布资格不会因 pin 或连接池接线更新而获得。先 `bun install --frozen-lockfile`，再 `bun run build` 构建精确十个新 workspace。正式源码入口依赖完整候选，运行前执行 `bun run release:build`；显式开发入口需要已构建的 workspace 资产，Desktop 另从当前 Service 源码构建独立开发版本。当前资格范围见[进度证据](../plans/unified-agent-refactor-v1-progress.md)。
+在源码 checkout 准备 Node.js 26.13.1 和 Bun 1.4.4，执行 `bun install --frozen-lockfile`。Bun 按 `bun.lock` 将依赖隔离安装到仓库自己的 `node_modules/.bun`，构建与 CI 使用同一份锁。根 postinstall 构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，需要 rustup／固定 Rust 1.97.1 和本机 linker。Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C/C++ 工具链、`pkg-config` 和 `libffi-dev`。使用 `--ignore-scripts` 安装后，运行 `bun run build:files-native` 补齐 Files 资产。直跑 Agent 或 Service 源码测试前执行 `bun --cwd=packages/agent run build`，使原生插件和 Worker 摘要匹配。发行制品自带 Node 和原生插件。
 
-源码安装的 postinstall 会构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，期间显示三个构建阶段及实时 Cargo 诊断，完成后显示资产路径。需要 rustup／固定 Rust1.97.1 和本机 linker；Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C 工具链。使用 `--ignore-scripts` 安装后，先显式运行 `bun run build:files-native` 再执行文件工具测试。正式 Agent build 会把同一原生模块、ABI/hash manifest 和许可证放进制品；用户机器不需要 Rust。运行期缺失资产明确失败，不能依靠源码或即时编译回退。
+十个 workspace 的 JS／TS bundle、Desktop 开发版 Service 重载及 Terminal／Native 发行构建共用 [Bun 打包入口](../../scripts/tooling/bun-build.ts)，开发脚本和服务端产物由 Node 执行。`bun run test` 通过显式 Node 入口执行正式测试。[Bun 配置](../../bunfig.toml)关闭自动读取 `.env`、自动安装和 `node` 命令替换。Desktop renderer 的热更新和生产构建使用 Vite／Tailwind，原生组件沿用各平台编译工具链。取舍见 [Bun 工具链决定](../../.agents/notes/implemented/architecture/2026-11-13-bun-build-node-runtime.md)。
 
-Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，不需要 Rust，也不准备 Files 原生资产。安装后以 Actions 的 `working-directory: apps/web` 执行 `bun run build`，生成公开 `./assets` 的实际默认导出 `apps/web/dist/assets.js`，再执行原全部质量门禁；缺少该导出仍由工作区守卫拒绝。该准备只构建 Web，不执行整个 workspace build。其他运行时测试、qualification、发布和普通源码安装继续执行原 postinstall，不能照搬 quality 的安装方式后直接运行文件工具。
+[工作区构建参数](../../scripts/tooling/build-command.ts)由开发和桌面发行共用。普通浏览器目录构建由 Bun 写入，只向 Node 返回构建结果和诊断。需要私有导入转换或内存产物的构建沿用原接口。[API 校验器](../../scripts/generate-unified-api.ts)由同一版本的 Bun 打包。
 
-quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 临时目录，不缓存 `node_modules`、workspace 构建或原生资产。不可变 cache action 的 key 包含 OS、架构、Bun1.4.4、lock、根及精确十 workspace manifest、registry 配置和 patches；不使用较宽 restore key。命中和未命中都执行原 frozen install、Web 准备与全部检查，不能把 cache hit 当作依赖或边界验证通过。
+Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，显式构建 Web 的公开 assets export，再执行全部质量门禁。其他构建作业按相同锁文件安装，再准备各自的原生输入和测试环境。
+
+需要在源码 checkout 启动 Desktop 时，执行 `node apps/desktop/node_modules/electron/install.js` 准备锁定的 Electron 二进制。实际 TUI PTY 测试在 macOS 和 Linux 使用 Python 3；Windows 使用测试依赖中的 ConPTY 及原生进程观察。发行制品运行不依赖这些开发工具。
+
+Linux 上持久保存模型凭据需要 `libsecret-1.so.0`（Ubuntu／Debian 的 `libsecret-1-0`）和已解锁的用户 Secret Service。开发运行时准备按原生源码和插件摘要识别旧插件。变更原生源码后运行 `bun --cwd=packages/agent run build`，使插件及 Worker 摘要同步。[模型凭据](../handbook/features/models-and-configuration.md#配置范围)
+
+quality 在 runner 步骤中从 `RUNNER_TEMP` 设置 Bun 下载缓存目录。unit 同样在步骤中设置 Playwright 浏览器目录。缓存键覆盖平台、Node 和 Bun 版本、`bun.lock`、`bunfig.toml`、根与十个 workspace 清单、registry 配置和补丁。缓存命中后仍执行冻结安装与全部检查。
 
 | 目标 | 命令 | 说明 |
 | --- | --- | --- |
@@ -20,32 +26,33 @@ quality 仅缓存 `BUN_INSTALL_CACHE_DIR` 指定的下载目录，位于 runner 
 | TUI 开发 | `bun run tui:dev --workspace .` | 同一 development profile 与 Ink；`--thread <id>` 选择原 Session |
 | Desktop 开发 | `bun run desktop:dev` | 已准备 workspace 资产、已安装 Electron；检查运行时依赖加载与真实 Service 就绪，UI 热更新，Service 及其 workspace 源码变更自动重载 |
 | 只读 Web 开发 | `bun run web:dev` | 已构建 Service/Web assets、development profile 与只读 Gateway |
-| Native 候选 | `bun run release:build --product native` | macOS arm64 和 Windows x64 默认构建桌面专用候选。Linux 先构建独立 Terminal。使用 `--terminal` 可显式构建组合候选，启动和 Windows 构建条件见 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装) |
+| Native 候选 | `bun run release:build --product native` 后 `bun run desktop` | macOS arm64 和 Windows x64 默认构建含包内 Node 的桌面专用候选。Linux 先构建独立 Terminal。使用 `--terminal dist/unified-terminal` 构建组合候选，启动和 Windows 构建条件见 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装) |
 | Desktop 定向验证 | `bun run test:desktop:native` | 新 Native bundle/process/Files 的隔离实际场景，使用本地固定 Provider |
 | Native 安装生命周期 | `bun run test:desktop:window` | 新完整 Native 的源码外安装、升级、强杀、回滚与卸载；具体资格见 Native owner |
 | 默认测试 | `bun run test` | 与 `test:unified-agent` 共用精确十 workspace 和有限 root safety 计划，最多四槽；独占场景串行 |
+| 本机快速单测 | `bun run test:fast tui desktop` | Bun 执行，`--node` 复跑同一组文件。范围与用法见[本机快速单测](../../tests/README.md#本机快速单测) |
 | TUI 系统测试 | `bun run test:tui:system` | 当前 112 个完整文件（原 52 个旅程及 60 个当前宿主文件）；支持 `--list` 和 `KITE_TUI_SYSTEM_SHARD=0/4` 至 `3/4`，详见测试 owner |
-| 类型检查 | `bun run typecheck` | Bun 1.4.4；单进程检查原根与精确十 workspace 的十一份配置 |
+| 类型检查 | `bun run typecheck` | TypeScript；单进程检查原根与精确十 workspace 的十一份配置 |
 | 工作区与依赖边界 | `bun run check:runtime-packages`、`bun run check:core-boundary` | 工作区清单、正式消费闭包与源代码依赖边界 |
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构检查与实际影响语义核对 |
 | 首发证据 | `bun run check:plan-evidence` | 独立历史证据消费者，不代替当前 §35 资格 |
 
-类型检查执行 `bun check -b -p tsconfig.typecheck.json`；[聚合配置](../../tsconfig.typecheck.json)只含空 `files` 和原根／十 workspace 的有序 references，共十一份配置。每个项目仍用自己的 include/exclude、严格选项和类型环境；不把源码合成一个项目，也不递归发现目录。任一项目类型错误仍返回非零，聚合检查可以一起报告多个项目错误。各包的 `bun check -p tsconfig.json` 与[原 workspace runner](../../scripts/run-runtime-workspace-script.ts)仍可独立使用；pre-commit 仍只检查根配置。Bun 1.4.4 内置检查器标识为 TypeScript 7.0.2；保留项目的 TypeScript 5.9.3，供边界检查、测试发现使用 compiler API，并供编辑器使用，不再作为默认类型门禁。类型库语义差异、文件清单与失败路径对照归[测试体系](../../tests/README.md#类型检查)。
+类型检查执行 `tsc -b tsconfig.typecheck.json`；[聚合配置](../../tsconfig.typecheck.json)只含空 `files` 和原根／十 workspace 的有序 references，共十一份配置。每个项目仍用自己的 include/exclude、严格选项和类型环境；不把源码合成一个项目，也不递归发现目录。任一项目类型错误仍返回非零，聚合检查可以一起报告多个项目错误。可用 `bun --cwd=<workspace> run typecheck` 单独检查；pre-commit 仍只检查根配置。聚合检查、边界检查、测试发现和编辑器都使用依赖锁中的 TypeScript。历史检查器和覆盖范围的对照归[测试体系](../../tests/README.md#类型检查)。
 
 `check:runtime-packages` 检查十个工作区的清单、公开 exports、正式脚本、聚合类型检查清单和 CI 消费闭包，并调用与 `check:core-boundary` 相同的[依赖边界守卫](../../scripts/check-unified-agent-boundary.ts)，同时覆盖默认源码和额外正式入口。Required quality、pre-commit 与 `check:pre-release-architecture` 各只调用一次这一合并入口，独立边界命令保留。合并 CLI 输出原覆盖计数、pending 与未取得发布资格提示；拒绝条件保持，聚合清单缺少、重复、越界或覆盖项目设置也会失败。守卫仅在本次调用内复用已解析的模块图、workspace manifest、候选文件的存在／类型与实际路径结果，包括缺失候选；入口策略仍分别检查，每个条件导出分支仍解析，并核实际路径是否越界或指向旧模块。下一次调用重新读取源码、清单和链接，不跨运行缓存通过结论。回归覆盖[共享与循环依赖、入口策略及缓存失效](../../tests/isolated/scripts/unified-agent-boundary.test.ts)、[独立／合并拒绝对照](../../tests/integration/scripts/unified-workspaces.test.ts)和[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)。
 
 正式 Terminal 默认使用 `~/.kite-code/unified-agent/default`。CLI、TUI、Desktop 和 Web 开发入口的默认数据根为当前用户的 `~/.kite-code`，与 checkout 和启动工作目录无关；其 `development` profile 位于 `~/.kite-code/development`，数据库直接位于 `~/.kite-code/development/core.db`，会话、制品、草稿和偏好随 profile 保存。CLI/TUI/Web 可用 `--data-root <绝对路径>` 明确选择其他数据根，优先于默认值。原 checkout 的 `.kite-code/unified-development` 数据保持原位，不自动迁移；需要读取时显式选择该旧数据根。模型配置仍统一读取 `~/.kite-code/kite-code.jsonc`。测试必须使用所属临时 home/workspace/profile/endpoint，按 harness 清理。
 
-日常开发可使用 npm 调用同一 Bun 脚本：
+日常开发从根目录运行以下脚本：
 
 ```sh
-npm run build
-npm run cli:dev -- run --workspace . --task "任务"
-npm run tui:dev -- --workspace .
-npm run desktop:dev
+bun run build
+bun run cli:dev run --workspace . --task "任务"
+bun run tui:dev --workspace .
+bun run desktop:dev
 ```
 
-四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
+四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `bun run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
 Desktop 在准备 Electron／Vite 前先只读预检这个实际 development Profile。遇到 `store_incompatible` 时取得该 Profile 的独占使用锁并重新核对，在交互终端展示备份位置、历史隔离和全局模型配置保留说明，询问是否备份后新建。只有明确输入 `y`／`yes`（不区分大小写）才将旧目录整体改名保留在同一数据根的 `development-backup-<时间戳>-<随机标识>`，然后继续启动；Service 按原流程创建干净的 development 数据。回车、其他回答、Ctrl+C 或关闭输入均取消；非交互环境返回 `development_profile_confirmation_required`，不自动接受。旧会话、附件和 Profile 内配置保留在备份中，不会出现在新环境；数据根中的全局模型配置保持原位。兼容数据直接复用，不询问或反复备份。其他客户端仍在使用、恢复日志待处理、访问／I/O 失败或无法完整改名备份时停止，不清库、不强杀其他进程；占用时关闭使用同一 Profile 的客户端再重试。此确认后自动处置仅限 `desktop:dev`，不是旧数据迁移能力，正式客户端和其他开发入口的格式检查保持。具体实现与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
@@ -55,20 +62,20 @@ Desktop 的主页面与全局确认框均由该 Vite 服务提供，启动时预
 
 Windows 数据目录若被其他程序增加授权（例如 Agent 沙箱读取组），Desktop 会在启动 Service／SQLite 前显示准确路径和处理选项，默认退出；符合有限安全条件时可主动备份并修复该对象，操作见[桌面手册](../handbook/clients/desktop/README.md)。取消后开发命令返回 `native_profile_permissions_cancelled`，不删除 Profile。验证权限错误须使用测试自有的数据根，不在真实用户目录制造故障；正式 Native 默认数据根 `~/.kite-code/unified-agent` 与开发入口保持独立。
 
-`desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
+`desktop:dev` 在启动 Electron 前，用独立 Node 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
 
 页面、组件和样式（包括共享 UI）使用 Vite／React Fast Refresh，保存后即时更新，通常保留组件的页面状态；不能进行 Fast Refresh 的模块由 Vite 重新加载。Service 以及 Agent、AI、Client 的 `src` 源码保存后合并连续变更，构建到新的私有 Service 版本并再次检查运行时加载；同时比较这些源码的内容摘要，外部依赖变化不会因入口字节未变而被跳过，内容未变不重启。检查失败保持旧服务，修正保存后可再次检查。在同一 Electron 窗口内关闭并核实旧配套服务实际退出，再按新 SHA／build 身份准入新服务并重载页面。运行中的开发任务会正常取消和收尾，不自动重发或接续；Service 重载会重置页面内存中的未保存状态，持久数据保留。
 
-开发 Service 的 Shell 资产定位器使用当前 checkout 已构建的 Agent 入口，主 Agent 和默认通用／code 子 Agent 因而能够在宿主资产可用时取得 Shell；其余工作区代码继续使用源码。修改开发构建脚本或更新 Shell 资产后，退出并重新运行 `desktop:dev`；资产未准备时先执行 `npm run build`。该选择不改变工作区信任和审批要求，具体装配与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+开发 Service 的 Shell 资产定位器使用当前 checkout 已构建的 Agent 入口，主 Agent 和默认通用／code 子 Agent 因而能够在宿主资产可用时取得 Shell；其余工作区代码继续使用源码。修改开发构建脚本或更新 Shell 资产后，退出并重新运行 `desktop:dev`；资产未准备时先执行 `bun run build`。该选择不改变工作区信任和审批要求，具体装配与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
-Vite 以 middleware 模式接入宿主拥有的 loopback HTTP／WebSocket 服务，不另接管 SIGTERM 或 stdin EOF。退出由开发宿主统一收尾，信号处理器保留到清理完成，等待所属 Electron 退出后再删除该次应用目录。Service 编译／加载检查失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload（包括由其导入打包的 `src` 共享 helper）、原生模块、构建脚本或依赖清单变更仍需退出后重新启动；Browser 隔离代码 worker 由当前开发 builder 随 Service 版本重建，其他 workspace Worker 沿所属资产要求重建。需要更新包资产时先执行 `npm run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Vite 以 middleware 模式接入宿主拥有的 loopback HTTP／WebSocket 服务，不另接管 SIGTERM 或 stdin EOF。退出由开发宿主统一收尾，信号处理器保留到清理完成，等待所属 Electron 退出后再删除该次应用目录。Service 编译／加载检查失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload（包括由其导入打包的 `src` 共享 helper）、原生模块、构建脚本或依赖清单变更仍需退出后重新启动；Browser 隔离代码 worker 由当前开发 builder 随 Service 版本重建，其他 workspace Worker 沿所属资产要求重建。需要更新包资产时先执行 `bun run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
 切换分支或 workspace 清单变更后，先重新执行 `bun install --frozen-lockfile`，确保 `node_modules/@kite-ai/*` 链接当前十个 workspace；缺少这些链接会在启动前报 `Cannot find module '@kite-ai/cli/host'`。
 
 Windows x64 的 Desktop 开发入口还会构建 Node 原生权限模块，需要已安装 [Microsoft C++ Build Tools](https://learn.microsoft.com/en-us/cpp/overview/acquire-msvc) 的 C++ 桌面开发工具和 Windows SDK。普通 PowerShell 可直接启动：
 
 ```powershell
-npm run desktop:dev
+bun run desktop:dev
 ```
 
 [开发环境准备](../../scripts/development/windows-desktop-environment.ts)先复用完整的 x64 C++ 构建环境；否则通过 Visual Studio Installer 自带的 [vswhere](https://github.com/microsoft/vswhere/wiki/Examples) 定位最新已安装 C++ 工具，再调用 `VsDevCmd.bat -arch=x64 -host_arch=x64`。仅将编译所需的环境白名单导入本次进程，核编译器与 Windows SDK 文件，设置 canonical absolute `KITE_WINDOWS_MSVC` 并清空 `CL`／`_CL_` 注入参数；调用者的 PowerShell 和系统环境不变。已有显式编译器路径保留，路径无效返回 `windows_desktop_compiler_override_invalid`。
@@ -83,11 +90,11 @@ Windows 的 `desktop:dev` 在构建／创建应用目录前执行 [Electron 权�
 
 `tui:dev`、`desktop:dev` 与正式客户端强制使用普通用户界面，测试专用调试功能不得在 dev／prod 出现。TUI 公开参数拒绝 `--test-ui-diagnostics`；自动化只能从测试目录的入口向可信 host 显式传 `testDiagnostics:true`。Desktop 开发和普通正式 renderer 的构建常量固定为 false，传入组件参数也不能开启；DOM fixture 或单独测试制品可以显式启用。共享 UI 不以 `NODE_ENV` 等环境名自动开启诊断。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
 
-`npm run agent` 和 `npm run tui` 选择 `npm run release:build` 生成的正式 Terminal 候选。`npm run desktop` 选择 `npm run release:build -- --product native` 生成的 Native 候选。Linux 的 Native 构建先准备 Terminal。缺失候选时返回 `terminal_bundle_unavailable` 或 `native_bundle_unavailable` 和准备命令。源码变化不会自动更新候选。重新构建前先退出使用它的客户端，将旧候选目录移出默认路径，再构建新的候选。
+先用 `bun run prepare:node-inputs` 准备发行用 Node。`bun run agent` 和 `bun run tui` 选择 `bun run release:build` 生成的 Terminal 候选。`bun run desktop` 选择 `bun run release:build --product native` 生成的 Native 候选。Linux 的 Native 构建先准备 Terminal。缺失候选时分别返回 `terminal_bundle_unavailable` 或 `native_bundle_unavailable` 和准备命令。制品通过完整验证后才进入 Profile。源码变化后如需更新候选，先退出使用它的客户端，将旧目录移出默认路径，再构建新的候选。
 
 2026-10-26 已删除旧 Desktop、Service、Web 及旧 Runtime/Kernel/contract 等 workspace，同时清理其独占的测试、构建和发布脚本；旧架构只保留 [apps/kite-cli](../../apps/kite-cli/README.md) 供源码阅读。其依赖闭包已删除，不再提供旧 library 导入、构建或普通启动。旧命令的拒绝行为和旧制品证据属于[删除前历史](https://github.com/ferqx/kite-code/tree/d5407cfe4319c5a84d530f63b1d0a0123218ad34/scripts)，不作为当前命令列表。正式和开发入口只使用上表的新架构；删除旧源码不改变 unknown、数据保护、平台或发布门禁。
 
-`cli:dev`、`tui:dev` 和 `web:dev` 验证实际 Bun 与已构建 Service 的 SHA，通过私有 bootstrap 准入。缺资产局部失败；help/version 与严格参数拒绝先于 Profile 或 Provider I/O。开发 entry SHA 只标识所选入口，完整发行资格另行核对。
+`cli:dev`、`tui:dev` 和 `web:dev` 使用已准备的 Node，绑定实际可执行文件与已构建 Service 的 SHA，通过私有 bootstrap 准入。缺资产局部失败；help/version 与严格参数拒绝先于 Profile 或 Provider I/O。开发 entry SHA 只标识所选入口，完整发行资格另行核对。
 
 开发 CLI 的 `run/resume` 消费公开 Client；`resume` 在原 Session 输入新任务，冷接续原 Run 使用明确 recovery 命令。`--skill` 只选已配置知识，Workflow 使用明确 `--activate-skill`。首次 mutation 前保存完整原申请，回执未知只查原 ID。stdin EOF 保留原待人工作；Ctrl+C 精确取消原 work。显式 `--server` 连接所选 data root 的原共享服务，不读取本地 Service 资产。`caller list` 和 `files intents` 仍先连接服务，不是离线查询。参数和退出码见[CLI 手册](../handbook/cli/commands.md)，真实 argv 证据见[CLI owner](../../apps/cli/README.md)。
 

@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import type { Extension, OperationRef } from '../../../src/extensions';
 import { createTaskExtension } from '../../../src/extensions/task';
 import { isChildPreparationFailure } from '../../../src/extensions/task/preparation-failure';

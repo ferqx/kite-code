@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
@@ -9,6 +9,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { JobEvent, OperationRef, ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -49,7 +50,7 @@ async function fact<T>(read: () => Promise<T | undefined>): Promise<T> {
     const result = await read();
     if (result !== undefined) return result;
     if (Date.now() > deadline) throw new Error('child_result_missing_fact');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture() {

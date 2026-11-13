@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { finiteNativeFixture } from '../../../../tests/fixtures/unified-agent/native-artifact-fixture';
 import { releaseScratch } from '../../../../tests/fixtures/unified-agent/release-filesystem';
 import {

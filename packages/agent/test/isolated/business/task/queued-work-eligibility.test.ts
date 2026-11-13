@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import type { ToolDefinition } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
@@ -25,7 +26,7 @@ async function eventually(predicate: () => Promise<boolean>) {
   const deadline = Date.now() + 4000;
   while (!(await predicate())) {
     if (Date.now() > deadline) throw Error('Exact queued-work condition did not settle');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 

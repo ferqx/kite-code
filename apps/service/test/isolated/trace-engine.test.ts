@@ -1,13 +1,21 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { TraceEventBatch } from '@kite-ai/trajectory';
-import { createTraceEngine, TraceEngineError } from '../../src/trace-extensions/engine';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
+import {
+  createTraceEngine as createEngine,
+  TraceEngineError,
+} from '../../src/trace-extensions/engine';
 import { engineDigest, type TraceEngineAssets } from '../../src/trace-extensions/engine/assets';
 import { buildTraceEngineAssets } from '../../src/trace-extensions/engine/build-assets';
+import { fixtureNodeExecutable } from '../fixtures/node-service-process';
 
 let directory: string, assets: TraceEngineAssets;
+function createTraceEngine(options: Parameters<typeof createEngine>[0]) {
+  return createEngine({ ...options, executable: fixtureNodeExecutable() });
+}
 beforeAll(async () => {
   directory = mkdtempSync(join(tmpdir(), 'kite-trace-engine-test-'));
   assets = await buildTraceEngineAssets(join(directory, 'assets'));
@@ -51,7 +59,7 @@ describe('isolated Trace engine', () => {
       bundle: bundle(source),
       broker: async (method, input) => {
         seen.push({ method, input });
-        await Bun.sleep(2);
+        await sleepTimer(2);
         return true;
       },
     });
@@ -138,7 +146,7 @@ describe('isolated Trace engine', () => {
     ['stack', 'defineTraceExtension({onEvents(){function f(){return f()}return f()}});'],
     ['module', "defineTraceExtension({async onEvents(){return await import('node:fs')}});"],
     ['message', "defineTraceExtension({onEvents(){return 'x'.repeat(100000)}});"],
-  ])('%s failure retires only the original runner', async (name, source) => {
+  ] as [string, string][])('%s failure retires only the original runner', async (name, source) => {
     const engine = await createTraceEngine({
       installationId: `bad-${name}`,
       generation: '1',
@@ -222,10 +230,10 @@ describe('isolated Trace engine', () => {
         broker: async () => null,
       }),
     ).rejects.toThrow('trace_engine_bundle_invalid');
-    const path = join(assets.directory, 'empty-tsconfig.json'),
+    const path = join(assets.directory, 'runner.js'),
       original = readFileSync(path);
     try {
-      writeFileSync(path, '{"compilerOptions":{"paths":{"*": ["/tmp/*"]}}}');
+      writeFileSync(path, Buffer.concat([original, Buffer.from('\n// modified\n')]));
       await expect(
         createTraceEngine({
           installationId: 'asset',

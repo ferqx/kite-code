@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,12 +12,13 @@ import {
   type Message,
   type PermissionMutation,
 } from '@kite-ai/client';
-import { callerTextDigest } from '../electron/caller-journal';
-import { NativeCaller } from '../electron/native-caller';
-import { decodeNativeRequest } from '../electron/native-ipc';
-import type { NativeConversationResult, NativeDraft, NativeRequest } from '../src/native-bridge';
-import { desktopTranscript } from '../src/native-transcript';
-import { memoryPrivateData } from './private-data.fixture';
+import { expect, test } from '#kite-test';
+import { callerTextDigest } from '../../electron/caller-journal';
+import { NativeCaller } from '../../electron/native-caller';
+import { decodeNativeRequest } from '../../electron/native-ipc';
+import type { NativeConversationResult, NativeDraft, NativeRequest } from '../../src/native-bridge';
+import { desktopTranscript } from '../../src/native-transcript';
+import { memoryPrivateData } from '../private-data.fixture';
 
 const text = 'first input\n雪🙂\u0000end';
 test('formal Native transcript preserves the explicit final-only copy contract for the exact completed Run', () => {

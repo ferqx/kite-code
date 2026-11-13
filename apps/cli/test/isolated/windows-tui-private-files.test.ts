@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, linkSync, readdirSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +9,9 @@ import {
   type ProfileAccess,
 } from '@kite-ai/agent/profile-access';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   publishWindowsTuiPrivateFile,
   readWindowsTuiPrivateFile,
@@ -263,17 +265,17 @@ test('validation Close unknown retains original Profile and data regions before 
   );
   const helper = fileURLToPath(new URL('../../host/windows-tui-private-files.ts', import.meta.url));
   const code = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as nativeFFI from 'bun:ffi';
-assert.equal(typeof require('bun:ffi').dlopen, 'function');
+import * as nativeFFI from '@kite-ai/agent/runtime-ffi';
+assert.equal(typeof nativeFFI.dlopen, 'function');
 Object.defineProperty(process, 'platform', {value:'win32'});
 let next = 1n, armed, probes = 0;
 const handles = new Set(), regions = new Set();
-mock.module('bun:ffi', () => ({...nativeFFI, ptr: value => value, dlopen() { return {
+mock.module('@kite-ai/agent/runtime-ffi', () => ({...nativeFFI, ptr: value => value, dlopen() { return {
 close() {}, symbols: {
 CreateFileW() { const h = next++; handles.add(h); return h; },
 GetFileInformationByHandle(_h, bytes) { new DataView(bytes.buffer).setUint32(40,1,true); return true; },
@@ -308,7 +310,10 @@ try {
   assert.equal(probes,before);
 } finally { rmSync(root,{recursive:true,force:true}); }
 `;
-  const child = Bun.spawn([process.execPath, '--eval', code], { stdout: 'pipe', stderr: 'pipe' });
+  const child = testSpawn(
+    [process.execPath, ...testRuntimeFlags, '--input-type=module', '--eval', code],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
   const stdout = new Response(child.stdout).text(),
     stderr = new Response(child.stderr).text();
   let timer: ReturnType<typeof setTimeout> | undefined;

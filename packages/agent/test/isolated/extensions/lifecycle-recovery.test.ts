@@ -1,7 +1,10 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import type {
@@ -18,7 +21,7 @@ async function until(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error('lifecycle_recovery_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -27,9 +30,10 @@ test.each([
   'completion',
 ] as const)('cold recovery resumes %s without replaying Run start or previously settled Models', async (mode) => {
   const root = temporaryDirectory('kite-lifecycle-recovery-');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('../recovery/run-resume-crash-child.ts', import.meta.url)),
       root,
       mode,

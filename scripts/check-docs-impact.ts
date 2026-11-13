@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync as spawnProcessSync } from './tooling/process';
 
 export interface DocumentationRule {
   id: string;
@@ -81,8 +82,7 @@ export function evaluateDocumentationImpact(
 }
 
 function gitPaths(args: readonly string[], repositoryRoot: string): string[] {
-  const result = Bun.spawnSync({
-    cmd: ['git', ...args],
+  const result = spawnProcessSync(['git', ...args], {
     cwd: repositoryRoot,
     stdout: 'pipe',
     stderr: 'inherit',

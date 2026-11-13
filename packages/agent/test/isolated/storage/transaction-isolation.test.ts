@@ -1,6 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import { Database } from '../../../src/runtime-sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
+import { fixtureWorkerEntry, NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
 for (const ended of [false, true])
   test(`rollback failure preserves both errors and ${ended ? 'confirmed rollback remains usable' : 'unconfirmed transaction isolates reads and writes'}`, () => {
@@ -69,7 +71,7 @@ for (const mode of [
     const { openSqliteStore } = await import('../../../src/sqlite');
     const { acquireProfileAccess } = await import('../../../src/platform/profile');
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-transaction-isolation-')));
-    const NativeWorker = globalThis.Worker;
+
     const received: {
       id: number;
       result?: unknown;
@@ -83,17 +85,22 @@ for (const mode of [
     }[] = [];
     class FaultWorker extends NativeWorker {
       constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-        super(new URL('./transaction-isolation-worker-fixture.ts', import.meta.url).href, args[1]);
-        this.addEventListener('message', (event: MessageEvent) => received.push(event.data));
+        super(
+          ...fixtureWorkerEntry(
+            args,
+            new URL('./transaction-isolation-worker-fixture.ts', import.meta.url),
+          ),
+        );
+        this.on('message', (data) => received.push(data));
       }
     }
-    globalThis.Worker = FaultWorker;
+    useFixtureWorker(FaultWorker);
     let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let observer: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let peer: Database | undefined;
     try {
       store = await openSqliteStore({ dataRoot: root, profile: 'owned' });
-      globalThis.Worker = NativeWorker;
+      useFixtureWorker();
       observer = await openSqliteStore({ dataRoot: root, profile: 'owned' });
       const expectedStoreId = (await store.getMetadata()).storeId;
       await store.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: 'file:///w' });
@@ -202,7 +209,7 @@ for (const mode of [
       const exclusive = acquireProfileAccess({ dataRoot: root, profile: 'owned' }, 'exclusive');
       exclusive.lock.release();
     } finally {
-      globalThis.Worker = NativeWorker;
+      useFixtureWorker();
       await store?.close();
       await observer?.close();
       peer?.close(true);
@@ -266,19 +273,24 @@ test('Runtime closes an actually poisoned owner transaction only after normal wo
   const { createRuntime } = await import('../../../src/runtime');
   const { openSqliteStore } = await import('../../../src/sqlite');
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runtime-transaction-isolation-')));
-  const NativeWorker = globalThis.Worker;
+
   const received: {
     fixture?: { closes: number; rollbacks: number; transactionBeforeClose: boolean };
   }[] = [];
   class FaultWorker extends NativeWorker {
     constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-      super(new URL('./transaction-isolation-worker-fixture.ts', import.meta.url).href, args[1]);
-      this.addEventListener('message', (event: MessageEvent) => received.push(event.data));
+      super(
+        ...fixtureWorkerEntry(
+          args,
+          new URL('./transaction-isolation-worker-fixture.ts', import.meta.url),
+        ),
+      );
+      this.on('message', (data) => received.push(data));
     }
   }
-  globalThis.Worker = FaultWorker;
+  useFixtureWorker(FaultWorker);
   const store = await openSqliteStore({ dataRoot: root, profile: 'owned' });
-  globalThis.Worker = NativeWorker;
+  useFixtureWorker();
   const observer = await openSqliteStore({ dataRoot: root, profile: 'owned' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   await store.createWorkspace({ expectedStoreId, id: 'w', name: 'w', rootUri: 'file:///w' });
@@ -358,7 +370,7 @@ test('Runtime closes an actually poisoned owner transaction only after normal wo
     const deadline = Date.now() + 5000;
     while (!received.some((item) => item.fixture?.rollbacks === 1)) {
       if (Date.now() > deadline) throw Error('runtime_poison_fixture_timeout');
-      await Bun.sleep(1);
+      await sleepTimer(1);
     }
     expect((await observer.getView('s')).runs).toMatchObject([{ status: 'completed' }]);
     expect(model.requests).toHaveLength(2);
@@ -380,7 +392,7 @@ test('Runtime closes an actually poisoned owner transaction only after normal wo
     expect(readFileSync(effectPath, 'utf8')).toBe('exact original effect');
     expect(disposals).toBe(1);
   } finally {
-    globalThis.Worker = NativeWorker;
+    useFixtureWorker();
     await runtime.close().catch(() => {});
     await store.close();
     await observer.close();

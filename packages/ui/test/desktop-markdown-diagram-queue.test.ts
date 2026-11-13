@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { transformSync } from 'esbuild';
+import { expect, test } from '#kite-test';
 
 test('diagram serialization retains completion only and recovers after canceled work', async () => {
   // Inspect the actual module-local queue without adding a production diagnostic export.
@@ -9,11 +10,12 @@ test('diagram serialization retains completion only and recovers after canceled 
     new URL('../src/desktop/markdown-diagram.ts', import.meta.url),
     'utf8',
   );
-  const script = new Bun.Transpiler({ loader: 'ts' }).transformSync(
+  const script = transformSync(
     source
       .replaceAll('export ', '')
       .replace("await import('mermaid')", '{ default: injectedMermaid }'),
-  );
+    { loader: 'ts' },
+  ).code;
   let removed = 0;
   let rendered = 0;
   let serializedBytes = 0;

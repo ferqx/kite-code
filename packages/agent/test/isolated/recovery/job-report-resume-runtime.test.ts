@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, JobEvent } from '../../../src/extensions';
 import { canonicalJson } from '../../../src/json';
@@ -30,7 +31,7 @@ async function until(read: () => Promise<boolean>) {
   const end = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > end) throw Error('report fixture deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function rejects(promise: Promise<unknown>, code: string) {

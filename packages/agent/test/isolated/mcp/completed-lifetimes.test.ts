@@ -1,9 +1,11 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import type { Json, OperationRef } from '../../../src/extensions';
 import { createMcpLifecycle, type McpReconnectionInput } from '../../../src/mcp';
 import { createRuntime } from '../../../src/runtime';
@@ -16,7 +18,7 @@ async function fixture() {
   let opens = 0,
     stops = 0,
     wire = 0;
-  const peer = Bun.serve({
+  const peer = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -121,7 +123,7 @@ async function fixture() {
     const deadline = Date.now() + 5000;
     while ((await store.getExecution(ref.executionId!))!.status !== 'cancelled') {
       if (Date.now() > deadline) throw Error('owned_connection_stop_deadline');
-      await Bun.sleep(1);
+      await sleepTimer(1);
     }
   };
   return {

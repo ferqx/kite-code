@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import type {
   ActionContext,
   ExtensionRecord,
   OperationRef,
   PublicExecution,
 } from '@kite-ai/agent/extensions';
+import { expect, test } from '#kite-test';
 import { createMiniReview } from '../src';
 
 function fixture() {

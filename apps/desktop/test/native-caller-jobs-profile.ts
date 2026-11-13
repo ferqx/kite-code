@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import {
   parseShellModelFeedback,
   shellModelFeedbackMatchesResult,
@@ -9,11 +11,11 @@ import {
 /** Explicit Shell selection, actual default permission controls and confined supervisor. */
 export async function nativeCallerJobsProfile() {
   const module = await import(
-      resolve(import.meta.dir, '../../cli/test/fixtures/recovery-profile.ts')
+      resolve(import.meta.dirname, '../../cli/test/fixtures/recovery-profile.ts')
     ),
     f = await module.recoveryProfile();
   let calls = 0;
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -132,14 +134,14 @@ export async function nativeCallerJobsProfile() {
     } finally {
       await warm.close();
     }
-    const supervisor = await Bun.build({
+    const supervisor = await buildFixture({
       entrypoints: [
         resolve(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
-      target: 'bun',
+      target: 'node',
       outdir: join(f.root, 'assets'),
       naming: 'shell-supervisor.js',
     });
@@ -163,11 +165,11 @@ export async function nativeCallerJobsProfile() {
     const source = join(f.root, 'artifact', 'native-caller-jobs-service.ts');
     writeFileSync(
       source,
-      `import{selectProfile}from'@kite-ai/agent/profile';import{createDefaultProcessConfiguration}from'@kite-ai/service/configuration';import{runServiceProcess}from'@kite-ai/service/main';await runServiceProcess({configure(startup,context){return createDefaultProcessConfiguration({userConfigurationPath:${JSON.stringify(f.userConfiguration.path)},observerSubjectId:context.subjectId,profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,shell:${JSON.stringify({ platform: 'darwin', configurationId: 'native-caller-confined-1', env: { PATH: '/usr/bin:/bin' }, supervisorPath: supervisor.outputs[0]!.path, bunExecutable: process.execPath, shellExecutable: '/bin/sh', graceMs: 20 })}});}});`,
+      `import{selectProfile}from'@kite-ai/agent/profile';import{createDefaultProcessConfiguration}from'@kite-ai/service/configuration';import{runServiceProcess}from'@kite-ai/service/main';await runServiceProcess({configure(startup,context){return createDefaultProcessConfiguration({userConfigurationPath:${JSON.stringify(f.userConfiguration.path)},observerSubjectId:context.subjectId,profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,shell:${JSON.stringify({ platform: 'darwin', configurationId: 'native-caller-confined-1', env: { PATH: '/usr/bin:/bin' }, supervisorPath: supervisor.outputs[0]!.path, runtimeExecutable: process.execPath, shellExecutable: '/bin/sh', graceMs: 20 })}});}});`,
     );
-    const compiled = await Bun.build({
+    const compiled = await buildFixture({
       entrypoints: [source],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: join(f.root, 'artifact'),
     });

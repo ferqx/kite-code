@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type ContextCompressor, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -12,6 +12,7 @@ import { startService } from '@kite-ai/service';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { NativeContext } from '../../electron/context';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
@@ -22,7 +23,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() >= deadline) throw Error('native_compression_history_dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -182,19 +183,16 @@ test('Native original compression lookup reads its complete terminal Run beyond 
       beforeRequests = model.requests;
     expect(beforeRequests).toHaveLength(203);
     const wire: { method: string; path: string }[] = [];
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const input = args[0],
-          init = args[1],
-          url = new URL(input instanceof Request ? input.url : String(input));
-        wire.push({
-          method: init?.method ?? (input instanceof Request ? input.method : 'GET'),
-          path: url.pathname,
-        });
-        return originalFetch(...args);
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const input = args[0],
+        init = args[1],
+        url = new URL(input instanceof Request ? input.url : String(input));
+      wire.push({
+        method: init?.method ?? (input instanceof Request ? input.method : 'GET'),
+        path: url.pathname,
+      });
+      return originalFetch(...args);
+    }, {});
     dom = new JSDOM('<div id="root"></div>');
     Object.assign(globals, {
       window: dom.window,

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -10,6 +9,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -318,9 +320,12 @@ test('caller archive fails closed where actual no-follow support is unavailable'
     const script = join(f.root, 'no-follow.ts');
     writeFileSync(
       script,
-      `import {constants} from 'node:fs'; import {verifyCallerIntentsDocument} from ${JSON.stringify(join(import.meta.dir, '../../../src/maintenance/caller-intents.ts'))}; constants.O_NOFOLLOW=0; try { verifyCallerIntentsDocument(${JSON.stringify(f.path)});process.exit(9); } catch(error) { if(error.code!=='maintenance_platform_unsupported')throw error; }`,
+      `import {constants} from 'node:fs'; import {verifyCallerIntentsDocument} from ${JSON.stringify(join(import.meta.dirname, '../../../src/maintenance/caller-intents.ts'))}; constants.O_NOFOLLOW=0; try { verifyCallerIntentsDocument(${JSON.stringify(f.path)});process.exit(9); } catch(error) { if(error.code!=='maintenance_platform_unsupported')throw error; }`,
     );
-    const result = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+    const result = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     expect(await result.exited).toBe(0);
   } finally {
     f.close();

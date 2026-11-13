@@ -16,9 +16,9 @@
  * 5. Model continues after interaction completes
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { assertCurrentPlanCompletion, currentPlanWorkResponses } from '../harness/current-plan';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
@@ -46,11 +46,11 @@ const TIMEOUT = 45000;
 
 describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     server.setResponses([
       {
@@ -144,11 +144,11 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
 
 describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     server.setResponses([
       {
@@ -267,12 +267,12 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
 
 describe('TUI PTY System — Tool Lifecycle: approval', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let externalFile: string;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         interactionMode: 'accept_edits',
@@ -450,11 +450,11 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
 
 describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({ files: { 'fixture.ts': 'export const marker = true;\n' } });
     server.setResponses([
       {

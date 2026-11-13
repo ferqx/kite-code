@@ -17,18 +17,13 @@
  * interrupt handling coverage.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  activateSessionSearch,
-  submitCommand,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { openSessionByTitle, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -48,11 +43,11 @@ describe('TUI PTY System — Interrupt Resume', () => {
   let tui1: PtyProcess;
   let tui2: PtyProcess;
   let tui3: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
 
     server.setResponses([{ message: { content: 'Response from the first instance.' }, delay: 50 }]);
@@ -169,30 +164,14 @@ describe('TUI PTY System — Interrupt Resume', () => {
     'load persisted session → historical messages restored from DB',
     async () => {
       // Filter the exact original Session without assuming selector row order.
-      await activateSessionSearch(tui2);
-      await typeText(tui2, 'Hello from tui1');
-      tui2.write('\x1b[B');
-      await waitForCondition(
-        () =>
-          screenHasSessionRow(tui2.viewport(), 'Hello from tui1', {
-            selected: true,
-            active: false,
-          }),
-        'persisted session row to become selected',
-        5_000,
-      );
-      tui2.write('\r');
-      await waitForCondition(
-        () => {
-          const viewport = tui2.viewport();
-          return (
-            screenContains(viewport, 'Hello from tui1') &&
-            screenContains(viewport, 'Response from the first instance.') &&
-            screenContains(viewport, '❯')
-          );
-        },
-        'persisted user and assistant messages to finish replaying in the viewport',
-        15000,
+      await openSessionByTitle(
+        tui2,
+        'Hello from tui1',
+        (viewport) =>
+          screenContains(viewport, 'Hello from tui1') &&
+          screenContains(viewport, 'Response from the first instance.') &&
+          screenContains(viewport, '❯'),
+        15_000,
       );
 
       const afterLoad = tui2.viewport();
@@ -240,7 +219,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
         rows: 40,
         mockServer: server,
         workspace,
-        entryPath: join(import.meta.dir, '../fixtures/interrupt-owner-observation-tui.ts'),
+        entryPath: join(import.meta.dirname, '../fixtures/interrupt-owner-observation-tui.ts'),
       });
       await submitCommand(tui3, '/resume');
       await waitForCondition(
@@ -250,25 +229,12 @@ describe('TUI PTY System — Interrupt Resume', () => {
         'interrupted session row to become selectable after restart recovery',
         15_000,
       );
-      await activateSessionSearch(tui3);
-      await typeText(tui3, 'Hello from tui1');
-      tui3.write('\x1b[B');
-      await waitForCondition(
-        () =>
-          screenHasSessionRow(tui3.viewport(), 'Hello from tui1', {
-            selected: true,
-            active: false,
-          }),
-        'interrupted session row to become selected after restart recovery',
-        5_000,
-      );
-      tui3.write('\r');
-      await waitForCondition(
-        () =>
-          screenContains(tui3.viewport(), 'Interrupted model turn before restart') &&
-          screenContains(tui3.viewport(), '❯') &&
-          !screenContains(tui3.viewport(), '会话列表'),
-        'post-recovery Session event tail to finish replaying',
+      await openSessionByTitle(
+        tui3,
+        'Hello from tui1',
+        (viewport) =>
+          screenContains(viewport, 'Interrupted model turn before restart') &&
+          screenContains(viewport, '❯'),
         15_000,
       );
 

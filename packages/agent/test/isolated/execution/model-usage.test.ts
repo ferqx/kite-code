@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -43,33 +43,30 @@ test.each([
   const binding = createCompatibleModelBinding({
     baseURL: 'http://local-usage-fixture.invalid/v1',
     modelId: 'fixture',
-    fetch: Object.assign(
-      async (_url: unknown, init?: RequestInit) => {
-        calls++;
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          stream_options: { include_usage: true },
-        });
-        const chunk = (choices: unknown[], usage: unknown) =>
-          `data: ${JSON.stringify({ id: 'fixture', choices, usage })}\n\n`;
-        return new Response(
-          chunk([{ index: 0, delta: { content: 'Original content' }, finish_reason: null }], null) +
-            chunk(
-              [
-                {
-                  index: 0,
-                  delta: {},
-                  finish_reason: mode === 'failed' ? 'content_filter' : 'stop',
-                },
-              ],
-              null,
-            ) +
-            (mode === 'missing' ? '' : chunk([], raw)) +
-            'data: [DONE]\n\n',
-          { headers: { 'content-type': 'text/event-stream' } },
-        );
-      },
-      { preconnect: fetch.preconnect },
-    ),
+    fetch: Object.assign(async (_url: unknown, init?: RequestInit) => {
+      calls++;
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        stream_options: { include_usage: true },
+      });
+      const chunk = (choices: unknown[], usage: unknown) =>
+        `data: ${JSON.stringify({ id: 'fixture', choices, usage })}\n\n`;
+      return new Response(
+        chunk([{ index: 0, delta: { content: 'Original content' }, finish_reason: null }], null) +
+          chunk(
+            [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: mode === 'failed' ? 'content_filter' : 'stop',
+              },
+            ],
+            null,
+          ) +
+          (mode === 'missing' ? '' : chunk([], raw)) +
+          'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }, {}),
   });
   const adapter = createSdkModelAdapter({ models: new Map([['fixture', binding]]) });
   const model: ModelAdapter = {

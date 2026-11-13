@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -400,7 +401,7 @@ export async function runLiveCollaborationFiles(
       )
         break;
       if (Date.now() >= end) break;
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     }
     const sessions = await treeSessions();
     const executions = (

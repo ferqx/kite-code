@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 import { nodeWindowsAccess, retainLegacyDb6Fixture } from './assets-fixture';
 import { nodeCallerAssets } from './desktop-callers-fixture';
 
@@ -57,7 +60,7 @@ try {data=openPrivateData(input.profilePath,lease);
 `,
       { mode: 0o600 },
     );
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [source],
       target: 'node',
       packages: 'bundle',
@@ -69,9 +72,9 @@ try {data=openPrivateData(input.profilePath,lease);
     writeFileSync(join(directory, 'package.json'), '{"type":"module"}', { mode: 0o600 });
   }
   const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-  const node = Bun.which('node');
-  if (!node) throw Error('owned_node_unavailable');
-  const child = Bun.spawn(
+  const node = fixtureNodeExecutable();
+
+  const child = spawnProcess(
     [
       node,
       driver,
@@ -83,8 +86,8 @@ try {data=openPrivateData(input.profilePath,lease);
         access: {
           ...(windowsAsset ? { windowsAsset } : {}),
           profile,
-          bunExecutable: process.execPath,
-          bunSha256: digest(process.execPath),
+          runtimeExecutable: fixtureNodeExecutable(),
+          runtimeSha256: digest(fixtureNodeExecutable()),
           helperPath: helper,
           helperSha256: digest(helper),
         },

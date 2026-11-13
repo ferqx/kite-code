@@ -1,13 +1,14 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Extension } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { readSSE } from '@kite-ai/client/sse';
+import { expect, test } from '#kite-test';
 import { decodeResponse } from '../../../../packages/client/src/decode';
 import { startService } from '../../src';
 import { schemas } from '../../src/http/schema';
@@ -175,7 +176,7 @@ test('actual durable extension record changes reach generated Client SSE without
       resets.length === 0 &&
       client.lastAppliedCursor?.sequence !== original.metadata.lastChangeCursor
     )
-      await Bun.sleep(5);
+      await sleepTimer(5);
     abort.abort();
     await observation;
     await wireRead;

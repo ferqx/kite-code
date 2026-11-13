@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { createHash as fixtureHash } from 'node:crypto';
 import type { Message } from '@kite-ai/client';
 import type { Message as DisplayMessage } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { controlCacheAccounting } from '../../../../packages/ui/test/conversation-cache-accounting.fixture';
 import type {
   NativeBridge,
@@ -86,7 +87,7 @@ function fixture(
     sessionId: 'root',
     subjectId: 'owner',
     scope: { kind: 'session' as const, id: 'root' },
-    hash: new Bun.CryptoHasher('sha256').update(imageBytes).digest('hex'),
+    hash: fixtureHash('sha256').update(imageBytes).digest('hex'),
     size: String(imageBytes.length),
     mediaType: 'image/png' as const,
   };
@@ -1049,7 +1050,7 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!,
       reply = f.host.querySelector('.message.assistant[data-final-reply="true"]'),
       compression = f.host.querySelector('.context-compacted'),
-      input = f.host.querySelector('[role="textbox"][contenteditable]');
+      input = f.host.querySelector('textarea.prompt-editor');
     viewport.scrollTop = 23;
     const requests = f.requests.length;
     for (let index = 0; index < 3; index++) await f.select('Original');
@@ -1066,7 +1067,7 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
     expect(f.host.querySelector('.message.assistant[data-final-reply="true"]')).toBe(reply);
     expect(f.host.querySelector('.context-compacted')).toBe(compression);
-    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBe(input);
+    expect(f.host.querySelector('textarea.prompt-editor')).toBe(input);
     expect(viewport.scrollTop).toBe(23);
     expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(

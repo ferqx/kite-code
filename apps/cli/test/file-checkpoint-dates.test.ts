@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, FileCheckpointPage, SessionLogPage, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createFileRecoveryPort, readFileCheckpointRecordedTimes } from '../host/file-recovery';
 import type { openFileRecoveryJournal } from '../host/file-recovery-intents';
 

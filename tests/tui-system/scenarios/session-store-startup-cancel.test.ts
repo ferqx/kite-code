@@ -1,17 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { describe, expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  activateSessionSearch,
-  submitCommand,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { openSessionByTitle, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnPreInkTui, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -26,7 +23,7 @@ import { createTestWorkspace, observePersistedUserMessageSession } from '../harn
  * the original interrupted-startup user journey using the actual selected
  * Profile's maintenance exclusion: no history publication is needed or allowed.
  */
-const holderFixture = join(import.meta.dir, '../fixtures/session-store-maintenance-holder.ts');
+const holderFixture = join(import.meta.dirname, '../fixtures/session-store-maintenance-holder.ts');
 
 function digest(path: string): string {
   const fd = openSync(path, 'r'),
@@ -47,9 +44,9 @@ function digest(path: string): string {
 describe('TUI PTY System — current Profile startup cancellation (original Store 11 journey)', () => {
   test('Ctrl+C in pre-Ink preparation settles safely and the original Session reopens', async () => {
     const workspace = createTestWorkspace();
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     const tuis: Array<PtyProcess | undefined> = [];
-    let holder: ReturnType<typeof Bun.spawn> | undefined;
+    let holder: ReturnType<typeof testSpawn> | undefined;
     try {
       server.setResponses([
         { message: { content: 'Historical answer survives startup cancellation.' } },
@@ -93,8 +90,15 @@ describe('TUI PTY System — current Profile startup cancellation (original Stor
       }
       expect(originalSessionIds).toContainEqual({ id: sessionId });
       const readyPath = join(workspace.home, 'startup-cancel-maintenance-ready');
-      holder = Bun.spawn(
-        [process.execPath, holderFixture, workspace.dataRoot, workspace.profile, readyPath],
+      holder = testSpawn(
+        [
+          process.execPath,
+          ...testRuntimeFlags,
+          holderFixture,
+          workspace.dataRoot,
+          workspace.profile,
+          readyPath,
+        ],
         { stdin: 'pipe', stdout: 'ignore', stderr: 'pipe' },
       );
       await waitForCondition(
@@ -160,26 +164,13 @@ describe('TUI PTY System — current Profile startup cancellation (original Stor
         'historical Session row after interrupted startup',
         15_000,
       );
-      await activateSessionSearch(restarted);
-      await typeText(restarted, 'Question before startup cancellation');
-      restarted.write('\x1b[B');
-      await waitForCondition(
-        () =>
-          screenHasSessionRow(restarted.viewport(), 'Question before startup cancellation', {
-            selected: true,
-            active: false,
-          }),
-        'historical Session selection',
-        5_000,
-      );
-      restarted.write('\r');
-      await waitForCondition(
-        () =>
-          screenContains(
-            restarted.viewport(),
-            'Historical answer survives startup cancellation.',
-          ) && screenContains(restarted.viewport(), 'Question before startup cancellation'),
-        'original conversation replay',
+      const selectedTui = restarted;
+      await openSessionByTitle(
+        selectedTui,
+        'Question before startup cancellation',
+        (viewport) =>
+          screenContains(viewport, 'Historical answer survives startup cancellation.') &&
+          screenContains(viewport, 'Question before startup cancellation'),
         15_000,
       );
       const db = new Database(canonical, { readonly: true });

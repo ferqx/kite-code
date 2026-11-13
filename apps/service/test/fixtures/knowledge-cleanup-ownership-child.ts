@@ -1,8 +1,10 @@
-import { mock } from 'bun:test';
 import * as fs from 'node:fs';
 import * as promises from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { mock } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 process.once('SIGTERM', () => process.exit(143));
@@ -22,9 +24,9 @@ const load = (path: string) => import(pathToFileURL(join(moduleRoot, path)).href
 // workspace exports. No new interface is invoked to establish the old failure.
 const fixtureRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 if (moduleRoot !== fixtureRoot) {
-  const packageManifest = (await Bun.file(
-    join(moduleRoot, 'packages/agent/package.json'),
-  ).json()) as { exports: Record<string, string> };
+  const packageManifest = JSON.parse(
+    await promises.readFile(join(moduleRoot, 'packages/agent/package.json'), 'utf8'),
+  ) as { exports: Record<string, string> };
   for (const [entry, path] of Object.entries(packageManifest.exports)) {
     const original = { ...(await load(`packages/agent/${path}`)) };
     mock.module(
@@ -169,7 +171,7 @@ if (mode === 'tool') {
     },
   }));
 }
-const provider = Bun.serve({
+const provider = await fixtureServe({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -254,7 +256,7 @@ const until = async (condition: () => Promise<boolean>, phase: string) => {
   const deadline = Date.now() + 3000;
   while (!(await condition())) {
     if (Date.now() >= deadline) throw Error(`knowledge fixture deadline: ${phase}`);
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 };
 try {

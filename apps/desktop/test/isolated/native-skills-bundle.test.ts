@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -11,12 +10,20 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
@@ -38,7 +45,7 @@ test.skipIf(process.platform !== 'darwin')(
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
       out: Promise<string> | undefined,
       err: Promise<string> | undefined,
       completed = false,
@@ -49,7 +56,7 @@ test.skipIf(process.platform !== 'darwin')(
       cleanupFailures: unknown[] = [];
     try {
       const { buildTerminalBundle } = await import(
-        resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+        resolve(import.meta.dirname, '../../../../scripts/release/terminal-bundle.ts')
       );
       // Production default process Service: no source, resolver, Runtime, credential,
       // model, OAuth, network-policy or processHostFixture injection.
@@ -176,16 +183,16 @@ test.skipIf(process.platform !== 'darwin')(
       writeFileSync(
         fixture,
         readFileSync(
-          resolve(import.meta.dir, '../native-skills-electron.fixture.ts'),
+          resolve(import.meta.dirname, '../native-skills-electron.fixture.ts'),
           'utf8',
         ).replace(
           "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
         ),
       );
       expect(
         (
-          await Bun.build({
+          await buildFixture({
             entrypoints: [fixture],
             target: 'node',
             format: 'esm',
@@ -209,9 +216,9 @@ test.skipIf(process.platform !== 'darwin')(
           count: 306,
         }),
       );
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           moved,
           home,
@@ -368,7 +375,7 @@ test.skipIf(process.platform !== 'darwin')(
             }
           })
         )
-          await Bun.sleep(20);
+          await fixtureDelay(20);
         const forced: number[] = [];
         for (const pid of owned)
           try {
@@ -394,7 +401,7 @@ test.skipIf(process.platform !== 'darwin')(
         const disappearanceDeadline = Date.now() + 5000;
         let remaining = remainingOwned();
         while (remaining.length && Date.now() < disappearanceDeadline) {
-          await Bun.sleep(50);
+          await fixtureDelay(50);
           remaining = remainingOwned();
         }
         cleanupUnconfirmed = remaining.length > 0;

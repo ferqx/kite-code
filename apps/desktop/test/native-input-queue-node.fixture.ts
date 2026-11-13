@@ -15,8 +15,8 @@ const open = async () =>
     profilePath,
     await acquireDesktopProfileAccess({
       profile,
-      bunExecutable: bunExecutable!,
-      bunSha256: bunSha256!,
+      runtimeExecutable: bunExecutable!,
+      runtimeSha256: bunSha256!,
       helperPath: helperPath!,
       helperSha256: helperSha256!,
       ...(windowsAssetJson && JSON.parse(windowsAssetJson)

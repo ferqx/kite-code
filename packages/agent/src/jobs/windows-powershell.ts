@@ -4,6 +4,7 @@ import {
   startWindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../platform/process/windows-owned-child';
+import { dlopen, ptr } from '../runtime-ffi';
 import {
   type LaunchIdentity,
   launchIdentityAsync,
@@ -17,7 +18,6 @@ export interface WindowsPowerShell {
 }
 
 function systemDirectory() {
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
   });

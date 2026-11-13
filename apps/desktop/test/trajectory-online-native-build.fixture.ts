@@ -2,11 +2,17 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { buildNativeDesktop } from '../scripts/build-native';
 
 // Explicit fixture artifact. It never modifies ordinary Main/renderer/service sources.
 const directory = realpathSync(
-  mkdtempSync(resolve(import.meta.dir, '../../../.cache/trajectory-online-native-')),
+  mkdtempSync(resolve(import.meta.dirname, '../../../.cache/trajectory-online-native-')),
 );
 for (const leaf of ['home', 'workspace', 'app', 'driver', 'service'])
   mkdirSync(join(directory, leaf), { mode: 0o700 });
@@ -34,7 +40,7 @@ for (const [sessionId, title] of [
 await store.close();
 const observation = { calls: 0, prefixSaved: false, released: false, events: [] as unknown[] };
 const gates = new Set<() => void>();
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   idleTimeout: 0,
@@ -72,11 +78,11 @@ const server = Bun.serve({
 });
 const control = server.url.href.replace(/\/$/, '');
 const service = join(directory, 'service/main.js');
-const result = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'trajectory-online-native-service.fixture.ts')],
+const result = await buildFixture({
+  entrypoints: [resolve(import.meta.dirname, 'trajectory-online-native-service.fixture.ts')],
   outdir: join(directory, 'service'),
   naming: 'main.js',
-  target: 'bun',
+  target: 'node',
   packages: 'bundle',
   external: ['@kite-ai/agent', '@kite-ai/ai'],
   define: { TRAJECTORY_ONLINE_FIXTURE_CONTROL: JSON.stringify(control) },
@@ -89,8 +95,8 @@ await buildNativeDesktop(
     kind: 'development',
     serviceEntrypoint: service,
     serviceSha256: hash(service),
-    bunExecutable: runtime,
-    bunSha256: hash(runtime),
+    runtimeExecutable: runtime,
+    runtimeSha256: hash(runtime),
     buildId: 'trajectory-online-native-isolated',
     apiMajor: 1,
     requiredCapabilities: ['sessions', 'history', 'commands', 'trajectory'],
@@ -99,8 +105,8 @@ await buildNativeDesktop(
   join(directory, 'app'),
   { testDiagnostics: false },
 );
-const driver = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'trajectory-online-native-driver.fixture.ts')],
+const driver = await buildFixture({
+  entrypoints: [resolve(import.meta.dirname, 'trajectory-online-native-driver.fixture.ts')],
   target: 'node',
   packages: 'external',
   outdir: join(directory, 'driver'),
@@ -110,10 +116,10 @@ if (!driver.success) throw new AggregateError(driver.logs, 'fixture_driver_build
 const fixture = { directory, profile, storeId, control, outdir: join(directory, 'app') };
 writeFileSync(join(directory, 'fixture.json'), JSON.stringify(fixture, null, 2));
 console.log(JSON.stringify({ phase: 'built', ...fixture }));
-const node = Bun.which('node');
+const node = findFixtureExecutable('node');
 if (!node) throw Error('node_driver_required');
-const packagePath = resolve(import.meta.dir, '../package.json');
-const child = Bun.spawn(
+const packagePath = resolve(import.meta.dirname, '../package.json');
+const child = spawnFixtureProcess(
   [node, join(directory, 'driver/driver.mjs'), join(directory, 'fixture.json'), packagePath],
   { stdout: 'inherit', stderr: 'inherit', cwd: directory },
 );

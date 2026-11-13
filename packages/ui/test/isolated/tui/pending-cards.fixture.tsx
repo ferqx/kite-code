@@ -1,3 +1,4 @@
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import './terminal-viewport.fixture';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -126,7 +127,7 @@ const runtime = createRuntime({
             return { reference: { expectedEffects: 2 } };
           },
           async *observe() {
-            while (effects < 2) await Bun.sleep(20);
+            while (effects < 2) await fixtureDelay(20);
             yield {
               type: 'terminal' as const,
               supervision: 'ended' as const,
@@ -248,50 +249,47 @@ const service = await startService({
 });
 const originalGetResponses: unknown[] = [];
 const actualFetch = globalThis.fetch;
-globalThis.fetch = Object.assign(
-  async (...args: Parameters<typeof fetch>) => {
-    const method = args[1]?.method ?? 'GET',
-      path = new URL(String(args[0])).pathname;
-    const body = args[1]?.body ? JSON.parse(String(args[1].body)) : null;
-    if (process.env.KITE_TUI_WIRE) {
-      const { appendFileSync } = await import('node:fs');
-      appendFileSync(process.env.KITE_TUI_WIRE, JSON.stringify({ method, path, body }) + '\n');
-    }
-    const response = await actualFetch(...args);
-    if (method === 'GET' && path.endsWith(`/commands/${lostCommand}`)) {
-      const original = await response.clone().json();
-      originalGetResponses.push({
-        id: original.id,
-        kind: original.kind,
-        originStoreId: original.originStoreId,
-        sessionId: original.sessionId,
-        status: original.status,
-        receipt: original.receipt,
-      });
-    }
-    if (
-      process.env.KITE_LOSE_CARD === '1' &&
-      method === 'POST' &&
-      path.endsWith('/answer') &&
-      !lostCommand
-    ) {
-      lostCommand = body.commandId;
-      await response.arrayBuffer();
-      throw Error('physical original POST response lost');
-    }
-    if (
-      process.env.KITE_LOSE_CARD === '1' &&
-      method === 'GET' &&
-      path.endsWith('/commands/' + lostCommand) &&
-      getCount === 1
-    ) {
-      await response.arrayBuffer();
-      throw Error('physical first original GET response lost');
-    }
-    return response;
-  },
-  { preconnect: actualFetch.preconnect },
-);
+globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+  const method = args[1]?.method ?? 'GET',
+    path = new URL(String(args[0])).pathname;
+  const body = args[1]?.body ? JSON.parse(String(args[1].body)) : null;
+  if (process.env.KITE_TUI_WIRE) {
+    const { appendFileSync } = await import('node:fs');
+    appendFileSync(process.env.KITE_TUI_WIRE, JSON.stringify({ method, path, body }) + '\n');
+  }
+  const response = await actualFetch(...args);
+  if (method === 'GET' && path.endsWith(`/commands/${lostCommand}`)) {
+    const original = await response.clone().json();
+    originalGetResponses.push({
+      id: original.id,
+      kind: original.kind,
+      originStoreId: original.originStoreId,
+      sessionId: original.sessionId,
+      status: original.status,
+      receipt: original.receipt,
+    });
+  }
+  if (
+    process.env.KITE_LOSE_CARD === '1' &&
+    method === 'POST' &&
+    path.endsWith('/answer') &&
+    !lostCommand
+  ) {
+    lostCommand = body.commandId;
+    await response.arrayBuffer();
+    throw Error('physical original POST response lost');
+  }
+  if (
+    process.env.KITE_LOSE_CARD === '1' &&
+    method === 'GET' &&
+    path.endsWith('/commands/' + lostCommand) &&
+    getCount === 1
+  ) {
+    await response.arrayBuffer();
+    throw Error('physical first original GET response lost');
+  }
+  return response;
+}, {});
 const client = createClient({
   endpoint: service.endpoint,
   token: service.bootstrap.token,

@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
@@ -35,6 +36,8 @@ async function fixture(fail: boolean, check: (events: Event[], cause: unknown) =
     businessError: unknown;
   const cleanupErrors: unknown[] = [];
   try {
+    mkdirSync(join(repository, 'scripts/tooling'), { recursive: true });
+    writeFileSync(join(repository, 'scripts/tooling/register.mjs'), 'export {};');
     for (const [index, workspace] of workspaces.entries()) {
       const source = join(repository, workspace);
       mkdirSync(source, { recursive: true });
@@ -45,19 +48,23 @@ async function fixture(fail: boolean, check: (events: Event[], cause: unknown) =
           name,
           version: '1',
           exports: { '.': './src/index.ts' },
-          scripts: { build: 'bun build-fixture.ts first dist && bun build-fixture.ts second dist' },
+          scripts: {
+            build:
+              'node --import ../../scripts/tooling/register.mjs build-fixture.ts first dist && node --import ../../scripts/tooling/register.mjs build-fixture.ts second dist',
+          },
         }),
       );
       writeFileSync(
         join(source, 'build-fixture.ts'),
         `import {appendFileSync,existsSync,readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {setTimeout as sleep} from 'node:timers/promises';
 const [phase,outdir]=process.argv.slice(2),name=${JSON.stringify(name)},index=${index};
 const log=(value)=>appendFileSync(${JSON.stringify(eventsPath)},JSON.stringify({name,phase:value,pid:process.pid,outdir})+'\\n');
 log(phase+'_started');
-if(${fail}&&index===0){await Bun.sleep(150);log('failed');process.exit(17);}
+if(${fail}&&index===0){await sleep(150);log('failed');process.exit(17);}
 if(phase==='first'){
-  await Bun.sleep(${fail ? 400 : 80});
+  await sleep(${fail ? 400 : 80});
   if(!existsSync(outdir))throw Error('candidate_removed_while_original_child_live');
   writeFileSync(join(outdir,'index.js'),'export const owner='+JSON.stringify(name)+';');
 }else{
@@ -109,7 +116,7 @@ if(${fail}&&phase==='second')process.exit(23);
         });
         if (!live.length) break;
         if (Date.now() > until) throw Error(`terminal_fixture_children_unconfirmed:${root}`);
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
     }
     rmSync(root, { recursive: true, force: false });

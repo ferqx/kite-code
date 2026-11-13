@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createPlanningValidation } from '../../../src/business/planning';
 import type { ExtensionRecord, Json, ReadContext } from '../../../src/extensions';
@@ -346,7 +347,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
         await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
       ).interactions.find((item) => item.kind === 'plan_review');
       if (Date.now() > until) throw Error('plan_query_timeout');
-      if (!interaction) await Bun.sleep(5);
+      if (!interaction) await sleepTimer(5);
     }
     const runId = (await runtime.getView('s')).runs.find(
       (run) => run.originCommandId === 'work',
@@ -368,7 +369,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
         input: { runId },
       });
       if ((parts[0]!.payload as Record<string, Json>).approvalStatus !== 'approved')
-        await Bun.sleep(5);
+        await sleepTimer(5);
       if (Date.now() > until) throw Error('plan_approval_query_timeout');
     } while ((parts[0]!.payload as Record<string, Json>).approvalStatus !== 'approved');
     const body = parts[0]!.payload as Record<string, Json>;
@@ -380,7 +381,7 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
     expect(body.progress).toBeNull();
     while (postApprovalInput === undefined) {
       if (Date.now() > until) throw Error('postapproval_input_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(postApprovalInput).toContain('Do not ask again');
     expect(postApprovalInput).toContain('current tool permissions');

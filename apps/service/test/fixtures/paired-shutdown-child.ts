@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { setTimeout as wait } from 'node:timers/promises';
 import type { ToolDefinition } from '@kite-ai/agent/extensions';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
@@ -65,7 +66,7 @@ const running = runServiceProcess({
             context.signal.addEventListener('abort', () => resolve(), { once: true });
           });
         writeFileSync(host.cancelled, context.executionId);
-        while (!existsSync(host.release)) await Bun.sleep(10);
+        while (!existsSync(host.release)) await wait(10);
         writeFileSync(host.terminal, context.executionId);
         return { outcome: 'cancelled', content: 'Original owned cleanup confirmed' };
       },

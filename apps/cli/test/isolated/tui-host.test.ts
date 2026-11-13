@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -15,16 +13,24 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 for (const mode of ['complete', 'cancel', 'eof'] as const) {
   test(`built development TUI actual PTY ${mode} preserves work and owned lifecycle`, async () => {
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let verified = false;
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-host-')));
     const workspace = join(root, 'workspace');
@@ -62,7 +68,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
     if (mode === 'complete')
       writeFileSync(join(workspace, 'source.txt'), `${'中'.repeat(3 * 1024 * 1024)}${sourceTail}`);
     const tail = 'ACTUAL_HOST_VERIFIED_TAIL';
-    const provider = Bun.serve({
+    const provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       maxRequestBodySize: 64 * 1024 * 1024,
@@ -190,9 +196,10 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
       } finally {
         await seed.close();
       }
-      const child = Bun.spawn(
+      const child = testSpawn(
         [
           process.execPath,
+          ...testRuntimeFlags,
           join(repository, 'apps/cli/test/fixtures/tui-host-pty.ts'),
           JSON.stringify({
             mode,
@@ -318,8 +325,13 @@ test('TUI help/version and nonterminal refusal do not create a profile or launch
       [['--version'], 0, '0.1.0'],
       [['--data-root', join(root, 'never-created')], 1, 'tui_terminal_unavailable'],
     ] as const) {
-      const child = Bun.spawn(
-        [process.execPath, join(repository, 'apps/cli/host/tui-main.ts'), ...argv],
+      const child = testSpawn(
+        [
+          process.execPath,
+          ...testRuntimeFlags,
+          join(repository, 'apps/cli/host/tui-main.ts'),
+          ...argv,
+        ],
         { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
       );
       const [out, err, exit] = await Promise.all([

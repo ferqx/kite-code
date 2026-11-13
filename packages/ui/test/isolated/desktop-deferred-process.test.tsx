@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { DeferredProcessContent as DeferredProcessContentType } from '../../src/desktop/DeferredProcessContent';
 import type { ToolActivity as ToolActivityType } from '../../src/desktop/ToolActivity';
 import type { Message } from '../../src/desktop/types';

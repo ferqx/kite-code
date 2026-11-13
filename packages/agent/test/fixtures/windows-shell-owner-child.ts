@@ -48,6 +48,6 @@ void (async () => {
 })();
 // Deliberately omit disposal: process exit must close the original Job handle,
 // and the OS must stop every nested descendant without a live JS controller.
-for await (const _ of Bun.stdin.stream()) {
+for await (const _ of process.stdin) {
 }
 process.exit(0);

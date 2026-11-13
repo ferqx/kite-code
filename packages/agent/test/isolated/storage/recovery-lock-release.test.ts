@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { acquireProfileAccess, acquireSessionLock } from '../../../src/platform/profile';
@@ -186,7 +187,7 @@ for (const kind of ['run', 'job'] as const)
             )?.id ?? '';
           if (executionId) break;
           if (Date.now() >= deadline) throw Error('job_seed_timeout');
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
         await runtime.close();
       }

@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { nativeRuntime } from './runtime-native';
+import { Database } from './runtime-sqlite';
 
 export interface DynamicSqliteEngineManifest {
   readonly version: 1;
-  readonly driver: 'bun:sqlite';
+  readonly driver: 'bun:sqlite' | 'node-api:sqlite';
   readonly target: { readonly platform: string; readonly arch: string };
   readonly library: 'libsqlite3.dylib' | 'libsqlite3.so' | 'sqlite3.dll';
   readonly size: number;
@@ -15,6 +16,7 @@ export interface DynamicSqliteEngineManifest {
 }
 export interface BuiltinSqliteEngineManifest {
   readonly version: 1;
+  /** Legacy installer verification only. */
   readonly driver: 'bun:sqlite';
   readonly target: { readonly platform: string; readonly arch: string };
   readonly linkage: 'builtin';
@@ -89,7 +91,7 @@ export function parseSqliteEngineManifest(value: unknown): SqliteEngineManifest 
   if (
     !closed(value, ['version', 'driver', 'target', 'library', 'size', 'sha256', 'sqlite']) ||
     value.version !== 1 ||
-    value.driver !== 'bun:sqlite' ||
+    (value.driver !== 'bun:sqlite' && value.driver !== 'node-api:sqlite') ||
     !closed(value.target, ['platform', 'arch']) ||
     typeof value.target.platform !== 'string' ||
     typeof value.target.arch !== 'string' ||
@@ -116,7 +118,7 @@ export function parseSqliteEngineManifest(value: unknown): SqliteEngineManifest 
     fail('sqlite_engine_manifest_invalid');
   return Object.freeze({
     version: 1,
-    driver: 'bun:sqlite',
+    driver: value.driver,
     target: Object.freeze({ platform: value.target.platform, arch: value.target.arch }),
     library,
     size: value.size,
@@ -177,18 +179,14 @@ export function verifySqliteEngineAsset(selection: SqliteEngineSelection): Verif
     fail('sqlite_engine_asset_unavailable');
   }
 }
-const require = createRequire(import.meta.url);
-function sqlite(): typeof import('bun:sqlite') {
-  try {
-    return require('bun:sqlite');
-  } catch {
-    fail('sqlite_engine_runtime_unsupported');
-  }
-}
 let loaded: SqliteEngineObservation | null = null;
 let initializationFailed = false;
+function runtimeLibrary(verified: VerifiedSqliteEngine): string {
+  if (verified.manifest.driver !== 'node-api:sqlite' || !('library' in verified.manifest))
+    fail('sqlite_engine_runtime_unsupported');
+  return join(verified.root, verified.manifest.library);
+}
 function measure(verified: VerifiedSqliteEngine): SqliteEngineObservation {
-  const { Database } = sqlite();
   const db = new Database(':memory:');
   try {
     const row = db
@@ -216,7 +214,7 @@ function measure(verified: VerifiedSqliteEngine): SqliteEngineObservation {
 function same(left: SqliteEngineSelection, right: SqliteEngineSelection) {
   return left.root === right.root && left.manifestSha256 === right.manifestSha256;
 }
-/** Call once in the parent before any DB/Worker. Bun's native SQLite selection is process-wide. */
+/** Call once in the parent before any DB/Worker. The native SQLite selection is process-wide. */
 export function initializeSqliteEngine(selection: SqliteEngineSelection): SqliteEngineObservation {
   const verified = verifySqliteEngineAsset(selection),
     canonical = { root: verified.root, manifestSha256: verified.manifestSha256 };
@@ -227,11 +225,7 @@ export function initializeSqliteEngine(selection: SqliteEngineSelection): Sqlite
   if (initializationFailed) fail('sqlite_engine_initialization_failed');
   initializationFailed = true;
   try {
-    if ('library' in verified.manifest) {
-      if (process.platform !== 'darwin') fail('sqlite_engine_platform_unsupported');
-      if (!sqlite().Database.setCustomSQLite(join(verified.root, verified.manifest.library)))
-        fail('sqlite_engine_load_failed');
-    }
+    if (!Database.setCustomSQLite(runtimeLibrary(verified))) fail('sqlite_engine_load_failed');
     loaded = measure(verified);
     verifySqliteEngineAsset(canonical);
     initializationFailed = false;
@@ -247,8 +241,8 @@ export function assertSelectedSqliteEngine(
   selection: SqliteEngineSelection,
 ): SqliteEngineObservation {
   const verified = verifySqliteEngineAsset(selection);
-  if ('library' in verified.manifest && process.platform !== 'darwin')
-    fail('sqlite_engine_platform_unsupported');
+  if (!nativeRuntime().sqliteIsSelected(runtimeLibrary(verified)))
+    fail('sqlite_engine_selection_changed');
   return measure(verified);
 }
 /** Pure in-memory observation. null means unqualified, never evidence of a patched built-in engine. */
@@ -260,7 +254,10 @@ export type DefaultSqliteEngineObservation =
   | SqliteEngineObservation
   | { readonly qualification: 'unqualified'; readonly reason: 'development_no_selection' };
 export function defaultSqliteEngineAssets() {
-  const root = new URL('./storage/engine/', import.meta.url);
+  const root = new URL(
+    import.meta.url.endsWith('.ts') ? '../dist/storage/engine/' : './storage/engine/',
+    import.meta.url,
+  );
   return Object.freeze({
     root,
     selection: new URL('engine-selection.json', root),
@@ -270,6 +267,8 @@ export function defaultSqliteEngineAssets() {
 /** Package host entry, before profile access or any raw Database. Absence is development-only. */
 export function initializeDefaultSqliteEngine(): DefaultSqliteEngineObservation {
   if (initializationFailed) fail('sqlite_engine_initialization_failed');
+  const source = import.meta.url.endsWith('.ts');
+  if (source && loaded) return initializeSqliteEngine(loaded.selection);
   const assets = defaultSqliteEngineAssets();
   let absent = false;
   try {
@@ -281,7 +280,21 @@ export function initializeDefaultSqliteEngine(): DefaultSqliteEngineObservation 
   }
   if (absent) {
     if (loaded) return initializeSqliteEngine(loaded.selection);
-    return Object.freeze({ qualification: 'unqualified', reason: 'development_no_selection' });
+    if (source) {
+      const library = process.env.KITE_DEVELOPMENT_SQLITE_LIBRARY;
+      if (library !== undefined) {
+        if (!isAbsolute(library)) fail('sqlite_engine_selection_invalid');
+        try {
+          if (!nativeRuntime().sqliteSelect(realpathSync.native(library), true))
+            fail('sqlite_engine_selection_changed');
+        } catch (error) {
+          if (error instanceof SqliteEngineError) throw error;
+          fail('sqlite_engine_asset_unavailable');
+        }
+      }
+      return Object.freeze({ qualification: 'unqualified', reason: 'development_no_selection' });
+    }
+    fail('sqlite_engine_asset_unavailable');
   }
   try {
     const path = fileURLToPath(assets.selection);

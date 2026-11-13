@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { BrowserView, Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { installGlobals } from '../globals.fixture';
 
 async function settle(check: () => boolean) {
@@ -10,7 +11,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() >= deadline) throw Error('message_copy_dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -196,7 +197,7 @@ test('formal Web mount copies each original user message with recoverable clipbo
     expect(copied).toEqual([raw[0]!]);
     expect(first!.getAttribute('aria-label')).toBe('已复制消息');
     await act(async () => {
-      await Bun.sleep(1500);
+      await fixtureDelay(1500);
     });
     expect(first!.getAttribute('aria-label')).toBe('已复制消息');
     await settle(() => first!.getAttribute('aria-label') === '复制本轮用户消息');

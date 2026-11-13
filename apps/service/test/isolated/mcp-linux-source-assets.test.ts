@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 
 test('Linux source asset seal closes confirmed original FDs and retains the first unknown per Profile without retry', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-linux-source-assets-')));
@@ -11,7 +13,7 @@ test('Linux source asset seal closes confirmed original FDs and retains the firs
     script,
     `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import * as fs from 'node:fs';
 const original = {...fs};
 const actualPlatform = process.platform;
@@ -29,11 +31,11 @@ mock.module('node:fs',()=>({...original,
  readSync(...args){reads++;if(mode==='read-close-unknown')throw readError;return original.readSync(...args);},
  closeSync(fd){closes++;assert.ok(held.has(fd));if(mode!=='confirmed')throw closeError;original.closeSync(fd);held.delete(fd);},
 }));
-const {createMcpSourceConfiguration,assertMcpSourceStdioAssetsClosed}=await import(${JSON.stringify(pathToFileURL(join(import.meta.dir, '../../src/mcp-source-configuration.ts')).href)});
+const {createMcpSourceConfiguration,assertMcpSourceStdioAssetsClosed}=await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, '../../src/mcp-source-configuration.ts')).href)});
 const configure=(key)=>createMcpSourceConfiguration({
  profile:{profileAccessKey:key,profilePath:${JSON.stringify(join(root, 'profile'))},coordinationPath:${JSON.stringify(join(root, 'coordination'))}},
  runtime(){throw Error('source constructor must not read Runtime');},credentialVault:{async resolve(){throw Error('must not resolve credential');}},
- stdio:{guardianPath:${JSON.stringify(join(root, 'unused-guardian.js'))},bunExecutable:process.execPath,linux:{initExecutable:init,bubblewrapPath:bwrap}},
+ stdio:{guardianPath:${JSON.stringify(join(root, 'unused-guardian.js'))},runtimeExecutable:process.execPath,linux:{initExecutable:init,bubblewrapPath:bwrap}},
 });
 configure('confirmed');assert.equal(opens,2);assert.equal(closes,2);assert.ok(reads>=2);assert.equal(held.size,0);assertMcpSourceStdioAssetsClosed('confirmed');
 for(const current of ['close-unknown','read-close-unknown']){
@@ -47,7 +49,10 @@ for(const current of ['close-unknown','read-close-unknown']){
 assert.equal(held.size,2);console.log('original-linux-source-fd-ownership-confirmed');
 `,
   );
-  const child = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const output = Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),

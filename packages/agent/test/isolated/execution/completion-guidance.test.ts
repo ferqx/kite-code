@@ -1,9 +1,12 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -94,9 +97,10 @@ for (const frontier of [
   test(`same-Run cold recovery retains ${frontier} diagnostic delivery proof`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-completion-guidance-cold-')));
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./completion-guidance-crash.fixture.ts', import.meta.url)),
         root,
         frontier.startsWith('static-') ? frontier : frontier === 'planned' ? 'planned' : 'settled',
@@ -109,7 +113,7 @@ for (const frontier of [
       const deadline = Date.now() + 5000;
       while (!existsSync(join(root, 'ready.json'))) {
         if (Date.now() > deadline) throw Error('guidance_child_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       const ready = JSON.parse(readFileSync(join(root, 'ready.json'), 'utf8'));
       child.kill('SIGKILL');
@@ -167,7 +171,7 @@ for (const frontier of [
       const deadline2 = Date.now() + 5000;
       while ((await store.getRun(ready.runId))!.isActive) {
         if (Date.now() > deadline2) throw Error('guidance_resume_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       expect((await store.getRun(ready.runId))?.status).toBe('failed');
       expect(readFileSync(join(root, 'model-ledger'), 'utf8').trim().split('\n')).toHaveLength(2);

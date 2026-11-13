@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, ToolResult } from '../../../src/extensions';
@@ -436,7 +437,7 @@ for (const legacyCompact of [true, false])
       while (!card) {
         card = (await f.runtime.listInteractions({ ...f.scope, state: 'pending' })).interactions[0];
         if (Date.now() > deadline) throw Error('pending_fixture_approval_timeout');
-        if (!card) await Bun.sleep(5);
+        if (!card) await sleepTimer(5);
       }
       const actual = f.reviewInputs[0]!;
       const reads = JSON.parse(actual.messages.find((message) => message.role === 'user')!.content)

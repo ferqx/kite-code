@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
+import { expect, test } from '#kite-test';
 import { describeTuiCommand, slashGhostSuffix } from '../../src/tui/command-catalog';
 import { fixedTuiCommands } from '../../src/tui/commands';
 import { ComposerBuffer } from '../../src/tui/composer';

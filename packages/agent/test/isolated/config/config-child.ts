@@ -18,12 +18,14 @@ if (mode === 'credential') {
   const lock = acquireFileLock(`${path}.lock`, 'exclusive');
   try {
     process.stdout.write('locked\n');
-    await Bun.stdin.text();
+    for await (const _ of process.stdin) {
+    }
   } finally {
     lock.release();
   }
 } else {
-  await Bun.stdin.text();
+  for await (const _ of process.stdin) {
+  }
   try {
     const document = updateConfigurationFile({
       path,

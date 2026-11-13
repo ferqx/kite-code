@@ -1,7 +1,9 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { canonicalJson } from '../../../src/json';
@@ -23,8 +25,12 @@ for (const mode of ['tool', 'model'])
     const dataRoot = temporaryDirectory('kite-recovery-crash-');
     chmodSync(dataRoot, 0o700);
     const ledger = join(dataRoot, 'external-ledger');
-    const child = Bun.spawn(
-      [process.execPath, fileURLToPath(new URL('./crash-child.ts', import.meta.url))],
+    const child = spawnProcess(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        fileURLToPath(new URL('./crash-child.ts', import.meta.url)),
+      ],
       {
         env: {
           ...process.env,

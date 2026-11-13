@@ -1,10 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage';
 import type { DispatchInput } from '../../../src/storage/port';

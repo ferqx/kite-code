@@ -1,15 +1,16 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import {
   type ModelAdapter,
   ModelAttemptError,
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createSessionTitleExtension } from '../../../src/business/session-title';
 import { sessionTitleInstructions } from '../../../src/business/session-title/title';
@@ -206,7 +207,7 @@ async function fixture(
           return;
         if (Date.now() >= deadline)
           throw new Error(`title settlement timeout: ${JSON.stringify({ attempt, job })}`);
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     },
     async close() {
@@ -478,7 +479,7 @@ test('title admission overflow retains fallback once while every business Run an
       )
         break;
       if (Date.now() >= deadline) throw Error('overflow was not retired');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const rejected = records.filter(
       (record) => (record?.value as { publication?: string })?.publication === 'closed',
@@ -507,7 +508,7 @@ test('title admission overflow retains fallback once while every business Run an
       )
     ) {
       if (Date.now() >= settledDeadline) throw Error('admitted titles did not settle');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     await f.runtime.close();
     const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
@@ -705,7 +706,7 @@ test('internal title Model isolation preserves the main recovery checkpoint befo
     await f.submit();
     await completionGate.entered.promise;
     await f.titleStarted.promise;
-    for (let i = 0; disposed === 0 && i < 400; i++) await Bun.sleep(5);
+    for (let i = 0; disposed === 0 && i < 400; i++) await sleepTimer(5);
     expect(disposed).toBe(1);
     const before = await f.runtime.getView('session');
     const run = before.runs[0]!;
@@ -1085,7 +1086,7 @@ async function publicInputSettled(f: Awaited<ReturnType<typeof fixture>>) {
     const receipt = command.receipt as { runId?: string };
     if (receipt.runId && !(await f.store.getRun(receipt.runId))?.isActive) return command;
     if (Date.now() >= deadline) throw Error('public title input did not settle');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 

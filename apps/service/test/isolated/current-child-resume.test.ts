@@ -1,9 +1,12 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { ExecutionRecord, InteractionRecord, SessionView } from '@kite-ai/agent/storage';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -15,12 +18,17 @@ async function until(read: () => Promise<boolean>) {
   const deadline = Date.now() + 15000;
   while (!(await read())) {
     if (Date.now() >= deadline) throw Error('current_service_child_resume_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function spawnFixture(directory: string) {
-  return Bun.spawn(
-    [process.execPath, join(import.meta.dir, '../fixtures/current-child-resume.ts'), directory],
+  return spawnProcess(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      join(import.meta.dirname, '../fixtures/current-child-resume.ts'),
+      directory,
+    ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
 }

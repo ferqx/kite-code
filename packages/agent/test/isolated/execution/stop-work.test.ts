@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   appendFileSync,
   existsSync,
@@ -11,7 +9,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
 import { createMcpAdapter } from '../../../src/mcp';
@@ -27,7 +30,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw Error('stop_work_test_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 for (const mode of ['direct', 'batch', 'data', 'failed'] as const)
@@ -110,9 +113,10 @@ for (const mode of ['direct', 'batch', 'data', 'failed'] as const)
 test('actual crash after finish commits the original stop with its cancellation and never replays it into new work', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-stop-work-cold-'))),
     profile = { dataRoot: join(root, 'data'), profile: 'test' };
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./stop-work-crash.fixture.ts', import.meta.url)),
       root,
     ],

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -25,6 +26,8 @@ import {
 } from '../../../../apps/service/src/daemon/endpoint';
 import { startDevelopmentWeb } from '../../../../apps/service/src/development-web';
 import { createTrustedAssets } from '../../../../apps/web/src/assets';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { liveCodeEvidence } from './live-code-evidence';
 import { createLiveModelFixture, summarizeLiveToolCalls } from './live-model-fixture';
 
@@ -106,11 +109,11 @@ export async function runLiveCrossClient(options: CrossClientOptions) {
   let reservation: Awaited<ReturnType<typeof reserveDaemonEndpoint>> | undefined;
   let locks: ReturnType<typeof createWorkspaceSerialLocks> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
-  let web: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let web: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let browser: BrowserHandle | undefined;
   let page: BrowserPage | undefined;
   let terminal: TuiPTY | undefined;
-  let cli: ReturnType<typeof Bun.spawn> | undefined;
+  let cli: ReturnType<typeof spawnFixtureProcess> | undefined;
   let closeLocksTask: Promise<void> | undefined;
   let status: 'passed' | 'failed' | 'inconclusive' = 'inconclusive';
   let failureStage = 'setup';
@@ -136,7 +139,7 @@ export async function runLiveCrossClient(options: CrossClientOptions) {
         return result;
       }
       if (Date.now() >= end) throw new Boundary('branch_not_hit', stage);
-      await Bun.sleep(30);
+      await fixtureDelay(30);
     }
   };
   const frame = async (stage: string, predicate: (text: string) => boolean) => {
@@ -305,10 +308,10 @@ export async function runLiveCrossClient(options: CrossClientOptions) {
       }, 'exact_input_decision');
     const runCLI = async (task: string, stage: string, trust = false) => {
       failureStage = stage;
-      cli = Bun.spawn({
+      cli = spawnFixtureProcess({
         cmd: [
           process.execPath,
-          '--no-install',
+          ...process.execArgv,
           join(repository, 'apps/cli/host/main.ts'),
           'run',
           '--data-root',
@@ -467,7 +470,7 @@ export async function runLiveCrossClient(options: CrossClientOptions) {
     terminal = spawnTuiPTY({
       cmd: [
         process.execPath,
-        '--no-install',
+        ...process.execArgv,
         launcher,
         '--data-root',
         profile.dataRoot,
@@ -622,7 +625,7 @@ export async function runLiveCrossClient(options: CrossClientOptions) {
     terminal = undefined;
     // Compile the production browser entry in memory; no synthetic DOM or controller substitutes.
     failureStage = 'actual_web_build';
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [join(repository, 'apps/web/src/browser.tsx')],
       target: 'browser',
       format: 'esm',
@@ -633,7 +636,7 @@ export async function runLiveCrossClient(options: CrossClientOptions) {
     if (!built.success || built.outputs.length !== 1 || !output)
       throw new Boundary('branch_not_hit', 'actual_web_bundle_unavailable');
     const assets = await createTrustedAssets(await output.text());
-    web = startDevelopmentWeb({ admittedClient: client, assets: assets.assets });
+    web = await startDevelopmentWeb({ admittedClient: client, assets: assets.assets });
     const require = createRequire(join(repository, 'apps/desktop/package.json'));
     const { chromium } = require('playwright') as BrowserAPI;
     const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -789,7 +792,7 @@ if (import.meta.main) {
     version: 1,
     date: new Date().toISOString(),
     platform: process.platform,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     code: liveCodeEvidence(),
     requestLimit: 40,
     timeoutMs: 600_000,

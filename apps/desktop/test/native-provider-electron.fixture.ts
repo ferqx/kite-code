@@ -184,30 +184,27 @@ async function launch() {
     t.dropProviderSave = false;
     t.ownedTransport = undefined;
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0])),
-          method = args[1]?.method ?? 'GET';
-        if (
-          url.pathname === '/v1/config/user/providers' ||
-          url.pathname.startsWith('/v1/host-mutations/')
-        )
-          t.providerPhysical.push({ path: url.pathname, method });
-        if (url.pathname === '/v1/config/user/providers')
-          t.ownedTransport = { base: url.origin, headers: args[1]?.headers };
-        if (url.pathname === '/v1/config/user/providers' && method === 'POST') {
-          const response = await original(...args);
-          if (t.dropProviderSave) {
-            t.dropProviderSave = false;
-            await response.arrayBuffer();
-            throw new TypeError('fixture dropped one completed save response');
-          }
-          return response;
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0])),
+        method = args[1]?.method ?? 'GET';
+      if (
+        url.pathname === '/v1/config/user/providers' ||
+        url.pathname.startsWith('/v1/host-mutations/')
+      )
+        t.providerPhysical.push({ path: url.pathname, method });
+      if (url.pathname === '/v1/config/user/providers')
+        t.ownedTransport = { base: url.origin, headers: args[1]?.headers };
+      if (url.pathname === '/v1/config/user/providers' && method === 'POST') {
+        const response = await original(...args);
+        if (t.dropProviderSave) {
+          t.dropProviderSave = false;
+          await response.arrayBuffer();
+          throw new TypeError('fixture dropped one completed save response');
         }
-        return original(...args);
-      },
-      { preconnect: original.preconnect },
-    );
+        return response;
+      }
+      return original(...args);
+    }, {});
   });
   return page;
 }
@@ -643,15 +640,12 @@ try {
     const t = globalThis as ProviderFixtureGlobal;
     const existing = t.fetch;
     let transport: OwnedTransport | undefined;
-    t.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const u = new URL(String(args[0]));
-        if (u.pathname === '/v1/config/user/providers')
-          transport = { base: u.origin, headers: args[1]?.headers };
-        return existing(...args);
-      },
-      { preconnect: existing.preconnect },
-    );
+    t.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const u = new URL(String(args[0]));
+      if (u.pathname === '/v1/config/user/providers')
+        transport = { base: u.origin, headers: args[1]?.headers };
+      return existing(...args);
+    }, {});
     t.cleanupTransport = () => transport;
   });
   await openSettings(page);

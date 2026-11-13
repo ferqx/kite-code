@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { type Interaction, interactionAttachment } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeInteractionAttachmentReads } from '../electron/interaction-attachment-reads';
 import { NativeInteractionHistoryReads } from '../electron/interaction-history-reads';
 import { decodeNativeRequest } from '../electron/native-ipc';

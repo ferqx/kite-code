@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test.skipIf(process.platform !== 'win32')(
   'Git Bash staging creates and reuses both runtimes, repairs missing assets and preserves changed assets',
@@ -10,15 +11,16 @@ test.skipIf(process.platform !== 'win32')(
       new URL('../../../src/platform/process/windows-owned-child.ts', import.meta.url),
     );
     const jobModule = fileURLToPath(new URL('../../../src/jobs/windows-shell.ts', import.meta.url));
-    const code = `
+    const code = `import {which as findExecutable} from ${JSON.stringify(new URL('../../../../../scripts/tooling/process.ts', import.meta.url).href)};
+
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import {mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname,join} from 'node:path';
 import {captureWindowsGitBashRuntime,stageWindowsGitBash} from ${JSON.stringify(module)};
 
-const gitParent = dirname(realpathSync.native(Bun.which('git')));
+const gitParent = dirname(realpathSync.native(findExecutable('git')));
 const source = [dirname(gitParent), dirname(dirname(gitParent))]
   .map(root => join(root, 'usr/bin/msys-2.0.dll')).find(existsSync);
 assert.ok(source, 'a real installed MSYS image is required');
@@ -36,7 +38,7 @@ try {
   write(join(installation, 'mingw64/libexec/git-core/git-remote-http.exe'), 'helper');
   write(join(installation, 'etc/ssl/certs/ca-bundle.crt'), 'certificate');
   write(compatibility, 'compatibility');
-  Bun.which = command => { assert.equal(command, 'git'); return join(installation, 'cmd/git.exe'); };
+  process.env.PATH = join(installation, 'cmd');
   const state = join(root, 'state');
   const staged = await stageWindowsGitBash(state, compatibility);
   const runtime = join(dirname(staged.shell), '../..');
@@ -94,11 +96,15 @@ try {
   rmSync(root, {recursive:true,force:true});
 }
 `;
-    const child = spawnSync(process.execPath, ['--eval', code], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 20000,
-    });
+    const child = spawnSync(
+      process.execPath,
+      [...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+        timeout: 20000,
+      },
+    );
     expect({ status: child.status, error: child.error?.message, stderr: child.stderr }).toEqual({
       status: 0,
       error: undefined,

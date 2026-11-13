@@ -1,4 +1,3 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import {
   inspectProfileBackup,
   restoreProfileBackup,
 } from '@kite-ai/agent/maintenance';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import {
   carrier,
   prepareReconnectionEngine,

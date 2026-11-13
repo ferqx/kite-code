@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeCallerMetadata, NativeRequest, NativeState } from '../../src/native-bridge';
 import { NativeCallerView } from '../../src/native-caller';
 import { NativeDiagnosticsProvider } from '../../src/native-diagnostics';

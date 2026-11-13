@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -23,7 +24,7 @@ export async function until<T>(read: () => Promise<T>, check: (value: T) => bool
     const value = await read();
     if (check(value)) return value;
     if (performance.now() > end) throw Error('operation_deadline');
-    await Bun.sleep(10);
+    await sleep(10);
   }
 }
 export async function fixture(

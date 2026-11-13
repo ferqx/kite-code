@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import {
   browserDraftImagesMatch,
   browserDraftProofText,
@@ -33,7 +34,7 @@ async function ready(owner: BrowserAnnotationDrafts, key = 'A') {
   const end = Date.now() + 2000;
   while (owner.get(key).some((item) => item.status === 'preparing')) {
     if (Date.now() > end) throw Error('preparation_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 test('immutable frame bytes prepare once; prompt/note edits only change small metadata and matching versions', async () => {

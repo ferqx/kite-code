@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, test } from '#kite-test';
 import {
   nativeWindowMenuShortcut,
   nativeWindowMenuTemplate,

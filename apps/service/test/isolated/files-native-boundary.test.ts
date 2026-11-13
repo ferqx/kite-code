@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -19,6 +18,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
@@ -41,7 +42,7 @@ test('actual default Service keeps native and compiler assets protected in Full 
   const ordinary = join(root, 'ordinary.txt');
   writeFileSync(ordinary, 'complete external ordinary text');
   let modelCalls = 0;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

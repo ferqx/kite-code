@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { JobDefinition, JobEvent, JobHandle, ToolResult } from '@kite-ai/agent/extensions';
@@ -7,6 +8,7 @@ import type { ModelAdapter } from '@kite-ai/ai';
 import type { ProcessHostConfiguration } from '../../../apps/service/src/bootstrap';
 import { createMcpOAuthBrowser } from '../../../apps/service/src/mcp-oauth-browser';
 import type { ProcessServiceOptions } from '../../../apps/service/src/process-service';
+import { spawn as testSpawn } from '../../../scripts/tooling/process';
 
 const base = process.env.KITE_TUI_FIXTURE_BASE_SERVICE;
 const expected = process.env.KITE_TUI_FIXTURE_BASE_SHA;
@@ -18,7 +20,7 @@ if (
 )
   throw Error('special_fixture_service_source_changed');
 const { runServiceProcess } = await import(pathToFileURL(base).href);
-const delay = (ms: number) => Bun.sleep(ms);
+const delay = (ms: number) => testSleep(ms);
 const waitAbort = (signal: AbortSignal) =>
   new Promise<void>((resolve) => {
     if (signal.aborted) resolve();
@@ -55,7 +57,7 @@ function decorateJob(job: JobDefinition): JobDefinition {
     async start(input, context) {
       if (mode === 'unavailable-sandbox') {
         // A real missing backend mechanism. No fallback process is executed.
-        Bun.spawn([`${process.cwd()}/.test-owned-missing-shell-backend`], {
+        testSpawn([`${process.cwd()}/.test-owned-missing-shell-backend`], {
           stdin: 'ignore',
           stdout: 'ignore',
           stderr: 'ignore',
@@ -127,7 +129,7 @@ const options: ProcessServiceOptions = {
           oauth: {
             network: { allowLoopbackForTests: true },
             openBrowser: createMcpOAuthBrowser((_argv, options) =>
-              Bun.spawn([`${process.cwd()}/.test-owned-missing-oauth-opener`], options),
+              testSpawn([`${process.cwd()}/.test-owned-missing-oauth-opener`], options),
             ),
           },
         },

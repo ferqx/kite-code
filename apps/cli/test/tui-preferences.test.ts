@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { existsSync, linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readConfigurationFile, updateConfigurationFile } from '@kite-ai/agent/config';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
 import {
   directoryLink,
   fixturePermissions,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import type { Page } from 'playwright';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 import { outputStateCases } from './trajectory-output-state.fixture';
 
 /** Focused output admission and reading-position checks against the real Native renderer. */
@@ -359,7 +360,7 @@ export async function verifyTrajectoryOutputState(input: {
     materialLoadingNeverChangesRows: true,
     cases,
   };
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'output-state-verification.json'),
     JSON.stringify(verification, null, 2),
   );

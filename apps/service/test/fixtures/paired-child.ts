@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { setTimeout as wait } from 'node:timers/promises';
 import { defineExtension } from '@kite-ai/agent/extensions';
 import { createFixedModel } from '@kite-ai/ai';
 import { runServiceProcess } from '../../src/main';
@@ -27,7 +28,7 @@ await runServiceProcess({
             while (!existsSync(configuration.release)) {
               if (context.signal.aborted)
                 return { outcome: 'cancelled', content: 'No fixture effect was performed' };
-              await Bun.sleep(10);
+              await wait(10);
             }
             if (context.signal.aborted)
               return { outcome: 'cancelled', content: 'No fixture effect was performed' };

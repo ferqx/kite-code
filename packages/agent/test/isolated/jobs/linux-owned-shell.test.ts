@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('Linux namespace owner import is inert and original kernel handoff is strict', () => {
   const path = fileURLToPath(
@@ -8,13 +9,13 @@ test('Linux namespace owner import is inert and original kernel handoff is stric
   );
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
-import * as actualFFI from 'bun:ffi';
+import * as actualFFI from '@kite-ai/agent/runtime-ffi';
 import * as actualFS from 'node:fs';
 import * as actualChild from 'node:child_process';
-assert.equal(typeof require('bun:ffi').dlopen,'function');
+assert.equal(typeof require('@kite-ai/agent/runtime-ffi').dlopen,'function');
 require('node:fs');require('node:child_process');
 Object.defineProperty(process,'platform',{value:'linux'});
 Object.defineProperty(process,'arch',{value:'x64'});
@@ -69,7 +70,7 @@ const functions={
  poll(poll,count,timeout){assert.equal(count,1n);assert.equal(timeout,0);const p=bytes(poll);assert.ok([12,30,32].includes(p.readInt32LE(0)));if(scenario.dead){p.writeInt16LE(1,6);return 1;}return 0;},
  close(fd){scenario.closes.push(fd);if(scenario.failClose===fd){errno=5;return -1;}assert.equal(scenario.closed.has(fd),false);scenario.closed.add(fd);return 0;},
 };
-mock.module('bun:ffi',()=>({...actualFFI,ptr,toArrayBuffer(at,offset,length){const value=bytes(at);return value.buffer.slice(value.byteOffset+offset,value.byteOffset+offset+length);},dlopen(name){assert.equal(name,'libc.so.6');loads++;return{symbols:functions,close(){scenario.libraryClosed++;}};}}));
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)},()=>({...actualFFI,ptr,toArrayBuffer(at,offset,length){const value=bytes(at);return value.buffer.slice(value.byteOffset+offset,value.byteOffset+offset+length);},dlopen(name){assert.equal(name,'libc.so.6');loads++;return{symbols:functions,close(){scenario.libraryClosed++;}};}}));
 const {startLinuxOwnedShell,LinuxOwnedShellStartError}=await import(${JSON.stringify(path)});
 assert.equal(loads,0);
 const options={bubblewrapPath:'/trusted/bwrap',bubblewrapArgs:['--unshare-user','--unshare-pid','--as-pid-1','--die-with-parent'],initExecutable:'/trusted/init',shellExecutable:'/bin/sh',command:'printf original',cwd:'/work',env:{},nonce:'abcdefghijklmnop',graceMs:20,temp:'/private/tmp/job',mode:'confined',noExecPaths:['/private/tmp/job','/readonly/code','/work'],trustedExecutableFiles:['/bin/sh'],maskedRoots:['/private/profile']};
@@ -90,10 +91,14 @@ let failure;try{start({failPasscred:true,failClose:11});}catch(error){failure=er
 assert.ok(failure instanceof LinuxOwnedShellStartError);await assert.rejects(failure.cleanup.ready,/passcred/);assert.equal((await failure.cleanup.completion).confirmed,false);assert.equal((await failure.cleanup.cancel()).confirmed,false);evidence=failure.cleanup.readProcessEvidence();assert.equal(evidence.phase,'unknown');assert.equal(evidence.wrapper.pid,0);assert.equal(evidence.wrapper.birth,'');assert.equal(evidence.wrapper.exit,null);assert.equal(evidence.namespace,null);assert.equal(evidence.closeUnknown,true);assert.equal(evidence.fdClosed,false);assert.equal(scenario.closes.filter(fd=>fd===11).length,1);assert.equal(scenario.libraryClosed,0);assert.deepEqual(scenario.signals,[]);
 process.exit(0);
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    timeout: 4000,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      timeout: 4000,
+      encoding: 'utf8',
+    },
+  );
   if (result.status !== 0) console.error(result.stderr);
   expect(result.error).toBeUndefined();
   expect(result.signal).toBeNull();

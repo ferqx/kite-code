@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   mkdtempSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -25,7 +25,10 @@ import { createMcpAdapter, createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { acquireFileLock } from '../../../../packages/agent/src/platform/locks';
+import type { FixtureServer } from '../../../../scripts/tooling/http';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type {
   UserMcpOperationResult,
@@ -47,7 +50,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() >= end) throw Error('global_mcp_test_deadline');
-    await Bun.sleep(2);
+    await sleepTimer(2);
   }
 }
 async function fixture(
@@ -82,7 +85,7 @@ async function fixture(
       key: string | null;
     }[] = [],
     oauthWire: string[] = [];
-  const peer: Bun.Server<undefined> = Bun.serve<undefined>({
+  const peer: FixtureServer = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {

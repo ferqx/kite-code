@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
 import type { ShellConfigurationOptions } from '../../src/configuration';
 
 export type MixedShellLedger = {
@@ -127,11 +129,14 @@ try {
   };
 }
 export async function buildMixedShellSupervisor(directory: string) {
-  const output = await Bun.build({
+  const output = await buildBundle({
     entrypoints: [
-      join(import.meta.dir, '../../../../packages/agent/src/platform/process/shell-supervisor.ts'),
+      join(
+        import.meta.dirname,
+        '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
+      ),
     ],
-    target: 'bun',
+    ...fixtureRuntimeBuild(join(directory, 'mixed-shell-assets')),
     outdir: join(directory, 'mixed-shell-assets'),
     naming: 'shell-supervisor.js',
   });
@@ -148,7 +153,7 @@ export function mixedShellConfiguration(
     configurationId: 'isolated-mixed-macos-host-shell-v1',
     env: { PATH: '/usr/bin:/bin' },
     supervisorPath,
-    bunExecutable: process.execPath,
+    runtimeExecutable: process.execPath,
     shellExecutable: '/bin/sh',
     host: {
       controlBase: profile.coordinationPath,

@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -16,6 +16,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
 import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 
 function gate() {
@@ -612,7 +613,7 @@ test('actual durable approval card precedes every credential lookup and socket; 
       ).interactions[0];
       if (card) break;
       if (Date.now() > deadline) throw Error('approval_card_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(card.kind).toBe('approval');
     expect(f.refs.size).toBe(0);

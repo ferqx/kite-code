@@ -1,11 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createClient } from '@kite-ai/client';
 import {
   inspectProcess,
@@ -13,6 +13,10 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   temporarySocketDirectory,
@@ -31,12 +35,12 @@ beforeAll(async () => {
   // Keep UUID-scoped sockets inside macOS's original Unix address budget.
   root = temporarySocketDirectory('kite-shared-cli-');
   const old = await buildOwnedDaemon(join(root, 'artifact'));
-  const result = await Bun.build({
+  const result = await testBuild({
     entrypoints: [
       fileURLToPath(new URL('../fixtures/shared-cli-daemon-child.ts', import.meta.url)),
       fileURLToPath(new URL('../fixtures/shared-cli-driver.ts', import.meta.url)),
     ],
-    target: 'bun',
+    target: 'node',
     packages: 'external',
     outdir: dirname(old),
   });
@@ -51,7 +55,7 @@ async function until(check: () => boolean) {
   const end = Date.now() + 5000;
   while (!check()) {
     if (Date.now() > end) throw Error('shared_fixture_timeout');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 async function limit<T>(value: Promise<T>) {
@@ -489,8 +493,19 @@ function spawnDriver(
   task = 'New task: hold external',
   thread = 'terminated',
 ) {
-  return Bun.spawn(
-    [process.execPath, driver, 'run', '--task', task, '--thread', thread, '--server', socket],
+  return testSpawn(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      driver,
+      'run',
+      '--task',
+      task,
+      '--thread',
+      thread,
+      '--server',
+      socket,
+    ],
     {
       cwd: dirname(driver),
       env: { PATH: process.env.PATH ?? '', OWNED_DATA_ROOT: dataRoot },

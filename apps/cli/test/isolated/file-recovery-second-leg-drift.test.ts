@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
 import { createFileRecoveryPort } from '../../host/file-recovery';
 import { openFileRecoveryJournal } from '../../host/file-recovery-intents';
 import { fileRecoveryProfile } from '../fixtures/file-recovery-profile';
@@ -13,7 +15,7 @@ async function until<T>(read: () => Promise<T>, accept: (value: T) => boolean) {
     const value = await read();
     if (accept(value)) return value;
     if (Date.now() > end) throw Error('drift_qualification_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 for (const drift of ['external_edit', 'later_run'] as const)
@@ -28,7 +30,7 @@ for (const drift of ['external_edit', 'later_run'] as const)
       apiMajor: 1,
       requiredCapabilities: ['file_recovery'],
       spawnChild: (args, { env }) =>
-        Bun.spawn([...args], {
+        testSpawn([...args], {
           stdin: 'pipe',
           stdout: 'pipe',
           stderr: 'pipe',

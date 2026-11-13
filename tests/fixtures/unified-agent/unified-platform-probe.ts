@@ -1,31 +1,41 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
+import { getLoadedSqliteEngine, verifySqliteEngineAsset } from '@kite-ai/agent/sqlite-engine';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
-import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { userConfigurationPath } from '../../../apps/service/src/user-configuration-path';
+import { startLoopbackHttpServer } from '../loopback-http-server';
 import { loopbackModelEnvironment } from '../loopback-model-environment';
-import { privateDirectory } from '../test-filesystem';
 
 const [workspace, candidateRoot, barrier] = process.argv.slice(2);
 if (!workspace || !candidateRoot || !barrier) throw Error('platform_probe_helper_arguments');
 const lease = acquireArtifactAccess({ root: candidateRoot, mode: 'shared' });
 const candidate = verifyTerminalRuntimeBundle(candidateRoot);
+const runtimeVersion = candidate.manifest.nodeVersion
+  ? process.versions.node
+  : process.versions.bun;
+const executable = join(candidateRoot, candidate.manifest.entries.runtime);
+if (
+  realpathSync.native(process.execPath) !== executable ||
+  runtimeVersion !== (candidate.manifest.nodeVersion ?? candidate.manifest.bunVersion)
+)
+  throw Error('platform_probe_runtime_identity_mismatch');
 const home = join(workspace, 'home');
-privateDirectory(home);
-process.env.HOME = home;
-const userConfiguration = ownedUserConfiguration(home);
+if (process.env.HOME !== home) throw Error('platform_probe_home_mismatch');
+const configPath = userConfigurationPath(home);
+privateDirectory(join(home, '.kite-code'));
 const profile = selectProfile({
   dataRoot: join(home, '.kite-code/unified-agent'),
   profile: 'default',
 });
 privateDirectory(profile.profilePath);
-writeFileSync(join(barrier, 'ready'), 'second-owned-shared', { mode: 0o600, flag: 'wx' });
 let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
 let calls = 0,
@@ -39,108 +49,101 @@ const body = 'actual ordinary Files 😀\r\n';
 const assetHash = createHash('sha256')
   .update(readFileSync(join(workspace, asset)))
   .digest('hex');
-const assetStat = lstatSync(join(workspace, asset));
-const assetBaseline = {
-  hash: assetHash,
-  size: assetStat.size,
-  device: String(assetStat.dev),
-  inode: String(assetStat.ino),
-};
-const provider = Bun.serve({
-  hostname: '127.0.0.1',
-  port: 0,
-  async fetch(request) {
-    const raw = (await request.json()) as { messages: { role: string; content: unknown }[] };
-    if (!Array.isArray(raw.messages)) throw Error('fixed_provider_bad_request');
-    calls++;
-    const task = [...raw.messages]
-      .reverse()
-      .find(
-        (message) =>
-          message.role === 'user' &&
-          (message.content === 'Selected default Shell.' ||
-            message.content === 'New task: Ordinary Files and protected runtime assets.'),
-      )?.content;
-    if (!task) throw Error('fixed_provider_actual_task_unavailable');
-    const shell = task === 'Selected default Shell.';
-    if (shell) shellCalls++;
-    else fileCalls++;
-    const call = shell
-      ? shellCalls === 1
-        ? {
-            name: 'shell_execute',
-            input: {
-              command: 'printf default-shell; printf default-stderr >&2',
-            },
-          }
-        : null
-      : fileCalls === 1
-        ? { name: 'write_file', input: { path: 'ordinary.txt', base: null, content: body } }
-        : fileCalls === 2
-          ? { name: 'read_file', input: { path: 'ordinary.txt' } }
-          : fileCalls === 3
-            ? { name: 'read_file', input: { path: asset } }
-            : fileCalls === 4
-              ? {
-                  name: 'write_file',
-                  input: { path: asset, base: assetBaseline, content: 'MUST_NOT_PUBLISH' },
-                }
-              : null;
-    const delta = call
+let provider: Awaited<ReturnType<typeof startLoopbackHttpServer>> | undefined;
+async function respond(request: Request) {
+  if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/chat/completions')
+    return new Response(null, { status: 404 });
+  const raw = (await request.json()) as { messages: { role: string; content: unknown }[] };
+  if (!Array.isArray(raw.messages)) throw Error('fixed_provider_bad_request');
+  calls++;
+  const task = [...raw.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === 'user' &&
+        (message.content === 'Selected default Shell.' ||
+          message.content === 'New task: Ordinary Files and protected runtime assets.'),
+    )?.content;
+  if (!task) throw Error('fixed_provider_actual_task_unavailable');
+  const shell = task === 'Selected default Shell.';
+  if (shell) shellCalls++;
+  else fileCalls++;
+  const call = shell
+    ? shellCalls === 1
       ? {
-          tool_calls: [
-            {
-              index: 0,
-              id: shell ? 'platform-shell' : `platform-${fileCalls}`,
-              type: 'function',
-              function: { name: call.name, arguments: JSON.stringify(call.input) },
-            },
-          ],
+          name: 'shell_execute',
+          input: {
+            command: 'printf default-shell; printf default-stderr >&2',
+          },
         }
-      : { content: 'actual platform diagnostic complete' };
-    const frame = (delta: unknown, finish_reason: string | null) =>
-      `data: ${JSON.stringify({ id: 'owned-fixed', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
-    return new Response(
-      `${frame(delta, null)}${frame({}, call ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
-      { headers: { 'content-type': 'text/event-stream' } },
-    );
-  },
-});
+      : null
+    : fileCalls === 1
+      ? { name: 'write_file', input: { path: 'ordinary.txt', content: body } }
+      : fileCalls === 2
+        ? { name: 'read_file', input: { path: 'ordinary.txt' } }
+        : fileCalls === 3
+          ? { name: 'read_file', input: { path: asset } }
+          : fileCalls === 4
+            ? {
+                name: 'write_file',
+                input: { path: asset, content: 'MUST_NOT_PUBLISH' },
+              }
+            : null;
+  const delta = call
+    ? {
+        tool_calls: [
+          {
+            index: 0,
+            id: shell ? 'platform-shell' : `platform-${fileCalls}`,
+            type: 'function',
+            function: { name: call.name, arguments: JSON.stringify(call.input) },
+          },
+        ],
+      }
+    : { content: 'actual platform diagnostic complete' };
+  const frame = (delta: unknown, finish_reason: string | null) =>
+    `data: ${JSON.stringify({ id: 'owned-fixed', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+  return new Response(
+    `${frame(delta, null)}${frame({}, call ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
+    { headers: { 'content-type': 'text/event-stream' } },
+  );
+}
 async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean) {
   const end = Date.now() + 30000;
   for (;;) {
     const value = await read();
     if (predicate(value)) return value;
     if (Date.now() > end) throw Error('platform_probe_actual_deadline');
-    await Bun.sleep(10);
+    await sleep(10);
   }
 }
 let result: Record<string, unknown> | undefined;
 let cleanup = 'confirmed';
-Object.assign(userConfiguration.homeEnvironment, loopbackModelEnvironment(provider.url));
 try {
+  provider = await startLoopbackHttpServer(respond);
+  const modelUrl = provider.url;
+  Object.assign(process.env, loopbackModelEnvironment(modelUrl));
+  writeFileSync(join(barrier, 'ready'), 'second-owned-shared', { mode: 0o600, flag: 'wx' });
   const deadline = Date.now() + 15000;
   while (!existsSync(join(barrier, 'continue'))) {
     if (Date.now() > deadline) throw Error('platform_probe_lease_barrier_expired');
-    await Bun.sleep(5);
+    await sleep(5);
   }
   const configuration = (tools: { id: string; definitionVersion: string }[]) =>
     JSON.stringify({
       modelId: 'fixed',
       models: [
-        { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
+        { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${modelUrl.href}v1` },
       ],
       tools,
     });
-  const configPath = userConfiguration.path;
   writeFileSync(configPath, configuration([{ id: 'shell.execute', definitionVersion: '1' }]), {
     mode: 0o600,
   });
   service = await launchPairedService({
     profile,
     entrypoint: join(candidateRoot, candidate.manifest.entries.service),
-    executable: join(candidateRoot, candidate.manifest.entries.runtime),
-    spawnChild: userConfiguration.spawnChild,
+    executable,
     instanceId: 'unified-platform-owned',
     buildId: `terminal-${candidate.digest}`,
     apiMajor: 1,
@@ -301,10 +304,29 @@ try {
         .update(readFileSync(join(workspace, asset)))
         .digest('hex')
   )
-    throw Error('actual_files_boundary_failed');
+    throw Error(
+      `actual_files_boundary_failed:${JSON.stringify({
+        status: run.status,
+        reason: run.reason,
+        calls,
+        fileCalls,
+        shellCalls,
+        tools: tools.map(({ definitionId, status, result }) => ({
+          definitionId,
+          status,
+          result: JSON.stringify(result).match(/\b(?:file|tool)_[a-z_]+\b/)?.[0],
+        })),
+      })}`,
+    );
   const servicePid = service.pid;
   await service.close();
   service = undefined;
+  try {
+    process.kill(servicePid, 0);
+    throw Error('platform_service_still_running');
+  } catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error;
+  }
   reader = await openSqliteStore({
     dataRoot: profile.dataRoot,
     profile: profile.profile,
@@ -326,9 +348,12 @@ try {
     !loaded ||
     loaded.selection.manifestSha256 !== candidate.manifest.sqlite.manifestSha256 ||
     loaded.version !== candidate.manifest.sqlite.version ||
-    loaded.sourceId !== candidate.manifest.sqlite.sourceId
+    loaded.sourceId !== candidate.manifest.sqlite.sourceId ||
+    loaded.linkage !== candidate.manifest.sqlite.linkage
   )
     throw Error('actual_selected_sqlite_mismatch');
+  const { driver } = verifySqliteEngineAsset(loaded.selection).manifest;
+  if (driver !== candidate.manifest.sqlite.driver) throw Error('actual_sqlite_driver_mismatch');
   const cursor = (await reader.getMetadata()).lastChangeCursor;
   if (
     (await reader.getCommand(shellCommandId))?.status !==
@@ -359,7 +384,7 @@ try {
     status: 'passed',
     pid: process.pid,
     servicePid,
-    runtimeVersion: process.versions.bun,
+    runtimeVersion,
     storeId,
     sessionId: 's',
     providerCalls: calls,
@@ -380,7 +405,7 @@ try {
     shell: shellEvidence,
     sqlite: {
       status: 'passed',
-      driver: 'bun:sqlite',
+      driver,
       version: loaded.version,
       sourceId: loaded.sourceId,
       manifestSha256: loaded.selection.manifestSha256,
@@ -396,7 +421,7 @@ try {
   for (const close of [
     async () => reader?.close(),
     async () => service?.close(),
-    async () => provider.stop(true),
+    async () => provider?.close(),
     async () => lease.release(),
   ]) {
     try {

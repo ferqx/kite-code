@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { Execution, Message, Run } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { nativeLiveShellInputFact } from '../../electron/tool-message-fact';
 import type {
   NativeBridge,

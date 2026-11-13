@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { AuthorizationRequest, Json } from '../../../src/extensions';
 import { createDefaultTaskRequestClassifier, defaultTaskRoles } from '../../../src/extensions/task';
 import { type CapabilityDescription, createPermissionPolicy } from '../../../src/permissions';

@@ -8,7 +8,7 @@ macOS arm64 和 Windows x64 的桌面安装器已有可独立运行的制品，�
 
 ## Decision
 
-支持桌面专用运行时的两个目标默认构建该布局。`--terminal` 明确要求组合制品，Linux 沿用完整 Terminal。原[组合制品与独立登记决定](2026-10-04-native-complete-closure-and-cli-registration.md)继续适用于组合候选。两层校验、使用权、固定 Bun 与配套 Service 的绑定适用于两种布局。
+macOS arm64 和 Windows x64 默认构建桌面专用布局。`--terminal` 选择组合制品，Linux 使用完整 Terminal。原[组合制品与独立登记决定](2026-10-04-native-complete-closure-and-cli-registration.md)继续适用于组合候选。两种布局均保留两层校验、使用权和配套 Service 的运行时绑定。当前制品使用[随包 Node](2026-11-12-bundled-node-native-runtime.md)，原 Bun 候选按各自的清单核验。
 
 macOS managed 安装核验新候选和原独立 Terminal 后，在两前缀的原锁内按 nonce 撤销自己仍持有的登记，再发布桌面 `active` 并移除 Native 的终端前门。撤销先于发布使发布失败时独立命令仍有已验证的 Terminal。回退到组合候选恢复 Native 前门，重新转发须显式登记。Windows 使用现有安装器替换路径和旧制品的排他移除所有权，沿原 nonce 撤销旧登记。
 

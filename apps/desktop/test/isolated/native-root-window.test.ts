@@ -1,8 +1,9 @@
-import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { MenuItemConstructorOptions } from 'electron';
+import { expect, mock, test } from '#kite-test';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -166,7 +167,7 @@ const {
   nativeRootWillShowEvent,
 } = await import('../../electron/native-root-window');
 const tick = async () => {
-  await Bun.sleep(0);
+  await fixtureDelay(0);
 };
 
 test('Root waits for its actual load without requiring a hidden capture surface; Main retains show and preload ownership', async () => {

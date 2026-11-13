@@ -1,10 +1,12 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawnSync as runFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
-const root = join(import.meta.dir, '../../..');
+const root = join(import.meta.dirname, '../../..');
 
 test('passes recursive current links and map validation', () => {
-  const result = Bun.spawnSync(['bun', 'run', 'scripts/check-docs.ts'], {
+  const result = runFixtureProcess(testNodeCommand('scripts/check-docs.ts'), {
     cwd: root,
     stdout: 'pipe',
     stderr: 'pipe',

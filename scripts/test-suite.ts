@@ -1,13 +1,20 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import ts from 'typescript';
+import {
+  startWindowsOwnedChild,
+  WindowsOwnedChildStartError,
+} from '../packages/agent/src/platform/process/windows-owned-child';
 import {
   privateDirectory,
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../tests/fixtures/test-filesystem';
 import { testToolchainEnvironment } from './test-environment';
+import { spawn } from './tooling/process';
+import { testFileCommand } from './tooling/test-command';
 
 export const TEST_FILE_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
 
@@ -59,6 +66,25 @@ export function testIsolationClass(path: string): 'parallel' | 'isolated' | 'exc
 
 export function testSourceRequiresProcessIsolation(source: string): boolean {
   const file = ts.createSourceFile('test-isolation.ts', source, ts.ScriptTarget.Latest, true);
+  const processStarts = new Set(['spawn', 'spawnSync']);
+  for (const statement of file.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier) ||
+      !/^(?:node:child_process|.*[/\\]tooling[/\\]process)$/u.test(statement.moduleSpecifier.text)
+    )
+      continue;
+    const imports = statement.importClause?.namedBindings;
+    if (!imports || !ts.isNamedImports(imports)) continue;
+    for (const entry of imports.elements) {
+      if (
+        /^(?:spawn|spawnSync|exec|execFile|execSync|execFileSync|fork)$/u.test(
+          (entry.propertyName ?? entry.name).text,
+        )
+      )
+        processStarts.add(entry.name.text);
+    }
+  }
   let required = false;
   const visit = (node: ts.Node): void => {
     if (required) return;
@@ -66,9 +92,7 @@ export function testSourceRequiresProcessIsolation(source: string): boolean {
       const target = node.expression.getText(file);
       if (
         target === 'process.chdir' ||
-        target === 'Bun.spawn' ||
-        target === 'Bun.spawnSync' ||
-        target === 'spawnSync' ||
+        processStarts.has(target) ||
         target === 'ServiceProcess.start'
       ) {
         required = true;
@@ -145,6 +169,135 @@ function testEnvironment(prefix: string): { env: Record<string, string>; dispose
   };
 }
 
+function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+  if (!Number.isSafeInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function runPosixTestChild(
+  command: string[],
+  cwd: string,
+  env: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<number> {
+  const child = spawn(command, {
+    cwd,
+    env,
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+    detached: true,
+  });
+  let escalation: NodeJS.Timeout | undefined;
+  let deliveryError: unknown;
+  const deliver = (signal: NodeJS.Signals) => {
+    try {
+      signalGroup(child.pid, signal);
+    } catch (error) {
+      deliveryError ??= error;
+      // The ChildProcess still identifies the direct child, even if macOS
+      // denies a group kill through the enclosing sandbox.
+      try {
+        child.kill(signal);
+      } catch (fallbackError) {
+        deliveryError = new AggregateError(
+          [deliveryError, fallbackError],
+          'test_process_signal_failed',
+        );
+      }
+    }
+  };
+  const abort = () => {
+    deliver('SIGTERM');
+    escalation ??= setTimeout(() => deliver('SIGKILL'), 2000);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  const [result] = await Promise.allSettled([child.exited]);
+  signal?.removeEventListener('abort', abort);
+  clearTimeout(escalation);
+  // The exit status is complete only after the exact detached group drains.
+  const deadline = performance.now() + 5000;
+  for (;;) {
+    try {
+      // Absence is authoritative. EPERM is not absence and macOS can
+      // report it briefly while the last sandboxed child is exiting.
+      if (!signalGroup(child.pid, 'SIGKILL')) break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error;
+      deliveryError ??= error;
+    }
+    if (performance.now() >= deadline)
+      throw Error('test_process_group_cleanup_unknown', { cause: deliveryError });
+    await sleep(50);
+  }
+  if (result.status === 'rejected') throw result.reason;
+  return result.value;
+}
+
+async function runWindowsTestChild(
+  command: string[],
+  cwd: string,
+  env: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<number> {
+  const [entry, ...argv] = command;
+  if (!entry || !isAbsolute(entry)) throw Error('test_child_executable_must_be_absolute');
+  let child: ReturnType<typeof startWindowsOwnedChild>;
+  try {
+    child = startWindowsOwnedChild({
+      executable: entry,
+      argv,
+      cwd,
+      env: Object.fromEntries(
+        Object.entries(env).filter((pair): pair is [string, string] => typeof pair[1] === 'string'),
+      ),
+      stdin: 'ignore',
+    });
+  } catch (error) {
+    if (error instanceof WindowsOwnedChildStartError) await error.cleanup;
+    throw error;
+  }
+  const forward = async (source: AsyncIterable<Uint8Array>, output: NodeJS.WriteStream) => {
+    for await (const chunk of source) {
+      await new Promise<void>((resolve, reject) =>
+        output.write(chunk, (error) => (error ? reject(error) : resolve())),
+      );
+    }
+  };
+  const abort = () => {
+    void child.stop({ graceMs: 0 }).catch(() => {});
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
+  const exit = await Promise.all([
+    child.exited,
+    forward(child.stdout, process.stdout),
+    forward(child.stderr, process.stderr),
+  ]).then(
+    ([code]) => ({ code }),
+    (error: unknown) => ({ error }),
+  );
+  signal?.removeEventListener('abort', abort);
+  await child.close();
+  const evidence = child.readEvidence();
+  if (
+    !evidence.closed ||
+    evidence.closeUnknown ||
+    !evidence.job.treeStopped ||
+    !evidence.root.waitConfirmed
+  )
+    throw Error('test_windows_job_cleanup_unknown');
+  if ('error' in exit) throw exit.error;
+  return exit.code;
+}
+
 export async function runTestJob(
   repositoryRoot: string,
   job: TestJob,
@@ -164,36 +317,18 @@ export async function runTestJob(
       displayFiles.length +
       (maxConcurrency ? ` maxConcurrency=${maxConcurrency}` : ''),
   );
-  const args = job.command ?? [
-    process.execPath,
-    'test',
-    '--no-orphans',
-    '--only-failures',
-    ...(process.platform === 'darwin' ? [] : ['--timeout=30000']),
-    ...(maxConcurrency ? [`--max-concurrency=${maxConcurrency}`] : []),
-    // Bare relative strings are Bun discovery filters, not exact planned files.
-    ...job.files.map((file) => resolve(repositoryRoot, file)),
-  ];
+  const args =
+    job.command ??
+    testFileCommand([
+      '--only-failures',
+      ...(process.platform === 'darwin' ? [] : ['--timeout=30000']),
+      ...(maxConcurrency ? [`--max-concurrency=${maxConcurrency}`] : []),
+      ...job.files.map((file) => resolve(repositoryRoot, file)),
+    ]);
   try {
-    const child = Bun.spawn(args, {
-      cwd: repositoryRoot,
-      env: environment.env,
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    const abort = (): void => {
-      try {
-        child.kill();
-      } catch {
-        // The process may have exited between the abort signal and this callback.
-      }
-    };
-    options.signal?.addEventListener('abort', abort, { once: true });
-    if (options.signal?.aborted) abort();
-    const exitCode = await child.exited;
+    const execute = process.platform === 'win32' ? runWindowsTestChild : runPosixTestChild;
+    const exitCode = await execute(args, repositoryRoot, environment.env, options.signal);
     succeeded = exitCode === 0;
-    options.signal?.removeEventListener('abort', abort);
     console.log(
       '[test:' +
         job.label +
@@ -222,9 +357,17 @@ export async function runTestJobs(
       const index = nextIndex++;
       const job = jobs[index];
       if (!job) return;
-      const exitCode = await runTestJob(repositoryRoot, job, {
-        signal: job.drainOnFailure ? undefined : controller.signal,
-      });
+      let exitCode: number;
+      try {
+        exitCode = await runTestJob(repositoryRoot, job, {
+          signal: job.drainOnFailure ? undefined : controller.signal,
+        });
+      } catch (error) {
+        console.error(
+          `[test:${job.label}] ${error instanceof Error ? error.message : String(error)}`,
+        );
+        exitCode = 1;
+      }
       if (exitCode !== 0 && failure === 0) {
         failure = exitCode;
         controller.abort();

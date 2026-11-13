@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeInputImageReads } from '../electron/input-image-reads';
 import { nativeToolImages } from '../electron/tool-images';
 import type { NativeToolMessageScope } from '../src/tool-messages-bridge';

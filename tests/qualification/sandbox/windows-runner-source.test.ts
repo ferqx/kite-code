@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 
 test('keeps the cancel HANDLE under one Option/take close owner after join', () => {
   const source = readFileSync(
-    resolve(import.meta.dir, '../../../native/windows-sandbox-runner/src/main.rs'),
+    resolve(import.meta.dirname, '../../../native/windows-sandbox-runner/src/main.rs'),
     'utf8',
   );
   const watcher = source.slice(

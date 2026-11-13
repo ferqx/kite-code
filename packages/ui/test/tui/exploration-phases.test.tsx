@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Execution, Message } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiSession } from '../../src/tui';
 import { TuiController, type TuiPort, type TuiSnapshot } from '../../src/tui/controller';
 import { projectInkExplorationPhases } from '../../src/tui/exploration-phases';
@@ -607,7 +608,7 @@ test('main keeps source-proven content-first exploration compact while retaining
   await controller.select('session');
   const app = render(<TuiSession controller={controller} />);
   try {
-    await Bun.sleep(40);
+    await fixtureDelay(40);
     const frame = app.lastFrame()!;
     expect(frame).not.toContain('narration-0');
     expect(frame).not.toContain('narration-1');
@@ -666,11 +667,11 @@ test('a single read without Thinking keeps its actual result instead of an empty
   await controller.select('session');
   const app = render(<TuiSession controller={controller} />);
   try {
-    await Bun.sleep(40);
+    await fixtureDelay(40);
     expect(app.lastFrame()?.match(/Read.*original\.ts/g)).toHaveLength(1);
     source = settled;
     await controller.select('session');
-    await Bun.sleep(40);
+    await fixtureDelay(40);
     expect(app.lastFrame()).toContain('narration-0');
     expect(app.lastFrame()).toContain('read 1 file');
     expect(app.lastFrame()).toContain('planning-baseline.txt · exact original readonly result');
@@ -726,7 +727,7 @@ test('a live exact Shell carrier with no Run ID replaces its foreground wrapper 
   await controller.select('session');
   const app = render(<TuiSession controller={controller} />);
   try {
-    await Bun.sleep(40);
+    await fixtureDelay(40);
     expect(app.lastFrame()?.match(/Bash pwd/g)).toHaveLength(1);
     expect(app.lastFrame()!.indexOf('Bash pwd')).toBeLessThan(
       app.lastFrame()!.indexOf('Read original.ts'),
@@ -773,7 +774,7 @@ test('a live exact Shell carrier with no Run ID replaces its foreground wrapper 
       ],
     };
     await controller.select('session');
-    await Bun.sleep(40);
+    await fixtureDelay(40);
     const frame = app.lastFrame()!;
     expect(frame).toContain('ORIGINAL_CANCELLED_SHELL_HISTORY');
     expect(frame).not.toContain('FOREGROUND_PROTOCOL_ALREADY_OWNED_BY_CARRIER');

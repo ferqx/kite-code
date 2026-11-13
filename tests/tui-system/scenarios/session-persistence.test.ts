@@ -18,15 +18,10 @@
  * Original Store 10/9/11 journey identifiers remain; D08 excludes old formats.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  activateSessionSearch,
-  submitCommand,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { openSessionByTitle, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -47,12 +42,12 @@ describe.each([
   const step = journey.step;
   let tui1: PtyProcess;
   let tui2: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let persistedThreadId: string | undefined;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
 
     server.setResponses([{ message: { content: 'Hello from session!' }, delay: 50 }]);
@@ -80,15 +75,19 @@ describe.each([
     async () => {
       await submitUserMessage(tui1, server, 'Message before restart', { timeout: 15000 });
 
-      // Wait for the mock model response to appear in the TUI
-      await waitForText(() => tui1.outputSinceLastAction(), 'Hello from session!', 15000);
+      await waitForCondition(
+        () => {
+          const viewport = tui1.viewport();
+          return (
+            screenContains(viewport, 'Message before restart') &&
+            screenContains(viewport, 'Hello from session!') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'original user and model reply in the same settled viewport',
+        15_000,
+      );
       await submitCommand(tui1, '/session rename Message before restart');
-
-      const output = tui1.viewport();
-      expect(screenContains(output, 'Message before restart')).toBe(true);
-      expect(screenContains(output, 'Hello from session!')).toBe(true);
-      // Prompt should still be visible
-      expect(screenContains(output, '❯')).toBe(true);
 
       await waitForCondition(
         () => {
@@ -194,33 +193,14 @@ describe.each([
     async () => {
       // Filter by the original explicit title without assuming recency order.
       console.log('  pressing Enter to load historical session...');
-      await activateSessionSearch(tui2);
-      await typeText(tui2, 'Message before restart');
-      tui2.write('\x1b[B');
-      await waitForCondition(
-        () =>
-          screenHasSessionRow(tui2.viewport(), 'Message before restart', {
-            selected: true,
-            active: false,
-          }),
-        'persisted historical session row to become selected',
-        5_000,
-      );
-      tui2.write('\r');
-
-      // Wait for the historical session content to be replayed.
-      // Both the user message and model response should be restored.
-      await waitForCondition(
-        () => {
-          const viewport = tui2.viewport();
-          return (
-            screenContains(viewport, 'Message before restart') &&
-            screenContains(viewport, 'Hello from session!') &&
-            screenContains(viewport, '❯')
-          );
-        },
-        'historical user and assistant messages to finish replaying in the viewport',
-        15000,
+      await openSessionByTitle(
+        tui2,
+        'Message before restart',
+        (viewport) =>
+          screenContains(viewport, 'Message before restart') &&
+          screenContains(viewport, 'Hello from session!') &&
+          screenContains(viewport, '❯'),
+        15_000,
       );
 
       const output = tui2.viewport();

@@ -1,8 +1,8 @@
-import { type Database, constants as sqlConstants } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, fstatSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { canonicalJson } from '../json';
+import { type Database, constants as sqlConstants } from '../runtime-sqlite';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
 import { verifyCallerIntentsDocument } from './caller-intents';
 import { verifyDesktopAnswerRows } from './desktop-answers';

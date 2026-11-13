@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   lstatSync,
   mkdirSync,
@@ -9,6 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -16,6 +16,7 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -140,7 +141,7 @@ async function fixture() {
       if ((run && !run.isActive) || command?.status === 'rejected') return { run, command, view };
       if (Date.now() > deadline)
         throw Error(`retired_tool_run_deadline:${JSON.stringify(command)}`);
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   };
   return {

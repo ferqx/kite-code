@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { ToolContext } from '@kite-ai/agent/extensions';
+import { expect, test } from '#kite-test';
 import { createWebFetchConfiguration } from '../../src/web-fetch-configuration';
 import {
   environmentWebProxy,

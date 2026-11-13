@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { ExecutionRecord, Json } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { shellOperationKey } from '../../../packages/agent/src/shell-input';
 import { formatShellResult } from '../../../packages/agent/src/shell-result-presentation';
 import { toolFailurePresentation } from '../../../packages/agent/src/tool-failure-presentation';
@@ -216,7 +216,7 @@ test('continuous selection waits on the returned original handle and requires co
       { role: 'tool', tool_call_id: id, content },
     );
   add('write', calls[0]!, '{"path":"effect"}');
-  add('spawn', calls[1]!, '{"accepted":true,"agent_id":"child"}');
+  add('spawn', calls[1]!, '{"accepted":true,"agent_id":"child","work_ref":"original-work"}');
   add('launch', calls[2]!, accepted);
   const verify = async (
     _id: string,
@@ -226,14 +226,26 @@ test('continuous selection waits on the returned original handle and requires co
   ) => (feedback.shellId === f.handle ? f.job.id : undefined);
   expect(await selectContinuousParentTool(messages, calls, async () => false, verify)).toEqual({
     name: 'wait_agent_events',
-    input: { after_seq: '0', wait_ms: 4000 },
+    input: { work_refs: ['original-work'], wait_ms: 4000 },
   });
   add(
     'child-events',
-    { name: 'wait_agent_events', input: { after_seq: '0', wait_ms: 4000 } },
-    '{"next_seq":"1","events":[{"agent_id":"child","kind":"completed","outcome":"succeeded"}]}',
+    { name: 'wait_agent_events', input: { work_refs: ['original-work'], wait_ms: 4000 } },
+    '{"next_cursor":"cursor-1","events":[{"agent_id":"child","work_ref":"foreign-work","kind":"completed","outcome":"succeeded"}]}',
   );
-  const waiting = { name: 'shell_wait', input: { shell_id: f.handle, wait_timeout_ms: 4000 } };
+  const observing = {
+    name: 'wait_agent_events',
+    input: { work_refs: ['original-work'], cursor: 'cursor-1', wait_ms: 4000 },
+  };
+  expect(await selectContinuousParentTool(messages, calls, async () => false, verify)).toEqual(
+    observing,
+  );
+  add(
+    'child-terminal',
+    observing,
+    '{"next_cursor":"cursor-2","events":[{"agent_id":"child","work_ref":"original-work","kind":"completed","outcome":"succeeded"}]}',
+  );
+  const waiting = { name: 'shell_wait', input: { shell_id: f.handle, wait_ms: 4000 } };
   expect(await selectContinuousParentTool(messages, calls, async () => false, verify)).toEqual(
     waiting,
   );
@@ -276,7 +288,11 @@ test('continuous preparation can advance past an accurately verified English ref
     },
   };
   const content = toolFailurePresentation({ result: raw, notDispatched: true })!;
-  const results = ['{"path":"effect"}', '{"accepted":true,"agent_id":"child"}', content];
+  const results = [
+    '{"path":"effect"}',
+    '{"accepted":true,"agent_id":"child","work_ref":"original-work"}',
+    content,
+  ];
   const messages = calls.flatMap((call, index) => [
     {
       role: 'assistant',

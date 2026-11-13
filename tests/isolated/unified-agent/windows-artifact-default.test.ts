@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { buildOwnedDefaultArtifactConsumer } from '../../fixtures/unified-agent/windows-artifact-default/build';
 
 // All supported platforms execute this public path, including actual win32 without availability skip.
@@ -13,7 +14,7 @@ test('source-free default paired Service seals >64KiB actual Model media and col
     expect(existsSync(join(root, 'original'))).toBe(false);
     const home = join(root, 'home');
     mkdirSync(home);
-    const child = Bun.spawn([process.execPath, built.entry, root], {
+    const child = spawnFixtureProcess([process.execPath, built.entry, root], {
       cwd: home,
       env: {
         ...process.env,

@@ -1,25 +1,24 @@
 import { writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-const { readProcessStartIdentity } = (await import(
-  pathToFileURL(resolve(import.meta.dir, '../../../service/src/daemon/process-identity.ts')).href
-)) as { readProcessStartIdentity(pid: number): string | undefined };
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+import { readProcessStartIdentity } from '../../../service/src/daemon/process-identity';
 
 // Passive preload: the actual development front door and every spawn argument stay intact.
-const original = Bun.spawn;
+const childProcess = createRequire(import.meta.url)(
+  'node:child_process',
+) as typeof import('node:child_process');
+const original = childProcess.spawn;
 const serviceEntry = process.env.KITE_MANAGEMENT_SERVICE_ENTRY;
 const observationPath = process.env.KITE_MANAGEMENT_OBSERVATION;
-Bun.spawn = ((...args: unknown[]) => {
-  const child = Reflect.apply(original, Bun, args) as Bun.Subprocess;
-  const first = args[0] as string[] | { cmd?: string[] };
-  const cmd = Array.isArray(first) ? first : first?.cmd;
-  if (observationPath && serviceEntry && cmd?.includes(serviceEntry)) {
+childProcess.spawn = ((...args: unknown[]) => {
+  const child = Reflect.apply(original, childProcess, args) as ReturnType<typeof original>;
+  const cmd = [args[0], ...(Array.isArray(args[1]) ? args[1] : [])];
+  if (child.pid && observationPath && serviceEntry && cmd.includes(serviceEntry)) {
     const observation = { pid: child.pid, start: readProcessStartIdentity(child.pid), cmd };
     writeFileSync(observationPath, JSON.stringify(observation));
-    void child.exited.then((code) => {
+    child.once('exit', (code) => {
       writeFileSync(`${observationPath}.exit`, JSON.stringify({ ...observation, code }));
     });
   }
   return child;
-}) as typeof Bun.spawn;
+}) as typeof original;
+syncBuiltinESMExports();

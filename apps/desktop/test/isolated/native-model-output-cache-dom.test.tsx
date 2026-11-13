@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, useContext, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { ConversationActivityContext } from '../../../../packages/ui/src/conversation-activity';
 import { Conversation } from '../../../../packages/ui/src/desktop/Conversation';
 import { ConversationCache } from '../../../../packages/ui/src/desktop/ConversationCache';

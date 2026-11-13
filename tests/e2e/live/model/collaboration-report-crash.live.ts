@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -12,12 +11,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration, type RuntimeOptions } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json, ToolDefinition } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { agentContractSource } from '@kite-ai/agent/sources';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
@@ -741,7 +742,7 @@ async function phase(phaseName: 'hot' | 'cold' | 'resume', root: string) {
       const idleDeadline = Math.min(control.deadline, Date.now() + 10000);
       while (runtime.getLifecycleState().busy) {
         assert(Date.now() < idleDeadline, 'original_report_recovery_cleanup_settles_before_replay');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
       const after = await observations(store, root, ids);
       const recoveryMetadata = assertOriginalChildRecovery(original, after);
@@ -854,7 +855,7 @@ async function phase(phaseName: 'hot' | 'cold' | 'resume', root: string) {
       const repeatIdleDeadline = Math.min(control.deadline, Date.now() + 10000);
       while (runtime.getLifecycleState().busy) {
         assert(Date.now() < repeatIdleDeadline, 'explicit_repeat_owner_cleanup_settles');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
       const replayed = await observations(store, root, ids);
       const repeatChanges = await store.getChanges({

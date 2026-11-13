@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, type ForkSessionRequest } from '../../src';
 
 test('Fork SDK seals the explicit source/new Session and selection, rejects local authority/cursor drift, and treats an unverifiable committed receipt as unknown', async () => {
@@ -46,7 +47,7 @@ test('Fork SDK seals the explicit source/new Session and selection, rejects loca
     cancelRequestedAt: null,
     receipt,
   };
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

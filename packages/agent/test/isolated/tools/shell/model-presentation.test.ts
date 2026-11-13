@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../../src/json';
 import { modelCursor } from '../../../../src/model-cursor';
 import { modelExecutionId } from '../../../../src/model-identifier';

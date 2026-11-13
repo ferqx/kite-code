@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type AgentClient,
   canonicalMcpCommandRequest,
@@ -7,6 +6,7 @@ import {
   type UserMcpSettingsRequest,
   type UserMcpSettingsView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { mcpSha, parseNativeMcpRecord } from '../../electron/mcp-journal';
 import { NativeUserMcpSettings } from '../../electron/user-mcp-settings';
 import { memoryPrivateData } from '../private-data.fixture';

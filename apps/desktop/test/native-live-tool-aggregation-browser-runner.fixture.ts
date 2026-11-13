@@ -17,6 +17,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { NativeConfiguration } from '../electron/configuration';
 import {
   type NativeConfigurationData,
@@ -88,7 +90,7 @@ declare global {
     liveAggregationPhase: string;
   }
 }
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const handoff = process.env.KITE_AGGREGATION_SCENARIO === 'model-handoff';
 const longGroup = process.env.KITE_AGGREGATION_SCENARIO === 'long-group';
 const toolDetails = process.env.KITE_AGGREGATION_SCENARIO === 'tool-details';
@@ -570,7 +572,7 @@ await build({
     },
   },
 });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -628,7 +630,7 @@ const server = Bun.serve({
       );
     const file = path.resolve(output, `.${pathname}`);
     return file.startsWith(output + path.sep)
-      ? new Response(Bun.file(file))
+      ? new Response(await openFixtureFile(file))
       : new Response(null, { status: 404 });
   },
 });
@@ -1033,7 +1035,7 @@ try {
           requests: requests.map((request) => request.method),
         },
       });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       console.log(JSON.stringify({ worktreeErrors, theme, width, screenshotFrames, errors }));
       await page.close();
       continue;
@@ -1992,7 +1994,7 @@ try {
             );
         }
         const appliedEnableFocus = await focusState();
-        await Bun.write(
+        await writeFixtureFile(
           path.join(artifact, `${label}-queue-focus.json`),
           JSON.stringify(
             {
@@ -2742,7 +2744,7 @@ try {
             : 'Navigation only: existing Bridge has no settings data reader; null replies exercise the real unavailable state.',
         },
       });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       console.log(
         JSON.stringify({ theme, width, samples: samples.length, screenshotFrames, errors }),
       );
@@ -2940,7 +2942,7 @@ try {
               );
               await page.mouse.move(5, 5, { steps: 8 });
               await stage('native-execute-live-approved-pointer-exit');
-              await Bun.write(
+              await writeFixtureFile(
                 path.join(artifact, `${label}-approval-pointer-exit.json`),
                 JSON.stringify(
                   await summary.evaluate((node) => ({
@@ -3098,7 +3100,7 @@ try {
           const readsAfterModel = (
             await page.evaluate(() => window.liveAggregationFixture.nativeShellMetadataPages())
           ).length;
-          await Bun.write(
+          await writeFixtureFile(
             path.join(artifact, `${label}-native-late-model.json`),
             JSON.stringify(
               {
@@ -3181,7 +3183,7 @@ try {
           }),
           { before: liveNode, current: settledNode },
         );
-        await Bun.write(
+        await writeFixtureFile(
           path.join(artifact, `${label}-native-${entry.kind}-handoff.json`),
           JSON.stringify(
             { pending, handoff, samples: await page.evaluate(() => window.liveAggregationSamples) },
@@ -3453,7 +3455,7 @@ try {
         samples,
         verification: { verified, requests, coldVerification, iconChecks },
       });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       assert.deepEqual(errors, [], 'Native Shell page errors');
       assert.ok(
         samples.every(
@@ -3613,7 +3615,7 @@ try {
         'icon change shrank Shell card',
       );
       assert.equal(headerBeforeScroll?.height, 118, 'icon change shrank multiline Header');
-      await Bun.write(
+      await writeFixtureFile(
         path.join(artifact, `${theme}-${width}-standalone-shell-geometry.json`),
         JSON.stringify(standaloneGeometry, null, 2),
       );
@@ -4107,7 +4109,7 @@ try {
           shellMatrix,
         },
       });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       assert.deepEqual(errors, [], 'tool island page errors');
       for (const sample of samples) {
         assert.equal(sample.overflow, false, 'tool island overflowed page');
@@ -4704,7 +4706,7 @@ try {
           webVisual,
         },
       });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       assert.deepEqual(errors, [], 'long group page errors');
       for (const sample of samples.filter((item) => item.activities.length > 0)) {
         assert.equal(
@@ -4803,7 +4805,7 @@ try {
       const samples = await page.evaluate(() => window.liveAggregationSamples);
       await cdp.send('Page.stopScreencast');
       report.cases.push({ theme, width, errors, screenshotFrames, samples });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       const affected = samples.filter(
         (sample) =>
           [
@@ -4939,7 +4941,7 @@ try {
     const samples = await page.evaluate(() => window.liveAggregationSamples);
     await cdp.send('Page.stopScreencast');
     report.cases.push({ theme, width, errors, screenshotFrames, samples });
-    await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+    await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
     assert.deepEqual(errors, [], `${theme}: page errors`);
     const start = samples.findIndex(
       (sample) => sample.phase === 'single-read' && sample.activities.length > 0,

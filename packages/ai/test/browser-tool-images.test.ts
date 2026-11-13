@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { deflateSync } from 'node:zlib';
+import { expect, test } from '#kite-test';
 import type { ModelRequest } from '../src';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '../src/sdk';
 
@@ -115,7 +115,6 @@ for (const protocol of ['responses', 'chat-completions'] as const)
             { headers: { 'content-type': 'text/event-stream' } },
           );
         },
-        { preconnect: fetch.preconnect },
       );
       const model = createCompatibleModelBinding({
         modelId: 'fixture',

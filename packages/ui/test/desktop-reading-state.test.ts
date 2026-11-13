@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { pruneReadingState, ReadingStateCache } from '../src/desktop/reading-state';
 
 test('reading cache evicts least recently used sessions without retaining readers', () => {

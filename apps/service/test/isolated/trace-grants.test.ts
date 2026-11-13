@@ -1,7 +1,7 @@
-import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import { TraceConsumerStore } from '../../src/trace-extensions/consumer-store';
 import { engineDigest } from '../../src/trace-extensions/engine/assets';
 import type { TraceGrant } from '../../src/trace-extensions/types';

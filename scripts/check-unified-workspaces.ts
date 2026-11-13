@@ -30,22 +30,27 @@ export interface UnifiedWorkspaceReport {
 }
 const names = new Map(UNIFIED_WORKSPACES.map((path) => [`@kite-ai/${path.split('/')[1]}`, path]));
 const formalScripts: Readonly<Record<string, string>> = {
-  build: 'bun run scripts/run-runtime-workspace-script.ts build',
-  test: 'bun run scripts/run-default-tests.ts',
+  build:
+    'node --import ./scripts/tooling/register.mjs scripts/run-runtime-workspace-script.ts build',
+  test: 'node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts',
   'test:all': 'bun run test',
-  typecheck: 'bun check -b -p tsconfig.typecheck.json',
-  agent: 'bun run scripts/release/entrypoints/cli.ts',
-  tui: 'bun run scripts/release/entrypoints/tui.ts',
-  'prod:tui': 'NODE_ENV=production bun run scripts/release/entrypoints/tui.ts',
-  server: 'bun run scripts/development/ensure-web.ts',
-  desktop: 'bun run scripts/release/native.ts launch',
-  'release:terminal': 'bun run scripts/release/terminal.ts',
-  'release:build': 'bun run scripts/release/unified.ts build',
-  'release:verify': 'bun run scripts/release/unified.ts verify',
-  'release:smoke': 'bun run scripts/release/unified.ts smoke',
-  'release:install': 'bun run scripts/release/unified.ts install',
-  'release:native': 'bun run scripts/release/native.ts',
-  'check:runtime-packages': 'bun run scripts/check-unified-workspaces.ts',
+  typecheck: 'node node_modules/typescript/bin/tsc -b tsconfig.typecheck.json',
+  agent: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/cli.ts',
+  tui: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/tui.ts',
+  'prod:tui':
+    'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/production-tui.ts',
+  server: 'node --import ./scripts/tooling/register.mjs scripts/development/ensure-web.ts',
+  desktop: 'node --import ./scripts/tooling/register.mjs scripts/release/native.ts launch',
+  'release:terminal': 'node --import ./scripts/tooling/register.mjs scripts/release/terminal.ts',
+  'release:build': 'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts build',
+  'release:verify':
+    'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts verify',
+  'release:smoke': 'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts smoke',
+  'release:install':
+    'node --import ./scripts/tooling/register.mjs scripts/release/unified.ts install',
+  'release:native': 'node --import ./scripts/tooling/register.mjs scripts/release/native.ts',
+  'check:runtime-packages':
+    'node --import ./scripts/tooling/register.mjs scripts/check-unified-workspaces.ts',
 };
 const legacyConsumer =
   /(?:@kite-ai\/|packages\/|#)(?:agent-api-(?:contract|client)|agent-kernel|builtin-runtime|runtime-(?:host|spi|contract|protocol|server|client|storage-sqlite)|kite-(?:app-contract|local-runtime|client-ui|cli|service|web|desktop))(?:\/|\b)|(?:^|[\s'"/])apps\/kite-(?:cli|service|web|desktop)(?:\/|\b)|scripts\/(?:run-tui-system-tests|runtime\/(?:run-fault-soak|verify-fault-soak-qualification)|release\/(?:oss-candidate|build-oss-candidate|build-artifact|verify-artifact|bootstrap-verifier|prepare-desktop-service|platform-capability-probe|session-log-acl-smoke))\.ts/;
@@ -83,8 +88,7 @@ export function checkUnifiedFormalConsumers(root: string): {
       return;
     }
     if (!existsSync(resolve(root, path))) {
-      if (explicitTestFile)
-        add('formal-test-file-missing', path, 'explicit bun test input must exist');
+      if (explicitTestFile) add('formal-test-file-missing', path, 'explicit test file must exist');
       return;
     }
     if (statSync(resolve(root, path)).isDirectory())
@@ -95,60 +99,89 @@ export function checkUnifiedFormalConsumers(root: string): {
     if (legacyConsumer.test(command) || legacyConsumer.test(cwd))
       add('formal-legacy-command', location, command);
     if (/^\s*\$/.test(command)) add('formal-command-unresolved', location, 'computed command head');
-    for (const match of command.matchAll(/\b(?:bun|node)\s+([^\s;]+\.[cm]?[jt]sx?)(?=\s|$)/g))
-      paths(relative(root, resolve(root, cwd, match[1]!)));
-    for (const match of command.matchAll(
-      /\bbun\s+((?:--cwd\s+[^\s;]+\s+)?(?:run|test|build))\s+([^;\n|&]+)/g,
-    )) {
-      const raw = `${match[1]} ${match[2]}`,
-        tokens =
-          raw
-            .match(/"[^"\n]*"|'[^'\n]*'|[^\s]+/g)
-            ?.map((token) => token.replace(/^['"]|['"]$/g, '')) ?? [];
-      const cwdIndex = tokens.indexOf('--cwd');
-      let selected = cwd;
-      if (cwdIndex !== -1) {
-        selected = relative(root, resolve(root, cwd, tokens[cwdIndex + 1] ?? '')).replaceAll(
-          '\\',
-          '/',
+    for (const segment of command.split(/[;\n|&]+/u)) {
+      const tokens =
+        segment
+          .match(/"[^"\n]*"|'[^'\n]*'|[^\s]+/gu)
+          ?.map((token) => token.replace(/^['"]|['"]$/gu, '')) ?? [];
+      if (tokens[0] === 'xvfb-run' && tokens[1] === '-a') tokens.splice(0, 2);
+      const tool = tokens.shift();
+      if (tool === 'node') {
+        while (tokens[0]?.startsWith('-')) {
+          const option = tokens.shift();
+          if (option === '--import' || option === '--require') {
+            const preload = tokens.shift();
+            if (preload?.startsWith('.')) paths(relative(root, resolve(root, cwd, preload)));
+          }
+        }
+        const entry = tokens.shift();
+        if (!entry || !/\.[cm]?[jt]sx?$/u.test(entry)) continue;
+        const path = relative(root, resolve(root, cwd, entry));
+        paths(path);
+        if (/(?:^|\/)run-test-files\.ts$/u.test(path)) {
+          for (const arg of tokens) {
+            if (arg.startsWith('-')) continue;
+            paths(
+              relative(root, resolve(root, cwd, arg)),
+              /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(arg),
+            );
+          }
+        } else if (/(?:^|\/)build-command\.ts$/u.test(path)) {
+          const firstOption = tokens.findIndex((token) => token.startsWith('-'));
+          const entrypoints = firstOption < 0 ? tokens : tokens.slice(0, firstOption);
+          for (const input of entrypoints) paths(relative(root, resolve(root, cwd, input)));
+        }
+        continue;
+      }
+      if (tool === 'pnpm') {
+        add(
+          'formal-runtime-forbidden',
+          location,
+          'use Bun for dependency installation and scripts',
         );
-        tokens.splice(cwdIndex, 2);
+        continue;
+      }
+      if (tool !== 'bun') continue;
+      let selected = cwd;
+      const cwdOption = tokens[0]?.match(/^--cwd=(.+)$/u);
+      if (cwdOption) {
+        tokens.shift();
+        selected = relative(root, resolve(root, cwd, cwdOption[1]!)).replaceAll('\\', '/');
+      }
+      const operation = tokens.shift();
+      if (
+        operation === 'install' &&
+        !cwdOption &&
+        tokens.includes('--frozen-lockfile') &&
+        tokens.every((token) => token === '--frozen-lockfile' || token === '--ignore-scripts')
+      )
+        continue;
+      if (operation !== 'run' || (tokens[0] && !/^\w[\w:-]*$/u.test(tokens[0]))) {
+        add(
+          'formal-runtime-forbidden',
+          location,
+          'Bun may install frozen dependencies or dispatch a manifest script',
+        );
+        continue;
       }
       if (selected && !UNIFIED_WORKSPACES.includes(selected as (typeof UNIFIED_WORKSPACES)[number]))
         add('formal-command-cwd-forbidden', location, selected);
-      const kind = tokens.shift();
-      const args = tokens.filter((token) => !token.startsWith('-'));
-      if (kind === 'run') {
-        const target = args[0];
-        if (!target) {
-          add('formal-command-invalid', location, command);
-          continue;
-        }
-        if (/\.[cm]?[jt]sx?$/.test(target)) paths(relative(root, resolve(root, selected, target)));
-        else {
-          const key = `${selected}:${target}`;
-          if (visited.has(key)) continue;
-          visited.add(key);
-          try {
-            const scripts = packageAt(selected).scripts as Record<string, unknown> | undefined;
-            const value = scripts?.[target];
-            if (typeof value !== 'string') add('formal-command-unresolved', location, key);
-            else inspect(value, `${selected || '.'}/package.json#${target}`, selected);
-          } catch (error) {
-            add('formal-command-unresolved', location, String(error));
-          }
-        }
-      } else
-        for (const arg of args)
-          if (
-            arg.includes('/') ||
-            /\.[cm]?[jt]sx?$/.test(arg) ||
-            existsSync(resolve(root, selected, arg))
-          )
-            paths(
-              relative(root, resolve(root, selected, arg)),
-              kind === 'test' && /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(arg),
-            );
+      const target = tokens.shift();
+      if (!target) {
+        add('formal-command-invalid', location, command);
+        continue;
+      }
+      const key = `${selected}:${target}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      try {
+        const scripts = packageAt(selected).scripts as Record<string, unknown> | undefined;
+        const value = scripts?.[target];
+        if (typeof value !== 'string') add('formal-command-unresolved', location, key);
+        else inspect(value, `${selected || '.'}/package.json#${target}`, selected);
+      } catch (error) {
+        add('formal-command-unresolved', location, String(error));
+      }
     }
   };
   try {
@@ -268,7 +301,7 @@ export function checkUnifiedFormalConsumers(root: string): {
           );
           if (name === 'runtime-transport-qualification.yml') {
             const required =
-              'bun test --parallel=1 --max-concurrency=1 apps/cli/test/file-recovery-pty.test.ts apps/cli/test/isolated/tui-drafts-host.test.ts apps/cli/test/isolated/file-recovery-argv.test.ts apps/cli/test/isolated/tui-file-recovery.test.ts apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts apps/cli/test/isolated/tui-file-recovery-scopes.test.ts apps/cli/test/isolated/tui-file-recovery-crash.test.ts apps/cli/test/isolated/tui-recovery-host.test.ts apps/cli/test/isolated/tui-preferences-host.test.ts apps/cli/test/isolated/tui-mcp-connection-pty.test.ts apps/cli/test/isolated/tui-composer-host.test.ts apps/cli/test/isolated/tui-planning-host.test.ts tests/isolated/unified-agent/extension-upgrade.test.ts';
+              'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/file-recovery-pty.test.ts apps/cli/test/isolated/tui-drafts-host.test.ts apps/cli/test/isolated/file-recovery-argv.test.ts apps/cli/test/isolated/tui-file-recovery.test.ts apps/cli/test/isolated/tui-file-recovery-lost-replies.test.ts apps/cli/test/isolated/tui-file-recovery-scopes.test.ts apps/cli/test/isolated/tui-file-recovery-crash.test.ts apps/cli/test/isolated/tui-recovery-host.test.ts apps/cli/test/isolated/tui-preferences-host.test.ts apps/cli/test/isolated/tui-mcp-connection-pty.test.ts apps/cli/test/isolated/tui-composer-host.test.ts apps/cli/test/isolated/tui-planning-host.test.ts tests/isolated/unified-agent/extension-upgrade.test.ts';
             const unfiltered = (step: Record<string, unknown>) =>
               step.if === undefined &&
               step['working-directory'] === undefined &&
@@ -285,7 +318,8 @@ export function checkUnifiedFormalConsumers(root: string): {
             const callerIndex = (file: string) =>
               steps.findIndex(
                 (step) =>
-                  step.run === `bun test --parallel=1 --max-concurrency=1 ${file}` &&
+                  step.run ===
+                    `node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 ${file}` &&
                   unfiltered(step),
               );
             const candidateFiles = [
@@ -329,7 +363,8 @@ export function checkUnifiedFormalConsumers(root: string): {
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
-                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts',
+                step.run ===
+                  'node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts',
             );
             if (
               build <= prepare ||
@@ -365,13 +400,15 @@ export function checkUnifiedFormalConsumers(root: string): {
               (step) =>
                 step.if === (name === 'required.yml' ? undefined : "runner.os == 'Linux'") &&
                 step.run ===
-                  `sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap${display ? ' xvfb' : ''}` &&
+                  `sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential pkg-config libffi-dev bubblewrap${display ? ' xvfb' : ''}` &&
                 (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
             );
             const consumer = steps.findIndex(
               (step) =>
                 typeof step.run === 'string' &&
-                /\bbun (?:test|run (?:test(?::|\b)|release:build))/.test(step.run),
+                /\b(?:node --import \.\/scripts\/tooling\/register\.mjs \.?\/?scripts\/run-test-files\.ts|bun run (?:test(?::|\b)|release:build\b))/.test(
+                  step.run,
+                ),
             );
             if (prepare < 0 || consumer <= prepare)
               add('formal-ci-linux-native-dependencies-missing', location, jobName);
@@ -389,14 +426,15 @@ export function checkUnifiedFormalConsumers(root: string): {
               qualify < 0 ||
               job['runs-on'] !== `\${{ matrix.os }}` ||
               scripts?.['test:runtime:stdio'] !==
-                `bun test --parallel=1 --max-concurrency=1 ${stdioSuites.slice(0, -1).join(' ')} && bun test --parallel=1 --max-concurrency=1 ${stdioSuites.at(-1)}` ||
+                `node --import ./scripts/tooling/register.mjs ./scripts/run-test-files.ts --parallel=1 --max-concurrency=1 ${stdioSuites.slice(0, -1).join(' ')} && node --import ./scripts/tooling/register.mjs ./scripts/run-test-files.ts --parallel=1 --max-concurrency=1 ${stdioSuites.at(-1)}` ||
               !stdioSuites.every((path) => existsSync(resolve(root, path)))
             )
               add('formal-ci-mcp-stdio-missing', location, jobName);
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
-                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts',
+                step.run ===
+                  'node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts',
             );
             if (
               prepare < 0 ||
@@ -408,7 +446,7 @@ export function checkUnifiedFormalConsumers(root: string): {
               (step) =>
                 step.if === undefined &&
                 step.run ===
-                  'bun test --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts',
+                  'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/scripts/ci-logged-shell.test.ts',
             );
             if (
               shellTest < 0 ||
@@ -422,14 +460,14 @@ export function checkUnifiedFormalConsumers(root: string): {
             for (const step of steps) {
               if (
                 typeof step.run !== 'string' ||
-                !/\bbun (?:test|run (?:test:runtime:stdio\b|release:|scripts\/release\/unified-platform-|tests\/fixtures\/unified-agent\/windows-(?:terminal-installation|native-installation|installed-tui|cross-version)\.qualification\.ts\b))/.test(
+                !/\b(?:bun run (?:test:runtime:stdio\b|release:)|node --import \.\/scripts\/tooling\/register\.mjs \.?\/?(?:scripts\/(?:run-test-files\.ts\b|ci\/prepare-release-predecessors\.ts\b|release\/unified-platform-)|tests\/fixtures\/unified-agent\/(?:native-terminal-split|windows-(?:terminal-installation|native-installation|installed-tui|cross-version))\.qualification\.ts\b))/.test(
                   step.run,
                 )
               )
                 continue;
               const match =
                 typeof step.shell === 'string'
-                  ? /^bun run scripts\/ci\/logged-shell\.ts --log=(dist\/unified-evidence\/[a-z0-9-]+\.log) "\{0\}"$/.exec(
+                  ? /^node --import \.\/scripts\/tooling\/register\.mjs scripts\/ci\/logged-shell\.ts --log=(dist\/unified-evidence\/[a-z0-9-]+\.log) "\{0\}"$/.exec(
                       step.shell,
                     )
                   : null;
@@ -481,7 +519,7 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.if === "runner.os == 'macOS' || runner.os == 'Linux'" &&
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') ===
-                  'bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts',
+                  'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts',
             )
           )
             add('formal-ci-terminal-lifecycle-missing', location, jobName);
@@ -492,7 +530,7 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.if === "runner.os == 'Linux'" &&
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') ===
-                  'xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts',
+                  'xvfb-run -a node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts',
             )
           )
             add('formal-ci-linux-native-lifecycle-missing', location, jobName);
@@ -500,7 +538,8 @@ export function checkUnifiedFormalConsumers(root: string): {
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
-                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts' &&
+                step.run ===
+                  'node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts' &&
                 (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
             );
             const build = steps.findIndex(
@@ -516,7 +555,7 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.if === "runner.os == 'Windows'" &&
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') ===
-                  `bun run tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-terminal"` &&
+                  `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-terminal"` &&
                 (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
             );
             if (qualify < 0 || build < 0 || qualify <= build)
@@ -546,7 +585,7 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.if === "runner.os == 'Windows'" &&
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') ===
-                  `bun run tests/fixtures/unified-agent/windows-native-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-native"` &&
+                  `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-native-installation.qualification.ts "--candidate=\${{ github.workspace }}/dist/unified-native"` &&
                 (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
             );
             const windowsRunner =
@@ -592,10 +631,35 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.if === "runner.os == 'Windows'" &&
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') ===
-                  `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"` &&
+                  `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-installed-tui.qualification.ts "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"` &&
                 (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
             );
             const tuiPrerequisites = [...terminalPrerequisites, ...nativePrerequisites];
+            const splitQualificationPath =
+              'tests/fixtures/unified-agent/native-terminal-split.qualification.ts';
+            const splitStep = (command: string) =>
+              steps.findIndex(
+                (step) =>
+                  step.if === "runner.os == 'macOS' || runner.os == 'Windows'" &&
+                  (step['continue-on-error'] === undefined ||
+                    step['continue-on-error'] === false) &&
+                  step['working-directory'] === undefined &&
+                  typeof step.run === 'string' &&
+                  step.run.trim().replace(/\s+/g, ' ') === command,
+              );
+            const splitBuild = splitStep(
+              'bun run release:build --product native --directory dist/unified-desktop',
+            );
+            const splitQualification = splitStep(
+              `node --import ./scripts/tooling/register.mjs ${splitQualificationPath} "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native" "--desktop=\${{ github.workspace }}/dist/unified-desktop"`,
+            );
+            if (
+              splitBuild < 0 ||
+              splitQualification <= splitBuild ||
+              tuiPrerequisites.some((index) => index < 0 || index >= splitQualification) ||
+              !existsSync(resolve(root, splitQualificationPath))
+            )
+              add('formal-ci-native-terminal-split-missing', location, jobName);
             if (
               !windowsRunner ||
               tuiQualification < 0 ||
@@ -624,9 +688,23 @@ export function checkUnifiedFormalConsumers(root: string): {
                 step.if === "runner.os == 'Windows'" &&
                 typeof step.run === 'string' &&
                 step.run.trim().replace(/\s+/g, ' ') ===
-                  `bun run tests/fixtures/unified-agent/windows-cross-version.qualification.ts "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"` &&
+                  `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-cross-version.qualification.ts "--terminal=\${{ github.workspace }}/dist/unified-terminal" "--native=\${{ github.workspace }}/dist/unified-native"` &&
                 (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
             );
+            const historicalProducer = 'scripts/ci/prepare-release-predecessors.ts';
+            const prepareHistory = steps.findIndex(
+              (step) =>
+                step.run === `node --import ./scripts/tooling/register.mjs ${historicalProducer}` &&
+                step.if === undefined &&
+                step['working-directory'] === undefined &&
+                (step['continue-on-error'] === undefined || step['continue-on-error'] === false),
+            );
+            if (
+              prepareHistory <= prepare ||
+              prepareHistory >= crossVersionQualification ||
+              !existsSync(resolve(root, historicalProducer))
+            )
+              add('formal-ci-historical-predecessors-missing', location, jobName);
             const crossVersionPrerequisites = [
               prepare,
               ...terminalPrerequisites,
@@ -657,24 +735,29 @@ export function checkUnifiedFormalConsumers(root: string): {
             for (const [platform, command, code] of [
               [
                 "runner.os == 'macOS' || runner.os == 'Linux'",
-                'bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-cross-version.test.ts',
+                'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-cross-version.test.ts',
                 'formal-ci-terminal-real-code-missing',
               ],
               [
                 "runner.os == 'macOS'",
-                'bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts',
+                'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts',
                 'formal-ci-macos-native-real-code-missing',
               ],
               [
                 "runner.os == 'Linux'",
-                'xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts',
+                'xvfb-run -a node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts',
                 'formal-ci-linux-native-real-code-missing',
               ],
             ] as const)
               if (
                 !steps.some(
-                  (step) =>
+                  (step, index) =>
+                    index > prepareHistory &&
                     step.if === platform &&
+                    (step['continue-on-error'] === undefined ||
+                      step['continue-on-error'] === false) &&
+                    (step.env as Record<string, unknown> | undefined)
+                      ?.KITE_REQUIRE_HISTORICAL_PREDECESSOR === '1' &&
                     typeof step.run === 'string' &&
                     step.run.trim().replace(/\s+/g, ' ') === command,
                 )
@@ -691,14 +774,15 @@ export function checkUnifiedFormalConsumers(root: string): {
             const prepare = steps.findIndex(
               (step) =>
                 step.if === "runner.os == 'Windows'" &&
-                step.run === 'bun run scripts/release/prepare-windows-native-ci.ts',
+                step.run ===
+                  'node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts',
             );
             const requiredConsumer =
               name === 'release-candidate.yml'
                 ? 'bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz'
                 : name === 'platform-capability-probe.yml'
                   ? 'bun run release:build --directory dist/unified-terminal'
-                  : 'bun test --parallel=1 --max-concurrency=1 packages/agent/test/isolated/windows-path-security/default.test.ts packages/agent/test/isolated/config/mcp-selection-windows.test.ts apps/desktop/test/isolated/windows-node-access.test.ts';
+                  : 'node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 packages/agent/test/isolated/windows-path-security/default.test.ts packages/agent/test/isolated/config/mcp-selection-windows.test.ts apps/desktop/test/isolated/windows-node-access.test.ts';
             const consumer = steps.findIndex(
               (step) =>
                 typeof step.run === 'string' &&
@@ -850,7 +934,7 @@ export function checkUnifiedWorkspaces(repositoryRoot: string): UnifiedWorkspace
     for (const [name, expected] of Object.entries(formalScripts)) {
       if (scripts?.[name] !== expected)
         add('formal-script-invalid', 'package.json', `${name} must be ${expected}`);
-      const entry = expected.match(/bun run (\S+\.ts)(?: |$)/)?.[1];
+      const entry = expected.match(/node --import \S+ (\S+\.ts)(?: |$)/)?.[1];
       if (entry && !existsSync(resolve(root, entry))) add('formal-entry-missing', entry, name);
     }
     if (!existsSync(resolve(root, 'scripts/release/source-terminal.ts')))

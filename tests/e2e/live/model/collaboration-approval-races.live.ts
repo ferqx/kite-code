@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -298,7 +299,7 @@ export async function runLiveApprovalRaces(options: Options): Promise<{ cases: R
             (c) => c.kind === 'approval' && c.definitionId === 'files.write_path',
           );
         }
-        if (!card) await Bun.sleep(30);
+        if (!card) await fixtureDelay(30);
       }
       if (!card || !carrier?.childSessionId) {
         reason = 'branch_not_reached';
@@ -329,7 +330,7 @@ export async function runLiveApprovalRaces(options: Options): Promise<{ cases: R
           await approve();
           while (Date.now() < end && !(heldAfterEffect && existsSync(target))) {
             options.signal.throwIfAborted();
-            await Bun.sleep(30);
+            await fixtureDelay(30);
           }
           const done = await store.getExecution(card.executionId!);
           checks.actualEffectBeforeStop =
@@ -347,7 +348,7 @@ export async function runLiveApprovalRaces(options: Options): Promise<{ cases: R
         if (controlKind === 'parent') {
           while (!parentHeld && Date.now() < end) {
             options.signal.throwIfAborted();
-            await Bun.sleep(30);
+            await fixtureDelay(30);
           }
         }
         const parent = (await store.getView('s')).runs.find((run) => run.isActive);
@@ -425,7 +426,7 @@ export async function runLiveApprovalRaces(options: Options): Promise<{ cases: R
             !!c &&
             ['cancelled', 'failed', 'succeeded', 'outcome_unknown'].includes(c.status);
           if (settled) break;
-          await Bun.sleep(30);
+          await fixtureDelay(30);
         }
         checks.settled = settled;
         const writes = (await store.listExecutions(leaf)).filter(
@@ -568,7 +569,7 @@ if (import.meta.main) {
     date: new Date().toISOString(),
     platform: process.platform,
     arch: process.arch,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     group: 'approval-races',
     caseId: id,
     entryLayer: 'service-client-runtime-sqlite',

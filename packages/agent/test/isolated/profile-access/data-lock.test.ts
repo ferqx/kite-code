@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -11,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { acquireProfileAccess as internalAcquire } from '../../../src/platform/profile';
 import {

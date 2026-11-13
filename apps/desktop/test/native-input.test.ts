@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { NativeSelection } from '../src/native-bridge';
 import { nativeTextIntent } from '../src/native-input';
 import { promptTextForSend } from '../src/prompt-text';

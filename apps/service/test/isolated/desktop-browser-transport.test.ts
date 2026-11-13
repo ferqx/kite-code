@@ -1,5 +1,7 @@
-import { expect, mock, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { NativeBrowserTransport, NativeBrowserTransportOptions } from '@kite-ai/agent/browser';
+import { expect, mock, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { listenBrowserPageHost } from '../../../desktop/electron/browser-page-channel';
 import { NativeBrowserPageHost } from '../../../desktop/electron/browser-page-host';
 
@@ -121,13 +123,13 @@ for (const mode of [
         socket!.addEventListener('error', reject, { once: true });
       });
       const deadline = Date.now() + 2000;
-      while (!polls && Date.now() < deadline) await Bun.sleep(5);
+      while (!polls && Date.now() < deadline) await sleepTimer(5);
       expect(polls).toBeGreaterThan(0);
       remove();
       alive = mode === 'alive';
       const end = await Promise.race([
         transport.completion,
-        Bun.sleep(2000).then(() => {
+        sleepTimer(2000).then(() => {
           throw Error('original_page_cleanup_did_not_finish');
         }),
       ]);
@@ -207,7 +209,7 @@ for (const mode of [
         }
       },
     };
-    const server = Bun.serve({
+    const server = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -326,7 +328,7 @@ test('only a paired failure proof bound to this exact request establishes no dis
   const request = { op: 'cdp', leaseId: 'lease', method: 'Page.navigate' },
     proof = { kind: 'not_dispatched', ...request };
   let failure: unknown = proof;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch: () =>
@@ -368,7 +370,7 @@ test('only a paired failure proof bound to this exact request establishes no dis
 
 test('a proven acquire refusal confirms no new lease independently of its diagnostic code', async () => {
   const requests: unknown[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -587,7 +589,7 @@ test('actual Host AX envelopes above 512 KiB reach Service and a proven 2 MiB re
 for (const priorEffect of [false, true])
   test(`paired refusal survives daemon error flattening with prior effect=${priorEffect}`, async () => {
     const cdp: string[] = [];
-    const server = Bun.serve({
+    const server = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -806,7 +808,7 @@ for (const mode of ['event-before-ack', 'event-after-ack', 'post-navigation-read
         if (mode !== 'event-before-ack') publishLifecycle();
         await Promise.race([
           lifecycleReceived.promise,
-          Bun.sleep(2000).then(() => {
+          sleepTimer(2000).then(() => {
             throw Error('fixture_dom_content_not_forwarded');
           }),
         ]);
@@ -1008,7 +1010,7 @@ for (const variant of [
         : (mode.error ?? 'browser_page_method_denied');
     const cdp: string[] = [];
     let confirms = 0;
-    const server = Bun.serve({
+    const server = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -1147,7 +1149,7 @@ for (const operation of ['cdp', 'navigate'] as const)
       release = deferred<void>();
     let calls = 0;
     const supplied = { authorization: null as string | null };
-    const server = Bun.serve({
+    const server = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -1173,7 +1175,7 @@ for (const operation of ['cdp', 'navigate'] as const)
     );
     try {
       await entered.promise;
-      await Bun.sleep(10200);
+      await sleepTimer(10200);
       expect(settled).toBe(false);
       expect(owner.signal.aborted).toBe(false);
       expect(calls).toBe(1);
@@ -1195,7 +1197,7 @@ test('non-CDP private requests retain their ten-second bound without aborting th
   const entered = deferred<void>(),
     release = deferred<void>();
   let calls = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch() {
@@ -1233,7 +1235,7 @@ test('non-CDP private requests retain their ten-second bound without aborting th
 
 test('CDP needs an owner signal and cancelled owners never dispatch a request', async () => {
   let calls = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -1259,7 +1261,7 @@ test('CDP needs an owner signal and cancelled owners never dispatch a request', 
 
 test('authentication failures and the original per-response byte limits remain terminal without retry', async () => {
   let calls = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -1315,7 +1317,7 @@ test('an oversized untrusted AX stream is cancelled without retry or aborting th
   let calls = 0,
     cancellations = 0;
   const cancelled = deferred<void>();
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -1344,7 +1346,7 @@ test('an oversized untrusted AX stream is cancelled without retry or aborting th
     ).rejects.toThrow('desktop_browser_response_limit');
     await Promise.race([
       cancelled.promise,
-      Bun.sleep(2000).then(() => {
+      sleepTimer(2000).then(() => {
         throw Error('oversized_stream_cancellation_not_observed');
       }),
     ]);
@@ -1429,7 +1431,7 @@ test('original transport cancellation aborts its pending CDP and queued commands
     await expect(transport.dispose()).rejects.toThrow('desktop_browser_cleanup_unknown');
     reply.resolve({ result: { type: 'undefined' } });
     await finished.promise;
-    await Bun.sleep(20);
+    await sleepTimer(20);
     expect(methods).toEqual(['Runtime.evaluate']);
     expect(await transport.close()).toEqual({ confirmed: false });
   } finally {
@@ -1567,7 +1569,7 @@ for (const changedOwner of [false, true])
     }
   }, 10000);
 
-function ownedDriverFixture(options: { requestTimeoutMs?: number } = {}) {
+async function ownedDriverFixture(options: { requestTimeoutMs?: number } = {}) {
   const acquired = {
     leaseId: 'owned-lease',
     pageId: 'owned-page',
@@ -1579,7 +1581,7 @@ function ownedDriverFixture(options: { requestTimeoutMs?: number } = {}) {
   const state = { ...acquired, url: 'about:blank', title: 'New page' };
   let reply: ((operation: string) => unknown | Promise<unknown>) | undefined;
   let cdpReply: ((request: Record<string, unknown>) => Response) | undefined;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -1629,7 +1631,7 @@ function ownedDriverFixture(options: { requestTimeoutMs?: number } = {}) {
 }
 
 test('Native navigation and metadata use exact Main receipts without daemon helper commands', async () => {
-  const fixture = ownedDriverFixture();
+  const fixture = await ownedDriverFixture();
   const daemonCommands: string[] = [];
   innerRequest = async (command) => {
     daemonCommands.push(command.action);
@@ -1691,7 +1693,7 @@ for (const mode of [
   'missing',
 ] as const)
   test(`Main owned ${mode} receipt failure never supplies state or falls back to the daemon`, async () => {
-    const fixture = ownedDriverFixture();
+    const fixture = await ownedDriverFixture();
     let daemonReads = 0;
     innerRequest = async () => {
       daemonReads++;
@@ -1727,7 +1729,7 @@ for (const mode of [
   });
 
 test('a previous Main state cannot move navigation backwards or acquire a new identity', async () => {
-  const fixture = ownedDriverFixture();
+  const fixture = await ownedDriverFixture();
   try {
     await fixture.transport.ready;
     await fixture.transport.request({ action: 'launch' }, fixture.owner.signal);
@@ -1744,7 +1746,7 @@ test('a previous Main state cannot move navigation backwards or acquire a new id
 });
 
 test('owned navigation retains its one original call across cancellation and rejects overlapping work', async () => {
-  const fixture = ownedDriverFixture();
+  const fixture = await ownedDriverFixture();
   const entered = deferred<void>(),
     release = deferred<void>();
   fixture.setReply(async (operation) => {
@@ -1787,7 +1789,7 @@ for (const scenario of [
   { name: 'prior WS effect', direct: 'not_dispatched', priorEffect: true, unknown: true },
 ] as const)
   test(`a known WS refusal cannot downgrade owned navigation with ${scenario.name}`, async () => {
-    const fixture = ownedDriverFixture(),
+    const fixture = await ownedDriverFixture(),
       entered = deferred<void>(),
       finish = deferred<void>();
     let socket: WebSocket | undefined;
@@ -1882,7 +1884,7 @@ for (const scenario of [
   });
 
 test('unknown owned navigation arguments refuse before any Main or daemon dispatch', async () => {
-  const fixture = ownedDriverFixture();
+  const fixture = await ownedDriverFixture();
   try {
     await fixture.transport.ready;
     await fixture.transport.request({ action: 'launch' }, fixture.owner.signal);
@@ -1909,7 +1911,7 @@ test('unknown owned navigation arguments refuse before any Main or daemon dispat
 });
 
 test('close aborts its owned HTTP before draining and a late response cannot restore success', async () => {
-  const fixture = ownedDriverFixture();
+  const fixture = await ownedDriverFixture();
   const entered = deferred<void>(),
     release = deferred<void>();
   fixture.setReply(async (operation) => {

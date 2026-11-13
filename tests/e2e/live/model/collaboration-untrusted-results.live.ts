@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -17,6 +16,7 @@ import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';

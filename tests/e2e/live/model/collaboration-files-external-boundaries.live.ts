@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -24,6 +25,10 @@ import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import {
+  type Subprocess as FixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 
 const ids = [
   'F03-external-process-same-inode-mtime-old-baseline-conflict',
@@ -128,7 +133,7 @@ export async function runLiveExternalFilesBoundaries(
       client: ReturnType<typeof createClient> | undefined,
       files: ReturnType<typeof createWorkspaceFiles> | undefined,
       locks: ReturnType<typeof createWorkspaceSerialLocks> | undefined;
-    let writer: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    let writer: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
       writerExited = false,
       storeClosed = false,
       auxiliariesClosed = false,
@@ -170,7 +175,7 @@ export async function runLiveExternalFilesBoundaries(
         const value = await read();
         if (value !== undefined) return value;
         if (Date.now() > end) throw new Boundary('branch_not_reached', point);
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
     }
     const closeAuxiliaries = async () => {
@@ -424,7 +429,7 @@ export async function runLiveExternalFilesBoundaries(
           `import{openSync,writeSync,ftruncateSync,fsyncSync,closeSync,utimesSync,statSync}from'node:fs';import{createHash}from'node:crypto';const p=process.argv[2],bytes=Buffer.from(process.argv[3]);const before=statSync(p,{bigint:true});const fd=openSync(p,'r+');try{let n=0;while(n<bytes.length)n+=writeSync(fd,bytes,n,bytes.length-n,n);ftruncateSync(fd,bytes.length);fsyncSync(fd);}finally{closeSync(fd);}const seconds=Number(BigInt(process.argv[4])/1000000000n);utimesSync(p,seconds,seconds);const after=statSync(p,{bigint:true});console.log(JSON.stringify({pid:process.pid,beforeDev:String(before.dev),beforeIno:String(before.ino),afterDev:String(after.dev),afterIno:String(after.ino),beforeMtimeNs:String(before.mtimeNs),afterMtimeNs:String(after.mtimeNs),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')}));`,
           { mode: 0o600 },
         );
-        writer = Bun.spawn(
+        writer = spawnFixtureProcess(
           [process.execPath, script, target, external, String(initialStat.mtimeNs)],
           { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', signal: options.signal },
         );

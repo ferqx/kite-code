@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
@@ -13,6 +13,7 @@ import type { Json } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import type { AgentClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeExtensions } from '../../electron/extensions';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import {
@@ -26,7 +27,7 @@ const until = async (check: () => boolean | Promise<boolean>) => {
   const end = Date.now() + 4000;
   while (!(await check())) {
     if (Date.now() > end) throw Error('browser_session_runtime_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 };
 

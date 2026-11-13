@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
 
 test('Darwin startup closes every accepted socket when authentication crosses the original ready deadline', () => {
   const result = spawnSync(

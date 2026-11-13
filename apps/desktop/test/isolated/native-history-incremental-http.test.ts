@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { NativeCaller } from '../../electron/native-caller';
 import type { NativeBridge } from '../../src/native-bridge';
@@ -22,7 +23,7 @@ async function until(predicate: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 8000;
   while (!(await predicate())) {
     if (Date.now() > deadline) throw Error('native_incremental_http_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 
@@ -39,7 +40,7 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
       modelCalls++;
       yield { type: 'text_delta', text: 'first saved chunk' };
       await second.waiting;
-      await Bun.sleep(100);
+      await fixtureDelay(100);
       signal.throwIfAborted();
       yield { type: 'text_delta', text: ' then second saved chunk' };
       await finish.waiting;

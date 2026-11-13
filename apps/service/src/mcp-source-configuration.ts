@@ -211,7 +211,7 @@ export interface McpSourceConfigurationOptions {
   /** Trusted packaged manifest assets supplied by the host; never source fallback. */
   stdio?: Pick<
     McpStdioPortOptions,
-    'guardianPath' | 'bunExecutable' | 'limits' | 'controlBase' | 'linux'
+    'guardianPath' | 'runtimeExecutable' | 'limits' | 'controlBase' | 'linux'
   >;
   oauth?: Partial<
     Pick<McpOAuthSessionOptions, 'openBrowser' | 'network' | 'callbackTimeoutMs' | 'now'>

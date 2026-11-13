@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { defineExtension, type Json } from '../../../src/extensions';
@@ -154,7 +155,7 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
             .reasons.some((reason) => ['background', 'execution', 'cleanup'].includes(reason))
         ) {
           if (Date.now() > end) throw new Error('owned background settlement not observed');
-          await Bun.sleep(10);
+          await sleepTimer(10);
         }
       }
       return commands;
@@ -180,7 +181,7 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
       const end = Date.now() + 5000;
       while (!(await read())) {
         if (Date.now() > end) throw new Error('owner window not settled');
-        await Bun.sleep(10);
+        await sleepTimer(10);
       }
     };
     try {
@@ -374,7 +375,7 @@ test('actual SQLite root owner keeps peer Action intake after an empty control p
         console.error(JSON.stringify({ phase: 'hot_owner_intake_deadline', lastObserved: value }));
         throw new Error('hot_owner_intake_deadline', { cause: value });
       }
-      await Bun.sleep(10);
+      await sleepTimer(10);
     }
   };
   const expectedStoreId = (await storeA.getMetadata()).storeId;

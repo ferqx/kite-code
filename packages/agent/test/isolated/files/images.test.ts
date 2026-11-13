@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createCanvas, GifEncoder, loadImage } from '@napi-rs/canvas';
+import { expect, test } from '#kite-test';
 import {
   directoryLink,
   removeTemporaryDirectory,
@@ -313,7 +313,7 @@ test('queued cancellation never reads bytes; active timeout, crash, output overf
     ).rejects.toMatchObject({ code: 'image_processing_timeout' });
     for (const code of [
       'for await (const chunk of process.stdin) {} process.abort();',
-      'for await (const chunk of process.stdin) {} await Bun.write(Bun.stdout, new Uint8Array(9*1024*1024));',
+      'for await (const chunk of process.stdin) {} process.stdout.write(new Uint8Array(9*1024*1024));',
       ...(process.platform === 'win32'
         ? [
             'for await (const chunk of process.stdin) {} const held=[]; for(;;) {const a=Buffer.alloc(32*1024*1024,1); held.push(a);}',

@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { createWindowsDaemonPipe, requestWindowsDaemonPipe } from '../../src/daemon/windows-pipe';
 import { retainWindowsProcess } from '../../src/daemon/windows-process';
 
@@ -8,10 +9,11 @@ test('Windows pipe retains original overlapped operations, bounded frames and un
   const module = fileURLToPath(new URL('../../src/daemon/windows-pipe.ts', import.meta.url));
   const security = fileURLToPath(new URL('../../src/daemon/windows-security.ts', import.meta.url));
   const processes = fileURLToPath(new URL('../../src/daemon/windows-process.ts', import.meta.url));
-  const code = `
-import { mock } from 'bun:test';
+  const code = `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-assert.equal(typeof require('bun:ffi').dlopen, 'function');
+assert.equal(typeof require('@kite-ai/agent/runtime-ffi').dlopen, 'function');
 Object.defineProperty(process, 'platform', {value:'win32'});
 Object.defineProperty(process, 'arch', {value:'x64'});
 let next=1n, errno=0, failClose, pipeExistsError=2, serverPid=123, processClosed=0;
@@ -35,7 +37,7 @@ const symbols={
  ReadFile(_h,bytes,_length,count){if(bytes.length===1){peerClosed=true;errno=109;return false;}if(handles.get(_h)==='pipe'){bytes.set(Buffer.from('request\\n'));count[0]=8;return true;}bytes.set(Buffer.from('reply\\n'));count[0]=6;return true;},
  WaitNamedPipeW(){errno=pipeExistsError;return false;}
 };
-mock.module('bun:ffi',()=>({ptr:value=>value,dlopen:()=>({symbols})}));
+mock.module('@kite-ai/agent/runtime-ffi',()=>({ptr:value=>value,dlopen:()=>({symbols})}));
 mock.module(${JSON.stringify(security)},()=>({windowsDaemonSecurity:()=>({descriptor:()=>({attributes:new Uint8Array(24),close(){}}),verifyPipe(h){assert.ok(handles.has(h));}})}));
 mock.module(${JSON.stringify(processes)},()=>({retainWindowsProcess:(_pid,expected)=>({identity:expected,inspect:()=> 'alive',close(){processClosed++;}})}));
 const {createWindowsDaemonPipe,requestWindowsDaemonPipe,windowsPipeExists}=await import(${JSON.stringify(module)});
@@ -44,7 +46,7 @@ assert.equal(windowsPipeExists(name),false);pipeExistsError=121;assert.equal(win
 const owner=createWindowsDaemonPipe(name);await owner.listen(request=>{assert.equal(Buffer.from(request).toString(),'request\\n');return Buffer.from('reply\\n');});
 assert.equal(calls.filter(c=>c.kind==='pipe').length,64);
 assert.equal(calls.filter(c=>c.kind==='pipe' && (c.flags&0x80000)).length,1);
-await Bun.sleep(20);assert.ok(calls.some(c=>c.kind==='disconnect'));await owner.close();assert.equal(handles.size,0);assert.equal(operations.size,0);
+await sleepTimer(20);assert.ok(calls.some(c=>c.kind==='disconnect'));await owner.close();assert.equal(handles.size,0);assert.equal(operations.size,0);
 const request=Buffer.from('request\\n');assert.deepEqual(await requestWindowsDaemonPipe(name,{pid:123,processStartIdentity:'original'},request),new Uint8Array(Buffer.from('reply\\n')));
 assert.equal(processClosed,1);assert.equal(handles.size,0);
 serverPid=124;await assert.rejects(requestWindowsDaemonPipe(name,{pid:123,processStartIdentity:'original'},request),/identity_mismatch/);assert.equal(handles.size,0);
@@ -52,10 +54,14 @@ await assert.rejects(requestWindowsDaemonPipe(name,{pid:123,processStartIdentity
 const unknown=createWindowsDaemonPipe(name);failClose=calls.filter(c=>c.kind==='pipe').at(-1).h;
 await assert.rejects(unknown.close(),/close_unknown/);assert.ok(handles.has(failClose));assert.equal(handles.size,1);
 `;
-  const child = spawnSync(process.execPath, ['--eval', code], {
-    encoding: 'utf8',
-    timeout: 4000,
-  });
+  const child = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+    {
+      encoding: 'utf8',
+      timeout: 4000,
+    },
+  );
   if (child.status !== 0)
     throw Error(`Windows pipe mock failed: ${child.error?.message ?? ''}\n${child.stderr}`);
   expect(child.status).toBe(0);

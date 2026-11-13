@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   decodeMcpStdioProcessEvidence,
   type McpStdioLinuxEvidence,
@@ -130,7 +130,7 @@ test('Linux formal transport preserves SDK discovery and full results, checks fr
     const result = spawnSync(
       process.execPath,
       [
-        join(import.meta.dir, 'linux-stdio-port.fixture.ts'),
+        join(import.meta.dirname, 'linux-stdio-port.fixture.ts'),
         JSON.stringify({
           root,
           guardian,

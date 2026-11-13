@@ -2,6 +2,14 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { getDocument, VerbosityLevel, version } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { desktopAsset } from '../../platform/desktop-assets';
+import { workerEndpoint } from '../../platform/process/worker-endpoint';
+
+const endpoint = workerEndpoint<{
+  bytes: Uint8Array;
+  start: number;
+  count: number;
+  mode: 'text' | 'image';
+}>();
 
 // Only trusted local package assets and transferred source bytes are accepted.
 const assets =
@@ -15,13 +23,12 @@ globalThis.fetch = Object.assign(
   },
   { preconnect() {} },
 );
-declare const self: Worker;
-self.onmessage = async (
+endpoint.onmessage = async (
   event: MessageEvent<{ bytes: Uint8Array; start: number; count: number; mode: 'text' | 'image' }>,
 ) => {
   const { bytes, start, count, mode } = event.data;
   if (version !== '6.4.299') {
-    self.postMessage({ error: 'pdf_assets_invalid' });
+    endpoint.postMessage({ error: 'pdf_assets_invalid' });
     return;
   }
   // PDF.js catches some embedded-font errors even with stopAtErrors. Its fixed
@@ -123,14 +130,14 @@ self.onmessage = async (
       });
       page.cleanup();
     }
-    self.postMessage({
+    endpoint.postMessage({
       totalPages: pdf.numPages,
       pages,
       nextPage: start + pages.length <= pdf.numPages ? start + pages.length : null,
     });
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
-    self.postMessage({
+    endpoint.postMessage({
       error:
         name === 'PasswordException'
           ? 'pdf_password_required'

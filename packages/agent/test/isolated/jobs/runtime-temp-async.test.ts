@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -10,6 +9,9 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
@@ -65,9 +67,12 @@ test('async temp cleanup rejects a replaced original root and preserves both dir
 for (const scenario of ['bounded', 'failure'] as const)
   test(`async cleanup settles all I/O before returning: ${scenario}`, async () => {
     const root = temporaryDirectory('kite-async-temp-slots-'),
-      module = pathToFileURL(join(import.meta.dir, '../../../src/jobs/launch-identity.ts')).href;
-    const code = `
- import assert from 'node:assert/strict';import * as fs from 'node:fs';import * as io from 'node:fs/promises';import {mock}from'bun:test';
+      module = pathToFileURL(
+        join(import.meta.dirname, '../../../src/jobs/launch-identity.ts'),
+      ).href;
+    const code = `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
+ import assert from 'node:assert/strict';import * as fs from 'node:fs';import * as io from 'node:fs/promises';import {mock}from'#kite-test';
  const root=${JSON.stringify(root)},scenario=${JSON.stringify(scenario)},original={...io};let active=0,peak=0,started=0,release;
  const held=new Promise(r=>release=r);const seen=[];
  mock.module('node:fs/promises',()=>({...original,async rmdir(path,...args){active++;peak=Math.max(peak,active);started++;seen.push(path);
@@ -76,20 +81,23 @@ for (const scenario of ['bounded', 'failure'] as const)
  const facts=Array.from({length:7},(_,i)=>{const p=root+'/'+i;fs.mkdirSync(p);return launchIdentity(p);});
  if(scenario==='bounded'){
   let completed=0;const all=facts.map(fact=>removeRuntimeTempAsync(fact).then(()=>completed++));
-  const until=Date.now()+3000;while(started<4){assert.ok(Date.now()<until);await Bun.sleep(1);}
-  await Bun.sleep(10);assert.equal(started,4);assert.equal(completed,0);assert.equal(active,4);
+  const until=Date.now()+3000;while(started<4){assert.ok(Date.now()<until);await sleepTimer(1);}
+  await sleepTimer(10);assert.equal(started,4);assert.equal(completed,0);assert.equal(active,4);
   release();await Promise.all(all);assert.equal(completed,7);assert.equal(active,0);assert.equal(peak,4);
  }else{
   await assert.rejects(removeRuntimeTempAsync(facts[0]),/fixture_remove_failure/);assert.equal(active,0);assert.equal(fs.existsSync(facts[0].canonical),true);
  }
  console.log('async_temp_passed');`;
     try {
-      const child = Bun.spawn([process.execPath, '--eval', code], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        windowsHide: true,
-        timeout: 10000,
-      });
+      const child = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          windowsHide: true,
+          timeout: 10000,
+        },
+      );
       const [exit, stdout, stderr] = await Promise.all([
         child.exited,
         new Response(child.stdout).text(),
@@ -107,16 +115,17 @@ for (const scenario of ['cancel-during-cleanup', 'cleanup-unknown'] as const)
     async () => {
       const root = temporaryDirectory('kite-native-async-cleanup-');
       const jobModule = pathToFileURL(
-        join(import.meta.dir, '../../../src/jobs/windows-shell.ts'),
+        join(import.meta.dirname, '../../../src/jobs/windows-shell.ts'),
       ).href;
       const runtimeModule = pathToFileURL(
-        join(import.meta.dir, '../../fixtures/windows-shell-runtime.ts'),
+        join(import.meta.dirname, '../../fixtures/windows-shell-runtime.ts'),
       ).href;
       const processModule = pathToFileURL(
-        join(import.meta.dir, '../../../src/platform/process/windows-owned-child.ts'),
+        join(import.meta.dirname, '../../../src/platform/process/windows-owned-child.ts'),
       ).href;
-      const code = `
- import assert from 'node:assert/strict';import * as fs from'node:fs';import * as io from'node:fs/promises';import{dirname,join}from'node:path';import{mock}from'bun:test';
+      const code = `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
+ import assert from 'node:assert/strict';import * as fs from'node:fs';import * as io from'node:fs/promises';import{dirname,join}from'node:path';import{mock}from'#kite-test';
  const root=${JSON.stringify(root)},scenario=${JSON.stringify(scenario)},original={...io},control=join(root,'control'),cwd=join(root,'workspace'),stateRoot=join(root,'state');
  for(const path of[control,cwd,stateRoot])fs.mkdirSync(path);
  let armed=false,heldPath,release;const held=new Promise(r=>release=r);
@@ -128,11 +137,11 @@ for (const scenario of ['cancel-during-cleanup', 'cleanup-unknown'] as const)
  const abort=new AbortController();const handle=await job.start({command:'printf owned > "$TMPDIR/owned"; sleep 0.2; printf completed'},{executionId:crypto.randomUUID(),sessionId:'cleanup',signal:abort.signal});
  const observation=retainWindowsOwnedProcessObservation(handle.reference.supervisorPid);armed=true;
  const events=[];let terminal=false;const observing=(async()=>{for await(const event of job.observe(handle)){events.push(event);if(event.type==='terminal')terminal=true;}})();
- const until=async read=>{const deadline=Date.now()+10000;while(!read()){assert.ok(Date.now()<deadline,'cleanup deadline');await Bun.sleep(5);}};
+ const until=async read=>{const deadline=Date.now()+10000;while(!read()){assert.ok(Date.now()<deadline,'cleanup deadline');await sleepTimer(5);}};
  try{
  await until(()=>!!heldPath);assert.equal(observation.inspect(),'dead');assert.equal(fs.existsSync(heldPath),true);
  if(scenario==='cancel-during-cleanup'){
-  assert.equal(terminal,false);let settled=false;abort.abort();const stopping=job.cancel(handle).then(value=>{settled=true;return value;});await Bun.sleep(20);assert.equal(settled,false);assert.equal(terminal,false);
+  assert.equal(terminal,false);let settled=false;abort.abort();const stopping=job.cancel(handle).then(value=>{settled=true;return value;});await sleepTimer(20);assert.equal(settled,false);assert.equal(terminal,false);
   release();assert.equal((await stopping).status,'stopped');await observing;
   const result=events.find(event=>event.type==='terminal').result;assert.equal(result.details.cleanupConfirmed,true);assert.equal(result.details.ownedProcesses.closed,true);await job.dispose(handle);assert.equal(fs.existsSync(heldPath),false);
  }else{
@@ -142,12 +151,15 @@ for (const scenario of ['cancel-during-cleanup', 'cleanup-unknown'] as const)
  }finally{release();observation.close();}
  `;
       try {
-        const child = Bun.spawn([process.execPath, '--eval', code], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-          windowsHide: true,
-          timeout: 25000,
-        });
+        const child = spawnProcess(
+          [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+          {
+            stdout: 'pipe',
+            stderr: 'pipe',
+            windowsHide: true,
+            timeout: 25000,
+          },
+        );
         const [exit, stdout, stderr] = await Promise.all([
           child.exited,
           new Response(child.stdout).text(),

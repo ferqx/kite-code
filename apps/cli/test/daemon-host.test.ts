@@ -1,4 +1,3 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
@@ -21,6 +21,7 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import { privateDirectory } from '../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../host';
 import { runSelectedDaemon } from '../host/daemon';
@@ -100,7 +101,7 @@ function fixture(absent = false, defaultEndpoint = false) {
       if (inspectProcess(pid, start) === 'alive') {
         process.kill(pid, 'SIGTERM');
         const end = Date.now() + 3000;
-        while (inspectProcess(pid, start) === 'alive' && Date.now() < end) await Bun.sleep(10);
+        while (inspectProcess(pid, start) === 'alive' && Date.now() < end) await testSleep(10);
         if (inspectProcess(pid, start) === 'alive') process.kill(pid, 'SIGKILL');
       }
     }
@@ -139,7 +140,7 @@ async function until(check: () => boolean) {
   const end = Date.now() + 5000;
   while (!check()) {
     if (Date.now() > end) throw Error('cli_daemon_fixture_timeout');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 function client(bootstrap: DaemonBootstrap) {

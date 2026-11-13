@@ -1,9 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
+  cpSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -15,6 +14,9 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -23,7 +25,11 @@ import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/uni
 import { artifactPath } from '../../../src/artifacts-files';
 import { createProfileBackup, inspectProfileBackup } from '../../../src/maintenance';
 import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
+import { defaultSqliteEngineAssets } from '../../../src/sqlite-engine';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>> | undefined;
 beforeAll(async () => {
@@ -417,11 +423,11 @@ test('inspection requires full database, inventory and media validation rather t
 test('a real second process holds the same profile-use lock without blocking another profile', async () => {
   const f = await fixture();
   const module = new URL('../../../src/platform/profile.ts', import.meta.url).href;
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
       '-e',
-      `import { acquireProfileAccess } from ${JSON.stringify(module)}; const held = acquireProfileAccess(JSON.parse(process.env.KITE_BACKUP_TEST_PROFILE)); console.log('held'); for await (const _ of Bun.stdin.stream()) break; held.lock.release();`,
+      `import { acquireProfileAccess } from ${JSON.stringify(module)}; const held = acquireProfileAccess(JSON.parse(process.env.KITE_BACKUP_TEST_PROFILE)); console.log('held'); for await (const _ of process.stdin) break; held.lock.release();`,
     ],
     {
       env: { ...process.env, KITE_BACKUP_TEST_PROFILE: JSON.stringify(f.profile) },
@@ -467,14 +473,16 @@ test('built maintenance leaf creates and inspects a backup from a consumer outsi
   const f = await fixture();
   try {
     const packaged = join(f.directory, 'package');
-    const build = await Bun.build({
+    const leaf = join(packaged, 'maintenance');
+    const build = await buildBundle({
       entrypoints: [fileURLToPath(new URL('../../../src/maintenance/index.ts', import.meta.url))],
-      root: fileURLToPath(new URL('../../../src', import.meta.url)),
-      outdir: packaged,
-      target: 'bun',
-      packages: 'external',
+      outdir: leaf,
+      ...fixtureRuntimeBuild(packaged, leaf),
+      packages: 'bundle',
+      naming: 'index.js',
     });
     if (!build.success) throw new AggregateError(build.logs, 'maintenance build failed');
+    cpSync(defaultSqliteEngineAssets().root, join(leaf, 'storage/engine'), { recursive: true });
     mkdirSync(join(packaged, 'storage', 'migrations'), { recursive: true });
     for (const name of [
       '0001-baseline.sql',
@@ -500,12 +508,12 @@ test('built maintenance leaf creates and inspects a backup from a consumer outsi
     const consumer = join(f.directory, 'consumer');
     mkdirSync(join(consumer, 'node_modules', '@kite-ai'), { recursive: true });
     symlinkSync(packaged, join(consumer, 'node_modules', '@kite-ai', 'agent'));
-    const script = join(consumer, 'main.ts');
+    const script = join(consumer, 'main.mjs');
     writeFileSync(
       script,
       `import { createProfileBackup, inspectProfileBackup } from '@kite-ai/agent/maintenance'; const created = await createProfileBackup(${JSON.stringify({ profile: f.profile, destinationRoot: f.destinationRoot })}); const inspected = await inspectProfileBackup({directory:created.directory}); console.log(JSON.stringify({ storeId: inspected.manifest.source.storeId, cursor: inspected.manifest.source.snapshotCursor, blobs: inspected.manifest.media.blobCount }));`,
     );
-    const child = Bun.spawn([process.execPath, script], {
+    const child = spawnProcess([fixtureNodeExecutable(), ...nodeRuntimeFlags, script], {
       cwd: consumer,
       stdout: 'pipe',
       stderr: 'pipe',

@@ -1,4 +1,5 @@
-import { Database } from 'bun:sqlite';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { MockChatRequest, MockResponse } from './fixtures';
 import type { TestWorkspace } from './test-workspace';
 
@@ -106,7 +107,7 @@ export function publicAgentResponses(
             break;
           }
           if (Date.now() >= deadline) throw Error('public_agent_fixture_child_completion_deadline');
-          await Bun.sleep(5);
+          await testSleep(5);
         }
         return {
           expectedRequest: { toolResults: requiredResults(request) },

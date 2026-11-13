@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -17,6 +18,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { build as bundle } from '../tooling/build';
 
 type AcquireArtifactAccess = typeof import('@kite-ai/agent/artifact-access').acquireArtifactAccess;
 type VerifyTerminalRuntimeBundle =
@@ -54,14 +58,25 @@ function busy(root: string, acquireArtifactAccess: AcquireArtifactAccess) {
   }
   throw Error('shared_candidate_exclusive_not_busy');
 }
+async function collect(stream: Readable, limit: number) {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of stream as AsyncIterable<Buffer>) {
+    if (bytes < limit) chunks.push(chunk.subarray(0, limit - bytes));
+    bytes += chunk.length;
+  }
+  return { text: Buffer.concat(chunks).toString('utf8'), exceeded: bytes > limit };
+}
 export async function runUnifiedPlatformProbe(
   candidatePath: string,
 ): Promise<Record<string, unknown>> {
   const { acquireArtifactAccess } = await import('@kite-ai/agent/artifact-access');
-  const { verifyTerminalRuntimeBundle } = await import('@kite-ai/service/runtime-assets');
-  const sourceScriptSha256 = sha(readFileSync(import.meta.path));
+  const { terminalEmptyAssetDirectories, verifyTerminalRuntimeBundle } = await import(
+    '@kite-ai/service/runtime-assets'
+  );
+  const sourceScriptSha256 = sha(readFileSync(import.meta.filename));
   const helperPath = resolve(
-    import.meta.dir,
+    import.meta.dirname,
     '../../tests/fixtures/unified-agent/unified-platform-probe.ts',
   );
   const github = {
@@ -95,7 +110,8 @@ export async function runUnifiedPlatformProbe(
   let root: string | undefined,
     inputLease: ReturnType<AcquireArtifactAccess> | undefined,
     parentLease: ReturnType<AcquireArtifactAccess> | undefined;
-  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let child: ChildProcess | undefined;
+  let exited: Promise<number | null> | undefined;
   let cleanup = 'confirmed';
   let candidate: ReturnType<VerifyTerminalRuntimeBundle> | undefined;
   let result: Record<string, unknown>;
@@ -116,6 +132,8 @@ export async function runUnifiedPlatformProbe(
       barrier = join(root, 'barrier');
     for (const path of [workspace, relocated, app, barrier])
       mkdirSync(path, { recursive: true, mode: 0o700 });
+    for (const path of terminalEmptyAssetDirectories(candidate.manifest))
+      mkdirSync(join(relocated, path), { recursive: true, mode: 0o700 });
     for (const file of candidate.manifest.files) {
       const destination = join(relocated, file.path);
       mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
@@ -135,65 +153,70 @@ export async function runUnifiedPlatformProbe(
     if (moved.digest !== candidate.digest) throw Error('relocated_candidate_digest_mismatch');
     parentLease = acquireArtifactAccess({ root: relocated, mode: 'shared' });
     symlinkSync(join(relocated, 'node_modules'), join(app, 'node_modules'));
-    const compiled = await Bun.build({
+    const node = moved.manifest.nodeVersion !== undefined;
+    const helper = join(app, 'probe.mjs');
+    const compiled = await bundle({
       entrypoints: [helperPath],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: app,
-      naming: 'probe.js',
+      naming: 'probe.mjs',
     });
     if (!compiled.success)
       throw Error(`platform_helper_build_failed:${compiled.logs.join('\n').slice(0, 512)}`);
-    const helperSha256 = sha(readFileSync(join(app, 'probe.js')));
-    const runtimeSha256 = sha(readFileSync(join(relocated, moved.manifest.entries.runtime)));
-    const spawned = Bun.spawn(
-      [
-        join(relocated, moved.manifest.entries.runtime),
-        join(app, 'probe.js'),
-        workspace,
-        relocated,
-        barrier,
-      ],
+    const helperSha256 = sha(readFileSync(helper));
+    const executable = join(relocated, moved.manifest.entries.runtime);
+    const runtimeSha256 = sha(readFileSync(executable));
+    const spawned = spawn(
+      executable,
+      [...(node ? ['--no-global-search-paths'] : []), helper, workspace, relocated, barrier],
       {
         cwd: workspace,
         env: { HOME: join(workspace, 'home'), PATH: process.env.PATH ?? '' },
-        stdout: 'pipe',
-        stderr: 'pipe',
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
     child = spawned;
+    exited = new Promise((resolve, reject) => {
+      spawned.once('error', reject);
+      spawned.once('close', resolve);
+    });
     cleanup = 'unconfirmed';
-    const output = new Response(spawned.stdout).text(),
-      error = new Response(spawned.stderr).text();
-    timer = setTimeout(() => {
-      cleanup = 'unconfirmed';
-      child?.kill('SIGKILL');
-    }, 60000);
+    const observed = Promise.all([
+      exited,
+      collect(spawned.stdout, 256 * 1024),
+      collect(spawned.stderr, 16 * 1024),
+    ]);
+    void observed.catch(() => {});
+    timer = setTimeout(() => spawned.kill('SIGKILL'), 60000);
     const deadline = Date.now() + 20000;
     while (!existsSync(join(barrier, 'ready'))) {
-      if (child.exitCode !== null || Date.now() > deadline)
-        throw Error(`platform_probe_ready_failed:${await error}`);
-      await Bun.sleep(5);
+      if (spawned.exitCode !== null || spawned.signalCode !== null || !spawned.pid) {
+        const [, , stderr] = await observed;
+        throw Error(`platform_probe_ready_failed:${stderr.text.slice(0, 512)}`);
+      }
+      if (Date.now() > deadline) throw Error('platform_probe_ready_timeout');
+      await sleep(5);
     }
     busy(relocated, acquireArtifactAccess);
     parentLease.release();
     parentLease = undefined;
     busy(relocated, acquireArtifactAccess);
     writeFileSync(join(barrier, 'continue'), 'continue', { mode: 0o600, flag: 'wx' });
-    const code = await child.exited;
-    const stdout = await output,
-      stderr = await error;
-    if (stdout.length > 256 * 1024) throw Error('platform_probe_output_limit');
-    const evidence = JSON.parse(stdout) as Record<string, unknown>;
-    if (evidence.cleanup === 'confirmed') cleanup = 'confirmed';
+    const [code, stdout, stderr] = await observed;
+    if (stdout.exceeded || stderr.exceeded) throw Error('platform_probe_output_limit');
+    if (spawned.signalCode) throw Error(`platform_probe_child_signaled:${spawned.signalCode}`);
+    const evidence = JSON.parse(stdout.text) as Record<string, unknown>;
+    if (evidence.cleanup === 'confirmed' && evidence.pid === spawned.pid) cleanup = 'confirmed';
     if (
       code !== 0 ||
       evidence.status !== 'passed' ||
-      evidence.cleanup !== 'confirmed' ||
-      stderr.length
+      cleanup !== 'confirmed' ||
+      evidence.runtimeVersion !== (moved.manifest.nodeVersion ?? moved.manifest.bunVersion) ||
+      stderr.text.length
     )
       throw Error(
-        `platform_probe_child_failed:${code}:${String(evidence.reason ?? stderr).slice(0, 512)}`,
+        `platform_probe_child_failed:${code}:${String(evidence.reason ?? stderr.text).slice(0, 512)}`,
       );
     verifyTerminalRuntimeBundle(relocated);
     const exclusive = acquireArtifactAccess({ root: relocated, mode: 'exclusive' });
@@ -226,11 +249,11 @@ export async function runUnifiedPlatformProbe(
     };
   } finally {
     clearTimeout(timer);
-    if (child && child.exitCode === null) {
+    if (child && exited && cleanup === 'unconfirmed') {
       cleanup = 'unconfirmed';
       try {
-        child.kill('SIGKILL');
-        await child.exited;
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+        await exited;
       } catch {
         cleanup = 'unconfirmed';
       }

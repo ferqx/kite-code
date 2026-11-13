@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from '#kite-test';
 import { createClient } from '../src';
 import {
   backgroundItem as item,

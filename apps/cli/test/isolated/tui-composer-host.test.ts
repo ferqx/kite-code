@@ -1,17 +1,24 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { createStdioPermissionReader, promptPermissionMode } from '../../src/permissions';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { recoveryProfile } from '../fixtures/recovery-profile';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('80x24 actual composer edits graphemes and bracketed paste without premature POST or placeholder content', async () => {
   const f = await recoveryProfile();
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-  let relay: ReturnType<typeof Bun.serve> | undefined;
+  let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let relay: FixtureServer | undefined;
   let closing = false;
   const transcript = `${f.root}-composer.pty.log`;
   try {
@@ -46,7 +53,7 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
       config = JSON.parse(readFileSync(configPath, 'utf8')),
       originalURL = config.models[0].baseURL;
     let relayed = 0;
-    relay = Bun.serve({
+    relay = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -55,7 +62,7 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
         if (relayed === 1) {
           writeFileSync(join(f.root, 'composer-model-entered'), 'owned real SDK request');
           while (!existsSync(join(f.root, 'composer-model-release')) && !closing)
-            await Bun.sleep(5);
+            await testSleep(5);
         }
         if (closing) throw Error('owned fixture closed');
         const headers = new Headers(request.headers);
@@ -97,15 +104,15 @@ globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
     } });
   }
   return response;
-}, { preconnect: actual.preconnect });
+}, {});
 await runTUIHost({ testDiagnostics: true, dataRoot: ${JSON.stringify(f.profile.dataRoot)}, profile: 'owned', thread: 'composer', cwd: ${JSON.stringify(f.workspace)}, artifact: ${JSON.stringify(f.artifact)} });`,
     );
     const built = await compileFileRecoveryTUI(f.root, runner);
     if (!built.success) throw new AggregateError(built.logs, 'composer_tui_compile_failed');
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         fileURLToPath(new URL('../fixtures/tui-composer-pty.ts', import.meta.url)),
         JSON.stringify({
           root: f.root,

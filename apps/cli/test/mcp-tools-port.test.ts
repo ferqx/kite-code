@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentClient, McpToolsEntry, McpToolsSnapshot, QueryResponse } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createTuiMcpPort } from '../host/tui-mcp';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');

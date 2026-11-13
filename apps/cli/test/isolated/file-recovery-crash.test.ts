@@ -1,14 +1,18 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { fileRecoveryProfile } from '../fixtures/file-recovery-profile';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 async function wait(check: () => boolean) {
   const end = Date.now() + 20000;
   while (!check()) {
     if (Date.now() > end) throw Error('file_caller_window_deadline');
-    await Bun.sleep(10);
+    await testSleep(10);
   }
 }
 for (const window of ['before_post', 'between_legs'] as const)
@@ -24,22 +28,25 @@ for (const window of ['before_post', 'between_legs'] as const)
       );
       expect(
         (
-          await Bun.build({
+          await testBuild({
             entrypoints: [runner],
             outdir: f.root,
-            target: 'bun',
+            target: 'node',
             external: ['react-devtools-core'],
           })
         ).success,
       ).toBe(true);
       function spawn(args: string[], mode?: string, answer = '') {
-        const child = Bun.spawn([process.execPath, join(f.root, 'crash.js'), ...args], {
-          cwd: f.workspace,
-          env: { ...process.env, HOME: f.home, ...(mode ? { WINDOW: mode } : {}) },
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
+        const child = testSpawn(
+          [process.execPath, ...testRuntimeFlags, join(f.root, 'crash.js'), ...args],
+          {
+            cwd: f.workspace,
+            env: { ...process.env, HOME: f.home, ...(mode ? { WINDOW: mode } : {}) },
+            stdin: 'pipe',
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
         if (!answer) child.stdin.end();
         const output = new Response(child.stdout).text();
         const error = (async () => {
@@ -84,7 +91,7 @@ for (const window of ['before_post', 'between_legs'] as const)
         if (code === 2) break;
         await cold.output;
         if (Date.now() > end) throw Error(`cold_start_failed:${err}`);
-        await Bun.sleep(50);
+        await testSleep(50);
       }
       const outcome = JSON.parse((await cold.output).trim().split('\n').at(-1)!).intent;
       expect(outcome.code.phase).toBe(window === 'before_post' ? 'unknown' : 'succeeded');

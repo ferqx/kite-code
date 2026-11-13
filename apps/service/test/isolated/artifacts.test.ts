@@ -1,16 +1,19 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
 import { launchPairedService } from '../../src/paired';
+import { nodeServiceFixture } from '../fixtures/node-service-process';
 
 test('paired Core Tool publishes immutable scoped bytes, authenticated downloads do not change the live Run or cursor', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-http-artifacts-'));
   const profile = selectProfile({ dataRoot: root, profile: 'test' });
   const handle = await launchPairedService({
-    entrypoint: join(import.meta.dir, '../fixtures/artifact-child.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, '../fixtures/artifact-child.ts'),
     profile,
     instanceId: 'artifacts',
     buildId: 'artifacts-test',
@@ -48,7 +51,7 @@ test('paired Core Tool publishes immutable scoped bytes, authenticated downloads
       )
     ) {
       if (Date.now() > deadline) throw new Error('artifact_publish_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       view = await handle.client.getView('session');
     }
     const tool = view.executions.find((execution) => execution.kind === 'tool')!;
@@ -74,7 +77,7 @@ test('paired Core Tool publishes immutable scoped bytes, authenticated downloads
       }
       if (requests === 2) break;
       if (Date.now() > deadline) throw new Error('artifact_model_barrier_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const before = (await store.getMetadata()).lastChangeCursor;
     const applied = handle.client.lastAppliedCursor;

@@ -1,15 +1,17 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, afterEach, beforeAll, expect, spyOn, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { buildTraceBundle } from '@kite-ai/trace-extension-sdk/bundle';
 import type { TrajectoryEvent, TrajectoryReadRequest } from '@kite-ai/trajectory';
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { afterAll, afterEach, beforeAll, expect, spyOn, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { TraceConsumerStore } from '../../src/trace-extensions/consumer-store';
 import { TraceCredentialBroker } from '../../src/trace-extensions/credentials';
 import type { TraceEngineAssets } from '../../src/trace-extensions/engine';
@@ -27,7 +29,7 @@ let root: string, assets: TraceEngineAssets;
 const stores: TraceConsumerStore[] = [],
   hosts: TraceHost[] = [];
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'kite-trace-host-'));
+  root = temporaryDirectory('kite-trace-host-');
   assets = await buildTraceEngineAssets(join(root, 'assets'));
 });
 afterEach(async () => {
@@ -225,7 +227,7 @@ test('revocation during a guest history broker call blocks the late job and ACK'
   await f.host.revoke(f.id);
   release();
   await expect(delivery).rejects.toBeInstanceOf(Error);
-  await Bun.sleep(5);
+  await sleepTimer(5);
   expect(f.store.listPartitions(f.id)).toHaveLength(1);
   expect(f.store.listPartitions(f.id)[0]!.status).toBe('revoked');
   expect(f.store.listPartitions(f.id)[0]!.contiguousAcknowledgedPosition).toBe('5');
@@ -275,7 +277,7 @@ test('HTTP broker pins explicit origins, injects own credentials, rejects foreig
   const arrived = new Promise<void>((resolve) => {
     arrive = resolve;
   });
-  const collector = Bun.serve({
+  const collector = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -285,7 +287,7 @@ test('HTTP broker pins explicit origins, injects own credentials, rejects foreig
       });
       if (delay) {
         arrive();
-        await Bun.sleep(100);
+        await sleepTimer(100);
       }
       if (new URL(request.url).pathname === '/redirect')
         return new Response('', {

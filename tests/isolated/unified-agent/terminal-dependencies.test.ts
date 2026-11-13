@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
@@ -12,10 +12,11 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { expect, test } from '#kite-test';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
+import { spawn } from '../../../scripts/tooling/process';
 
 function pkg(
   path: string,
@@ -41,6 +42,121 @@ function validateTree(path: string, root: string) {
     else if (entry.isDirectory()) validateTree(target, root);
   }
 }
+test('Bun release copy verifies the locked alias, peer context and installed patch stamp', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-bun-lock-')));
+  try {
+    const repository = join(root, 'repository');
+    const manifest = {
+      name: '@kite-ai/fixture',
+      version: '1.0.0',
+      dependencies: { alias: 'npm:shared@1.0.0', peer: '2.0.0' },
+    };
+    const workspace = pkg(join(repository, 'workspace'), manifest);
+    const patch = 'patch bytes\n';
+    const patchPath = 'patches/shared.patch';
+    const patchTag = createHash('sha1').update(patch).digest().readBigUInt64LE().toString(16);
+    mkdirSync(join(repository, 'patches'));
+    writeFileSync(join(repository, patchPath), patch);
+    const store = join(repository, 'node_modules/.bun');
+    const packageId = 'shared@1.0.0';
+    const rootManifest = {
+      name: 'fixture',
+      version: '1.0.0',
+      workspaces: ['workspace'],
+      patchedDependencies: { [packageId]: patchPath },
+    };
+    pkg(repository, rootManifest);
+    const snapshot = join(store, `${packageId}+0123456789abcdef`);
+    const patched = pkg(join(snapshot, 'node_modules/shared'), {
+      name: 'shared',
+      version: '1.0.0',
+      peerDependencies: { peer: '>=1' },
+    });
+    const peer = pkg(join(store, 'peer@2.0.0/node_modules/peer'), {
+      name: 'peer',
+      version: '2.0.0',
+    });
+    const wrongPeer = pkg(join(store, 'peer@1.0.0/node_modules/peer'), {
+      name: 'peer',
+      version: '1.0.0',
+    });
+    writeFileSync(join(patched, `.bun-tag-${patchTag}`), '');
+    link(workspace, 'alias', patched);
+    link(workspace, 'peer', peer);
+    link(snapshot, 'peer', peer);
+    const integrity = `sha512-${Buffer.alloc(64).toString('base64')}`;
+    const lock = {
+      lockfileVersion: 2,
+      configVersion: 1,
+      patchedDependencies: { [packageId]: patchPath },
+      workspaces: { '': { name: 'fixture' }, workspace: manifest },
+      packages: {
+        alias: [packageId, '', { peerDependencies: { peer: '>=1' } }, integrity],
+        peer: ['peer@1.0.0', '', {}, integrity],
+        '@kite-ai/fixture': ['@kite-ai/fixture@workspace:workspace'],
+        '@kite-ai/fixture/peer': ['peer@2.0.0', '', {}, integrity],
+      },
+    };
+    const lockPath = join(repository, 'bun.lock');
+    writeFileSync(lockPath, JSON.stringify(lock));
+    let attempt = 0;
+    const copy = () => {
+      const destination = join(root, `output-${attempt++}`, 'node_modules');
+      const built = pkg(join(destination, '@kite-ai/fixture'), {
+        name: '@kite-ai/fixture',
+        version: '1.0.0',
+      });
+      return copyTerminalDependencies({
+        repositoryRoot: repository,
+        destination,
+        workspacePackages: [{ name: '@kite-ai/fixture', source: workspace, destination: built }],
+      });
+    };
+    expect(new Set(copy().packages.map(({ source }) => source))).toEqual(new Set([patched, peer]));
+    writeFileSync(
+      join(repository, 'package.json'),
+      JSON.stringify({ ...rootManifest, workspaces: [] }),
+    );
+    expect(copy).toThrow('terminal_dependency_lock_mismatch');
+    writeFileSync(join(repository, 'package.json'), JSON.stringify(rootManifest));
+    writeFileSync(
+      join(workspace, 'package.json'),
+      JSON.stringify({ ...manifest, dependencies: {} }),
+    );
+    expect(copy).toThrow('terminal_dependency_lock_mismatch');
+    writeFileSync(join(workspace, 'package.json'), JSON.stringify(manifest));
+    writeFileSync(join(repository, patchPath), 'changed');
+    expect(copy).toThrow('terminal_dependency_lock_patch_mismatch');
+    writeFileSync(join(repository, patchPath), patch);
+    const peerSlot = join(snapshot, 'node_modules', 'peer');
+    rmSync(peerSlot);
+    link(snapshot, 'peer', wrongPeer);
+    expect(copy).toThrow('terminal_dependency_lock_resolution_mismatch');
+    rmSync(peerSlot);
+    link(repository, 'peer', peer);
+    expect(copy).toThrow('terminal_dependency_missing');
+    link(snapshot, 'peer', peer);
+    const aliasSlot = join(workspace, 'node_modules', 'alias');
+    rmSync(aliasSlot);
+    const unpatched = pkg(join(store, `${packageId}/node_modules/shared`), {
+      name: 'shared',
+      version: '1.0.0',
+    });
+    link(workspace, 'alias', unpatched);
+    expect(copy).toThrow('terminal_dependency_lock_patch_mismatch');
+    rmSync(aliasSlot);
+    const arbitrary = pkg(join(store, 'arbitrary/node_modules/shared'), {
+      name: 'shared',
+      version: '1.0.0',
+    });
+    link(workspace, 'alias', arbitrary);
+    expect(copy).toThrow('terminal_dependency_lock_snapshot_mismatch');
+    rmSync(lockPath);
+    expect(copy).toThrow('terminal_dependency_lock_unavailable');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 test('finite installed graph preserves multiversion, peer contexts, aliases, cycles, optional platform native files and bins without source links', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-terminal-deps-'));
   try {
@@ -64,9 +180,10 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
         name: 'left',
         version: '1',
         dependencies: { shared: '1', right: '1' },
-        peerDependencies: { peer: '1' },
+        peerDependencies: { peer: '1', 'present-optional-peer': '1' },
+        peerDependenciesMeta: { 'present-optional-peer': { optional: true } },
       },
-      'module.exports={shared:require("shared"),peer:require("peer"),right:require.resolve("right")};',
+      'module.exports={shared:require("shared"),peer:require("peer"),optionalPeer:require("present-optional-peer"),right:require.resolve("right")};',
     );
     const right = pkg(
       join(pool, 'right'),
@@ -86,7 +203,7 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
       bin: { 'native-check': 'tool.js' },
     });
     writeFileSync(join(native, 'native.node'), Buffer.from([0, 1, 255, 42]));
-    writeFileSync(join(native, 'tool.js'), '#!/usr/bin/env bun\nconsole.log("native-bin");', {
+    writeFileSync(join(native, 'tool.js'), '#!/usr/bin/env node\nconsole.log("native-bin");', {
       mode: 0o755,
     });
     const foreign = pkg(join(pool, 'foreign'), {
@@ -112,6 +229,7 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
     link(left, 'shared', one);
     link(left, 'right', right);
     link(left, 'peer', peer);
+    link(left, 'present-optional-peer', one);
     link(right, 'shared', two);
     link(right, 'peer', peerTwo);
     link(platform, 'native', native);
@@ -169,7 +287,7 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
     expect(readFileSync(join(nativeCopy, 'LICENSE'), 'utf8')).toBe('fixture license');
     expect(lstatSync(join(nativeCopy, 'internal-link.js')).isSymbolicLink()).toBe(false);
     expect(lstatSync(join(nativeCopy, 'tool.js')).mode & 0o111).not.toBe(0);
-    const child = Bun.spawn(
+    const child = spawn(
       [
         process.execPath,
         '-e',
@@ -182,7 +300,7 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
     expect(await child.exited).toBe(0);
     expect(stderr).toBe('');
     expect(JSON.parse(stdout)).toMatchObject({
-      left: { shared: '1', peer: '1' },
+      left: { shared: '1', peer: '1', optionalPeer: '1' },
       right: { shared: '2', peer: '2' },
     });
   } finally {
@@ -193,12 +311,13 @@ test('finite installed graph preserves multiversion, peer contexts, aliases, cyc
 test('real locked terminal workspace graph copies actual native assets and resolves production npm outside the repository', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-terminal-real-deps-'));
   try {
-    const repositoryRoot = resolve(import.meta.dir, '../../..');
+    const repositoryRoot = resolve(import.meta.dirname, '../../..');
     const destination = join(root, 'node_modules');
     const locations = [
       'packages/agent',
       'packages/ai',
       'packages/client',
+      'packages/trajectory',
       'packages/ui',
       'apps/service',
       'apps/cli',
@@ -223,38 +342,13 @@ test('real locked terminal workspace graph copies actual native assets and resol
         readFileSync(join(asset.source, binary!)),
       );
     }
-    // Lexical declares an installed optional production peer. Root dev dependencies
-    // alone do not admit a package; this exact declared edge owns its inclusion.
-    const uiRequire = createRequire(join(repositoryRoot, 'packages/ui/package.json'));
-    const lexicalManifestPath = uiRequire.resolve('lexical/package.json');
-    const lexicalManifest = JSON.parse(readFileSync(lexicalManifestPath, 'utf8'));
-    expect(lexicalManifest.version).toBe('0.52.0');
-    expect(lexicalManifest.peerDependencies.typescript).toBe('>=5.2');
-    expect(lexicalManifest.peerDependenciesMeta.typescript).toEqual({ optional: true });
-    const lexicalRequire = createRequire(lexicalManifestPath);
-    const typescriptSource = realpathSync(
-      dirname(lexicalRequire.resolve('typescript/package.json')),
-    );
-    const typescriptManifest = JSON.parse(
-      readFileSync(join(typescriptSource, 'package.json'), 'utf8'),
-    );
-    const typescriptCopies = report.packages.filter((p) => p.name === 'typescript');
-    expect(typescriptCopies).toHaveLength(1);
-    expect(typescriptCopies[0]!.source).toBe(typescriptSource);
-    expect(typescriptCopies[0]!.version).toBe(typescriptManifest.version);
-    const lexicalCopy = report.packages.find(
-      (p) => p.source === realpathSync(dirname(lexicalManifestPath)),
-    )!;
-    expect(lexicalCopy).toBeDefined();
-    expect(
-      realpathSync(join(destination, lexicalCopy.destination, 'node_modules/typescript')),
-    ).toBe(realpathSync(join(destination, typescriptCopies[0]!.destination)));
+    expect(report.packages.some((p) => p.name === 'typescript')).toBe(false);
     expect(report.packages.some((p) => p.name === 'ink')).toBe(true);
     expect(report.packages.some((p) => p.name === 'react')).toBe(true);
     expect(report.packages.some((p) => p.name === 'punycode')).toBe(true);
     expect(report.packages.find((p) => p.name === 'zod' && p.version === '4.3.6')).toBeDefined();
     validateTree(destination, destination);
-    const child = Bun.spawn(
+    const child = spawn(
       [
         process.execPath,
         '-e',
@@ -324,7 +418,7 @@ test('generated workspace exports retain peers and external dependencies after a
     const moved = join(root, 'relocated');
     renameSync(join(root, 'bundle'), moved);
     validateTree(moved, moved);
-    const child = Bun.spawn(
+    const child = spawn(
       [process.execPath, '-e', 'console.log(JSON.stringify(require("@kite-ai/fixture")));'],
       { cwd: moved, env: { PATH: '' }, stdout: 'pipe', stderr: 'pipe' },
     );

@@ -1,11 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { canonicalJson } from '../../../src/json';
@@ -17,7 +18,7 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
   while (Date.now() < end) {
     const value = await read();
     if (value !== null) return value;
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
   throw new Error('Timed out at original complete-output check boundary');
 }

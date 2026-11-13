@@ -1,5 +1,6 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { constants, homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { parseCLIArguments } from '../src/arguments';
@@ -112,28 +113,35 @@ async function runSelected(
       const env = { ...process.env };
       for (const key of ['NODE_PATH', 'NODE_OPTIONS', 'BUN_OPTIONS', 'ELECTRON_RUN_AS_NODE'])
         delete env[key];
-      // No business client runs in this frontdoor: CLI, SDK and Bun come from the selected Native closure.
+      // The selected Native closure supplies the business client, SDK and runtime.
       const ignoreInterrupt = () => {};
-      let child: ReturnType<typeof Bun.spawn> | undefined;
+      let child: ChildProcess | undefined;
       let terminating = false;
       const terminate = () => {
         terminating = true;
-        if (child && child.exitCode === null) child.kill('SIGTERM');
+        if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
       };
       // Foreground SIGINT already reaches the child group; forwarding would cancel twice.
       process.on('SIGINT', ignoreInterrupt);
       process.on('SIGTERM', terminate);
       try {
-        child = Bun.spawn(
+        const launched = spawn(
+          fresh.artifact.executable,
           [
-            fresh.artifact.executable,
             join(fresh.bundle.terminal.root, `entrypoints/native-${tui ? 'tui' : 'cli'}.js`),
             ...argv,
           ],
-          { cwd: process.cwd(), env, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' },
+          { cwd: process.cwd(), env, stdio: 'inherit' },
         );
-        if (terminating) child.kill('SIGTERM');
-        return await child.exited;
+        child = launched;
+        const exited = new Promise<number>((resolve, reject) => {
+          launched.once('error', reject);
+          launched.once('close', (code, signal) => {
+            resolve(code ?? (signal ? 128 + constants.signals[signal] : 1));
+          });
+        });
+        if (terminating) launched.kill('SIGTERM');
+        return await exited;
       } finally {
         process.removeListener('SIGINT', ignoreInterrupt);
         process.removeListener('SIGTERM', terminate);

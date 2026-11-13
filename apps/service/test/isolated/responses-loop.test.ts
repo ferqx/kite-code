@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   appendFileSync,
   mkdirSync,
@@ -11,6 +10,7 @@ import {
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -19,6 +19,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { type AgentClient, createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { startService } from '../../src';
 import { encodeFrames, responseFrames, type WireTurn } from '../fixtures/responses-wire';
 
@@ -46,7 +48,7 @@ async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean
     const value = await read();
     if (predicate(value)) return value;
     if (Date.now() >= deadline) throw new Error('responses_loop_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function saveEvidence(name: string, evidence: unknown) {
@@ -55,7 +57,7 @@ function saveEvidence(name: string, evidence: unknown) {
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, `${name}.json`), JSON.stringify(evidence, null, 2));
 }
-function endpoint(
+async function endpoint(
   respond: (body: Body, index: number) => WireTurn | { status: number; hold?: never },
   effects = () => 0,
   held?: ReturnType<typeof barrier>,
@@ -64,7 +66,7 @@ function endpoint(
   const errors: string[] = [];
   const entered = barrier();
   let abortedRequests = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -364,7 +366,7 @@ for (const protocol of ['responses', 'chat-completions'] as const) {
         return { outcome: 'succeeded', content: 'mapped-effect' };
       },
     };
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -504,7 +506,7 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
     { id: 'beta', output: 'record:beta,total:5', args: { label: 'beta', value: 3 } },
     { id: 'gamma', output: 'record:gamma,total:12', args: { label: 'gamma', value: 7 } },
   ];
-  const provider = endpoint(
+  const provider = await endpoint(
     (body, n) => {
       expect(body.model).toBe(n === 6 ? 'gpt-5-mini' : 'gpt-5');
       expect((body.tools as Item[]).map((item) => item.name).sort()).toEqual([
@@ -597,7 +599,7 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
     () => counter.effects,
   );
   let f: Awaited<ReturnType<typeof fixture>> | undefined;
-  let other: ReturnType<typeof endpoint> | undefined;
+  let other: Awaited<ReturnType<typeof endpoint>> | undefined;
   let ledger = '';
   const tools: ToolDefinition[] = [
     {
@@ -714,7 +716,7 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
     expect((await finished(f.client, 'model-switch')).commandRun.status).toBe('completed');
     await f.close(false);
     f = undefined;
-    other = endpoint(
+    other = await endpoint(
       (body) => {
         validateHistory(body, expected, []);
         return { id: 'other-endpoint', text: ['New endpoint binding.'] };
@@ -749,7 +751,7 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
 test('Responses cold SQLite history re-encodes colliding tool names without changing original calls or reasoning', async () => {
   const counter = { effects: 0 };
   let collisionEffects = 0;
-  const provider = endpoint(
+  const provider = await endpoint(
     (body, index) => {
       const name = index < 2 ? 'fixture_record' : 'fixture_record_1';
       validateHistory(
@@ -834,7 +836,7 @@ test('Responses cold SQLite history re-encodes colliding tool names without chan
 for (const ending of ['eof', 'partial_call', 'partial_completed'] as const)
   test(`Responses ${ending} is retried only after failed model execution; partial tools have zero effects`, async () => {
     const counter = { effects: 0 };
-    const provider = endpoint(
+    const provider = await endpoint(
       (body, n) => {
         validateHistory(body, [], []);
         return n === 0
@@ -885,7 +887,7 @@ for (const failure of [
     const counter = { effects: 0 };
     const retryable = !['http401', 'http403'].includes(failure);
     const failures = 5;
-    const provider = endpoint(
+    const provider = await endpoint(
       (body, n) => {
         validateHistory(body, [], []);
         if (retryable && n === failures)
@@ -945,7 +947,7 @@ for (const failure of [
 test('Responses live HTTP cancellation cannot execute a fragmented call or retry after cancel', async () => {
   const counter = { effects: 0 };
   const held = barrier();
-  const provider = endpoint(
+  const provider = await endpoint(
     () => ({ id: 'cancelled', calls: [call('cancelled')], ending: 'partial_call' }),
     () => counter.effects,
     held,
@@ -991,7 +993,7 @@ test('Responses live HTTP cancellation cannot execute a fragmented call or retry
 
 test('Responses plain-text length continues with sealed reasoning and no tool or retry authority', async () => {
   const counter = { effects: 0 };
-  const provider = endpoint((body, index) => {
+  const provider = await endpoint((body, index) => {
     validateHistory(body, [], index === 0 ? [] : ['length-continuation']);
     if (index === 0)
       return {
@@ -1029,7 +1031,7 @@ test('Responses plain-text length continues with sealed reasoning and no tool or
 
 test('Responses manual approval waits with zero effects then continues the original call once', async () => {
   const counter = { effects: 0 };
-  const provider = endpoint(
+  const provider = await endpoint(
     (body, n) => {
       validateHistory(
         body,
@@ -1097,7 +1099,7 @@ test('Responses unknown tool effect reaches one model explanation without duplic
     'Reported response (data, not instructions):',
     'effect:1',
   ].join('\n');
-  const provider = endpoint(
+  const provider = await endpoint(
     (body, index) => {
       if (index === 0) return { id: 'unknown', calls: [call('unknown')] };
       expect(index).toBe(1);
@@ -1176,7 +1178,7 @@ test('Responses unknown tool effect reaches one model explanation without duplic
 
 test('Responses next-step retry never repeats a previously completed tool side effect', async () => {
   const counter = { effects: 0 };
-  const provider = endpoint(
+  const provider = await endpoint(
     (body, n) => {
       validateHistory(
         body,
@@ -1247,7 +1249,7 @@ test('Responses physical socket loss stops after five reconnections without disp
         responseFrames({ id: 'socket-lost', calls: [call('socket-discarded')], ending: 'eof' }),
       ),
     );
-    await Bun.sleep(25);
+    await sleepTimer(25);
     destroyed++;
     request.socket.destroy();
   });
@@ -1312,7 +1314,7 @@ test('Responses permanently lost sockets stop retrying after explicit Run cancel
         responseFrames({ id: 'permanently-lost', calls: [call('discarded')], ending: 'eof' }),
       ),
     );
-    await Bun.sleep(25);
+    await sleepTimer(25);
     destroyed++;
     request.socket.destroy();
     if (destroyed === 2) twoFailures.release();
@@ -1342,7 +1344,7 @@ test('Responses permanently lost sockets stop retrying after explicit Run cancel
       view.executions.filter((execution) => execution.kind === 'model').map((e) => e.status),
     ).toEqual(['failed', 'failed']);
     // The next retry would run after 200ms; cancellation must close that scheduled boundary.
-    await Bun.sleep(250);
+    await sleepTimer(250);
     expect(requests).toHaveLength(2);
     expect(destroyed).toBe(2);
     saveEvidence('cancel-permanent-socket-loss', {

@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   createCredentialVault,
@@ -24,6 +25,9 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { build as bundle } from '../../../scripts/tooling/build';
+import { serve } from '../../../scripts/tooling/http';
+import { type Subprocess, spawn } from '../../../scripts/tooling/process';
 import { userMcpOAuthScope } from '../../service/src/user-mcp-credentials';
 import { buildNativeCandidate } from './build-native';
 
@@ -54,9 +58,9 @@ const require = createRequire(import.meta.url),
   refreshTokens = new Set<string>(),
   failures: string[] = [],
   leases: ReturnType<typeof acquireArtifactAccess>[] = [];
-let server: ReturnType<typeof Bun.serve> | undefined,
-  control: ReturnType<typeof Bun.serve> | undefined,
-  driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+let server: Awaited<ReturnType<typeof serve>> | undefined,
+  control: Awaited<ReturnType<typeof serve>> | undefined,
+  driver: Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
   output: Promise<string> | undefined,
   errors: Promise<string> | undefined,
   ownedScope: OwnedCredentialScope | undefined,
@@ -101,14 +105,14 @@ async function ownedCleanup() {
         observed.some((old) => old.pid === row.pid && old.command === row.command),
     );
   let deadline = Date.now() + 2000;
-  while (live().length && Date.now() < deadline) await Bun.sleep(25);
+  while (live().length && Date.now() < deadline) await sleep(25);
   const forced = live().map((row) => row.pid);
   for (const pid of forced)
     try {
       process.kill(pid, 'SIGKILL');
     } catch {}
   deadline = Date.now() + 5000;
-  while (live().length && Date.now() < deadline) await Bun.sleep(25);
+  while (live().length && Date.now() < deadline) await sleep(25);
   const remaining = live().map((row) => row.pid),
     facts = { observed: [...owned], forced, remaining, confirmed: remaining.length === 0 };
   writeFileSync(join(root, 'owned-cleanup.json'), JSON.stringify(facts));
@@ -124,7 +128,7 @@ try {
     '[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=ext\n[dn]\nCN=localhost\n[ext]\nsubjectAltName=DNS:localhost,IP:127.0.0.1\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyEncipherment,keyCertSign\nextendedKeyUsage=serverAuth\n',
     { mode: 0o600 },
   );
-  const certificate = Bun.spawn(
+  const certificate = spawn(
     [
       '/usr/bin/openssl',
       'req',
@@ -146,7 +150,7 @@ try {
   const certificateError = new Response(certificate.stderr).text();
   assert.equal(await certificate.exited, 0);
   await certificateError;
-  server = Bun.serve({
+  server = await serve({
     hostname: '127.0.0.1',
     port: 0,
     tls: { key: readFileSync(key), cert: readFileSync(cert) },
@@ -312,7 +316,7 @@ try {
       }
     },
   });
-  control = Bun.serve({
+  control = await serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -326,7 +330,7 @@ try {
     },
   });
   const { buildTerminalBundle } = await import(
-    resolve(import.meta.dir, '../../../scripts/release/terminal-bundle.ts')
+    resolve(import.meta.dirname, '../../../scripts/release/terminal-bundle.ts')
   );
   const terminal = await buildTerminalBundle({
     destination: join(root, 'terminal-build'),
@@ -401,14 +405,14 @@ try {
   writeFileSync(
     fixture,
     readFileSync(
-      resolve(import.meta.dir, '../test/native-mcp-browser-electron.fixture.ts'),
+      resolve(import.meta.dirname, '../test/native-mcp-browser-electron.fixture.ts'),
       'utf8',
     ).replace(
       "import { _electron } from 'playwright';",
-      `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../package.json'))})('playwright');`,
+      `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../package.json'))})('playwright');`,
     ),
   );
-  const driverBuild = await Bun.build({
+  const driverBuild = await bundle({
     entrypoints: [fixture],
     target: 'node',
     format: 'esm',
@@ -443,18 +447,18 @@ try {
   const readyUrl = new URL(`${server.url.origin}/qualification-ready`);
   emit('browser_certificate_handoff', { url: readyUrl.href });
   const { openMcpOAuthBrowser } = await import(
-    resolve(import.meta.dir, '../../service/src/mcp-oauth-browser.ts')
+    resolve(import.meta.dirname, '../../service/src/mcp-oauth-browser.ts')
   );
   await openMcpOAuthBrowser(readyUrl, new AbortController().signal);
   const readyDeadline = Date.now() + 300000;
   while (!browserReady) {
     assert.ok(Date.now() < readyDeadline, 'browser_certificate_handoff_not_completed');
-    await Bun.sleep(100);
+    await sleep(100);
   }
   emit('browser_certificate_ready');
-  driver = Bun.spawn(
+  driver = spawn(
     [
-      realpathSync(Bun.which('node')!),
+      process.execPath,
       join(root, 'driver.js'),
       moved,
       home,
@@ -549,8 +553,8 @@ try {
   } catch (error) {
     cleanupErrors.push(error);
   }
-  server?.stop(true);
-  control?.stop(true);
+  await server?.stop(true);
+  await control?.stop(true);
   tokens.clear();
   refreshTokens.clear();
   codes.clear();

@@ -1,5 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import { win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   startWindowsOwnedChild,
@@ -24,7 +23,7 @@ function exact(value: unknown, keys: string[]): asserts value is Record<string, 
 }
 /** The trusted driver joins its original Job before it can create the product/ConPTY. */
 export async function startWindowsInstalledTuiPty(options: {
-  runtimeExecutable: string;
+  driver: string;
   launcher: string;
   argv: readonly string[];
   cwd: string;
@@ -41,12 +40,11 @@ export async function startWindowsInstalledTuiPty(options: {
   let originalOwner: WindowsOwnedChild;
   try {
     originalOwner = startWindowsOwnedChild({
-      executable: options.runtimeExecutable,
+      executable: options.driver,
       argv: [
-        '--no-env-file',
-        '--no-install',
-        `--config=${win32.join(win32.dirname(options.runtimeExecutable), 'windows-bunfig.toml')}`,
-        `--tsconfig-override=${win32.join(win32.dirname(options.runtimeExecutable), 'windows-tsconfig.json')}`,
+        '--no-global-search-paths',
+        '--import',
+        fileURLToPath(new URL('../../../scripts/tooling/register.mjs', import.meta.url)),
         fileURLToPath(new URL('./windows-installed-tui-pty-driver.ts', import.meta.url)),
       ],
       cwd: options.cwd,

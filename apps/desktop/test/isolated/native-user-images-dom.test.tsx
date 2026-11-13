@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { createHash as fixtureHash } from 'node:crypto';
 import type { Message } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { ConversationCache } from '../../../../packages/ui/src/desktop/ConversationCache';
 import { ConversationCacheCost } from '../../../../packages/ui/src/desktop/conversation-cache-cost';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
@@ -13,7 +14,7 @@ import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 const data =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
 const bytes = Buffer.from(data, 'base64');
-const hash = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+const hash = fixtureHash('sha256').update(bytes).digest('hex');
 
 function fixture() {
   const costs = new Set<ConversationCacheCost>();

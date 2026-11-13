@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import TaskProgressBlock from '../../src/tui/ink/TaskProgressBlock';
 
 test('failed, blocked and compensated steps retain their actual status and hidden rows are not declared completed', () => {

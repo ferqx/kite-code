@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { ModelOutputSnapshot, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { readTuiLiveOutput } from '../../host/tui-live-output';
 
 const view: SessionView = {

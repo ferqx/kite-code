@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
+import { expect, test } from '#kite-test';
 import { browserDecorationScript } from '../../electron/browser-decoration';
 import { BrowserPageLease } from '../../electron/browser-lease';
 

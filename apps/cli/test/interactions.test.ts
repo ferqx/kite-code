@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +8,8 @@ import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { createDesktopController } from '@kite-ai/desktop';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
+import { nodeServiceFixture } from '../../service/test/fixtures/node-service-process';
 import { run } from '../src';
 
 async function fixture() {
@@ -224,7 +225,8 @@ test('actual private paired Service process completes opt-in CLI approval/questi
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-paired-interaction-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const handle = await launchPairedService({
-    entrypoint: join(import.meta.dir, 'fixtures/interaction-child.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, 'fixtures/interaction-child.ts'),
     profile,
     instanceId: 'thin-client',
     buildId: 'thin-client',

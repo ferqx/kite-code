@@ -1,20 +1,27 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function seedTrust(client: ReturnType<typeof createClient>, storeId: string) {
   const state = await client.getWorkspaceTrust('w', { storeId });
@@ -37,7 +44,7 @@ async function seedModel(client: ReturnType<typeof createClient>, storeId: strin
   const end = Date.now() + 10000;
   while ((await client.getView('a')).runs[0]?.status !== 'completed') {
     if (Date.now() > end) throw Error('seed_not_completed');
-    await Bun.sleep(10);
+    await testSleep(10);
   }
   expect((await client.getView('a')).runs[0]?.status).toBe('completed');
 }
@@ -57,7 +64,7 @@ for (const mode of ['paired', 'shared'] as const)
       { mode: 0o600 },
     );
     let calls = 0;
-    const provider = Bun.serve({
+    const provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch() {
@@ -97,8 +104,8 @@ for (const mode of ['paired', 'shared'] as const)
       buildId: 'owned-preferences',
       apiMajor: 1,
     };
-    let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined,
-      python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let daemon: TestSubprocess<'pipe', 'pipe', 'pipe'> | undefined,
+      python: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
     let stopShared: () => Promise<void> = async () => {
       throw Error('preferences_daemon_lifecycle_missing');
@@ -158,9 +165,10 @@ for (const mode of ['paired', 'shared'] as const)
         const manifest = JSON.stringify(assets);
         writeFileSync(join(web, 'manifest.json'), manifest);
         const instanceId = randomUUID();
-        daemon = Bun.spawn(
+        daemon = testSpawn(
           [
             process.execPath,
+            ...testRuntimeFlags,
             join(root, 'service-artifact/node_modules/@kite-ai/service/daemon-main.js'),
           ],
           {
@@ -259,10 +267,10 @@ for (const mode of ['paired', 'shared'] as const)
       const runner = join(repo, 'apps/cli/test/fixtures/tui-preferences-runner.ts');
       const preferencePath = join(profile.profilePath, 'ui', 'preferences.jsonc');
       const transcript = join(tmpdir(), `kite-tui-preferences-${mode}-${randomUUID()}.pty.log`);
-      python = Bun.spawn(
+      python = testSpawn(
         [
           process.execPath,
-          '--no-install',
+          ...testRuntimeFlags,
           fileURLToPath(new URL('../fixtures/tui-preferences-pty.ts', import.meta.url)),
           JSON.stringify({
             root,

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type CredentialBackend,
   createCredentialVault,
@@ -6,6 +5,7 @@ import {
   createTemporaryCredentialBackend,
   type OwnedCredentialScope,
 } from '@kite-ai/agent/config';
+import { expect, test } from '#kite-test';
 
 const scope: OwnedCredentialScope = { namespace: 'mcp.oauth', ownerDigest: 'a'.repeat(64) };
 const other: OwnedCredentialScope = { ...scope, ownerDigest: 'b'.repeat(64) };

@@ -9,8 +9,8 @@ import {
 import { parseCLIArguments } from '../../../apps/cli/src/arguments';
 import { releaseErrorCode } from '../release-arguments';
 
-/** import.meta.dir belongs to this candidate, never the installer's mutable active pointer. */
-const bundleRoot = resolve(import.meta.dir, '..');
+/** The module belongs to the candidate, independent of the current selection. */
+const bundleRoot = resolve(import.meta.dirname, '..');
 export async function runInstalledTerminalCLI(
   argv: readonly string[] = process.argv.slice(2),
   candidateRoot: string = bundleRoot,
@@ -31,7 +31,7 @@ export async function runInstalledTerminalCLI(
     access?.release();
   }
 }
-if (import.meta.main) {
+if (Reflect.get(import.meta, 'main') === true) {
   try {
     process.exitCode = await runInstalledTerminalCLI();
   } catch (error) {

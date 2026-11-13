@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, type SessionLogPage } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 import { decodeResponse } from '../../src/decode';
@@ -97,7 +98,7 @@ test('Native and Browser log methods retain original query, fail closed before I
   let responsePage: unknown = page();
   let capabilities = ['session_logs'];
   let oversized = false;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

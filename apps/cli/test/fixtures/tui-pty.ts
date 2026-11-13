@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
-import { Terminal } from '@xterm/headless';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import xterm from '@xterm/headless';
 import stringWidth from 'string-width';
+import { spawnOwnedPty } from '../../../../tests/tui-system/harness/pty-node';
+
+const { Terminal } = xterm;
+type Terminal = InstanceType<typeof Terminal>;
 
 /** ConPTY serializes its own cells, including spacing combining marks. */
 export function configureConPTYCellWidths(screen: Terminal): void {
@@ -86,44 +91,43 @@ export function spawnTuiPTY(input: {
   let byteLength = 0;
   let ended = false;
   let closed = false;
-  let resolveEOF!: () => void;
-  const eof = new Promise<void>((resolve) => {
-    resolveEOF = resolve;
-  });
-  const host = Bun.spawn({
-    cmd: input.cmd,
+  const host = spawnOwnedPty({
+    command: input.cmd,
     cwd: input.cwd,
-    env: { ...process.env, ...input.env },
-    detached: process.platform !== 'win32',
-    terminal: {
-      cols: 80,
-      rows: 24,
-      data(_terminal, bytes) {
-        const copy = bytes.slice();
-        output.push(copy);
-        input.onData?.(copy);
-        byteLength += copy.byteLength;
-        if (screen) {
-          // xterm already owns an ordered write queue. Enqueue native chunks
-          // immediately so it can parse a burst in one turn; chaining writes
-          // behind each callback adds a timer turn for every ConPTY fragment.
-          // The last callback also proves every earlier queued chunk was parsed.
-          parsed = new Promise<void>((resolve) => {
-            screen.write(copy, () => {
-              revision++;
-              resolve();
-            });
+    env: Object.fromEntries(
+      Object.entries({ ...process.env, ...input.env }).filter(
+        (pair): pair is [string, string] => typeof pair[1] === 'string',
+      ),
+    ),
+    detach: process.platform !== 'win32',
+    cols: 80,
+    rows: 24,
+    onData(bytes) {
+      const copy = bytes.slice();
+      output.push(copy);
+      input.onData?.(copy);
+      byteLength += copy.byteLength;
+      if (screen) {
+        // xterm already owns an ordered write queue. Enqueue native chunks
+        // immediately so it can parse a burst in one turn; chaining writes
+        // behind each callback adds a timer turn for every ConPTY fragment.
+        // The last callback also proves every earlier queued chunk was parsed.
+        parsed = new Promise<void>((resolve) => {
+          screen.write(copy, () => {
+            revision++;
+            resolve();
           });
-        } else revision++;
-      },
-      exit() {
-        resolveEOF();
-      },
+        });
+      } else revision++;
     },
   });
-  void host.exited.then(() => {
-    ended = true;
-  });
+  const eof = host.exited.then(() => {});
+  void eof.catch(() => {});
+  void host.exited
+    .finally(() => {
+      ended = true;
+    })
+    .catch(() => {});
   return {
     host,
     eof,
@@ -146,7 +150,7 @@ export function spawnTuiPTY(input: {
       await parsed;
       actionRevision = revision;
       actionOffset = byteLength;
-      host.terminal!.write(value);
+      await host.write(value);
     },
     /** Navigation only: do not turn an already painted target into a no-op action. */
     async keyUnlessVisible(value: string, target: string) {
@@ -162,7 +166,7 @@ export function spawnTuiPTY(input: {
       if (viewport.includes(target)) return false;
       actionRevision = revision;
       actionOffset = byteLength;
-      host.terminal!.write(value);
+      await host.write(value);
       return true;
     },
     async projection() {
@@ -180,7 +184,7 @@ export function spawnTuiPTY(input: {
     close() {
       if (closed) return;
       closed = true;
-      host.terminal?.close();
+      host.close();
       screen?.dispose();
     },
   };
@@ -202,15 +206,8 @@ export async function terminateTuiTree(
     assert.ok(Number.isSafeInteger(input.servicePid) && input.servicePid > 0);
     if (input.requireServiceAlive !== false) process.kill(input.servicePid, 0);
   }
-  if (process.platform === 'win32') {
-    const result = Bun.spawnSync(['taskkill.exe', '/pid', String(owned.host.pid), '/t', '/f'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    assert.equal(result.exitCode, 0, 'original host tree termination failed');
-  } else {
-    process.kill(-owned.host.pid, 'SIGKILL');
-  }
+  await owned.host.ready;
+  owned.host.kill('SIGKILL');
   await ptyDeadline(
     Promise.all([owned.host.exited, owned.eof]),
     input.exitTimeoutMs,
@@ -227,7 +224,7 @@ export async function terminateTuiTree(
         throw error;
       }
       if (Date.now() >= end) throw Error('original Service remains alive after tree termination');
-      await Bun.sleep(20);
+      await testSleep(20);
     }
   }
   await owned.drain();

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   linkSync,
   readdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { releaseScratch } from '../../../../../tests/fixtures/unified-agent/release-filesystem';
 import {
   defaultWindowsPathSecurity,

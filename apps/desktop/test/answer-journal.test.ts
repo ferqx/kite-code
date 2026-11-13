@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import type {
   AgentClient,
   AnswerInteractionRequest,
@@ -6,6 +5,7 @@ import type {
   Interaction,
   SessionView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { answerRequestDigest, NativeAnswerJournal } from '../electron/answer-journal';
 import { callerDigest } from '../electron/caller-journal';
 import { decodeNativeRequest } from '../electron/native-ipc';

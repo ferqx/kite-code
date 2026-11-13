@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';

@@ -18,6 +18,7 @@ import type {
   NativeState,
   NativeWorkspaceRemoval,
 } from '../src/native-bridge';
+import { nativeChannel } from '../src/native-bridge';
 import { readNativeModelInput } from '../src/native-model-input';
 import { readNativeModelOutput } from '../src/native-model-output';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
@@ -28,7 +29,25 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-function nativeServiceProcesses(candidateRoot: string, parentPid?: number) {
+async function confirmGlobalDialog(title: string | RegExp, button: string | RegExp) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const page = app!
+      .windows()
+      .find((candidate) => candidate.url().endsWith('/global-dialog.html'));
+    if (page) {
+      await page
+        .getByRole('alertdialog', { name: title, exact: true })
+        .getByRole('button', { name: button, exact: true })
+        .click({ timeout: Math.max(1, deadline - Date.now()) });
+      return;
+    }
+    assert.ok(Date.now() < deadline, 'original global confirmation dialog');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+function nativeServiceProcesses(runtimePath: string, parentPid?: number) {
   const processColumn = process.platform === 'linux' ? 'args=' : 'comm=';
   return String(execFileSync('/bin/ps', ['-axo', `pid=,ppid=,${processColumn}`]))
     .split('\n')
@@ -36,8 +55,7 @@ function nativeServiceProcesses(candidateRoot: string, parentPid?: number) {
     .filter(
       (parts) =>
         (parentPid === undefined || Number(parts[1]) === parentPid) &&
-        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) ===
-          join(candidateRoot, 'terminal/runtime/bun'),
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) === runtimePath,
     );
 }
 
@@ -46,7 +64,7 @@ const { _electron } = createRequire(desktopPackage!)('playwright') as typeof imp
 const expected = JSON.parse(readFileSync(join(home!, 'expected.json'), 'utf8')) as {
   storeId: string;
   sessionId: string;
-  candidates: { root: string; id: string; electron: string }[];
+  candidates: { root: string; id: string; electron: string; runtime: string }[];
   tasks: string[];
   bodies: string[];
 };
@@ -61,6 +79,7 @@ type Physical = {
 type Globals = typeof globalThis & {
   versionPhysical: Physical[];
   versionServer?: Promise<ServerInfo>;
+  versionOmittedTurnReads?: number;
 };
 type Facts = {
   cursor: string;
@@ -195,7 +214,10 @@ async function launch(index: number) {
   });
   const parentPid = app.process().pid;
   assert.ok(parentPid);
-  const children = nativeServiceProcesses(candidate.root, parentPid);
+  const children = nativeServiceProcesses(
+    join(candidate.root, 'terminal', candidate.runtime),
+    parentPid,
+  );
   assert.equal(children.length, 1);
   childPid = Number(children[0]![0]);
   const identity = await query<{ pid: number; startIdentity: string }>(`process?pid=${childPid}`);
@@ -204,6 +226,32 @@ async function launch(index: number) {
   owned.push({ ...identity, root: candidate.root });
   await page.context().tracing.start({ screenshots: true, snapshots: true });
   tracingActive = true;
+  if (process.platform === 'darwin' && mode !== 'legacy-private') {
+    // This profile witnesses creation of DB8 and DB9. Turn read receipts on either
+    // release would first promote it to DB12, outside the DB9 backup format.
+    await app.evaluate(({ ipcMain }, channel) => {
+      const handlers = Reflect.get(ipcMain, '_invokeHandlers') as Map<
+        string,
+        (...args: unknown[]) => Promise<unknown>
+      >;
+      const original = handlers?.get(channel);
+      if (!original) throw Error('native_version_request_handler_missing');
+      const globals = globalThis as Globals;
+      globals.versionOmittedTurnReads = 0;
+      handlers.set(channel, async function (this: unknown, ...args) {
+        const payload = args[1];
+        if (
+          payload &&
+          typeof payload === 'object' &&
+          Reflect.get(payload, 'method') === 'session.markRead'
+        ) {
+          globals.versionOmittedTurnReads!++;
+          return { ok: false, code: 'turn_read_storage_unavailable' };
+        }
+        return Reflect.apply(original, this, args);
+      });
+    }, nativeChannel);
+  }
   await app.evaluate(() => {
     const target = globalThis as Globals,
       original = globalThis.fetch;
@@ -599,7 +647,8 @@ try {
         windows: [{ sandbox: true, contextIsolation: true, nodeIntegration: false }],
       },
     );
-    const serviceProcesses = () => nativeServiceProcesses(candidate.root);
+    const serviceProcesses = () =>
+      nativeServiceProcesses(join(candidate.root, 'terminal', candidate.runtime));
     const observed = new Set<number>();
     const observe = () => {
       for (const row of serviceProcesses()) observed.add(Number(row[0]));
@@ -709,11 +758,12 @@ try {
     await app!.evaluate(() => {
       (globalThis as Globals).versionPhysical = [];
     });
+    await cold.page.getByRole('button', { name: '查询空间移除结果', exact: true }).click();
     const originalRemoval = cold.page
-      .getByRole('status')
-      .filter({ hasText: `空间“${saved.label}”移除结果待确认。` });
+      .getByRole('menu', { name: '查询空间移除结果', exact: true })
+      .getByRole('menuitem', { name: `查看 ${saved.label} 的移除结果`, exact: true });
     assert.equal(await originalRemoval.count(), 1);
-    await originalRemoval.getByRole('button', { name: '查看结果', exact: true }).click();
+    await originalRemoval.click();
     const lookedUp = await waitState(
       cold.page,
       (value) =>
@@ -992,8 +1042,7 @@ try {
         (w) => w.id === 'db8-removal-workspace',
       )!;
       assert.ok(witness);
-      await app!.evaluate(({ dialog }) => {
-        dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+      await app!.evaluate(() => {
         const original = globalThis.fetch;
         let drop = true;
         globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
@@ -1010,16 +1059,14 @@ try {
         }) as typeof fetch;
         (globalThis as Globals).versionPhysical = [];
       });
-      await launched.page
-        .getByRole('button', { name: `${witness.name} 更多操作`, exact: true })
-        .locator('..')
-        .hover();
+      await launched.page.getByRole('button', { name: witness.name, exact: true }).hover();
       await launched.page
         .getByRole('button', { name: `${witness.name} 更多操作`, exact: true })
         .click();
       await launched.page
         .getByRole('menuitem', { name: `移除 ${witness.name}`, exact: true })
         .click();
+      await confirmGlobalDialog(`移除空间“${witness.name}”？`, '移除空间');
       const unknownState = await waitState(
         launched.page,
         (value) =>
@@ -1058,6 +1105,7 @@ try {
       await permissions.locator('input[name="permission-mode"][value="full"]').check();
       await permissions.getByRole('button', { name: '保存模式选择', exact: true }).click();
       await permissions.getByText(/^当前模式：full；默认模式：/).waitFor();
+      assert.ok(await app!.evaluate(() => (globalThis as Globals).versionOmittedTurnReads! > 0));
       assert.equal((await query<{ version: number }>('db8-capture')).version, 8);
       const sourceFacts = await state(launched.page);
       const sourceModel = sourceFacts.selection!.executions.find(

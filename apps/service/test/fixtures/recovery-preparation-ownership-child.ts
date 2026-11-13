@@ -1,7 +1,7 @@
-import { mock } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AgentError, ConfigurationPreparationCleanupError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -12,12 +12,16 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { mock } from '#kite-test';
+import type { Subprocess } from '../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { resumeBinding } from './run-resume-binding';
 
-let ownedSeed: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+let ownedSeed: Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
 let seedOutput: Promise<string> | undefined;
 let seedDiagnostics: Promise<string> | undefined;
 async function bounded<T>(work: Promise<T>, milliseconds: number, phase: string): Promise<T> {
@@ -111,7 +115,7 @@ async function until(condition: () => Promise<boolean>, phase: string) {
   const deadline = Date.now() + 5000;
   while (!(await condition())) {
     if (Date.now() >= deadline) throw Error(`original recovery deadline: ${phase}`);
-    await Bun.sleep(1);
+    await sleepTimer(1);
   }
 }
 type Store = Awaited<ReturnType<typeof openSqliteStore>>;
@@ -273,7 +277,7 @@ if (mode === 'seed-run') {
   setTimeout(() => process.exit(124), 7000);
   await seedRun();
 } else {
-  let seed: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+  let seed: Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
   let store: Store | undefined;
   let runtime: ReturnType<typeof createRuntime> | undefined;
   let service: Awaited<ReturnType<typeof startService>> | undefined;
@@ -290,8 +294,8 @@ if (mode === 'seed-run') {
       commandIds = ['create', 'work'];
     let seedExit: RecoveryReceipt['seedExit'] = null;
     if (mode === 'run') {
-      seed = Bun.spawn(
-        [process.execPath, '--no-install', fileURLToPath(import.meta.url), root, 'seed-run'],
+      seed = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, fileURLToPath(import.meta.url), root, 'seed-run'],
         { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
       );
       ownedSeed = seed;

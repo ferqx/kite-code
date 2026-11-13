@@ -1,10 +1,17 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { CallerCommandRequest } from '@kite-ai/client';
 import { canonicalCallerCommandRequest } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
 import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { callerDigest } from '../../electron/caller-journal';
 import { buildWindowsAccess } from '../../scripts/build-windows-access';
 
@@ -18,13 +25,13 @@ async function windowsAccess(root: string) {
 for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.cancel'] as const)
   test(`actual Node Native ${kind} durable POST loss and SIGKILL; cold physical first GET loss never repeats original request`, async () => {
     const module = await import(
-      resolve(import.meta.dir, '../../../cli/test/fixtures/recovery-profile.ts')
+      resolve(import.meta.dirname, '../../../cli/test/fixtures/recovery-profile.ts')
     );
     const f = await module.recoveryProfile(
       kind === 'input.follow_up' ? { holdModelCommandId: 'native-original' } : {},
     );
     let warm: Awaited<ReturnType<typeof f.launch>> | undefined,
-      child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+      child: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     const wire = `${f.root}-native-caller-${kind}.wire.jsonl`;
     try {
       const access = await windowsAccess(f.root);
@@ -103,17 +110,18 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
         );
         input = { ...input, files: [file] };
       }
-      const helper = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-        target: 'bun',
+      const helper = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+        target: 'node',
         format: 'esm',
         packages: 'bundle',
         outdir: f.root,
         naming: 'native-profile-access.js',
+        ...fixtureRuntimeBuild(f.root),
       });
       expect(helper.success).toBe(true);
-      const build = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../native-caller-node.fixture.ts')],
+      const build = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, '../native-caller-node.fixture.ts')],
         target: 'node',
         format: 'esm',
         packages: 'bundle',
@@ -124,9 +132,9 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
       const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
       const launch = async (mode: string) => {
         const bootstrap = warm!.bootstrap;
-        child = Bun.spawn(
+        child = spawnFixtureProcess(
           [
-            realpathSync(Bun.which('node')!),
+            realpathSync(findFixtureExecutable('node')!),
             join(f.root, 'native-caller-node.js'),
             mode,
             JSON.stringify({ dataRoot: f.profile.dataRoot, profile: 'owned' }),
@@ -297,24 +305,25 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
 
 test('actual Node Native execution.cancel preserves original independent Job through POST loss and cold first GET loss', async () => {
   const module = await import(
-      resolve(import.meta.dir, '../../../cli/test/fixtures/caller-job-profile.ts')
+      resolve(import.meta.dirname, '../../../cli/test/fixtures/caller-job-profile.ts')
     ),
     f = await module.callerJobProfile();
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
   const wire = `${f.root}-native-execution-cancel.wire.jsonl`;
   try {
     const access = await windowsAccess(f.root);
-    const helper = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-      target: 'bun',
+    const helper = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'bundle',
       outdir: f.root,
       naming: 'native-profile-access.js',
+      ...fixtureRuntimeBuild(f.root),
     });
     expect(helper.success).toBe(true);
-    const build = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../native-caller-node.fixture.ts')],
+    const build = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../native-caller-node.fixture.ts')],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
@@ -330,9 +339,9 @@ test('actual Node Native execution.cancel preserves original independent Job thr
       },
       hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
     const launch = async (mode: string) => {
-      child = Bun.spawn(
+      child = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(f.root, 'native-caller-node.js'),
           mode,
           JSON.stringify({ dataRoot: f.profile.dataRoot, profile: 'owned' }),
@@ -406,7 +415,7 @@ test('actual Node Native cold lookup confirms the completed original public Run 
     module = await import('../../../cli/test/fixtures/recovery-profile'),
     f = await module.recoveryProfile({ completeModelSessionId: sessionId });
   let warm: Awaited<ReturnType<typeof f.launch>> | undefined,
-    child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    child: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
   const wire = `${f.root}-native-derived.wire.jsonl`;
   try {
     const access = await windowsAccess(f.root);
@@ -425,24 +434,25 @@ test('actual Node Native cold lookup confirms the completed original public Run 
       content: 'New task: complete the original Native business\n完整原文🙂é\r\nEXACT TAIL',
     };
     for (const [entrypoint, target, naming] of [
-      ['../../electron/profile-access-helper.ts', 'bun', 'native-profile-access.js'],
+      ['../../electron/profile-access-helper.ts', 'node', 'native-profile-access.js'],
       ['../native-caller-node.fixture.ts', 'node', 'native-caller-node.js'],
     ] as const) {
-      const build = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, entrypoint)],
+      const build = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, entrypoint)],
         target,
         format: 'esm',
         packages: 'bundle',
         outdir: f.root,
         naming,
+        ...(entrypoint.endsWith('profile-access-helper.ts') ? fixtureRuntimeBuild(f.root) : {}),
       });
       expect(build.success).toBe(true);
     }
     const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
     const launch = async (mode: string) => {
-      child = Bun.spawn(
+      child = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(f.root, 'native-caller-node.js'),
           mode,
           JSON.stringify({ dataRoot: f.profile.dataRoot, profile: 'owned' }),

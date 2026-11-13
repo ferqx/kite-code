@@ -1,5 +1,5 @@
-import { Database, type SQLQueryBindings } from 'bun:sqlite';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { Database, type SQLQueryBindings } from '@kite-ai/agent/runtime-sqlite';
 import {
   canonicalSerialize,
   decimal64Schema,
@@ -18,6 +18,7 @@ import {
 import type { TraceEngineBundle } from './engine';
 import { engineDigest } from './engine/assets';
 import { projectTraceEvent, traceReference } from './projection';
+import { readTraceRow, readTraceRows, writeTraceStatement } from './sqlite-statements';
 import {
   sameScope,
   type TraceGrant,
@@ -142,14 +143,15 @@ export class TraceConsumerStore {
     this.db = new Database(path, { create: true, strict: true });
     try {
       this.db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
-      const version = (this.db.query('PRAGMA user_version').get() as { user_version: number })
-        .user_version;
+      const version = readTraceRow<{ user_version: number }>(
+        this.db,
+        'PRAGMA user_version',
+      )!.user_version;
       if (version === 0) {
-        const tables = (
-          this.db.query("SELECT count(*) AS count FROM sqlite_master WHERE type='table'").get() as {
-            count: number;
-          }
-        ).count;
+        const tables = readTraceRow<{ count: number }>(
+          this.db,
+          "SELECT count(*) AS count FROM sqlite_master WHERE type='table'",
+        )!.count;
         if (tables) throw new TraceHostError('trace_consumer_schema_unknown');
         this.db.transaction(() => this.db.exec(schema))();
       } else if (version !== 1) throw new TraceHostError('trace_consumer_schema_unknown');
@@ -169,13 +171,13 @@ export class TraceConsumerStore {
     this.db.close();
   }
   private one<T>(sql: string, ...values: SQLQueryBindings[]): T | null {
-    return this.db.query(sql).get(...values) as T | null;
+    return readTraceRow<T>(this.db, sql, ...values);
   }
   private all<T>(sql: string, ...values: SQLQueryBindings[]): T[] {
-    return this.db.query(sql).all(...values) as T[];
+    return readTraceRows<T>(this.db, sql, ...values);
   }
   private run(sql: string, ...values: SQLQueryBindings[]): void {
-    this.db.query(sql).run(...values);
+    writeTraceStatement(this.db, sql, ...values);
   }
   private installation(id: string): InstallationRow {
     const row = this.one<InstallationRow>('SELECT * FROM installation WHERE id=?', id);

@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 
 const [ledger, catalogue, gate] = process.argv.slice(2) as [string, string, string];
 let buffer = '';
@@ -31,7 +32,7 @@ async function handle(request: {
     send(request.id, Array.isArray(value) ? { tools: value } : value);
   } else if (request.method === 'tools/call') {
     appendFileSync(ledger, `effect:${JSON.stringify(request.params)}\n`);
-    while (gate && !existsSync(gate)) await Bun.sleep(5);
+    while (gate && !existsSync(gate)) await fixtureDelay(5);
     send(request.id, {
       content: [{ type: 'text', text: 'fixed-result' }],
       structuredContent: { version: 'old' },

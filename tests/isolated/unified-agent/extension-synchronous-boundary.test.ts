@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
@@ -10,28 +10,30 @@ import {
 } from '@kite-ai/agent/process-observation';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { type Subprocess, spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 async function waitForFile(path: string) {
   const deadline = Date.now() + 2000;
   while (!existsSync(path)) {
     if (Date.now() >= deadline) throw new Error('synchronous_fixture_entry_unconfirmed');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
 test('a trusted synchronous callback blocks its own timer and observation; an independent host works and cold reads never replay it', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-synchronous-boundary-')));
-  let child: ReturnType<typeof Bun.spawn> | undefined,
+  let child: Subprocess | undefined,
     stdout: Promise<string> | undefined,
     stderr: Promise<string> | undefined;
   let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined,
     healthy: ReturnType<typeof createRuntime> | undefined;
   try {
-    const started = Bun.spawn(
+    const started = spawnFixtureProcess(
       [
         process.execPath,
-        join(import.meta.dir, '../../fixtures/unified-agent/synchronous-extension.ts'),
+        join(import.meta.dirname, '../../fixtures/unified-agent/synchronous-extension.ts'),
         root,
       ],
       { stdout: 'pipe', stderr: 'pipe' },
@@ -110,7 +112,7 @@ test('a trusted synchronous callback blocks its own timer and observation; an in
     healthy = undefined;
 
     const remaining = entered.enteredAt + entered.timeoutMs + 100 - Date.now();
-    if (remaining > 0) await Bun.sleep(remaining);
+    if (remaining > 0) await fixtureDelay(remaining);
     expect(Date.now() - entered.enteredAt).toBeGreaterThan(entered.timeoutMs);
     expect(child.exitCode).toBeNull();
     expect(existsSync(join(root, 'timer-fired.json'))).toBe(false);

@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
 import { ModelOutputMessage } from '@kite-ai/ui';
 import { MessageContent, SessionPage } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { desktopMessages } from '../../src/native-presentation';
 import { desktopTranscript } from '../../src/native-transcript';
 import type { NativeRunFact } from '../../src/tool-messages-bridge';

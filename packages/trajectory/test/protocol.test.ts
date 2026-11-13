@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import Ajv2020 from 'ajv/dist/2020';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { expect, test } from '#kite-test';
 import {
   canonicalSerialize,
   compareDecimal64,

@@ -1,15 +1,22 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { run } from '../../src';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { planningProfile } from '../fixtures/planning-profile';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 async function initializePlanningHost(
   f: Awaited<ReturnType<typeof planningProfile>>,
   providerURL: string,
@@ -106,7 +113,7 @@ test('native 80x24 PTY observer preserves complete Unicode and styled material a
     cmd: [
       process.execPath,
       '-e',
-      `process.stdout.write(${JSON.stringify(body)});await Bun.sleep(250);`,
+      `process.stdout.write(${JSON.stringify(body)});await new Promise(resolve=>setTimeout(resolve,250));`,
     ],
     cwd: repo,
     conptyCellWidths: process.platform === 'win32',
@@ -140,12 +147,12 @@ for (const entrance of [
 ] as const)
   test(`80x24 actual ${entrance} single Planning intent reviews full original Artifact and never inherits Full authority`, async () => {
     const f = await planningProfile();
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const body = `ORIGINAL_PLAN_UTF8 ${'原完整🙂e\u0301方案'.repeat(6500)} ORIGINAL_PLAN_FULL_TAIL`;
     let calls = 0,
       closing = false;
     const models: Record<string, unknown>[] = [];
-    const provider = Bun.serve({
+    const provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -159,7 +166,7 @@ for (const entrance of [
             'actual original Model SDK request',
           );
           while (!existsSync(join(f.root, 'original-model-release')) && !closing)
-            await Bun.sleep(5);
+            await testSleep(5);
           if (closing) throw Error('owned Planning fixture closed');
           const frame = (delta: unknown, reason: string | null) =>
             `data: ${JSON.stringify({ id: 'original-parent', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
@@ -266,17 +273,17 @@ for (const entrance of [
         transcript = `${f.root}-plan.pty.log`;
       writeFileSync(
         runner,
-        `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};import{recordPlanningHostRead}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/test/fixtures/tui-planning-read-diagnostic.ts')).href)};const actual=globalThis.fetch;let originalAnswer,lostGet=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const path=new URL(String(args[0])).pathname,method=args[1]?.method??'GET',body=args[1]?.body?JSON.parse(String(args[1].body)):null;appendFileSync(${JSON.stringify(wire)},JSON.stringify({path,method,body})+'\\n');const response=await actual(...args);if(method==='GET')await recordPlanningHostRead(path,response,${JSON.stringify(`${transcript}.host-reads.jsonl`)});if(method==='GET'&&path.includes('/artifacts/')){writeFileSync(${JSON.stringify(join(f.root, 'plan-attachment.bin'))},new Uint8Array(await response.clone().arrayBuffer()));}if(method==='POST'&&path.endsWith('/answer')&&body?.answer?.kind==='plan_review'){originalAnswer=body.commandId;await response.arrayBuffer();throw Error('actual original plan answer POST response lost');}if(method==='GET'&&originalAnswer&&path==='/v1/commands/'+originalAnswer&&!lostGet){lostGet=true;await response.arrayBuffer();writeFileSync(${JSON.stringify(firstLost)},'actual original GET lost');throw Error('actual original plan GET response lost');}return response;},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'plan-owned-pid'))},String(pid),{mode:0o600})});`,
+        `import{appendFileSync,writeFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};import{recordPlanningHostRead}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/test/fixtures/tui-planning-read-diagnostic.ts')).href)};const actual=globalThis.fetch;let originalAnswer,lostGet=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const path=new URL(String(args[0])).pathname,method=args[1]?.method??'GET',body=args[1]?.body?JSON.parse(String(args[1].body)):null;appendFileSync(${JSON.stringify(wire)},JSON.stringify({path,method,body})+'\\n');const response=await actual(...args);if(method==='GET')await recordPlanningHostRead(path,response,${JSON.stringify(`${transcript}.host-reads.jsonl`)});if(method==='GET'&&path.includes('/artifacts/')){writeFileSync(${JSON.stringify(join(f.root, 'plan-attachment.bin'))},new Uint8Array(await response.clone().arrayBuffer()));}if(method==='POST'&&path.endsWith('/answer')&&body?.answer?.kind==='plan_review'){originalAnswer=body.commandId;await response.arrayBuffer();throw Error('actual original plan answer POST response lost');}if(method==='GET'&&originalAnswer&&path==='/v1/commands/'+originalAnswer&&!lostGet){lostGet=true;await response.arrayBuffer();writeFileSync(${JSON.stringify(firstLost)},'actual original GET lost');throw Error('actual original plan GET response lost');}return response;});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'plan-owned-pid'))},String(pid),{mode:0o600})});`,
       );
       const compiled = await compileFileRecoveryTUI(f.root, runner);
       if (!compiled.success) throw new AggregateError(compiled.logs, 'owned Planning host build');
       const expectedBodyPath = join(f.root, 'original-plan-body.txt');
       writeFileSync(expectedBodyPath, body);
-      driver = Bun.spawn(
+      driver = testSpawn(
         [
           process.execPath,
-          '--no-install',
-          join(import.meta.dir, '../fixtures/tui-planning-pty.ts'),
+          ...testRuntimeFlags,
+          join(import.meta.dirname, '../fixtures/tui-planning-pty.ts'),
           JSON.stringify({
             entrance,
             root: f.root,
@@ -633,7 +640,7 @@ test('CLI default Planning reads the complete original body then deny returns ca
   const f = await planningProfile();
   const body = `CLI_ORIGINAL_PLAN ${'完整原文🙂e\u0301'.repeat(6500)} CLI_ORIGINAL_PLAN_TAIL`;
   let calls = 0;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch() {
@@ -714,19 +721,16 @@ test('CLI default Planning reads the complete original body then deny returns ca
       requiredCapabilities: ['sessions', 'commands', 'interactions'],
     });
     const endpoint = new URL(paired.bootstrap.endpoint).origin;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        if (url.origin === endpoint)
-          network.push({
-            method: args[1]?.method ?? 'GET',
-            path: url.pathname,
-            body: args[1]?.body ? JSON.parse(String(args[1].body)) : null,
-          });
-        return originalFetch(...args);
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0]));
+      if (url.origin === endpoint)
+        network.push({
+          method: args[1]?.method ?? 'GET',
+          path: url.pathname,
+          body: args[1]?.body ? JSON.parse(String(args[1].body)) : null,
+        });
+      return originalFetch(...args);
+    }, {});
     const outcome = await run(
       's',
       {

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   mkdirSync,
   mkdtempSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
 import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, withPlanFileTools } from '../../../src/files';
 

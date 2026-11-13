@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from 'node:assert';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -9,6 +10,7 @@ import { startDevelopmentWeb } from '@kite-ai/service/development-web';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { type AssetManifest, validateTrustedAssets } from '@kite-ai/web';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../test-filesystem';
 
 // Independent actual browser qualifier. Only facts/hold/release/stop are accepted on stdin.
@@ -23,7 +25,7 @@ writeFileSync(join(workspace, 'original.txt'), original);
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');
 const requests: unknown[] = [];
 const steps = new Map<string, number>();
-const provider = Bun.serve({
+const provider = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -100,8 +102,8 @@ writeFileSync(
 );
 const built = await buildTerminalBundle({
   destination: join(root, 'candidate'),
-  repositoryRoot: realpathSync(join(import.meta.dir, '../../..')),
-  bunExecutable: process.execPath,
+  repositoryRoot: realpathSync(join(import.meta.dirname, '../../..')),
+  nodeExecutable: process.execPath,
 });
 const child = await launchPairedService({
   entrypoint: built.artifact.entrypoint,
@@ -121,11 +123,11 @@ async function until<T>(read: () => Promise<T>, match: (value: T) => boolean) {
     const value = await read();
     if (match(value)) return value;
     if (Date.now() > deadline) throw Error('owned_browser_fixture_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
-let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
-let proxy: ReturnType<typeof Bun.serve> | undefined;
+let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
+let proxy: FixtureServer | undefined;
 const reader = await openSqliteStore({
   dataRoot: profile.dataRoot,
   profile: profile.profile,
@@ -249,8 +251,8 @@ try {
     ]),
   );
   await validateTrustedAssets(assets, assetManifest);
-  gateway = startDevelopmentWeb({ admittedClient: client, assets });
-  proxy = Bun.serve({
+  gateway = await startDevelopmentWeb({ admittedClient: client, assets });
+  proxy = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

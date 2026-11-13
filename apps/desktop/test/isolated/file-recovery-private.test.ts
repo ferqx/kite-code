@@ -1,9 +1,14 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 test('actual Node DB7 validates all leg digests, original PK/UTF8, monotone CAS, capacity and cold unknown without reissuing', async () => {
@@ -13,16 +18,16 @@ test('actual Node DB7 validates all leg digests, original PK/UTF8, monotone CAS,
     const initialized = acquireProfileAccess(profile);
     privateDirectory(profile.profilePath);
     initialized.lock.release();
-    const helper = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-      target: 'bun',
+    const helper = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'bundle',
       outdir: root,
       naming: 'helper.js',
     });
-    const driver = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../file-recovery-private-node.fixture.ts')],
+    const driver = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../file-recovery-private-node.fixture.ts')],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
@@ -34,9 +39,9 @@ test('actual Node DB7 validates all leg digests, original PK/UTF8, monotone CAS,
     const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex'),
       bun = realpathSync(process.execPath),
       helperPath = join(root, 'helper.js');
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           JSON.stringify({ dataRoot: profile.dataRoot, profile: profile.profile }),
           bun,

@@ -1,10 +1,11 @@
-import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import * as promises from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { mock } from '#kite-test';
 
 const root = process.argv[2]!;
 const original = { ...promises };
@@ -88,7 +89,7 @@ const host = createDefaultProcessConfiguration({
     configurationId: 'verification-scheduling-test',
     env: { SystemRoot: process.env.SystemRoot!, Path: '' },
     supervisorPath: assets.runner,
-    bunExecutable: process.execPath,
+    runtimeExecutable: process.execPath,
     shellExecutable: assets.shell,
     windows: { fullShellExecutable: assets.fullShell, stateRoot },
     host: {
@@ -146,7 +147,7 @@ const until = async <T>(read: () => Promise<T | undefined>): Promise<T> => {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() >= deadline) throw Error('verification_scheduling_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 };
 const job = async (id: string) =>

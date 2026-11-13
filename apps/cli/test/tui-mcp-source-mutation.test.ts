@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { Command, QueryResponse } from '@kite-ai/client';
 import type { TuiMcpSourceMutationIntent, TuiMcpSourceSnapshot } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { mcpSha } from '../host/mcp-selection-intents';
 import {
   createMcpSourceMutationRecord,

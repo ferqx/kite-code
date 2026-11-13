@@ -1,15 +1,17 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { mcpCanonical } from '@kite-ai/agent/config';
 import type { Extension, Json, Permissions } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { readSkillSelection } from '../../src/child-configuration';
@@ -26,7 +28,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
     const value = await read();
     if (done(value)) return value;
     if (Date.now() > deadline) throw Error('skill_selection_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(runlessTools = false) {
@@ -49,7 +51,7 @@ async function fixture(runlessTools = false) {
   let requests = 0,
     credentialReads = 0;
   const records: { model: string; messages: unknown[] }[] = [];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

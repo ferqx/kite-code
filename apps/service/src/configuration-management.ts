@@ -370,6 +370,7 @@ export function createConfigurationManagement(options: {
   userConfiguration: UserConfiguration;
   runtime?: AgentRuntime;
   vault: ReturnType<typeof createCredentialVault>;
+  authorizeModelCredentials?: (ref?: string) => Promise<void>;
   persistence: 'os' | 'temporary';
   explicit: () => JsonObject;
 }): ConfigurationManagementPort {
@@ -858,6 +859,10 @@ export function createConfigurationManagement(options: {
               configurationState = 'published';
               return { etag: result.etag, credentialState, configurationState };
             }
+            if (operation.credential === 'keep' && typeof originalRef === 'string') {
+              await options.authorizeModelCredentials?.(originalRef);
+              assertReadSet(input.expectedReadSet);
+            }
             let names = providerModelNames(operation.modelNames);
             if (!names.length) {
               const secret =
@@ -949,6 +954,10 @@ export function createConfigurationManagement(options: {
             // Preflight the complete candidate before either publication medium is touched.
             validate({ ...state.user.value, models });
             if (operation.credential === 'replace') {
+              // Prepare the wrapping key before publishing any credential record. A key
+              // preparation failure leaves the provider save safe to submit again.
+              await options.authorizeModelCredentials?.();
+              assertReadSet(input.expectedReadSet);
               credentialState = 'outcome_unknown';
               const stored = await options.vault.put(input.secret!);
               credentialState = 'stored';

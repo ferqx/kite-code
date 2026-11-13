@@ -1,8 +1,14 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 test('actual Node private file cold restore, two-process CAS, paginated retained drafts and damaged bytes fail closed', async () => {
@@ -12,20 +18,21 @@ test('actual Node private file cold restore, two-process CAS, paginated retained
     const initialized = acquireProfileAccess(profile);
     privateDirectory(initialized.profilePath);
     initialized.lock.release();
-    const helper = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-      target: 'bun',
+    const helper = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'bundle',
       outdir: root,
       naming: 'profile-access.js',
+      ...fixtureRuntimeBuild(root),
     });
     expect(helper.success).toBe(true);
     const bunExecutable = realpathSync(process.execPath),
       helperPath = join(root, 'profile-access.js');
     const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-    const built = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../private-data-node.fixture.ts')],
+    const built = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../private-data-node.fixture.ts')],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
@@ -41,26 +48,33 @@ test('actual Node private file cold restore, two-process CAS, paginated retained
       sha(helperPath),
     ];
     async function denied(code: string) {
-      const denied = Bun.spawn(
-        [realpathSync(Bun.which('node')!), join(root, 'driver.js'), 'denied', ...nativeArgs, code],
+      const denied = spawnFixtureProcess(
+        [
+          realpathSync(findFixtureExecutable('node')!),
+          join(root, 'driver.js'),
+          'denied',
+          ...nativeArgs,
+          code,
+        ],
         { stdout: 'pipe', stderr: 'pipe' },
       );
       const output = new Response(denied.stdout).text(),
         error = new Response(denied.stderr).text();
       const timer = setTimeout(() => denied.kill('SIGKILL'), 15000);
       try {
-        expect(await denied.exited).toBe(0);
+        const exit = await denied.exited;
+        if (exit !== 0) console.error(await error);
+        expect(exit).toBe(0);
         expect(await output).toContain('private-lease-denied');
         expect(existsSync(join(initialized.profilePath, 'desktop-private/data.sqlite'))).toBe(
           false,
         );
-        if (denied.exitCode) console.error(await error);
       } finally {
         clearTimeout(timer);
       }
     }
     const runtimeProfile = await import(
-      resolve(import.meta.dir, '../../../../packages/agent/src/platform/profile.ts')
+      resolve(import.meta.dirname, '../../../../packages/agent/src/platform/profile.ts')
     );
     const maintenance = runtimeProfile.acquireProfileAccess(profile, 'exclusive');
     try {
@@ -76,9 +90,9 @@ test('actual Node private file cold restore, two-process CAS, paginated retained
     } finally {
       unlinkSync(join(initialized.coordinationPath, 'restore-journal.json'));
     }
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         join(root, 'driver.js'),
         'parent',
         JSON.stringify(profile),

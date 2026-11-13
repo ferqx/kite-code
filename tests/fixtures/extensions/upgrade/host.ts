@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -109,7 +110,7 @@ async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean
     const value = await read();
     if (predicate(value)) return value;
     if (Date.now() > deadline) throw Error(`fixture_deadline:${JSON.stringify(value)}`);
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 async function run(sessionId: string, commandId: string, content: string) {

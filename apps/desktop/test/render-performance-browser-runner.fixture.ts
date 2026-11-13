@@ -5,6 +5,8 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './render-performance-browser.fixture';
 
 type Frame = {
@@ -32,7 +34,7 @@ declare global {
   }
 }
 
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'render-performance-'));
@@ -57,10 +59,10 @@ await build({
     target: 'esnext',
   },
 });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
     if (pathname === '/')
@@ -70,7 +72,7 @@ const server = Bun.serve({
       );
     const file = path.resolve(output, `.${pathname}`);
     if (!file.startsWith(output + path.sep)) return new Response(null, { status: 404 });
-    return new Response(Bun.file(file));
+    return new Response(await openFixtureFile(file));
   },
 });
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel: 'chrome' });
@@ -382,7 +384,7 @@ try {
       settlement,
       errors,
     });
-    await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+    await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(summary));
     assert.ok(
       initialFrames.every((frame) => frame.animations === 0),
@@ -497,11 +499,11 @@ try {
       settlementIdentities,
       completeHistory,
     });
-    await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+    await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
     await page.screenshot({ path: path.join(artifact, `full-history-${label}.png`) });
     await page.close();
   }
-  await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
 } finally {
   console.log(JSON.stringify({ artifact }));
   await browser.close();

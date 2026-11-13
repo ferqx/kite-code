@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
-import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
 import type {
   WindowsNativeBuildResource,
   WindowsNativeCandidateBuildPort,
@@ -12,40 +12,16 @@ import type {
   VerifiedTerminalRuntimeBundle,
 } from '../../apps/service/src/runtime-assets';
 import {
+  windowsNodeDesktopRuntimeEntries,
+  windowsTerminalVerifierAddonPath,
+} from '../../apps/service/src/runtime-assets';
+import { windowsNodeDesktopFrontdoorNames } from '../../packages/agent/src/platform/windows-native-frontdoors';
+import { build as bundle } from '../tooling/bun-build';
+import {
   buildWindowsTerminalLauncher,
-  compileWindowsVerifier,
   copyWindowsSystemExecutable,
 } from './build-windows-terminal-launcher';
 import { sharedWindowsNativeVerifier } from './windows-verifier-assets';
-
-async function compileLegacyNativeVerifier(
-  root: string,
-  runtime: string,
-  pins: WindowsNativeBuildResource[],
-) {
-  const compileRoot = join(root, `.windows-native-verifier-${randomUUID()}`);
-  privateDirectory(compileRoot);
-  const compiledPath = join(compileRoot, 'native-verifier.exe');
-  await compileWindowsVerifier({
-    runtime,
-    entrypoint: resolve(import.meta.dir, 'entrypoints/windows-native-verifier-main.ts'),
-    outfile: compiledPath,
-  });
-  const verifierPath = join(root, 'app', 'native-verifier.exe');
-  const compiledPin = retainWindowsCandidateFiles(compileRoot, ['native-verifier.exe']);
-  pins.push(compiledPin);
-  copyWindowsSystemExecutable(compiledPath, verifierPath);
-  compiledPin.verify();
-  compiledPin.release();
-  pins.pop();
-  rmSync(compileRoot, { recursive: true, force: false });
-  const bytes = readFileSync(verifierPath);
-  return {
-    path: verifierPath,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-    size: bytes.length,
-  };
-}
 
 async function buildFrontdoors(
   root: string,
@@ -55,14 +31,30 @@ async function buildFrontdoors(
   const security = defaultWindowsPathSecurity()!;
   const app = join(root, 'app');
   const desktop = !('cli' in terminal.manifest.entries);
+  if (!terminal.manifest.nodeVersion) throw Error('windows_native_node_runtime_required');
+  const addon = terminal.manifest.files.find(
+    (file) =>
+      file.path ===
+      (desktop ? 'code/@kite-ai/agent/runtime-native.node' : windowsTerminalVerifierAddonPath),
+  );
+  if (
+    addon?.mode !== 493 ||
+    (desktop && terminal.manifest.entries.runtime !== windowsNodeDesktopRuntimeEntries.runtime)
+  )
+    throw Error('windows_native_runtime_unavailable');
   let verifier: { path: string; sha256: string; size: number };
   if (desktop) {
-    const path = join(app, 'native-verifier.js');
-    const build = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, 'entrypoints/windows-native-verifier.ts')],
-      target: 'bun',
+    const filename = windowsNodeDesktopFrontdoorNames[1];
+    const path = join(app, filename);
+    const build = await bundle({
+      entrypoints: [resolve(import.meta.dirname, 'entrypoints/windows-native-verifier.ts')],
+      target: 'node',
+      format: 'esm',
       outdir: app,
-      naming: 'native-verifier.js',
+      naming: filename,
+      ...(addon
+        ? { define: { __KITE_WINDOWS_DESKTOP_ADDON_SHA256__: JSON.stringify(addon.sha256) } }
+        : {}),
       minify: true,
     });
     if (!build.success)
@@ -75,21 +67,26 @@ async function buildFrontdoors(
     };
   } else {
     const shared = sharedWindowsNativeVerifier(terminal.manifest);
-    verifier = shared
-      ? { ...shared, path: join(terminal.root, shared.path) }
-      : await compileLegacyNativeVerifier(
-          root,
-          join(terminal.root, terminal.manifest.entries.runtime),
-          resources.pins,
-        );
+    if (!shared) throw Error('windows_native_runtime_unavailable');
+    verifier = { ...shared, path: join(terminal.root, shared.path) };
   }
   const runtime = terminal.manifest.files.find(
     (file) => file.path === terminal.manifest.entries.runtime,
   );
-  if (!runtime) throw Error('windows_native_runtime_unavailable');
+  if (runtime?.mode !== 493) throw Error('windows_native_runtime_unavailable');
   const launchers = await buildWindowsTerminalLauncher({
     kind: desktop ? 'desktop' : 'native',
-    ...(desktop ? { desktopRuntime: runtime } : {}),
+    ...(desktop
+      ? {
+          desktopRuntime: {
+            ...runtime,
+            runtimeKind: 'node',
+            ...(addon ? { addonSha256: addon.sha256, addonSize: addon.size } : {}),
+          },
+        }
+      : addon
+        ? { verifierAddon: { sha256: addon.sha256, size: addon.size } }
+        : {}),
     outdir: join(root, `.windows-native-launcher-${randomUUID()}`),
     verifierPath: verifier.path,
     verifierSha256: verifier.sha256,

@@ -1,5 +1,7 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../../../scripts/tooling/test-command';
 
 for (const mode of ['complete', 'eof'] as readonly string[]) {
   test(`real child POSIX PTY ${mode} answers original child through presentation root without borrowing authority`, async () => {
@@ -10,7 +12,7 @@ temporary=tempfile.TemporaryDirectory(prefix='kite-tui-facts-')
 facts=os.path.join(temporary.name,'facts.json')
 env=dict(os.environ);env['KITE_TUI_FACTS']=facts
 env['KITE_TUI_ROOT']=os.path.join(temporary.name,'runtime');os.mkdir(env['KITE_TUI_ROOT'],0o700)
-p=subprocess.Popen(['bun',${JSON.stringify(join(import.meta.dir, 'child-permissions.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True)
+p=subprocess.Popen(${JSON.stringify(testNodeCommand(join(import.meta.dirname, 'child-permissions.fixture.tsx')))},stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True)
 os.close(slave)
 reader=master
 chunks=[]
@@ -73,7 +75,10 @@ finally:
  if master>=0: os.close(master)
  temporary.cleanup()
 `;
-    const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+    const child = spawnFixtureProcess(['python3', '-c', program], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const [out, err, exit] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -15,6 +14,17 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { compileSqlite, sqliteLibraryBasename } from '../../../scripts/release/compile-sqlite';
+import {
+  cachedNodeDistribution,
+  extractNodeDistribution,
+  extractReviewedSqlite,
+} from '../../../scripts/release/node-inputs';
+import { buildTerminalSqliteEngine } from '../../../scripts/release/sqlite-engine';
+import { build as bundle } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 type Manifest = {
   name: string;
@@ -23,9 +33,10 @@ type Manifest = {
   scripts: { build: string };
   dependencies?: Record<string, string>;
 };
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
+const register = join(repository, 'scripts/tooling/register.mjs');
 function assertWorktreeAssetClosure(directory: string) {
-  for (const name of ['manifest.json', 'worker.js', 'empty-bunfig.toml']) {
+  for (const name of ['manifest.json', 'worker.js']) {
     const stat = lstatSync(join(directory, name));
     expect(stat.isFile()).toBe(true);
     expect(stat.isSymbolicLink()).toBe(false);
@@ -34,8 +45,8 @@ function assertWorktreeAssetClosure(directory: string) {
   expect(Object.keys(manifest).sort()).toEqual(['emptyHooks', 'files', 'schemaVersion']);
   expect(manifest.schemaVersion).toBe(1);
   expect(manifest.emptyHooks).toBe('empty-hooks');
-  expect(Object.keys(manifest.files).sort()).toEqual(['empty-bunfig.toml', 'worker.js']);
-  for (const name of ['worker.js', 'empty-bunfig.toml']) {
+  expect(Object.keys(manifest.files).sort()).toEqual(['worker.js']);
+  for (const name of ['worker.js']) {
     expect(manifest.files[name]).toMatch(/^[a-f0-9]{64}$/);
     expect(
       createHash('sha256')
@@ -52,26 +63,22 @@ function assertWorktreeAssetClosure(directory: string) {
 test('packaged Worktree assets reject altered bytes, manifest drift and nonempty or non-directory hooks', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-worktree-asset-check-')));
   const worker = join(root, 'worker.js');
-  const config = join(root, 'empty-bunfig.toml');
   const manifestPath = join(root, 'manifest.json');
   const hooks = join(root, 'empty-hooks');
   const workerBytes = 'export const inertFixture = true;\n';
-  const configBytes = '# empty fixture\n';
   const manifest = {
     schemaVersion: 1,
     files: Object.fromEntries([
       ['worker.js', createHash('sha256').update(workerBytes).digest('hex')],
-      ['empty-bunfig.toml', createHash('sha256').update(configBytes).digest('hex')],
     ]),
     emptyHooks: 'empty-hooks',
   };
   try {
     writeFileSync(worker, workerBytes);
-    writeFileSync(config, configBytes);
     writeFileSync(manifestPath, JSON.stringify(manifest));
     mkdirSync(hooks);
     assertWorktreeAssetClosure(root);
-    for (const path of [worker, config]) {
+    for (const path of [worker]) {
       const original = readFileSync(path);
       writeFileSync(path, Buffer.concat([original, Buffer.from('changed')]));
       expect(() => assertWorktreeAssetClosure(root)).toThrow();
@@ -104,7 +111,7 @@ test('packaged Worktree assets reject altered bytes, manifest drift and nonempty
   }
 });
 async function run(args: string[], cwd: string, env: Record<string, string> = {}) {
-  const child = Bun.spawn([process.execPath, ...args], {
+  const child = spawnFixtureProcess([process.execPath, ...args], {
     cwd,
     env: { PATH: process.env.PATH ?? '', ...env },
     stdout: 'pipe',
@@ -135,12 +142,22 @@ async function run(args: string[], cwd: string, env: Record<string, string> = {}
     }
   }
 }
-async function buildManifest(manifest: Manifest, source: string, destination: string) {
+async function buildManifest(
+  manifest: Manifest,
+  source: string,
+  destination: string,
+  env?: Record<string, string>,
+) {
   // Execute every command from the actual manifest, changing only its output destination.
   // All entries remain in one build invocation, preserving common-root behavior.
   for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
     const words = segment.trim().split(/\s+/);
-    if (words.shift() !== 'bun') throw new Error('unsupported_manifest_build');
+    if (
+      words.shift() !== 'node' ||
+      words.shift() !== '--import' ||
+      resolve(source, words.shift() ?? '') !== register
+    )
+      throw new Error('unsupported_manifest_build');
     const args = words.map((word) =>
       word === 'dist' || word === './dist'
         ? destination
@@ -148,7 +165,7 @@ async function buildManifest(manifest: Manifest, source: string, destination: st
     );
     const outputFlag = args.indexOf('--outdir');
     if (outputFlag >= 0) args[outputFlag + 1] = destination;
-    await run(args, source);
+    await run(['--import', register, ...args], source, env);
   }
   const exports = Object.fromEntries(
     Object.entries(manifest.exports).map(([key, path]) => [
@@ -168,9 +185,9 @@ const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.
 nativeTest(
   'complete manifest build runs SQLite Worker, Shell and MCP guardians, Web parser, Skills and paired Service outside source without fallback',
   async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-built-package-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-built-package-')));
     let proxyRequests = 0;
-    const proxy = Bun.serve({
+    const proxy = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       fetch() {
@@ -181,12 +198,21 @@ nativeTest(
     try {
       const artifact = join(root, 'distribution');
       const modules = join(artifact, 'node_modules');
+      const inputs = join(root, 'verified-build-inputs');
+      mkdirSync(inputs);
+      const node = extractNodeDistribution(repository, cachedNodeDistribution(repository), inputs);
+      const sqlite = extractReviewedSqlite(repository, inputs);
       const agentPath = join(modules, '@kite-ai/agent');
       mkdirSync(agentPath, { recursive: true });
       const agent = JSON.parse(
         readFileSync(join(repository, 'packages/agent/package.json'), 'utf8'),
       ) as Manifest;
-      const exports = await buildManifest(agent, join(repository, 'packages/agent'), agentPath);
+      const exports = await buildManifest(agent, join(repository, 'packages/agent'), agentPath, {
+        KITE_RELEASE_NODE_HEADERS: node.headers,
+        KITE_RELEASE_SQLITE_HEADERS: sqlite,
+      });
+      const library = compileSqlite(sqlite, join(inputs, sqliteLibraryBasename(process.platform)));
+      await buildTerminalSqliteEngine({ root: artifact, executable: process.execPath, library });
       // External npm dependencies are linked as installed modules. Workspace AI is a
       // separately built sibling package, never the source workspace alias.
       const ai = JSON.parse(
@@ -207,12 +233,19 @@ nativeTest(
       const servicePath = join(modules, '@kite-ai/service');
       mkdirSync(servicePath, { recursive: true });
       await buildManifest(service, join(repository, 'apps/service'), servicePath);
+      const trajectory = JSON.parse(
+        readFileSync(join(repository, 'packages/trajectory/package.json'), 'utf8'),
+      ) as Manifest;
+      const trajectoryPath = join(modules, '@kite-ai/trajectory');
+      mkdirSync(trajectoryPath, { recursive: true });
+      await buildManifest(trajectory, join(repository, 'packages/trajectory'), trajectoryPath);
       const dependencyOwners = new Map<string, string[]>();
       for (const [manifest, source] of [
         [agent, 'packages/agent'],
         [ai, 'packages/ai'],
         [client, 'packages/client'],
         [service, 'apps/service'],
+        [trajectory, 'packages/trajectory'],
       ] as const) {
         for (const dependency of Object.keys(manifest.dependencies ?? {})) {
           const owners = dependencyOwners.get(dependency) ?? [];
@@ -222,7 +255,12 @@ nativeTest(
       }
       for (const [dependency, owners] of dependencyOwners) {
         if (dependency.startsWith('@kite-ai/')) {
-          expect(['@kite-ai/agent', '@kite-ai/ai', '@kite-ai/client']).toContain(dependency);
+          expect([
+            '@kite-ai/agent',
+            '@kite-ai/ai',
+            '@kite-ai/client',
+            '@kite-ai/trajectory',
+          ]).toContain(dependency);
           continue;
         }
         const target = join(modules, dependency);
@@ -244,7 +282,7 @@ nativeTest(
       expect(existsSync(join(agentPath, 'mcp/schema-worker.sha256'))).toBe(true);
       expect(existsSync(join(agentPath, 'skills/workflow-contract/worker.js'))).toBe(false);
       expect(existsSync(join(agentPath, 'skills/workflow-contract/worker.sha256'))).toBe(false);
-      expect(existsSync(join(agentPath, 'tools/browser/executor/worker.js'))).toBe(true);
+      expect(existsSync(join(agentPath, 'tools/browser/executor/worker.mjs'))).toBe(true);
       expect(exports).toEqual({
         '.': './index.js',
         './extensions': './extensions/index.js',
@@ -276,6 +314,8 @@ nativeTest(
         './maintenance': './maintenance/index.js',
         './artifact-access': './artifact-access.js',
         './sqlite-engine': './sqlite-engine.js',
+        './runtime-ffi': './runtime-ffi.js',
+        './runtime-sqlite': './runtime-sqlite.js',
         './windows-path-security': './platform/windows-path-security.js',
       });
       expect(exports['./maintenance']).toBe('./maintenance/index.js');
@@ -299,6 +339,12 @@ createInterface({input:process.stdin}).on('line',line=>{
  process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');
 });`,
       );
+      const httpFixture = await bundle({
+        entrypoints: [join(repository, 'scripts/tooling/http.ts')],
+        outfile: join(artifact, 'fixture-http.mjs'),
+        target: 'node',
+      });
+      expect(httpFixture.success).toBe(true);
       const entry = join(artifact, 'verify.mjs');
       writeFileSync(
         entry,
@@ -307,20 +353,24 @@ import assert from 'node:assert/strict';
 import {mkdirSync,writeFileSync,existsSync,readFileSync,renameSync,readdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {join} from 'node:path';
-const base=import.meta.dir;
+import {fileURLToPath} from 'node:url';
+import {setTimeout as sleep} from 'node:timers/promises';
+import {serve} from './fixture-http.mjs';
+const base=import.meta.dirname;
+const resolvePackage=(specifier)=>fileURLToPath(import.meta.resolve(specifier));
 const packageRoot=join(base,'node_modules/@kite-ai/agent');
 const manifest=JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
 for(const key of Object.keys(manifest.exports)){
  const specifier=key==='.'?'@kite-ai/agent':'@kite-ai/agent/'+key.slice(2);
- const path=Bun.resolveSync(specifier,base);
+ const path=resolvePackage(specifier);
  assert(path.startsWith(packageRoot+'/')&&path.endsWith('.js')&&!path.includes('/src/'));
  await import(specifier);
 }
-assert(Bun.resolveSync('@kite-ai/ai',base).startsWith(join(base,'node_modules/@kite-ai/ai')+'/'));
+assert(resolvePackage('@kite-ai/ai').startsWith(join(base,'node_modules/@kite-ai/ai')+'/'));
 for(const packageName of ['client','service']){
  const root=join(base,'node_modules/@kite-ai/'+packageName);assert(!existsSync(join(root,'src')));
  const entries=JSON.parse(readFileSync(join(root,'package.json'),'utf8')).exports;
- for(const key of Object.keys(entries)){const name=key==='.'?'@kite-ai/'+packageName:'@kite-ai/'+packageName+'/'+key.slice(2);assert(Bun.resolveSync(name,base).startsWith(root+'/'));await import(name);}
+ for(const key of Object.keys(entries)){const name=key==='.'?'@kite-ai/'+packageName:'@kite-ai/'+packageName+'/'+key.slice(2);assert(resolvePackage(name).startsWith(root+'/'));await import(name);}
 }
 const {createRuntime,AgentError}=await import('@kite-ai/agent');
 const {AgentError:StorageAgentError}=await import('@kite-ai/agent/storage');
@@ -368,9 +418,9 @@ const skills=join(working,'knowledge');mkdirSync(skills);writeFileSync(join(skil
 const source=createSkillSource({trustedRoots:[skills],locations:[skills]});const summary=(await source.list()).entries[0];const body=await source.load({id:summary.id,version:summary.version});assert.equal(body.resources.length,1);assert.equal((await source.readResource({skillId:summary.id,version:summary.version,path:'note.txt'})).body,'packaged reference');
 assert.equal(shellSupervisorAsset(),join(packageRoot,'platform/process/shell-supervisor.js'));
 assert.equal(mcpStdioGuardianAsset(),join(packageRoot,'mcp/stdio-guardian.js'));
-const browserWorker=browserExecutorWorkerAsset();assert.equal(browserWorker,join(packageRoot,'tools/browser/executor/worker.js'));assert(existsSync(browserWorker));
+const browserWorker=browserExecutorWorkerAsset();assert.equal(browserWorker,join(packageRoot,'tools/browser/executor/worker.mjs'));assert(existsSync(browserWorker));
 const browserExecutorCalls=[];let browserExecutorQualified=false,browserExecutorClosed=false,browserExecutorUnavailable=false;
-const browserExecutorOptions={scope:'packaged-browser-code',workerPath:browserWorker,guardianPath:mcpStdioGuardianAsset(),bunExecutable:process.execPath};
+const browserExecutorOptions={scope:'packaged-browser-code',workerPath:browserWorker,guardianPath:mcpStdioGuardianAsset(),runtimeExecutable:process.execPath};
 if(process.platform==='darwin'){
  const deniedFile=join(working,'executor-denied.txt');writeFileSync(deniedFile,'PACKAGED_EXECUTOR_FIXTURE_ONLY');
  let observations=0,filled='',clicked=0;
@@ -378,7 +428,7 @@ if(process.platform==='darwin'){
  const executor=await createBrowserExecutor(browserExecutorOptions);
  try{
   assert.deepEqual(await executor.execute({code:'var p=await browser.open("http://localhost/packaged-only"); var count=4; const signature="built"; let mutable=1; var first=await p.snapshot(); await p.fill(first.elements.find(e=>e.role==="textbox").ref,"Ada"); var fresh=await p.snapshot(); await p.click(fresh.elements.find(e=>e.role==="button").ref); var verified=await p.snapshot(); ({filled:verified.filled,clicked:verified.clicked})',signal:new AbortController().signal,call}),{value:{filled:'Ada',clicked:1},output:''});
-  assert.deepEqual(await executor.execute({code:'count+=mutable; var denied=false; try{await Bun.file('+JSON.stringify(deniedFile)+').text();}catch{denied=true;} console.log(signature,p.id); ({count,denied})',signal:new AbortController().signal,call}),{value:{count:5,denied:true},output:'built packaged-page\\n'});
+  assert.deepEqual(await executor.execute({code:'count+=mutable; var denied=false; try{await process.getBuiltinModule("node:fs/promises").readFile('+JSON.stringify(deniedFile)+', "utf8");}catch{denied=true;} console.log(signature,p.id); ({count,denied})',signal:new AbortController().signal,call}),{value:{count:5,denied:true},output:'built packaged-page\\n'});
   assert.deepEqual(browserExecutorCalls,[['open',{url:'http://localhost/packaged-only'}],['snapshot',{page:'packaged-page',args:[]}],['fill',{page:'packaged-page',args:['name-1','Ada']}],['snapshot',{page:'packaged-page',args:[]}],['click',{page:'packaged-page',args:['submit-2']}],['snapshot',{page:'packaged-page',args:[]}]]);assert.equal(readFileSync(deniedFile,'utf8'),'PACKAGED_EXECUTOR_FIXTURE_ONLY');browserExecutorQualified=true;
  }finally{assert.deepEqual(await executor.close(),{confirmed:true});browserExecutorClosed=true;}
 }else{
@@ -388,20 +438,20 @@ const compilerAssets=[mcpSchemaWorkerAssets()];
 assert.equal(compilerAssets[0].worker,join(packageRoot,'mcp/schema-worker.js'));
 for(const assets of compilerAssets){assert.equal(readFileSync(assets.checksum,'utf8'),createHash('sha256').update(readFileSync(assets.worker)).digest('hex')+String.fromCharCode(10));for(const file of [assets.preload,...assets.observerModules])assert(file.startsWith(packageRoot+'/')&&existsSync(file));}
 let effects=0;
-const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){if(request.method!=='POST')return new Response(null,{status:405});const rpc=await request.json();if(rpc.id===undefined)return new Response(null,{status:202});let result;if(rpc.method==='initialize')result={protocolVersion:'2024-11-05',serverInfo:{name:'artifact',version:'1'},capabilities:{tools:{}}};else if(rpc.method==='tools/list')result={tools:[{name:'artifact-count',inputSchema:{type:'object'}}]};else{assert.equal(rpc.method,'tools/call');assert.equal(rpc.params.name,'artifact-count');assert.deepEqual(rpc.params.arguments,{});effects++;result={content:[{type:'text',text:'artifact operation'}]};}return Response.json({jsonrpc:'2.0',id:rpc.id,result});}});
+const server=await serve({hostname:'127.0.0.1',port:0,async fetch(request){if(request.method!=='POST')return new Response(null,{status:405});const rpc=await request.json();if(rpc.id===undefined)return new Response(null,{status:202});let result;if(rpc.method==='initialize')result={protocolVersion:'2024-11-05',serverInfo:{name:'artifact',version:'1'},capabilities:{tools:{}}};else if(rpc.method==='tools/list')result={tools:[{name:'artifact-count',inputSchema:{type:'object'}}]};else{assert.equal(rpc.method,'tools/call');assert.equal(rpc.params.name,'artifact-count');assert.deepEqual(rpc.params.arguments,{});effects++;result={content:[{type:'text',text:'artifact operation'}]};}return Response.json({jsonrpc:'2.0',id:rpc.id,result});}});
 const adapter=createMcpAdapter({id:'packaged',transport:{type:'http',url:server.url.href}});const scope=adapter.scope('session');
 const webAsset=webExtractorAsset();assert.equal(webAsset,join(packageRoot,'tools/web-fetch/extractor-worker.js'));
 const parserHash=createHash('sha256').update(readFileSync(webAsset)).digest('hex');assert.equal(readFileSync(webAsset.replace(/\\.js$/,'.sha256'),'utf8').trim(),parserHash);
 let webRequests=0,webAdmissions=0,providerRequests=[];
 const html='<html><head><title>Packaged article</title></head><body><article><h1>Package verification</h1>'+Array.from({length:700},(_,i)=>'<p>Paragraph '+i+(i===699?' FINAL PACKAGED HTML MARKER':'')+' contains complete packaged article evidence, with enough readable context and a <a href="/reference">reference link</a>.</p>').join('')+'<script>fetch("/forbidden-subresource")</script><img src="/forbidden-subresource" /></article></body></html>';
-const web=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){webRequests++;const path=new URL(request.url).pathname;assert.notEqual(path,'/forbidden-subresource');return new Response(path==='/robots.txt'?'User-agent: *':html,{headers:{'content-type':path==='/robots.txt'?'text/plain':'text/html'}});}});
+const web=await serve({hostname:'127.0.0.1',port:0,fetch(request){webRequests++;const path=new URL(request.url).pathname;assert.notEqual(path,'/forbidden-subresource');return new Response(path==='/robots.txt'?'User-agent: *':html,{headers:{'content-type':path==='/robots.txt'?'text/plain':'text/html'}});}});
 const webUrl='http://fixture.test:'+web.port+'/article';
-const provider=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){const body=await request.json();providerRequests.push(body);const last=body.messages.reduce((found,message,i)=>message.role==='user'&&message.content.startsWith('新任务：packaged-web')?i:found,-1);const answered=body.messages.slice(last+1).some(message=>message.role==='tool');const chunk=(delta,finish_reason)=>'data: '+JSON.stringify({id:'packaged-web',object:'chat.completion.chunk',created:1,model:'local',choices:[{index:0,delta,finish_reason}]})+'\\n\\n';return new Response(chunk(answered?{content:'Web result observed'}:{tool_calls:[{index:0,id:'web-'+providerRequests.length,type:'function',function:{name:'web_fetch',arguments:JSON.stringify({url:webUrl})}}]},null)+chunk({},answered?'stop':'tool_calls')+'data: [DONE]\\n\\n',{headers:{'content-type':'text/event-stream'}});}});
+const provider=await serve({hostname:'127.0.0.1',port:0,async fetch(request){const body=await request.json();providerRequests.push(body);const last=body.messages.reduce((found,message,i)=>message.role==='user'&&message.content.startsWith('新任务：packaged-web')?i:found,-1);const answered=body.messages.slice(last+1).some(message=>message.role==='tool');const chunk=(delta,finish_reason)=>'data: '+JSON.stringify({id:'packaged-web',object:'chat.completion.chunk',created:1,model:'local',choices:[{index:0,delta,finish_reason}]})+'\\n\\n';return new Response(chunk(answered?{content:'Web result observed'}:{tool_calls:[{index:0,id:'web-'+providerRequests.length,type:'function',function:{name:'web_fetch',arguments:JSON.stringify({url:webUrl})}}]},null)+chunk({},answered?'stop':'tool_calls')+'data: [DONE]\\n\\n',{headers:{'content-type':'text/event-stream'}});}});
 let runtime;let store;let service;let webSelected=false;let webHost;
 let stdioAdmissions=0,stdioEffects=0,stdioStopped=false,stdioConnection,stdioPublicConnection,stdioReadyOutput,stdioStoppedOutput;
 const stdioLedger=join(working,'stdio-ledger.json');
 const stdioConfiguration={type:'stdio',command:process.execPath,args:[join(base,'packaged-mcp-server.mjs')],cwd:working,env:{LEDGER:stdioLedger}};
-const stdioPort=createMcpStdioTransportPort({servers:[{id:'packaged-stdio',configuration:stdioConfiguration}],guardianPath:mcpStdioGuardianAsset(),controlBase:working,bunExecutable:process.execPath,allowedEnvNames:['LEDGER'],async admit(binding){const execution=await store.getExecution(binding.executionId);assert.equal(execution.kind,'job');assert.equal(execution.status,'dispatching');assert.equal(execution.originStoreId,binding.originalStoreId);assert.equal(execution.sessionId,binding.sessionId);assert.equal(execution.definitionVersion,binding.configDigest);const command=await store.getCommand(execution.originCommandId);assert.equal(command.receipt.executionId,execution.id);stdioAdmissions++;}});
+const stdioPort=createMcpStdioTransportPort({servers:[{id:'packaged-stdio',configuration:stdioConfiguration}],guardianPath:mcpStdioGuardianAsset(),controlBase:working,runtimeExecutable:process.execPath,allowedEnvNames:['LEDGER'],async admit(binding){const execution=await store.getExecution(binding.executionId);assert.equal(execution.kind,'job');assert.equal(execution.status,'dispatching');assert.equal(execution.originStoreId,binding.originalStoreId);assert.equal(execution.sessionId,binding.sessionId);assert.equal(execution.definitionVersion,binding.configDigest);const command=await store.getCommand(execution.originCommandId);assert.equal(command.receipt.executionId,execution.id);stdioAdmissions++;}});
 const lifecycle=createMcpLifecycle({servers:[{id:'packaged-stdio',transport:stdioConfiguration}],transportPort:stdioPort});
 assert(!existsSync(stdioLedger));
 try{
@@ -436,7 +486,7 @@ try{
  const mcpModel=await store.getExecution(model.requests[0].requestId);assert.deepEqual(mcpModel.input.tools.map(tool=>tool.id),['mcp.connect',tools[0].id]);const inspectedModel=await client.getModelInput('s',mcpModel.id);assert.deepEqual(inspectedModel.request,model.requests[0]);
 
  await runtime.submitCommand({expectedStoreId:metadata.storeId,commandId:'shell',sessionId:'s',subjectId:'owner',request:{kind:'extension.invoke',extensionId:extension.id,actionId:'artifact-launch',definitionVersion:'1',input:{}}});await runtime.waitForCommand('shell',{timeoutMs:5000});const actionId=(await runtime.getCommand('shell')).receipt.executionId;const jobId=(await runtime.getExecution(actionId)).result.details.executionId;
- const deadline=Date.now()+5000;let job;while(true){job=await runtime.getExecution(jobId);if(['succeeded','failed','cancelled','outcome_unknown'].includes(job.status))break;if(Date.now()>deadline)throw new Error('shell_fixture_deadline');await Bun.sleep(10);}
+ const deadline=Date.now()+5000;let job;while(true){job=await runtime.getExecution(jobId);if(['succeeded','failed','cancelled','outcome_unknown'].includes(job.status))break;if(Date.now()>deadline)throw new Error('shell_fixture_deadline');await sleep(10);}
  assert.equal(job.status,'succeeded');assert.equal(job.result.details.groupStopped,true);const output=await runtime.listExecutionOutput({executionId:jobId});assert.equal(output.items.map(item=>item.content).join(''),'packaged-helper');
  webSelected=true;
  await runtime.submitCommand({expectedStoreId:metadata.storeId,commandId:'web',sessionId:'s',subjectId:'owner',request:{kind:'run.start',content:'新任务：packaged-web complete HTML'}});
@@ -444,8 +494,8 @@ try{
  const webExecution=(await store.listExecutions('s')).find(item=>item.originCommandId===webApplication.sourceCommandId&&item.definitionId==='web_fetch');assert.equal(webExecution.status,'succeeded');assert.equal(webExecution.definitionVersion,'1');assert.equal(webExecution.originStoreId,metadata.storeId);assert.deepEqual(webExecution.input,{url:webUrl});assert.equal(webExecution.result.details.parserAssetHash,parserHash);
  assert.equal(webRequests,2);assert.equal(webAdmissions,2);assert.equal(providerRequests.length,2);assert(providerRequests[0].tools.some(tool=>tool.function.name==='web_fetch'));
  const reference=webExecution.result.artifactRefs[0];assert.deepEqual(reference.scope,{kind:'execution',id:webExecution.id});
- const readCursor=(await store.getMetadata()).lastChangeCursor;const binary=await client.readArtifact('s',{expectedStoreId:metadata.storeId,refId:reference.id,scope:reference.scope});const markdown=new TextDecoder('utf-8',{fatal:true}).decode(binary.content);assert(binary.content.byteLength>65536,'full article must publish Artifact');assert(markdown.includes('FINAL PACKAGED HTML MARKER'),'final readable paragraph must survive extraction');assert(markdown.includes('[reference link](http://fixture.test:'+web.port+'/reference)'),'Markdown resolves reference links');assert(!markdown.includes('<article>'));const durableReference=await store.getArtifactReference({expectedStoreId:metadata.storeId,sessionId:'s',subjectId:'owner',refId:reference.id,scope:reference.scope});assert.equal(durableReference.storeId,metadata.storeId);assert.equal(createHash('sha256').update(binary.content).digest('hex'),durableReference.hash);assert.equal(binary.reference.hash,durableReference.hash);assert.equal(String(binary.content.byteLength),durableReference.size);assert(providerRequests[1].messages.some(message=>message.role==='tool'&&message.content.includes('Complete artifact body:\\n'+markdown)));assert.equal((await store.getMetadata()).lastChangeCursor,readCursor);assert.equal((await runtime.getExecution(jobId)).status,'succeeded');
- const webModel=(await store.listExecutions('s')).find(item=>item.kind==='model'&&item.originCommandId===webApplication.sourceCommandId&&item.input.body);assert(webModel,'complete artifact-backed history must seal the original Model request');const modelBodyReference=webModel.input.body.reference;await assert.rejects(client.readArtifact('s',{expectedStoreId:metadata.storeId,refId:modelBodyReference.id,scope:modelBodyReference.scope}),error=>error.code==='artifact_scope_denied'&&error.status===403);const originalModelBody=await artifacts.read({expectedStoreId:metadata.storeId,sessionId:'s',subjectId:'owner',refId:modelBodyReference.id,scope:modelBodyReference.scope});assert.equal(createHash('sha256').update(originalModelBody).digest('hex'),modelBodyReference.hash);assert.equal(String(originalModelBody.byteLength),modelBodyReference.size);const originalModelRequest=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(originalModelBody));assert.equal(originalModelRequest.messages.find(message=>message.toolCalls?.some(call=>call.id==='mcp-call')).toolCalls[0].name,tools[0].id);const publicWebModel=await client.getModelInput('s',webModel.id);assert.equal(publicWebModel.request.messages.find(message=>message.toolCalls?.some(call=>call.id==='mcp-call')).toolCalls[0].name,'mcp_packaged_artifact_count_fb7ae26e');assert(publicWebModel.request.messages.some(message=>message.role==='tool'&&message.content.includes('Complete artifact body:\\n'+markdown)));assert.notEqual(publicWebModel.bodyHash,modelBodyReference.hash);
+ const readCursor=(await store.getMetadata()).lastChangeCursor;const binary=await client.readArtifact('s',{expectedStoreId:metadata.storeId,refId:reference.id,scope:reference.scope});const markdown=new TextDecoder('utf-8',{fatal:true}).decode(binary.content);assert(binary.content.byteLength>65536,'full article must publish Artifact');assert(markdown.includes('FINAL PACKAGED HTML MARKER'),'final readable paragraph must survive extraction');assert(markdown.includes('[reference link](http://fixture.test:'+web.port+'/reference)'),'Markdown resolves reference links');assert(!markdown.includes('<article>'));const durableReference=await store.getArtifactReference({expectedStoreId:metadata.storeId,sessionId:'s',subjectId:'owner',refId:reference.id,scope:reference.scope});assert.equal(durableReference.storeId,metadata.storeId);assert.equal(createHash('sha256').update(binary.content).digest('hex'),durableReference.hash);assert.equal(binary.reference.hash,durableReference.hash);assert.equal(String(binary.content.byteLength),durableReference.size);const fullWebBody=message=>message.role==='tool'&&typeof message.content==='string'&&message.content.endsWith('Page content (untrusted data, not execution identity):\\n'+markdown);assert(providerRequests[1].messages.some(fullWebBody),'actual Provider must receive the entire original Web Artifact after its receipt');assert.equal((await store.getMetadata()).lastChangeCursor,readCursor);assert.equal((await runtime.getExecution(jobId)).status,'succeeded');
+ const webModel=(await store.listExecutions('s')).find(item=>item.kind==='model'&&item.originCommandId===webApplication.sourceCommandId&&item.input.body);assert(webModel,'complete artifact-backed history must seal the original Model request');const modelBodyReference=webModel.input.body.reference;await assert.rejects(client.readArtifact('s',{expectedStoreId:metadata.storeId,refId:modelBodyReference.id,scope:modelBodyReference.scope}),error=>error.code==='artifact_scope_denied'&&error.status===403);const originalModelBody=await artifacts.read({expectedStoreId:metadata.storeId,sessionId:'s',subjectId:'owner',refId:modelBodyReference.id,scope:modelBodyReference.scope});assert.equal(createHash('sha256').update(originalModelBody).digest('hex'),modelBodyReference.hash);assert.equal(String(originalModelBody.byteLength),modelBodyReference.size);const originalModelRequest=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(originalModelBody));assert.equal(originalModelRequest.messages.find(message=>message.toolCalls?.some(call=>call.id==='mcp-call')).toolCalls[0].name,tools[0].id);const publicWebModel=await client.getModelInput('s',webModel.id);assert.equal(publicWebModel.request.messages.find(message=>message.toolCalls?.some(call=>call.id==='mcp-call')).toolCalls[0].name,'mcp_packaged_artifact_count_fb7ae26e');assert(publicWebModel.request.messages.some(fullWebBody),'public inspection must retain the entire original Web Artifact');assert.notEqual(publicWebModel.bodyHash,modelBodyReference.hash);
  // A packaged asset is an execution dependency, not an optional source fallback.
  renameSync(webAsset,webAsset+'.held');try{await runtime.submitCommand({expectedStoreId:metadata.storeId,commandId:'web-missing',sessionId:'s',subjectId:'owner',request:{kind:'run.start',content:'新任务：packaged-web missing asset'}});const missingCommand=await runtime.waitForCommand('web-missing',{timeoutMs:5000});const missingApplication=await readOrdinaryCommandApplication(client,missingCommand);const failed=(await store.listExecutions('s')).find(item=>item.originCommandId===missingApplication.sourceCommandId&&item.definitionId==='web_fetch');assert.equal(failed.status,'failed');assert.equal(failed.result.content,'web_parser_unavailable');assert.equal(webRequests,2);assert.equal(webAdmissions,2);}finally{renameSync(webAsset+'.held',webAsset);}
  webSelected=false;
@@ -461,20 +511,20 @@ try{
   assert.equal(ready.version,2);assert.equal(ready.coverage,'mcp-owned-coalition');assert.equal(ready.ownerPid,process.pid);assert.deepEqual(ready.binding,{originalStoreId:metadata.storeId,sessionId:'s',executionId:connection.id,serverId:'packaged-stdio',scopeId:JSON.stringify([metadata.storeId,'s','packaged-stdio']),configDigest:connection.definitionVersion});
   assert.equal(ready.broker.parentPid,process.pid);assert.equal(ready.guardian.parentPid,1);assert.equal(ready.server.parentPid,ready.guardian.pid);assert.equal(ready.server.pid,ledger.pid);assert(ready.broker.birth&&ready.guardian.birth&&ready.server.birth);assert.deepEqual(ready.broker.unavailable,[]);assert.deepEqual(ready.guardian.unavailable,[]);assert.deepEqual(ready.server.unavailable,[]);assert.equal(ready.broker.exit,null);assert.equal(ready.guardian.exit,null);assert.equal(ready.coalition.claimTaskCount,1);assert.equal(ready.coalition.terminalTaskCount,null);assert.equal(ready.coalition.processTreeStopped,false);assert.equal(ready.coalition.registrationRemoved,false);assert.equal(ready.server.exit,null);
   await runtime.cancelSession({expectedStoreId:metadata.storeId,commandId:'stop-stdio',sessionId:'s',subjectId:'owner',includeBackground:true});
-  const end=Date.now()+5000;while(true){const fact=await runtime.getExecution(connection.id);if(fact.status==='cancelled'){assert.equal(fact.result.details.transportStopped,true);assert.equal(fact.result.details.remoteToolStopConfirmed,false);stdioStopped=true;break;}if(Date.now()>end)throw new Error('stdio_fixture_deadline');await Bun.sleep(10);}
+  const end=Date.now()+5000;while(true){const fact=await runtime.getExecution(connection.id);if(fact.status==='cancelled'){assert.equal(fact.result.details.transportStopped,true);assert.equal(fact.result.details.remoteToolStopConfirmed,false);stdioStopped=true;break;}if(Date.now()>end)throw new Error('stdio_fixture_deadline');await sleep(10);}
   stdioConnection=await runtime.getExecution(connection.id);stdioPublicConnection=await client.getExecution(connection.id);assert.deepEqual(stdioPublicConnection.result,stdioConnection.result);const stopped=stdioConnection.result.details.ownedProcesses;assert.deepEqual(stopped.binding,ready.binding);
   for(const [before,after] of [[ready.broker,stopped.broker],[ready.server,stopped.server]]){assert.equal(after.pid,before.pid);assert.deepEqual(after.birth,before.birth);assert.equal(after.parentPid,before.parentPid);assert.equal(after.exit.reaped,true);assert.equal(after.kernelState,'absent');assert.throws(()=>process.kill(after.pid,0));}
   assert.deepEqual(stopped.broker.exit,{code:0,signal:null,reaped:true});assert.equal(stopped.guardian.pid,ready.guardian.pid);assert.deepEqual(stopped.guardian.birth,ready.guardian.birth);assert.equal(stopped.guardian.parentPid,ready.guardian.parentPid);assert.equal(stopped.guardian.exit,null);assert.equal(stopped.guardian.kernelState,'absent');assert.throws(()=>process.kill(stopped.guardian.pid,0));assert.equal(stopped.coalition.id,ready.coalition.id);assert.equal(stopped.coalition.guardianUniqueId,ready.coalition.guardianUniqueId);assert.equal(stopped.coalition.guardianPidVersion,ready.coalition.guardianPidVersion);assert.equal(stopped.coalition.label,ready.coalition.label);assert.equal(stopped.coalition.domain,ready.coalition.domain);assert.equal(stopped.coalition.claimTaskCount,1);assert.equal(stopped.coalition.terminalTaskCount,1);assert.equal(stopped.coalition.processTreeStopped,true);assert.equal(stopped.coalition.registrationRemoved,true);stdioStoppedOutput=await client.listExecutionOutput(connection.id);assert.deepEqual(stdioStoppedOutput,stdioReadyOutput);
   assert.throws(()=>process.kill(ledger.pid,0));assert.equal((await lifecycle.readStepCapabilities({command:{originStoreId:metadata.storeId},session:{id:'s'}})).toolIds.length,0);
  }
- const mainEntry=Bun.resolveSync('@kite-ai/service/main',base);assert.equal(mainEntry,join(base,'node_modules/@kite-ai/service/main.js'));
+ const mainEntry=resolvePackage('@kite-ai/service/main');assert.equal(mainEntry,join(base,'node_modules/@kite-ai/service/main.js'));
  const pairedProfile=selectProfile({dataRoot:join(working,'paired-data'),profile:'empty'});const providerBeforePaired=providerRequests.length;
  let paired,gateway,browser;let pairedMain=false,pairedStopped=false,gatewayRead=false,nativeSecretHidden=false;
  try{
   paired=await launchPairedService({entrypoint:mainEntry,profile:pairedProfile,instanceId:'packaged-paired-instance',buildId:'packaged-paired-build',apiMajor:1,requiredCapabilities:['sessions','history','commands']});
   assert(paired.pid!==process.pid);process.kill(paired.pid,0);assert.equal(paired.bootstrap.instanceId,'packaged-paired-instance');assert.equal(paired.bootstrap.buildId,'packaged-paired-build');assert.equal(paired.bootstrap.profile.accessKey,pairedProfile.profileAccessKey);assert.equal(paired.bootstrap.profile.dataRoot,pairedProfile.dataRoot);assert.equal((await paired.client.listWorkspaces()).length,0);pairedMain=true;
   // The Gateway default observation document needs no source or UI build fallback.
-  gateway=startDevelopmentWeb({admittedClient:paired.client});const shell=await fetch(gateway.endpoint+'/');assert.equal(shell.status,200);const html=await shell.text();assert(!html.includes(paired.bootstrap.token));assert(!html.includes(paired.bootstrap.endpoint));assert(shell.headers.get('content-security-policy').includes("script-src 'self'"));const cookie=shell.headers.get('set-cookie').split(';')[0];
+  gateway=await startDevelopmentWeb({admittedClient:paired.client});const shell=await fetch(gateway.endpoint+'/');assert.equal(shell.status,200);const html=await shell.text();assert(!html.includes(paired.bootstrap.token));assert(!html.includes(paired.bootstrap.endpoint));assert(shell.headers.get('content-security-policy').includes("script-src 'self'"));const cookie=shell.headers.get('set-cookie').split(';')[0];
   const browserBodies=[];browser=createBrowserClient({origin:gateway.endpoint,pageIdentity:gateway.pageIdentity,fetch:async(input,init)=>{const headers=new Headers(init?.headers);assert(!headers.has('authorization'));headers.set('cookie',cookie);const response=await fetch(input,{...init,headers});browserBodies.push(await response.clone().text());return response;}});
   const browserInfo=await browser.connect();assert.equal(browserInfo.instanceId,'packaged-paired-instance');assert.equal(browserInfo.storeId,paired.bootstrap.storeId);assert.equal((await browser.listWorkspaces()).length,0);assert.equal((await browser.listSessions()).length,0);assert(browserBodies.every(body=>!body.includes(paired.bootstrap.token)&&!body.includes(paired.bootstrap.endpoint)));assert(!JSON.stringify(paired.diagnostics).includes(paired.bootstrap.token));nativeSecretHidden=true;gatewayRead=true;
   assert.equal(providerRequests.length,providerBeforePaired);assert(!existsSync(join(pairedProfile.profilePath,'config.jsonc')));
@@ -520,7 +570,7 @@ try{
  }finally{await restoredReader.close();}
  assert.deepEqual({provider:providerRequests.length,effects,stdioEffects},beforeBackup);
  process.stdout.write(JSON.stringify({entries:Object.keys(manifest.exports).length,worker:true,guardian:true,mcpGuardian:true,browserExecutorWorker:true,browserExecutorQualified,browserExecutorClosed,browserExecutorUnavailable,browserExecutorApiCalls:browserExecutorCalls.length,service:true,client:true,httpPort:true,stdioQualified:process.platform==='darwin',stdioAdmissions,stdioEffects,stdioStopped,skillVersion:body.version,mcpEffects:effects,shellStatus:job.status,sourceFallback:false,filePaging:true,glob:true,webWorker:true,parserHash,webArtifactBytes:binary.content.byteLength,webArtifactScope:reference.scope.kind,webRequests,webAdmissions,webStatus:webExecution.status,webMissingAssetRejected:true,pairedMain,pairedStopped,lifecycleStopped,gatewayRead,nativeSecretHidden,backupVerified:true,restoreVerified:true})+'\\n');
-}finally{await files.close();await service?.close();await runtime?.close();if(!runtime)await store?.close();await lifecycle.close();await adapter.close();server.stop(true);web.stop(true);provider.stop(true);}
+}finally{await files.close();await service?.close();await runtime?.close();if(!runtime)await store?.close();await lifecycle.close();await adapter.close();await Promise.all([server.stop(true),web.stop(true),provider.stop(true)]);}
 `,
       );
       // Keep real Provider traffic on the owned loopback server regardless of the host proxy.
@@ -613,7 +663,7 @@ try{
       expect(result.parserHash).toMatch(/^[a-f0-9]{64}$/);
       expect(result.webArtifactBytes).toBeGreaterThan(65536);
     } finally {
-      proxy.stop(true);
+      await proxy.stop(true);
       rmSync(root, { recursive: true, force: true });
     }
   },

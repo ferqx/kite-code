@@ -1,6 +1,8 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
@@ -23,7 +25,7 @@ async function main(settings: Settings) {
   let active: ReturnType<typeof spawnTuiPTY>;
   const launch = () => {
     active = spawnTuiPTY({
-      cmd: [process.execPath, '--no-install', settings.runner],
+      cmd: [process.execPath, ...testRuntimeFlags, settings.runner],
       cwd: process.cwd(),
       env: {
         ...process.env,
@@ -44,7 +46,7 @@ async function main(settings: Settings) {
       const candidate = material ? active.text().replace(ansi, '') : frame.text;
       if ((material || frame.fresh) && candidate.replace(/\s+/g, ' ').includes(text)) return;
       if (active.ended) throw Error(`host ended before ${text}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     throw Error(`expected ${text} tail=${active.text().slice(-7000)}`);
   };
@@ -70,7 +72,7 @@ async function main(settings: Settings) {
         throw Error(
           `expected preference row ${label} ${JSON.stringify(options)} tail=${active.text().slice(-7000)}`,
         );
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   };
   const key = (value: string) => active.key(value);
@@ -97,7 +99,7 @@ async function main(settings: Settings) {
   const close = async () => {
     await key('\x11');
     const end = Date.now() + 6000;
-    while (!active.ended && Date.now() < end) await Bun.sleep(50);
+    while (!active.ended && Date.now() < end) await testSleep(50);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const [exit] = await Promise.race([

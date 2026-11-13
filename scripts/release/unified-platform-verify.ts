@@ -96,8 +96,10 @@ export function verifyUnifiedPlatformReport(value: unknown, mode: 'diagnostic' |
     !/^[a-f0-9]{40}$/.test(candidate.source.commit) ||
     typeof candidate.source.dirty !== 'boolean' ||
     !closed(candidate.sqlite, ['driver', 'linkage', 'version', 'sourceId', 'manifestSha256']) ||
-    candidate.sqlite.driver !== 'bun:sqlite' ||
-    !['builtin', 'dynamic'].includes(String(candidate.sqlite.linkage)) ||
+    !['bun:sqlite', 'node-api:sqlite'].includes(String(candidate.sqlite.driver)) ||
+    (candidate.sqlite.driver === 'node-api:sqlite'
+      ? candidate.sqlite.linkage !== 'dynamic'
+      : !['builtin', 'dynamic'].includes(String(candidate.sqlite.linkage))) ||
     !text(candidate.sqlite.version) ||
     !text(candidate.sqlite.sourceId) ||
     !hash(candidate.sqlite.manifestSha256)
@@ -199,9 +201,9 @@ export function verifyUnifiedPlatformReport(value: unknown, mode: 'diagnostic' |
   if (
     !closed(sqlite, ['status', 'driver', 'version', 'sourceId', 'manifestSha256']) ||
     sqlite.status !== 'passed' ||
-    sqlite.driver !== 'bun:sqlite' ||
     !object(candidate) ||
     !object(candidate.sqlite) ||
+    sqlite.driver !== candidate.sqlite.driver ||
     sqlite.version !== candidate.sqlite.version ||
     sqlite.sourceId !== candidate.sqlite.sourceId ||
     sqlite.manifestSha256 !== candidate.sqlite.manifestSha256

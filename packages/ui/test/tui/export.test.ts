@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   canonicalModelBody,
@@ -6,6 +5,7 @@ import {
   type ModelOutputSnapshot,
   type SessionView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   parseTuiCommand,
   serializeLoadedText,

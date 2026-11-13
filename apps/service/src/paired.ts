@@ -13,6 +13,8 @@ import {
 } from './bootstrap';
 import { desktopShellSettingsPath, desktopShellSettingsSchema } from './desktop-shell';
 import { schemas } from './http/schema';
+import { linuxModelKeyringEnvironment } from './model-keyring-process';
+import { spawnNodePairedChild } from './node-process';
 import type { RuntimeProtection } from './runtime-protection';
 import { parseServiceStartupDiagnostic, type ServiceStartupDiagnostic } from './startup-diagnostic';
 import { parseServiceStartupTiming, type ServiceStartupTiming } from './startup-timing';
@@ -175,6 +177,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
     LANG: 'C.UTF-8',
     HOME: home,
     ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+    ...linuxModelKeyringEnvironment(),
   };
   // Preserve the trusted host's proxy policy and explicit Codex auth directory.
   // Keep raw values for the owning readers; inherit no other host inputs.
@@ -192,17 +195,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
   }
   let child: PairedServiceChild;
   try {
-    child = options.spawnChild
-      ? options.spawnChild(command, { env })
-      : Bun.spawn(command, {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          env,
-          // A Windows caller's console close/Ctrl+C is not the Service's parent
-          // EOF. Keep the owned pipe lifecycle without attaching its console.
-          ...(process.platform === 'win32' ? { windowsHide: true } : {}),
-        });
+    child = (options.spawnChild ?? spawnNodePairedChild)(command, { env });
   } catch (error) {
     try {
       artifact?.release();

@@ -1,12 +1,14 @@
-import { expect, test } from 'bun:test';
 import { cpSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 async function execute(argv: string[], cwd: string, home: string) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd,
     env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
     stdin: 'ignore',
@@ -36,7 +38,7 @@ test('actual candidate default paired and daemon children protect closure and re
   const home = join(root, 'home');
   privateDirectory(home);
   const userConfiguration = ownedUserConfiguration(home);
-  let provider: ReturnType<typeof Bun.serve> | undefined;
+  let provider: FixtureServer | undefined;
   let daemonStarted = false;
   let runtime = '',
     cli = '';
@@ -59,7 +61,7 @@ test('actual candidate default paired and daemon children protect closure and re
       : await buildTerminalBundle({
           destination: join(root, 'candidate'),
           repositoryRoot,
-          bunExecutable: process.execPath,
+          nodeExecutable: process.execPath,
         });
     const proof = built.artifact.runtimeProtection!;
     expect(Object.keys(proof).sort()).toEqual(['kind', 'manifestSha256', 'root']);
@@ -100,7 +102,7 @@ test('actual candidate default paired and daemon children protect closure and re
       ]),
     ];
     const messages: unknown[][] = [];
-    provider = Bun.serve({
+    provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -156,13 +158,15 @@ test('actual candidate default paired and daemon children protect closure and re
       driver,
       `
 import assert from 'node:assert/strict';
+import {setTimeout as sleep} from 'node:timers/promises';
+import {spawn} from ${JSON.stringify(new URL('../../../scripts/tooling/process.ts', import.meta.url).href)};
 import {readFileSync} from 'node:fs';
 import {launchPairedService} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/service/paired.js'))};
 import {acquireArtifactAccess} from ${JSON.stringify(join(built.root, 'node_modules/@kite-ai/agent/artifact-access.js'))};
 const p=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const blocked=()=>assert.throws(()=>acquireArtifactAccess({root:p.root,mode:'exclusive'}),e=>e.code==='owner_busy');
 const free=()=>acquireArtifactAccess({root:p.root,mode:'exclusive'}).release();
-const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){return Bun.spawn(argv,{env:{...env,...${JSON.stringify(userConfiguration.homeEnvironment)}},stdin:'pipe',stdout:'pipe',stderr:'pipe'});}});
+const launch=(instanceId)=>launchPairedService({...p.artifact,profile:p.profile,instanceId,requiredCapabilities:['commands','history','sessions'],shutdownTimeoutMs:5000,spawnChild(argv,{env}){return spawn(argv,{env:{...env,...${JSON.stringify(userConfiguration.homeEnvironment)}},stdin:'pipe',stdout:'pipe',stderr:'pipe'});}});
 let h;
 try {
  free();h=await launch('runtime-paired');blocked();
@@ -175,7 +179,7 @@ try {
  await c.setPermissionMode('s',{expectedStoreId:s,commandId:'full',mode:'full',ifRevision:mode.revision,makeDefault:false,ifDefaultRevision:mode.defaultRevision});
  await c.startRun('s',{kind:'run.start',expectedStoreId:s,commandId:'work',content:'verify protected runtime assets'});
  const deadline=Date.now()+15000;let command,run;
- while(true){command=await c.getCommand('work');if(command.receipt?.runId){run=await c.getRun(command.receipt.runId);if(!run.isActive)break;}if(Date.now()>deadline)throw Error('runtime_run_deadline');await Bun.sleep(10);}
+ while(true){command=await c.getCommand('work');if(command.receipt?.runId){run=await c.getRun(command.receipt.runId);if(!run.isActive)break;}if(Date.now()>deadline)throw Error('runtime_run_deadline');await sleep(10);}
  assert.equal(run.status,'completed');assert.equal(run.originCommandId,'work');blocked();
  await h.close();h=undefined;free();
  h=await launch('runtime-cold');blocked();const original=await h.client.getCommand('work');assert.equal(original.id,'work');assert.equal(original.originStoreId,s);assert.equal(original.receipt?.runId,run.id);assert.equal((await h.client.getRun(run.id)).status,'completed');

@@ -1,17 +1,19 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { readSessionLogs } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient, type SessionLogPage } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { startService } from '../../src/index';
@@ -27,7 +29,7 @@ async function failure(read: Promise<unknown> | (() => Promise<unknown>)) {
   throw Error('expected read refusal');
 }
 async function browserFor(client: ReturnType<typeof createClient>) {
-  const gateway = startDevelopmentWeb({ admittedClient: client });
+  const gateway = await startDevelopmentWeb({ admittedClient: client });
   const document = await fetch(gateway.endpoint);
   await document.body?.cancel();
   const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -46,7 +48,7 @@ async function browserFor(client: ReturnType<typeof createClient>) {
         });
         return fetch(url, { ...init, headers });
       },
-      { preconnect: fetch.preconnect },
+      {},
     ),
   });
   await browser.connect();
@@ -63,7 +65,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
     const value = await read();
     if (done(value)) return value;
     if (Date.now() >= end) throw Error('actual logs fixture deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 
@@ -368,7 +370,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   privateDirectory(profile.profilePath);
   const requests: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -393,7 +395,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
   );
   const launch = (id: string) =>
     launchPairedService({
-      entrypoint: join(import.meta.dir, '../../src/main.ts'),
+      entrypoint: join(import.meta.dirname, '../../src/main.ts'),
       spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,

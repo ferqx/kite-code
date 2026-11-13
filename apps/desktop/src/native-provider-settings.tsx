@@ -11,6 +11,7 @@ import type {
 } from './native-bridge';
 import { NativeConnectionModels } from './native-connection-models';
 import { NativeToast, type NativeToastProps } from './native-message';
+import { nativeModelFailure } from './native-model-failure';
 import {
   NativeModelSettingsFeedback,
   type NativeModelSettingsState,
@@ -980,7 +981,8 @@ export function NativeProviderSettings({
         setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
         if (response.error)
           setError(
-            (operation.kind === 'remove' && removalBlockedMessage(response.error)) ||
+            (operation.kind === 'remove' ? removalBlockedMessage(response.error) : undefined) ??
+              nativeModelFailure(response.error)?.text ??
               `${action}失败：${response.error}`,
           );
       }
@@ -1049,7 +1051,8 @@ export function NativeProviderSettings({
       if (current.current === original && editing === editorVersion.current) {
         setError(
           response.phase === 'failed'
-            ? `更改失败：${response.error ?? 'configuration_unavailable'}`
+            ? (nativeModelFailure(response.error)?.text ??
+                `更改失败：${response.error ?? 'configuration_unavailable'}`)
             : '',
         );
         if (response.phase === 'failed') {

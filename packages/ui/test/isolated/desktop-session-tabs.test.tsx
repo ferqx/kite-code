@@ -1,6 +1,7 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act, useCallback, useEffect, useState } from 'react';
+import { afterAll, afterEach, expect, test } from '#kite-test';
 import { childAgentAppearance } from '../../src/desktop/ApprovalHeader';
 import type {
   SessionChildTabRequest,
@@ -790,7 +791,7 @@ test('a verified retained browser key survives background renders while a new re
   );
   await act(async () => {
     root!.render(tree(false));
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   });
   const retained = document.querySelector('[data-browser-id="retained"]');
   const originalTab = document.querySelector('[role="tab"]');
@@ -799,7 +800,7 @@ test('a verified retained browser key survives background renders while a new re
     for (const loading of [true, false]) {
       await act(async () => {
         root!.render(tree(loading));
-        await Bun.sleep(5);
+        await fixtureDelay(5);
       });
       expect(calls).toEqual(['original']);
       expect(document.body.textContent).not.toContain('正在核对保留页面');
@@ -809,14 +810,14 @@ test('a verified retained browser key survives background renders while a new re
   }
   await act(async () => {
     root!.render(tree(false, 'next'));
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
   expect(calls).toEqual(['original', 'next']);
   expect(document.querySelector('[data-browser-id="retained"]')).toBeNull();
   expect(document.body.textContent).toContain('正在核对保留页面');
   await act(async () => {
     confirm({ id: 'next-page', title: 'Next page' });
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
   expect(document.querySelector('[data-browser-id="next-page"]')).not.toBeNull();
   expect(document.body.textContent).not.toContain('正在核对保留页面');
@@ -858,7 +859,7 @@ test('a new browser restore key rechecks the retained tab without inserting a st
   root = createRoot(document.body);
   await act(async () => {
     root!.render(tree('first-browser-request'));
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
   const page = document.querySelector('[data-browser-id="retained-page"]')!;
   const toolbar = page.querySelector('.native-browser-toolbar')!;
@@ -871,7 +872,7 @@ test('a new browser restore key rechecks the retained tab without inserting a st
 
   await act(async () => {
     root!.render(tree('new-task-browser-request'));
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
   // A changed request key still performs its real read and closes allocation
   // while the exact retained page stays mounted. Only its layout remains quiet.
@@ -889,7 +890,7 @@ test('a new browser restore key rechecks the retained tab without inserting a st
 
   await act(async () => {
     resolve({ id: 'retained-page', title: 'Existing ordinary page' });
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
   expect(document.querySelector('[data-browser-id="retained-page"]')).toBe(page);
   expect(document.querySelector<HTMLButtonElement>('[aria-label="新建标签页"]')!.disabled).toBe(
@@ -900,7 +901,7 @@ test('a new browser restore key rechecks the retained tab without inserting a st
 
   await act(async () => {
     root!.render(tree('failed-browser-request'));
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
   expect(reads).toEqual([
     'first-browser-request',
@@ -1057,7 +1058,7 @@ test('the original tab header retains document panel associations and keyboard s
     tabs[0]!.dispatchEvent(
       new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
     );
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   });
   expect(document.activeElement).toBe(tabs[1]!);
   expect(tabs[1]!.getAttribute('aria-selected')).toBe('true');

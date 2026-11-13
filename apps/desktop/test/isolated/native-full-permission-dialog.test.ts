@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, test } from '#kite-test';
 import { registerNativeFullPermissionDialogIpc } from '../../electron/native-full-permission-dialog';
 import type { NativeRootWindow } from '../../electron/native-root-window';
 import {

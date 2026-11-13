@@ -1,6 +1,6 @@
 # 私有 Runtime 观测源码
 
-当前状态：部分实施，来源扩展收束。按用户最新要求，本轮只处理正常运行、内存稳定及已定位源码修复，不继续系统采集或扩大观测类别；原失败、partial 和 unknown 不解除，完整资格仍未取得。准确范围归[当前执行范围](../../docs/plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)。
+历史状态：Bun 观测原型部分实施，现只保留源码和原验证记录。当前 Node 发行、构建、测试和 CI 不消费本目录。原失败、partial 和 unknown 不解除，完整资格仍未取得。原范围归[当时的执行记录](../../docs/plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)。
 
 本目录保存针对固定 [Bun 1.4.2 源码](https://github.com/oven-sh/bun/tree/744846f844374847c902b5e7fd59b4342a51ef99)的可审计补丁；它尚未进入正式安装、候选构建、默认测试运行时或发布资产。[补丁元数据](bun-1.4.2-resource-census.json)记录准确 base commit、SHA 与未覆盖范围，[补丁](bun-1.4.2-resource-census.patch)是实现的耐久副本，本机忽略的构建 checkout 不是唯一保存位置。补丁为零context格式，避免补丁空context前缀被误作源码尾随空格；只对元数据固定base使用 `git apply --unidiff-zero --check` 后应用。
 

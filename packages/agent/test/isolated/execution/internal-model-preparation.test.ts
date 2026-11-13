@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { type AgentRuntime, createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
@@ -355,7 +356,7 @@ test('a cancelled checker that ignores abort retains its per-Run configuration a
       drained = true;
     });
     void draining.catch(() => {});
-    await Bun.sleep(100);
+    await sleepTimer(100);
     expect(disposed).toBe(0);
     expect(storeClosed).toBe(false);
     expect(drained).toBe(false);
@@ -422,7 +423,7 @@ test('cancelling during the first planned check command read retains its configu
       drained = true;
     });
     void draining.catch(() => {});
-    await Bun.sleep(100);
+    await sleepTimer(100);
     expect(disposed).toBe(0);
     expect(storeClosed).toBe(false);
     expect(drained).toBe(false);

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
@@ -15,12 +14,18 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
 import { createShellCommandPolicy, readOnlySearchCommand } from '@kite-ai/agent/permissions/shell';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import {
+  which as findExecutable,
+  spawn as spawnProcess,
+} from '../../../../../scripts/tooling/process';
 
 test('literal search uses bundled rg through Bash with quoted arguments and no ambient rg configuration', async () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-search-')));
   const shell =
     process.platform === 'win32'
-      ? realpathSync.native(join(dirname(dirname(Bun.which('git')!)), 'usr/bin/bash.exe'))
+      ? realpathSync.native(join(dirname(dirname(findExecutable('git')!)), 'usr/bin/bash.exe'))
       : '/bin/bash';
   try {
     const directory = join(root, '目录 space');
@@ -39,7 +44,7 @@ test('literal search uses bundled rg through Bash with quoted arguments and no a
       PATH: '',
       RIPGREP_CONFIG_PATH: configuration,
     });
-    const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
+    const child = spawnProcess([shell, '--noprofile', '--norc', '-c', command!], {
       cwd: root,
       env,
       stdout: 'pipe',
@@ -75,7 +80,7 @@ test('rg consumes option values before recognizing an option terminator', async 
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-rg-argv-')));
   const shell =
     process.platform === 'win32'
-      ? realpathSync.native(join(dirname(dirname(Bun.which('git')!)), 'usr/bin/bash.exe'))
+      ? realpathSync.native(join(dirname(dirname(findExecutable('git')!)), 'usr/bin/bash.exe'))
       : '/bin/bash';
   try {
     const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: shell });
@@ -105,7 +110,7 @@ test('rg consumes option values before recognizing an option terminator', async 
       const command = readOnlySearchCommand(parsed, shell);
       expect(parsed.hardDenied, candidate).toBeNull();
       expect(command, candidate).toBeDefined();
-      const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
+      const child = spawnProcess([shell, '--noprofile', '--norc', '-c', command!], {
         cwd: root,
         env: { SystemRoot: process.env.SystemRoot ?? '', PATH: '' },
         stdout: 'pipe',
@@ -158,7 +163,7 @@ test('literal read-only && chains rewrite every leaf and preserve failure short-
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-search-chain-')));
   const shell =
     process.platform === 'win32'
-      ? realpathSync.native(join(dirname(dirname(Bun.which('git')!)), 'usr/bin/bash.exe'))
+      ? realpathSync.native(join(dirname(dirname(findExecutable('git')!)), 'usr/bin/bash.exe'))
       : '/bin/bash';
   try {
     const policy = await createShellCommandPolicy({ cwd: root, shellExecutable: shell });
@@ -169,7 +174,7 @@ test('literal read-only && chains rewrite every leaf and preserve failure short-
       const classification = await policy.classify(source);
       const command = readOnlySearchCommand(classification, shell);
       expect(command, source).toBeDefined();
-      const child = Bun.spawn([shell, '--noprofile', '--norc', '-c', command!], {
+      const child = spawnProcess([shell, '--noprofile', '--norc', '-c', command!], {
         cwd: root,
         env: {
           SystemRoot: process.env.SystemRoot ?? '',
@@ -259,7 +264,7 @@ test.skipIf(process.platform === 'win32')(
         expect(parsed.hardDenied, command).toBeNull();
         expect(readOnlySearchCommand(parsed, '/bin/bash'), command).toBeUndefined();
         // Execute only our own temporary fixture to verify the hidden option really can spawn.
-        const child = Bun.spawn([executable, '--no-config', ...args], {
+        const child = spawnProcess([executable, '--no-config', ...args], {
           cwd: root,
           env,
           stdout: 'pipe',
@@ -459,11 +464,11 @@ test('rejects changed original parser assets without touching installed dependen
       join(modules, '@kite-ai/agent'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const result = await Bun.build({
+    const result = await buildBundle({
       entrypoints: [
         fileURLToPath(new URL('../../../src/permissions/shell-command-policy.ts', import.meta.url)),
       ],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: root,
     });

@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
 import { constants, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createKnowledgeReadScope, type KnowledgeFileAccess } from '../../../src/sources';
 
 test('scoped knowledge close seals admission and waits the complete original composite read', async () => {
@@ -56,10 +58,10 @@ test('scoped knowledge close seals admission and waits the complete original com
 });
 
 test('isolated actual FileHandle and fd close failures retain original bytes, errors and one close across knowledge consumers', async () => {
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
-      '--no-install',
+      ...testRuntimeFlags,
       fileURLToPath(new URL('../../fixtures/knowledge-read-custody.ts', import.meta.url)),
     ],
     { stdout: 'pipe', stderr: 'pipe' },

@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -11,6 +11,7 @@ import { readSessionLogs } from '@kite-ai/agent/storage';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { startService } from '../../src/index';
 
@@ -35,7 +36,7 @@ for (const scenario of ['reused_approval', 'timeout_continue'] as const)
     ]);
     const reviewer: ModelAdapter = {
       async *stream() {
-        if (scenario === 'timeout_continue') await Bun.sleep(150);
+        if (scenario === 'timeout_continue') await sleepTimer(150);
         yield {
           type: 'text_delta',
           text: JSON.stringify({
@@ -117,7 +118,7 @@ for (const scenario of ['reused_approval', 'timeout_continue'] as const)
       },
     });
     await client.connect();
-    const gateway = startDevelopmentWeb({ admittedClient: client });
+    const gateway = await startDevelopmentWeb({ admittedClient: client });
     const document = await fetch(gateway.endpoint);
     await document.body?.cancel();
     const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -131,7 +132,7 @@ for (const scenario of ['reused_approval', 'timeout_continue'] as const)
           headers.set('origin', gateway.endpoint);
           return fetch(url, { ...init, headers });
         },
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     try {

@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Interaction } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -177,7 +178,7 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
     const deadline = Date.now() + 5000;
     while (!host.querySelector('[data-complete-attachment="verified"]')) {
       if (Date.now() >= deadline) throw Error('group_attachment_not_verified');
-      await act(async () => await Bun.sleep(5));
+      await act(async () => await fixtureDelay(5));
     }
     expect(button(child.id, '仅此次').disabled).toBe(false);
     expect(article(child.id).textContent).toContain('child-full.txt');
@@ -194,7 +195,7 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
     expect(group.querySelector('.approval-child-icon')!.outerHTML).toBe(icon);
     while (!host.querySelector('[data-complete-attachment="verified"]')) {
       if (Date.now() >= deadline) throw Error('group_attachment_not_verified_again');
-      await act(async () => await Bun.sleep(5));
+      await act(async () => await fixtureDelay(5));
     }
     await act(async () => button(child.id, '仅此次').click());
     expect(answers[1]).toEqual({

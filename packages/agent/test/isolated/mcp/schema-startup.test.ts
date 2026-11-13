@@ -1,5 +1,7 @@
-import { afterAll, expect, mock, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs/promises';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { afterAll, expect, mock, spyOn, test } from '#kite-test';
+import { NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
 // Process-isolated observers delegate original bytes and digest results unchanged.
 const nativeFS = { ...fs };
@@ -17,16 +19,17 @@ mock.module('node:fs/promises', () => ({
     return bytes;
   },
 }));
-const NativeWorker = globalThis.Worker;
 let created = 0;
-globalThis.Worker = class extends NativeWorker {
-  constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-    super(...args);
-    created++;
-  }
-};
+useFixtureWorker(
+  class extends NativeWorker {
+    constructor(...args: ConstructorParameters<typeof NativeWorker>) {
+      super(...args);
+      created++;
+    }
+  },
+);
 afterAll(() => {
-  globalThis.Worker = NativeWorker;
+  useFixtureWorker();
   mock.module('node:fs/promises', () => nativeFS);
 });
 const { createMcpSchemaValidation } = await import('../../../src/mcp/schema-validation');
@@ -70,7 +73,7 @@ for (const boundary of ['abort', 'timeout'] as const) {
     try {
       await gate.entered;
       if (boundary === 'abort') abort.abort(new Error('owned_start_cancel'));
-      await Bun.sleep(35);
+      await sleepTimer(35);
       console.log(
         'schema-startup-held',
         JSON.stringify({ boundary, firstSettled, peerSettled, createdWorkers: created - before }),
@@ -123,7 +126,7 @@ test('schema close seals asset preparation immediately and joins the original ac
     closing = validation.close().then(() => {
       closed = true;
     });
-    await Bun.sleep(20);
+    await sleepTimer(20);
     expect(settled).toBe(false);
     expect(closed).toBe(false);
     expect(created).toBe(before);
@@ -170,7 +173,7 @@ test('schema deadline includes the actual asset hash and cannot create a Worker 
   });
   try {
     await started;
-    await Bun.sleep(1100);
+    await sleepTimer(1100);
     expect(settled).toBe(false);
     expect(created).toBe(before);
     release();

@@ -1,3 +1,4 @@
+import { workerEndpoint } from '../../platform/process/worker-endpoint';
 import type { ProfileAccess } from '../../platform/profile';
 import { assertSelectedSqliteEngine, type SqliteEngineSelection } from '../../sqlite-engine';
 import {
@@ -19,8 +20,9 @@ import type { WorkerRequest } from './protocol';
 import { WorkerQueue } from './queue';
 import type { DbTiming } from './timing';
 
+const endpoint = workerEndpoint<WorkerRequest>();
+
 let operations: SqliteOperations | undefined;
-declare const self: Worker;
 const queue = new WorkerQueue();
 let scheduled = false;
 const arrivals = new Map<number, number>();
@@ -34,7 +36,7 @@ function pump(): void {
     else setTimeout(pump, 25);
   }
 }
-self.onmessage = (event: MessageEvent<WorkerRequest>) => {
+endpoint.onmessage = (event: MessageEvent<WorkerRequest>) => {
   try {
     queue.push(event.data);
     arrivals.set(event.data.id, performance.now());
@@ -43,7 +45,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       setImmediate(pump);
     }
   } catch (error) {
-    self.postMessage({
+    endpoint.postMessage({
       id: event.data.id,
       error: {
         code: 'storage_queue_full',
@@ -121,7 +123,7 @@ function execute(request: WorkerRequest): void {
       totalMs: performance.now() - arrived,
       outcome: message.error ? 'failed' : 'succeeded',
     };
-    self.postMessage({ ...message, timing });
+    endpoint.postMessage({ ...message, timing });
   };
   try {
     if (method === 'close') tracked?.resetTiming();

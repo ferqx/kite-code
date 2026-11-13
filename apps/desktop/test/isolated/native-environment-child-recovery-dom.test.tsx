@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { Message } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { NativeBackgroundChild } from '../../src/background-bridge';
 import type { NativeBridge, NativeSelection } from '../../src/native-bridge';
 import { NativeChildDetail } from '../../src/native-child-detail';

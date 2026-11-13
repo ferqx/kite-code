@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { decodeNativeRequest } from '../electron/native-ipc';
 
 const input = {

@@ -12,7 +12,9 @@
 
 ## 规则
 
-Kite Code 是 provider-neutral 系统。当前默认 Service 的手动模型来自 ~/.kite-code/kite-code.jsonc，正式宿主另发现本机 Codex 登录和实际本地模型元数据；不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，路由和参数结构仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。所有配置可用模型都可选择思考程度，四类手动 Provider 与 Codex 都按实际协议传递所选思考程度，不以名称或旧能力标记拒绝；是否接受或生效由模型服务决定。非法档位仍本地拒绝，远端拒绝保留真实失败，不切换路由或去参数重发。决定及验证见[思考程度参数 Note](../../.agents/notes/implemented/architecture/2026-10-16-model-effort-pass-through.md)。已有 inline key 只用于宿主解析，新增替换 key 存用户级 OS vault，原 key 不进入 DTO/snapshot/日志。配置源的决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
+Kite Code 是 provider-neutral 系统。当前默认 Service 的手动模型来自 ~/.kite-code/kite-code.jsonc，正式宿主另发现本机 Codex 登录和实际本地模型元数据；不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，路由和参数结构仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。所有配置可用模型都可选择思考程度，四类手动 Provider 与 Codex 都按实际协议传递所选思考程度，不以名称或旧能力标记拒绝；是否接受或生效由模型服务决定。非法档位仍本地拒绝，远端拒绝保留真实失败，不切换路由或去参数重发。决定及验证见[思考程度参数 Note](../../.agents/notes/implemented/architecture/2026-10-16-model-effort-pass-through.md)。已有 inline key 只用于宿主解析，新增或替换的 key 写入用户级加密记录。系统凭据库保管解密密钥。公开 DTO、快照和日志只使用不透明引用。配置源的决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
+
+手动 Provider 的普通请求、审核、标题和后台运行走同一无交互绑定。Service 先核本地加密记录，旧条目按同一引用惰性迁移。macOS 只在显式保存连接时允许系统授权。Linux 读取只查询可访问的 Secret Service 条目。Windows 由当前用户 Credential Manager 保护解密密钥。用户目录的文件权限及加密不能作为同用户任意程序的隔离承诺。已批准的普通 Shell 与原工具权限边界由各自 owner 定义。决定及验证见[加密模型凭据](../../.agents/notes/implemented/architecture/2026-11-13-encrypted-model-credentials.md)。
 
 当前 SDK 适配器在 transport 边界将 namespaced Tool ID 转为符合 compatible 函数名语法的无碰撞名称，并用同一请求映射还原返回调用。Core ID、权限和持久历史不重命名，实际转换版本与严格端点证据归[AI owner](../../packages/ai/README.md)；下文旧 Model Surface 的序列化身份不因当前 SDK 编码变化而改写。
 

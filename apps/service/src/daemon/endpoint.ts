@@ -1,4 +1,3 @@
-import { dlopen, ptr } from 'bun:ffi';
 import {
   chmodSync,
   constants,
@@ -14,6 +13,7 @@ import {
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 import { bootstrapSchema, type DaemonBootstrap, handleBootstrapConnection } from './bootstrap';
 import { assertPosixRecordUnlocked, closePosixRecord, withPosixRecordLock } from './posix-record';
 import { readProcessStartIdentity } from './process-identity';

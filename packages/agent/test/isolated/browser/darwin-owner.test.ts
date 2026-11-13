@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('Darwin owner keeps malformed control sticky across later valid terminal and stream closure', () => {
   const owner = fileURLToPath(
@@ -12,7 +13,7 @@ test('Darwin owner keeps malformed control sticky across later valid terminal an
   // Private subprocess mocks only the OS boundary; it starts no guardian or browser.
   const source = String.raw`
 import assert from 'node:assert/strict';
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { readFileSync,writeFileSync,mkdtempSync,rmSync } from 'node:fs';
@@ -34,7 +35,7 @@ assert.notEqual(original,instrumented);
 writeFileSync(directory+'/owner.ts',instrumented);
 const {startDarwinBrowserOwner}=await import(directory+'/owner.ts');
 for(const mode of ['cancel-before-ready','cancel-invalid-ready','cancel-invalid-then-ready','cancel-after-unknown','valid','after-terminal','partial','before-terminal','guardian-reaped','duplicate-terminal']){
- const owner=startDarwinBrowserOwner({guardianPath:'/fixture/guardian.js',bunExecutable:'/fixture/bun',executable:'/fixture/daemon',cwd:'/fixture',env:{},nonce:'nonce',graceMs:1,startupTimeoutMs:1000});
+ const owner=startDarwinBrowserOwner({guardianPath:'/fixture/guardian.js',runtimeExecutable:'/fixture/bun',executable:'/fixture/daemon',cwd:'/fixture',env:{},nonce:'nonce',graceMs:1,startupTimeoutMs:1000});
  const record=(pid,parent)=>({...identity(pid,parent),exit:null,kernelState:'alive'});
  const guardian=record(102,1),server=record(103,102),registration={label:'com.kitecode.browser.11111111-1111-1111-1111-111111111111',domain:'user/'+process.getuid(),removed:false};
  let sequence=0;
@@ -63,10 +64,14 @@ for(const mode of ['cancel-before-ready','cancel-invalid-ready','cancel-invalid-
 rmSync(directory,{recursive:true});
 console.log('darwin-owner-sticky-control-verified');
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    encoding: 'utf8',
-    timeout: 10000,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      encoding: 'utf8',
+      timeout: 10000,
+    },
+  );
   expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
   expect(result.stdout).toContain('darwin-owner-sticky-control-verified');
 });

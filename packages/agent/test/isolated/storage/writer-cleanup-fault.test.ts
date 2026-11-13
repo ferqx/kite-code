@@ -1,14 +1,15 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureWorkerEntry, NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
 for (const busy of [true, false]) {
   test(`statement cleanup failure ${busy ? 'before a BUSY write' : 'after a committed write'} rejects the original request without replay or queue loss`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-writer-cleanup-')));
-    const NativeWorker = globalThis.Worker;
+
     const sent: { id: number; method: string; args: unknown[] }[] = [];
     const received: {
       id: number;
@@ -18,15 +19,20 @@ for (const busy of [true, false]) {
     }[] = [];
     class FaultWorker extends NativeWorker {
       constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-        super(new URL('./writer-cleanup-worker-fixture.ts', import.meta.url).href, args[1]);
-        this.addEventListener('message', (event: MessageEvent) => received.push(event.data));
+        super(
+          ...fixtureWorkerEntry(
+            args,
+            new URL('./writer-cleanup-worker-fixture.ts', import.meta.url),
+          ),
+        );
+        this.on('message', (data) => received.push(data));
       }
       override postMessage(message: unknown): void {
         sent.push(message as (typeof sent)[number]);
         super.postMessage(message);
       }
     }
-    globalThis.Worker = FaultWorker;
+    useFixtureWorker(FaultWorker);
     let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let peer: Database | undefined;
     let held = false;
@@ -90,7 +96,7 @@ for (const busy of [true, false]) {
       expect(received.find((item) => item.id === close!.id)?.error).toBeUndefined();
       expect(received.at(-1)?.fixtureFaults).toBe(1);
     } finally {
-      globalThis.Worker = NativeWorker;
+      useFixtureWorker();
       if (held) peer?.run('ROLLBACK');
       peer?.close(true);
       await store?.close();

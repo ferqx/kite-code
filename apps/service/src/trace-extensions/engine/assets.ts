@@ -3,12 +3,7 @@ import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
-export const engineAssetNames = [
-  'runner.js',
-  'quickjs.wasm',
-  'empty-bunfig.toml',
-  'empty-tsconfig.json',
-] as const;
+export const engineAssetNames = ['runner.js', 'quickjs.wasm'] as const;
 const assetManifestSchema = z.strictObject({
   schema: z.literal('kite.trace-engine-assets'),
   version: z.literal(1),
@@ -21,7 +16,7 @@ const assetManifestSchema = z.strictObject({
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
       }),
     )
-    .length(4),
+    .length(engineAssetNames.length),
 });
 export type TraceEngineAssets = { directory: string; manifestSha256: string };
 export const engineDigest = (bytes: string | Uint8Array) =>

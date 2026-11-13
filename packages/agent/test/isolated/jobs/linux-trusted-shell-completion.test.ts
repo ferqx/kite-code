@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('trusted Linux Job waits for adapter drain and cleanup before cancellation or disposal', () => {
   const base = fileURLToPath(new URL('../../../src/', import.meta.url));
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import {PassThrough} from 'node:stream';
 const base=${JSON.stringify(base)};
 const ownerPath=base+'platform/process/linux-owned-shell.ts',prepPath=base+'jobs/linux-preparation.ts';
@@ -26,7 +27,7 @@ mock.module(ownerPath,()=>({...originalOwner,startLinuxOwnedShell(options){
  return {pid:p,stdout,stderr,ready:Promise.resolve(),completion,cancel(){owner.cancelCalls++;owner.finish('cancel');return completion;},readProcessEvidence(){return structuredClone(evidence);}};
 }}));
 const {createLinuxShellJob}=await import(base+'jobs/linux-shell.ts');
-const job=createLinuxShellJob({cwd:'/mock/cwd',env:{},initExecutable:'/mock/init',bubblewrapPath:'/mock/bwrap',bunExecutable:'/mock/bun',shellExecutable:'/bin/sh',protectedRoots:[],filesystemScope:'workspace_write',mode:'host',trustedWorkerLaunch:()=>({version:1,digest:'mock',env:{},bunFlags:[]})});
+const job=createLinuxShellJob({cwd:'/mock/cwd',env:{},initExecutable:'/mock/init',bubblewrapPath:'/mock/bwrap',runtimeExecutable:'/mock/bun',shellExecutable:'/bin/sh',protectedRoots:[],filesystemScope:'workspace_write',mode:'host',trustedWorkerLaunch:()=>({version:1,digest:'mock',env:{},runtimeFlags:[]})});
 const start=()=>job.start({command:'fixed trusted command'},{sessionId:'s',executionId:crypto.randomUUID(),signal:new AbortController().signal});
 const collect=async handle=>{const events=[];for await(const event of job.observe(handle))events.push(event);return events;};
 for(const mode of ['dispose-only','serial','parallel']){
@@ -58,10 +59,14 @@ for(const fault of ['native-unknown','cleanup-unknown']){
  assert.equal(owner.cleanupCalls,fault==='native-unknown'?0:1);
 }
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    encoding: 'utf8',
-    timeout: 5000,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+    },
+  );
   if (result.status !== 0) console.error(result.stderr);
   expect(result.error).toBeUndefined();
   expect(result.signal).toBeNull();

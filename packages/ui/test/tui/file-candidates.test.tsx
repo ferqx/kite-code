@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   fileReference,
   fileToken,
@@ -110,7 +111,7 @@ test('exhausts candidate pages and freezes original scope/revision; stale cross 
       'next',
     ),
   );
-  await Bun.sleep(0);
+  await fixtureDelay(0);
   expect(c.state.fileCandidates?.phase).toBe('reading');
   expect(f.reads).toHaveLength(2);
   f.reads[1]!.resolve(page(f.reads[1]!, ['目录/尾部 空格.txt']));

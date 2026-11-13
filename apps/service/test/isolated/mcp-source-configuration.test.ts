@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,6 +13,9 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src/index';
 import {
@@ -27,7 +30,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw Error('source_fixture_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(
@@ -61,7 +64,7 @@ async function fixture(
     },
   });
   const credential = await vault.put('owned-temporary-bearer');
-  const network = Bun.serve({
+  const network = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -88,10 +91,10 @@ async function fixture(
   });
   const ledger = join(root, 'stdio-wire.jsonl');
   const built = stdio
-    ? await Bun.build({
+    ? await buildBundle({
         entrypoints: [
           join(
-            import.meta.dir,
+            import.meta.dirname,
             process.platform === 'win32'
               ? '../../../../packages/agent/src/mcp/windows-stdio-guardian.ts'
               : '../../../../packages/agent/src/mcp/stdio-guardian.ts',
@@ -99,7 +102,7 @@ async function fixture(
         ],
         outdir: root,
         naming: 'qualified-guardian.js',
-        target: 'bun',
+        target: 'node',
       })
     : undefined;
   if (built) expect(built.success).toBe(true);
@@ -108,7 +111,7 @@ async function fixture(
       ? {
           command: process.execPath,
           args: [
-            join(import.meta.dir, '../../../../tests/fixtures/mcp-leaf/resources-prompts.ts'),
+            join(import.meta.dirname, '../../../../tests/fixtures/mcp-leaf/resources-prompts.ts'),
             ledger,
           ],
           cwd: workspace,
@@ -138,7 +141,7 @@ async function fixture(
     credentialVault: vault,
     selection: () => selection,
     ...(built
-      ? { stdio: { guardianPath: built.outputs[0]!.path, bunExecutable: process.execPath } }
+      ? { stdio: { guardianPath: built.outputs[0]!.path, runtimeExecutable: process.execPath } }
       : {}),
     http: {
       allowLoopbackForTests: true,
@@ -152,7 +155,7 @@ async function fixture(
   const modelBodies: Record<string, unknown>[] = [];
   let directoryModel = false;
   let beforeModelReply: (() => void) | undefined;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {

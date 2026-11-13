@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('native browser transport binds its daemon, bounds NDJSON and retains namespace cancellation uncertainty', () => {
   const native = fileURLToPath(new URL('../../../src/tools/browser/native.ts', import.meta.url));
@@ -11,7 +12,7 @@ test('native browser transport binds its daemon, bounds NDJSON and retains names
 import realAssert from 'node:assert/strict';
 let assertions=0;
 const assert=new Proxy(realAssert,{get(target,key){const value=target[key];return typeof value==='function'?(...args)=>{assertions++;return value(...args);}:value;}});
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
 import * as actualFS from 'node:fs';
@@ -439,19 +440,27 @@ assert.throws(()=>createNativeBrowserTransport(options,context()),/session_limit
 rmSync(base,{recursive:true,force:true});
 console.log('browser-native-fixture-ok assertions='+assertions+' fake-daemon-starts='+starts);
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    encoding: 'utf8',
-    timeout: 15000,
-    maxBuffer: 1024 * 1024,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      encoding: 'utf8',
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+    },
+  );
   console.info(result.stdout.trim());
   expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
   expect(result.stdout).toContain('browser-native-fixture-ok');
-  const pngClose = spawnSync(process.execPath, ['--eval', source], {
-    encoding: 'utf8',
-    timeout: 15000,
-    env: { ...process.env, KITE_FIXTURE_PNG_CLOSE_FAIL: '1' },
-  });
+  const pngClose = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      encoding: 'utf8',
+      timeout: 15000,
+      env: { ...process.env, KITE_FIXTURE_PNG_CLOSE_FAIL: '1' },
+    },
+  );
   expect(pngClose.status, `${pngClose.stdout}\n${pngClose.stderr}`).toBe(0);
   expect(pngClose.stdout).toContain('browser-png-close-unknown-ok');
 }, 20000);

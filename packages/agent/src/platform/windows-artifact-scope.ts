@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { dlopen, ptr, toArrayBuffer } from '../runtime-ffi';
 import {
   windowsSecurityDescriptorReader,
   windowsSecurityDescriptorSymbols,
@@ -73,7 +74,6 @@ function createBackend(): (
   relativeFiles?: readonly string[],
   relativeDirectories?: readonly string[],
 ) => WindowsArtifactScope {
-  const { dlopen, ptr, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
@@ -88,10 +88,10 @@ function createBackend(): (
   const fail = (): never => {
     throw Error('artifact_scope_denied');
   };
-  const pointer = (value: bigint): import('bun:ffi').Pointer => {
+  const pointer = (value: bigint): import('../runtime-ffi').Pointer => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number <= 0) return fail();
-    return number as import('bun:ffi').Pointer;
+    return number as import('../runtime-ffi').Pointer;
   };
   const wide = (path: string) => {
     if (!path || path.includes('\0') || path.length > 32760) return fail();
@@ -119,7 +119,7 @@ function createBackend(): (
     const token = out();
     if (!adv.symbols.OpenProcessToken(kernel.symbols.GetCurrentProcess(), 8, ptr(token))) fail();
     let user: Uint8Array;
-    let sid: import('bun:ffi').Pointer;
+    let sid: import('../runtime-ffi').Pointer;
     try {
       const bytes = new Uint32Array(1);
       adv.symbols.GetTokenInformation(token[0]!, 1, null, 0, ptr(bytes));

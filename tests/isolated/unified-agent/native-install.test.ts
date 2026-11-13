@@ -1,8 +1,8 @@
-import { expect, setDefaultTimeout, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import { expect, setDefaultTimeout, test } from '#kite-test';
 import { windowsInstallationCoordination } from '../../../packages/agent/src/platform/windows-installation-coordination';
 import { packNativeBundle } from '../../../scripts/release/native-archive';
 import {

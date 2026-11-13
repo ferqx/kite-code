@@ -1,12 +1,14 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type AfterTurnPolicy, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -24,7 +26,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw new Error('after_turn_configuration_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(mode: 'allow' | 'deny' | 'json_only') {
@@ -38,7 +40,7 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
     requests: Record<string, unknown>[] = [];
   const childBody = `original child result ${'c'.repeat(6000)} complete tail`;
   let unexpected = 0;
-  const later = Bun.serve({
+  const later = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -46,7 +48,7 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
       return new Response('{}');
     },
   });
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

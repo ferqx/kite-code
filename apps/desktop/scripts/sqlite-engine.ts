@@ -7,17 +7,18 @@ import {
   parseSqliteReleaseIdentity,
   type SqliteReleaseIdentity,
 } from '@kite-ai/service/sqlite-release-assets';
+import { type Subprocess, spawn } from '../../../scripts/tooling/process';
 
-type ProbeChild = Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+type ProbeChild = Subprocess<'ignore', 'pipe', 'pipe'>;
 const pendingProbes = new Set<{ child: ProbeChild; scratch: string; exitConfirmed: boolean }>();
-/** Measure the copied Electron, independently of the shell's Node and the paired Bun. */
+/** Measure the copied Electron independently of the Service runtime. */
 export async function probeNativeSqliteEngine(
   input: {
     executable: string;
     root: string;
     electronVersion: string;
   },
-  spawnChild: typeof Bun.spawn = Bun.spawn,
+  spawnChild: typeof spawn = spawn,
 ): Promise<SqliteReleaseIdentity & { driver: 'node:sqlite'; linkage: 'builtin' }> {
   let scratch: string;
   if (process.platform === 'win32') {

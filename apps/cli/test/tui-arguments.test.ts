@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { parseTUIArguments } from '../host/tui-arguments';
 
 test('ordinary TUI arguments reject test diagnostics in every environment', () => {

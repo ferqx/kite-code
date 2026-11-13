@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -464,7 +465,7 @@ test('trusted Host prepare seals guard; real Ask self qualifies and physical run
       card = (await runtime.listInteractions({ ...f.base, sessionId: 's', state: 'pending' }))
         .interactions[0];
       if (Date.now() > deadline) throw Error('approval_timeout');
-      if (!card) await Bun.sleep(5);
+      if (!card) await sleepTimer(5);
     }
     expect(effects).toBe(0);
     expect(await errorCode(retained!())).toBe('dispatch_read_context_closed');
@@ -478,7 +479,7 @@ test('trusted Host prepare seals guard; real Ask self qualifies and physical run
     });
     await Promise.race([
       running,
-      Bun.sleep(5000).then(() => {
+      sleepTimer(5000).then(() => {
         throw Error('effect_timeout');
       }),
     ]);

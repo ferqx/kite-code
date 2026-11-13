@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   readWindowsDaemonRecord,
   removeWindowsDaemonRecord,
@@ -49,9 +50,9 @@ test('record HANDLE protocol preserves original identity, bounded full bytes and
   const module = fileURLToPath(new URL('../../src/daemon/windows-record.ts', import.meta.url));
   const security = fileURLToPath(new URL('../../src/daemon/windows-security.ts', import.meta.url));
   const code = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-import * as ffi from 'bun:ffi';
+import * as ffi from '@kite-ai/agent/runtime-ffi';
 import * as path from 'node:path';
 Object.defineProperty(process, 'platform', { value: 'win32' });
 Object.defineProperty(process, 'arch', { value: 'x64' });
@@ -89,7 +90,7 @@ const symbols = {
  CloseHandle(h) { if (failedClose === h) { failedClose = undefined; return false; } const e = handles.get(h); assert.ok(e); if (e.marked) files.delete(e.name); handles.delete(h); return true; },
 };
 // The production leaf deliberately uses lazy CommonJS builtin loading.
-Object.assign(require('bun:ffi'), { ptr: b => b, dlopen: () => ({ symbols, close() {} }) });
+Object.assign(require('@kite-ai/agent/runtime-ffi'), { ptr: b => b, dlopen: () => ({ symbols, close() {} }) });
 const { reserveWindowsDaemonRecord, readWindowsDaemonRecord, removeWindowsDaemonRecord } = await import(${JSON.stringify(module)});
 const pathName = '/private/owner.json', initial = Buffer.from('{"ready":false}');
 assert.equal(readWindowsDaemonRecord(pathName), undefined); assert.equal(handles.size, 0);
@@ -123,7 +124,11 @@ assert.throws(() => reserveWindowsDaemonRecord('/private/unknown.json', initial)
 assert.equal(handles.size, 1); assert.equal([...handles.values()][0].name, '/private/unknown.json');
 console.log('original-record-owner-confirmed');
 `;
-  const child = spawnSync(process.execPath, ['-e', code], { encoding: 'utf8', timeout: 4000 });
+  const child = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    { encoding: 'utf8', timeout: 4000 },
+  );
   if (child.error || child.status !== 0) process.stderr.write(child.stderr || String(child.error));
   expect(child.error).toBeUndefined();
   expect(child.status).toBe(0);

@@ -1,4 +1,3 @@
-import { expect, mock, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,9 +9,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, mock, test } from '#kite-test';
 import { createNativeWorkspaceFileIo } from '../../../src/files-native-binding';
 
 const collectedCalls = new Set<string>();
+const collectGarbage = globalThis.gc;
+if (!collectGarbage) throw Error('native_path_fixture_requires_expose_gc');
 const actualNative = createNativeWorkspaceFileIo;
 mock.module('../../../src/files-native-binding', () => ({
   createNativeWorkspaceFileIo(...args: Parameters<typeof createNativeWorkspaceFileIo>) {
@@ -26,10 +28,10 @@ mock.module('../../../src/files-native-binding', () => ({
           return (...args: unknown[]) => {
             if (['openAt', 'read', 'write', 'publishAt', 'unlinkAt'].includes(String(key))) {
               collectedCalls.add(String(key));
-              Bun.gc(true);
+              collectGarbage!();
               const churn = Array.from({ length: 256 }, () => Buffer.alloc(256, 120));
               const result = Reflect.apply(value, source, args);
-              Bun.gc(true);
+              collectGarbage!();
               if (churn[0]![0] !== 120) throw new Error('allocation changed');
               return result;
             }

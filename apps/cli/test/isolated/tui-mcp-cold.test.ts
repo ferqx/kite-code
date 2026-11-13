@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -9,15 +8,24 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { TuiMcpIntent } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { createTuiMcpPort } from '../../host/tui-mcp';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   const deadline = performance.now() + 10000;
@@ -25,7 +33,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const result = await read();
     if (result !== undefined) return result;
     if (performance.now() > deadline) throw Error('owned_mcp_cold_deadline');
-    await Bun.sleep(20);
+    await testSleep(20);
   }
 }
 test('source-free original MCP prepare and physical first GET loss survive caller SIGKILL with GET-only cold lookup; shared stays and paired drains', async () => {
@@ -51,7 +59,7 @@ test('source-free original MCP prepare and physical first GET loss survive calle
   let rpc = 0,
     posts = 0,
     physicalDropped = false;
-  const remote = Bun.serve({
+  const remote = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -60,13 +68,14 @@ test('source-free original MCP prepare and physical first GET loss survive calle
     },
   });
   let service: Awaited<ReturnType<typeof launchPairedService>> | undefined,
-    child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    relay: ReturnType<typeof Bun.serve> | undefined;
+    child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    relay: FixtureServer | undefined;
   const receipts: Record<string, unknown>[] = [];
   try {
-    const build = Bun.spawn(
+    const build = testSpawn(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -87,9 +96,9 @@ test('source-free original MCP prepare and physical first GET loss survive calle
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-mcp-cold.ts')],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: root,
     });
@@ -137,7 +146,7 @@ test('source-free original MCP prepare and physical first GET loss survive calle
     expect(() => process.kill(originalPid, 0)).toThrow();
     settings.seed = { storeId, subjectId };
     publish();
-    const seed = Bun.spawn([candidate.artifact.executable, entrypoint, 'seed-controls'], {
+    const seed = testSpawn([candidate.artifact.executable, entrypoint, 'seed-controls'], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -195,7 +204,7 @@ test('source-free original MCP prepare and physical first GET loss survive calle
       settings.intent = intent;
       publish();
       rmSync(join(root, 'caller-stage'), { force: true });
-      child = Bun.spawn([candidate.artifact.executable, entrypoint, 'caller'], {
+      child = testSpawn([candidate.artifact.executable, entrypoint, 'caller'], {
         stdout: 'pipe',
         stderr: 'pipe',
       });
@@ -255,7 +264,7 @@ test('source-free original MCP prepare and physical first GET loss survive calle
       commandId: prepared.request.commandId,
       status: 'outcome_unknown',
     });
-    relay = Bun.serve({
+    relay = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {

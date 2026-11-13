@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,6 +7,8 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { startService } from '../../src';
 import { createSummaryCompressor } from '../../src/compression-configuration';
 import { apiSchemas } from '../../src/http/schema';
@@ -176,7 +177,7 @@ for (const mode of ['high', 'zero', 'missing', 'many'] as const)
       if (mode === 'high') {
         let distortion: 'sum' | 'scope' | 'coverage' = 'sum';
         const endpoint = service.endpoint;
-        const proxy = Bun.serve({
+        const proxy = await fixtureServe({
           hostname: '127.0.0.1',
           port: 0,
           async fetch(request) {

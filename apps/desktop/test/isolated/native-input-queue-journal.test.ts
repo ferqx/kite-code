@@ -1,9 +1,14 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
 import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildWindowsAccess } from '../../scripts/build-windows-access';
 
@@ -16,17 +21,17 @@ test('actual Node queue journal migrates the private database, survives cold los
     initialized.lock.release();
     initializeDesktopBuildEnvironment();
     const asset = process.platform === 'win32' ? await buildWindowsAccess(root) : undefined;
-    const helper = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-      target: 'bun',
+    const helper = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'bundle',
       outdir: root,
       naming: 'queue-profile-access.js',
     });
     expect(helper.success).toBe(true);
-    const built = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../native-input-queue-node.fixture.ts')],
+    const built = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../native-input-queue-node.fixture.ts')],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
@@ -37,9 +42,9 @@ test('actual Node queue journal migrates the private database, survives cold los
     const executable = realpathSync(process.execPath),
       helperPath = join(root, 'queue-profile-access.js');
     const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         join(root, 'queue-journal-node.js'),
         JSON.stringify(profile),
         executable,

@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -11,9 +11,11 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { terminalSqliteEngineRoot } from '@kite-ai/service/sqlite-release-assets';
+import { expect, test } from '#kite-test';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -41,13 +43,13 @@ test.skipIf(process.platform !== 'darwin')(
     privateDirectory(profile.profilePath);
     let service: Awaited<ReturnType<typeof launchPairedService>> | undefined,
       reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined,
-      provider: ReturnType<typeof Bun.serve> | undefined;
+      provider: FixtureServer | undefined;
     const requests: Message[][] = [];
     const coldAssets: ReturnType<typeof acquireArtifactAccess>[] = [];
     try {
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
       const electron = createRequire(
-        resolve(import.meta.dir, '../../../apps/desktop/package.json'),
+        resolve(import.meta.dirname, '../../../apps/desktop/package.json'),
       )('electron') as string;
       const built = await buildNativeCandidate({
         terminalRoot: terminal.root,
@@ -83,7 +85,7 @@ test.skipIf(process.platform !== 'darwin')(
           { name: 'write_file', input: { path, base: null, content: 'MUST NEVER REPLACE ASSET' } },
         ]),
       ];
-      provider = Bun.serve({
+      provider = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -200,7 +202,7 @@ test.skipIf(process.platform !== 'darwin')(
         run = runId ? await client.getRun(runId) : null;
       while (!run || run.isActive) {
         if (Date.now() > deadline) throw Error('native_protection_run_deadline');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
         command = await client.getCommand('protected-work');
         runId = receiptRunId(command.receipt);
         run = runId ? await client.getRun(runId) : null;

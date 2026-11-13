@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { parseCLIArguments } from '../../apps/cli/src/arguments';
 import { runSourceTerminalCLI, terminalEntrypoint } from '../release/source-terminal';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 /** Validate both finite calls before starting anything; workspace belongs only to start. */
 export function sourceServerArguments(argv: readonly string[]): {
   start: readonly string[];

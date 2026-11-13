@@ -1,11 +1,11 @@
-import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Ajv from 'ajv';
 import { parse } from 'yaml';
+import { describe, expect, test } from '#kite-test';
 
 const source = readFileSync(
-  join(import.meta.dir, '../../.agents/skills/document-before-commit/SKILL.md'),
+  join(import.meta.dirname, '../../.agents/skills/document-before-commit/SKILL.md'),
   'utf8',
 );
 const metadata = parse(source.split('---')[1]!);

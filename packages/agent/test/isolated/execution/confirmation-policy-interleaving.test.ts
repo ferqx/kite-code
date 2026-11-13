@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { Permissions, ToolDefinition } from '../../../src/extensions';
 import { intersectPermissionPolicies } from '../../../src/permissions/inheritance';
@@ -148,7 +149,7 @@ test('a concurrent actual Tool cannot replace another Tool independent confirmat
           expectedRevision: card.revision,
           answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
         });
-      await Promise.race([completed, Bun.sleep(5)]);
+      await Promise.race([completed, sleepTimer(5)]);
     }
     await completed;
     expect(interleaved).toBe(true);

@@ -1,7 +1,8 @@
-import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { AgentClient, SessionView } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, mock, test } from '#kite-test';
 import { createBrowserGrantRequestId } from '../../../service/src/desktop-browser-authorization';
 import {
   type BrowserGrantScope,
@@ -1114,7 +1115,7 @@ test('a real Caller loading projection commits and restores a scoped new page th
       ).value.display !== 'ready'
     ) {
       if (Date.now() >= displayDeadline) throw Error('browser_fixture_display_not_ready');
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     }
     expect(views[0]!.getBounds()).toEqual({ x: 800, y: 80, width: 390, height: 810 });
     expect(views[0]!.getVisible()).toBe(true);

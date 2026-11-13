@@ -1,10 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 import {
   directoryLink,
@@ -17,7 +21,7 @@ import {
   selectDaemonEndpoint,
 } from '../../src/daemon';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 const nativePlatform = ['darwin', 'linux'].includes(process.platform);
 const nativeTest = nativePlatform ? test : test.skip;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -36,7 +40,7 @@ async function bounded<T>(work: Promise<T>, ms = 5000): Promise<T> {
   }
 }
 async function build(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], {
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, ...args], {
     cwd,
     env: hostBuildEnvironment(),
     stdout: 'pipe',
@@ -123,9 +127,9 @@ beforeAll(async () => {
     mkdirSync(dirname(target), { recursive: true });
     directoryLink(realpathSync(installed), target);
   }
-  const result = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../fixtures/process-cleanup-retention-child.ts')],
-    target: 'bun',
+  const result = await buildBundle({
+    entrypoints: [join(import.meta.dirname, '../fixtures/process-cleanup-retention-child.ts')],
+    target: 'node',
     packages: 'external',
     outdir: artifact,
   });
@@ -185,7 +189,7 @@ function selection(kind: string) {
   return { directory, profile, retained, models, startup, input, identity, endpoint };
 }
 function spawn(kind: string, input: unknown) {
-  const child = Bun.spawn([process.execPath, entry, kind], {
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, entry, kind], {
     cwd: artifact,
     stdin: 'pipe',
     stdout: 'pipe',
@@ -226,7 +230,7 @@ for (const kind of ['paired', 'daemon'])
         stderr.releaseLock();
         pipesClosed = true;
         // Actual EOF plus closed stdout/stderr: neither a parent pipe nor a pending read holds it.
-        await Bun.sleep(100);
+        await sleepTimer(100);
         expect(child.exitCode).toBeNull();
         expect(process.kill(child.pid, 0)).toBe(true);
         expect(existsSync(value.retained)).toBe(true);

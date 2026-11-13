@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -11,8 +9,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
@@ -1010,7 +1011,7 @@ test('cancel during actual immutable preimage publication leaves original file a
   try {
     const work = f.run();
     const deadline = Date.now() + 3000;
-    while (!f.captureEntered && Date.now() < deadline) await Bun.sleep(10);
+    while (!f.captureEntered && Date.now() < deadline) await sleepTimer(10);
     expect(f.captureEntered).toBe(true);
     await f.runtime.cancelCommand({
       expectedStoreId: f.storeId,
@@ -1063,7 +1064,7 @@ async function restoreApproval(f: Awaited<ReturnType<typeof fixture>>) {
       state: 'pending',
     });
     if (page.interactions[0]) return page.interactions[0];
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
   console.error(
     'restore Ask diagnostic',

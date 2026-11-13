@@ -19,6 +19,7 @@ export const FINITE_ROOT_SCRIPT_TESTS = [
   'tests/integration/docs-structure.test.ts',
   'tests/integration/document-sync-skill.test.ts',
   'tests/integration/scripts/check-test-ownership.test.ts',
+  'tests/integration/scripts/ci-node-baseline.test.ts',
   'tests/integration/scripts/test-discovery.test.ts',
   'tests/integration/scripts/unified-workspaces.test.ts',
   'tests/integration/scripts/unified-default-plan.test.ts',
@@ -79,7 +80,9 @@ export function unifiedTestPlan(root: string, concurrency: number): TestPlan {
 
 export async function runUnifiedTests(root: string, args: readonly string[]): Promise<number> {
   if (args.length > 1 || (args.length === 1 && args[0] !== '--list')) {
-    console.error('usage: bun run scripts/run-default-tests.ts [--list]');
+    console.error(
+      'usage: node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts [--list]',
+    );
     return 2;
   }
   if (args[0] === '--list') {

@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { initializeDesktopBuildEnvironment } from '../../development/windows-desktop-environment';
+import { spawn as spawnProcess } from '../../tooling/process';
 import { packNativeBundle } from '../native-archive';
 
 function preparedElectron(root: string, inputs: string): string | undefined {
@@ -17,7 +18,7 @@ function preparedElectron(root: string, inputs: string): string | undefined {
 
 export async function buildWindowsSetup(
   root: string,
-  values: Readonly<Partial<Record<'directory' | 'zstd-archive' | 'bun' | 'electron', string>>>,
+  values: Readonly<Partial<Record<'directory' | 'zstd-archive' | 'node' | 'electron', string>>>,
 ) {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw Error('windows_setup_requires_windows_x64');
@@ -37,24 +38,20 @@ export async function buildWindowsSetup(
   );
   if (lstatSync(output, { throwIfNoEntry: false })) throw Error('windows_setup_destination_exists');
 
-  const cachedBun = join(inputs, `bun-${Bun.version}`, 'bin/bun.exe');
-  const bun = realpathSync.native(
-    resolve(
-      values.bun ??
-        (lstatSync(cachedBun, { throwIfNoEntry: false }) ? cachedBun : process.execPath),
-    ),
-  );
+  const node = realpathSync.native(resolve(values.node ?? process.execPath));
+  const register = join(root, 'scripts/tooling/register.mjs');
   const electron = values.electron ?? preparedElectron(root, inputs);
-  const bunSource = retainWindowsCandidateFiles(dirname(bun), [basename(bun)]);
+  const nodeSource = retainWindowsCandidateFiles(dirname(node), [basename(node)]);
   try {
     const env = { ...process.env };
     initializeDesktopBuildEnvironment({ env });
     privateDirectory(output);
     const bundle = join(output, 'native');
-    const native = Bun.spawn(
+    const native = spawnProcess(
       [
-        bun,
-        'run',
+        node,
+        '--import',
+        register,
         join(root, 'scripts/release/unified.ts'),
         'build',
         '--product',
@@ -79,14 +76,14 @@ export async function buildWindowsSetup(
       Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PSMODULEPATH'),
     );
     setupEnv.PSModulePath = join(dirname(powerShell), 'Modules');
-    const setup = Bun.spawn(
+    const setup = spawnProcess(
       [
         powerShell,
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
         '-File',
-        join(import.meta.dir, 'build.ps1'),
+        join(import.meta.dirname, 'build.ps1'),
         '-Archive',
         archive.archivePath,
         '-Sha256',
@@ -95,14 +92,14 @@ export async function buildWindowsSetup(
         decoder,
         '-OutFile',
         installer,
-        '-Bun',
-        bun,
+        '-Node',
+        node,
       ],
       { cwd: root, env: setupEnv, stdout: 'inherit', stderr: 'inherit' },
     );
     if ((await setup.exited) !== 0) throw Error('windows_setup_build_failed');
     return { installer, checksum: `${installer}.sha256`, ...archive };
   } finally {
-    bunSource.release();
+    nodeSource.release();
   }
 }

@@ -4,14 +4,17 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve, win32 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Terminal } from '@xterm/headless';
+import xterm from '@xterm/headless';
 import { parseCallerIntent } from '../../../apps/cli/host/caller-intents';
 import { parseTuiDraftDocument } from '../../../apps/cli/host/tui-drafts';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { readModelOutput } from '../../../packages/agent/src/model-output';
 import type { WindowsOwnedJobMember } from '../../../packages/agent/src/platform/process/windows-owned-child';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { windowsQualificationStore } from './windows-daemon-qualification';
 import { startWindowsInstalledTuiPty } from './windows-installed-tui-pty';
 
+const { Terminal } = xterm;
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const samePath = (a: string, b: string) =>
   win32.normalize(a).toLowerCase() === win32.normalize(b).toLowerCase();
@@ -49,7 +52,9 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
   const terminalCandidate = verifyTerminalBundle(terminalSource),
     nativeCandidate = verifyNativeRuntimeBundle(nativeSource),
     security = defaultWindowsPathSecurity()!;
-  assert.deepEqual(terminalCandidate.manifest.sqlite, nativeCandidate.terminal.manifest.sqlite);
+  const nativeManifest = nativeCandidate.terminal.manifest;
+  assert('cli' in nativeManifest.entries, 'full_native_candidate_required');
+  assert.deepEqual(terminalCandidate.manifest.sqlite, nativeManifest.sqlite);
   const root = join(realpathSync(tmpdir()), `kite-windows-installed-tui-${randomUUID()}`);
   assert(!existsSync(root), 'new_private_root_required');
   privateDirectory(root);
@@ -85,8 +90,8 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
     LOCALAPPDATA: local,
     LANG: 'C.UTF-8',
   });
-  // Only the stable product frontdoor receives poisoned startup options. The trusted
-  // candidate Bun driver receives the clean environment and fixed native config.
+  // Only the stable product frontdoor receives poisoned startup options. The ConPTY
+  // test driver keeps a clean environment and never supplies the product runtime.
   const poison = join(workspace, 'poison.mjs'),
     poisonMarker = join(root, 'preload-ran');
   security.writePrivateFile(
@@ -125,7 +130,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
   const calls = new Map<string, number>();
   const cancelledStreams = new Set<string>();
   let providerError: unknown;
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     maxRequestBodySize: 64 * 1024 * 1024,
@@ -251,13 +256,13 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
     remaining();
     assert.equal(installedTerminal.candidateId, terminalCandidate.candidateId);
     const terminalRoot = installedTerminal.releaseRoot,
-      launcher = join(terminalPrefix, 'bin', 'kite-tui.exe'),
-      driverRuntime = join(terminalRoot, terminalCandidate.manifest.entries.runtime);
-    const load = (selected: string) =>
-      pathToFileURL(join(selected, 'node_modules', '@kite-ai', 'agent', 'sqlite.js')).href;
-    const sqlite = (await import(
-      load(terminalRoot)
-    )) as typeof import('../../../packages/agent/src/sqlite');
+      launcher = join(terminalPrefix, 'bin', 'kite-tui.exe');
+    const driverRuntime = realpathSync(process.execPath);
+    const openStore = (
+      root: string,
+      manifest: Parameters<typeof windowsQualificationStore>[0]['manifest'],
+    ) => windowsQualificationStore({ root, manifest, cwd: home, env, remaining });
+    const sqlite = openStore(terminalRoot, terminalCandidate.manifest);
     type Store = Awaited<ReturnType<typeof sqlite.openSqliteStore>>;
     const usingStore = async <T>(store: Store, read: (selected: Store) => Promise<T>) => {
       let result: { ok: true; value: T } | { ok: false; error: unknown };
@@ -423,7 +428,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
       const screen = new Terminal({ cols: 80, rows: 24, scrollback: 1000, allowProposedApi: true });
       let revision = 0;
       const pty = await startWindowsInstalledTuiPty({
-        runtimeExecutable: driverRuntime,
+        driver: driverRuntime,
         launcher,
         argv: ['--workspace', workspace, '--thread', scenario.sessionId],
         cwd: workspace,
@@ -485,7 +490,8 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
             ? join(nativePrefix, 'bin', 'native-verifier.exe')
             : join(terminalPrefix, 'bin', 'terminal-verifier.exe');
           const verifier = all.filter((member) => samePath(member.executablePath, verifierPath));
-          const runtimePath = join(runtimeRoot, 'runtime', 'bun.exe');
+          const selected = nativeRoot ? nativeManifest : terminalCandidate.manifest;
+          const runtimePath = join(runtimeRoot, selected.entries.runtime);
           const tui = all.filter(
             (member) =>
               samePath(member.executablePath, runtimePath) &&
@@ -832,7 +838,7 @@ export async function qualifyWindowsInstalledTui(input: { terminal: string; nati
     assert(sameCLIRegistration(readCLIRegistration(nativePrefix, true), registration));
     assert.equal(registration.candidateId, nativeCandidate.digest);
     const nativeTerminalRoot = join(installedNative.releaseRoot, 'terminal');
-    const nativeSqlite = (await import(load(nativeTerminalRoot))) as typeof sqlite;
+    const nativeSqlite = openStore(nativeTerminalRoot, nativeManifest);
     await exercise(cases[1]!, nativeSqlite, nativeTerminalRoot, installedNative.releaseRoot);
     const migratedHistory = await history(nativeSqlite, cases[0]!.sessionId);
     for (const field of ['runs', 'messages', 'executions', 'commands'] as const)

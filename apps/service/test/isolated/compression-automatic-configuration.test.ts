@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +13,8 @@ import {
   createDefaultProcessConfiguration,
   createSummaryCompressor,
 } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 
 for (const rejectSummary of [false, true])
   test(`trusted automatic summary uses the actual default SDK and one Core; ${rejectSummary ? 'rejected summary preserves old input and continues work' : 'published summary becomes the next recorded input'}`, async () => {
@@ -24,7 +25,7 @@ for (const rejectSummary of [false, true])
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
     const requests: Record<string, unknown>[] = [],
       summary = 'Summary of original answer and automatic next work';
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {

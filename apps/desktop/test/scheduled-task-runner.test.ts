@@ -1,14 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel } from '@kite-ai/ai';
@@ -22,6 +22,8 @@ import {
   type Run,
 } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { type ScheduledTaskClock, ScheduledTaskRunner } from '../electron/scheduled-task-runner';
 import { createScheduledTaskData } from '../electron/scheduled-tasks';
 import type { NativeCreation } from '../src/native-bridge';
@@ -495,7 +497,7 @@ for (const protocol of ['fixed-model', 'responses'] as const) {
     const requests: { path: string; body: Record<string, unknown> }[] = [];
     const provider =
       protocol === 'responses'
-        ? Bun.serve({
+        ? await serveFixture({
             hostname: '127.0.0.1',
             port: 0,
             async fetch(incoming) {
@@ -682,7 +684,7 @@ for (const protocol of ['fixed-model', 'responses'] as const) {
         !['completed', 'failed'].includes(runner.list().runs[0]!.status) &&
         Date.now() < deadline
       ) {
-        await Bun.sleep(10);
+        await fixtureDelay(10);
         await runner.tick();
       }
       const run = runner.list().runs[0]!;
@@ -708,7 +710,7 @@ for (const protocol of ['fixed-model', 'responses'] as const) {
           runner.list().runs.some((item) => !['completed', 'failed'].includes(item.status)) &&
           Date.now() < deadline
         ) {
-          await Bun.sleep(10);
+          await fixtureDelay(10);
           await runner.tick();
         }
         const history = runner.list().runs;
@@ -897,7 +899,7 @@ test('actual scheduled Service Run waits for ordinary approval and completes onl
     let page = await client.listInteractions(sessionId, { storeId, state: 'pending' });
     const deadline = Date.now() + 10000;
     while (!page.interactions.some((item) => item.kind === 'approval') && Date.now() < deadline) {
-      await Bun.sleep(10);
+      await fixtureDelay(10);
       page = await client.listInteractions(sessionId, { storeId, state: 'pending' });
     }
     const approval = page.interactions.find((item) => item.kind === 'approval')!;
@@ -1994,7 +1996,7 @@ test('stop drains manual legacy verification before private storage closes and n
     const stopping = runner.stop().then(() => {
       stopped = true;
     });
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(stopped).toBe(false);
     release();
     expect(await manual).toMatchObject({ message: 'scheduled_runner_stopped' });
@@ -2003,7 +2005,7 @@ test('stop drains manual legacy verification before private storage closes and n
     expect(c.posts).toEqual(['create', 'start']);
     expect(f.timers.size).toBe(0);
     const settled = JSON.stringify(f.data.scheduledTaskRuns());
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(JSON.stringify(f.data.scheduledTaskRuns())).toBe(settled);
   } finally {
     release?.();
@@ -2176,7 +2178,7 @@ test('a queued human turn cannot settle unfinished scheduled Tool work or admit 
     const end = Date.now() + 6000;
     while (!(await read())) {
       if (Date.now() > end) throw Error('scheduled_tool_timeout');
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     }
   };
   try {

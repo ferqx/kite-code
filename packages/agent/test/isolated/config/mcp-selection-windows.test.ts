@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { fixturePermissions } from '../../../../../tests/fixtures/test-filesystem';
 import { readMcpSelection, updateMcpSelection } from '../../../src/config/mcp-selection';
 import {

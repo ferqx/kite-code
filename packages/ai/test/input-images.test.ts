@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { ModelRequest } from '../src';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '../src/sdk';
 
@@ -19,7 +19,6 @@ for (const [protocol, families] of [
             { headers: { 'content-type': 'text/event-stream' } },
           );
         },
-        { preconnect: fetch.preconnect },
       );
       const model = createCompatibleModelBinding({
         modelId: 'fixture',
@@ -124,7 +123,6 @@ for (const protocol of ['chat-completions', 'responses'] as const)
           { status: 400 },
         );
       },
-      { preconnect: fetch.preconnect },
     );
     const model = createCompatibleModelBinding({
       modelId: 'fixture',

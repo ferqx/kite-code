@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { expect, test } from '#kite-test';
 import { semanticDigestBytes } from '../../../src/model-body/digest';
 
 test('full semantic verification lets macrotasks progress and hashes the final byte', async () => {

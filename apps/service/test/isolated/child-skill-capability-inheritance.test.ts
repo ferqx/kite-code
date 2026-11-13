@@ -1,6 +1,6 @@
-import { expect, spyOn, test } from 'bun:test';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -11,6 +11,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, spyOn, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -115,7 +117,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
     }),
   );
   let browserRequests = 0;
-  const endpoint = Bun.serve({
+  const endpoint = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -125,7 +127,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
   });
   // The source-only resolver deliberately rejects .ts callers. Resolve the actual
   // packaged guardian, without replacing a capability, controller or permission.
-  const packagedMcpPath = join(import.meta.dir, '../../../../packages/agent/dist/mcp/index.js');
+  const packagedMcpPath = join(import.meta.dirname, '../../../../packages/agent/dist/mcp/index.js');
   const packagedMcp = (await import(packagedMcpPath)) as typeof mcp;
   const guardianAsset = spyOn(mcp, 'mcpStdioGuardianAsset').mockImplementation(
     packagedMcp.mcpStdioGuardianAsset,
@@ -309,7 +311,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
             })}`,
           );
         }
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       expect(children.get(role)!.requests).toHaveLength(2);
       const childExecutions = await store.listExecutions(carrier.childSessionId!);
@@ -345,7 +347,7 @@ async function defaultScenario(selectedSkills?: string[], childBrowserAvailable 
         ).toEqual(readonly ? [] : ['browser_execute']);
     }
     expect(browserRequests).toBe(0);
-    expect(await Bun.file(join(f.workspace, 'source.txt')).text()).toBe(
+    expect(readFileSync(join(f.workspace, 'source.txt'), 'utf8')).toBe(
       'unchanged fixture source\n',
     );
   } finally {

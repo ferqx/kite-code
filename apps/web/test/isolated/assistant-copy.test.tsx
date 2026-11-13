@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { BrowserView, Message, ModelOutputSnapshot } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { createTrustedAssets } from '../../src/assets';
 import { installGlobals } from '../globals.fixture';
 
@@ -13,7 +14,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() >= end) throw new Error('assistant_copy_dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -285,7 +286,7 @@ test('Web copies the exact completed historical Run across all message pages inc
   try {
     await open(f);
     await act(async () => {
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     });
     expect(assistantButtons(f)).toHaveLength(1);
     expect(
@@ -402,7 +403,7 @@ test('Web never labels unfinished, unsuccessful, sealed, unsupported or incomple
       else f.state.status = boundary;
       await open(f);
       await act(async () => {
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       });
       expect(assistantButtons(f)).toHaveLength(0);
       expect(f.state.outputReads).toHaveLength(boundary === 'incomplete' ? 2 : 0);

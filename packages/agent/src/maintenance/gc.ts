@@ -1,4 +1,3 @@
-import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import { existsSync, fstatSync, lstatSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -8,6 +7,7 @@ import {
   retainWindowsGcArtifact,
   WindowsGcArtifactAcquireUnknownError,
 } from '../platform/windows-artifact-files';
+import type { Database } from '../runtime-sqlite';
 import {
   checkpoint,
   closePrivate,

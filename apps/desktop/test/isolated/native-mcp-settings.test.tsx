@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act, createRef } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeUserMcpFacts,
   NativeUserMcpRequest,
@@ -677,7 +678,7 @@ test('tool loading failure offers an explicit retry and schemas stay collapsed u
     await render({ bridge: controlled });
     await act(async () => button(host, '管理 Knowledge').click());
     expect(panel.textContent).toContain('未能加载工具');
-    await act(async () => Bun.sleep(20));
+    await act(async () => fixtureDelay(20));
     expect(toolReads).toBe(1);
     await act(async () => button(panel, '重试').click());
     expect(panel.textContent).toContain('Full tool description.');
@@ -768,7 +769,7 @@ test('an accepted asynchronous add freezes its draft and closes only after the o
     expect(panel.querySelector<HTMLInputElement>('input[aria-label="Name"]')?.disabled).toBe(true);
     expect(button(panel, '正在添加…').disabled).toBe(true);
     expect(button(panel, '取消添加')).not.toBeUndefined();
-    await act(async () => Bun.sleep(800));
+    await act(async () => fixtureDelay(800));
     expect(panel.textContent).toBe('');
     expect(host.ownerDocument.activeElement).toBe(button(host, '新增 MCP'));
     expect(calls.filter((input) => input.method === 'settings.userMcp.submit')).toHaveLength(1);
@@ -799,7 +800,7 @@ test('an accepted asynchronous deletion closes its service when its original com
     await act(async () => menuItem(panel, '删除 MCP').click());
     await act(async () => button(panel, 'Confirm exact MCP operation').click());
     expect(panel.querySelector('aside')).not.toBeNull();
-    await act(async () => Bun.sleep(800));
+    await act(async () => fixtureDelay(800));
     expect(panel.textContent).toBe('');
     expect(calls.filter((input) => input.method === 'settings.userMcp.submit')).toHaveLength(1);
   }));
@@ -913,12 +914,12 @@ test('a live connection challenge settles automatically, exposes login and then 
     await act(async () => button(host, '管理 Knowledge').click());
     expect(button(panel, '登录')).toBeUndefined();
     await act(async () => button(panel, '建立连接').click());
-    await act(async () => Bun.sleep(800));
+    await act(async () => fixtureDelay(800));
     expect(panel.textContent).toContain('此服务需要登录');
     expect(button(panel, '登录').disabled).toBe(false);
     await act(async () => button(panel, '登录').click());
     expect(panel.textContent).toContain('请在浏览器中完成登录');
-    await act(async () => Bun.sleep(800));
+    await act(async () => fixtureDelay(800));
     expect(panel.textContent).toContain('已登录');
     expect(panel.textContent).not.toContain('此服务需要登录');
     expect(button(panel, '重试连接').disabled).toBe(false);
@@ -946,7 +947,7 @@ test('a timed out browser login explains retry, while unknown originals are neve
     expect(host.textContent).not.toContain('登录已超时');
     await act(async () => button(host, '管理 Knowledge').click());
     expect(panel.textContent).toContain('登录已超时');
-    await act(async () => Bun.sleep(800));
+    await act(async () => fixtureDelay(800));
     expect(calls.filter((call) => call.method === 'settings.userMcp.lookup')).toHaveLength(0);
     expect(calls.filter((call) => call.method === 'settings.userMcp.submit')).toHaveLength(0);
   }));
@@ -984,7 +985,7 @@ test('successive immediate pending replies keep observing the same original unti
     await act(async () => button(host, '管理 Knowledge').click());
     await act(async () => button(panel, '登录').click());
     for (let i = 1; i <= 3; i++) {
-      await act(async () => Bun.sleep(800));
+      await act(async () => fixtureDelay(800));
       expect(lookups).toBe(i);
       if (i < 3) expect(panel.textContent).toContain('请在浏览器中完成登录');
     }
@@ -1026,12 +1027,12 @@ test('an immediate authentication failure refreshes login eligibility and a repl
     await act(async () => button(host, '管理 Knowledge').click());
     expect(button(panel, '登录')).toBeUndefined();
     await act(async () => button(panel, '建立连接').click());
-    await act(async () => Bun.sleep(0));
+    await act(async () => fixtureDelay(0));
     expect(calls.filter((call) => call.method === 'settings.userMcp.read')).toHaveLength(2);
     expect(button(panel, '登录').disabled).toBe(false);
     await render({ bridge: controlled, submissions: [{ ...original, phase: 'pending' }] });
     await render({ bridge: controlled, storeId: 'new-store', generation: 2 });
-    await act(async () => Bun.sleep(800));
+    await act(async () => fixtureDelay(800));
     expect(calls.filter((call) => call.method === 'settings.userMcp.lookup')).toHaveLength(0);
     expect(calls.filter((call) => call.method === 'settings.userMcp.submit')).toHaveLength(1);
   }));

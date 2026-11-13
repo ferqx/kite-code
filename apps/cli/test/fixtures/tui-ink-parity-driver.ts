@@ -1,11 +1,15 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Terminal } from '@xterm/headless';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import xterm from '@xterm/headless';
 import stringWidth from 'string-width';
 import { automaticTitleIdentity } from '../../../../packages/agent/src/business/session-title/state';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, readTuiRender, spawnTuiPTY, terminateTuiTree } from './tui-pty';
+
+const { Terminal } = xterm;
 
 const input = JSON.parse(process.argv[2]!) as {
   root: string;
@@ -28,7 +32,7 @@ const message = (value: unknown) => {
 if (process.platform === 'win32') process.on('message', message);
 const open = (sessionId?: string) =>
   spawnTuiPTY({
-    cmd: [process.execPath, '--no-install', input.runner, ...(sessionId ? [sessionId] : [])],
+    cmd: [process.execPath, ...testRuntimeFlags, input.runner, ...(sessionId ? [sessionId] : [])],
     cwd: input.root,
   });
 let pty = open();
@@ -40,12 +44,12 @@ async function wait(text: string) {
     if (frame.text.includes(text)) return frame.text;
     if (pty.ended || Date.now() > until)
       throw Error(`ordinary_tui_missing:${text}\n${frame.text.slice(-7000)}`);
-    await Bun.sleep(25);
+    await testSleep(25);
   }
 }
 async function key(value: string) {
   await pty.key(value);
-  await Bun.sleep(75);
+  await testSleep(75);
   await pty.drain();
 }
 let success = false;
@@ -186,9 +190,9 @@ try {
     }
     if (done) break;
     if (Date.now() > completedUntil) throw Error('ordinary_actual_root_title_not_completed');
-    await Bun.sleep(25);
+    await testSleep(25);
   }
-  await Bun.sleep(300);
+  await testSleep(300);
   const after = (await pty.projection()).text;
   assert.ok(after.includes(unsent));
   assert.ok(!after.includes('Working'));
@@ -261,7 +265,7 @@ try {
         throw error;
       }
       if (Date.now() > end) throw Error('owned_service_survived_normal_exit');
-      await Bun.sleep(25);
+      await testSleep(25);
     }
   }
   await closeNormally();
@@ -300,7 +304,7 @@ try {
       break;
     }
     if (Date.now() > newUntil) throw Error('ordinary_created_session_not_selected');
-    await Bun.sleep(25);
+    await testSleep(25);
   }
   await closeNormally();
   success = true;

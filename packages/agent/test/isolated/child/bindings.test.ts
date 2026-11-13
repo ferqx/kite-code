@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { fixtureGrant, fixtureScopeOption } from '../../../../../tests/fixtures/permission-grant';
 import { type ChildAgentConfiguration, createRuntime, type RuntimeOptions } from '../../../src';
 import type {
@@ -48,7 +49,7 @@ async function fact<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() >= end) throw new Error('missing_child_binding_fact');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 const tool = (id: string, execute: ToolDefinition['execute'], version = '1'): ToolDefinition => ({

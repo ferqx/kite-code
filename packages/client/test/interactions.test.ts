@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { type AnswerInteractionRequest, createClient } from '../src';
 
 test('Interaction reads and answers require admission/capability and validate closed original write intents before HTTP', async () => {
   let requests = 0;
   let capabilities: string[] = ['sessions'];
   const profile = { dataRoot: '/selected-disposable', name: 'new', accessKey: 'selected-access' };
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

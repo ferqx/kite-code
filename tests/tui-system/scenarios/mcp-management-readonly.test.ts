@@ -1,7 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, describe, expect, test } from '#kite-test';
+import type { FixtureServer } from '../../../scripts/tooling/http';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
@@ -17,7 +18,7 @@ import {
 describe('TUI PTY System — MCP Select management', () => {
   let tui: PtyProcess | undefined;
   let server: MockModelServer | undefined;
-  let mcpServer: ReturnType<typeof Bun.serve> | undefined;
+  let mcpServer: FixtureServer | undefined;
   let workspace: TestWorkspace | undefined;
 
   afterEach(async () => {
@@ -30,9 +31,9 @@ describe('TUI PTY System — MCP Select management', () => {
   });
 
   test('opens a selected server in the read-only detail action menu', async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     server.setResponses([]);
-    mcpServer = startTestHttpServer({
+    mcpServer = await startTestHttpServer({
       fetch: async (request) => {
         if (request.method === 'GET' || request.method === 'DELETE') {
           return new Response(null, { status: 405 });
@@ -74,7 +75,7 @@ describe('TUI PTY System — MCP Select management', () => {
       rows: 40,
       mockServer: server,
       workspace,
-      entryPath: join(import.meta.dir, '../fixtures/mcp-management-tui.tsx'),
+      entryPath: join(import.meta.dirname, '../fixtures/mcp-management-tui.tsx'),
     });
 
     await submitCommand(tui, '/mcp', 20);
@@ -95,7 +96,7 @@ describe('TUI PTY System — MCP Select management', () => {
     let toolCalls = 0;
     const remoteToolName = 'remote echo';
     const exposedToolName = `mcp__closed__${remoteToolName}`;
-    mcpServer = startTestHttpServer({
+    mcpServer = await startTestHttpServer({
       fetch: async (request) => {
         if (request.method === 'GET' || request.method === 'DELETE') {
           return new Response(null, { status: 405 });
@@ -151,7 +152,7 @@ describe('TUI PTY System — MCP Select management', () => {
         return new Response(null, { status: 202 });
       },
     });
-    server = createMockModelServer();
+    server = await createMockModelServer();
     server.setResponses([
       {
         message: {
@@ -210,7 +211,7 @@ describe('TUI PTY System — MCP Select management', () => {
       rows: 40,
       mockServer: server,
       workspace,
-      entryPath: join(import.meta.dir, '../fixtures/mcp-management-tui.tsx'),
+      entryPath: join(import.meta.dirname, '../fixtures/mcp-management-tui.tsx'),
     });
 
     await submitUserMessage(tui, server, 'call the closed remote MCP tool', {
@@ -237,7 +238,7 @@ describe('TUI PTY System — MCP Select management', () => {
       let failedTransportCalls = 0;
       const remoteToolName = 'search documentation / latest';
       const exposedToolName = `mcp__docs__${remoteToolName}`;
-      mcpServer = startTestHttpServer({
+      mcpServer = await startTestHttpServer({
         idleTimeout: 120,
         fetch: async (request) => {
           if (request.method === 'GET' || request.method === 'DELETE') {
@@ -340,7 +341,7 @@ describe('TUI PTY System — MCP Select management', () => {
           return new Response(null, { status: 202 });
         },
       });
-      server = createMockModelServer();
+      server = await createMockModelServer();
       const longMcpSummary = [
         'MCP conversation completed successfully.',
         ...Array.from(
@@ -505,7 +506,7 @@ describe('TUI PTY System — MCP Select management', () => {
         rows: 40,
         mockServer: server,
         workspace,
-        entryPath: join(import.meta.dir, '../fixtures/mcp-management-tui.tsx'),
+        entryPath: join(import.meta.dirname, '../fixtures/mcp-management-tui.tsx'),
       });
 
       const conversationFrames = tui.markScreen();

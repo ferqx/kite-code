@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -29,7 +30,13 @@ import {
   createUserConfiguration,
 } from '../../../../apps/service/src/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
 import { resolveDefaultWorktreeTarget } from '../../../../packages/agent/src/tools/git-worktree/protocol';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  spawnSync as runFixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { verifyWorktreeExecutionEvidence } from '../../../fixtures/worktree-execution-evidence';
 import { readLiveExecutionDirectory, readLiveSessionLogPages } from './approval-execution-fixture';
 import {
@@ -65,7 +72,7 @@ const save = (path: string, value: unknown) =>
 const append = (path: string, value: unknown) =>
   appendFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
 function git(cwd: string, ...args: string[]): string {
-  const result = Bun.spawnSync(
+  const result = runFixtureProcess(
     ['/usr/bin/git', '--no-replace-objects', '--no-lazy-fetch', ...args],
     {
       cwd,
@@ -213,16 +220,19 @@ export async function runGitWorktreeLive(
     gitCommands: 0,
     nativeSupervision: 'not_started',
   };
-  let built: Awaited<ReturnType<typeof Bun.build>>;
+  let built: Awaited<ReturnType<typeof buildFixture>>;
   try {
-    built = await Bun.build({
+    built = await buildFixture({
       entrypoints: [
         join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
-      target: 'bun',
+      ...runtimeBuildOptions(
+        join(root, 'assets'),
+        resolve(import.meta.dirname, '../../../../packages/agent/dist'),
+      ),
       outdir: join(root, 'assets'),
       naming: 'shell-supervisor.js',
     });
@@ -282,7 +292,7 @@ export async function runGitWorktreeLive(
     startedAt: new Date().toISOString(),
     platform: process.platform,
     arch: process.arch,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     executionStack: 'default-service-http-client-sqlite-native-shell',
     transportQualification:
       'test-injected actual configured adapter; no model/protocol substitution or response edits; no installed UI qualification',
@@ -404,7 +414,7 @@ export async function runGitWorktreeLive(
         configurationId: 'owned-worktree-live',
         env: { PATH: '/usr/bin:/bin', HOME: fixtureHome },
         supervisorPath: built.outputs[0]!.path,
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: '/bin/sh',
         host: {
           controlBase: control,
@@ -660,7 +670,7 @@ export async function runGitWorktreeLive(
             break;
           }
         }
-        await Bun.sleep(50);
+        await fixtureDelay(50);
       }
       const directory = await executionDirectory(store!, expectedStoreId!);
       const tools = directory.executions.filter(
@@ -2027,10 +2037,11 @@ if (import.meta.main) {
     const startupHome = `${outputRoot}.home`;
     newLiveOutputRoot(startupHome);
     const originalConfigurationPath = resolve(createUserConfiguration().path);
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
         process.execPath,
-        import.meta.path,
+        ...process.execArgv,
+        import.meta.filename,
         ...args,
         `--provider-configuration=${originalConfigurationPath}`,
       ],

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -20,7 +21,7 @@ process.once('SIGTERM', interrupted);
 if (process.platform === 'win32') process.on('message', stop);
 const output: Uint8Array[] = [];
 const owned = spawnTuiPTY({
-  cmd: [input.executable, '--no-install', input.entrypoint],
+  cmd: [input.executable, '--no-global-search-paths', input.entrypoint],
   cwd: input.root,
   onData(bytes) {
     output.push(bytes.slice());
@@ -46,7 +47,7 @@ const wait = async (text: string) => {
     if (frame.fresh && normalized(frame.text).includes(text)) return;
     if (owned.ended) throw Error(`early exit ${frame.text.slice(-3000)}`);
     if (Date.now() > end) throw Error(`expected ${text} tail=${frame.text.slice(-5000)}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const waitDraft = async (text: string) => {
@@ -64,7 +65,7 @@ const waitDraft = async (text: string) => {
       return;
     if (owned.ended) throw Error('early exit before current draft');
     if (Date.now() > end) throw Error(`expected current draft ${text} tail=${footer.slice(-5000)}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string) => {
@@ -92,7 +93,7 @@ const choose = async (label: string, prefix = false) => {
       if (selectedLabel(frame.text) !== undefined) return frame;
       if (owned.ended) throw Error('original MCP host ended during navigation');
       if (Date.now() > end) throw Error(`expected original MCP selection: ${label} ${frame.text}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   };
   const initial = await selected();
@@ -104,7 +105,7 @@ const choose = async (label: string, prefix = false) => {
       if (selectedLabel(frame.text) === 'Project sources') break;
       if (Date.now() > end) throw Error(`expected original MCP top ${frame.text}`);
       if (owned.ended) throw Error('original MCP host ended during navigation');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   for (let n = 0; n < 32; n++) {
@@ -122,7 +123,7 @@ const choose = async (label: string, prefix = false) => {
       if (Date.now() > end)
         throw Error(`original MCP selection did not move: ${label} ${frame.text}`);
       if (owned.ended) throw Error('original MCP host ended during navigation');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   throw Error(`original MCP choice unavailable: ${label}`);
@@ -223,7 +224,7 @@ try {
   await check('draft-clear');
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!owned.ended && Date.now() < end) await Bun.sleep(50);
+  while (!owned.ended && Date.now() < end) await testSleep(50);
   const [exitCode] = await ptyDeadline(
     Promise.all([owned.host.exited, owned.eof]),
     3000,

@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiPanelViewport } from '../../src/tui/panel-viewport';
 
-const tick = () => Bun.sleep(30);
+const tick = () => fixtureDelay(30);
 test('bounded panel pages through complete content and resets for a different original scope', async () => {
   const content = Array.from(
     { length: 15 },

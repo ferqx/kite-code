@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentClient, InputImage } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeInputImages } from '../electron/input-images';
 
 test('Native staging checks chunks and digest, publishes exact bytes once per session, and releases removed drafts', async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { sha256Digest } from '../../scripts/release/canonical-json';
 import { buildReleaseEvidenceBundle } from '../../scripts/release/evidence-bundle';
 import {

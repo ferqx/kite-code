@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   readFileSync,
@@ -10,11 +9,15 @@ import {
 import { join } from 'node:path';
 import { shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
 import { WebFetchError } from '@kite-ai/agent/web-fetch';
+import { expect, test } from '#kite-test';
 import { resolveModelTransport } from '../../../apps/service/src/model-transport';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import type { ContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyContinuousEvidence } from '../../../scripts/runtime/unified-soak-continuous';
 import { verifyPairedServiceResources } from '../../../scripts/runtime/unified-soak-service-resources';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { startLoopbackHttpServer } from '../../fixtures/loopback-http-server';
 import { loopbackModelEnvironment } from '../../fixtures/loopback-model-environment';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
@@ -28,13 +31,24 @@ test('the continuous local Provider route excludes unsupported OS proxy discover
     code: 'model_proxy_protocol_unsupported',
   });
   const before = { ...process.env };
-  const env = loopbackModelEnvironment(new URL('http://127.0.0.1:43123/'));
+  const provider = await startLoopbackHttpServer((request) => {
+    if (request.url !== new URL('v1', provider.url).href)
+      return new Response(null, { status: 400 });
+    return new Response('owned direct request');
+  });
+  const env = loopbackModelEnvironment(provider.url);
   const transport = await resolveModelTransport({ env, systemProxy });
-  expect(transport.fetch).toBe(fetch);
+  try {
+    const response = await transport.fetch(new URL('v1', provider.url));
+    expect(await response.text()).toBe('owned direct request');
+  } finally {
+    await transport.close();
+    await provider.close();
+  }
   expect(discoveries).toBe(1);
   expect(env.NO_PROXY).toBe('127.0.0.1,localhost');
   expect(env.no_proxy).toBe(env.NO_PROXY);
-  expect(env.HTTP_PROXY).toBe('http://127.0.0.1:43123');
+  expect(env.HTTP_PROXY).toBe(provider.url.origin);
   expect(env.http_proxy).toBe(env.HTTP_PROXY);
   expect(env.ALL_PROXY).toBe(env.HTTP_PROXY);
   expect(env.all_proxy).toBe(env.HTTP_PROXY);
@@ -57,23 +71,25 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     writeFileSync(
       entry,
       `import {writeFileSync} from 'node:fs';
-import {openDefaultShellContinuousFixture} from ${JSON.stringify(join(import.meta.dir, '../../fixtures/unified-agent/soak/continuous-default-shell.ts'))};
+import {openDefaultShellContinuousFixture} from ${JSON.stringify(join(import.meta.dirname, '../../fixtures/unified-agent/soak/continuous-default-shell.ts'))};
 const fixture=await openDefaultShellContinuousFixture(${JSON.stringify(workload)},process.argv[2]);
 try {await fixture.cycle();await fixture.cycle();await fixture.confirmCold();writeFileSync(${JSON.stringify(result)},JSON.stringify(fixture.evidence()),{mode:0o600});}
 finally {await fixture.close();}`,
       { mode: 0o600 },
     );
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [entry],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
+      naming: '[name].mjs',
       outdir: root,
     });
     expect(built.success).toBe(true);
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
         join(candidate.root, candidate.manifest.entries.runtime),
-        join(root, 'compiled-collection.js'),
+        '--no-global-search-paths',
+        join(root, 'compiled-collection.mjs'),
         candidate.root,
       ],
       {

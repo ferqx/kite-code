@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import type {
   AuthorizationRequest,
@@ -77,7 +78,7 @@ export function groupOptions(
               },
               async *observe(): AsyncIterable<JobEvent> {
                 appendFileSync(`${directory}/ledger`, 'background-running\n');
-                while (!existsSync(`${directory}/release-background`)) await Bun.sleep(5);
+                while (!existsSync(`${directory}/release-background`)) await sleepTimer(5);
                 if (disposed.has('one')) throw Error('parent_configuration_disposed');
                 appendFileSync(`${directory}/ledger`, 'use-config:one\n');
                 yield {

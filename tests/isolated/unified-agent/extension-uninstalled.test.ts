@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
 import { realpathSync, rmSync } from 'node:fs';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { createLabelStation, extensionId } from '../../fixtures/extensions/label-station/src/index';
 import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
@@ -79,7 +80,7 @@ test('removing a trusted extension assembly preserves its original records and p
       )
         return command;
       if (Date.now() > deadline) throw Error(`removed_extension_command_deadline:${id}`);
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     }
   }
   const records = () =>

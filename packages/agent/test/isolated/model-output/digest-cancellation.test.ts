@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { AgentRuntime } from '../../../src/runtime';
 import type { Store } from '../../../src/storage/port';
 

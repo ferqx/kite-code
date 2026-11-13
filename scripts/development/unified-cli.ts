@@ -5,8 +5,9 @@ import { join, resolve } from 'node:path';
 import { CLIHostError, type CLIServiceArtifact, parseCLIServiceArtifact } from '@kite-ai/cli/host';
 import { runCLIProcess } from '@kite-ai/cli/main';
 import { parseCLIArguments } from '../../apps/cli/src/arguments';
+import { preparedDevelopmentNode } from '../release/node-inputs';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 export interface DevelopmentCLISelection {
   readonly argv: readonly string[];
@@ -20,7 +21,7 @@ export interface DevelopmentCLISelection {
 export function selectDevelopmentCLI(
   argv: readonly string[],
   root = repositoryRoot,
-  executable = process.execPath,
+  executable?: string,
 ): DevelopmentCLISelection {
   const args = parseCLIArguments(argv);
   const selected = {
@@ -69,7 +70,7 @@ export function selectDevelopmentCLI(
 /** Shared exact development Service bytes for the CLI and terminal host. */
 export function selectDevelopmentServiceArtifact(
   root = repositoryRoot,
-  executable = process.execPath,
+  executable?: string,
 ): Readonly<CLIServiceArtifact> {
   const entrypoint = join(root, 'apps/service/dist/main.js');
   try {
@@ -77,7 +78,9 @@ export function selectDevelopmentServiceArtifact(
     if (!stat.isFile() || stat.isSymbolicLink())
       throw new CLIHostError('development_service_asset_unavailable');
     const entrypointSha256 = hash(readFileSync(entrypoint));
-    const actualExecutable = realpathSync(executable);
+    const actualExecutable = executable
+      ? realpathSync.native(executable)
+      : preparedDevelopmentNode(root);
     const artifact = parseCLIServiceArtifact({
       entrypoint,
       entrypointSha256,
@@ -97,7 +100,7 @@ export function selectDevelopmentServiceArtifact(
 /** Only actual daemon launch/preflight resolves this trusted host selection. */
 export function selectDevelopmentDaemonArtifact(
   root = repositoryRoot,
-  executable = process.execPath,
+  executable?: string,
 ): Readonly<CLIServiceArtifact> {
   const paired = selectDevelopmentServiceArtifact(root, executable);
   const entrypoint = join(root, 'apps/service/dist/daemon-main.js');

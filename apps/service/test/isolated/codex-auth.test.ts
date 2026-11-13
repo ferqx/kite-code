@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
@@ -17,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { CODEX_BASE_URL, createCodexLocalSource } from '../../src/codex-auth';
 import { encodeFrames, responseFrames } from '../fixtures/responses-wire';
 
@@ -63,7 +63,7 @@ function fixture(transport?: typeof fetch) {
 }
 const fakeFetch = (
   body: (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>,
-) => Object.assign(body, { preconnect: fetch.preconnect });
+) => Object.assign(body, {});
 const post = (binding: Awaited<ReturnType<ReturnType<typeof createCodexLocalSource>['binding']>>) =>
   binding.fetch(`${CODEX_BASE_URL}/responses`, {
     method: 'POST',

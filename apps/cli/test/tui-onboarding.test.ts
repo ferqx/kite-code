@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, ModelSettingsRequest, ProviderSettingsRequest } from '@kite-ai/client';
 import { ClientError } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createTuiOnboardingPort } from '../host/tui-onboarding';
 
 function fixture() {

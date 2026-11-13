@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -177,8 +178,8 @@ export async function runAgentTaskQualityTrial(options: {
         configurationId: role.id,
         description: role.description!,
       })),
-      defaultRole: 'worker',
-      presets: defaultTaskRoles.filter((role) => role.id !== 'worker').map((role) => role.id),
+      defaultRole: defaultTaskRoles[0]!.id,
+      presets: defaultTaskRoles.slice(1).map((role) => role.id),
     });
     const child = createChildConfiguration({
       roles: defaultTaskRoles,
@@ -251,7 +252,7 @@ export async function runAgentTaskQualityTrial(options: {
           mkdirSync(join(workspace, directory), { recursive: true });
         writeFileSync(
           join(workspace, 'package.json'),
-          JSON.stringify({ scripts: { start: 'bun src/entry.ts' } }),
+          JSON.stringify({ scripts: { start: 'node src/entry.ts' } }),
         );
         writeFileSync(join(workspace, '.gitignore'), 'dist/\n');
         writeFileSync(
@@ -326,7 +327,7 @@ export async function runAgentTaskQualityTrial(options: {
           if (settled) break;
           if (Date.now() - waitStart > timeoutMs - 10000)
             throw Error('test_observation_budget_exhausted');
-          await Bun.sleep(100);
+          await fixtureDelay(100);
         }
       }
       const parent = await store.getView('root');

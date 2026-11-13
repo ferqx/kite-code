@@ -1,12 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import {
   createMcpLifecycle,
   type McpLifecycleTransportPort,
@@ -46,7 +48,7 @@ async function fixture(
   const stops: string[] = [];
   let confirmStop = true;
   let rejectInitialize = false;
-  const network = Bun.serve({
+  const network = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -141,7 +143,7 @@ async function fixture(
   const servers = [{ id: 'local', transport: { type: 'http' as const, url: network.url.href } }];
   const lifecycle = createMcpLifecycle({ servers, ...(withPort ? { transportPort: port } : {}) });
   const steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -422,7 +424,7 @@ test('connection Job cancellation is exact per Session and leaves another Sessio
     const deadline = Date.now() + 5000;
     while ((await f.store.getExecution(ref.executionId))!.status !== 'cancelled') {
       if (Date.now() > deadline) throw new Error('connection_cancel_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(f.stops).toEqual(['a']);
     expect(
@@ -584,7 +586,7 @@ test('unconfirmed owned transport stop invalidates future tools without inventin
     const deadline = Date.now() + 5000;
     while (!f.stops.includes('a')) {
       if (Date.now() > deadline) throw new Error('stop_attempt_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const pending = await f.store.getExecution(ref.executionId);
     expect(pending!.cancelRequestedAt).not.toBeNull();
@@ -602,7 +604,7 @@ test('unconfirmed owned transport stop invalidates future tools without inventin
     await f.lifecycle.close();
     while ((await f.store.getExecution(ref.executionId))!.status === 'running') {
       if (Date.now() > deadline) throw new Error('confirmed_stop_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect((await f.store.getExecution(ref.executionId))!.result).toMatchObject({
       details: { transportStopped: true, remoteToolStopConfirmed: false },
@@ -772,7 +774,7 @@ test('close during actual dispatched Job open collects the late owned handle wit
       let terminal = await f.store.getExecution(job.id);
       while (terminal!.status === 'dispatching' || terminal!.status === 'running') {
         if (Date.now() > deadline) throw new Error('late_handle_terminal_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
         terminal = await f.store.getExecution(job.id);
       }
       expect(terminal!.status).toBe('failed');
@@ -818,7 +820,7 @@ for (const corruptParent of [false, true])
         const result = await read();
         if (result !== null) return result;
         if (Date.now() > deadline) throw Error('owned_stopped_opening_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     };
     const invoke = async (id: string, sessionId = 'a') => {

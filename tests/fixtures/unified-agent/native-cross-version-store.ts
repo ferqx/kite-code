@@ -1,8 +1,8 @@
-import { constants, Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { constants, Database } from '@kite-ai/agent/runtime-sqlite';
 import { acquireProfileAccess, openSqliteStore } from '@kite-ai/agent/sqlite';
 import { getLoadedSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 

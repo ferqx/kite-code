@@ -1,4 +1,3 @@
-import { type Database, constants as sqliteConstants } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -14,6 +13,7 @@ import { artifactPath, readPublishedArtifactChunks } from '../artifacts-files';
 import { canonicalJson } from '../json';
 import { acquireProfileAccess, assertNoSymlinkPath } from '../platform/profile';
 import { selectProfile } from '../platform/profile-identity';
+import { type Database, constants as sqliteConstants } from '../runtime-sqlite';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
 import { captureAssets, verifyAssets } from './assets';
 import { verifyCallerIntentsDocument } from './caller-intents';

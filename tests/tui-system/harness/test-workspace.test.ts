@@ -1,8 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { afterEach, describe, expect, test } from '#kite-test';
 import {
   createTestWorkspace,
   observePersistedCommandSession,

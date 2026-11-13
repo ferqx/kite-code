@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -6,6 +5,13 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -59,7 +65,7 @@ test.skipIf(process.platform !== 'darwin')(
       thirdEntered = new Promise<void>((r) => {
         entered = r;
       });
-    const control = Bun.serve({
+    const control = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -101,14 +107,17 @@ test.skipIf(process.platform !== 'darwin')(
     const serviceSource = join(root, 'service.ts');
     writeFileSync(
       serviceSource,
-      readFileSync(resolve(import.meta.dir, '../native-context-service.fixture.ts'), 'utf8')
+      readFileSync(resolve(import.meta.dirname, '../native-context-service.fixture.ts'), 'utf8')
         .replace("'CONTROL_URL'", JSON.stringify(`http://127.0.0.1:${control.port}`))
         .replace("'LEDGER_PATH'", JSON.stringify(ledger)),
     );
-    directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
-    const service = await Bun.build({
+    directoryLink(
+      resolve(import.meta.dirname, '../../../../node_modules'),
+      join(root, 'node_modules'),
+    );
+    const service = await buildFixture({
       entrypoints: [serviceSource],
-      target: 'bun',
+      target: 'node',
       format: 'esm',
       packages: 'external',
       outdir: root,
@@ -122,9 +131,9 @@ test.skipIf(process.platform !== 'darwin')(
     await buildNativeDesktop(
       {
         serviceEntrypoint,
-        bunExecutable,
+        runtimeExecutable: bunExecutable,
         serviceSha256: createHash('sha256').update(readFileSync(serviceEntrypoint)).digest('hex'),
-        bunSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
+        runtimeSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
         buildId: 'native-context-fixture',
         apiMajor: 1,
         requiredCapabilities: ['sessions', 'history', 'commands', 'context'],
@@ -136,21 +145,21 @@ test.skipIf(process.platform !== 'darwin')(
     const fixture = join(root, 'driver.ts');
     writeFileSync(
       fixture,
-      readFileSync(resolve(import.meta.dir, '../native-context-electron.fixture.ts'), 'utf8')
+      readFileSync(resolve(import.meta.dirname, '../native-context-electron.fixture.ts'), 'utf8')
         .replace(
           "'./native-model-selection.fixture'",
-          JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+          JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
         )
         .replace(
           "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
         )
         .replace(
           "import {_electron} from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
         ),
     );
-    const build = await Bun.build({
+    const build = await buildFixture({
       entrypoints: [fixture],
       target: 'node',
       format: 'esm',
@@ -159,9 +168,9 @@ test.skipIf(process.platform !== 'darwin')(
       naming: 'driver.js',
     });
     if (!build.success) throw new AggregateError(build.logs, 'driver_build_failed');
-    const driver = Bun.spawn(
+    const driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           outdir,
           root,

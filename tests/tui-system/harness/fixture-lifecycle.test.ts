@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from './fixture-lifecycle';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';

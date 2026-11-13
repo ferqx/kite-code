@@ -5,10 +5,12 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type { CacheSnapshot } from './conversation-cache-browser.fixture';
 
 // Explicit standalone fixture; it never loads Service, user data or the production diagnostics.
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'conversation-cache-browser-'));
@@ -33,10 +35,10 @@ await build({
     target: 'esnext',
   },
 });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
     if (pathname === '/')
@@ -46,7 +48,7 @@ const server = Bun.serve({
       );
     const file = path.resolve(output, `.${pathname}`);
     if (!file.startsWith(output + path.sep)) return new Response(null, { status: 404 });
-    return new Response(Bun.file(file));
+    return new Response(await openFixtureFile(file));
   },
 });
 const browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel: 'chrome' });
@@ -223,7 +225,7 @@ try {
   }
   assert.notEqual(report.cases[0]!.idle.summaryColor, report.cases[1]!.idle.summaryColor);
   console.log(JSON.stringify(report, null, 2));
-  await Bun.write(
+  await writeFixtureFile(
     process.argv[2] ?? path.join(artifact, 'report.json'),
     JSON.stringify(report, null, 2),
   );

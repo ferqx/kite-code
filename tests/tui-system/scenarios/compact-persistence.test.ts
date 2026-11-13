@@ -5,7 +5,7 @@
  * It owns one Runtime Store and two TUI processes, proving that an exact
  * command event is replayed after a real process restart.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
@@ -29,11 +29,11 @@ const DURABLE_COMMAND_RECEIPT_TIMEOUT_MS = 30_000;
 
 describe('TUI PTY System — /compact persistence', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });

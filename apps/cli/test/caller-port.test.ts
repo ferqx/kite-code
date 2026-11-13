@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { type AgentClient, ClientError } from '@kite-ai/client';
 import type { TuiCallerRequest } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { callerRequestDigest } from '../host/caller-intents';
 import { openCallerJournal } from '../host/caller-journal';

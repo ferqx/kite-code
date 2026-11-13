@@ -24,6 +24,7 @@ import {
   nativeBundleEntries,
   verifyNativeRuntimeBundle,
 } from '@kite-ai/service/native-runtime-assets';
+import { nodeNativeInstallerPath } from '@kite-ai/service/runtime-assets';
 import {
   OWNED_CLI_REGISTRATION_FILE,
   readCLIRegistration,
@@ -145,24 +146,53 @@ function active(root: string) {
     fail('active_invalid');
   return { current: lines[0]!, previous: lines[1] || null };
 }
-function launcher(name: 'desktop' | 'cli' | 'tui' = 'desktop') {
+function launcher(name: 'desktop' | 'cli' | 'tui' = 'desktop', bundledNode = false) {
   const electron = nativeBundleEntries(process.platform).electron;
-  return `#!/bin/sh\nset -eu\nunset NODE_PATH NODE_OPTIONS BUN_OPTIONS ELECTRON_RUN_AS_NODE\nroot=$(CDPATH= cd -P -- "\${0%/*}/.." && pwd)\nIFS= read -r candidate < "$root/active"\ncase "$candidate" in ''|*[!0-9a-f]*) echo native_active_invalid >&2; exit 1;; esac\n[ "\${#candidate}" -eq 64 ] || exit 1\n${name === 'desktop' ? `exec "$root/releases/$candidate/${electron}" "$root/releases/$candidate/app" "$@"` : `exec "$root/releases/$candidate/terminal/runtime/bun" "$root/releases/$candidate/terminal/entrypoints/native-${name}.js" "$@"`}\n`;
+  const launch =
+    name === 'desktop'
+      ? `exec "$root/releases/$candidate/${electron}" "$root/releases/$candidate/app" "$@"`
+      : `${bundledNode ? `unset NODE_COMPILE_CACHE NODE_V8_COVERAGE\nif [ -x "$root/releases/$candidate/terminal/runtime/node" ]; then\n  exec "$root/releases/$candidate/terminal/runtime/node" "$root/releases/$candidate/terminal/entrypoints/native-${name}.js" "$@"\nfi\n` : ''}exec "$root/releases/$candidate/terminal/runtime/bun" "$root/releases/$candidate/terminal/entrypoints/native-${name}.js" "$@"`;
+  return `#!/bin/sh\nset -eu\nunset NODE_PATH NODE_OPTIONS BUN_OPTIONS ELECTRON_RUN_AS_NODE\nroot=$(CDPATH= cd -P -- "\${0%/*}/.." && pwd)\nIFS= read -r candidate < "$root/active"\ncase "$candidate" in ''|*[!0-9a-f]*) echo native_active_invalid >&2; exit 1;; esac\n[ "\${#candidate}" -eq 64 ] || exit 1\n${launch}\n`;
 }
 const terminalLaunchers = [
   ['kite', 'cli'],
   ['kite-tui', 'tui'],
 ] as const;
-function addTerminalLaunchers(root: string) {
+function addTerminalLaunchers(root: string, node: boolean) {
   for (const [file, name] of terminalLaunchers) {
     const path = join(root, 'bin', file);
-    if (!present(path)) durable(path, launcher(name), 0o755);
+    const body = launcher(name, node);
+    if (!present(path) || (node && text(path) !== body)) durable(path, body, 0o755);
   }
 }
 function removeTerminalLaunchers(root: string) {
   for (const [file] of terminalLaunchers) rmSync(join(root, 'bin', file), { force: true });
   syncDirectory(join(root, 'bin'));
 }
+const maintenanceName = 'kite-maintenance';
+const includesMaintenance = (bundle: ReturnType<typeof verifyNativeRuntimeBundle>) =>
+  bundle.terminal.manifest.files.some(({ path }) => path === nodeNativeInstallerPath);
+const maintenanceLauncher = `#!/bin/sh
+set -eu
+root=$(CDPATH= cd -P -- "\${0%/*}/.." && pwd)
+[ "$#" -gt 0 ] || { echo 'usage: kite-maintenance verify|rollback|uninstall' >&2; exit 1; }
+command=$1
+shift
+{
+  IFS= read -r current
+  IFS= read -r previous
+} < "$root/active"
+for candidate in "$current" "$previous"; do
+  case "$candidate" in ''|*[!0-9a-f]*) continue;; esac
+  [ "\${#candidate}" -eq 64 ] || continue
+  entry="$root/releases/$candidate/terminal/entrypoints/kite-install.command"
+  if [ -x "$entry" ]; then
+    exec "$entry" "$command" --prefix "$root" "$@"
+  fi
+done
+echo native_maintenance_unavailable >&2
+exit 1
+`;
 function copy(source: string, destination: string) {
   const stat = lstatSync(source);
   if (stat.isSymbolicLink()) symlinkSync(readlinkSync(source), destination);
@@ -199,7 +229,7 @@ function inventory(root: string, verifyContent = true) {
   const launchers = [...terminalLaunchers, ['kite-desktop', 'desktop']] as const;
   if (
     !bin.includes('kite-desktop') ||
-    bin.some((file) => !launchers.some(([known]) => known === file))
+    bin.some((file) => file !== maintenanceName && !launchers.some(([known]) => known === file))
   )
     fail('install_unknown_entry');
   const hasTerminalLaunchers = terminalLaunchers.every(([file]) => bin.includes(file));
@@ -207,7 +237,12 @@ function inventory(root: string, verifyContent = true) {
   for (const [file, name] of launchers) {
     if (!bin.includes(file)) continue;
     regular(join(root, 'bin', file), 0o755);
-    if (text(join(root, 'bin', file)) !== launcher(name)) fail('launcher_changed');
+    if (![launcher(name), launcher(name, true)].includes(text(join(root, 'bin', file))))
+      fail('launcher_changed');
+  }
+  if (bin.includes(maintenanceName)) {
+    regular(join(root, 'bin', maintenanceName), 0o755);
+    if (text(join(root, 'bin', maintenanceName)) !== maintenanceLauncher) fail('launcher_changed');
   }
   directory(join(root, 'releases'));
   const entries = readdirSync(join(root, 'releases'));
@@ -217,7 +252,8 @@ function inventory(root: string, verifyContent = true) {
     (selection.previous && !candidates.includes(selection.previous))
   )
     fail('active_invalid');
-  let previousUsesTerminal = false;
+  let previousTerminalRuntime: 'bun' | 'node' | undefined;
+  const maintenanceCandidates = new Set<string>();
   for (const name of entries) {
     if (pattern.test(name)) {
       const candidate = join(root, 'releases', name);
@@ -226,16 +262,24 @@ function inventory(root: string, verifyContent = true) {
       if (verifyContent) {
         const bundle = verifyNativeRuntimeBundle(candidate);
         if (bundle.digest !== name) fail('candidate_changed');
+        if (includesMaintenance(bundle)) maintenanceCandidates.add(name);
         const usesTerminal = 'cli' in bundle.terminal.manifest.entries;
         if (name === selection.current && usesTerminal && !hasTerminalLaunchers)
           fail('install_unknown_entry');
-        if (name === selection.previous) previousUsesTerminal = usesTerminal;
+        if (name === selection.previous && usesTerminal)
+          previousTerminalRuntime = bundle.terminal.manifest.nodeVersion ? 'node' : 'bun';
       }
     } else if (/^\.use-[a-f0-9]{64}\.lock$/.test(name) && candidates.includes(name.slice(5, -5))) {
       if (regular(join(root, 'releases', name), 0o600).size !== 0) fail('install_file_unsafe');
     } else fail('install_unknown_entry');
   }
-  return { selection, candidates, previousUsesTerminal, hasTerminalLaunchers };
+  return {
+    selection,
+    candidates,
+    previousTerminalRuntime,
+    hasTerminalLaunchers,
+    maintenanceCandidates,
+  };
 }
 function platform() {
   if (!['darwin', 'linux'].includes(process.platform)) fail('install_platform_unsupported');
@@ -245,6 +289,23 @@ export interface InstalledNativeBundle {
   candidateId: string;
   releaseRoot: string;
   previousCandidateId: string | null;
+}
+export function verifyNativeInstallation(prefix: string): InstalledNativeBundle {
+  platform();
+  const root = resolve(prefix);
+  installed(root);
+  const locks = acquireCLIRegistrationLocks([root]);
+  try {
+    const { selection } = inventory(root);
+    return {
+      root,
+      candidateId: selection.current,
+      releaseRoot: join(root, 'releases', selection.current),
+      previousCandidateId: selection.previous,
+    };
+  } finally {
+    for (const lock of locks.reverse()) lock.release();
+  }
 }
 export function installNativeBundle(input: {
   bundleRoot: string;
@@ -264,6 +325,7 @@ export function installNativeBundle(input: {
     const usesTerminal = 'cli' in bundle.terminal.manifest.entries;
     if (!usesTerminal && input.cliPrefix !== undefined)
       throw Error('cli_registration_candidate_invalid');
+    const node = bundle.terminal.manifest.nodeVersion !== undefined;
     rejectBundleOutput(source, root);
     createDirectory(root);
     const existing = present(join(root, marker));
@@ -280,10 +342,12 @@ export function installNativeBundle(input: {
     try {
       if (owned && cliPrefix !== owned.terminalPrefix)
         throw Error('cli_registration_already_owned');
-      if (registrationTarget) verifyCLIRegistrationTargetWhileLocked(registrationTarget, locks);
+      if (registrationTarget)
+        verifyCLIRegistrationTargetWhileLocked(registrationTarget, locks, usesTerminal && node);
       if (!sameCLIRegistration(owned, existing ? readCLIRegistration(root, true) : undefined))
         throw Error('cli_registration_changed');
-      const previous = existing ? inventory(root).selection : undefined;
+      const prior = existing ? inventory(root) : undefined;
+      const previous = prior?.selection;
       if (!existing) {
         if (readdirSync(root).some((name) => name !== '.install.lock')) fail('install_not_empty');
         durable(join(root, marker), `${JSON.stringify({ version: 1, root })}\n`);
@@ -309,11 +373,21 @@ export function installNativeBundle(input: {
         fail('candidate_changed');
       const previousCandidateId =
         previous?.current === bundle.digest ? previous.previous : (previous?.current ?? null);
-      if (usesTerminal) addTerminalLaunchers(root);
+      const maintenance = join(root, 'bin', maintenanceName);
+      const needsMaintenance =
+        includesMaintenance(bundle) ||
+        (previousCandidateId !== null && prior?.maintenanceCandidates.has(previousCandidateId));
+      if (needsMaintenance && !present(maintenance))
+        durable(maintenance, maintenanceLauncher, 0o755);
+      if (usesTerminal) addTerminalLaunchers(root, node);
       // The independent frontdoor must stop forwarding before active can name a desktop runtime.
       else if (owned) unregisterNativeCLIWhileLocked(root, locks);
       durable(join(root, 'active'), `${bundle.digest}\n${previousCandidateId ?? ''}\n`);
       if (!usesTerminal) removeTerminalLaunchers(root);
+      if (!needsMaintenance && present(maintenance)) {
+        rmSync(maintenance);
+        syncDirectory(join(root, 'bin'));
+      }
       if (
         usesTerminal &&
         registrationTarget &&
@@ -351,15 +425,20 @@ export function rollbackNativeBundle(prefix: string): InstalledNativeBundle {
       sameCLIRegistration(owned, readCLIRegistration(owned.terminalPrefix))
         ? owned.terminalPrefix
         : undefined;
-    if (registrationTarget) verifyCLIRegistrationTargetWhileLocked(registrationTarget, locks);
-    const { selection, previousUsesTerminal } = inventory(root);
+    const { selection, previousTerminalRuntime } = inventory(root);
     if (!selection.previous) fail('previous_unavailable');
     const releaseRoot = join(root, 'releases', selection.previous);
-    if (previousUsesTerminal) addTerminalLaunchers(root);
+    if (registrationTarget)
+      verifyCLIRegistrationTargetWhileLocked(
+        registrationTarget,
+        locks,
+        previousTerminalRuntime === 'node',
+      );
+    if (previousTerminalRuntime) addTerminalLaunchers(root, previousTerminalRuntime === 'node');
     else if (owned) unregisterNativeCLIWhileLocked(root, locks);
     durable(join(root, 'active'), `${selection.previous}\n${selection.current}\n`);
-    if (!previousUsesTerminal) removeTerminalLaunchers(root);
-    if (previousUsesTerminal && registrationTarget)
+    if (!previousTerminalRuntime) removeTerminalLaunchers(root);
+    if (previousTerminalRuntime && registrationTarget)
       registerNativeCLIWhileLocked(
         { nativePrefix: root, terminalPrefix: registrationTarget },
         locks,

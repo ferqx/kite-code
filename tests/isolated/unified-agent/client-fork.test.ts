@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +10,7 @@ import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '@kite-ai/service';
 import { startDevelopmentWeb } from '@kite-ai/service/development-web';
+import { expect, test } from '#kite-test';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -78,7 +78,7 @@ test('public Fork history proves original full Model output beyond 17MiB; Native
     bootstrap: service.bootstrap,
     expected: { profile: host, apiMajor: 1, requiredCapabilities: ['context', 'model_outputs'] },
   });
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined,
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined,
     browser: ReturnType<typeof createBrowserClient> | undefined,
     coldRuntime: ReturnType<typeof createRuntime> | undefined,
     closed = false;
@@ -153,7 +153,7 @@ test('public Fork history proves original full Model output beyond 17MiB; Native
     expect(originalOutput.output.toolCalls).toEqual([
       { id: 'original-call', name: 'effect', arguments: '{}' },
     ]);
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const document = await fetch(gateway.endpoint);
     await document.body?.cancel();
     const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -170,7 +170,7 @@ test('public Fork history proves original full Model output beyond 17MiB; Native
               origin: gateway!.endpoint,
             },
           }),
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     await browser.connect();

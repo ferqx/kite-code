@@ -1,4 +1,4 @@
-import { expect } from 'bun:test';
+import { expect } from '#kite-test';
 import type { MockChatRequest, MockModelServer, MockResponse } from './fixtures';
 import { parseDraftSavedPlan } from './fixtures';
 import { waitForCondition } from './terminal-screen';

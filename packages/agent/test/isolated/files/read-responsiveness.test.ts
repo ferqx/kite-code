@@ -1,8 +1,8 @@
-import { afterEach, expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, expect, mock, test } from '#kite-test';
 import type { ToolContext } from '../../../src/extensions';
 import type { WorkspaceFiles } from '../../../src/files';
 import * as binding from '../../../src/files-native-binding';

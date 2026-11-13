@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeModelSettingsFacts,
@@ -199,7 +199,7 @@ test('an unselected picker stays at its placeholder across configuration default
   }
 });
 
-test('settled model presentation distinguishes an unselected display, a valid choice and actual read or route failures', async () => {
+test('a missing route settles as an unselected display, while a failed read stays unqualified', async () => {
   const f = fixture();
   let presentation: NativeModelPresentation | undefined,
     ready = false;
@@ -231,7 +231,7 @@ test('settled model presentation distinguishes an unselected display, a valid ch
       );
       expect(presentation?.settled).toBe(true);
       expect(ready).toBe(selectedModelId === 'a');
-      expect(presentation?.display !== undefined).toBe(selectedModelId !== 'missing');
+      expect(presentation?.display).toBeDefined();
       expect(presentation?.display?.model?.id).toBe(selectedModelId === 'a' ? 'a' : undefined);
     }
     const selection = selected('s', 4);
@@ -254,7 +254,10 @@ test('settled model presentation distinguishes an unselected display, a valid ch
     );
     expect(ready).toBe(false);
     expect(presentation).toEqual({ settled: true, display: undefined });
-    expect(f.element.textContent).toContain('模型目录不可用：catalogue_failed');
+    expect(f.element.querySelector('[data-model-picker]')?.textContent).toBe('选择模型');
+    expect(f.button('模型：选择模型').getAttribute('aria-description')).toBe(
+      '暂时无法读取模型目录。',
+    );
     await act(async () =>
       f.root.render(
         <NativeModelPicker
@@ -499,9 +502,10 @@ test.each([
       );
     });
     expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'ultar' });
-    expect(f.element.querySelector('[role="alert"]')?.textContent).toBe(
-      '未能记住推荐模型与思考程度，请重新选择。',
+    expect(f.element.querySelector('[data-model-trigger]')?.getAttribute('aria-description')).toBe(
+      '本次选择已生效，未能记住为新对话的推荐。',
     );
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
   } finally {
     await f.close();
   }
@@ -722,7 +726,7 @@ test('picker filters disabled routes, preserves transient effort through observe
   }
 });
 
-test('ordinary pending catalogue reads keep a compact busy control and genuine failures remain visible', async () => {
+test('pending and failed catalogue reads keep the same compact control, with the failure on the control', async () => {
   const f = fixture(),
     ready: boolean[] = [];
   let rejectRead!: (cause: Error) => void;
@@ -751,11 +755,16 @@ test('ordinary pending catalogue reads keep a compact busy control and genuine f
     const picker = f.element.querySelector('[aria-label="下一轮模型选择"]')!;
     expect(picker.getAttribute('aria-busy')).toBe('true');
     expect(picker.querySelector('[role="status"]')).toBeNull();
-    expect(picker.querySelector<HTMLButtonElement>('[data-model-trigger]')!.disabled).toBe(true);
+    const trigger = picker.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.hasAttribute('aria-description')).toBe(false);
     expect(ready.at(-1)).toBe(false);
     await act(async () => rejectRead(Error('model_catalogue_unavailable')));
     expect(picker.hasAttribute('aria-busy')).toBe(false);
-    expect(picker.querySelector('[role="alert"]')?.textContent).toContain('模型目录不可用');
+    expect(picker.querySelector('[data-model-trigger]')).toBe(trigger);
+    expect(trigger.disabled).toBe(true);
+    expect(trigger.getAttribute('aria-description')).toBe('暂时无法读取模型目录。');
+    expect(picker.textContent).toBe('选择模型');
     expect(ready.at(-1)).toBe(false);
   } finally {
     await f.close();
@@ -826,7 +835,7 @@ test('returning to a cached Session retains its model button while rereading, an
   }
 });
 
-test('explicit missing selection after configuration refresh stays unavailable without switching to default', async () => {
+test('disabling the current model leaves only the picker and requires a new explicit choice', async () => {
   const f = fixture(),
     ready: boolean[] = [],
     changes: NativeModelChoice[] = [];
@@ -845,27 +854,40 @@ test('explicit missing selection after configuration refresh stays unavailable w
           };
     },
   };
-  const render = (revision: string) =>
-    f.root.render(
+  function Host({ revision }: { revision: string }) {
+    const [value, setValue] = useState<NativeModelChoice>({
+      modelId: 'a',
+      reasoningEffort: 'high',
+    });
+    return (
       <NativeModelPicker
         bridge={bridge}
         generation={1}
         selection={selected('s')}
         revision={revision}
-        value={{ modelId: 'a', reasoningEffort: 'high' }}
-        onChange={(choice) => changes.push(choice)}
+        value={value}
+        onChange={(choice) => {
+          changes.push(choice);
+          setValue(choice);
+        }}
         onReady={(value) => ready.push(value)}
-      />,
+      />
     );
+  }
   try {
-    await act(async () => render('one'));
+    await act(async () => f.root.render(<Host revision="one" />));
     expect(ready.at(-1)).toBe(true);
-    await act(async () => render('two'));
+    await act(async () => f.root.render(<Host revision="two" />));
     expect(ready.at(-1)).toBe(false);
-    expect(f.element.textContent).toContain('所选模型 a 当前不可用');
-    expect(f.element.textContent).not.toContain('模型：remote-b');
+    expect(f.element.querySelector('[data-model-picker]')?.textContent).toBe('选择模型');
     expect(changes).toHaveLength(0);
     expect(reads).toBe(2);
+    await f.click('模型：选择模型');
+    await f.click('选择模型，当前 未选择');
+    expect(f.element.querySelector('[aria-label="选择模型 a"]')).toBeNull();
+    await f.click('选择模型 b');
+    expect(changes).toEqual([{ modelId: 'b' }]);
+    expect(ready.at(-1)).toBe(true);
   } finally {
     await f.close();
   }
@@ -1017,7 +1039,9 @@ test('an inactive picker retains display without reading and discards both late 
         if (failed) reject(Error('native_request_failed'));
         else resolve({ ...facts, selectedModelId: 'b' });
       });
-      expect(f.element.textContent).not.toContain('模型目录不可用');
+      expect(
+        f.element.querySelector('[data-model-trigger]')?.hasAttribute('aria-description'),
+      ).toBe(false);
       expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
       expect(ready.at(-1)).toBe(false);
       await render(false);
@@ -1030,12 +1054,16 @@ test('an inactive picker retains display without reading and discards both late 
       expect(reads).toBe(3);
       expect(ready.at(-1)).toBe(false);
       await act(async () => reject(Error('model_catalogue_unavailable')));
-      expect(f.element.textContent).toContain('模型目录不可用：model_catalogue_unavailable');
+      expect(
+        f.element.querySelector('[data-model-trigger]')?.getAttribute('aria-description'),
+      ).toBe('暂时无法读取模型目录。');
       expect(ready.at(-1)).toBe(false);
       await render(true);
       await render(false);
       await act(async () => resolve({ ...facts, selectedModelId: 'a' }));
-      expect(f.element.textContent).not.toContain('模型目录不可用');
+      expect(
+        f.element.querySelector('[data-model-trigger]')?.hasAttribute('aria-description'),
+      ).toBe(false);
       expect(ready.at(-1)).toBe(true);
     } finally {
       await f.close();
@@ -1132,7 +1160,7 @@ test('picker honors durable Session route before global default and does not rep
     expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-b');
     expect(ready.at(-1)).toBe(true);
     await act(async () => render('two'));
-    expect(f.element.textContent).toContain('所选模型 missing 当前不可用');
+    expect(f.element.querySelector('[data-model-picker]')?.textContent).toBe('选择模型');
     expect(ready.at(-1)).toBe(false);
   } finally {
     await f.close();
@@ -1451,12 +1479,9 @@ for (const source of [
       await act(async () => f.root.render(<Host />));
       expect(resolved).toEqual({ modelId: 'first', reasoningEffort: 'low' });
       await f.click('模型：first-model，思考程度：轻度');
-      expect(f.element.querySelector('.model-selection-hint')).toBeNull();
       expect(f.element.textContent).not.toContain('切换协议请新建会话');
       await f.click(`选择模型，当前 ${source.provider} / first-model`);
-      expect(f.element.querySelector('.model-selection-hint')?.textContent).toBe(
-        '仅显示当前对话可用的模型',
-      );
+      expect(f.element.textContent).not.toContain('仅显示当前对话可用的模型');
       expect(f.element.querySelector('[aria-label="选择模型 opposite"]')).toBeNull();
       expect(f.element.querySelector('[aria-label="选择模型 same"]')).not.toBeNull();
       await f.click('选择模型 same');
@@ -1552,7 +1577,7 @@ test('an existing selected route of the other protocol stays unavailable without
     await act(async () => f.root.render(<Host />));
     expect(ready).toBe(false);
     expect(resolved).toBeUndefined();
-    expect(f.element.textContent).toContain('所选模型 b 当前不可用');
+    expect(f.element.querySelector('[data-model-picker]')?.textContent).toBe('选择模型');
     await f.click('模型：选择模型');
     await f.click('选择模型，当前 未选择');
     expect(f.element.querySelector('[aria-label="选择模型 b"]')).toBeNull();
@@ -1673,9 +1698,10 @@ test('an unverified first Run blocks sending and does not infer its protocol fro
       expect(f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(
         true,
       );
-      expect(f.element.querySelector('[role="alert"]')?.textContent).toBe(
-        '无法确认此会话首次运行的模型协议，暂时无法发送。',
-      );
+      expect(
+        f.element.querySelector('[data-model-trigger]')?.getAttribute('aria-description'),
+      ).toBe('无法确认此会话首次运行的模型协议，暂时无法发送。');
+      expect(f.element.querySelector('[role="alert"]')).toBeNull();
     }
   } finally {
     await f.close();
@@ -1982,9 +2008,9 @@ test('selected routes use configured effort while foreign, stale and malformed h
         history.available ? { modelId: 'a', reasoningEffort: 'low' } : undefined,
       );
       if (!history.available)
-        expect(f.element.querySelector('[role="alert"]')?.textContent).toContain(
-          '无法确认此会话首次运行的模型协议',
-        );
+        expect(
+          f.element.querySelector('[data-model-trigger]')?.getAttribute('aria-description'),
+        ).toBe('无法确认此会话首次运行的模型协议，暂时无法发送。');
     }
     await render([previousRun('max')]);
     expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('Max');
@@ -2042,7 +2068,10 @@ test('restored legacy effort remains usable and an unavailable saved level requi
     await act(async () => f.root.render(<Host key="max" previous="max" />));
     expect(ready).toBe(false);
     expect(resolved).toBeUndefined();
-    expect(f.element.textContent).toContain('原临时思考档位当前不可用');
+    expect(f.element.querySelector('[data-model-trigger]')?.getAttribute('aria-description')).toBe(
+      '所选思考档位当前不可用，请重新选择档位。',
+    );
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
     await f.click('模型：remote-a，思考程度：Max');
     const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     await act(async () => {
@@ -2053,6 +2082,9 @@ test('restored legacy effort remains usable and an unavailable saved level requi
     expect(ready).toBe(true);
     expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'high' });
     expect(f.element.querySelector('.effort-value')?.textContent).toBe('高');
+    expect(f.element.querySelector('[data-model-trigger]')?.hasAttribute('aria-description')).toBe(
+      false,
+    );
   } finally {
     await f.close();
   }

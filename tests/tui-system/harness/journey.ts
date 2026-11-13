@@ -20,7 +20,7 @@ const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
 const STEP_ABORT_SETTLE_TIMEOUT_MS = 100;
 
 /**
- * Bun's default per-test timeout is only five seconds. Stateful PTY journeys
+ * The test runner's default per-test timeout is only five seconds. Stateful PTY journeys
  * own several bounded steps plus fixture teardown, so their outer test budget
  * must remain above the journey deadline without every scenario inventing a
  * local magic number.
@@ -84,7 +84,7 @@ async function runWithTimeout(
  * Register named checkpoints inside one stateful PTY journey.
  *
  * A journey owns one TUI process, mock response queue and workspace. Its
- * checkpoints are deliberately not Bun test cases: later checkpoints may
+ * checkpoints are deliberately not separate test cases: later checkpoints may
  * consume state produced by earlier ones, so exposing them as independently
  * runnable tests would be false and would create cascading failures.
  */

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,16 +6,18 @@ import { createRuntime } from '@kite-ai/agent';
 import type { Extension, Json, PublicView } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
 import { startService } from '../../src';
 
 test('real HTTP mini-review Actions and Queries use generic records and controlled operations without additional model Runs', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-http-review-'));
-  const built = await Bun.build({
+  const built = await buildBundle({
     entrypoints: [
-      join(import.meta.dir, '../../../../tests/fixtures/extensions/mini-review/src/index.ts'),
+      join(import.meta.dirname, '../../../../tests/fixtures/extensions/mini-review/src/index.ts'),
     ],
     outdir: join(root, 'extension'),
-    target: 'bun',
+    target: 'node',
   });
   expect(built.success).toBe(true);
   // Load the independently built fixture artifact, with no application source alias.

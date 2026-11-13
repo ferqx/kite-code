@@ -1,4 +1,3 @@
-import { expect, setDefaultTimeout, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -15,13 +14,16 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { expect, setDefaultTimeout, test } from '#kite-test';
 import {
   type TerminalBundleManifest,
   terminalBundleEntries,
   verifyTerminalBundle,
 } from '../../../apps/cli/host/terminal-artifact';
+import { releaseArchiveBytes } from '../../../scripts/release/archive-compression';
 import {
   packTerminalBundle,
+  readCandidateArchiveFiles,
   unpackTerminalBundle,
 } from '../../../scripts/release/terminal-archive';
 import { privateDirectory } from '../../fixtures/test-filesystem';
@@ -65,7 +67,7 @@ function fixture() {
     version: 1,
     apiMajor: 1,
     target: { platform: process.platform, arch: process.arch },
-    bunVersion: Bun.version,
+    bunVersion: '1.4.4',
     sqlite: fixtureTerminalSqlite(bundleRoot, files),
     productVersion: '0.1.0',
     source: { commit: 'a'.repeat(40), dirty: true },
@@ -161,7 +163,7 @@ test('authenticated Terminal modes survive private umask077 without changing the
     f.close();
   }
 });
-test('actual Bun archive roundtrip stores no symlink entries and reconstructs only authenticated internal links', async () => {
+test('actual Node archive roundtrip stores no symlink entries and reconstructs only authenticated internal links', async () => {
   const f = fixture();
   try {
     const original = verifyTerminalBundle(f.bundleRoot),
@@ -170,8 +172,10 @@ test('actual Bun archive roundtrip stores no symlink entries and reconstructs on
     expect(readFileSync(`${f.archivePath}.sha256`, 'utf8')).toBe(
       `${packed.sha256}  bundle.tar.gz\n`,
     );
-    const bytes = readFileSync(f.archivePath),
-      archiveFiles = await new Bun.Archive(bytes).files();
+    const archiveFiles = readCandidateArchiveFiles({
+      archivePath: f.archivePath,
+      sha256: packed.sha256,
+    });
     expect(archiveFiles.has('node_modules/alias')).toBe(false);
     expect(archiveFiles.has('terminal-manifest.json')).toBe(true);
     const result = unpackTerminalBundle({
@@ -243,7 +247,7 @@ test('checksum and authenticated content tampering reject before destination exi
       ...f.content,
       'node_modules/example/index.js': Buffer.from('INERT tampered module'),
     };
-    const bytes = await new Bun.Archive(tampered, { compress: 'gzip' }).bytes();
+    const bytes = await releaseArchiveBytes(tampered, 'fixture.tar.gz');
     expect(() => f.unpack(bytes)).toThrow('terminal_archive_invalid');
     expect(existsSync(f.destination)).toBe(false);
     expect(hash(readFileSync(f.archivePath))).not.toBe(packed.sha256);
@@ -311,7 +315,7 @@ test('decompression budget stops a small compressed bomb before creating output;
   const f = fixture();
   try {
     const contents = { ...f.content, 'unlisted-large': Buffer.alloc(1024 * 1024) },
-      bytes = await new Bun.Archive(contents, { compress: 'gzip' }).bytes();
+      bytes = await releaseArchiveBytes(contents, 'fixture.tar.gz');
     expect(bytes.length).toBeLessThan(20_000);
     expect(() => f.unpack(bytes, 4096)).toThrow();
     expect(existsSync(f.destination)).toBe(false);

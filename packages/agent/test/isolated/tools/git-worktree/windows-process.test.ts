@@ -1,4 +1,3 @@
-import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as filesystem from 'node:fs';
 import {
@@ -12,16 +11,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { expect, spyOn, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../../scripts/tooling/build';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../../../tests/fixtures/test-filesystem';
 import type { JobEvent } from '../../../../src/extensions';
 import { createWindowsShellJob } from '../../../../src/jobs/windows-shell';
+import { nodeRuntimeFlags } from '../../../../src/platform/runtime-flags';
 import { utf8 } from '../../../../src/tools/git-worktree/paths';
 import { limits, shellQuote } from '../../../../src/tools/git-worktree/protocol';
 import { runWindowsGitProcess } from '../../../../src/tools/git-worktree/windows-process';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../../fixtures/node-runtime';
 import { windowsShellFixture } from '../../../fixtures/windows-shell-runtime';
 
 const windows = process.platform === 'win32' ? test : test.skip;
@@ -48,7 +50,7 @@ const run = (
   code: string,
   extra: Parameters<typeof runWindowsGitProcess>[2] = { cwd, env: environment() },
 ) =>
-  runWindowsGitProcess(process.execPath, ['--no-env-file', '-e', code], {
+  runWindowsGitProcess(fixtureNodeExecutable(), [...nodeRuntimeFlags, '-e', code], {
     ...extra,
     cwd,
     env: environment(),
@@ -166,16 +168,13 @@ windows(
     mkdirSync(workspace);
     mkdirSync(control);
     const runtime = await windowsShellFixture();
-    const config = join(root, 'empty.toml');
-    writeFileSync(config, '# empty\n');
     const gitPath = join(dirname(runtime.fullShell), '../../mingw64/bin/git.exe');
     const sha = createHash('sha256').update(readFileSync(gitPath)).digest('hex');
-    const gitModule = pathToFileURL(
-      join(import.meta.dir, '../../../../src/tools/git-worktree/git.ts'),
-    ).href;
-    const processModule = pathToFileURL(
-      join(import.meta.dir, '../../../../src/tools/git-worktree/windows-process.ts'),
-    ).href;
+    const gitModule = join(import.meta.dirname, '../../../../src/tools/git-worktree/git.ts');
+    const processModule = join(
+      import.meta.dirname,
+      '../../../../src/tools/git-worktree/windows-process.ts',
+    );
     const hooks = join(root, 'hooks');
     mkdirSync(hooks);
     const probe = join(root, 'probe.ts');
@@ -184,10 +183,17 @@ windows(
         writeFileSync(
           probe,
           cancel
-            ? `import {runWindowsGitProcess} from ${JSON.stringify(processModule)};console.log('attached');await runWindowsGitProcess(process.execPath,['--no-env-file','-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env});`
+            ? `import {runWindowsGitProcess} from ${JSON.stringify(processModule)};console.log('attached');await runWindowsGitProcess(process.execPath,[${JSON.stringify(nodeRuntimeFlags[0])},'-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env});`
             : `import {Git} from ${JSON.stringify(gitModule)};const git=new Git(${JSON.stringify(gitPath)},${JSON.stringify(sha)},${JSON.stringify(hooks)});const result=await git.run(process.cwd(),['--version']);console.log(JSON.stringify({exitCode:result.exitCode,stdout:result.stdout.toString(),stderr:result.stderr.toString()}));`,
         );
-        const command = [process.execPath, '--no-env-file', `--config=${config}`, probe]
+        const built = await buildBundle({
+          entrypoints: [probe],
+          outdir: root,
+          ...fixtureRuntimeBuild(root),
+          naming: 'probe.mjs',
+        });
+        if (!built.success) throw new AggregateError(built.logs, 'windows_stdio_fixture_build');
+        const command = [fixtureNodeExecutable(), ...nodeRuntimeFlags, built.outputs[0]!.path]
           .map(shellQuote)
           .join(' ');
         const env = environment();
@@ -205,7 +211,7 @@ windows(
               ? {
                   version: 1,
                   env,
-                  bunFlags: ['--no-env-file', `--config=${config}`],
+                  runtimeFlags: nodeRuntimeFlags,
                   digest: 'a'.repeat(64),
                 }
               : undefined,

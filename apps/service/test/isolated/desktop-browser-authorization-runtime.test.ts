@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type AgentRuntime, createRuntime } from '@kite-ai/agent';
 import {
@@ -18,13 +18,14 @@ import {
 } from '@kite-ai/agent/permissions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createDesktopBrowserAuthorization } from '../../src/desktop-browser-authorization';
 
 async function until(read: () => boolean | Promise<boolean>) {
   const limit = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > limit) throw Error('browser_permission_runtime_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 const finish: Extract<ModelEvent, { type: 'finish' }> = {

@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { installedDependency, verifyBuiltDependency } from '../fixtures/built-dependency-proof';
 
 function fixture() {

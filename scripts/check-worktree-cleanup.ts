@@ -71,8 +71,10 @@ if (import.meta.main) {
   try {
     const arg = process.argv[2];
     if (process.argv.length !== 3 || !arg?.startsWith('--worktree='))
-      throw Error('usage: bun scripts/check-worktree-cleanup.ts --worktree=<absolute-path>');
-    const result = checkWorktreeCleanup(resolve(import.meta.dir, '..'), arg.slice(11));
+      throw Error(
+        'usage: node --import ./scripts/tooling/register.mjs scripts/check-worktree-cleanup.ts --worktree=<absolute-path>',
+      );
+    const result = checkWorktreeCleanup(resolve(import.meta.dirname, '..'), arg.slice(11));
     console.log(JSON.stringify(result, null, 2));
     if (!result.safe) process.exitCode = 1;
   } catch (error) {

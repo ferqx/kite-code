@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe, expect, test } from '#kite-test';
 import {
   BEHAVIOR_COMPONENT_NAMES,
   generateBehaviorDigest,
@@ -9,7 +9,7 @@ import {
   verifyBehaviorDigest,
 } from '../../scripts/release/behavior-digest';
 
-const FIXTURE_DIR = join(import.meta.dir, '..', 'fixtures', 'release', 'behavior-digest');
+const FIXTURE_DIR = join(import.meta.dirname, '..', 'fixtures', 'release', 'behavior-digest');
 
 interface MutableComponentFixture {
   schemaVersion: number;

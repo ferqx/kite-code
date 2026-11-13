@@ -1,4 +1,3 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -13,10 +12,13 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 let root: string, artifact: string;
 let entries: Record<'paired' | 'daemon', string>;
@@ -34,7 +36,7 @@ async function bounded<T>(work: Promise<T>, ms = 5000): Promise<T> {
   }
 }
 async function build(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], {
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, ...args], {
     cwd,
     env: hostBuildEnvironment(),
     stdout: 'pipe',
@@ -171,7 +173,7 @@ for (const kind of ['paired', 'daemon'] as const)
           web: { directory: web, manifestSha256: hash(manifest) },
         };
       }
-      const child = Bun.spawn([process.execPath, entries[kind]], {
+      const child = spawnProcess([process.execPath, ...testRuntimeFlags, entries[kind]], {
         cwd: artifact,
         stdin: 'pipe',
         stdout: 'pipe',

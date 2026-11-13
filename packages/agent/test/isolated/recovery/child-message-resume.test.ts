@@ -1,8 +1,11 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -13,7 +16,7 @@ async function until(check: () => Promise<boolean>) {
   const deadline = Date.now() + 10000;
   while (!(await check())) {
     if (Date.now() >= deadline) throw Error('child_message_resume_boundary_unconfirmed');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function requests(directory: string): { actor: 'parent' | 'child'; request: ModelRequest }[] {
@@ -24,8 +27,13 @@ function requests(directory: string): { actor: 'parent' | 'child'; request: Mode
     .map((line) => JSON.parse(line));
 }
 function spawnFixture(directory: string) {
-  return Bun.spawn(
-    [process.execPath, join(import.meta.dir, 'child-message-resume-fixture.ts'), directory],
+  return spawnProcess(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      join(import.meta.dirname, 'child-message-resume-fixture.ts'),
+      directory,
+    ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
 }

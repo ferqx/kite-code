@@ -18,6 +18,10 @@ on:
       - "tests/fixtures/formal-optional-capabilities/**"
       - "package.json"
       - "bun.lock"
+      - "bunfig.toml"
+      - "scripts/tooling/**"
+      - "scripts/run-test-files.ts"
+      - "scripts/development/node-loader.mjs"
       - ".github/workflows/platform-capability-probe.yml"
   workflow_dispatch:
 
@@ -51,22 +55,28 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: '26.13.1'
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.4
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Linux'
         name: Prepare Linux native MCP dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential pkg-config libffi-dev bubblewrap
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
-        run: bun run scripts/release/prepare-windows-native-ci.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts
+      - name: Build the Node Agent runtime
+        run: bun --cwd=packages/agent run build
       - name: Native Files resource ownership and failure semantics
         working-directory: packages/agent/native/files
         run: cargo test --locked --lib
       - name: Actual Files tools and relocated Node-API companion
         run: >-
-          bun test --parallel=1 --max-concurrency=1 --timeout=30000
+          node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 --timeout=30000
           packages/agent/test/isolated/files/native-addon.test.ts
           packages/agent/test/isolated/files/native-packaged.test.ts
           packages/agent/test/isolated/files/native-path-lifetime.test.ts
@@ -79,7 +89,7 @@ jobs:
           apps/service/test/isolated/files-native-boundary.test.ts
       - name: Current public boundary and fail-closed contracts
         run: >-
-          bun test --parallel=1 --max-concurrency=1
+          node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1
           packages/agent/test/isolated/jobs/confined-shell.test.ts
           packages/agent/test/isolated/jobs/macos-host-shell.test.ts
           packages/agent/test/isolated/jobs/linux-preparation.test.ts
@@ -97,22 +107,22 @@ jobs:
           packages/agent/test/isolated/permissions/shell-scoped-permissions.test.ts
           apps/service/test/isolated/web-permissions.test.ts
           tests/isolated/unified-agent/unified-platform.test.ts
-      - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
+      - run: node -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
       - run: bun run release:build --directory dist/unified-terminal
       - name: Actual relocated candidate Files, assets, default capability and lifetime probe
         run: >-
-          bun run scripts/release/unified-platform-probe.ts
+          node --import ./scripts/tooling/register.mjs scripts/release/unified-platform-probe.ts
           "--candidate=${{ github.workspace }}/dist/unified-terminal"
           "--output=${{ github.workspace }}/dist/unified-evidence/platform.json"
       - name: Check diagnostic evidence
         run: >-
-          bun run scripts/release/unified-platform-verify.ts
+          node --import ./scripts/tooling/register.mjs scripts/release/unified-platform-verify.ts
           "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
           --mode=diagnostic
       - name: Require complete native execution qualification
         if: always()
         run: >-
-          bun run scripts/release/unified-platform-verify.ts
+          node --import ./scripts/tooling/register.mjs scripts/release/unified-platform-verify.ts
           "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
           --mode=formal
       - name: Preserve actual evidence and unsigned candidates

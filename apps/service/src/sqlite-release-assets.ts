@@ -6,7 +6,7 @@ export const reviewedSqliteSources = Object.freeze({
 });
 
 export interface SqliteReleaseIdentity {
-  readonly driver: 'bun:sqlite' | 'node:sqlite';
+  readonly driver: 'bun:sqlite' | 'node:sqlite' | 'node-api:sqlite';
   readonly linkage: 'dynamic' | 'builtin';
   readonly version: string;
   readonly sourceId: string;
@@ -19,9 +19,11 @@ export function parseSqliteReleaseIdentity(value: unknown): SqliteReleaseIdentit
   const raw = value as Record<string, unknown>;
   if (
     Object.keys(raw).sort().join(',') !== 'driver,linkage,sourceId,version' ||
-    !['bun:sqlite', 'node:sqlite'].includes(String(raw.driver)) ||
-    !['dynamic', 'builtin'].includes(String(raw.linkage)) ||
+    typeof raw.driver !== 'string' ||
+    !['bun:sqlite', 'node:sqlite', 'node-api:sqlite'].includes(raw.driver) ||
+    (raw.linkage !== 'dynamic' && raw.linkage !== 'builtin') ||
     (raw.driver === 'node:sqlite' && raw.linkage !== 'builtin') ||
+    (raw.driver === 'node-api:sqlite' && raw.linkage !== 'dynamic') ||
     typeof raw.version !== 'string' ||
     !Object.hasOwn(reviewedSqliteSources, raw.version) ||
     raw.sourceId !== reviewedSqliteSources[raw.version as keyof typeof reviewedSqliteSources]
@@ -29,7 +31,7 @@ export function parseSqliteReleaseIdentity(value: unknown): SqliteReleaseIdentit
     throw Error('sqlite_release_identity_invalid');
   return Object.freeze({
     driver: raw.driver as SqliteReleaseIdentity['driver'],
-    linkage: raw.linkage as SqliteReleaseIdentity['linkage'],
+    linkage: raw.linkage,
     version: raw.version,
     sourceId: raw.sourceId as string,
   });

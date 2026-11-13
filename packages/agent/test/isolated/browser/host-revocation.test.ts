@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { type AgentRuntime, createRuntime } from '../../../src';
 import {
   hostRevocationAuthorization,
@@ -30,7 +31,7 @@ async function until(read: () => boolean | Promise<boolean>) {
   const end = Date.now() + 4000;
   while (!(await read())) {
     if (Date.now() > end) throw Error('host_revocation_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 

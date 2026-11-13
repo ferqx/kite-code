@@ -1,15 +1,22 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
@@ -22,7 +29,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('default_file_checkpoint_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 type ProviderBody = {
@@ -49,7 +56,7 @@ test.skipIf(process.platform !== 'darwin')(
     privateDirectory(profile.profilePath);
     const requests: ProviderBody[] = [],
       steps = new Map<string, number>();
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request): Promise<Response> {
@@ -136,9 +143,9 @@ test.skipIf(process.platform !== 'darwin')(
     );
     const launch = (id: string) =>
       launchPairedService({
-        entrypoint: resolve(import.meta.dir, '../../../service/src/main.ts'),
+        entrypoint: resolve(import.meta.dirname, '../../../service/src/main.ts'),
         spawnChild: (command, { env }) =>
-          Bun.spawn([...command], {
+          spawnFixtureProcess([...command], {
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
@@ -258,18 +265,18 @@ test.skipIf(process.platform !== 'darwin')(
       await reader.close();
       reader = undefined;
       directoryLink(
-        resolve(import.meta.dir, '../../../../node_modules'),
+        resolve(import.meta.dirname, '../../../../node_modules'),
         join(root, 'node_modules'),
       );
       const serviceOutdir = join(root, 'apps/service/dist');
       mkdirSync(serviceOutdir, { recursive: true });
       directoryLink(
-        resolve(import.meta.dir, '../../../service/node_modules'),
+        resolve(import.meta.dirname, '../../../service/node_modules'),
         join(root, 'apps/service/node_modules'),
       );
-      const built = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
-        target: 'bun',
+      const built = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, '../../../service/src/main.ts')],
+        target: 'node',
         format: 'esm',
         packages: 'external',
         outdir: serviceOutdir,
@@ -283,8 +290,8 @@ test.skipIf(process.platform !== 'darwin')(
         {
           serviceEntrypoint: service,
           serviceSha256: hash(readFileSync(service)),
-          bunExecutable: bun,
-          bunSha256: hash(readFileSync(bun)),
+          runtimeExecutable: bun,
+          runtimeSha256: hash(readFileSync(bun)),
           buildId: 'native-files-fixture',
           apiMajor: 1,
           requiredCapabilities: [
@@ -299,8 +306,8 @@ test.skipIf(process.platform !== 'darwin')(
         outdir,
         { testDiagnostics: true },
       );
-      const fixture = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../native-file-recovery-electron.fixture.ts')],
+      const fixture = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, '../native-file-recovery-electron.fixture.ts')],
         target: 'node',
         format: 'esm',
         packages: 'external',
@@ -308,9 +315,9 @@ test.skipIf(process.platform !== 'darwin')(
         naming: 'driver.js',
       });
       expect(fixture.success).toBe(true);
-      const driver = Bun.spawn(
+      const driver = spawnFixtureProcess(
           [
-            realpathSync(Bun.which('node')!),
+            realpathSync(findFixtureExecutable('node')!),
             join(root, 'driver.js'),
             outdir,
             root,
@@ -318,7 +325,7 @@ test.skipIf(process.platform !== 'darwin')(
             point.id,
             originalPath,
             preimage,
-            resolve(import.meta.dir, '../../package.json'),
+            resolve(import.meta.dirname, '../../package.json'),
           ],
           {
             stdout: 'pipe',

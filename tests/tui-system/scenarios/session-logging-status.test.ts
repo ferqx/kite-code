@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -13,11 +13,11 @@ describe('TUI PTY System — session logging status', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let modelServer: ReturnType<typeof createMockModelServer>;
+  let modelServer: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: TestWorkspace;
 
   beforeAll(async () => {
-    modelServer = createMockModelServer();
+    modelServer = await createMockModelServer();
     modelServer.setResponses([{ message: { content: 'Logging status checked.' } }]);
     workspace = createTestWorkspace();
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -20,6 +19,9 @@ import {
   readMcpSources,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   directoryLink,
   expectPrivateMode,
@@ -675,20 +677,20 @@ test('finite bytes, not aggregate catalogue quota: 5001 entries are retained', (
 
 test('a separate real process holds source OS lock; two publishers share exact CAS with one winner', async () => {
   const f = fixture();
-  const children: ReturnType<typeof Bun.spawn>[] = [];
+  const children: ReturnType<typeof spawnProcess>[] = [];
   try {
     f.put(f.project, { mcpServers: { local: source } });
     const locksModule = new URL('../../../src/platform/locks.ts', import.meta.url).href;
     const sourcesModule = new URL('../../../src/config/mcp-sources.ts', import.meta.url).href;
-    const holder = Bun.spawn(
+    const holder = spawnProcess(
       [
         process.execPath,
         '--eval',
         `
       import { acquireFileLock } from ${JSON.stringify(locksModule)};
       const lock = acquireFileLock(${JSON.stringify(`${f.project}.lock`)}, 'exclusive');
-      await Bun.write(Bun.stdout, 'locked\\n');
-      await new Response(Bun.stdin.stream()).text();
+      process.stdout.write('locked\\n');
+      for await (const _ of process.stdin) {}
       lock.release();
     `,
       ],
@@ -703,19 +705,23 @@ test('a separate real process holds source OS lock; two publishers share exact C
     holder.stdin.end();
     expect(await holder.exited).toBe(0);
     const start = join(f.base, 'start');
-    const code = `
+    const code = `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
       import { existsSync } from 'node:fs';
       import { readMcpSources, writeMcpSourceMetadata } from ${JSON.stringify(sourcesModule)};
       const options = ${JSON.stringify({ ...f.options, now: undefined })};
       const state = readMcpSources(options);
       const value = { ...state.entries[0].binding, kind:'mcp_source_approval', decision:'approved', proof:${JSON.stringify(proof)} };
-      await Bun.write(Bun.stdout, 'ready\\n');
-      while (!existsSync(${JSON.stringify(start)})) await Bun.sleep(1);
+      process.stdout.write('ready\\n');
+      while (!existsSync(${JSON.stringify(start)})) await sleepTimer(1);
       try { writeMcpSourceMetadata({ ...options, expectedReadSet:state.readSet, value, validateDecision:()=>true }); console.log('published'); }
       catch (error) { console.log(error.code); }
     `;
     const racers = [0, 1].map(() =>
-      Bun.spawn([process.execPath, '--eval', code], { stdout: 'pipe', stderr: 'pipe' }),
+      spawnProcess(
+        [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+        { stdout: 'pipe', stderr: 'pipe' },
+      ),
     );
     children.push(...racers);
     const readers = racers.map((racer) => racer.stdout.getReader());

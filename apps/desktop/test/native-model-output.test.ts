@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { AgentClient, ModelOutputSnapshot } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { type ModelOutputViewScope, NativeModelOutputReads } from '../electron/model-output-reads';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import type { NativeBridge, NativeRequest } from '../src/native-bridge';
@@ -283,7 +284,7 @@ test('aborting a queued reply rejects promptly without opening or closing it or 
   cancelled.abort(new Error('queued_reply_cancelled'));
   try {
     expect(
-      await Promise.race([aborted, Bun.sleep(1000).then(() => 'queued_reply_abort_timeout')]),
+      await Promise.race([aborted, fixtureDelay(1000).then(() => 'queued_reply_abort_timeout')]),
     ).toBe('queued_reply_cancelled');
     expect(requests.map((request) => request.method)).toEqual(['modelOutput.open']);
     expect(f.reads).toBe(1);

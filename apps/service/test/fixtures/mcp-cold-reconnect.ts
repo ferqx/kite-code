@@ -6,7 +6,7 @@ import { runServiceProcess } from '@kite-ai/service/main';
 
 // This compiled, source-free Host uses the same public process assembly as default Main.
 // The only test policy is independent Ask for Actions/connection Jobs and a loopback port.
-const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'), 'utf8')) as {
+const settings = JSON.parse(readFileSync(join(import.meta.dirname, 'settings.json'), 'utf8')) as {
   root: string;
   phase: 'warm' | 'cold';
 };

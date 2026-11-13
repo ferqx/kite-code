@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import type { DatabaseSync } from 'node:sqlite';
+import { expect, test } from '#kite-test';
 import { verifyDesktopScheduleRows } from '../../../../packages/agent/src/maintenance/desktop-schedules';
+import { Database } from '../../../../packages/agent/src/runtime-sqlite';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import {
   createScheduledTaskData,
   latestScheduledOccurrence,
@@ -145,14 +147,14 @@ test('actual Node sqlite preserves claims and enforces raw-byte capacity through
   const root = mkdtempSync(join(tmpdir(), 'scheduled-node-'));
   try {
     const outfile = join(root, 'fixture.mjs');
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [resolve('apps/desktop/test/scheduled-tasks-node.fixture.ts')],
       target: 'node',
       outdir: root,
       naming: 'fixture.mjs',
     });
     expect(built.success).toBe(true);
-    const child = Bun.spawn(['node', outfile, join(root, 'data.sqlite')], {
+    const child = spawnFixtureProcess(['node', outfile, join(root, 'data.sqlite')], {
       stdout: 'pipe',
       stderr: 'pipe',
     });

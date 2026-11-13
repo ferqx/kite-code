@@ -63,6 +63,8 @@ export async function createTraceEngine(options: {
   installationId: string;
   generation: string;
   assets: TraceEngineAssets;
+  /** Trusted in-process composition. Guest bundles cannot select an executable. */
+  executable?: string;
   bundle: TraceEngineBundle;
   budgets?: Partial<TraceEngineBudgets>;
   broker(
@@ -95,17 +97,11 @@ export async function createTraceEngine(options: {
   let child: ChildProcessWithoutNullStreams;
   try {
     child = spawn(
-      realpathSync.native(process.execPath),
-      [
-        '--no-env-file',
-        '--no-install',
-        `--config=${join(assetRoot, 'empty-bunfig.toml')}`,
-        `--tsconfig-override=${join(assetRoot, 'empty-tsconfig.json')}`,
-        join(assetRoot, 'runner.js'),
-      ],
+      realpathSync.native(options.executable ?? process.execPath),
+      ['--no-global-search-paths', join(assetRoot, 'runner.js')],
       {
         cwd: root,
-        // Never inherit credentials, proxy/NODE_OPTIONS/BUN_OPTIONS, preload, project configuration.
+        // Never inherit credentials, proxies, Node options, preload, or project configuration.
         env: {
           HOME: root,
           TMPDIR: root,

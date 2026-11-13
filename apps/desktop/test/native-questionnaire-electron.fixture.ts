@@ -173,18 +173,15 @@ try {
     const target = globalThis as typeof globalThis & { questionnairePosts: number };
     target.questionnairePosts = 0;
     const original = target.fetch;
-    target.fetch = Object.assign(
-      (...args: Parameters<typeof original>) => {
-        const [input, init] = args;
-        if (
-          init?.method === 'POST' &&
-          /\/interactions\/[^/]+\/answer$/.test(new URL(String(input)).pathname)
-        )
-          target.questionnairePosts++;
-        return original(...args);
-      },
-      { preconnect: original.preconnect },
-    );
+    target.fetch = Object.assign((...args: Parameters<typeof original>) => {
+      const [input, init] = args;
+      if (
+        init?.method === 'POST' &&
+        /\/interactions\/[^/]+\/answer$/.test(new URL(String(input)).pathname)
+      )
+        target.questionnairePosts++;
+      return original(...args);
+    }, {});
   });
   const posts = () =>
     app!.evaluate(

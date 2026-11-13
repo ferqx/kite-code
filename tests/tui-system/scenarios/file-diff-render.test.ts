@@ -15,9 +15,9 @@
  * Static scrollback 跨轮次累积，后续轮次不对旧卡片文案做"不存在"断言。
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -39,11 +39,11 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     // Pre-create a Markdown file with list items — the overwrite keeps them
     // as diff context lines; only the final line changes.
     workspace = createTestWorkspace({

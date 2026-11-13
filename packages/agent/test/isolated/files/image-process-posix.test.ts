@@ -1,10 +1,10 @@
-import { expect, mock, test } from 'bun:test';
 import * as processes from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
+import { expect, mock, test } from '#kite-test';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,

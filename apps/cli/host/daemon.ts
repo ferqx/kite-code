@@ -159,6 +159,12 @@ async function launch(
           LANG: 'C.UTF-8',
           HOME: home,
           ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+          ...(process.platform === 'linux'
+            ? {
+                DBUS_SESSION_BUS_ADDRESS: process.env.DBUS_SESSION_BUS_ADDRESS,
+                XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR,
+              }
+            : {}),
         },
       },
     );

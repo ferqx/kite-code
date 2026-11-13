@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, type HostMutation } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 
@@ -26,7 +27,7 @@ test('Provider settings admit the local Codex family and reject missing or dupli
   }));
   let current = structuredClone(providers),
     writes = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -97,7 +98,7 @@ test('Native configuration capability, diagnostic read and closed intent never i
     lookups = 0,
     tamper = '';
   const saved = new Map<string, HostMutation>();
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -278,7 +279,7 @@ test('Settings SDK freezes original read-set and operation; altered committed ma
   let posts = 0,
     lookups = 0,
     tamper = 'operation';
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -413,7 +414,7 @@ test('model successor proof is optional, exact and bound to applied model receip
   };
   let current: unknown = structuredClone(good);
   let writes = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

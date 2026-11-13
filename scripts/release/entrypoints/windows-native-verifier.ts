@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -20,12 +21,16 @@ import {
 import { acquireArtifactAccess } from '../../../packages/agent/src/artifact-access';
 import { acquireFileLock } from '../../../packages/agent/src/platform/locks';
 import { windowsInstallationCoordination } from '../../../packages/agent/src/platform/windows-installation-coordination';
+import { initializePinnedNativeRuntime } from '../../../packages/agent/src/runtime-native';
 
 type Resource = { release(): void | Promise<void> };
+declare const __KITE_WINDOWS_DESKTOP_ADDON_SHA256__: string | undefined;
 const retained = new Set<Resource[]>();
 const environmentKeys = [
   'NODE_PATH',
   'NODE_OPTIONS',
+  'NODE_COMPILE_CACHE',
+  'NODE_V8_COVERAGE',
   'BUN_OPTIONS',
   'BUN_BE_BUN',
   'ELECTRON_RUN_AS_NODE',
@@ -64,7 +69,7 @@ async function keep(error: unknown, resources: Resource[]): Promise<never> {
     }, 60000);
   });
 }
-/** Only the fixed native first stage can certify this compiled verifier's original process. */
+/** Only the fixed native first stage can certify this verifier's original process. */
 export async function runWindowsNativeVerifier(
   kind: string,
   prefix: string,
@@ -74,6 +79,10 @@ export async function runWindowsNativeVerifier(
 ): Promise<number> {
   const executable = realpathSync(process.execPath);
   const desktopRuntime = executable !== join(prefix, 'bin', 'native-verifier.exe');
+  const addonDigest =
+    typeof __KITE_WINDOWS_DESKTOP_ADDON_SHA256__ === 'undefined'
+      ? undefined
+      : __KITE_WINDOWS_DESKTOP_ADDON_SHA256__;
   if (
     process.platform !== 'win32' ||
     process.arch !== 'x64' ||
@@ -82,7 +91,13 @@ export async function runWindowsNativeVerifier(
       (kind !== 'desktop' ||
         !expectedCandidateId ||
         executable !==
-          join(prefix, 'releases', expectedCandidateId, 'terminal/runtime/bun.exe'))) ||
+          join(
+            prefix,
+            'releases',
+            expectedCandidateId,
+            'terminal/runtime',
+            addonDigest ? 'node.exe' : 'bun.exe',
+          ))) ||
     argv.some(
       (arg) => arg.startsWith('--kite-native-handoff') || arg.startsWith('--kite-native-candidate'),
     ) ||
@@ -92,9 +107,20 @@ export async function runWindowsNativeVerifier(
     throw Error('native_windows_frontdoor_invalid');
   for (const key of environmentKeys)
     if (process.env[key] !== undefined) throw Error('native_windows_frontdoor_environment');
+  if (desktopRuntime && addonDigest)
+    initializePinnedNativeRuntime(
+      join(
+        prefix,
+        'releases',
+        expectedCandidateId!,
+        'terminal/code/@kite-ai/agent/runtime-native.node',
+      ),
+      addonDigest,
+    );
   const resources: Resource[] = [];
   retained.add(resources);
-  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let child: ChildProcess | undefined;
+  let exited: Promise<number> | undefined;
   let result = 1,
     failure: unknown;
   const ignoreInterrupt = () => {};
@@ -164,7 +190,7 @@ export async function runWindowsNativeVerifier(
     const handoff = kind === 'desktop' ? createWindowsNativeMainHandoff() : undefined;
     if (handoff) resources.push({ release: () => handoff.close() });
     process.on('SIGINT', ignoreInterrupt);
-    child = Bun.spawn(
+    const [program, ...args] =
       kind === 'desktop'
         ? [
             join(root, bundle.manifest.entries.electron),
@@ -173,21 +199,27 @@ export async function runWindowsNativeVerifier(
           ]
         : [
             join(terminalRoot, bundle.terminal.manifest.entries.runtime),
-            ...windowsTerminalRuntimeArguments(terminalRoot),
+            ...windowsTerminalRuntimeArguments(
+              terminalRoot,
+              bundle.terminal.manifest.nodeVersion ? 'node' : 'bun',
+            ),
             join(terminalRoot, `entrypoints/native-${kind}.js`),
             ...argv,
-          ],
-      { cwd: process.cwd(), env, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' },
-    );
-    handoff?.bind(child.pid);
-    result = await child.exited;
+          ];
+    child = spawn(program!, args, { cwd: process.cwd(), env, stdio: 'inherit', shell: false });
+    exited = new Promise<number>((resolve, reject) => {
+      child!.once('error', reject);
+      child!.once('close', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 1)));
+    });
+    if (child.pid !== undefined) handoff?.bind(child.pid);
+    result = await exited;
   } catch (error) {
     failure = error;
   }
   // Neither failed launch admission nor failed wait is evidence that a child has exited.
-  if (child && child.exitCode === null) {
+  if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
     try {
-      await child.exited;
+      await exited;
     } catch (error) {
       return keep(new AggregateError([failure, error]), resources);
     }
@@ -239,4 +271,4 @@ export async function runWindowsNativeVerifierMain(): Promise<void> {
     process.exitCode = 1;
   }
 }
-if (import.meta.main) await runWindowsNativeVerifierMain();
+if (Reflect.get(import.meta, 'main') === true) await runWindowsNativeVerifierMain();

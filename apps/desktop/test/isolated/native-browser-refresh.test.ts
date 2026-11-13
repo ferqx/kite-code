@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { dirname, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { JSDOM } from 'jsdom';
 import { act, createElement } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeBrowserRequest, NativeBrowserState } from '../../src/native-browser-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -128,7 +129,7 @@ test('the installed React refresh runtime preserves the real Pane while acceptin
             createElement('p', { 'data-notes-showing': showing }, 'Original notes'),
         }),
       );
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     });
     const input = host.querySelector<HTMLInputElement>('.native-browser-address')!;
     const pane = host.querySelector('.native-browser-page');
@@ -161,7 +162,7 @@ test('the installed React refresh runtime preserves the real Pane while acceptin
       await completed;
       // The installed runtime invokes its registered renderer after the before
       // hooks settle. Let that real refresh, effects and state read complete.
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     });
     expect(queued).toBe(true);
     expect(document).toBe(originalDocument);
@@ -258,7 +259,7 @@ for (const boundary of ['scope', 'page', 'host', 'document'] as const) {
                 createElement('p', { 'data-notes-showing': showing }, 'Notes'),
             }),
           );
-          await Bun.sleep(25);
+          await fixtureDelay(25);
         });
       await render();
       const originalInput = host.querySelector<HTMLInputElement>('.native-browser-address')!;

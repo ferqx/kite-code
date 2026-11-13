@@ -1,9 +1,11 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -15,7 +17,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('file_fork_receipt_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 test('actual default Files rebuild Fork false receipt is applied and cold original lookup stays accurate', async () => {
@@ -30,7 +32,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
   let requests = 0;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -90,7 +92,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
     }),
   );
   const service = await launchPairedService({
-    entrypoint: join(import.meta.dir, '../../../service/src/main.ts'),
+    entrypoint: join(import.meta.dirname, '../../../service/src/main.ts'),
     profile,
     instanceId: 'owned',
     buildId: 'file-fork-receipt',

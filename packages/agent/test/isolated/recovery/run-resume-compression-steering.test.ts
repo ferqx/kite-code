@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -10,8 +8,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -27,9 +30,10 @@ for (const cut of ['summary-complete', 'published'] as const)
         join(directory, 'material'),
         `Finite original fact ${crypto.randomUUID()} 雪🙂`,
       );
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
           process.execPath,
+          ...testRuntimeFlags,
           fileURLToPath(
             new URL('./run-resume-compression-steering-crash-child.ts', import.meta.url),
           ),
@@ -48,7 +52,7 @@ for (const cut of ['summary-complete', 'published'] as const)
             await child.exited;
             throw Error(`compression_crash_not_ready:${await new Response(child.stderr).text()}`);
           }
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
         child.kill('SIGKILL');
         await child.exited;

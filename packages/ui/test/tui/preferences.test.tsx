@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { Execution, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import {
   TuiController,
   type TuiPort,
@@ -320,7 +320,7 @@ test('all existing panel-owned headings use Chinese while public machine values 
     'Idle Rewind: choose original boundary with arrows/Enter; 0 empty; Esc close',
     'Current selected Context projection, not actual Model input Inspector; Esc close',
     'Up/Down explicit approval selection:',
-    'Ctrl+A: read required attachment. Approval: approve (once), approve <optionId> only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.',
+    'Ctrl+A: read required attachment. Approval: approve (once), approve <optionId> only if offered, deny. Question: original-schema JSON. Plan: approve / revise feedback / deny.',
   ];
   for (const label of labels) expect(tuiChinese[label]).toBeTruthy();
   expect(f.counts().effects).toBe(0);

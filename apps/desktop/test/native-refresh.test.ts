@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { AgentClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeCaller } from '../electron/native-caller';
 import { sessionChange } from './native-change.fixture';
 
@@ -207,7 +208,7 @@ test('Native notification backlog coalesces fast directory and view reads, retai
     const settledDeadline = Date.now() + 1000;
     while (caller.state().selection?.viewLoading) {
       if (Date.now() >= settledDeadline) throw Error('native_refresh_fixture_timeout');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     const value = await caller.invoke({ method: 'state', generation: 1 });
     expect(value).toMatchObject({
@@ -225,7 +226,7 @@ test('Native notification backlog coalesces fast directory and view reads, retai
     const deadline = Date.now() + 5000;
     while (caller.state().selection?.session.title !== title) {
       if (Date.now() > deadline) throw Error('native_refresh_fixture_timeout');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     expect(caller.state().selection).toMatchObject({
       session: { id: 's', title },

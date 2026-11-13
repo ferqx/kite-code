@@ -327,6 +327,7 @@ function publish(
 export function verifyCLIRegistrationTargetWhileLocked(
   prefix: string,
   locks: readonly FileLock[],
+  requireNode = false,
 ): void {
   held(prefix, locks);
   managed(prefix, locks);
@@ -339,11 +340,12 @@ export function verifyCLIRegistrationTargetWhileLocked(
   }
   observedRegistration(prefix, locks);
   const candidate = active(prefix, locks);
-  if (
-    observeWindows(prefix, locks, () => verifyTerminalBundle(join(prefix, 'releases', candidate)))
-      .digest !== candidate
-  )
-    throw Error('cli_registration_candidate_invalid');
+  const bundle = observeWindows(prefix, locks, () =>
+    verifyTerminalBundle(join(prefix, 'releases', candidate)),
+  );
+  if (bundle.digest !== candidate) throw Error('cli_registration_candidate_invalid');
+  if (requireNode && !bundle.manifest.nodeVersion)
+    throw Error('cli_registration_terminal_node_upgrade_required');
 }
 /** Two prefix EX owners; this operation never reads PATH, RC files or application data. */
 export function registerNativeCLIWhileLocked(
@@ -367,12 +369,12 @@ export function registerNativeCLIWhileLocked(
   if (candidate.digest !== candidateId || !('cli' in candidate.terminal.manifest.entries))
     throw Error('cli_registration_candidate_invalid');
   const independent = active(terminalPrefix, locks);
-  if (
-    observeWindows(terminalPrefix, locks, () =>
-      verifyTerminalBundle(join(terminalPrefix, 'releases', independent)),
-    ).digest !== independent
-  )
-    throw Error('cli_registration_candidate_invalid');
+  const terminal = observeWindows(terminalPrefix, locks, () =>
+    verifyTerminalBundle(join(terminalPrefix, 'releases', independent)),
+  );
+  if (terminal.digest !== independent) throw Error('cli_registration_candidate_invalid');
+  if (candidate.terminal.manifest.nodeVersion && !terminal.manifest.nodeVersion)
+    throw Error('cli_registration_terminal_node_upgrade_required');
   if (
     !sameCLIRegistration(before, observedRegistration(terminalPrefix, locks)) ||
     !sameCLIRegistration(previous, observedRegistration(nativePrefix, locks, true))

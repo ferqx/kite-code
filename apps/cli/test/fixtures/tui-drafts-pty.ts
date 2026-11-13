@@ -1,5 +1,10 @@
-import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
+import { spawnOwnedPty } from '../../../../tests/tui-system/harness/pty-node';
 
 async function deadline<T>(work: Promise<T>, ms: number, code: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -30,47 +35,35 @@ async function main() {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: Strip actual PTY ANSI CSI bytes.
   const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
   let buffer = '';
-  let resolveEOF!: () => void;
-  const eof = new Promise<void>((resolve) => {
-    resolveEOF = resolve;
-  });
-  let resolveForced!: () => void;
-  const forced = new Promise<void>((resolve) => {
-    resolveForced = resolve;
-  });
-  const host = Bun.spawn({
-    cmd: [process.execPath, '--no-install', hostPath, input],
+  const stopPath = join(root, `draft-stop-${randomUUID()}`);
+  const host = spawnOwnedPty({
+    command: [process.execPath, ...testRuntimeFlags, hostPath, input, stopPath],
     cwd: root,
-    detached: process.platform !== 'win32',
-    terminal: {
-      cols: 80,
-      rows: 24,
-      data(_terminal, bytes) {
-        buffer += decoder.decode(bytes, { stream: true });
-      },
-      exit() {
-        buffer += decoder.decode();
-        resolveEOF();
-      },
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (pair): pair is [string, string] => typeof pair[1] === 'string',
+      ),
+    ),
+    detach: process.platform !== 'win32',
+    cols: 80,
+    rows: 24,
+    onData(bytes) {
+      buffer += decoder.decode(bytes, { stream: true });
     },
-    ...(process.platform === 'win32'
-      ? {
-          ipc(message: unknown) {
-            if (message === 'draft-force-exit-dispatched') resolveForced();
-          },
-        }
-      : {}),
   });
+  const eof = host.exited.then(() => {
+    buffer += decoder.decode();
+  });
+  void eof.catch(() => {});
+  await host.ready;
   const wait = async (text: string, end = Date.now() + 12000) => {
     while (!buffer.replace(ansi, '').replace(/\s+/g, ' ').includes(text)) {
       if (Date.now() > end) throw Error(`expected ${text} tail=${buffer.slice(-2500)}`);
       if (host.exitCode !== null) throw Error(`host ended tail=${buffer.slice(-2500)}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   };
-  const key = (value: string) => {
-    host.terminal!.write(value);
-  };
+  const key = (value: string) => host.write(value);
   const command = async (expected: string) => {
     const line = await deadline(commands.next(), 12000, 'protocol timeout');
     if (line.done || line.value !== expected) throw Error('unexpected protocol command');
@@ -78,20 +71,11 @@ async function main() {
   const cleanup = async () => {
     control.close();
     process.stdin.pause();
-    if (host.exitCode === null) {
-      if (process.platform === 'win32') {
-        const killed = Bun.spawnSync(['taskkill.exe', '/pid', String(host.pid), '/t', '/f'], {
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        if (killed.exitCode !== 0 && host.exitCode === null)
-          throw Error('draft host tree cleanup failed');
-      } else {
-        process.kill(-host.pid, 'SIGKILL');
-      }
+    if (host.exitCode === null && host.signalCode === null) {
+      host.kill('SIGKILL');
       await deadline(host.exited, 5000, 'draft host cleanup timeout');
     }
-    host.terminal?.close();
+    host.close();
   };
   let failure: unknown;
   let exitDeadline: number | undefined;
@@ -106,36 +90,36 @@ async function main() {
         rendered.includes('Open this workspace?') &&
         rendered.includes('› Exit Kite Code')
       ) {
-        key('\x1b[A');
+        await key('\x1b[A');
         await wait('› Trust this workspace and continue', startupDeadline);
-        key('\r');
+        await key('\r');
         trustConfirmed = true;
       }
       if (Date.now() > startupDeadline)
         throw Error(`expected original draft main input tail=${buffer.slice(-2500)}`);
       if (host.exitCode !== null) throw Error(`draft host ended tail=${buffer.slice(-2500)}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     if (mode === 'first') {
-      key('cold original');
+      await key('cold original');
       await wait('cold original');
-      key('\x11');
+      await key('\x11');
     } else if (mode === 'crash') {
       await wait('cold original');
       process.kill(Number(readFileSync(pidPath, 'utf8')), 'SIGKILL');
       if (host.exitCode !== null) throw Error('host ended with Service');
-      key(' last edit');
+      await key(' last edit');
       await wait('cold original last edit');
       console.log('HELD');
       await command('quit');
-      key('\x11');
+      await key('\x11');
     } else if (mode === 'conflict') {
       await wait('/drafts');
-      key(' local conflict');
+      await key(' local conflict');
       await wait('/drafts local conflict');
       console.log('EDITED');
       await command('quit');
-      key('\x11');
+      await key('\x11');
       await wait('exit_blocked');
       if (host.exitCode !== null) throw Error('conflicted host exited');
       console.log('BLOCKED');
@@ -144,21 +128,24 @@ async function main() {
       if (process.platform === 'win32') {
         // Windows TerminateProcess cannot deliver a catchable SIGTERM. This
         // private fixture channel exercises the same registered host handler.
-        host.send('draft-force-exit');
-        await deadline(forced, exitDeadline - Date.now(), 'force exit was not dispatched');
+        writeFileSync(stopPath, 'draft-force-exit', { mode: 0o600, flag: 'wx' });
+        while (!existsSync(`${stopPath}.ack`)) {
+          if (Date.now() >= exitDeadline) throw Error('force exit was not dispatched');
+          await testSleep(20);
+        }
       } else {
         host.kill('SIGTERM');
       }
     } else {
       if (buffer.includes('cold original last edit')) throw Error('restored original inserted');
-      key('/drafts');
+      await key('/drafts');
       await wait('/drafts');
-      key('\r');
+      await key('\r');
       await wait(`Store ${storeId}`);
-      key('\x11');
+      await key('\x11');
     }
     const end = exitDeadline ?? Date.now() + 8000;
-    while (host.exitCode === null && Date.now() < end) await Bun.sleep(50);
+    while (host.exitCode === null && Date.now() < end) await testSleep(50);
     // Product status and PTY EOF are different facts: the terminal callback
     // can report 0 even when the host correctly returns 1 after a failed flush.
     const [exit] = await deadline(Promise.all([host.exited, eof]), 5000, 'host exit timeout');

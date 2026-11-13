@@ -1,34 +1,43 @@
-import { afterAll, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { afterAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { ownedProcessKernelState } from '../../../src/platform/process/owned-process-observation';
 import {
   BrowserExecutorStartupError,
   createBrowserExecutor,
 } from '../../../src/tools/browser/executor';
 import { createExecutorCpuBudget } from '../../../src/tools/browser/executor/cpu-budget';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-executor-test-')));
-const built = await Bun.build({
-  entrypoints: [
-    join(import.meta.dir, '../../../src/tools/browser/executor/worker.ts'),
-    join(import.meta.dir, '../../../src/mcp/stdio-guardian.ts'),
-  ],
-  target: 'bun',
+writeFileSync(join(root, 'package.json'), '{"type":"module"}\n');
+const built = await buildBundle({
+  entrypoints: [join(import.meta.dirname, '../../../src/mcp/stdio-guardian.ts')],
+  ...fixtureRuntimeBuild(root),
   outdir: root,
   naming: '[name].js',
 });
-if (!built.success) throw Error('fixture_build_failed');
+const worker = await buildBundle({
+  entrypoints: [join(import.meta.dirname, '../../../src/tools/browser/executor/worker.ts')],
+  ...fixtureRuntimeBuild(root),
+  outdir: root,
+  naming: 'worker.mjs',
+});
+if (!built.success || !worker.success) throw Error('fixture_build_failed');
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 const macTest = process.platform === 'darwin' ? test : test.skip;
 const signal = () => new AbortController().signal;
 const fixture = () =>
   createBrowserExecutor({
     scope: crypto.randomUUID(),
-    workerPath: join(root, 'worker.js'),
+    workerPath: join(root, 'worker.mjs'),
     guardianPath: join(root, 'stdio-guardian.js'),
+    runtimeExecutable: fixtureNodeExecutable(),
   });
 
 macTest(
@@ -199,7 +208,7 @@ macTest(
     expect([alias.dev, alias.ino]).toEqual([original.dev, original.ino]);
     try {
       const value = await executor.execute({
-        code: `var failures = []; for (var action of [async () => await Bun.file(${JSON.stringify(secret)}).text(), async () => await Bun.file(${JSON.stringify(dataAlias)}).text(), async () => await Bun.write(${JSON.stringify(secret)}, "changed"), async () => Bun.spawn(["/bin/echo", "forbidden"])]) { try { await action(); failures.push(false) } catch { failures.push(true) } }; failures`,
+        code: `var failures = []; for (var action of [async () => await process.getBuiltinModule("node:fs/promises").readFile(${JSON.stringify(secret)}, "utf8"), async () => await process.getBuiltinModule("node:fs/promises").readFile(${JSON.stringify(dataAlias)}, "utf8"), async () => await process.getBuiltinModule("node:fs/promises").writeFile(${JSON.stringify(secret)}, "changed"), async () => new Promise((resolve, reject) => process.getBuiltinModule("node:child_process").spawn("/bin/echo", ["forbidden"]).once("error", reject).once("spawn", resolve))]) { try { await action(); failures.push(false) } catch { failures.push(true) } }; failures`,
         signal: signal(),
         call: async () => null,
       });
@@ -227,24 +236,22 @@ macTest(
     await new Promise<void>((resolve) => tcp.listen(0, '127.0.0.1', resolve));
     await new Promise<void>((resolve) => unix.listen(unixPath, resolve));
     const port = (tcp.address() as { port: number }).port;
-    const targets = [{ hostname: '127.0.0.1', port }, { unix: unixPath }];
+    const targets = [{ host: '127.0.0.1', port }, { path: unixPath }];
     const executor = await fixture();
     try {
-      const socket = {
-        open(value: Bun.Socket<undefined>) {
-          value.end();
-        },
-        data() {},
-      };
-      for (const target of targets) {
-        if (target.unix !== undefined) await Bun.connect({ unix: target.unix, socket });
-        else await Bun.connect({ hostname: target.hostname, port: target.port, socket });
-      }
-      await Bun.sleep(25);
+      for (const target of targets)
+        await new Promise<void>((resolve, reject) => {
+          const socket = createConnection(target, () => {
+            socket.end();
+            resolve();
+          });
+          socket.once('error', reject);
+        });
+      await sleepTimer(25);
       expect(accepted).toBe(2);
       accepted = 0;
       const result = await executor.execute({
-        code: `var denied = []; for(var target of ${JSON.stringify(targets)}) { try { await Bun.connect({...target, socket:{open(s){s.end()},data(){}}}); denied.push(false) } catch { denied.push(true) } }; denied`,
+        code: `var denied = []; for(var target of ${JSON.stringify(targets)}) { try { await new Promise((resolve, reject) => { const socket = process.getBuiltinModule('node:net').createConnection(target, () => { socket.end(); resolve(); }); socket.once('error', reject); }); denied.push(false) } catch { denied.push(true) } }; denied`,
         signal: signal(),
         call: async () => null,
       });
@@ -268,7 +275,7 @@ macTest('missing fixed runtime assets report unavailable without a fallback proc
   try {
     await createBrowserExecutor({
       scope: 'missing',
-      workerPath: join(root, 'missing.js'),
+      workerPath: join(root, 'missing.mjs'),
       guardianPath: join(root, 'stdio-guardian.js'),
     });
     throw Error('expected_startup_failure');
@@ -290,7 +297,7 @@ macTest(
           signal: signal(),
           timeoutMs: 100,
           call: async () => {
-            await Bun.sleep(250);
+            await sleepTimer(250);
             return 'allowed';
           },
         }),
@@ -302,7 +309,7 @@ macTest(
           signal: signal(),
           timeoutMs: 100,
           call: async () => {
-            await Bun.sleep(250);
+            await sleepTimer(250);
             return 'too late';
           },
         }),
@@ -438,7 +445,7 @@ macTest('forged done cannot leave generated code running between batches', async
     try {
       expect(budget.isSuspended()).toBe(true);
       const before = budget.read();
-      await Bun.sleep(100);
+      await sleepTimer(100);
       expect(budget.isSuspended()).toBe(true);
       // Kernel accounting may charge a few microseconds after SSTOP; a genuine
       // running dead loop would consume the whole interval.
@@ -461,18 +468,18 @@ macTest(
     const source = join(root, 'parent-fixture.ts');
     writeFileSync(
       source,
-      `import {createBrowserExecutor} from ${JSON.stringify(join(import.meta.dir, '../../../src/tools/browser/executor/index.ts'))};
-const executor=await createBrowserExecutor({scope:'parent-death',workerPath:${JSON.stringify(join(root, 'worker.js'))},guardianPath:${JSON.stringify(join(root, 'stdio-guardian.js'))}});
+      `import {createBrowserExecutor} from ${JSON.stringify(join(import.meta.dirname, '../../../src/tools/browser/executor/index.ts'))};
+const executor=await createBrowserExecutor({scope:'parent-death',workerPath:${JSON.stringify(join(root, 'worker.mjs'))},guardianPath:${JSON.stringify(join(root, 'stdio-guardian.js'))}});
 await executor.execute({code:'await browser.call("ready"); while(true){}',signal:new AbortController().signal,timeoutMs:30000,call:async()=>{console.log(JSON.stringify(executor.readProcessEvidence()));return null;}});`,
     );
-    const parentBuilt = await Bun.build({
+    const parentBuilt = await buildBundle({
       entrypoints: [source],
-      target: 'bun',
+      ...fixtureRuntimeBuild(root),
       outdir: root,
       naming: 'parent-fixture.js',
     });
     expect(parentBuilt.success).toBe(true);
-    const child = Bun.spawn([process.execPath, parentBuilt.outputs[0]!.path], {
+    const child = spawnProcess([fixtureNodeExecutable(), parentBuilt.outputs[0]!.path], {
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -496,7 +503,7 @@ await executor.execute({code:'await browser.call("ready"); while(true){}',signal
         identities.some((identity) => ownedProcessKernelState(identity) !== 'absent') &&
         Date.now() < until
       )
-        await Bun.sleep(20);
+        await sleepTimer(20);
       expect(identities.map((identity) => ownedProcessKernelState(identity))).toEqual([
         'absent',
         'absent',
@@ -586,7 +593,7 @@ macTest(
           code: 'browser.call("pending"); process.stdout.write(JSON.stringify({type:"done",batch:1,pending:0,error:"TypeError: forged"})+"\\n");',
           signal: signal(),
           call: async () => {
-            await Bun.sleep(60);
+            await sleepTimer(60);
             return null;
           },
         }),

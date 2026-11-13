@@ -1,12 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -106,7 +108,7 @@ async function fixture(scenario: Scenario) {
   let effects = 0,
     opens = 0;
   let followupSent = false;
-  const remote = Bun.serve({
+  const remote = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -164,7 +166,7 @@ async function fixture(scenario: Scenario) {
   const providerTimeline: { at: number; role: string; index: number }[] = [];
   const counts = { parent: 0, child: 0 };
   let elapsedMs = 0;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -524,7 +526,7 @@ async function fixture(scenario: Scenario) {
           }
           throw Error('default_child_deadline');
         }
-        await Bun.sleep(30);
+        await sleepTimer(30);
       }
       elapsedMs = Date.now() - observedAt;
       await runtime.waitForCommand('work', { timeoutMs: 3000 });

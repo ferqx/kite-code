@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type AgentClient,
   ClientError,
@@ -7,6 +6,7 @@ import {
   type ReorderPendingInputsRequest,
   type WithdrawPendingInputRequest,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { callerDigest } from '../electron/caller-journal';
 import { NativeInputQueue } from '../electron/native-input-queue';
 import { decodeNativeRequest } from '../electron/native-ipc';

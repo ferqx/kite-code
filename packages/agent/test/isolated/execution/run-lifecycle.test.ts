@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import type { Extension, RunBoundaryEvent } from '../../../src/extensions';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';

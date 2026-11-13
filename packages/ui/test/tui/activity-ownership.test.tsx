@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import {
   activity,
   currentActivityVerified,
@@ -76,7 +77,7 @@ test('foreign owner keeps history without anomaly chrome, recovery, or cancellat
   await controller.select('s');
   const app = render(<TuiSession controller={controller} />);
   try {
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(app.lastFrame()).not.toContain('work may still be executing in another owner.');
     expect(app.lastFrame()).not.toContain('Working');
     expect(writes).toBe(0);

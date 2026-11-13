@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { JobDefinition, ToolDefinition } from '@kite-ai/agent/extensions';
@@ -13,6 +13,7 @@ import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { TuiController, type TuiPort } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { openCallerJournal } from '../../host/caller-journal';
 import { createTuiCallerPort } from '../../host/caller-port';
 import { createTuiDisplayReader, readTuiPendingInputs } from '../../host/tui-display';
@@ -30,7 +31,7 @@ async function until(read: () => Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > deadline) throw Error('finishing_input_observation_timeout');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 
@@ -139,19 +140,16 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     },
   });
   const actualFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      if (
-        String(args[0]).startsWith(service.endpoint) &&
-        args[1]?.method === 'POST' &&
-        typeof args[1].body === 'string'
-      ) {
-        if (JSON.parse(args[1].body).kind === 'input.follow_up') physicalFollowPosts++;
-      }
-      return actualFetch(...args);
-    },
-    { preconnect: actualFetch.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    if (
+      String(args[0]).startsWith(service.endpoint) &&
+      args[1]?.method === 'POST' &&
+      typeof args[1].body === 'string'
+    ) {
+      if (JSON.parse(args[1].body).kind === 'input.follow_up') physicalFollowPosts++;
+    }
+    return actualFetch(...args);
+  }, {});
   await client.connect();
   const access = acquireProfileAccess(profile);
   const journal = openCallerJournal({
@@ -224,7 +222,7 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     await controller.send();
     await Promise.race([
       started.promise,
-      Bun.sleep(5000).then(() => {
+      testSleep(5000).then(() => {
         throw Error('original_job_not_started');
       }),
     ]);

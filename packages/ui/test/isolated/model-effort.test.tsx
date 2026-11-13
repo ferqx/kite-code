@@ -1,6 +1,6 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
+import { afterAll, afterEach, expect, test } from '#kite-test';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 class TestResizeObserver {
@@ -234,7 +234,7 @@ test('every selected model offers effort adjustment without capability metadata;
   );
   await openSelector();
   expect(document.querySelector('[role="slider"]')).toBeNull();
-  expect(document.querySelector('.model-effort-unavailable')?.textContent).toBe('请先选择模型');
+  expect(document.querySelector('.model-effort-panel')?.textContent).toBe('missing / chat');
 });
 
 test.each([
@@ -281,7 +281,7 @@ test.each([
   expect(changes).toEqual(['low']);
 });
 
-test('model availability hints appear only in the model list and preserve selection and effort controls', async () => {
+test('the model trigger can describe its state without adding text to either popover view', async () => {
   const changes: string[] = [];
   let selectedEffort: string | undefined;
   await render(
@@ -295,22 +295,20 @@ test('model availability hints appear only in the model list and preserve select
       onReasoningEffortChange={(effort) => {
         selectedEffort = effort;
       }}
-      modelSelectionHint="仅显示当前对话可用的模型"
+      triggerDescription="所选思考档位当前不可用，请重新选择档位。"
     />,
   );
-  expect(document.body.textContent).not.toContain('仅显示当前对话可用的模型');
+  const trigger = document.querySelector('[data-model-trigger]')!;
+  expect(trigger.getAttribute('aria-description')).toBe('所选思考档位当前不可用，请重新选择档位。');
   await openSelector();
-  expect(document.querySelector('.model-selection-hint')).toBeNull();
+  expect(document.body.textContent).not.toContain('所选思考档位当前不可用');
   const slider = document.querySelector('[role="slider"]')!;
   await act(() =>
     slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true })),
   );
   expect(selectedEffort).toBe('ultar');
   await click(document.querySelector('.model-effort-switch'));
-  expect(document.querySelector('.model-selection-hint')?.textContent).toBe(
-    '仅显示当前对话可用的模型',
-  );
+  expect(document.body.textContent).not.toContain('所选思考档位当前不可用');
   await click(document.querySelector('[aria-label="选择模型 another"]'));
   expect(changes).toEqual(['another-model']);
-  expect(document.querySelector('.model-selection-hint')).toBeNull();
 });

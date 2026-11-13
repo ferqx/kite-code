@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import {
   createClient,
   type ReorderPendingInputsRequest,
@@ -18,7 +19,7 @@ test('pending queue requires capability, validates closed intent and response or
     snapshotCursor: '0',
   };
   const profile = { dataRoot: '/queue-fixture', name: 'test', accessKey: 'key' };
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

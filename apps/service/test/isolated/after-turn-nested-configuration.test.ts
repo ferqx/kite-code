@@ -1,13 +1,15 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type AfterTurnPolicy, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { readSkillSelection } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -26,7 +28,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const result = await read();
     if (result !== undefined) return result;
     if (Date.now() > deadline) throw new Error('after_turn_sdk_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(mode: 'spawn' | 'followup') {
@@ -40,7 +42,7 @@ async function fixture(mode: 'spawn' | 'followup') {
   const approvals: { phase: string; definitionId: string; commandId: string; runId: string }[] = [];
   let childId = '',
     unexpected = 0;
-  const later = Bun.serve({
+  const later = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -48,7 +50,7 @@ async function fixture(mode: 'spawn' | 'followup') {
       return new Response('{}');
     },
   });
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

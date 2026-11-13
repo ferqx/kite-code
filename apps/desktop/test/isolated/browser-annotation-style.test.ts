@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createBrowserAnnotationStyle } from '../../electron/browser-annotation-style';
 
 function deferred<T>() {

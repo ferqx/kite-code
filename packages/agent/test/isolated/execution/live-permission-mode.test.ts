@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { semanticDigest } from '../../../src/json';
@@ -24,7 +25,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > end) throw Error('live_mode_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function barrier() {

@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('private directory preparation pins parent descriptors, checks cancellation and never follows competing names', () => {
   const path = fileURLToPath(
@@ -9,7 +10,7 @@ test('private directory preparation pins parent descriptors, checks cancellation
   const identity = fileURLToPath(new URL('../../../src/jobs/launch-identity.ts', import.meta.url));
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import * as fs from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -36,10 +37,14 @@ try {
  mode='symlink';controller=new AbortController();const redirected=join(root,'redirected');assert.throws(()=>prepare(redirected,parent,controller.signal),/linux_shell_private_directory_unavailable/);assert.deepEqual(original.readdirSync(outside),[]);assert.equal(descriptors.size,0);
 } finally {original.rmSync(root,{recursive:true,force:true});}
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    timeout: 4000,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      timeout: 4000,
+      encoding: 'utf8',
+    },
+  );
   if (result.status !== 0) console.error(result.stderr);
   expect(result.error).toBeUndefined();
   expect(result.signal).toBeNull();

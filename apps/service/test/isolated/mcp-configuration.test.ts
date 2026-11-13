@@ -1,13 +1,15 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { McpLifecycleTransportPort } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
@@ -18,7 +20,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const x = await read();
     if (x !== null) return x;
     if (Date.now() > deadline) throw new Error('mcp_configuration_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(ask = false, withPort = true, connectServer = 'local') {
@@ -34,7 +36,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     calls = 0;
   const stops: string[] = [];
   const requests: Record<string, unknown>[] = [];
-  const network = Bun.serve({
+  const network = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -96,7 +98,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     },
   };
   const steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {

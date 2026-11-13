@@ -1,19 +1,19 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 
 test('Windows Native launcher binds the kernel creator and original birth, retaining unknown closes', () => {
   const module = fileURLToPath(
     new URL('../../../apps/service/src/windows-native-parent.ts', import.meta.url),
   );
   const code = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-assert.equal(typeof require('bun:ffi').dlopen,'function');
+import fs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
-const canonical=value=>value;canonical.native=canonical;
-mock.module('node:fs',()=>({...fs,realpathSync:canonical}));
+const realpath=fs.realpathSync;const canonical=(value,...args)=>typeof value==='string'&&value.startsWith('C:')?value:realpath(value,...args);canonical.native=canonical;
+fs.realpathSync=canonical;syncBuiltinESMExports();
 let next=1n,created=50n,selfCreated=100n,signal=258,foreign=false,failClose,loaded=0;
 const live=new Map(),calls=[];
 const alloc=kind=>{const h=next++;live.set(h,kind);return h;};
@@ -29,7 +29,7 @@ const symbols={
  WaitForSingleObject(h,timeout){assert.equal(live.get(h),'parent');assert.equal(timeout,0);return signal;},
  CloseHandle(h){assert.notEqual(h,999n);assert.ok(live.has(h));calls.push(['close',h]);if(h===failClose)return false;live.delete(h);return true;}
 };
-mock.module('bun:ffi',()=>({ptr:value=>value,dlopen(name){assert.equal(name,'kernel32.dll');loaded++;return {symbols};}}));
+mock.module('@kite-ai/agent/runtime-ffi',()=>({ptr:value=>value,dlopen(name){assert.equal(name,'kernel32.dll');loaded++;return {symbols};}}));
 const {retainWindowsNativeLauncherParent}=await import(${JSON.stringify(module)});
 assert.equal(loaded,0);
 const original=retainWindowsNativeLauncherParent(prefix,'cli');assert.equal(loaded,1);assert.deepEqual([...live.values()],['parent']);assert.ok(Object.isFrozen(original));assert.equal(original.parentPid,77);assert.equal(original.parentCreationTime,50n);assert.equal(original.selfPid,123);assert.equal(original.selfCreationTime,100n);original.verify();
@@ -39,7 +39,17 @@ created=200n;assert.throws(()=>retainWindowsNativeLauncherParent(prefix,'cli'),/
 foreign=true;assert.throws(()=>retainWindowsNativeLauncherParent(prefix,'cli'),/identity_mismatch/);assert.equal(live.size,0);foreign=false;
 failClose=next;assert.throws(()=>retainWindowsNativeLauncherParent(prefix,'cli'),/close_unknown/);assert.deepEqual([...live.values()],['snapshot']);assert.ok(calls.filter(c=>c[1]===failClose).length>=2);
 `;
-  const child = spawnSync(process.execPath, ['--eval', code], { encoding: 'utf8', timeout: 4000 });
+  const child = spawnSync(
+    process.execPath,
+    [
+      ...testRuntimeFlags,
+      '--disable-warning=ExperimentalWarning',
+      '--input-type=module',
+      '--eval',
+      code,
+    ],
+    { encoding: 'utf8', timeout: 4000 },
+  );
   if (child.status !== 0)
     throw Error(
       `Windows Native parent mock failed: ${child.error?.message ?? ''}\n${child.stderr}`,

@@ -1,10 +1,10 @@
-import { expect, mock, test } from 'bun:test';
 import { createTrajectoryBundle, openTrajectoryBundle } from '@kite-ai/client';
 import {
   createTrajectoryEventId,
   type TrajectoryEvent,
   type TrajectorySnapshot,
 } from '@kite-ai/trajectory';
+import { expect, mock, test } from '#kite-test';
 import type { openNativeTrajectoryBundle } from '../../electron/trajectory-bundle';
 
 type Opened = Awaited<ReturnType<typeof openNativeTrajectoryBundle>>;

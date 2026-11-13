@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -8,12 +6,14 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient, type SessionExportFrame } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '@kite-ai/service';
 import { startDevelopmentWeb } from '@kite-ai/service/development-web';
+import { expect, test } from '#kite-test';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -160,7 +160,7 @@ test('actual HTTP and Cookie exports preserve >200 raw records, 9MiB future text
   } finally {
     physical.close();
   }
-  const gateway = startDevelopmentWeb({ admittedClient: f.client });
+  const gateway = await startDevelopmentWeb({ admittedClient: f.client });
   const document = await fetch(gateway.endpoint);
   await document.body?.cancel();
   const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -177,7 +177,7 @@ test('actual HTTP and Cookie exports preserve >200 raw records, 9MiB future text
             origin: gateway.endpoint,
           },
         }),
-      { preconnect: fetch.preconnect },
+      {},
     ),
   });
   let relay: ReturnType<typeof createServer> | undefined,

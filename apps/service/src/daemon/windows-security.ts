@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { win32 } from 'node:path';
+import { CString, dlopen, ptr, toArrayBuffer } from '@kite-ai/agent/runtime-ffi';
 
 /** Daemon-only current-token policy. Importing the leaf performs no native or filesystem I/O. */
 let cached: ReturnType<typeof createSecurity> | undefined;
@@ -11,7 +12,6 @@ export function windowsDaemonSecurity() {
   return cached;
 }
 function createSecurity() {
-  const { dlopen, ptr, toArrayBuffer, CString } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
@@ -24,7 +24,7 @@ function createSecurity() {
   const pointer = (value: bigint) => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number <= 0) return fail();
-    return number as import('bun:ffi').Pointer;
+    return number as import('@kite-ai/agent/runtime-ffi').Pointer;
   };
   const system = new Uint16Array(32768);
   const length = kernel.symbols.GetSystemDirectoryW(ptr(system), system.length);
@@ -53,10 +53,10 @@ function createSecurity() {
     CoTaskMemFree: { args: ['ptr'], returns: 'void' },
   });
   const pendingHandles = new Set<bigint>();
-  const pendingAllocations = new Set<import('bun:ffi').Pointer>();
+  const pendingAllocations = new Set<import('@kite-ai/agent/runtime-ffi').Pointer>();
   // The DLLs and every unconfirmed native resource remain owned even if construction throws.
   const owner = { kernel, adv, shell, ole, pendingHandles, pendingAllocations };
-  const free = (address: import('bun:ffi').Pointer) => {
+  const free = (address: import('@kite-ai/agent/runtime-ffi').Pointer) => {
     if (kernel.symbols.LocalFree(address)) {
       pendingAllocations.add(address);
       retainedFailures.add(owner);
@@ -71,7 +71,7 @@ function createSecurity() {
     pendingHandles.delete(token[0]!);
   };
   let user: Uint8Array;
-  let sid: import('bun:ffi').Pointer;
+  let sid: import('@kite-ai/agent/runtime-ffi').Pointer;
   let sidText: string;
   let localAppData: string;
   try {

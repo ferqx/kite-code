@@ -6,9 +6,11 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { _electron, chromium, type ElectronApplication, type Page } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './render-performance-browser.fixture';
 
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'streaming-render-'));
@@ -35,10 +37,10 @@ await build({
     target: 'esnext',
   },
 });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
     if (pathname === '/')
@@ -48,7 +50,7 @@ const server = Bun.serve({
       );
     const file = path.resolve(output, `.${pathname}`);
     return file.startsWith(output + path.sep)
-      ? new Response(Bun.file(file))
+      ? new Response(await openFixtureFile(file))
       : new Response(null, { status: 404 });
   },
 });
@@ -593,7 +595,7 @@ try {
       firstBodyHandoff,
       firstReply,
     });
-    await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+    await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
     await checkpoint(`${label}:complete`);
     if (electron) await electron.close();
     else await page.close();
@@ -611,7 +613,7 @@ try {
       }))
       .catch(() => undefined),
   });
-  await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
   throw error;
 } finally {
   console.log(JSON.stringify({ artifact, cases: report.cases.length }));

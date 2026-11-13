@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe, expect, test } from '#kite-test';
 import {
   buildRuntimeFaultSoakReport,
   computeRuntimeFaultSoakReportDigest,
@@ -282,11 +282,13 @@ describe('runtime fault soak qualification verifier', () => {
 
   test('keeps the current formal workflow on the unified producer and verifier', () => {
     const workflow = readFileSync(
-      join(import.meta.dir, '../../../.github/workflows/runtime-resilience-qualification.yml'),
+      join(import.meta.dirname, '../../../.github/workflows/runtime-resilience-qualification.yml'),
       'utf8',
     );
     expect(workflow).toContain('timeout-minutes: 190');
-    expect(workflow).toContain('bun run scripts/runtime/unified-soak.ts');
+    expect(workflow).toContain(
+      'node --expose-gc --import ./scripts/tooling/register.mjs scripts/runtime/unified-soak.ts',
+    );
     expect(workflow).toContain('--profile=qualification');
     expect(workflow).toContain(
       '--output=dist/unified-evidence/runtime-resilience-qualification.json',
@@ -294,7 +296,7 @@ describe('runtime fault soak qualification verifier', () => {
     expect(workflow).toContain(`QUALIFICATION_WORKFLOW_REF: \${{ github.workflow_ref }}`);
     expect(workflow).toContain(`QUALIFICATION_WORKFLOW_SHA: \${{ github.workflow_sha }}`);
     expect(workflow).toContain(
-      'bun run scripts/runtime/unified-soak-verify.ts dist/unified-evidence/runtime-resilience-qualification.json',
+      'node --import ./scripts/tooling/register.mjs scripts/runtime/unified-soak-verify.ts dist/unified-evidence/runtime-resilience-qualification.json',
     );
     expect(workflow).not.toContain('scripts/runtime/run-fault-soak.ts');
     expect(workflow).not.toContain('scripts/runtime/verify-fault-soak-qualification.ts');

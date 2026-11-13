@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { defineExtension, type ToolDefinition } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -95,7 +96,7 @@ test('parallel Tools retain actual reverse completion and original Model call-re
         break;
       }
       if (Date.now() > deadline) throw Error('parallel_fast_cannot_complete_while_slow_held');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     release();
     const command = await runtime.waitForCommand('work', { timeoutMs: 2000 });
@@ -248,7 +249,7 @@ test('a later parallel Tool terminal SQLite rejection survives the earlier unkno
     const deadline = Date.now() + 1200;
     while (!aborted) {
       if (Date.now() > deadline) throw Error('late_storage_abort_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const activeCommand = (await store.getCommand('work'))!;
     const runId = (activeCommand.receipt as { runId: string }).runId;
@@ -407,7 +408,7 @@ test('denying a parallel sibling waits for cleanup and delivers both results bef
       const fact = await read();
       if (fact !== undefined) return fact;
       if (Date.now() > deadline) throw Error('parallel_denial_fact_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   }
   try {

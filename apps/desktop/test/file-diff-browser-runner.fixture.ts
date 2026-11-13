@@ -5,14 +5,16 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './file-diff-browser.fixture';
 
-const cache = resolve(import.meta.dir, '../../../.cache');
+const cache = resolve(import.meta.dirname, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(join(cache, 'file-diff-')),
   output = join(artifact, 'dist');
 await build({
-  root: resolve(import.meta.dir, '..'),
+  root: resolve(import.meta.dirname, '..'),
   configFile: false,
   envFile: false,
   plugins: [react(), tailwindcss()],
@@ -23,7 +25,7 @@ await build({
     outDir: output,
     emptyOutDir: false,
     lib: {
-      entry: join(import.meta.dir, 'file-diff-browser.fixture.tsx'),
+      entry: join(import.meta.dirname, 'file-diff-browser.fixture.tsx'),
       formats: ['es'],
       fileName: 'fixture',
       cssFileName: 'fixture',
@@ -33,7 +35,7 @@ await build({
 });
 // Build-only validates the real component/CSS artifact where Chromium is unavailable.
 if (process.argv.includes('--build-only')) {
-  const css = await Bun.file(join(output, 'fixture.css')).text();
+  const css = await (await openFixtureFile(join(output, 'fixture.css'))).text();
   assert.ok(css.includes('.file-diff-split-row'));
   assert.ok(css.includes('.workspace-change-tree'));
   assert.ok(css.includes('@container'));
@@ -53,10 +55,10 @@ if (process.argv.includes('--build-only')) {
   console.log(JSON.stringify({ stage: 'production-build-only', output }));
   process.exit(0);
 }
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const name = new URL(request.url).pathname;
     if (name === '/')
       return new Response(
@@ -66,7 +68,7 @@ const server = Bun.serve({
     if (name === '/favicon.ico') return new Response(null, { status: 204 });
     const path = resolve(output, `.${name}`);
     return path.startsWith(output + sep)
-      ? new Response(Bun.file(path))
+      ? new Response(await openFixtureFile(path))
       : new Response(null, { status: 404 });
   },
 });

@@ -1,7 +1,5 @@
 import { lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { and, eq, sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
 import {
   artifactPath,
   verifyPublishedArtifact,
@@ -14,7 +12,6 @@ import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
 import { isHumanBoundReviewRequest } from './authorization-review';
 import type { SqliteOperations } from './operations';
-import { blobReferences, blobs } from './schema';
 
 type Register = Parameters<Store['registerArtifact']>[0];
 type Get = Parameters<Store['getArtifactReference']>[0];
@@ -174,31 +171,19 @@ function scope(ops: SqliteOperations, input: Get, live: boolean): void {
     throw new AgentError('artifact_scope_denied');
 }
 function get(ops: SqliteOperations, input: Get, publishing = false): ArtifactReference | null {
-  const row = drizzle(ops.db)
-    .select({
-      id: blobReferences.id,
-      hash: blobReferences.hash,
-      sessionId: blobReferences.sessionId,
-      subjectId: blobReferences.subjectId,
-      originStoreId: blobReferences.originStoreId,
-      scopeKind: blobReferences.scopeKind,
-      scopeId: blobReferences.scopeId,
-      size: sql<string>`CAST(${blobs.size} AS TEXT)`,
-      mediaType: blobReferences.mediaType,
-    })
-    .from(blobReferences)
-    .innerJoin(blobs, eq(blobs.hash, blobReferences.hash))
-    .where(
-      and(
-        eq(blobReferences.id, input.refId),
-        eq(blobReferences.sessionId, input.sessionId),
-        eq(blobReferences.subjectId, input.subjectId),
-        eq(blobReferences.scopeKind, input.scope.kind),
-        eq(blobReferences.scopeId, input.scope.id),
-        ...(publishing ? [eq(blobReferences.originStoreId, input.expectedStoreId)] : []),
-      ),
-    )
-    .get();
+  const row = ops.row(
+    `SELECT r.id, r.blob_hash AS hash, r.session_id AS sessionId, r.subject_id AS subjectId,
+      r.origin_store_id AS originStoreId, r.owner_kind AS scopeKind, r.owner_id AS scopeId,
+      CAST(b.size AS TEXT) AS size, r.media_type AS mediaType
+     FROM blob_ref r JOIN blob b ON b.hash=r.blob_hash
+     WHERE r.id=? AND r.session_id=? AND r.subject_id=? AND r.owner_kind=? AND r.owner_id=?${publishing ? ' AND r.origin_store_id=?' : ''}`,
+    input.refId,
+    input.sessionId,
+    input.subjectId,
+    input.scope.kind,
+    input.scope.id,
+    ...(publishing ? [input.expectedStoreId] : []),
+  );
   if (row && input.scope.kind === 'execution') {
     const execution = ops.row(
       'SELECT e.origin_store_id, c.origin_store_id AS command_origin FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE e.id=? AND e.session_id=?',

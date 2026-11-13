@@ -1,5 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, verifyModelOutputSnapshot } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 
@@ -71,9 +73,9 @@ function wire(value: unknown, change: { hash?: string; truncate?: boolean } = {}
     },
   });
 }
-function fixture(read: () => Response) {
+async function fixture(read: () => Response) {
   const requests: Request[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -107,7 +109,7 @@ function fixture(read: () => Response) {
 
 test('Native and Cookie Model output readers verify full text, reasoning and calls beyond their ordinary JSON budget, preserving incomplete prefixes', async () => {
   let selected = snapshot();
-  const f = fixture(() => wire(selected));
+  const f = await fixture(() => wire(selected));
   try {
     await f.native.connect();
     await f.browser.connect();
@@ -144,7 +146,7 @@ test('bad wire EOF, body hash, byte accounting, completion or exact identity nev
     { value: { ...full, executionId: 'foreign' }, code: 'model_output_identity_mismatch' },
   ];
   for (const sample of cases) {
-    const f = fixture(() => wire(sample.value, sample.wire));
+    const f = await fixture(() => wire(sample.value, sample.wire));
     try {
       await f.browser.connect();
       await expect(f.browser.getModelOutput('s', 'model')).rejects.toThrow(sample.code);
@@ -162,7 +164,7 @@ test('local cancellation releases an in-flight Model output response and issues 
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const f = fixture(() => {
+  const f = await fixture(() => {
     let sent = false;
     return new Response(
       new ReadableStream<Uint8Array>({
@@ -197,11 +199,11 @@ test('local cancellation releases an in-flight Model output response and issues 
     const deadline = Date.now() + 3000;
     while (!entered) {
       if (Date.now() > deadline) throw Error('output_wire_deadline');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     abort.abort();
     expect(
-      await Promise.race([pending, Bun.sleep(1000).then(() => 'not_released')]),
+      await Promise.race([pending, fixtureDelay(1000).then(() => 'not_released')]),
     ).toBeInstanceOf(Error);
     expect(f.requests).toHaveLength(2);
     expect(f.requests.every((request) => request.method === 'GET')).toBe(true);

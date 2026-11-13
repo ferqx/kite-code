@@ -1,14 +1,17 @@
-import { expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parse as parseJsonc } from 'jsonc-parser';
+import { expect, test } from '#kite-test';
 import {
   matchReviewedCurrentOnlyPredecessorInput,
   matchReviewedPredecessorInput,
   type ReviewedPredecessorKind,
 } from '../../fixtures/unified-agent/predecessor-reviewed-input';
 
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
+const approvedCurrent = '942082d4b40fd19d62c5e44ab2a892bd646ddc25';
 const predecessors: Readonly<Record<ReviewedPredecessorKind, string>> = {
   compatible: '4a4c0e440b2098e5b4ec58c5831452773b39228f',
   terminal_legacy: 'a2b6441fde28d9c0f895a26e6a9d2471d2b1b242',
@@ -23,11 +26,13 @@ const paths = [
   'apps/service/package.json',
 ];
 const show = (commit: string, path: string) => {
-  const result = Bun.spawnSync(['git', 'show', `${commit}:${path}`], { cwd: repository });
-  if (result.exitCode !== 0) throw Error(`reviewed_fixture_blob_missing:${commit}:${path}`);
+  const result = spawnSync('git', ['show', `${commit}:${path}`], { cwd: repository });
+  if (result.status !== 0) throw Error(`reviewed_fixture_blob_missing:${commit}:${path}`);
   return result.stdout;
 };
-const current = (path: string) => readFileSync(resolve(repository, path));
+// These review exceptions authorize specific historical bytes. The current
+// Bun lock and Node manifests from the current checkout do not inherit that review.
+const current = (path: string) => show(approvedCurrent, path);
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const mutate = (bytes: Uint8Array) => {
   const changed = Buffer.from(bytes);
@@ -106,6 +111,13 @@ test('each reviewed path rejects changed current bytes, changed previous bytes, 
       ).toBeUndefined();
     }
   }
+});
+
+test('the current Bun lock cannot inherit a historical dependency review', () => {
+  const bytes = readFileSync(resolve(repository, 'bun.lock'));
+  const old = show(predecessors.compatible, 'bun.lock');
+  expect(bytes.equals(old)).toBe(false);
+  expect(matchReviewedPredecessorInput('compatible', 'bun.lock', old, bytes)).toBeUndefined();
 });
 
 test('context swaps reject different fixed predecessor blobs rather than admitting any reviewed old hash', () => {
@@ -260,10 +272,10 @@ test('the original October 21 approved pairs remain closed and accepted', () => 
 });
 
 test('the current dependency review preserves every original resolved package, including the relocated CLI highlighter', () => {
-  const previous = Bun.JSONC.parse(show('3cf44ed0f', 'bun.lock').toString()) as {
+  const previous = parseJsonc(show('3cf44ed0f', 'bun.lock').toString()) as {
     packages: Record<string, unknown>;
   };
-  const actual = Bun.JSONC.parse(current('bun.lock').toString()) as {
+  const actual = parseJsonc(current('bun.lock').toString()) as {
     packages: Record<string, unknown>;
   };
   for (const [name, resolved] of Object.entries(previous.packages))
@@ -304,7 +316,7 @@ test('the current-only Radix cleanup patch is independently pinned without inven
       expect(
         matchReviewedCurrentOnlyPredecessorInput(kind as ReviewedPredecessorKind, path, wrong),
       ).toBeUndefined();
-    for (const wrong of ['patches/other.patch', '../' + path, path.replace('%2F', '%2f')])
+    for (const wrong of ['patches/other.patch', `../${path}`, path.replace('%2F', '%2f')])
       expect(
         matchReviewedCurrentOnlyPredecessorInput(kind as ReviewedPredecessorKind, wrong, bytes),
       ).toBeUndefined();

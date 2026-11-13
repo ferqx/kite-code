@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
 import { SessionPage } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeFileChanges, NativeOutputFile } from '../../src/native-file-changes';
 import { prepareDesktopDom } from '../native-page-dom.fixture';

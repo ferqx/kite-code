@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { expect, test } from '#kite-test';
 import { connectSharedService } from '../../../apps/cli/host/shared-service';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
@@ -12,6 +12,8 @@ import {
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 test.skipIf(process.platform !== 'darwin')(
@@ -64,7 +66,7 @@ test.skipIf(process.platform !== 'darwin')(
       tools: { function: { name: string } }[];
     }[] = [];
     let titleCalls = 0;
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -115,7 +117,7 @@ test.skipIf(process.platform !== 'darwin')(
     let installed = false;
     let connection: Awaited<ReturnType<typeof connectSharedService>> | undefined;
     const execute = async (argv: string[], input = '', expectedExit = 0) => {
-      const child = Bun.spawn([join(prefix, 'bin/kite'), ...argv], {
+      const child = spawnFixtureProcess([join(prefix, 'bin/kite'), ...argv], {
         cwd: workspace,
         env: {
           ...userConfiguration.homeEnvironment,
@@ -169,7 +171,9 @@ test.skipIf(process.platform !== 'darwin')(
         { mode: 0o600 },
       );
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-source') });
-      const require = createRequire(resolve(import.meta.dir, '../../../apps/desktop/package.json'));
+      const require = createRequire(
+        resolve(import.meta.dirname, '../../../apps/desktop/package.json'),
+      );
       const native = await buildNativeCandidate({
         terminalRoot: terminal.root,
         electronDist: resolve(dirname(dirname(require('electron') as string)), '../..'),

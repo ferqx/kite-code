@@ -9,9 +9,9 @@
     "./sdk": "./src/sdk.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/sdk.ts --outdir ./dist --target browser --splitting --packages bundle",
-    "typecheck": "bun check -p tsconfig.json",
-    "test": "bun run ../../scripts/run-owned-tests.ts ."
+    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts ./src/sdk.ts --outdir ./dist --target browser --splitting --packages bundle",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.19",

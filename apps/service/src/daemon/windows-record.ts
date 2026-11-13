@@ -1,4 +1,5 @@
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { windowsDaemonSecurity } from './windows-security';
 
@@ -12,7 +13,6 @@ let implementation: ReturnType<typeof native> | undefined;
 const api = () => (implementation ??= native());
 function native() {
   if (process.platform !== 'win32' || process.arch !== 'x64') fail('daemon_platform_unsupported');
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },

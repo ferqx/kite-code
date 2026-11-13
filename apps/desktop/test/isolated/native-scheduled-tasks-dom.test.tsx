@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeConversationResult,

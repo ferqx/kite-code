@@ -24,26 +24,26 @@ export function tuiPollInterval(intervalMs: number): number {
 
 export function nestedTuiDeadlineBudget(input: {
   fileTimeoutMs: number;
-  requestedBunTestTimeoutMs: number;
+  requestedTestTimeoutMs: number;
   requestedJourneyDeadlineMs: number;
   fileTeardownMarginMs: number;
   testTeardownMarginMs: number;
-}): { bunTestTimeoutMs: number; journeyDeadlineMs: number } {
+}): { testTimeoutMs: number; journeyDeadlineMs: number } {
   if (!Number.isInteger(input.fileTimeoutMs) || input.fileTimeoutMs < MINIMUM_TUI_FILE_TIMEOUT_MS) {
     throw new Error(
       `TUI file timeout must be at least ${MINIMUM_TUI_FILE_TIMEOUT_MS}ms; received ${input.fileTimeoutMs}`,
     );
   }
-  const bunTestTimeoutMs = Math.min(
-    input.requestedBunTestTimeoutMs,
+  const testTimeoutMs = Math.min(
+    input.requestedTestTimeoutMs,
     input.fileTimeoutMs - input.fileTeardownMarginMs,
   );
   const journeyDeadlineMs = Math.min(
     input.requestedJourneyDeadlineMs,
-    bunTestTimeoutMs - input.testTeardownMarginMs,
+    testTimeoutMs - input.testTeardownMarginMs,
   );
   if (journeyDeadlineMs <= 0) {
     throw new Error('TUI deadline margins leave no positive journey budget.');
   }
-  return { bunTestTimeoutMs, journeyDeadlineMs };
+  return { testTimeoutMs, journeyDeadlineMs };
 }

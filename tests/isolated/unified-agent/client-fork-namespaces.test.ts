@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +11,7 @@ import { createClient, type SessionExportFrame } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '@kite-ai/service';
 import { startDevelopmentWeb } from '@kite-ai/service/development-web';
+import { expect, test } from '#kite-test';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -119,7 +119,7 @@ test('public namespace Fork reports frozen copy/rebuild/omit rules and exports o
         requiredCapabilities: ['context', 'session_exports'],
       },
     });
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined,
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined,
     browser: ReturnType<typeof createBrowserClient> | undefined;
   try {
     await client.connect();
@@ -199,7 +199,7 @@ test('public namespace Fork reports frozen copy/rebuild/omit rules and exports o
     expect(branch.runs).toHaveLength(0);
     expect(branch.executions).toHaveLength(0);
     expect(branch.messages.map((message) => message.role)).toEqual(['user']);
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const document = await fetch(gateway.endpoint);
     await document.body?.cancel();
     const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -216,7 +216,7 @@ test('public namespace Fork reports frozen copy/rebuild/omit rules and exports o
               origin: gateway!.endpoint,
             },
           }),
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     await browser.connect();

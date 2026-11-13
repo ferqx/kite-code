@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -102,7 +103,7 @@ export async function runLiveStaleApprovals(options: Options): Promise<{ cases: 
         const result = await read();
         if (result !== undefined) return result;
         if (Date.now() >= end) throw new Boundary('branch_not_reached', point);
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
     }
     try {

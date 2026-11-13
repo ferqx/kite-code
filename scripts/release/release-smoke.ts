@@ -6,12 +6,13 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { verifyTerminalBundle } from '../../apps/cli/host/terminal-artifact';
 import { windowsTerminalRuntimeArguments } from '../../apps/service/src/runtime-assets';
 import { privateDirectory } from '../../packages/agent/src/platform/windows-path-security';
+import { spawn as spawnProcess } from '../tooling/process';
 
 // A failed smoke keeps the original lease and private evidence until host exit.
 const pendingSmokes = new Set<object>();
 
 async function execute(command: string[], cwd: string, home: string): Promise<string> {
-  const child = Bun.spawn(command, {
+  const child = spawnProcess(command, {
     cwd,
     env:
       process.platform === 'win32'
@@ -98,7 +99,11 @@ export async function smokeTerminalBundle(directory: string) {
       entry = join(bundle.root, bundle.manifest.entries.cli),
       scope = ['--server', socket, '--data-root', join(home, '.kite-code', 'unified-agent')];
     const runtimeArguments =
-      process.platform === 'win32' ? windowsTerminalRuntimeArguments(bundle.root) : [];
+      process.platform === 'win32'
+        ? windowsTerminalRuntimeArguments(bundle.root, bundle.manifest.nodeVersion ? 'node' : 'bun')
+        : bundle.manifest.nodeVersion
+          ? ['--no-global-search-paths']
+          : [];
     cli = (argv) => execute([executable, ...runtimeArguments, entry, ...argv], workspace, home);
     const help = await cli(['--help']),
       version = await cli(['--version']);

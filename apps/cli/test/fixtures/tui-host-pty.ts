@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { inspectProcess } from '@kite-ai/service/daemon';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -28,9 +30,10 @@ const observation = `${input.evidence}.service.json`;
 const pty = spawnTuiPTY({
   cmd: [
     process.execPath,
-    '--preload',
-    `${import.meta.dir}/tui-management-observation.ts`,
-    `${import.meta.dir}/tui-diagnostics-entry.ts`,
+    ...testRuntimeFlags,
+    '--import',
+    `${import.meta.dirname}/tui-management-observation.ts`,
+    `${import.meta.dirname}/tui-diagnostics-entry.ts`,
     input.entrypoint,
     '--workspace',
     input.workspace,
@@ -56,7 +59,7 @@ const wait = async (text: string, viewport = false) => {
     if (frame.fresh && material.includes(text.replace(/\s+/g, ''))) return;
     if (pty.ended || Date.now() > deadline)
       throw Error(`expected ${text} tail=${material.slice(-3000)}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string) => {
@@ -75,7 +78,7 @@ try {
   assert(owned.cmd.includes(input.serviceEntry));
   assert.equal(inspectProcess(owned.pid, owned.start), 'alive');
   await key('owned task');
-  await Bun.sleep(100);
+  await testSleep(100);
   await key('\r');
   if (input.mode === 'complete') {
     await wait('360025 bytes, complete');
@@ -88,7 +91,7 @@ try {
       if (frame.fresh && frame.text.replace(/\s+/g, '').includes(original)) break;
       if (pty.ended || Date.now() > deadline)
         throw Error('complete original Model body not painted');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     await key('\x0e');
     await wait('New Workspace Session selected');
@@ -108,8 +111,8 @@ try {
     await wait('approval [');
     // Real PTY/ConPTY closure sends input-loss SIGHUP to the original Host.
     // It is not an answer and is not the later explicit Host stop.
-    pty.host.terminal!.close();
-    await Bun.sleep(300);
+    await pty.host.hangup();
+    await testSleep(300);
     assert.equal(pty.ended, false, 'original Host must survive input loss');
     const database = new Database(input.databasePath, { readonly: true });
     try {
@@ -131,7 +134,7 @@ try {
   }
   const deadline = Date.now() + 6000;
   while (!pty.ended && Date.now() < deadline) {
-    await Bun.sleep(100);
+    await testSleep(100);
     await pty.drain();
   }
   const [exit] = await ptyDeadline(

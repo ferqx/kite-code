@@ -1,9 +1,9 @@
-import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { constants, fstatSync, fsyncSync, lstatSync, readSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { canonicalJson } from '../json';
 import { assertNoSymlinkPath } from '../platform/profile';
+import type { Database } from '../runtime-sqlite';
 import { createWorkspaceFiles } from '../tools/files';
 import { isManagedWorkingFilePath } from '../tools/session-output-path';
 import {

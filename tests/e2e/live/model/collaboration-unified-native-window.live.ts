@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -16,6 +15,7 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
@@ -27,6 +27,13 @@ import {
 } from '../../../../apps/service/src/configuration';
 import { ordinaryHostConfigurationDefaults } from '../../../../apps/service/src/configuration-defaults';
 import { buildTerminalBundle } from '../../../../scripts/release/terminal-bundle';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { liveCodeEvidence } from './live-code-evidence';
 
 type Row = Record<string, string | number | null>;
@@ -164,8 +171,8 @@ export async function runLiveUnifiedNativeWindow(
   const checks: Record<string, boolean | number> = {};
   const modelMetadata: Record<string, unknown> = {};
   const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
-  let proxy: ReturnType<typeof Bun.serve> | undefined;
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let proxy: Awaited<ReturnType<typeof serveFixture>> | undefined;
+  let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
   let seed: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let storeId = '',
     stage = 'configuration',
@@ -511,7 +518,7 @@ export async function runLiveUnifiedNativeWindow(
     const upstream = selected.baseURL.replace(/\/$/, ''),
       controlToken = randomUUID();
     stage = 'proxy';
-    proxy = Bun.serve({
+    proxy = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 0,
@@ -818,7 +825,7 @@ export async function runLiveUnifiedNativeWindow(
     );
     stage = 'build';
     const require = createRequire(
-      resolve(import.meta.dir, '../../../../apps/desktop/package.json'),
+      resolve(import.meta.dirname, '../../../../apps/desktop/package.json'),
     );
     const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
     const built = await buildNativeCandidate({
@@ -868,10 +875,10 @@ export async function runLiveUnifiedNativeWindow(
     await seed.close();
     seed = undefined;
     stage = 'driver';
-    const driverBuild = await Bun.build({
+    const driverBuild = await buildFixture({
       entrypoints: [
         resolve(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../apps/desktop/test/live-unified-inbox-native-window.fixture.ts',
         ),
       ],
@@ -885,15 +892,15 @@ export async function runLiveUnifiedNativeWindow(
       naming: 'driver.js',
     });
     check(driverBuild.success, 'driver_build_failed');
-    driver = Bun.spawn(
+    driver = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         join(root, 'driver.js'),
         candidate,
         home,
         `${proxy.url.href}${controlToken}`,
         join(root, 'window-receipt.json'),
-        resolve(import.meta.dir, '../../../../apps/desktop/package.json'),
+        resolve(import.meta.dirname, '../../../../apps/desktop/package.json'),
         ...(parentCompactionOnly ? ['--parent-compaction-only'] : []),
         ...(finalResultsOnly ? ['--final-results-only'] : []),
         ...(steeringBoundaries ? ['--steering-boundaries'] : []),
@@ -940,7 +947,7 @@ export async function runLiveUnifiedNativeWindow(
     } catch {
       cleanupSucceeded = false;
     }
-    proxy?.stop(true);
+    await proxy?.stop(true);
     for (const lease of leases.reverse())
       try {
         lease.release();

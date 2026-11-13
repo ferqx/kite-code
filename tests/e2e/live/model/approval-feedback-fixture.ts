@@ -1,10 +1,20 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { basename, resolve } from 'node:path';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import type { ModelAdapter, ModelRequest, ModelToolCall, ModelUsage } from '@kite-ai/ai';
 import { describeLiveModelAttemptFailure } from './live-model-fixture';
 import { createPhysicalObserver } from './live-physical-stream-observer';
+
+const serviceRequire = createRequire(
+  new URL('../../../../apps/service/package.json', import.meta.url),
+);
+
+/** The Service and this observer share the same pinned CommonJS exports object. */
+export function liveServiceFetchPort(): { fetch: typeof fetch } {
+  return serviceRequire('undici/index.js');
+}
 
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -132,105 +142,95 @@ export function createDefaultApprovalObservation(options: {
     };
   }
   function observeFetch(original: typeof fetch): typeof fetch {
-    return Object.assign(
-      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-        const requestId = context.getStore();
-        if (!requestId) return original(input, init);
-        const attempt = physical.begin(requestId);
-        const body = typeof init?.body === 'string' ? init.body : '';
-        let parsed: Record<string, unknown> = {};
-        try {
-          parsed = object(JSON.parse(body));
-        } catch {
-          /* Preserve opaque requests unchanged. */
-        }
-        const tools = Array.isArray(parsed.tools)
-          ? parsed.tools.map((tool) =>
-              String(object(object(tool).function).name ?? object(tool).name ?? ''),
-            )
-          : [];
-        const entry = {
-          physicalIndex: attempt.index,
-          requestId,
-          body,
-          bytes: Buffer.byteLength(body),
+    return async (input, init) => {
+      const requestId = context.getStore();
+      if (!requestId) return original(input, init);
+      const attempt = physical.begin(requestId);
+      const body = typeof init?.body === 'string' ? init.body : '';
+      let parsed: Record<string, unknown> = {};
+      try {
+        parsed = object(JSON.parse(body));
+      } catch {
+        /* Preserve opaque requests unchanged. */
+      }
+      const tools = Array.isArray(parsed.tools)
+        ? parsed.tools.map((tool) =>
+            String(object(object(tool).function).name ?? object(tool).name ?? ''),
+          )
+        : [];
+      const entry = {
+        physicalIndex: attempt.index,
+        requestId,
+        body,
+        bytes: Buffer.byteLength(body),
+      };
+      options.wireRequest?.(entry);
+      wireRequests.push(entry);
+      const observation = { status: 0, tools };
+      wire.push(observation);
+      try {
+        const response = await original(input, init);
+        observation.status = response.status;
+        if (!response.body) return physical.response(attempt, response);
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let saved = false;
+        const save = () => {
+          if (saved) return;
+          saved = true;
+          options.rawResponse?.(attempt.index, Buffer.concat(chunks));
         };
-        options.wireRequest?.(entry);
-        wireRequests.push(entry);
-        const observation = { status: 0, tools };
-        wire.push(observation);
-        try {
-          const response = await original(input, init);
-          observation.status = response.status;
-          if (!response.body) return physical.response(attempt, response);
-          const reader = response.body.getReader();
-          const chunks: Uint8Array[] = [];
-          let saved = false;
-          const save = () => {
-            if (saved) return;
-            saved = true;
-            options.rawResponse?.(attempt.index, Buffer.concat(chunks));
-          };
-          const captured = new ReadableStream<Uint8Array>(
-            {
-              async pull(controller) {
-                try {
-                  const item = await reader.read();
-                  if (item.done) {
-                    save();
-                    controller.close();
-                  } else {
-                    chunks.push(item.value.slice());
-                    controller.enqueue(item.value);
-                  }
-                } catch (error) {
+        const captured = new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              try {
+                const item = await reader.read();
+                if (item.done) {
                   save();
-                  controller.error(error);
+                  controller.close();
+                } else {
+                  chunks.push(item.value.slice());
+                  controller.enqueue(item.value);
                 }
-              },
-              async cancel(reason) {
+              } catch (error) {
                 save();
-                await reader.cancel(reason);
-              },
+                controller.error(error);
+              }
             },
-            { highWaterMark: 0 },
-          );
-          return physical.response(
-            attempt,
-            new Response(captured, {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            }),
-          );
-        } catch (error) {
-          physical.transportFailed(attempt);
-          throw error;
-        }
-      },
-      { preconnect: original.preconnect },
-    );
+            async cancel(reason) {
+              save();
+              await reader.cancel(reason);
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        return physical.response(
+          attempt,
+          new Response(captured, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          }),
+        );
+      } catch (error) {
+        physical.transportFailed(attempt);
+        throw error;
+      }
+    };
   }
   function install() {
     const originalFetch = globalThis.fetch;
-    const originalSession = Bun.FetchSession;
+    const service = liveServiceFetchPort();
+    const originalServiceFetch = service.fetch;
     const observedFetch = observeFetch(originalFetch);
-    const observedSession = new Proxy(originalSession, {
-      construct(target, args, newTarget) {
-        const session = Reflect.construct(target, args, newTarget) as Bun.FetchSession;
-        Object.defineProperty(session, 'fetch', {
-          value: observeFetch(
-            Object.assign(session.fetch.bind(session), { preconnect: originalFetch.preconnect }),
-          ),
-        });
-        return session;
-      },
-    });
+    // The Fetch APIs share the Web Response/stream contract. Forward the
+    // original request and Undici-specific dispatcher unchanged at runtime.
+    const observedServiceFetch = observeFetch(originalServiceFetch);
     globalThis.fetch = observedFetch;
-    Bun.FetchSession = observedSession;
+    service.fetch = observedServiceFetch;
     return () => {
       if (globalThis.fetch === observedFetch) globalThis.fetch = originalFetch;
-      if (Bun.FetchSession === observedSession) Bun.FetchSession = originalSession;
+      if (service.fetch === observedServiceFetch) service.fetch = originalServiceFetch;
     };
   }
   return {
@@ -508,8 +508,7 @@ export function originalToolFeedbackReceived(
   if (tool.definitionId.startsWith('shell.') && typeof ref.key === 'string') {
     const job = executions.find((execution) => execution.id === ref.executionId);
     if (
-      !job ||
-      job.kind !== 'job' ||
+      job?.kind !== 'job' ||
       job.definitionId !== 'shell.command' ||
       job.sessionId !== tool.sessionId ||
       job.originStoreId !== tool.originStoreId ||

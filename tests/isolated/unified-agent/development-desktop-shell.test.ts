@@ -1,18 +1,22 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { spawnNodePairedChild } from '@kite-ai/service/node-process';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { buildDevelopmentService } from '../../../scripts/development/desktop-reload';
+import { preparedDevelopmentNode } from '../../../scripts/release/node-inputs';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 
-const repository = realpathSync(join(import.meta.dir, '../../..'));
+const repository = realpathSync(join(import.meta.dirname, '../../..'));
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
 const shellNames = ['shell_execute', 'shell_read', 'shell_wait', 'shell_stop'];
 
 nativeTest(
-  'actual Desktop development Service supplies and executes Shell for the root and existing default/code child roles',
+  'actual Desktop development Service supplies and executes Shell for the root and existing general/explore child roles',
   async () => {
     const cache = join(repository, '.cache');
     mkdirSync(cache, { recursive: true });
@@ -27,7 +31,7 @@ nativeTest(
       results: string[];
     }[] = [];
     const issued = new Set<string>();
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -40,12 +44,12 @@ nativeTest(
           body.messages.find(
             (row) =>
               row.role === 'user' &&
-              /DEV_SHELL_(PARENT|CHILD_DEFAULT|CHILD_CODE)/.test(row.content ?? ''),
+              /DEV_SHELL_(PARENT|CHILD_GENERAL|CHILD_EXPLORE)/.test(row.content ?? ''),
           )?.content ?? '';
-        const marker = content.includes('DEV_SHELL_CHILD_CODE')
-          ? 'DEV_SHELL_CHILD_CODE'
-          : content.includes('DEV_SHELL_CHILD_DEFAULT')
-            ? 'DEV_SHELL_CHILD_DEFAULT'
+        const marker = content.includes('DEV_SHELL_CHILD_EXPLORE')
+          ? 'DEV_SHELL_CHILD_EXPLORE'
+          : content.includes('DEV_SHELL_CHILD_GENERAL')
+            ? 'DEV_SHELL_CHILD_GENERAL'
             : 'DEV_SHELL_PARENT';
         const results = body.messages
           .filter((row) => row.role === 'tool')
@@ -56,10 +60,10 @@ nativeTest(
           issued.add(marker);
           if (marker === 'DEV_SHELL_PARENT')
             calls.push(
-              { name: 'spawn_agent', input: { prompt: 'DEV_SHELL_CHILD_DEFAULT' } },
+              { name: 'spawn_agent', input: { prompt: 'DEV_SHELL_CHILD_GENERAL' } },
               {
                 name: 'spawn_agent',
-                input: { prompt: 'DEV_SHELL_CHILD_CODE', preset: 'code' },
+                input: { prompt: 'DEV_SHELL_CHILD_EXPLORE', preset: 'explore' },
               },
             );
           calls.push({
@@ -111,12 +115,13 @@ nativeTest(
       const built = await buildDevelopmentService(repository, app);
       service = await launchPairedService({
         entrypoint: join(app, 'services', built.id, 'main.js'),
-        executable: realpathSync(process.execPath),
+        executable: preparedDevelopmentNode(repository),
         buildId: `development-${built.sha256}`,
         instanceId: 'development-shell',
         apiMajor: 1,
         profile,
-        spawnChild: user.spawnChild,
+        spawnChild: (command, { env }) =>
+          spawnNodePairedChild(command, { env: { ...env, ...user.homeEnvironment } }),
         requiredCapabilities: ['commands', 'permission_controls', 'host_status'],
       });
       const client = service.client;
@@ -169,7 +174,8 @@ nativeTest(
       const childExecutions = (actual: typeof view) =>
         actual.executions.filter(
           (execution) =>
-            execution.definitionId === 'agent/worker' || execution.definitionId === 'agent/code',
+            execution.definitionId === 'agent/general' ||
+            execution.definitionId === 'agent/explore',
         );
       while (
         !view.runs.some((run) => run.originCommandId === 'run' && !run.isActive) ||
@@ -178,8 +184,18 @@ nativeTest(
           ['planned', 'dispatching', 'running'].includes(execution.status),
         )
       ) {
-        if (Date.now() > deadline) throw Error('development_shell_run_deadline');
-        await Bun.sleep(10);
+        if (Date.now() > deadline)
+          throw Error(
+            `development_shell_run_deadline ${JSON.stringify({
+              runs: view.runs.map(({ status, reason }) => ({ status, reason })),
+              executions: view.executions.map(({ definitionId, status }) => ({
+                definitionId,
+                status,
+              })),
+              modelRequests: requests.map(({ marker }) => marker),
+            })}`,
+          );
+        await fixtureDelay(10);
         view = await client.getView('s');
       }
       expect(view.runs.find((run) => run.originCommandId === 'run')?.status).toBe('completed');
@@ -194,9 +210,9 @@ nativeTest(
         views.push({
           actual: await client.getView(child.childSessionId!),
           marker:
-            child.definitionId === 'agent/code'
-              ? 'DEV_SHELL_CHILD_CODE'
-              : 'DEV_SHELL_CHILD_DEFAULT',
+            child.definitionId === 'agent/explore'
+              ? 'DEV_SHELL_CHILD_EXPLORE'
+              : 'DEV_SHELL_CHILD_GENERAL',
         });
       for (const { actual, marker } of views) {
         const commands = actual.executions.filter(
@@ -222,8 +238,8 @@ nativeTest(
       }
       for (const marker of [
         'DEV_SHELL_PARENT',
-        'DEV_SHELL_CHILD_DEFAULT',
-        'DEV_SHELL_CHILD_CODE',
+        'DEV_SHELL_CHILD_GENERAL',
+        'DEV_SHELL_CHILD_EXPLORE',
       ]) {
         const calls = requests.filter((request) => request.marker === marker);
         expect(calls.length).toBeGreaterThanOrEqual(2);

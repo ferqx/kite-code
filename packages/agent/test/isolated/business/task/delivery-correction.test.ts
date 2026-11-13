@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -12,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../../scripts/tooling/http';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createFileTools, createWorkspaceFiles } from '../../../../src/files';
@@ -50,7 +51,7 @@ for (const scenario of ['correctable', 'complete', 'denied', 'unknown'] as const
     const target = join(workspace, 'delivery.json');
     const methods: string[] = [];
     const response = 'original-service-response';
-    const service = Bun.serve({
+    const service = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch(request) {

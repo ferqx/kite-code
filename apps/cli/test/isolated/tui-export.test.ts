@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { createTuiExporter } from '../../host/tui-export';
 
 test('trusted user configuration directory receives only 0600 loaded Markdown; wrong Store/aborted/failure write no success', async () => {

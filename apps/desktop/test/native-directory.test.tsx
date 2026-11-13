@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import type { Session } from '@kite-ai/client';
 import { Sidebar } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import type { NativeDirectory, NativeSelection } from '../src/native-bridge';
 import { desktopDirectory, NativeDirectoryProjection } from '../src/native-presentation';
 import { backgroundItem } from './background-item.fixture';

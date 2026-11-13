@@ -9,7 +9,9 @@ if (import.meta.main) {
   try {
     const path = process.argv[2];
     if (!path || process.argv.length !== 3)
-      throw Error('usage: bun unified-soak-verify.ts <report.json>');
+      throw Error(
+        'usage: node --import ./scripts/tooling/register.mjs scripts/runtime/unified-soak-verify.ts <report.json>',
+      );
     if (statSync(path).size > 512 * 1024) throw Error('report_size_invalid');
     const value = JSON.parse(readFileSync(path, 'utf8')) as UnifiedSoakReport;
     const expected: SourceIdentity = {

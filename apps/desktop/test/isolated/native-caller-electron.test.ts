@@ -1,7 +1,13 @@
-import { expect, test } from 'bun:test';
 import { realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 import { cleanupNativeCaller } from '../native-caller-cleanup.fixture';
@@ -21,7 +27,7 @@ for (const kind of [
       const content = '真实 Native 中文🙂é\r\n完整原正文';
       const module = await import(
           resolve(
-            import.meta.dir,
+            import.meta.dirname,
             kind === 'execution.cancel'
               ? '../native-caller-jobs-profile.ts'
               : '../../../cli/test/fixtures/recovery-profile.ts',
@@ -32,7 +38,7 @@ for (const kind of [
           : module.recoveryProfile(
               kind === 'input.follow_up' ? { holdModelCommandId: 'native-window-original' } : {},
             ));
-      let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+      let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
         observation: ReturnType<typeof openNativeShellObservation> | undefined,
         completed = false;
       try {
@@ -109,8 +115,8 @@ for (const kind of [
           {
             serviceEntrypoint: f.artifact.entrypoint,
             serviceSha256: f.artifact.entrypointSha256,
-            bunExecutable: f.artifact.executable,
-            bunSha256: f.artifact.executableSha256,
+            runtimeExecutable: f.artifact.executable,
+            runtimeSha256: f.artifact.executableSha256,
             buildId: 'native-caller',
             apiMajor: 1,
             requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
@@ -119,8 +125,8 @@ for (const kind of [
           outdir,
           { testDiagnostics: true },
         );
-        const built = await Bun.build({
-          entrypoints: [resolve(import.meta.dir, '../native-caller-electron.fixture.ts')],
+        const built = await buildFixture({
+          entrypoints: [resolve(import.meta.dirname, '../native-caller-electron.fixture.ts')],
           target: 'node',
           format: 'esm',
           packages: 'external',
@@ -129,14 +135,14 @@ for (const kind of [
         });
         expect(built.success).toBe(true);
         directoryLink(
-          resolve(import.meta.dir, '../../../../node_modules'),
+          resolve(import.meta.dirname, '../../../../node_modules'),
           join(f.root, 'node_modules'),
         );
         const requestPath = join(f.root, 'caller-request.json');
         writeFileSync(requestPath, JSON.stringify(input), { mode: 0o600 });
-        driver = Bun.spawn(
+        driver = spawnFixtureProcess(
           [
-            realpathSync(Bun.which('node')!),
+            realpathSync(findFixtureExecutable('node')!),
             join(f.root, 'caller-window-driver.js'),
             outdir,
             f.root,
@@ -144,7 +150,7 @@ for (const kind of [
             requestPath,
             f.profile.databasePath,
             f.workspace,
-            resolve(import.meta.dir, '../../package.json'),
+            resolve(import.meta.dirname, '../../package.json'),
           ],
           {
             stdin: 'ignore',

@@ -10,7 +10,7 @@
     "@kite-ai/agent": "0.1.0"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external @kite-ai/agent/extensions",
+    "build": "node --import ../../../../scripts/tooling/register.mjs ../../../../scripts/tooling/build-command.ts ./src/index.ts --outdir ./dist --target node --external @kite-ai/agent/extensions",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

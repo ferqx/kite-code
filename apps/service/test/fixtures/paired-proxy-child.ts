@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { createFixedModel } from '@kite-ai/ai';
 import { runServiceProcess } from '../../src/main';
+import { resolveModelTransport } from '../../src/model-transport';
 
 await runServiceProcess({
   async configure(startup) {
@@ -27,14 +28,18 @@ await runServiceProcess({
       'NODE_EXTRA_CA_CERTS',
     ];
     const responses = [];
-    for (const url of fixture.requests) {
-      try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
-        responses.push({ url, status: response.status, text: await response.text() });
-      } catch {
-        // Newer Bun rejects refused CONNECT; older Bun returns the proxy status.
-        responses.push({ url, failed: true });
+    const transport = await resolveModelTransport();
+    try {
+      for (const url of fixture.requests) {
+        try {
+          const response = await transport.fetch(url, { signal: AbortSignal.timeout(1500) });
+          responses.push({ url, status: response.status, text: await response.text() });
+        } catch {
+          responses.push({ url, failed: true });
+        }
       }
+    } finally {
+      await transport.close();
     }
     writeFileSync(
       fixture.report,

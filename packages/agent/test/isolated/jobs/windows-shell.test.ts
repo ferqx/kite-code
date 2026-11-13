@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -14,7 +13,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -37,8 +40,9 @@ native(
       new URL('../../../src/platform/process/windows-owned-child.ts', import.meta.url),
     );
     const jobModule = fileURLToPath(new URL('../../../src/jobs/windows-shell.ts', import.meta.url));
-    const code = `
-import {mock} from 'bun:test';
+    const code = `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
+import {mock} from '#kite-test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {existsSync,mkdirSync,mkdtempSync,readdirSync,rmSync,writeFileSync} from 'node:fs';
@@ -85,7 +89,7 @@ try{
  let resolved=false;
  const starting=job.start({command:'printf should-not-run'},{signal:new AbortController().signal,
   executionId:'admission',sessionId:'test'}).then(()=>{resolved=true;throw Error('unconfirmed start returned');},error=>error);
- await Bun.sleep(30);assert.equal(resolved,false);assert.deepEqual(writes,['request']);
+ await sleepTimer(30);assert.equal(resolved,false);assert.deepEqual(writes,['request']);
  const failure=await starting;assert.equal(failure.name,'JobStartError');const handle=failure.handle;
  const events=[];for await(const event of job.observe(handle))events.push(event);
  assert.ok(Date.now()-started<9000,'admission must not hang');
@@ -97,11 +101,15 @@ try{
  assert.equal(events.length,1);
 }finally{rmSync(root,{recursive:true,force:true});}
 `;
-    const child = spawnSync(process.execPath, ['--eval', code], {
-      encoding: 'utf8',
-      timeout: 12000,
-      windowsHide: true,
-    });
+    const child = spawnSync(
+      process.execPath,
+      [...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+      {
+        encoding: 'utf8',
+        timeout: 12000,
+        windowsHide: true,
+      },
+    );
     expect({ status: child.status, error: child.error?.message, stderr: child.stderr }).toEqual({
       status: 0,
       error: undefined,
@@ -145,7 +153,7 @@ native(
           stateRoot,
           shellExecutable: powerShell.executable.canonical,
           supervisorPath: resolve(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../dist/platform/process/windows-shell/kite-windows-runner.exe',
           ),
           env: { PATH: powerShell.systemDirectory, USERPROFILE: root },
@@ -393,10 +401,11 @@ native(
       const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-windows-shell-owner-')));
       mkdirSync(join(root, 'workspace'));
       mkdirSync(join(root, 'control'));
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
           process.execPath,
-          join(import.meta.dir, '../../fixtures/windows-shell-owner-child.ts'),
+          ...testRuntimeFlags,
+          join(import.meta.dirname, '../../fixtures/windows-shell-owner-child.ts'),
           root,
         ],
         { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
@@ -425,7 +434,7 @@ native(
         const deadline = Date.now() + 5000;
         while (observations.some((item) => item.inspect() !== 'dead')) {
           if (Date.now() > deadline) throw Error('owned_descendant_remained_alive');
-          await Bun.sleep(10);
+          await sleepTimer(10);
         }
         expect(observations.map((item) => item.inspect())).toEqual(['dead', 'dead']);
       } finally {
@@ -547,7 +556,7 @@ native(
       'System32/WindowsPowerShell/v1.0/powershell.exe',
     );
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
-    const holder = Bun.spawn(
+    const holder = spawnProcess(
       [
         powershell,
         '-NoProfile',
@@ -560,7 +569,7 @@ native(
     const diagnostics = new Response(holder.stderr).text();
     try {
       const deadline = Date.now() + 5000;
-      while (!existsSync(ready) && Date.now() < deadline) await Bun.sleep(10);
+      while (!existsSync(ready) && Date.now() < deadline) await sleepTimer(10);
       expect(existsSync(ready)).toBe(true);
       const runtime = await windowsShellFixture();
       const job = await createWindowsShellJob({
@@ -583,7 +592,7 @@ native(
         { command: 'printf forbidden > should-not-run.txt' },
         context(),
       );
-      await Bun.sleep(750);
+      await sleepTimer(750);
       expect(existsSync(join(cwd, 'should-not-run.txt'))).toBe(false);
       const stopping = job.cancel!(handle);
       let result: ToolResult | undefined;

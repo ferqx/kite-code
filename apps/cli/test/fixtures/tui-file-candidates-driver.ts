@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const [runner, workspace, profilePath, wire, transcript, quoteName, servicePidPath, storeId] =
@@ -13,7 +15,7 @@ const shutdown = (message: unknown) => {
 process.once('SIGINT', interrupted);
 process.once('SIGTERM', interrupted);
 if (process.platform === 'win32') process.on('message', shutdown);
-const pty = spawnTuiPTY({ cmd: [process.execPath, '--no-install', runner], cwd: workspace });
+const pty = spawnTuiPTY({ cmd: [process.execPath, ...testRuntimeFlags, runner], cwd: workspace });
 let failure: unknown;
 let normal = false;
 let servicePid: number | undefined;
@@ -21,7 +23,7 @@ const key = async (value: string) => {
   abort.signal.throwIfAborted();
   await pty.key(value);
   // Preserve the original 100ms pump after every input, including each Delete.
-  await Bun.sleep(100);
+  await testSleep(100);
 };
 const wait = async (text: string) => {
   const end = Date.now() + 10000;
@@ -31,7 +33,7 @@ const wait = async (text: string) => {
     if (frame.fresh && frame.text.replace(/\s+/g, ' ').includes(text)) return;
     if (pty.ended || Date.now() > end)
       throw Error(`expected ${text} tail=${frame.text.slice(-6000)}`);
-    await Bun.sleep(20);
+    await testSleep(20);
   }
 };
 const posts = () => {
@@ -66,7 +68,7 @@ const draft = async (expected: string) => {
       if (rows.some((row) => row.sessionId === 'files' && row.text === expected)) return;
       if (Date.now() > end) throw Error(`draft mismatch ${JSON.stringify(rows)}`);
     } else if (Date.now() > end) throw Error('draft file unavailable');
-    await Bun.sleep(20);
+    await testSleep(20);
   }
 };
 const erase = async (text: string) => {
@@ -113,7 +115,7 @@ try {
   assert.deepEqual(posts(), []);
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!pty.ended && Date.now() < end) await Bun.sleep(20);
+  while (!pty.ended && Date.now() < end) await testSleep(20);
   const [code] = await ptyDeadline(
     Promise.all([pty.host.exited, pty.eof]),
     3000,

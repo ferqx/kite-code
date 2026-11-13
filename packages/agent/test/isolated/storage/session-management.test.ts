@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -513,7 +514,7 @@ for (const deletionScope of ['session', 'workspace'] as const)
       let view = await f.store.getView('s');
       while (view.executions.find((e) => e.kind === 'job')!.status !== 'outcome_unknown') {
         if (Date.now() > deadline) throw new Error('terminal_unknown_missing');
-        await Bun.sleep(5);
+        await sleepTimer(5);
         view = await f.store.getView('s');
       }
       expect(view.runs[0]!.status).toBe('cancelled');

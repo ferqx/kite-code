@@ -1,18 +1,22 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
+const register = join(repositoryRoot, 'scripts/tooling/register.mjs');
 
 test('retained old Terminal entrypoints reject before loading legacy dependencies or touching profiles', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-retired-applications-')));
@@ -22,27 +26,29 @@ test('retained old Terminal entrypoints reject before loading legacy dependencie
   const sentinel = join(profile, 'original-profile');
   const bytes = new Uint8Array([0, 13, 10, 255]);
   writeFileSync(sentinel, bytes);
-  const commands = [
-    { kind: 'terminal', args: [join(repositoryRoot, 'apps/kite-cli/src/index.ts')] },
+  const commands: { args: string[]; cwd?: string }[] = [
+    { args: [join(repositoryRoot, 'apps/kite-cli/src/index.ts')] },
+    { args: [join(repositoryRoot, 'apps/kite-cli/src/cli/executable.ts'), '--version'] },
     {
-      kind: 'terminal',
-      args: [join(repositoryRoot, 'apps/kite-cli/src/cli/executable.ts'), '--version'],
+      args: [
+        '--import',
+        register,
+        join(repositoryRoot, 'apps/kite-cli/src/tui/executable.tsx'),
+        '--version',
+      ],
     },
-    {
-      kind: 'terminal',
-      args: [join(repositoryRoot, 'apps/kite-cli/src/tui/executable.tsx'), '--version'],
-    },
-    {
-      kind: 'terminal',
-      args: ['run', '--cwd', join(repositoryRoot, 'apps/kite-cli'), 'build'],
-    },
+    ...['build', 'test'].map((script) => ({
+      args: [`--run=${script}`],
+      cwd: join(repositoryRoot, 'apps/kite-cli'),
+    })),
   ];
   try {
-    for (const { kind, args } of commands) {
-      const child = Bun.spawn([process.execPath, ...args], {
-        cwd: root,
+    for (const { args, cwd } of commands) {
+      const child = spawnFixtureProcess([process.execPath, ...args], {
+        cwd: cwd ?? root,
         env: {
           ...process.env,
+          PATH: dirname(process.execPath),
           HOME: home,
           USERPROFILE: home,
           APPDATA: home,
@@ -50,7 +56,6 @@ test('retained old Terminal entrypoints reject before loading legacy dependencie
           XDG_CONFIG_HOME: home,
           XDG_DATA_HOME: home,
           KITE_CODE_HOME: profile,
-          BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
         },
         stdin: 'ignore',
         stdout: 'pipe',
@@ -63,11 +68,12 @@ test('retained old Terminal entrypoints reject before loading legacy dependencie
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
         ]);
-        expect(code).toBe(2);
+        // node --run reports a failed package script as 1; direct entrypoints return 2.
+        expect(code).toBe(cwd ? 1 : 2);
         expect(stdout).toBe('');
-        expect(stderr).toContain(`legacy_${kind}_entrypoint_retired`);
+        expect(stderr).toContain('legacy_terminal_entrypoint_retired');
         expect(stderr).toContain('请在仓库根使用当前入口');
-        expect(new Uint8Array(await Bun.file(sentinel).arrayBuffer())).toEqual(bytes);
+        expect(new Uint8Array(readFileSync(sentinel))).toEqual(bytes);
         expect(readdirSync(profile)).toEqual(['original-profile']);
         expect(readdirSync(home)).toEqual(['.kite-code']);
         expect(readdirSync(root)).toEqual(['home']);
@@ -99,9 +105,8 @@ test('retained Terminal wrappers preserve historical function identities and syn
     return file;
   };
   const execute = (entry: string, args: string[] = []) => {
-    const child = spawnSync(process.execPath, [entry, ...args], {
+    const child = spawnSync(process.execPath, ['--import', register, entry, ...args], {
       cwd: root,
-      env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
       encoding: 'utf8',
       timeout: 5000,
     });
@@ -125,11 +130,11 @@ test('retained Terminal wrappers preserve historical function identities and syn
     const entry = add(
       'consumer.ts',
       `import assert from 'node:assert/strict';
-      import * as root from './apps/kite-cli/src/index';
-      import * as cli from './apps/kite-cli/src/cli/executable';
-      import * as tui from './apps/kite-cli/src/tui/executable';
-      import * as originalCli from './apps/kite-cli/src/cli/legacy-executable';
-      import * as originalTui from './apps/kite-cli/src/tui/legacy-executable';
+      import * as root from './apps/kite-cli/src/index.ts';
+      import * as cli from './apps/kite-cli/src/cli/executable.ts';
+      import * as tui from './apps/kite-cli/src/tui/executable.tsx';
+      import * as originalCli from './apps/kite-cli/src/cli/legacy-executable.ts';
+      import * as originalTui from './apps/kite-cli/src/tui/legacy-executable.tsx';
       assert.equal(root.runCli, cli.runCli); assert.equal(cli.runCli, originalCli.runCli);
       assert.equal(root.runTui, tui.runTui); assert.equal(tui.runTui, originalTui.runTui);
       assert.equal(await root.runCli(), 7); assert.equal(root.runTui(), 11);
@@ -137,7 +142,13 @@ test('retained Terminal wrappers preserve historical function identities and syn
     );
     expect(execute(entry)).toBe('historical_import_contract_verified\n');
     const outdir = join(root, 'bundle');
-    const build = await Bun.build({ entrypoints: [entry], target: 'bun', outdir });
+    const build = await buildFixture({
+      entrypoints: [entry],
+      target: 'node',
+      outdir,
+      // The retired modules are only library imports in this bundle.
+      define: { 'import.meta.main': 'false' },
+    });
     expect(build.success).toBe(true);
     expect(execute(join(outdir, 'consumer.js'))).toBe('historical_import_contract_verified\n');
   } finally {

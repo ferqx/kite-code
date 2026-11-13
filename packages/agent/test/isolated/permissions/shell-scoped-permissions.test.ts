@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import type { AuthorizationRequest, PermissionDecision } from '@kite-ai/agent/extensions';
 import {
   type CapabilityDescription,
   createPermissionPolicy,
   type PermissionPolicySnapshot,
 } from '@kite-ai/agent/permissions';
+import { expect, test } from '#kite-test';
 import { fixtureGrant } from '../../../../../tests/fixtures/permission-grant';
 
 type Scope = { filesystem: 'workspace_write' | 'full_access'; network: 'none' | 'internet' };

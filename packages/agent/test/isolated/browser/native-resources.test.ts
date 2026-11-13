@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 const native = fileURLToPath(new URL('../../../src/tools/browser/native.ts', import.meta.url));
 const owned = fileURLToPath(
@@ -21,7 +22,7 @@ for (const fault of [
   test(`native storage scanner handles ${fault} without inventing cleanup proof`, () => {
     const source = `
 import realAssert from 'node:assert/strict';
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as promises from 'node:fs/promises';
@@ -203,11 +204,15 @@ if (unknown) {
 fs.rmSync(base, { recursive: true, force: true });
 console.log('browser-resource-fixture-ok fault=' + fault + ' assertions=' + assertions + ' fake-daemon-starts=' + starts);
 `;
-    const result = spawnSync(process.execPath, ['--eval', source], {
-      encoding: 'utf8',
-      timeout: 10000,
-      maxBuffer: 1024 * 1024,
-    });
+    const result = spawnSync(
+      process.execPath,
+      [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+      {
+        encoding: 'utf8',
+        timeout: 10000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
     console.info(result.stdout.trim());
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain(`browser-resource-fixture-ok fault=${fault}`);

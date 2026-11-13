@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
 import { type AgentClient, createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { observeCommand, run } from '../../src';
 
 const profile = { dataRoot: '/explicit-cli-response-fixture', name: 'test', accessKey: 'test' };
@@ -20,7 +21,7 @@ async function fixture(options: {
     receipt: { runId: 'original-run' },
     cancelRequestedAt: null,
   };
-  const server = Bun.serve({
+  const server = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

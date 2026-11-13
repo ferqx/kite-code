@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   parseUnifiedTuiShard,
   runUnifiedTuiSystemTests,
@@ -18,8 +18,10 @@ import {
   unifiedTuiTestPlan,
 } from '../../../scripts/run-unified-tui-system-tests';
 import { collectTestFiles } from '../../../scripts/test-suite';
+import { spawn } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
-const root = resolve(import.meta.dir, '../../..');
+const root = resolve(import.meta.dirname, '../../..');
 const formal = 'tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts';
 const startup = 'tests/isolated/unified-agent/tui-startup-wait.test.ts';
 test('four exact deterministic shards cover every original terminal scenario, current CLI owner and formal wrapper once', () => {
@@ -48,11 +50,9 @@ test('four exact deterministic shards cover every original terminal scenario, cu
   for (const job of originalJobs) {
     expect(job.files).toHaveLength(1);
     expect(job.drainOnFailure).toBe(true);
-    expect(job.command).toEqual([
-      process.execPath,
-      join(root, 'scripts/run-tui-system-tests.ts'),
-      basename(job.files[0]!),
-    ]);
+    expect(job.command).toEqual(
+      testNodeCommand(join(root, 'scripts/run-tui-system-tests.ts'), [basename(job.files[0]!)]),
+    );
   }
   const shards = Array.from(
     { length: 4 },
@@ -99,8 +99,8 @@ test('actual runner argv lists four shards without HOME publication and rejects 
   const home = mkdtempSync(join(tmpdir(), 'kite-unified-tui-list-'));
   try {
     const invoke = async (args: string[], shard: string) => {
-      const child = Bun.spawn(
-        [process.execPath, join(root, 'scripts/run-unified-tui-system-tests.ts'), ...args],
+      const child = spawn(
+        testNodeCommand(join(root, 'scripts/run-unified-tui-system-tests.ts'), args),
         {
           cwd: home,
           env: {
@@ -113,7 +113,6 @@ test('actual runner argv lists four shards without HOME publication and rejects 
             XDG_DATA_HOME: home,
             KITE_CODE_HOME: join(home, '.kite-code'),
             KITE_TUI_SYSTEM_SHARD: shard,
-            BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
           },
           stdin: 'ignore',
           stdout: 'pipe',
@@ -167,21 +166,24 @@ test.skipIf(process.platform === 'win32')(
     try {
       add(
         'apps/cli/test/isolated/tui-a-failure.test.ts',
-        `import {test} from 'bun:test'; import {writeFileSync} from 'node:fs'; test('actual failure',()=>{writeFileSync(${JSON.stringify(marker('failure-home'))},process.env.HOME!); process.exit(7)});`,
+        `import {test} from '#kite-test'; import {writeFileSync} from 'node:fs'; test('actual failure',()=>{writeFileSync(${JSON.stringify(marker('failure-home'))},process.env.HOME!); process.exit(7)});`,
       );
       add(
         'apps/cli/test/isolated/tui-b-drain.test.ts',
-        `import {test} from 'bun:test'; import {writeFileSync} from 'node:fs'; test('actual drain',async()=>{await new Promise(r=>setTimeout(r,150));writeFileSync(${JSON.stringify(marker('drained'))},process.env.HOME!)});`,
+        `import {test} from '#kite-test'; import {writeFileSync} from 'node:fs'; test('actual drain',async()=>{await new Promise(r=>setTimeout(r,150));writeFileSync(${JSON.stringify(marker('drained'))},process.env.HOME!)});`,
       );
       add(
         'apps/cli/test/isolated/exclusive/tui-c-exclusive.test.ts',
-        `import {test} from 'bun:test'; import {writeFileSync} from 'node:fs'; test('exclusive must not run',()=>writeFileSync(${JSON.stringify(marker('exclusive'))},'unexpected'));`,
+        `import {test} from '#kite-test'; import {writeFileSync} from 'node:fs'; test('exclusive must not run',()=>writeFileSync(${JSON.stringify(marker('exclusive'))},'unexpected'));`,
       );
-      add(formal, "import {test} from 'bun:test'; test('finite formal selection only',()=>{});");
-      add(startup, "import {test} from 'bun:test'; test('finite startup selection only',()=>{});");
+      add(formal, "import {test} from '#kite-test'; test('finite formal selection only',()=>{});");
+      add(
+        startup,
+        "import {test} from '#kite-test'; test('finite startup selection only',()=>{});",
+      );
       add(
         'tests/tui-system/scenarios/runner-fixture.test.ts',
-        "import {test} from 'bun:test'; test('finite original selection only',()=>{});",
+        "import {test} from '#kite-test'; test('finite original selection only',()=>{});",
       );
       add('scripts/run-tui-system-tests.ts', 'process.exitCode=0;');
       const selected = unifiedTuiInventory(owned);
@@ -201,7 +203,9 @@ test.skipIf(process.platform === 'win32')(
       const drainedHome = readFileSync(marker('drained'), 'utf8');
       expect(failureHome).not.toBe(process.env.HOME);
       expect(drainedHome).not.toBe(failureHome);
-      expect(existsSync(failureHome)).toBe(false);
+      expect(existsSync(failureHome)).toBe(true);
+      expect(basename(failureHome)).toStartWith('kite-test-v2-');
+      rmSync(failureHome, { recursive: true, force: true });
       expect(existsSync(drainedHome)).toBe(false);
     } finally {
       rmSync(owned, { recursive: true, force: true });

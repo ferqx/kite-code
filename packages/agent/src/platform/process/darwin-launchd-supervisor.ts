@@ -13,6 +13,7 @@ import {
 import { createConnection, createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { type LaunchIdentity, launchIdentity, removeRuntimeTemp } from '../../jobs/launch-identity';
+import { nodeRuntimeFlags } from '../runtime-flags';
 
 interface Registration {
   secret: string;
@@ -145,7 +146,7 @@ export async function startLaunchdSupervisor(input: {
   includeRegistration?: boolean;
   cancelled?: () => boolean;
   /** Present only in the fixed worker broker which already started with this profile. */
-  trustedRuntime?: { bunFlags: readonly string[]; env: Readonly<Record<string, string>> };
+  trustedRuntime?: { runtimeFlags: readonly string[]; env: Readonly<Record<string, string>> };
   onFrame(frame: Record<string, unknown>): Promise<void>;
 }): Promise<{
   stop(): void;
@@ -320,15 +321,13 @@ export async function startLaunchdSupervisor(input: {
     });
     const plist = join(rootPath, 'job.plist');
     const strings = [
-      ...(input.trustedRuntime
-        ? [
-            '/usr/bin/env',
-            '-i',
-            ...Object.entries(input.trustedRuntime.env).map(([key, value]) => `${key}=${value}`),
-          ]
-        : []),
+      '/usr/bin/env',
+      '-i',
+      ...Object.entries(input.trustedRuntime?.env ?? { PATH: '/usr/bin:/bin' }).map(
+        ([key, value]) => `${key}=${value}`,
+      ),
       process.execPath,
-      ...(input.trustedRuntime?.bunFlags ?? []),
+      ...(input.trustedRuntime?.runtimeFlags ?? (kind === 'shell' ? [] : nodeRuntimeFlags)),
       process.argv[1]!,
       '--launchd-owned',
       rootPath,

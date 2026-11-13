@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -13,16 +11,25 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('actual development PTY slash routes manage Session/Fork/current Context and manual compression without replay', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-management-'))),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
@@ -51,7 +58,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
     apiMajor: 1,
   };
   const evidence = join(tmpdir(), `kite-tui-management-${randomUUID()}`);
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let passed = false;
   let failure: unknown;
   const cleanupErrors: unknown[] = [];
@@ -61,7 +68,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
     summaryFocus = false,
     followupFullInput = false;
   const rewindObservations: unknown[] = [];
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -113,7 +120,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
       )
         followupFullInput = true;
       if (summary)
-        while (!stopped && !existsSync(join(root, 'release-summary'))) await Bun.sleep(5);
+        while (!stopped && !existsSync(join(root, 'release-summary'))) await testSleep(5);
       const content = summary
         ? 'Summary of owned task and original answer.'
         : task === 'Owned ordinary task'
@@ -188,10 +195,10 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
     } finally {
       await seed.close();
     }
-    child = Bun.spawn(
+    child = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         join(repo, 'apps/cli/test/fixtures/tui-management-driver.ts'),
         JSON.stringify({
           executable: process.execPath,

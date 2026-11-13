@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { TuiOnboardingPort } from '../../src/tui/onboarding';
 import { TuiOnboarding } from '../../src/tui/onboarding-panel';
 

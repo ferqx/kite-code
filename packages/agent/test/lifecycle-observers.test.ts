@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { LifecycleObservers } from '../src/extensions/lifecycle';
 
 function gate() {

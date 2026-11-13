@@ -139,7 +139,7 @@ struct Stage {
   bool owned = false;
   bool clean() {
     if (!owned) return true;
-    for (const wchar_t* file : {L"bundle.tar.zst", L"bun.exe", L"install.js", L"bunfig.toml",
+    for (const wchar_t* file : {L"bundle.tar.zst", L"node.exe", L"install.mjs", L"runtime-native.node",
                               L"install.log", L"Kite Desktop.exe"}) {
       if (!DeleteFileW((path + L"\\" + file).c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND) return false;
     }
@@ -201,6 +201,32 @@ void writeFile(const std::wstring& path, Bytes bytes, SetupProgress* progress = 
 Handle pin(const std::wstring& path) {
   return Handle(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
                             FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+}
+
+void stageAddon(const std::wstring& stage) {
+  const auto addon = resource(106);
+  require(addon.size == addonSize && matchesHash(addon, addonHash),
+          L"安装程序的原生组件校验失败。");
+  writeFile(stage + L"\\runtime-native.node", addon);
+}
+
+void verifyStagedFile(const std::wstring& path, HANDLE file, const wchar_t* hash,
+                      size_t expected) {
+  verifyPhysicalPath(path, file, false);
+  BY_HANDLE_FILE_INFORMATION info{};
+  require(GetFileInformationByHandle(file, &info) && info.nNumberOfLinks == 1 &&
+          !info.nFileSizeHigh && info.nFileSizeLow == expected,
+          L"安装文件身份无效。");
+  std::vector<unsigned char> bytes(info.nFileSizeLow);
+  DWORD offset = 0;
+  while (offset < bytes.size()) {
+    const DWORD amount = (std::min)(static_cast<DWORD>(bytes.size()) - offset, DWORD{1024 * 1024});
+    DWORD count = 0;
+    require(ReadFile(file, bytes.data() + offset, amount, &count, nullptr) && count == amount,
+            L"无法读取完整的安装文件。");
+    offset += count;
+  }
+  require(matchesHash({bytes.data(), static_cast<DWORD>(bytes.size())}, hash), L"安装文件校验失败。");
 }
 
 Handle pinDirectory(const std::wstring& path) {
@@ -350,16 +376,18 @@ struct ScriptResult {
 };
 
 ScriptResult runScript(const std::wstring& stage, const std::wstring& parameters,
-                       SetupProgress& progress) {
-  const auto bun = stage + L"\\bun.exe";
-  const auto script = stage + L"\\install.js";
-  const auto config = stage + L"\\bunfig.toml";
-  const auto runtimePin = pin(bun);
+                       const wchar_t* scriptDigest, size_t scriptSize, SetupProgress& progress) {
+  const auto node = stage + L"\\node.exe";
+  const auto script = stage + L"\\install.mjs";
+  const auto addon = stage + L"\\runtime-native.node";
+  const auto runtimePin = pin(node);
   const auto scriptPin = pin(script);
-  const auto configPin = pin(config);
-  require(runtimePin && scriptPin && configPin, L"无法锁定已验证的安装文件。");
-  const std::wstring command = quote(bun) + L" --no-install --no-env-file " + quote(L"--config=" + config) +
-    L" run " + quote(script) + L" " + parameters;
+  const auto addonPin = pin(addon);
+  require(runtimePin && scriptPin && addonPin, L"无法锁定已验证的安装文件。");
+  verifyStagedFile(node, runtimePin.value, runtimeHash, runtimeSize);
+  verifyStagedFile(script, scriptPin.value, scriptDigest, scriptSize);
+  verifyStagedFile(addon, addonPin.value, addonHash, addonSize);
+  const std::wstring command = quote(node) + L" --no-global-search-paths " + quote(script) + L" " + parameters;
   std::vector<wchar_t> arguments(command.begin(), command.end());
   arguments.push_back(L'\0');
   auto env = installEnvironment(stage);
@@ -402,7 +430,7 @@ ScriptResult runScript(const std::wstring& stage, const std::wstring& parameters
   require(job && SetInformationJobObject(job.value, JobObjectExtendedLimitInformation, &limits,
           sizeof(limits)), L"无法建立安装进程的回收范围。");
   PROCESS_INFORMATION child{};
-  require(CreateProcessW(bun.c_str(), arguments.data(), nullptr, nullptr, TRUE,
+  require(CreateProcessW(node.c_str(), arguments.data(), nullptr, nullptr, TRUE,
           CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
           env.data(), stage.c_str(), &startup.StartupInfo, &child), L"无法启动包内安装程序。");
   const Handle process(child.hProcess);
@@ -482,13 +510,13 @@ Installed install(const std::wstring& location, SetupProgress& progress,
   progress.pump();
   {
     const auto runtime = readRuntime(archive, progress);
-    writeFile(stage.path + L"\\bun.exe", {runtime.data(), static_cast<DWORD>(runtime.size())});
+    writeFile(stage.path + L"\\node.exe", {runtime.data(), static_cast<DWORD>(runtime.size())});
   }
   const auto archivePath = stage.path + L"\\bundle.tar.zst";
   progress.stage(L"正在暂存安装文件", {15, 25});
   writeFile(archivePath, archive, &progress);
-  writeFile(stage.path + L"\\install.js", script);
-  writeFile(stage.path + L"\\bunfig.toml", {nullptr, 0});
+  writeFile(stage.path + L"\\install.mjs", script);
+  stageAddon(stage.path);
   progress.step(2, L"安装应用");
   progress.stage(L"正在检查安装目录", {25, 25});
   progress.pump();
@@ -498,7 +526,7 @@ Installed install(const std::wstring& location, SetupProgress& progress,
     require(static_cast<bool>(archivePin), L"无法锁定已验证的安装包。");
     const auto parameters = quote(archivePath) + L" " + archiveHash + L" " + quote(location) +
       (previousPrefix.empty() ? L"" : L" " + quote(previousPrefix));
-    result = runScript(stage.path, parameters, progress);
+    result = runScript(stage.path, parameters, scriptHash, script.size, progress);
   }
   if (result.code == 3) throw LocationUnavailable{L"错误代码：" + scriptFailureCode(result.output)};
   const std::wstring receipt = L"KITE_DESKTOP_SETUP_OK " + std::wstring(expectedCandidate);
@@ -687,7 +715,7 @@ DesktopRegistration publishDesktop(const SetupSelection& selection, const Instal
 }
 
 std::vector<unsigned char> installedRuntime(const std::wstring& prefix, SetupProgress& progress) {
-  const auto path = prefix + L"\\releases\\" + expectedCandidate + L"\\terminal\\runtime\\bun.exe";
+  const auto path = prefix + L"\\releases\\" + expectedCandidate + L"\\terminal\\runtime\\node.exe";
   const auto file = pin(path);
   require(static_cast<bool>(file), L"找不到此安装对应的卸载运行时。");
   verifyPhysicalPath(path, file.value, false);
@@ -732,13 +760,13 @@ void uninstallFiles(const std::wstring& prefix, SetupProgress& progress) {
   require(matchesHash(script, uninstallHash), L"卸载程序校验失败。");
   {
     const auto runtime = installedRuntime(prefix, progress);
-    writeFile(stage.path + L"\\bun.exe", {runtime.data(), static_cast<DWORD>(runtime.size())});
+    writeFile(stage.path + L"\\node.exe", {runtime.data(), static_cast<DWORD>(runtime.size())});
   }
-  writeFile(stage.path + L"\\install.js", script);
-  writeFile(stage.path + L"\\bunfig.toml", {nullptr, 0});
+  writeFile(stage.path + L"\\install.mjs", script);
+  stageAddon(stage.path);
   progress.stage(L"正在检查已安装的文件", {10, 10});
   progress.pump();
-  const auto result = runScript(stage.path, quote(prefix), progress);
+  const auto result = runScript(stage.path, quote(prefix), uninstallHash, script.size, progress);
   if (result.code || lastScriptLine(result.output) != L"KITE_DESKTOP_UNINSTALL_OK") {
     const auto code = scriptFailureCode(result.output);
     if (setupFilesInUse(code)) throw UninstallFilesInUse{code};

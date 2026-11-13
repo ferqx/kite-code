@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants, copyFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from './tooling/process';
 
 /** Pin compiler caches before a child receives an isolated application HOME. */
 export function testToolchainEnvironment(env: NodeJS.ProcessEnv = process.env) {
@@ -12,7 +14,7 @@ export function testToolchainEnvironment(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
-/** Test entry points can use an owned runtime without changing the installed Bun or its ACL. */
+/** Test entry points can use an owned runtime without changing the installed Node or its ACL. */
 export async function withTestRuntime(
   entry: string,
   args: readonly string[],
@@ -41,26 +43,35 @@ export async function withTestRuntime(
   privateDirectory(root);
   const bin = join(root, 'bin');
   privateDirectory(bin);
-  const runtime = join(bin, 'bun.exe');
+  const runtime = join(bin, 'node.exe');
   const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
   const expected = digest(process.execPath);
   copyFileSync(process.execPath, runtime, constants.COPYFILE_EXCL);
   if (digest(runtime) !== expected || digest(process.execPath) !== expected)
     throw Error('test_runtime_copy_changed');
-  const pin = retainWindowsCandidateFiles(bin, ['bun.exe']);
+  const pin = retainWindowsCandidateFiles(bin, ['node.exe']);
   let code: number;
   try {
     pin.verify();
-    const child = Bun.spawn([runtime, entry, ...args], {
-      env: {
-        ...process.env,
-        ...testToolchainEnvironment(),
-        PATH: `${bin};${process.env.PATH ?? ''}`,
+    const child = spawn(
+      [
+        runtime,
+        '--import',
+        fileURLToPath(new URL('./tooling/register.mjs', import.meta.url)),
+        entry,
+        ...args,
+      ],
+      {
+        env: {
+          ...process.env,
+          ...testToolchainEnvironment(),
+          PATH: `${bin};${process.env.PATH ?? ''}`,
+        },
+        stdin: 'inherit',
+        stdout: 'inherit',
+        stderr: 'inherit',
       },
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
+    );
     code = await child.exited;
     pin.verify();
   } finally {

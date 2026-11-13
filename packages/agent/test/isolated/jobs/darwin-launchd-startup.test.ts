@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
 
 const darwinTest = process.platform === 'darwin' ? test : test.skip;
 

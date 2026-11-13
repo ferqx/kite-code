@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,6 +13,7 @@ import {
   canonicalCallerCommandRequest,
   createClient,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 
 test('authenticated original Command proofs match the complete caller request for all five durable caller kinds and GET never redispatches', async () => {
@@ -94,7 +95,7 @@ test('authenticated original Command proofs match the complete caller request fo
     const deadline = Date.now() + 5000;
     while (!requests) {
       if (Date.now() > deadline) throw Error('caller_proof_model_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const view = await client.getView('s');
     const run = view.runs.find((candidate) => candidate.isActive)!;
@@ -179,7 +180,7 @@ test('authenticated original Command proofs match the complete caller request fo
       (await store.getSession('s'))!.ownerInstanceId !== null
     ) {
       if (Date.now() > settledBy) throw Error('caller_proof_settlement_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const cursor = (await store.getMetadata()).lastChangeCursor;
     for (const input of originals) {

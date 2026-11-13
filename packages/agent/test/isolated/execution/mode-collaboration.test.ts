@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createTaskExtension } from '../../../src/extensions/task';
@@ -30,7 +31,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > end) throw Error('mode_collaboration_boundary_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(holdActivation = false, holdDispatch = false, reviewer?: ModelAdapter) {

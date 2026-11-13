@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import {
   projectTrajectory,
   type TrajectoryEvent,
   type TrajectoryEvidenceRef,
   trajectoryEventSchema,
 } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { trajectoryRequestTargets } from '../src/desktop/trajectory/request-details';
 import { buildTrajectoryTree } from '../src/desktop/trajectory/tree';
 import { buildTrajectoryWorkbench, type WorkbenchRow } from '../src/desktop/trajectory/workbench';

@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { verifyDesktopScheduleRows } from '../../../src/maintenance/desktop-schedules';
 import { excluded, parseManifest } from '../../../src/maintenance/manifest';
+import { Database } from '../../../src/runtime-sqlite';
 
 const capturedAt = '2026-10-15T00:00:00.000Z',
   hash = 'a'.repeat(64);

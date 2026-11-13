@@ -1,12 +1,15 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireProfileAccess,
   acquireProfileDataLock,
   selectProfile,
 } from '../../../src/platform/profile';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export type SelectionRecord = {
@@ -132,7 +135,7 @@ console.log(JSON.stringify({records,scope:foreign?'foreign':'original',queryAdmi
 `,
     { mode: 0o600 },
   );
-  const build = await Bun.build({
+  const build = await buildBundle({
     entrypoints: [source],
     target: 'node',
     packages: 'bundle',
@@ -140,13 +143,13 @@ console.log(JSON.stringify({records,scope:foreign?'foreign':'original',queryAdmi
     naming: 'reader.mjs',
   });
   if (!build.success) throw new AggregateError(build.logs, 'owned_mcp_node_reader_build');
-  const node = Bun.which('node');
-  if (!node) throw Error('owned_node_unavailable');
+  const node = fixtureNodeExecutable();
+
   const access = acquireProfileAccess(profile);
-  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let child: ReturnType<typeof spawnProcess> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const holder = Bun.spawn(
+    const holder = spawnProcess(
       [
         node,
         join(directory, 'reader.mjs'),

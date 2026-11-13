@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, Command } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { invokeExtension, runNonInteractive } from '../src';
 
 const command: Command = {

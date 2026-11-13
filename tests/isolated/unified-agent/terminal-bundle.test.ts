@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   cpSync,
   existsSync,
@@ -15,12 +14,20 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import type { ProfileBackup, ProfileRestoreResult } from '@kite-ai/agent/maintenance';
+import { expect, test } from '#kite-test';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
+import { nodeReleaseVersion } from '../../../scripts/release/node-inputs';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import {
+  spawnSync as runFixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import { persistentWorktreeDirectory } from '../../fixtures/worktree-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 function verifyLocalLinks(root: string) {
   let links = 0;
   const visit = (directory: string) => {
@@ -44,7 +51,7 @@ async function execute(
   home: string,
   gracefulProbe?: { evidencePath: string; deadlines?: readonly [number, number, number] },
 ) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd,
     env: {
       PATH: '/usr/bin:/bin',
@@ -162,10 +169,15 @@ process.on('SIGINT',stop);process.on('SIGTERM',stop);
 `,
       );
       try {
-        const result = await execute([process.execPath, '--no-env-file', script], root, root, {
-          evidencePath,
-          deadlines: [500, 800, 1100],
-        });
+        const result = await execute(
+          [process.execPath, '--no-global-search-paths', script],
+          root,
+          root,
+          {
+            evidencePath,
+            deadlines: [500, 800, 1100],
+          },
+        );
         expect(result.code).not.toBe(0);
         expect(result.termination.timedOut).toBe(true);
         expect(result.termination.interruptSent).toBe(true);
@@ -209,7 +221,7 @@ test('sealed terminal bundle remains independent after archive relocation and te
       : await buildTerminalBundle({
           destination: output,
           repositoryRoot,
-          bunExecutable: process.execPath,
+          nodeExecutable: process.execPath,
         });
     expect(built.root).toBe(reuse ? realpathSync(reuse) : output);
     expect(built.candidateId).toBeTruthy();
@@ -248,8 +260,11 @@ test('sealed terminal bundle remains independent after archive relocation and te
     verifyLocalLinks(candidate);
     const runtime = join(candidate, built.manifest.entries.runtime);
     expect((await execute([runtime, '--version'], home, home)).stdout.trim()).toBe(
-      built.manifest.bunVersion,
+      `v${nodeReleaseVersion}`,
     );
+    expect(built.manifest.nodeVersion).toBe(nodeReleaseVersion);
+    expect(built.manifest.bunVersion).toBeUndefined();
+    expect(readdirSync(join(candidate, 'runtime')).sort()).toEqual(['LICENSE.node', 'node']);
     for (const asset of [
       'storage/worker/main.js',
       'storage/migrations/0001-baseline.sql',
@@ -257,7 +272,6 @@ test('sealed terminal bundle remains independent after archive relocation and te
       'mcp/stdio-guardian.js',
       'tools/web-fetch/extractor-worker.js',
       'tools/git-worktree/worker.js',
-      'tools/git-worktree/empty-bunfig.toml',
       'tools/git-worktree/manifest.json',
       'tools/git-worktree/empty-hooks',
     ])
@@ -277,7 +291,7 @@ test('sealed terminal bundle remains independent after archive relocation and te
       const emptyConfig = join(gitHome, 'empty-config');
       writeFileSync(emptyConfig, '', { mode: 0o600 });
       const fixtureGit = (args: string[]) =>
-        Bun.spawnSync(
+        runFixtureProcess(
           [
             '/usr/bin/git',
             '-c',
@@ -333,6 +347,7 @@ test('sealed terminal bundle remains independent after archive relocation and te
         worktreeProbe,
         `
 import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
 import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -352,11 +367,11 @@ function close(){return closing??=(async()=>{try{if(agent){const shutdown=agent.
 const interrupt=signal=>{facts.cancellationRequested??=signal;facts.outcome='outcome_unknown';save();process.exitCode=1;if(agent)void close().catch(()=>{});};
 process.on('SIGINT',()=>interrupt('SIGINT'));process.on('SIGTERM',()=>interrupt('SIGTERM'));save();
 try{
-const configuration=await createShellConfiguration({workspaceRoot:workspace,toolIds:['git.worktree'],worktreeHost:{async readRegisteredWorkspaceRoots(){const {storeId}=await store.getMetadata();const page=await store.listWorkspaceDirectory({expectedStoreId:storeId,limit:200});assert.equal(page.nextAfterSeq,null);const roots=[];for(const item of page.items){const current=await store.getWorkspace(item.workspace.id);assert.equal(current.rootUri,item.workspace.rootUri);roots.push(realpathSync(fileURLToPath(current.rootUri)));}return {originStoreId:page.storeId,complete:true,roots,snapshotCursor:page.snapshotCursor};}},options:{platform:process.platform,configurationId:'installed-worktree',env:{PATH:'/usr/bin:/bin',HOME:${JSON.stringify(home)}},bunExecutable:process.execPath,shellExecutable:'/bin/sh',supervisorPath:${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/platform/process/shell-supervisor.js'))},host:{controlBase:join(base,'control'),protectedRoots:[join(base,'control'),join(base,'data')],readonlyAssets:[${JSON.stringify(candidate)}],runtimeReadOnlyRoots:[${JSON.stringify(dirname(runtime))}]}}});
+const configuration=await createShellConfiguration({workspaceRoot:workspace,toolIds:['git.worktree'],worktreeHost:{async readRegisteredWorkspaceRoots(){const {storeId}=await store.getMetadata();const page=await store.listWorkspaceDirectory({expectedStoreId:storeId,limit:200});assert.equal(page.nextAfterSeq,null);const roots=[];for(const item of page.items){const current=await store.getWorkspace(item.workspace.id);assert.equal(current.rootUri,item.workspace.rootUri);roots.push(realpathSync(fileURLToPath(current.rootUri)));}return {originStoreId:page.storeId,complete:true,roots,snapshotCursor:page.snapshotCursor};}},options:{platform:process.platform,configurationId:'installed-worktree',env:{PATH:'/usr/bin:/bin',HOME:${JSON.stringify(home)}},runtimeExecutable:process.execPath,shellExecutable:'/bin/sh',supervisorPath:${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/platform/process/shell-supervisor.js'))},host:{controlBase:join(base,'control'),protectedRoots:[join(base,'control'),join(base,'data')],readonlyAssets:[${JSON.stringify(candidate)}],runtimeReadOnlyRoots:[${JSON.stringify(dirname(runtime))}]}}});
 assert.equal(configuration.snapshot.available,true);
 store=await openSqliteStore({dataRoot:join(base,'data'),profile:'probe'});
-const target=join(base,'created'),permissionsInput={filesystem:'full_access',network:'none'};
-const intents=[{action:'list'},{action:'create',key:'installed-create',path:target,newBranch:'installed-branch',permissions:permissionsInput},{action:'remove',key:'installed-remove',path:target,permissions:permissionsInput}];
+const target=join(base,'created'),filesystem='full_access';
+const intents=[{action:'list'},{action:'create',path:target,new_branch:'installed-branch',filesystem},{action:'remove',path:target,filesystem}];
 const model=createFixedModel(intents.flatMap(input=>[[{type:'tool_call',id:input.action,name:'git_worktree',arguments:JSON.stringify(input)},{type:'finish',reason:'tool_calls',usage:{inputTokens:1,outputTokens:1}}],[{type:'finish',reason:'stop',usage:{inputTokens:1,outputTokens:1}}]]));
 const permissions=createPermissionPolicy({readPolicy:()=>({mode:'full',workspaceTrust:true,revision:'installed-probe',allowed:[{kind:'model',definitionId:'fixed',definitionVersion:'1'},{kind:'tool',definitionId:'git.worktree',definitionVersion:'1'},{kind:'job',definitionId:'shell.command',definitionVersion:'1'}]}),describeCapability:async(request)=>({kind:request.kind,definitionId:request.definitionId,definitionVersion:request.definitionVersion,revision:'installed-probe',hardAllowed:true,...builtinCapability('builtin.shell',request.definitionId,request.kind,'builtin.planning',request.definitionVersion),...await configuration.describeRequest(request)})});
 agent=createRuntime({store,model,modelId:'fixed',permissions,extensions:configuration.extensions,toolIds:['git.worktree']});
@@ -379,19 +394,14 @@ assert.equal(facts.cancellationRequested,null,'cancelled before admission');
  assert.equal(existsSync(target),false);
  assert.equal((await store.listExecutions('s')).filter(e=>e.definitionId==='shell.command').length,5);
  const git=configuration.snapshot.assets.gitWorktree.configuration.git.path;
- assert.equal(Bun.spawnSync([git,'show-ref','--verify','--quiet','refs/heads/installed-branch'],{cwd:workspace,env:${JSON.stringify({ PATH: '/usr/bin:/bin', HOME: gitHome, XDG_CONFIG_HOME: gitHome, LANG: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: emptyConfig, GIT_CONFIG_GLOBAL: emptyConfig, GIT_TERMINAL_PROMPT: '0' })}}).exitCode,0);
+ assert.equal(spawnSync(git,['show-ref','--verify','--quiet','refs/heads/installed-branch'],{cwd:workspace,env:${JSON.stringify({ PATH: '/usr/bin:/bin', HOME: gitHome, XDG_CONFIG_HOME: gitHome, LANG: 'C', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_SYSTEM: emptyConfig, GIT_CONFIG_GLOBAL: emptyConfig, GIT_TERMINAL_PROMPT: '0' })}}).status,0);
  facts.outcome='succeeded';await checkpoint('actions_completed');
  console.log('INSTALLED_WORKTREE_JOB_OK');
 }catch(error){facts.failure=error instanceof Error?error.message:String(error);facts.outcome='outcome_unknown';save();throw error;}finally{await close();}
 `,
       );
       const worktreeResult = await execute(
-        [
-          runtime,
-          '--no-env-file',
-          `--config=${join(candidate, 'node_modules/@kite-ai/agent/tools/git-worktree/empty-bunfig.toml')}`,
-          worktreeProbe,
-        ],
+        [runtime, '--no-global-search-paths', worktreeProbe],
         workspace,
         home,
         { evidencePath: probeEvidence },
@@ -428,7 +438,7 @@ assert.equal(facts.cancellationRequested,null,'cancelled before admission');
     const profile = JSON.parse(setupResult.stdout) as { profilePath: string; databasePath: string };
     let providerCalls = 0,
       titleCalls = 0;
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -738,11 +748,11 @@ finally:
       }
       if (process.platform === 'linux') {
         const readerRoot = join(home, 'engine-reader');
-        const reader = await Bun.build({
+        const reader = await buildFixture({
           entrypoints: [
             join(repositoryRoot, 'tests/fixtures/unified-agent/terminal-bundle-store.ts'),
           ],
-          target: 'bun',
+          target: 'node',
           packages: 'external',
           outdir: readerRoot,
           naming: 'read.js',

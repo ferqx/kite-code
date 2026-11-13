@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { Readable } from 'node:stream';
 import type { Interaction } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createStdioInteractionHandler } from '../src';
 
 async function read(

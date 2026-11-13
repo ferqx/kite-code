@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import { defineExtension, type JobEvent } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createDesktopController } from '../../../apps/desktop/src';
 import { startService } from '../../../apps/service/src';
 

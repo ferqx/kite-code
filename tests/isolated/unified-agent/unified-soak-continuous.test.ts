@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LinuxShellProcessEvidence } from '@kite-ai/agent/jobs/shell';
+import { expect, test } from '#kite-test';
 import {
   CONTINUOUS_SHELL_SOURCE,
   CONTINUOUS_SHELL_UNITS,

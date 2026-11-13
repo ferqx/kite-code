@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import type { Message } from '../../src/desktop/types';
 
 // Radix chooses its layout-effect implementation at module initialization.

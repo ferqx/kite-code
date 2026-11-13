@@ -1,4 +1,3 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
 import {
   projectTrajectory,
   type TrajectoryEvent,
@@ -7,6 +6,7 @@ import {
 } from '@kite-ai/trajectory';
 import { JSDOM } from 'jsdom';
 import { act, useCallback, useState } from 'react';
+import { afterAll, afterEach, expect, test } from '#kite-test';
 import type { TrajectoryMaterialTarget } from '../../src/desktop/trajectory/workbench-details';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {

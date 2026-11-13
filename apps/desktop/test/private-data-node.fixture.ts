@@ -33,8 +33,8 @@ const profile = selectProfile(profileInput).profilePath;
 const acquire = () =>
   acquireDesktopProfileAccess({
     profile: profileInput,
-    bunExecutable: bunExecutable!,
-    bunSha256: bunSha256!,
+    runtimeExecutable: bunExecutable!,
+    runtimeSha256: bunSha256!,
     helperPath: helperPath!,
     helperSha256: helperSha256!,
   });
@@ -314,9 +314,18 @@ if (mode === 'denied') {
     data = await open();
     assert.equal(data.beginCaller(caller).created, false);
     assert.deepEqual(data.callers()[0]!.intent.request, caller.intent.request);
+    assert.deepEqual(data.caller('caller-original'), caller);
+    assert.equal(data.caller('caller-missing'), undefined);
     assert.throws(() => data.clearCaller('caller-original'), /caller_clear_unconfirmed/);
     for (let i = 1; i < 128; i++) data.beginCaller(callerRow(`caller-${i}`));
     assert.equal(data.callers().length, 128);
+    assert.deepEqual(
+      data
+        .callers(true)
+        .slice(0, 3)
+        .map((row) => row.intent.request.commandId),
+      ['caller-original', 'caller-1', 'caller-2'],
+    );
     assert.throws(() => data.beginCaller(callerRow('caller-overflow')), /caller_capacity_exceeded/);
     assert.equal(data.callers().length, 128);
     assert.throws(
@@ -377,6 +386,7 @@ if (mode === 'denied') {
     const badCallerBytes = readFileSync(privatePath);
     data = await open();
     assert.throws(() => data.callers(), /caller_storage_unavailable|draft_storage_unavailable/);
+    assert.throws(() => data.caller('caller-original'));
     assert.throws(
       () => data.beginCaller(callerRow('bad-replacement')),
       /caller_storage_unavailable|draft_storage_unavailable/,

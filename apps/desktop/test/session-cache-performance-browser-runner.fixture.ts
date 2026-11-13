@@ -8,6 +8,8 @@ import react from '@vitejs/plugin-react';
 import { _electron, chromium, type ElectronApplication, type Page } from 'playwright';
 import ts from 'typescript';
 import { build, createServer, type ViteDevServer } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './session-cache-performance-browser.fixture';
 
 const mode = process.argv.includes('--dev') ? 'development' : 'production';
@@ -18,7 +20,7 @@ const iterations = Number(
   process.argv.find((arg) => arg.startsWith('--iterations='))?.slice(13) ?? 100,
 );
 assert.ok(Number.isInteger(iterations) && iterations > 0 && iterations <= 1000);
-const directory = import.meta.dir;
+const directory = import.meta.dirname;
 const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, `session-cache-performance-${mode}-`));
@@ -153,7 +155,7 @@ const define = {
   'process.env.NODE_ENV': JSON.stringify(mode),
 };
 let development: ViteDevServer | undefined;
-let production: ReturnType<typeof Bun.serve> | undefined;
+let production: FixtureServer | undefined;
 let url: string;
 if (mode === 'development') {
   development = await createServer({
@@ -208,10 +210,10 @@ if (mode === 'development') {
       target: 'esnext',
     },
   });
-  production = Bun.serve({
+  production = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
-    fetch(request) {
+    async fetch(request) {
       const pathname = new URL(request.url).pathname;
       if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
       if (pathname === '/')
@@ -220,7 +222,7 @@ if (mode === 'development') {
         });
       const file = path.resolve(output, `.${pathname}`);
       if (!file.startsWith(output + path.sep)) return new Response(null, { status: 404 });
-      return new Response(Bun.file(file));
+      return new Response(await openFixtureFile(file));
     },
   });
   url = production.url.toString();
@@ -283,7 +285,7 @@ const report = {
     release: release(),
     cpu: cpus()[0]?.model,
     cpuCount: cpus().length,
-    bun: Bun.version,
+    node: process.versions.node,
     react: createRequire(import.meta.url)('react/package.json').version as string,
     profileMode,
     desktopDiagnostics: false,
@@ -870,7 +872,7 @@ try {
   };
   report.summary = summary;
   report.boundaries.summary = summary;
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'report.json'),
     JSON.stringify({ ...report, summary }, null, 2),
   );
@@ -881,7 +883,7 @@ try {
     `click to first target compositor paint P95 ${p95.toFixed(2)}ms exceeds 32ms`,
   );
 } catch (error) {
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'report.json'),
     JSON.stringify({ ...report, failure: String(error) }, null, 2),
   );

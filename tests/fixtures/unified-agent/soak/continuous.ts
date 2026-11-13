@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
@@ -13,7 +14,6 @@ import {
   type ContinuousEvidence,
   verifyContinuousEvidence,
 } from '../../../../scripts/runtime/unified-soak-continuous';
-import { privateDirectory } from '../../test-filesystem';
 import { until } from './common';
 
 const finish: ModelEvent = {

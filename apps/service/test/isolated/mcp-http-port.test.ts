@@ -1,22 +1,23 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createMcpAdapter, createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { expect, test } from '#kite-test';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 
 async function until(read: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > deadline) throw new Error('http_port_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function network() {

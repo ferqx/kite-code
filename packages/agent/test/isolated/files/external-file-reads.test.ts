@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   linkSync,
   lstatSync,
@@ -10,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, withExternalFileReads } from '../../../src/files';

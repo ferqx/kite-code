@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const { createHeadlessTerminalScreen } = (await import(
-  join(import.meta.dir, '../../../../../tests/tui-system/harness/terminal-screen')
+  join(import.meta.dirname, '../../../../../tests/tui-system/harness/terminal-screen')
 )) as {
   createHeadlessTerminalScreen(
     cols: number,

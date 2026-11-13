@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
+import { expect, test } from '#kite-test';
 import { ConversationCacheCost } from '../../src/desktop/conversation-cache-cost';
 
 function fixture(elements = 1) {

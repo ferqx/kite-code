@@ -22,6 +22,7 @@ import type {
   NativeCallerRecord,
   NativeDraft,
 } from '../src/native-bridge';
+import { nativeModelFailure } from '../src/native-model-failure';
 import type { PrivateData } from './private-data';
 export const callerCanonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(callerCanonical).join(',')}]`;
@@ -217,14 +218,26 @@ export function callerMetadata(row: NativeCallerRecord): NativeCallerMetadata {
 export class NativeCallerJournal {
   private readonly first = new Map<string, NativeCallerIntent>();
   private readonly inflight = new Map<string, Promise<Command>>();
+  private readonly rejectedRuns = new Map<string, { bodyDigest: string; reason: string | null }>();
   private readonly client: AgentClient;
   private readonly data: PrivateData;
+
+  metadata(row: NativeCallerRecord): NativeCallerMetadata {
+    const value = callerMetadata(row);
+    const rejection = this.rejectedRuns.get(row.intent.request.commandId);
+    return row.phase === 'rejected' && rejection?.bodyDigest === row.intent.bodyDigest
+      ? { ...value, rejectionReason: rejection.reason }
+      : value;
+  }
   constructor(client: AgentClient, data: PrivateData) {
     this.client = client;
     this.data = data;
   }
-  records() {
-    return this.data.callers();
+  records(inSubmissionOrder = false) {
+    return this.data.callers(inSubmissionOrder);
+  }
+  record(commandId: string) {
+    return this.data.caller(commandId);
   }
   prepare(sessionId: string, raw: NativeCallerCommandRequest, draft?: NativeCallerIntent['draft']) {
     return this.prepareIntent(sessionId, raw, draft);
@@ -450,11 +463,25 @@ export class NativeCallerJournal {
       }
     }
     this.data.finishCaller(r.commandId, command.status);
+    if (r.kind === 'run.start' && command.status === 'rejected') {
+      const receipt = command.receipt;
+      const failure =
+        receipt && typeof receipt === 'object' && !Array.isArray(receipt)
+          ? nativeModelFailure(receipt.reason)
+          : undefined;
+      this.rejectedRuns.set(r.commandId, {
+        bodyDigest: i.bodyDigest,
+        reason: failure?.reasonCode ?? null,
+      });
+      if (this.rejectedRuns.size > 128)
+        this.rejectedRuns.delete(this.rejectedRuns.keys().next().value!);
+    }
     return command;
   }
   async lookup(commandId: string) {
     this.first.delete(commandId);
-    const row = this.original(commandId);
+    const row = this.record(commandId);
+    if (!row) throw Error('caller_intent_missing');
     if (
       row.intent.request.kind === 'extension.invoke' &&
       (this.client.serverInfo?.storeId !== row.intent.scope.storeId ||
@@ -471,10 +498,11 @@ export class NativeCallerJournal {
   submit(commandId: string): Promise<Command> {
     const pending = this.inflight.get(commandId);
     if (pending) return pending;
-    const row = this.original(commandId);
     const first = this.first.get(commandId);
     this.first.delete(commandId);
     if (!first) return this.lookup(commandId);
+    // A first POST still admits the full journal and its capacity limits.
+    const row = this.original(commandId);
     if (callerCanonical(first) !== callerCanonical(row.intent))
       throw Error('caller_intent_conflict');
     const r = row.intent.request;
@@ -537,6 +565,7 @@ export class NativeCallerJournal {
   }
   clear(commandId: string) {
     this.first.delete(commandId);
+    this.rejectedRuns.delete(commandId);
     if (
       this.records().find((row) => row.intent.request.commandId === commandId)?.intent.request
         .kind === 'extension.invoke'

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import {
   carrier,
   prepareReconnectionEngine,

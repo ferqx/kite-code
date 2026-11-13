@@ -1,5 +1,5 @@
-import { Database } from 'bun:sqlite';
 import type { DatabaseSync } from 'node:sqlite';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import {
   canonicalFileRecoveryIntent,
   type FileRecoveryIntent,
@@ -230,6 +230,10 @@ export function memoryPrivateData(): PrivateData {
     },
     callers() {
       return [...callers.values()].map((r) => structuredClone(r));
+    },
+    caller(commandId) {
+      const row = callers.get(commandId);
+      return row && structuredClone(row);
     },
     beginCaller(row) {
       const value = validateCallerRecord(row),

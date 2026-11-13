@@ -1,3 +1,5 @@
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
+
 /** Private Darwin task accounting, independent of process birth/exec observations. */
 export const DARWIN_COALITION_TASK_ABI = 'resource-usage-prefix-16' as const;
 const U64 = (1n << 64n) - 1n;
@@ -38,7 +40,6 @@ export function decodeCoalitionTaskCounters(bytes: Uint8Array, result: number) {
   return { tasksStarted: String(started), tasksExited: String(exited) };
 }
 function createCollector() {
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const proc = dlopen('/usr/lib/libproc.dylib', {
     proc_pidinfo: { args: ['i32', 'i32', 'u64', 'ptr', 'i32'], returns: 'i32' },
   });

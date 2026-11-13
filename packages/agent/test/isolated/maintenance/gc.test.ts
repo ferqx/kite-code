@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -12,8 +10,10 @@ import {
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import { runSelectedMaintenance } from '../../../../../apps/cli/host/maintenance';
 import { parseCLIArguments } from '../../../../../apps/cli/src/arguments';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -23,8 +23,11 @@ import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { collectProfileGarbage, createProfileBackup } from '../../../src/maintenance';
 import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
 import { createRuntime } from '../../../src/runtime';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureNodeExecutable, fixtureNodeLoader } from '../../fixtures/node-runtime';
 
 let selected: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>>;
 beforeAll(async () => {
@@ -129,8 +132,14 @@ test.skipIf(process.platform === 'win32')(
         f.referenced.bytes,
       );
       expect(readFileSync(join(f.path, 'core.db'))).toEqual(core);
-      const child = Bun.spawn(
-        [process.execPath, join(import.meta.dir, 'gc-close-owner.fixture.ts')],
+      const child = spawnProcess(
+        [
+          fixtureNodeExecutable(),
+          ...nodeRuntimeFlags,
+          '--import',
+          fixtureNodeLoader,
+          join(import.meta.dirname, 'gc-close-owner.fixture.ts'),
+        ],
         {
           env: {
             ...process.env,
@@ -161,7 +170,7 @@ test.skipIf(process.platform === 'win32')(
         other.lock.release();
       } finally {
         child.stdin.end();
-        expect(await child.exited).toBe(0);
+        expect(await child.exited, await stderr).toBe(0);
         while (!(await reader.read()).done) {}
         reader.releaseLock();
         expect(await stderr).toBe('');

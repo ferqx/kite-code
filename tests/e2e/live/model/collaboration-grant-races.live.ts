@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -320,7 +321,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
             (c) => c.kind === 'approval' && c.definitionId === 'files.write_path',
           );
         }
-        if (!card) await Bun.sleep(30);
+        if (!card) await fixtureDelay(30);
       }
       if (!card || !carrier?.childSessionId) {
         reason = 'branch_not_reached';
@@ -350,7 +351,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
         await answer(card, 'approve-original');
         while (!dispatchGateEntered && Date.now() < end) {
           options.signal.throwIfAborted();
-          await Bun.sleep(30);
+          await fixtureDelay(30);
         }
         if (!heldDispatch || !dispatchGateEntered) throw Error('branch_not_reached');
         const approved = await client.getInteraction(card.presentationSessionId, card.id, {
@@ -398,7 +399,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
           releaseDispatch();
           while (!reviewGateEntered && Date.now() < end) {
             options.signal.throwIfAborted();
-            await Bun.sleep(30);
+            await fixtureDelay(30);
           }
           if (!reviewGateEntered) throw Error('branch_not_reached');
           checks.realReviewOutputHeldBeforeCurrentModeChange =
@@ -423,7 +424,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
               c.kind === 'approval' && c.executionId === card!.executionId && c.id !== card!.id,
           );
           if (existsSync(target)) throw Error('oracle_violation');
-          if (!fresh) await Bun.sleep(30);
+          if (!fresh) await fixtureDelay(30);
         }
         if (!fresh) throw Error('branch_not_reached');
         checks.oldDispatchProofRejected = oldDispatchRejected;
@@ -455,7 +456,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
             !!c &&
             ['cancelled', 'failed', 'succeeded', 'outcome_unknown'].includes(c.status);
           if (settled) break;
-          await Bun.sleep(30);
+          await fixtureDelay(30);
         }
         checks.settled = settled;
         const writes = (await store.listExecutions(leaf)).filter(
@@ -607,7 +608,7 @@ if (import.meta.main) {
     date: new Date().toISOString(),
     platform: process.platform,
     arch: process.arch,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     group: 'grant-races',
     caseId: id,
     entryLayer: 'service-client-runtime-sqlite',

@@ -86,42 +86,39 @@ async function launch(removalPending = false) {
     const global = globalThis as Globals;
     global.backgroundPhysical = [];
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        const row: Physical = {
-          path: url.pathname,
-          query: url.search,
-          method: args[1]?.method ?? 'GET',
-          ...(typeof args[1]?.body === 'string' ? { body: args[1].body } : {}),
-        };
-        global.backgroundPhysical.push(row);
-        const response = await original(...args);
-        if (response.ok && /background|messages|model-output/.test(url.pathname)) {
-          const text = await response.clone().text();
-          row.bytes = Buffer.byteLength(text);
-          const value = JSON.parse(text);
-          row.responseStoreId = value.storeId;
-          if (url.pathname === '/v1/background-executions')
-            row.executionOrigins = value.items.map(
-              ({ execution }: { execution: { id: string; originStoreId: string } }) => ({
-                id: execution.id,
-                originStoreId: execution.originStoreId,
-              }),
-            );
-          if (url.pathname.endsWith('/model-output'))
-            row.model = {
-              sessionId: value.sessionId,
-              runId: value.runId,
-              executionId: value.executionId,
-              contentBytes: Buffer.byteLength(value.output.content),
-              complete: value.output.complete,
-            };
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0]));
+      const row: Physical = {
+        path: url.pathname,
+        query: url.search,
+        method: args[1]?.method ?? 'GET',
+        ...(typeof args[1]?.body === 'string' ? { body: args[1].body } : {}),
+      };
+      global.backgroundPhysical.push(row);
+      const response = await original(...args);
+      if (response.ok && /background|messages|model-output/.test(url.pathname)) {
+        const text = await response.clone().text();
+        row.bytes = Buffer.byteLength(text);
+        const value = JSON.parse(text);
+        row.responseStoreId = value.storeId;
+        if (url.pathname === '/v1/background-executions')
+          row.executionOrigins = value.items.map(
+            ({ execution }: { execution: { id: string; originStoreId: string } }) => ({
+              id: execution.id,
+              originStoreId: execution.originStoreId,
+            }),
+          );
+        if (url.pathname.endsWith('/model-output'))
+          row.model = {
+            sessionId: value.sessionId,
+            runId: value.runId,
+            executionId: value.executionId,
+            contentBytes: Buffer.byteLength(value.output.content),
+            complete: value.output.complete,
+          };
+      }
+      return response;
+    }, {});
   });
   stage('owned_service', { childPid, electronPid: app.process().pid });
   return page;
@@ -635,17 +632,14 @@ try {
     global.removeResponse = 1;
     const original = globalThis.fetch;
     let drop = true;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const response = await original(...args);
-        if (drop && new URL(String(args[0])).pathname.endsWith('/remove') && response.ok) {
-          drop = false;
-          throw Error('owned lost removal reply');
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const response = await original(...args);
+      if (drop && new URL(String(args[0])).pathname.endsWith('/remove') && response.ok) {
+        drop = false;
+        throw Error('owned lost removal reply');
+      }
+      return response;
+    }, {});
   });
   await page
     .getByRole('button', { name: `${workspace.name} 更多操作`, exact: true })

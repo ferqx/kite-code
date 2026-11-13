@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, UserSkillCataloguePage } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { NativeSkillCatalogueReads } from '../electron/skill-catalogue-reads';

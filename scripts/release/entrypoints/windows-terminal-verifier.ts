@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -32,6 +33,8 @@ const retained = new Set<object>();
 const environmentKeys = [
   'NODE_PATH',
   'NODE_OPTIONS',
+  'NODE_COMPILE_CACHE',
+  'NODE_V8_COVERAGE',
   'BUN_OPTIONS',
   'BUN_BE_BUN',
   'ELECTRON_RUN_AS_NODE',
@@ -68,7 +71,7 @@ function keep(error: unknown, owner: object): Promise<never> {
     }, 60000);
   });
 }
-/** Standalone trusted second stage. Native first stage sanitizes before Bun initializes. */
+/** Standalone trusted second stage. The native first stage sanitizes the environment. */
 export async function runWindowsTerminalVerifier(
   kind: string,
   prefix: string,
@@ -89,7 +92,8 @@ export async function runWindowsTerminalVerifier(
   const files: FileResource[] = [],
     uses: Resource[] = [],
     selections: Resource[] = [];
-  let child: ReturnType<typeof Bun.spawn> | undefined,
+  let child: ChildProcess | undefined,
+    exited: Promise<number> | undefined,
     result = 1,
     failure: unknown;
   const owner = {
@@ -180,7 +184,7 @@ export async function runWindowsTerminalVerifier(
         throw Error('terminal_windows_selection_changed');
       command = [
         join(root, bundle.manifest.entries.runtime),
-        ...windowsTerminalRuntimeArguments(root),
+        ...windowsTerminalRuntimeArguments(root, bundle.manifest.nodeVersion ? 'node' : 'bun'),
         join(root, `entrypoints/standard-${kind}.js`),
         ...argv,
       ];
@@ -193,21 +197,25 @@ export async function runWindowsTerminalVerifier(
     const env = { ...process.env };
     for (const key of environmentKeys) delete env[key];
     process.on('SIGINT', ignoreInterrupt);
-    child = Bun.spawn(command, {
+    const [program, ...args] = command;
+    child = spawn(program!, args, {
       cwd: process.cwd(),
       env,
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
+      stdio: 'inherit',
+      shell: false,
     });
-    result = await child.exited;
+    exited = new Promise<number>((resolve, reject) => {
+      child!.once('error', reject);
+      child!.once('close', (code, signal) => resolve(code ?? (signal === 'SIGINT' ? 130 : 1)));
+    });
+    result = await exited;
   } catch (error) {
     failure = error;
   }
   // A rejected wait never proves the original child stopped consuming its pinned files.
-  if (child && child.exitCode === null) {
+  if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
     try {
-      await child.exited;
+      await exited;
     } catch (error) {
       return keep(new AggregateError([failure, error]), owner);
     }
@@ -241,4 +249,4 @@ export async function runWindowsTerminalVerifierMain(): Promise<void> {
     process.exitCode = 1;
   }
 }
-if (import.meta.main) await runWindowsTerminalVerifierMain();
+if (Reflect.get(import.meta, 'main') === true) await runWindowsTerminalVerifierMain();

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -6,6 +5,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createProfileTraceRuntime } from '../../src/trace-runtime';

@@ -1,7 +1,9 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceSerialLocks } from '../../../src/resources';
 import { acquireProfileAccess } from '../../../src/sqlite';
@@ -46,8 +48,12 @@ test('real Workspace OS key excludes frozen process, permits other keys, and rel
   const dataRoot = temporaryDirectory('kite-workspace-lock-');
   chmodSync(dataRoot, 0o700);
   const locks = createWorkspaceSerialLocks({ dataRoot, profile: 'test' });
-  const child = Bun.spawn(
-    [process.execPath, fileURLToPath(new URL('./workspace-child.ts', import.meta.url))],
+  const child = spawnProcess(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      fileURLToPath(new URL('./workspace-child.ts', import.meta.url)),
+    ],
     { env: { ...process.env, TEST_DATA_ROOT: dataRoot }, stdout: 'pipe', stderr: 'pipe' },
   );
   const line = lines(child.stdout);
@@ -102,8 +108,12 @@ test('lock descriptors are not inherited by spawned process and close drains act
     { workspaceId: 'w', key: 'write' },
     new AbortController().signal,
   );
-  const child = Bun.spawn(
-    [process.execPath, fileURLToPath(new URL('./workspace-child.ts', import.meta.url))],
+  const child = spawnProcess(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      fileURLToPath(new URL('./workspace-child.ts', import.meta.url)),
+    ],
     { env: { ...process.env, TEST_DATA_ROOT: dataRoot }, stdout: 'pipe', stderr: 'pipe' },
   );
   try {

@@ -1,11 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { buildWindowsAccess } from '../../../../../apps/desktop/scripts/build-windows-access';
 import { initializeDesktopBuildEnvironment } from '../../../../../scripts/development/windows-desktop-environment';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
@@ -14,8 +15,10 @@ import {
   restoreProfileBackup,
 } from '../../../src/maintenance';
 import { selectProfile } from '../../../src/platform/profile';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import { matchingSchema } from '../../../src/storage/sqlite/migrations';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const sha = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
 test('actual Node DB10 backup restores exact original bindings and foreign Store runner issues zero requests', async () => {
@@ -78,9 +81,9 @@ test('actual Node DB10 backup restores exact original bindings and foreign Store
     const helper = join(root, 'profile-access-helper.js');
     expect(
       (
-        await Bun.build({
+        await buildBundle({
           entrypoints: [resolve('apps/desktop/electron/profile-access-helper.ts')],
-          target: 'bun',
+          ...fixtureRuntimeBuild(root),
           packages: 'bundle',
           outdir: root,
           naming: 'profile-access-helper.js',
@@ -125,7 +128,7 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
     );
     expect(
       (
-        await Bun.build({
+        await buildBundle({
           entrypoints: [source],
           target: 'node',
           packages: 'bundle',
@@ -137,9 +140,9 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
     const profilePath = selectProfile(profile).profilePath,
       path = join(profilePath, 'desktop-private/data.sqlite');
     async function node(action: string, id: string) {
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
-          realpathSync(Bun.which('node')!),
+          fixtureNodeExecutable(),
           join(root, 'driver.mjs'),
           JSON.stringify({
             action,
@@ -147,8 +150,8 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
             profilePath,
             access: {
               profile,
-              bunExecutable: realpathSync(process.execPath),
-              bunSha256: sha(process.execPath),
+              runtimeExecutable: fixtureNodeExecutable(),
+              runtimeSha256: sha(fixtureNodeExecutable()),
               helperPath: helper,
               helperSha256: sha(helper),
               ...(windowsAsset ? { windowsAsset } : {}),

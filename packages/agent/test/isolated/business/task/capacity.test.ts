@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { ChildSlots } from '../../../../src/execution/child-slots';
 
 test('fail-fast reservations use the same original child slots, reject at the exact default boundary, and release idempotently', async () => {

@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
 
 const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -35,7 +38,7 @@ const lease=await acquireDesktopProfileAccess(input.access);let data;
 try {data=openPrivateData(input.profilePath,lease);
 if(input.action==='seed')for(const kind of ['question','approval','plan_review']){
  const interaction={id:'original-'+kind,sessionId:'original-session',executionId:'original-execution',runId:'original-run',revision:'9007199254740993',kind,attempt:1,definitionId:'original-definition',definitionVersion:'1',inputDigest:'original-input-digest',policyRevision:'original-policy'};
- const answer=kind==='question'?{kind,answers:{exact:'é e\\u0301 🙂\\r\\n'.repeat(24000)+'ORIGINAL_ANSWER_TAIL\\r\\n'}}:kind==='approval'?{kind,decision:'approve',optionId:'once'}:{kind,decision:'revise',feedback:'Original 改訂\\r\\n',mode:'original-mode'};
+ const answer=kind==='question'?{kind,answers:{exact:'é e\\u0301 🙂\\r\\n'.repeat(24000)+'ORIGINAL_ANSWER_TAIL\\r\\n'}}:kind==='approval'?{kind,decision:'approve',optionId:'once'}:{kind,decision:'revise',feedback:'Original 改訂\\r\\n'};
  const request={expectedStoreId:input.storeId,commandId:'answer-'+kind,expectedRevision:interaction.revision,answer};
  data.beginAnswer({intent:{scope:{storeId:input.storeId,sessionId:'original-session',workspaceId:'original-workspace',contextSelectionId:'original-selection'},subjectId:'original-subject',interaction,observationDigest:callerDigest({original:true,interaction}),request,bodyDigest:callerDigest(request),requestDigest:answerRequestDigest(interaction.id,request)},phase:'submitting'});
  data.finishAnswer(request.commandId,'unknown');
@@ -45,7 +48,7 @@ console.log(JSON.stringify({records:data.answers(),httpRequests}));
 `,
       { mode: 0o600 },
     );
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [source],
       target: 'node',
       packages: 'bundle',
@@ -56,9 +59,9 @@ console.log(JSON.stringify({records:data.answers(),httpRequests}));
     writeFileSync(join(directory, 'package.json'), ' {"type":"module"}', { mode: 0o600 });
   }
   const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-  const node = Bun.which('node');
-  if (!node) throw Error('owned_node_unavailable');
-  const child = Bun.spawn(
+  const node = fixtureNodeExecutable();
+
+  const child = spawnProcess(
     [
       node,
       driver,
@@ -68,8 +71,8 @@ console.log(JSON.stringify({records:data.answers(),httpRequests}));
         profilePath: selectProfile(profile).profilePath,
         access: {
           profile,
-          bunExecutable: process.execPath,
-          bunSha256: digest(process.execPath),
+          runtimeExecutable: fixtureNodeExecutable(),
+          runtimeSha256: digest(fixtureNodeExecutable()),
           helperPath: helper,
           helperSha256: digest(helper),
         },

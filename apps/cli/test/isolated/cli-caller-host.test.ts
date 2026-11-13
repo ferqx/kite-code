@@ -1,18 +1,24 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { ClientError, createServiceLifecycleClient } from '@kite-ai/client';
 import { retainProcessObservation, selectDaemonEndpoint } from '@kite-ai/service/daemon';
+import { expect, test } from '#kite-test';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+  spawnSync as testSpawnSync,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { callerCanonical } from '../../host/caller-intents';
 import type { runSelectedDaemon } from '../../host/daemon';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { recoveryProfile } from '../fixtures/recovery-profile';
-import { workflowManifest } from '../fixtures/workflow-manifest';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 // Unknown native closure retains the actual owner and its self-owned files for diagnosis.
 const retainedCallerOwners = new Set<unknown>();
 function processGone(pid: number) {
@@ -27,13 +33,13 @@ async function awaitDead(observation: ReturnType<typeof retainProcessObservation
   const end = Date.now() + 5000;
   while (observation.inspect() !== 'dead') {
     if (Date.now() > end) throw Error('caller_owned_service_exit_unknown');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
-async function stopCaller(child: Bun.Subprocess) {
+async function stopCaller(child: TestSubprocess) {
   if (child.exitCode === null) {
     if (process.platform === 'win32') {
-      const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+      const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
         stdout: 'pipe',
         stderr: 'pipe',
       });
@@ -44,28 +50,9 @@ async function stopCaller(child: Bun.Subprocess) {
 }
 
 for (const connection of ['paired', 'shared'] as const)
-  test(`actual ${connection} work argv durable POST loss + SIGKILL and cold caller argv first GET loss preserve complete Workflow request and zero POST`, async () => {
+  test(`actual ${connection} work argv durable POST loss + SIGKILL and cold caller argv first GET loss preserve the full Planning request and zero POST`, async () => {
     const started = Date.now();
     const f = await recoveryProfile({ holdModelCommandId: 'cli-original' });
-    const skill = join(f.profile.profilePath, 'skills', 'caller-owned');
-    mkdirSync(skill, { recursive: true });
-    writeFileSync(
-      join(skill, 'SKILL.md'),
-      `---\n${JSON.stringify({ ...workflowManifest('caller-owned'), input_schema: { type: 'object', properties: { full: { type: 'string' } }, required: ['full'], additionalProperties: false } })}\n---\nPreserve this original no-effect caller workflow.\n`,
-    );
-    const config = JSON.parse(readFileSync(f.userConfiguration.path, 'utf8'));
-    writeFileSync(
-      f.userConfiguration.path,
-      JSON.stringify({ ...config, skills: [{ id: 'caller-owned', path: skill }] }),
-    );
-    writeFileSync(
-      join(f.profile.profilePath, 'skill-workflow.jsonc'),
-      JSON.stringify({
-        version: 1,
-        features: { skillActivation: true, skillWorkflow: true, verification: false },
-      }),
-      { mode: 0o600 },
-    );
     const candidateParent = join(f.root, 'candidate-parent');
     privateDirectory(candidateParent);
     const candidateRoot = join(candidateParent, 'candidate');
@@ -78,22 +65,25 @@ for (const connection of ['paired', 'shared'] as const)
       ...(process.platform === 'win32' ? {} : { explicitSocket: join(f.root, 'cli.sock') }),
     }).socket;
     let daemonArtifact: Parameters<typeof runSelectedDaemon>[0]['artifact'];
-    // A separate owned launcher selects the fixture HOME before Bun caches it.
+    // A separate owned launcher selects the fixture HOME before loading CLI configuration.
     // Retain that launcher's lifetime until explicit daemon stop under --no-orphans.
     const daemonRunner = join(f.root, 'daemon-runner.ts');
     writeFileSync(
       daemonRunner,
-      `import {runSelectedDaemon} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/daemon.ts')).href)}; const input=JSON.parse(process.argv[2]!);await runSelectedDaemon({...input,write(){}});if(input.arguments.action==='start'){console.log('OWNED_DAEMON_READY');await Bun.stdin.text();}`,
+      `import {runSelectedDaemon} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/daemon.ts')).href)}; const input=JSON.parse(process.argv[2]!);await runSelectedDaemon({...input,write(){}});if(input.arguments.action==='start'){console.log('OWNED_DAEMON_READY');await (await import('node:stream/consumers')).text(process.stdin);}`,
     );
-    let daemonLauncher: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+    let daemonLauncher: TestSubprocess<'pipe', 'pipe', 'pipe'> | undefined;
     let daemonOutput: ReadableStreamDefaultReader<Uint8Array> | undefined;
     const runFixtureDaemon = async (input: Parameters<typeof runSelectedDaemon>[0]) => {
-      const host = Bun.spawn([process.execPath, daemonRunner, JSON.stringify(input)], {
-        env: { ...process.env, ...f.userConfiguration.homeEnvironment },
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const host = testSpawn(
+        [process.execPath, ...testRuntimeFlags, daemonRunner, JSON.stringify(input)],
+        {
+          env: { ...process.env, ...f.userConfiguration.homeEnvironment },
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
       if (input.arguments.kind === 'server' && input.arguments.action === 'start') {
         daemonLauncher = host;
         daemonOutput = host.stdout.getReader();
@@ -127,8 +117,8 @@ for (const connection of ['paired', 'shared'] as const)
         daemonLauncher = undefined;
       }
     };
-    let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-    let building: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let building: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let buildResult: Promise<[string, string, number]> | undefined;
     let seed:
       | Awaited<ReturnType<Awaited<ReturnType<typeof recoveryProfile>>['launch']>>
@@ -160,7 +150,7 @@ for (const connection of ['paired', 'shared'] as const)
           if (process.platform === 'win32') {
             const b = original.bootstrap;
             if (!b) {
-              const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(pid), '/f'], {
+              const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(pid), '/f'], {
                 stdout: 'pipe',
                 stderr: 'pipe',
               });
@@ -188,7 +178,7 @@ for (const connection of ['paired', 'shared'] as const)
         const end = Date.now() + 5000;
         while (original.observation.inspect() !== 'dead') {
           if (Date.now() > end) throw Error('caller_owned_service_exit_unknown');
-          await Bun.sleep(5);
+          await testSleep(5);
         }
         original.observation.close();
         owned.delete(pid);
@@ -215,9 +205,10 @@ for (const connection of ['paired', 'shared'] as const)
         });
     };
     try {
-      building = Bun.spawn(
+      building = testSpawn(
         [
           process.execPath,
+          ...testRuntimeFlags,
           join(repo, 'scripts/release/terminal.ts'),
           'build',
           '--directory',
@@ -243,15 +234,19 @@ for (const connection of ['paired', 'shared'] as const)
       if (buildCode !== 0) throw Error(`caller_candidate_build_failed:${buildErr}`);
       const selected = verifyTerminalBundle(candidateRoot);
       const artifact = selected.artifact;
-      const reader = join(f.root, 'candidate-readonly.ts');
+      const reader = join(f.root, 'candidate-readonly.mjs');
+      const agentAsset = (name: string) =>
+        JSON.stringify(
+          pathToFileURL(join(selected.root, 'node_modules/@kite-ai/agent', name)).href,
+        );
       writeFileSync(
         reader,
-        `import{strict as assert}from'node:assert';import{Database}from'bun:sqlite';import{acquireArtifactAccess}from${JSON.stringify(pathToFileURL(join(selected.root, 'node_modules/@kite-ai/agent/artifact-access.js')).href)};import{initializeSqliteEngine}from${JSON.stringify(pathToFileURL(join(selected.root, 'node_modules/@kite-ai/agent/sqlite-engine.js')).href)};const pin=acquireArtifactAccess({root:${JSON.stringify(selected.root)},mode:'shared'});try{const engine=initializeSqliteEngine({root:${JSON.stringify(join(selected.root, 'node_modules/@kite-ai/agent/storage/engine'))},manifestSha256:${JSON.stringify(selected.manifest.sqlite.manifestSha256)}});assert.equal(engine.version,${JSON.stringify(selected.manifest.sqlite.version)});assert.equal(engine.sourceId,${JSON.stringify(selected.manifest.sqlite.sourceId)});const db=new Database(${JSON.stringify(f.profile.databasePath)},{readonly:true});try{console.log(JSON.stringify(db.query(process.argv[2]!).all()));}finally{db.close();}}finally{pin.release();}`,
+        `import{strict as assert}from'node:assert';import{Database}from${agentAsset('runtime-sqlite.js')};import{acquireArtifactAccess}from${agentAsset('artifact-access.js')};import{initializeSqliteEngine}from${agentAsset('sqlite-engine.js')};const pin=acquireArtifactAccess({root:${JSON.stringify(selected.root)},mode:'shared'});try{const engine=initializeSqliteEngine({root:${JSON.stringify(join(selected.root, 'node_modules/@kite-ai/agent/storage/engine'))},manifestSha256:${JSON.stringify(selected.manifest.sqlite.manifestSha256)}});assert.equal(engine.version,${JSON.stringify(selected.manifest.sqlite.version)});assert.equal(engine.sourceId,${JSON.stringify(selected.manifest.sqlite.sourceId)});const db=new Database(${JSON.stringify(f.profile.databasePath)},{readonly:true});try{console.log(JSON.stringify(db.query(process.argv[2]).all()));}finally{db.close();}}finally{pin.release();}`,
       );
       // The fixture process already opened its development SQLite. Cold candidate WAL must
       // be read by a fresh process selecting the same verified engine before its first DB.
       f.rows = (sql: string) => {
-        const result = Bun.spawnSync([artifact.executable, reader, sql], {
+        const result = testSpawnSync([artifact.executable, reader, sql], {
           stdout: 'pipe',
           stderr: 'pipe',
         });
@@ -305,17 +300,9 @@ for (const connection of ['paired', 'shared'] as const)
         contextSelectionId,
         extensionInputs: [
           {
-            extensionId: 'builtin.skill-workflow',
+            extensionId: 'builtin.planning',
             definitionVersion: '1',
-            input: {
-              activations: [
-                {
-                  key: 'original-workflow',
-                  skillId: 'skill:caller-owned',
-                  input: { full: '保留完整正文🙂\r\n' },
-                },
-              ],
-            },
+            input: { mode: 'plan' },
           },
         ],
       };
@@ -324,9 +311,9 @@ for (const connection of ['paired', 'shared'] as const)
         if (connection === 'shared') argv = [...argv, '--server', socket];
         writeFileSync(
           runner,
-          `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{runSelectedCLI}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/index.ts')).href)};import{parseCLIArguments}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/arguments.ts')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=((...args)=>{const original=actualSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(artifact.entrypoint)})){writeFileSync(${JSON.stringify(`${currentPIDPath}.spawned`)},JSON.stringify({pid:original.pid,start:readProcessStartIdentity(original.pid),entrypoint:${JSON.stringify(artifact.entrypoint)}}));}return original;});const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',mode:${JSON.stringify(mode)},method:req.method,json})+'\\n');res.socket!.destroy();${mode === 'post' ? "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');" : ''}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',mode:${JSON.stringify(mode)},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');${mode === 'prepared' ? `if(method==='POST'&&url.pathname==='/v1/sessions/s/commands'){writeFileSync(${JSON.stringify(`${base}.prepared-barrier`)},'prepared');if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');}` : ''}if(drop&&${mode === 'post' ? "method==='POST'&&url.pathname==='/v1/sessions/s/commands'" : mode === 'get' ? "method==='GET'&&url.pathname==='/v1/commands/cli-original'" : 'false'}){drop=false;forwarding=url.href;const pending=actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);${mode === 'post' ? `if(process.platform==='win32'){void pending.catch(()=>{});await new Promise(()=>{});}` : ''}return pending;}return actual(...args);},{preconnect:actual.preconnect});const hostExit=new AbortController();try{process.exitCode=await runSelectedCLI({exitSignal:hostExit.signal,arguments:parseCLIArguments(${JSON.stringify(argv)}),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)},onLaunched:c=>writeFileSync(${JSON.stringify(currentPIDPath)},JSON.stringify({pid:c.pid,start:readProcessStartIdentity(c.pid),bootstrap:c.bootstrap})),write:l=>{console.log(l);if(${mode === 'normal'}&&JSON.parse(l).kind==='work.event'&&(JSON.parse(l).line.startsWith('accepted ')||JSON.parse(l).line.includes('outcome_unknown')))hostExit.abort();},prompt:l=>process.stderr.write(l)});}finally{relay.close();}`,
+          `import{appendFileSync,writeFileSync}from'node:fs';import{createServer}from'node:http';import{runSelectedCLI}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/index.ts')).href)};import{parseCLIArguments}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/src/arguments.ts')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};process.env.KITE_MANAGEMENT_SERVICE_ENTRY=${JSON.stringify(artifact.entrypoint)};process.env.KITE_MANAGEMENT_OBSERVATION=${JSON.stringify(`${currentPIDPath}.spawned`)};await import(${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/test/fixtures/tui-management-observation.ts')).href)});const actual=fetch;let drop=true,forwarding='';const relay=createServer(async(req,res)=>{let body='';for await(const b of req)body+=b;const headers=new Headers();for(const[k,v]of Object.entries(req.headers))if(v&&!['host','connection','content-length'].includes(k))headers.set(k,Array.isArray(v)?v.join(','):v);const response=await actual(forwarding,{method:req.method,headers,...(req.method==='POST'?{body}:{})});const json=await response.json();appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'physical_loss',mode:${JSON.stringify(mode)},method:req.method,json})+'\\n');res.socket!.destroy();${mode === 'post' ? "if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');" : ''}});await new Promise<void>(r=>relay.listen(0,'127.0.0.1',r));const address=relay.address()as{port:number};globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const method=args[1]?.method??'GET',url=new URL(String(args[0]));appendFileSync(${JSON.stringify(wire)},JSON.stringify({event:'request',mode:${JSON.stringify(mode)},method,path:url.pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');${mode === 'prepared' ? `if(method==='POST'&&url.pathname==='/v1/sessions/s/commands'){writeFileSync(${JSON.stringify(`${base}.prepared-barrier`)},'prepared');if(process.platform==='win32')await new Promise(()=>{});else process.kill(process.pid,'SIGKILL');}` : ''}if(drop&&${mode === 'post' ? "method==='POST'&&url.pathname==='/v1/sessions/s/commands'" : mode === 'get' ? "method==='GET'&&url.pathname==='/v1/commands/cli-original'" : 'false'}){drop=false;forwarding=url.href;const pending=actual('http://127.0.0.1:'+address.port+url.pathname,args[1]);${mode === 'post' ? `if(process.platform==='win32'){void pending.catch(()=>{});await new Promise(()=>{});}` : ''}return pending;}return actual(...args);});const hostExit=new AbortController();try{process.exitCode=await runSelectedCLI({exitSignal:hostExit.signal,arguments:parseCLIArguments(${JSON.stringify(argv)}),artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)},onLaunched:c=>writeFileSync(${JSON.stringify(currentPIDPath)},JSON.stringify({pid:c.pid,start:readProcessStartIdentity(c.pid),bootstrap:c.bootstrap})),write:l=>{console.log(l);if(${mode === 'normal'}&&JSON.parse(l).kind==='work.event'&&(JSON.parse(l).line.startsWith('accepted ')||JSON.parse(l).line.includes('outcome_unknown')))hostExit.abort();},prompt:l=>process.stderr.write(l)});}finally{relay.close();}`,
         );
-        child = Bun.spawn([process.execPath, runner], {
+        child = testSpawn([process.execPath, ...testRuntimeFlags, runner], {
           env: { ...process.env, ...f.userConfiguration.homeEnvironment },
           stdout: 'pipe',
           stderr: 'pipe',
@@ -359,7 +346,7 @@ for (const connection of ['paired', 'shared'] as const)
           ) {
             if (child.exitCode !== null || Date.now() > end)
               throw Error('caller_original_kill_barrier_missing');
-            await Bun.sleep(20);
+            await testSleep(20);
           }
           process.kill(child.pid, 0);
           if (connection === 'paired') {
@@ -369,7 +356,7 @@ for (const connection of ['paired', 'shared'] as const)
               bootstrap: record.bootstrap,
             });
           }
-          const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+          const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
             stdout: 'pipe',
             stderr: 'pipe',
           });
@@ -656,7 +643,7 @@ test('actual paired main work JSON waits through original Tool approval and comp
   const f = await recoveryProfile(),
     base = `${f.root}-cli-complete`,
     runner = join(f.root, 'complete.ts');
-  let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+  let child: TestSubprocess<'pipe', 'pipe', 'pipe'> | undefined;
   let seed: Awaited<ReturnType<Awaited<ReturnType<typeof recoveryProfile>>['launch']>> | undefined;
   let failure: unknown;
   let observation: ReturnType<typeof retainProcessObservation> | undefined;
@@ -669,7 +656,7 @@ test('actual paired main work JSON waits through original Tool approval and comp
       if (observation.inspect() === 'alive') {
         if (!failure) throw Error('actual_main_service_not_closed');
         if (process.platform === 'win32') {
-          const dispatch = Bun.spawnSync(['taskkill.exe', '/pid', String(record.pid), '/f'], {
+          const dispatch = testSpawnSync(['taskkill.exe', '/pid', String(record.pid), '/f'], {
             stdout: 'pipe',
             stderr: 'pipe',
           });
@@ -705,9 +692,9 @@ test('actual paired main work JSON waits through original Tool approval and comp
     };
     writeFileSync(
       runner,
-      `import{writeFileSync}from'node:fs';import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};import{runCLIProcess}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/main.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=((...args)=>{const original=actualSpawn(...args);const command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(f.artifact.entrypoint)})){const record={pid:original.pid,start:readProcessStartIdentity(original.pid),entrypoint:${JSON.stringify(f.artifact.entrypoint)}};writeFileSync(${JSON.stringify(ownedPath)},JSON.stringify(record));void original.exited.then(code=>writeFileSync(${JSON.stringify(`${ownedPath}.exit`)},JSON.stringify({...record,code})));}return original;});process.exitCode=await runCLIProcess({argv:${JSON.stringify(['work', 's', '--input', JSON.stringify(request)])},artifact:${JSON.stringify(f.artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)}});`,
+      `import{writeFileSync}from'node:fs';import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};import{runCLIProcess}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/main.ts')).href)};process.env.KITE_MANAGEMENT_SERVICE_ENTRY=${JSON.stringify(f.artifact.entrypoint)};process.env.KITE_MANAGEMENT_OBSERVATION=${JSON.stringify(`${ownedPath}`)};await import(${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/test/fixtures/tui-management-observation.ts')).href)});process.exitCode=await runCLIProcess({argv:${JSON.stringify(['work', 's', '--input', JSON.stringify(request)])},artifact:${JSON.stringify(f.artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(f.workspace)}});`,
     );
-    child = Bun.spawn([process.execPath, runner], {
+    child = testSpawn([process.execPath, ...testRuntimeFlags, runner], {
       env: { ...process.env, ...f.userConfiguration.homeEnvironment },
       stdin: 'pipe',
       stdout: 'pipe',
@@ -720,7 +707,7 @@ test('actual paired main work JSON waits through original Tool approval and comp
       for await (const chunk of stream) {
         value += decoder.decode(chunk, { stream: true });
         writeFileSync(path, value);
-        if (approve && !answered && value.includes('Answer approve (once)')) {
+        if (approve && !answered && value.includes('Answer approve (仅此次)')) {
           answered = true;
           child!.stdin.write('approve\n');
           child!.stdin.end();
@@ -813,7 +800,7 @@ test('actual paired main work JSON waits through original Tool approval and comp
     expect(result.run.originStoreId).toBe(f.storeId);
     expect(result.run.sessionId).toBe('s');
     expect(out).toContain('RECOVERED_ORIGINAL_DONE');
-    expect(err).toContain('Answer approve (once)');
+    expect(err).toContain('Answer approve (仅此次)');
     expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('ORIGINAL_EFFECT_ONCE');
     expect(f.calls()).toBe(3);
     expect(f.rows("SELECT count(*) AS n FROM command WHERE id='cli-complete'")).toEqual([{ n: 1 }]);

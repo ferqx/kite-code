@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { ScheduledTaskDraft, ScheduledTasksProps } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
 import { useNativeScheduledTasks } from '../../src/native-scheduled-tasks';
 import type { NativeScheduledResult } from '../../src/scheduled-bridge';

@@ -1,8 +1,8 @@
-import { constants, Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { constants, Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ExecutionRecord, RunRecord, Store } from '@kite-ai/agent/storage';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import type { AgentClient } from '@kite-ai/client';

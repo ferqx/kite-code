@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { type AgentClient, type Interaction, interactionAttachment } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   type AttachmentView,
   NativeInteractionAttachmentReads,
@@ -347,7 +348,7 @@ test.each([
     const deadline = Date.now() + 1000;
     while (failedViewReads === 0) {
       if (Date.now() >= deadline) throw Error('original view failure was not observed');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     await main.invoke({ method: 'state', generation: 1 });
     expect(await code(main.invoke(answer))).not.toBe('success');
@@ -358,7 +359,7 @@ test.each([
     const restoreDeadline = Date.now() + 1000;
     while (successfulViewReads === beforeRestore) {
       if (Date.now() >= restoreDeadline) throw Error('original view restoration was not observed');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     await main.invoke({ method: 'state', generation: 1 });
     expect(await code(main.invoke(answer))).toBe('success');

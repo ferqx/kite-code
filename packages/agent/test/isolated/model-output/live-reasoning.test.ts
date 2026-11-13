@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -34,7 +35,7 @@ test('small live reasoning prefix is publicly readable before finish without rel
           startedFirst();
           await firstHeld;
           yield { type: 'tool_call', id: 'original-call', name: 'local.check', arguments: '{}' };
-          await Bun.sleep(110);
+          await sleepTimer(110);
           yield { type: 'reasoning_delta', text: ' continued' };
           started();
           await held;

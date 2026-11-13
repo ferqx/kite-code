@@ -1,4 +1,3 @@
-import { afterAll, afterEach, expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { TrajectoryEvidenceSource } from '@kite-ai/client';
 import {
@@ -10,6 +9,7 @@ import {
 import type { TrajectoryMaterialTarget } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
+import { afterAll, afterEach, expect, mock, test } from '#kite-test';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
 import type { NativeTrajectoryLocalCache } from '../../src/trajectory-bridge';
 

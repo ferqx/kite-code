@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -10,10 +9,16 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { hostBuildEnvironment } from '../../fixtures/build-tool-environment';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 
 type Manifest = {
   name: string;
@@ -28,7 +33,7 @@ async function child(
   deadlineMs = 20000,
   env: NodeJS.ProcessEnv = {},
 ) {
-  const process = Bun.spawn(command, { cwd, env, stdout: 'pipe', stderr: 'pipe' });
+  const process = spawnFixtureProcess(command, { cwd, env, stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => process.kill('SIGKILL'), deadlineMs);
   try {
     const [code, stdout, stderr] = await Promise.all([
@@ -73,7 +78,7 @@ async function wait(path: string, deadlineMs = 10000) {
   const deadline = Date.now() + deadlineMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) throw Error(`owned_file_deadline:${path}`);
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 async function dead(pid: number) {
@@ -86,12 +91,12 @@ async function dead(pid: number) {
       throw error;
     }
     if (Date.now() > deadline) throw Error('owned_pid_exit_unconfirmed');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 async function warm(built: Awaited<ReturnType<typeof distribution>>, root: string, mode: string) {
   mkdirSync(root, { recursive: true });
-  const host = Bun.spawn(
+  const host = spawnFixtureProcess(
     [
       process.execPath,
       join(built.extension, 'host.js'),
@@ -395,7 +400,7 @@ async function distribution() {
   expect(existsSync(join(modules, '@kite-ai/agent/storage/migrations/0001-baseline.sql'))).toBe(
     true,
   );
-  const node = Bun.which('node');
+  const node = findFixtureExecutable('node');
   if (!node) throw Error('qualified_node_unavailable');
   return {
     root,

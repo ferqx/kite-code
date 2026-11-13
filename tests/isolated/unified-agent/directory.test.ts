@@ -1,12 +1,13 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
 import { startService } from '../../../apps/service/src';
 import { startDevelopmentWeb } from '../../../apps/service/src/development-web';
 import { semanticDigest } from '../../../packages/agent/src/json';
@@ -52,7 +53,7 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
   const profile = { dataRoot: root, name: 'test', accessKey: 'directory-fixture' };
   let service: Awaited<ReturnType<typeof startService>> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
-  let web: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let web: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let peer: Awaited<ReturnType<typeof startService>> | undefined;
   let peerClient: ReturnType<typeof createClient> | undefined;
   try {
@@ -137,7 +138,7 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
     const summaries = await client.listAllSessionDirectory();
     expect(summaries.map((item) => item.session.id)).toEqual(all.map((item) => item.id));
     const beforeRename = summaries.find((item) => item.session.id === 's-0')!;
-    await Bun.sleep(2);
+    await fixtureDelay(2);
     await client.renameSession('s-0', {
       expectedStoreId: storeId,
       commandId: 'rename-s-0',
@@ -199,7 +200,7 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
     });
     await peerClient.connect();
     expect((await peerClient.listAllSessions()).map((item) => item.id)).toEqual(['foreign']);
-    web = startDevelopmentWeb({ admittedClient: client });
+    web = await startDevelopmentWeb({ admittedClient: client });
     const shell = await fetch(web.endpoint),
       cookie = shell.headers.get('set-cookie')!.split(';')[0]!;
     await shell.body?.cancel();
@@ -286,7 +287,7 @@ test('actual Core activity follows message clocks independently of mode, rename,
     });
     const firstMessageTime = (await activity()).updatedAt!;
     expect(firstMessageTime).toBeGreaterThan(0);
-    await Bun.sleep(2);
+    await fixtureDelay(2);
     const safeRequest = {
       scope: 'session',
       sessionId: 'working',
@@ -814,7 +815,7 @@ test('worktree navigation provenance requires a unique visible original create a
       const configuration = {
         configurationId: 'fixture',
         sourceCwd: sourcePath,
-        bunPath: join(root, 'bun'),
+        runtimePath: join(root, 'bun'),
         workerPath: join(root, 'worker.js'),
         configPath: join(root, 'bunfig.toml'),
         hooksPath: join(root, 'hooks'),

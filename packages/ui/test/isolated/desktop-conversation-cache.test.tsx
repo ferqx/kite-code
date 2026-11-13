@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, Profiler, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import {
   useConversationReadActive,
   useConversationResourceRetention,

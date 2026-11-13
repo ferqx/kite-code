@@ -80,7 +80,7 @@ export async function runLiveAgentEvents(options: {
     started = performance.now();
   const code = liveCodeEvidence();
   const scriptSha256 = createHash('sha256')
-    .update(readFileSync(import.meta.path))
+    .update(readFileSync(import.meta.filename))
     .digest('hex');
   const root = `${options.output}.workspace`;
   mkdirSync(root, { mode: 0o700 });

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,9 +5,18 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   parseShellModelFeedback,
@@ -19,7 +26,7 @@ import { ownedUserConfiguration } from '../../../service/test/fixtures/user-conf
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('built Service and actual PTY permission controls preserve exact grants and change a pending Run to Full', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-permissions-'))),
     workspace = join(root, 'workspace'),
@@ -37,9 +44,9 @@ test('built Service and actual PTY permission controls preserve exact grants and
   let calls = 0,
     reviewCalls = 0;
   let passed = false;
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let observer: Database | undefined;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -173,10 +180,10 @@ test('built Service and actual PTY permission controls preserve exact grants and
       fixture,
       `import {runServiceProcess} from ${JSON.stringify(pathToFileURL(defaultMain).href)};await runServiceProcess();`,
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [fixture],
       outdir: join(root, 'built'),
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       external: [pathToFileURL(defaultMain).href],
     });
@@ -221,11 +228,11 @@ test('built Service and actual PTY permission controls preserve exact grants and
       runner,
       `import {writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};await runTUIHost({testDiagnostics:true,artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(root, 'owned-service-pid'))},String(pid))});`,
     );
-    child = Bun.spawn(
+    child = testSpawn(
       [
         process.execPath,
-        '--no-install',
-        join(import.meta.dir, '../fixtures/tui-permissions-driver.ts'),
+        ...testRuntimeFlags,
+        join(import.meta.dirname, '../fixtures/tui-permissions-driver.ts'),
         JSON.stringify({
           runner,
           root,

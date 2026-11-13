@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -9,11 +8,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 test('native builds retain fixed renderer entries while development uses only Vite renderer assets', async () => {
   const temporary = mkdtempSync(
-    join(resolve(import.meta.dir, '../../../..'), '.cache/native-global-dialog-build-'),
+    join(resolve(import.meta.dirname, '../../../..'), '.cache/native-global-dialog-build-'),
   );
   const service = join(temporary, 'service.js');
   writeFileSync(service, 'export {};\n'); // Build input only; no Service or client is executed.
@@ -23,8 +23,8 @@ test('native builds retain fixed renderer entries while development uses only Vi
     kind: 'development' as const,
     serviceEntrypoint: service,
     serviceSha256: hash(service),
-    bunExecutable: bun,
-    bunSha256: hash(bun),
+    runtimeExecutable: bun,
+    runtimeSha256: hash(bun),
     buildId: 'dialog-build-fixture',
     apiMajor: 1,
     requiredCapabilities: [],

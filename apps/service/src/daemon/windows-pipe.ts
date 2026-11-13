@@ -1,3 +1,4 @@
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 import { retainWindowsProcess } from './windows-process';
 import { windowsDaemonSecurity } from './windows-security';
 
@@ -12,7 +13,6 @@ function validate(pipe: string) {
 function native() {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw error('daemon_platform_unsupported');
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetLastError: { args: [], returns: 'u32' },
     CreateNamedPipeW: {

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { describeInput, serializeInput } from '../src/form';
 
 test('flat schema creates typed fields and preserves future draft keys', () => {

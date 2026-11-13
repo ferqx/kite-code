@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -9,23 +8,25 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { DesktopInput, type InputSubmission } from '../../../apps/desktop/src/input';
 
 async function until(check: () => Promise<boolean>) {
   const deadline = Date.now() + 6000;
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error('input_test_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 async function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-desktop-input-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const handle = await launchPairedService({
-    entrypoint: join(import.meta.dir, '../../fixtures/unified-agent/desktop-input.ts'),
+    entrypoint: join(import.meta.dirname, '../../fixtures/unified-agent/desktop-input.ts'),
     profile,
     instanceId: 'input-test',
     buildId: 'input-test',

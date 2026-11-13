@@ -16,8 +16,8 @@ const profile = JSON.parse(profileJson!),
 const acquire = () =>
   acquireDesktopProfileAccess({
     profile,
-    bunExecutable: bunExecutable!,
-    bunSha256: bunSha256!,
+    runtimeExecutable: bunExecutable!,
+    runtimeSha256: bunSha256!,
     helperPath: helperPath!,
     helperSha256: helperSha256!,
   });

@@ -1,9 +1,11 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import type { McpSourceReadSet } from '../../../src/config/mcp-sources';
 import type {
   AuthorizationRequest,
@@ -67,7 +69,7 @@ async function fixture(
   let sourcePath = '';
   let resolves = 0,
     replacements = 0;
-  const peer = Bun.serve({
+  const peer = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -268,7 +270,7 @@ async function fixture(
       );
       if (e && ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(e.status)) return e;
       if (Date.now() > deadline) throw Error('reconnection_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   }
   async function query(executionId: string, sessionId = 's') {
@@ -366,7 +368,7 @@ async function fixture(
       const deadline = Date.now() + 5000;
       while (!resultFaultId) {
         if (Date.now() > deadline) throw Error('owned_action_result_fault_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       return resultFaultId;
     },
@@ -471,7 +473,7 @@ async function fixture(
           return card;
         }
         if (Date.now() > deadline) throw Error('owned_refusal_card_missing');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     },
     setUnknown() {
@@ -905,7 +907,7 @@ test('replacement terminal wait timeout keeps the original unknown after the rea
     const deadline = Date.now() + 5000;
     while ((await f.store.getExecution(childId))?.status !== 'failed') {
       if (Date.now() > deadline) throw Error('owned_replacement_terminal_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(await f.store.getExecution(childId)).toMatchObject({ resultRevision: '1' });
     expect(await f.store.getExecution(r.id)).toEqual(r);
@@ -984,7 +986,7 @@ test('closing during replacement open collects late owned handle; no discovery o
     let child = await f.store.getExecution(childId);
     while (child && ['running', 'dispatching'].includes(child.status)) {
       if (Date.now() > deadline) throw Error('late_owned_job_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       child = await f.store.getExecution(childId);
     }
     expect(child?.result).toMatchObject({
@@ -1034,7 +1036,7 @@ for (const fault of [
         let child = await f.store.getExecution(children[0]!.id);
         while (child && ['planned', 'dispatching', 'running'].includes(child.status)) {
           if (Date.now() > deadline) throw Error('unopened_job_terminal_deadline');
-          await Bun.sleep(5);
+          await sleepTimer(5);
           child = await f.store.getExecution(children[0]!.id);
         }
         expect(child?.status).toBe('failed');

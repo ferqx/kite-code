@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type TrajectoryEvent,
   type TrajectoryIntegrity,
@@ -7,6 +6,7 @@ import {
   trajectoryEventSchema,
   verifyTrajectoryPage,
 } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { decodeResponse } from '../src/decode';
 import {
   createTrajectoryBundle,

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { countTokens } from 'gpt-tokenizer/encoding/cl100k_base';
+import { expect, test } from '#kite-test';
 import { estimateModelContext } from '../../src/context-estimate';
 
 test('request estimate counts exact Unicode content, Tool calls and schemas with original framing', () => {

@@ -1,4 +1,3 @@
-import { expect, setDefaultTimeout, test } from 'bun:test';
 import {
   existsSync,
   linkSync,
@@ -12,7 +11,9 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, setDefaultTimeout, test } from '#kite-test';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
+import { releaseArchiveBytes } from '../../../scripts/release/archive-compression';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import { readCandidateArchiveFiles } from '../../../scripts/release/terminal-archive';
 import { privateDirectory } from '../../fixtures/test-filesystem';
@@ -163,7 +164,7 @@ test('finite Native archive closed regular inventory refuses bad SHA, extra/miss
       const altered = new Map(files);
       mutate(altered);
       const archivePath = join(parent, `bad-${i}.tgz`),
-        bytes = await new Bun.Archive(Object.fromEntries(altered), { compress: 'gzip' }).bytes();
+        bytes = await releaseArchiveBytes(Object.fromEntries(altered), 'fixture.tar.gz');
       writeFileSync(archivePath, bytes);
       const destination = join(parent, `bad-${i}`);
       expect(() => unpackNativeBundle({ archivePath, sha256: hash(bytes), destination })).toThrow();

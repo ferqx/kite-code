@@ -38,6 +38,7 @@ import {
   UserSkillDocumentSchema,
 } from './http/schema/skill-catalogue';
 import { createHttpLifecycle } from './lifecycle';
+import { serveLoopback } from './loopback-server';
 import { executionResponse, messageResponses } from './message-response';
 import { modelInputResponse, modelOutputResponse } from './model-input-response';
 import {
@@ -1379,6 +1380,7 @@ export async function startService(options: ServiceOptions) {
       )
     )
       throw new HttpFailure('lifecycle_identity_mismatch', 409);
+    server.flushResponse(context.req.raw);
     const result = beginShutdown(input.mode);
     if (!result.accepted) throw new HttpFailure('lifecycle_busy', 409);
     return context.json(
@@ -2388,7 +2390,6 @@ export async function startService(options: ServiceOptions) {
     const scope = sessionIds ? { sessionIds } : {};
     const baseline = await runtime.getChanges({ after: scanCursor, limit: 100, ...scope });
     if (baseline.metadata.storeId !== storeId) throw new HttpFailure('store_changed', 410);
-    server.timeout(context.req.raw, 0);
     const abort = new AbortController();
     subscribers.add(abort);
     const onDisconnect = () => abort.abort();
@@ -2493,7 +2494,7 @@ export async function startService(options: ServiceOptions) {
       },
     });
   });
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: app.fetch });
+  const server = await serveLoopback((request) => app.fetch(request));
   endpoint = `http://127.0.0.1:${server.port}`;
   const info = await serverInfo().catch(async (error) => {
     await server.stop(true);

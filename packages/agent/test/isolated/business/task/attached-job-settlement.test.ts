@@ -1,11 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../../src';
 import type { Extension } from '../../../../src/extensions';
 import { openSqliteStore } from '../../../../src/sqlite';
@@ -32,7 +33,7 @@ async function until<T>(read: () => Promise<T>, check: (value: T) => boolean) {
     const value = await read();
     if (check(value)) return value;
     if (Date.now() > end) throw Error('attached_job_settlement_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 for (const scenario of ['attached', 'detached', 'cancel', 'wake_race', 'close'] as const)

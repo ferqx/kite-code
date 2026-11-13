@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { openSqliteStore } from '../../../src/sqlite';
 import { finalBody, finish, fixture, gate, until } from './steering-boundaries.fixture';
 

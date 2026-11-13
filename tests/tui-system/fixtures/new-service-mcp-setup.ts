@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { createClient, type ServerInfo, type SessionView } from '@kite-ai/client';
 import { decodeTuiMcpSnapshot } from '@kite-ai/ui/tui';
 import { decodeMcpConnectionFact } from '../../../apps/cli/host/tui-mcp-connection';
@@ -110,7 +111,7 @@ export function installOriginalMcpSetup(options?: {
               break;
             }
           }
-          await Bun.sleep(25);
+          await testSleep(25);
         }
       }
     }
@@ -258,7 +259,7 @@ export function installOriginalMcpSetup(options?: {
               }
             } else if (command.status === 'rejected' || command.status === 'needs_review')
               throw Error('fixture_mcp_action_failed');
-            await Bun.sleep(25);
+            await testSleep(25);
           }
           throw Error('fixture_mcp_action_unsettled');
         };

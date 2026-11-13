@@ -1,13 +1,13 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createTaskExtension } from '../../../src/extensions/task';
 import { createRuntime } from '../../../src/runtime';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import { readBackgroundExecutions } from '../../../src/storage/sqlite/background-directory';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';

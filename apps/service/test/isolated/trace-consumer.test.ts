@@ -1,13 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import type { TraceEventBatch, TrajectoryEvent, TrajectoryPage } from '@kite-ai/trajectory';
+import { afterEach, describe, expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   TraceConsumerCleanupError,
   TraceConsumerStore,
@@ -39,7 +40,7 @@ const grant: TraceGrant = {
   allowHistory: true,
 };
 function setup(upper = '30', trusted = false) {
-  const root = mkdtempSync(join(tmpdir(), 'kite-trace-consumer-'));
+  const root = temporaryDirectory('kite-trace-consumer-');
   roots.push(root);
   const path = join(root, 'consumer.db'),
     store = new TraceConsumerStore(path);
@@ -198,7 +199,7 @@ async function killConsumerAt(input: {
   writeFileSync(path, JSON.stringify(input));
   const child = spawn(
     process.execPath,
-    [join(import.meta.dir, 'trace-consumer-crash.fixture.ts'), path],
+    [...testRuntimeFlags, join(import.meta.dirname, 'trace-consumer-crash.fixture.ts'), path],
     { stdio: ['ignore', 'pipe', 'pipe'] },
   );
   let stderr = '',
@@ -510,10 +511,29 @@ describe('persistent Trace consumer state', () => {
   test('a failed SQLite enqueue transaction advances neither membership nor scan', () => {
     const { store, partition, path } = setup();
     const fault = new Database(path);
+    const originalPrepare = Database.prototype.prepare;
+    const statements: ReturnType<Database['prepare']>[] = [];
     fault.exec(
       "CREATE TRIGGER fail_second BEFORE INSERT ON pending WHEN NEW.sequence='2' BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END;",
     );
-    expect(() => store.enqueuePage(partition, page(store, partition, ['1', '2'], '30'))).toThrow();
+    try {
+      Database.prototype.prepare = function <
+        Row,
+        Params extends import('@kite-ai/agent/runtime-sqlite').SQLQueryBindings[],
+      >(sql: string) {
+        const stmt = (originalPrepare<Row, Params>).call(this, sql);
+        statements.push(stmt as ReturnType<Database['prepare']>);
+        return stmt;
+      };
+      expect(() =>
+        store.enqueuePage(partition, page(store, partition, ['1', '2'], '30')),
+      ).toThrow();
+    } finally {
+      Database.prototype.prepare = originalPrepare;
+    }
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements)
+      expect(() => statement.get()).toThrow('native_sqlite_statement_finalized');
     expect(store.inspectPartition(partition).pending).toBe(0);
     expect(store.inspectPartition(partition).sourceScanPosition).toBe('0');
     fault.exec('DROP TRIGGER fail_second');

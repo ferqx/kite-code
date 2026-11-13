@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -16,7 +15,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { acquireArtifactAccess } from '../../../src/artifact-access';
 import { assertLiveLock, attachLockResource } from '../../../src/platform/locks';
 import {
@@ -88,7 +92,7 @@ test.skipIf(windows)(
     expect(touched).toBe(false);
     const root = mkdtempSync(join(tmpdir(), 'kite-scope-import-'));
     try {
-      const result = await Bun.build({
+      const result = await buildBundle({
         entrypoints: [
           fileURLToPath(
             new URL('../../../src/platform/windows-artifact-scope.ts', import.meta.url),
@@ -304,16 +308,19 @@ test.skipIf(!windows)(
     const entry = pathToFileURL(
       fileURLToPath(new URL('../../../src/artifact-access.ts', import.meta.url)),
     ).href;
-    const children: ReturnType<typeof Bun.spawn>[] = [];
+    const children: ReturnType<typeof spawnProcess>[] = [];
     try {
       for (let index = 0; index < 2; index++) {
         const marker = join(f.parent, `ready-${index}`);
-        const code = `import {writeFileSync} from 'node:fs';import {acquireArtifactAccess} from ${JSON.stringify(entry)};const lock=acquireArtifactAccess({root:${JSON.stringify(f.root)},mode:'shared'});writeFileSync(${JSON.stringify(marker)},'held');for await(const _ of Bun.stdin.stream()){}lock.release();`;
-        const child = Bun.spawn([process.execPath, '-e', code], {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
+        const code = `import {writeFileSync} from 'node:fs';import {acquireArtifactAccess} from ${JSON.stringify(entry)};const lock=acquireArtifactAccess({root:${JSON.stringify(f.root)},mode:'shared'});writeFileSync(${JSON.stringify(marker)},'held');for await(const _ of process.stdin){}lock.release();`;
+        const child = spawnProcess(
+          [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+          {
+            stdin: 'pipe',
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
         children.push(child);
         const deadline = Date.now() + 5000;
         while (!existsSync(marker)) {
@@ -324,14 +331,14 @@ test.skipIf(!windows)(
             }
             throw Error(`owned_holder_not_ready:${await new Response(child.stderr).text()}`);
           }
-          await Bun.sleep(10);
+          await sleepTimer(10);
         }
       }
       expect(() => acquireArtifactAccess({ root: f.root, mode: 'exclusive' })).toThrow(
         'Lock is busy',
       );
       for (const [index, child] of children.entries()) {
-        (child.stdin as import('bun').FileSink).end();
+        child.stdin!.end();
         expect(await child.exited).toBe(0);
         expect(await new Response(child.stderr as ReadableStream<Uint8Array>).text()).toBe('');
         if (index === 0)
@@ -358,14 +365,14 @@ test('Windows attached lock keeps its original region through scope and native c
     new URL('../../../src/platform/windows-path-security.ts', import.meta.url),
   );
   const code = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
-import * as nativeFFI from 'bun:ffi';
-assert.equal(typeof require('bun:ffi').dlopen, 'function');
+import * as nativeFFI from '@kite-ai/agent/runtime-ffi';
+assert.equal(typeof require('@kite-ai/agent/runtime-ffi').dlopen, 'function');
 Object.defineProperty(process, 'platform', { value: 'win32' });
 let nextHandle = 1n, region, failClose = false, failScope = true;
 const handles = new Map(), calls = [];
-mock.module('bun:ffi', () => ({
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)}, () => ({
   ...nativeFFI,
   ptr: value => value,
   dlopen() {
@@ -447,10 +454,14 @@ assert.deepEqual(calls, ['close:' + replacementHandle, 'dll-close']);
 assert.equal(handles.size, 0);
 console.log('attached-original-close-confirmed');
 `;
-  const child = spawnSync(process.execPath, ['-e', code], {
-    encoding: 'utf8',
-    timeout: 4000,
-  });
+  const child = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    {
+      encoding: 'utf8',
+      timeout: 4000,
+    },
+  );
   if (child.error || child.status !== 0)
     process.stderr.write(child.stderr || `${String(child.error ?? child.signal)}\n`);
   expect(child.error).toBeUndefined();

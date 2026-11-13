@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +16,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createBrowserConfiguration } from '../../src/browser-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import {
@@ -33,7 +34,7 @@ function assets(root: string): NativeBrowserTransportOptions {
     executable,
     browserPath: executable,
     linux: { bubblewrapPath: executable, initExecutable: executable },
-    darwin: { guardianPath: executable, bunExecutable: executable },
+    darwin: { guardianPath: executable, runtimeExecutable: executable },
     runtimeDirectory: join(root, 'private-browser'),
   };
 }
@@ -193,7 +194,7 @@ async function fixture(browserEnabled: boolean | 'missing' = true) {
   const file = join(profile.profilePath, 'config.jsonc');
   const requests: Record<string, unknown>[] = [];
   let toolCall: { name: string; input: JsonObject } | undefined;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

@@ -1,7 +1,7 @@
-import { afterEach, expect, mock, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, matchesGlob } from 'node:path';
+import { afterEach, expect, mock, test } from '#kite-test';
 import type { WorkspaceFiles } from '../../../src/files';
 import * as nativeBinding from '../../../src/files-native-binding';
 
@@ -277,10 +277,14 @@ test('glob syntax and paged results agree with Bun matching over known visible f
     '!*.md',
   ];
   for (const pattern of patterns) {
-    const matcher = new Bun.Glob(pattern);
+    const excludes = pattern.startsWith('!');
+    const glob = excludes ? pattern.slice(1) : pattern;
     // The public basename-only contract matches each file's basename at any depth.
     const expected = visible
-      .filter((path) => matcher.match(pattern.includes('/') ? path : path.split('/').at(-1)!))
+      .filter(
+        (path) =>
+          matchesGlob(pattern.includes('/') ? path : path.split('/').at(-1)!, glob) !== excludes,
+      )
       .sort();
     for (const limit of [1, 2]) {
       const collected: string[] = [];

@@ -1,10 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import { startService } from '../../../apps/service/src';
 import { BackgroundExecutionPageSchema } from '../../../apps/service/src/http/schema';
 import { semanticDigest } from '../../../packages/agent/src/json';

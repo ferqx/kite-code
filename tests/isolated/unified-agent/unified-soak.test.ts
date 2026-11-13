@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -14,6 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
+import { expect, test } from '#kite-test';
 import {
   parseUnifiedSoakArgs,
   prepareUnifiedSoakReportPath,
@@ -43,6 +43,7 @@ import {
   verifyBlockedWorkloadCollection,
   verifyUnifiedSoakReport,
 } from '../../../scripts/runtime/unified-soak-report';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
 function packet(): UnifiedSoakReport {
@@ -401,10 +402,10 @@ test.skipIf(process.platform === 'win32')(
 test('actual invalid qualification argv performs no report-directory or Profile I/O', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-soak-invalid-')));
   try {
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
         process.execPath,
-        resolve(import.meta.dir, '../../../scripts/runtime/unified-soak.ts'),
+        resolve(import.meta.dirname, '../../../scripts/runtime/unified-soak.ts'),
         '--profile=qualification',
         `--output=${join(root, 'dist/unified-evidence/report.json')}`,
         '--iterations=1',

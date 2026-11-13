@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { SelectedContextPage, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import {
   TuiController,
   type TuiManagementIntent,
@@ -101,7 +102,7 @@ function fixture() {
   };
   return { port, controller: new TuiController(port), writes, queries, reads, effects };
 }
-const settle = () => Bun.sleep(50);
+const settle = () => fixtureDelay(50);
 async function key(ui: ReturnType<typeof render>, value: string) {
   ui.stdin.write(value);
   await settle();
@@ -297,9 +298,9 @@ test('automatic original management receipt recovery refreshes only history with
     const deadline = Date.now() + 2000;
     while (f.controller.state.management?.status !== 'applied') {
       if (Date.now() > deadline) throw Error('automatic_management_deadline');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(reconciliations).toBe(before);
     expect(f.queries.map((query) => query.intent.request.commandId)).toEqual([
       'automatic-original',
@@ -329,13 +330,13 @@ test('automatic management GET is aborted on scope change and an ignored abort c
     const deadline = Date.now() + 2000;
     while (!finish) {
       if (Date.now() > deadline) throw Error('automatic_management_deadline');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     await f.controller.select('b');
     expect(signal?.aborted).toBe(true);
     const before = f.controller.state;
     finish({ intent: f.writes[0]!, status: 'applied' });
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(f.controller.state.management).toBe(before.management);
     expect(f.controller.state.sessionId).toBe('b');
     expect(f.reads).toEqual(['a', 'b']);

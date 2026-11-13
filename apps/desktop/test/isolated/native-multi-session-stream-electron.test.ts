@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
@@ -13,6 +12,14 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import {
@@ -91,7 +98,7 @@ globalThis.fetch = Object.assign(async (...args) => {
     });
     return response;
   } catch(error) { close(); throw error; }
-}, { preconnect: originalFetch.preconnect });
+}, {});
 `;
 
 const revealCostInstrumentation = String.raw`
@@ -163,7 +170,7 @@ test.skipIf(process.platform !== 'darwin')(
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'desktop' });
     const memoryDirectory = memoryTag
       ? resolve(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../.cache/native-session-stream-evidence',
           `memory-${Date.now()}-${memoryTag}`,
         )
@@ -232,7 +239,7 @@ test.skipIf(process.platform !== 'darwin')(
         }
       }
     }, 700);
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: 0,
@@ -390,7 +397,7 @@ test.skipIf(process.platform !== 'darwin')(
         );
       },
     });
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     let owner: NativeOwnedProcesses | undefined;
     let succeeded = false;
     try {
@@ -417,7 +424,7 @@ test.skipIf(process.platform !== 'darwin')(
       const serviceOutdir = join(root, 'apps/service/dist');
       mkdirSync(serviceOutdir, { recursive: true });
       directoryLink(
-        resolve(import.meta.dir, '../../../service/node_modules'),
+        resolve(import.meta.dirname, '../../../service/node_modules'),
         join(root, 'apps/service/node_modules'),
       );
       const serviceEntrypoint = join(serviceOutdir, 'service.js'),
@@ -426,15 +433,15 @@ test.skipIf(process.platform !== 'darwin')(
       writeFileSync(
         serviceSource,
         shellOptions
-          ? `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/main.ts'))};
-import { createDefaultProcessConfiguration } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/configuration.ts'))};
+          ? `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dirname, '../../../service/src/main.ts'))};
+import { createDefaultProcessConfiguration } from ${JSON.stringify(resolve(import.meta.dirname, '../../../service/src/configuration.ts'))};
 import { selectProfile } from '@kite-ai/agent/profile';
 await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProcessConfiguration({ ordinaryHostTools: true, profile: selectProfile(startup.profile), observerSubjectId: host.subjectId, hostConfiguration: startup.hostConfiguration, shell: ${JSON.stringify(shellOptions)} }), modelConcurrency: 16, processConcurrency: 16 }) });`
-          : `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dir, '../../../service/src/main.ts'))}; await runServiceProcess({ decorateConfiguration: configuration => ({ ...configuration, modelConcurrency: 16 }) });`,
+          : `import { runServiceProcess } from ${JSON.stringify(resolve(import.meta.dirname, '../../../service/src/main.ts'))}; await runServiceProcess({ decorateConfiguration: configuration => ({ ...configuration, modelConcurrency: 16 }) });`,
       );
-      const built = await Bun.build({
+      const built = await buildFixture({
         entrypoints: [serviceSource],
-        target: 'bun',
+        target: 'node',
         format: 'esm',
         packages: 'external',
         outdir: serviceOutdir,
@@ -450,11 +457,11 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
         await buildNativeDesktop(
           {
             serviceEntrypoint,
-            bunExecutable,
+            runtimeExecutable: bunExecutable,
             serviceSha256: createHash('sha256')
               .update(readFileSync(serviceEntrypoint))
               .digest('hex'),
-            bunSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
+            runtimeSha256: createHash('sha256').update(readFileSync(bunExecutable)).digest('hex'),
             buildId: 'native-multi-session-stream-fixture',
             apiMajor: 1,
             requiredCapabilities: ['sessions', 'history', 'commands', 'permission_controls'],
@@ -480,35 +487,38 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
       writeFileSync(
         source,
         readFileSync(
-          resolve(import.meta.dir, '../native-multi-session-stream-electron.fixture.ts'),
+          resolve(import.meta.dirname, '../native-multi-session-stream-electron.fixture.ts'),
           'utf8',
         )
           .replace(
             "'../../../tests/fixtures/loopback-model-environment'",
             JSON.stringify(
-              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+              resolve(
+                import.meta.dirname,
+                '../../../../tests/fixtures/loopback-model-environment.ts',
+              ),
             ),
           )
           .replace(
             "'./native-root-page.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-root-page.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-root-page.fixture.ts')),
           )
           .replace(
             "'./native-model-selection.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
           )
           .replace(
             "import { _electron } from 'playwright';",
-            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
           )
           .replace(
             "from './native-gpu-memory.fixture';",
-            `from ${JSON.stringify(resolve(import.meta.dir, '../native-gpu-memory.fixture.ts'))};`,
+            `from ${JSON.stringify(resolve(import.meta.dirname, '../native-gpu-memory.fixture.ts'))};`,
           ),
       );
       expect(
         (
-          await Bun.build({
+          await buildFixture({
             entrypoints: [source],
             target: 'node',
             format: 'esm',
@@ -519,12 +529,12 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
         ).success,
       ).toBe(true);
       directoryLink(
-        resolve(import.meta.dir, '../../../../node_modules'),
+        resolve(import.meta.dirname, '../../../../node_modules'),
         join(root, 'node_modules'),
       );
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           driverPath,
           outdir,
           root,
@@ -547,7 +557,7 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
       );
       owner = new NativeOwnedProcesses({
         pid: driver.pid,
-        nodeExecutable: realpathSync(Bun.which('node')!),
+        nodeExecutable: realpathSync(findFixtureExecutable('node')!),
         driverPath,
         root,
       });

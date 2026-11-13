@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   linkSync,
@@ -11,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { ensureWindowsElectronPermissions } from '../../../scripts/development/windows-electron-permissions';
 import { directoryLink, temporaryDirectory } from '../../fixtures/test-filesystem';
 

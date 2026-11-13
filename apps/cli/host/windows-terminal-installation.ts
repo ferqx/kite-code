@@ -1,12 +1,17 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
 
 export const windowsTerminalFrontdoorNames = Object.freeze([
   'kite.exe',
   'kite-tui.exe',
   'terminal-verifier.exe',
+] as const);
+export const windowsNodeTerminalFrontdoorNames = Object.freeze([
+  ...windowsTerminalFrontdoorNames,
+  'runtime-native.node',
 ] as const);
 export interface WindowsTerminalInstallationMarker {
   readonly version: 2;
@@ -42,13 +47,14 @@ export function parseWindowsTerminalInstallationMarker(
     typeof value.bootstrap.candidateId !== 'string' ||
     !/^[a-f0-9]{64}$/.test(value.bootstrap.candidateId) ||
     !Array.isArray(value.bootstrap.files) ||
-    value.bootstrap.files.length !== windowsTerminalFrontdoorNames.length
+    (value.bootstrap.files.length !== windowsTerminalFrontdoorNames.length &&
+      value.bootstrap.files.length !== windowsNodeTerminalFrontdoorNames.length)
   )
     denied();
   const files = value.bootstrap.files.map((file, index) => {
     if (
       !closed(file, ['name', 'size', 'sha256']) ||
-      file.name !== windowsTerminalFrontdoorNames[index] ||
+      file.name !== windowsNodeTerminalFrontdoorNames[index] ||
       typeof file.size !== 'number' ||
       !Number.isSafeInteger(file.size) ||
       file.size <= 0 ||
@@ -85,15 +91,13 @@ export function retainWindowsTerminalFrontdoor(marker: WindowsTerminalInstallati
   release(): void;
 } {
   if (process.platform !== 'win32') denied();
-  const { retainWindowsCandidateFiles } =
-    require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
   const bin = join(marker.root, 'bin');
-  const retained = retainWindowsCandidateFiles(bin, windowsTerminalFrontdoorNames);
+  const names = marker.bootstrap.files.map((file) => file.name).sort();
+  const retained = retainWindowsCandidateFiles(bin, names);
   try {
     const verify = () => {
       retained.verify();
-      if (readdirSync(bin).sort().join(',') !== [...windowsTerminalFrontdoorNames].sort().join(','))
-        denied();
+      if (readdirSync(bin).sort().join(',') !== names.join(',')) denied();
       for (const file of marker.bootstrap.files) {
         const path = join(bin, file.name);
         const stat = lstatSync(path);

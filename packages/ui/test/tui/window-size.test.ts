@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { expect, test } from '#kite-test';
 import { inkWindowStore } from '../../src/tui/ink/window-size';
 
 class WindowSource extends EventEmitter {

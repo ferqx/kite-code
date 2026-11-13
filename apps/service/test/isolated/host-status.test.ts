@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -6,6 +5,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -328,7 +328,7 @@ test('diagnostic Store unavailable remains real authenticated HTTP; advertised h
             import.meta.url,
           ),
         ),
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: '/bin/sh',
       },
     });
@@ -350,7 +350,7 @@ test('diagnostic Store unavailable remains real authenticated HTTP; advertised h
         configurationId: 'owned',
         env: {},
         supervisorPath: '/missing-owned-asset',
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: '/bin/sh',
       },
     });

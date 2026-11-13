@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -10,12 +9,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Extension, Json, OperationRef, ToolDefinition } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
@@ -612,7 +613,7 @@ async function sample(id: CaseId, options: Options): Promise<Result> {
           'branch_not_reached',
           'real_seal_Tool_success_and_late_confirmation_not_reached',
         );
-      await Bun.sleep(20);
+      await fixtureDelay(20);
     }
     branch(second && lateConfirm && lateSend && childRead2Run, 'seal_followup_branch_not_reached');
     assert(

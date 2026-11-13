@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   lstatSync,
@@ -11,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -28,6 +28,8 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { createMcpHttpTransportPort } from '@kite-ai/service/mcp-http-port';
 import type { TuiMcpIntent, TuiMcpSnapshot } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createPermissionManagement } from '../../../service/src/permission-management';
 import { createMcpSelectionRecord, mcpCanonical } from '../../host/mcp-selection-intents';
@@ -79,7 +81,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const found = await read();
     if (found !== undefined) return found;
     if (Date.now() > deadline) throw Error('actual_tui_mcp_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 async function fixture(source = false) {
@@ -104,7 +106,7 @@ async function fixture(source = false) {
   let rpc = 0,
     credentialReads = 0,
     ask = false;
-  const remote = Bun.serve({
+  const remote = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {

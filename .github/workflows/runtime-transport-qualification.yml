@@ -18,6 +18,10 @@ on:
       - "tests/fixtures/formal-optional-capabilities/**"
       - "package.json"
       - "bun.lock"
+      - "bunfig.toml"
+      - "scripts/tooling/**"
+      - "scripts/run-test-files.ts"
+      - "scripts/development/node-loader.mjs"
       - ".github/workflows/runtime-transport-qualification.yml"
   workflow_dispatch:
 
@@ -46,79 +50,84 @@ jobs:
           persist-credentials: false
           ref: ${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}
           repository: ${{ env.KITE_CANDIDATE_REPOSITORY }}
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903
+        with:
+          node-version: '26.13.1'
+          package-manager-cache: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.4.4
+          bun-version: '1.4.4'
       - if: runner.os == 'Linux'
         name: Prepare Linux native verifier dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential bubblewrap
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y build-essential pkg-config libffi-dev bubblewrap
       - run: bun install --frozen-lockfile
+      - run: node apps/desktop/node_modules/electron/install.js
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
-        run: bun run scripts/release/prepare-windows-native-ci.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/release/prepare-windows-native-ci.ts
       - name: Build the current eight workspaces for shared caller tests
         run: bun run build
       - name: Complete MCP Tools caller through the current candidate
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-tools-pty.test.ts
       - name: Complete MCP Source caller in a fresh selected engine process
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-mutation-pty.test.ts
       - name: Complete MCP Source approval caller in a fresh selected engine process
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-source-approval-pty.test.ts
       - name: Complete MCP reconnection caller in a fresh selected engine process
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-reconnection-pty.test.ts
       - name: Complete MCP authentication caller through the current candidate
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-auth-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-auth-pty.test.ts
       - name: Complete MCP configuration caller with original pending work
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-pty.test.ts
       - name: Complete cold MCP configuration caller with explicit original lookup
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-cold-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-mcp-cold-pty.test.ts
       - name: Complete paired and shared Skills catalogue callers
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-skills-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-skills-host.test.ts
       - name: Complete formal Terminal output and export in a fresh selected engine process
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-export-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-export-host.test.ts
       - name: Complete default question caller with original final answer
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-question-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-question-pty.test.ts
       - name: Complete original Work caller interruption and cold lookup
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-intents-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-intents-host.test.ts
       - name: Complete paired and shared formal CLI argv callers
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-host.test.ts
       - name: Complete ordinary CLI steer follow-up and cancel recovery
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-kinds.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-kinds.test.ts
       - name: Complete original TUI steer follow-up and cancel recovery
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/caller-kind-crash.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/caller-kind-crash.test.ts
       - name: Complete actual development TUI Session Fork and Context maintenance
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-management-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-management-host.test.ts
       - name: Complete paired and shared model settings with original mutation lookup
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-models-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-models-host.test.ts
       - name: Complete original host status diagnostics and shared daemon loss
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-status-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-status-host.test.ts
       - name: Complete native scrollback resize and clear with original material
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-scrollback-pty.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-scrollback-pty.test.ts
       - name: Validate file candidate directory records on every platform
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/file-candidate-windows-records.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/file-candidate-windows-records.test.ts
       - name: Validate the actual platform file candidate backend
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/file-candidate-windows-native.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/file-candidate-windows-native.test.ts
       - name: Complete Workspace file candidates and original draft completion
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-file-candidates-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-file-candidates-host.test.ts
       - name: Complete permissions caller through formal Shell and review
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-permissions-host.test.ts
       - name: Complete independent Job stop and original cold lookup through formal Shell
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-job-stop.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/tui-caller-job-stop.test.ts
       - name: Complete durable CLI library callers and local rejection contracts
-        run: bun test --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-library.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/cli/test/isolated/cli-caller-library.test.ts
       - run: bun run test:runtime:transport
       - name: Complete explicit Run recovery through the formal Service
-        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/run-resume.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/service/test/isolated/run-resume.test.ts
       - name: Complete explicit Job report recovery through the formal Service
-        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/job-report-resume.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/service/test/isolated/job-report-resume.test.ts
       - name: Complete explicit Job reconciliation through the formal Service
-        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/job-reconcile.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/service/test/isolated/job-reconcile.test.ts
       - name: Preserve original recovery data and unconfirmed preparation owners
-        run: bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/recovery-preparation-ownership.test.ts
+        run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/service/test/isolated/recovery-preparation-ownership.test.ts
       - if: runner.os != 'Windows'
         name: POSIX Profile locks, maintenance and recovery
         run: >-
-          bun test --parallel=1 --max-concurrency=1
+          node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1
           packages/agent/test/isolated/profile-access/data-lock.test.ts
           packages/agent/test/isolated/maintenance/backup.test.ts
           packages/agent/test/isolated/maintenance/restore.test.ts
@@ -126,13 +135,13 @@ jobs:
       - if: runner.os == 'Windows'
         name: Actual Windows private Store, Worker and LockFileEx contracts
         run: >-
-          bun test --parallel=1 --max-concurrency=1
+          node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1
           packages/agent/test/isolated/windows-path-security/default.test.ts
           packages/agent/test/isolated/config/mcp-selection-windows.test.ts
           apps/desktop/test/isolated/windows-node-access.test.ts
       - name: Shared TUI drafts and file recovery through the current caller
         run: >-
-          bun test --parallel=1 --max-concurrency=1
+          node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts --parallel=1 --max-concurrency=1
           apps/cli/test/file-recovery-pty.test.ts
           apps/cli/test/isolated/tui-drafts-host.test.ts
           apps/cli/test/isolated/file-recovery-argv.test.ts

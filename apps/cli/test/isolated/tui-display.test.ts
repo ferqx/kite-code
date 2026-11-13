@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +13,7 @@ import type {
   PendingInputPage,
   SessionView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   createTuiDisplayReader,
   readTuiPendingInputs,

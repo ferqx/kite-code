@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -22,7 +24,7 @@ process.once('SIGINT', interrupt);
 process.once('SIGTERM', interrupt);
 if (process.platform === 'win32') process.on('message', stop);
 const host = spawnTuiPTY({
-  cmd: [process.execPath, '--no-install', input.runner],
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
   cwd: process.cwd(),
   env: {
     TUI_SKILLS_SETTINGS: JSON.stringify(input.settings),
@@ -44,7 +46,7 @@ const wait = async (text: string, exactLine = false) => {
       return;
     if (Date.now() > end) throw Error(`expected ${text} tail=${host.text().slice(-6000)}`);
     if (host.ended) throw Error(`skills host ended before ${text}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = (value: string) => host.key(value);
@@ -82,7 +84,7 @@ try {
   while (!existsSync(input.ledger) || !rows().at(-1)?.value.complete) {
     abort.signal.throwIfAborted();
     if (Date.now() > initialReadDeadline) throw Error('startup catalogue did not finish');
-    await Bun.sleep(10);
+    await testSleep(10);
   }
   const firstPanelPage = rows().length;
 
@@ -115,7 +117,7 @@ try {
     'fixture.unavailable',
   ]);
   await key('\r');
-  await Bun.sleep(100);
+  await testSleep(100);
   assert.deepEqual(counts(), baseline);
   writeFileSync(join(input.root, 'arm-owned-page'), 'next original refresh first page');
   await key('r');
@@ -123,7 +125,7 @@ try {
   while (!existsSync(join(input.root, 'held-page'))) {
     abort.signal.throwIfAborted();
     if (Date.now() > held) throw Error('refresh did not request original page');
-    await Bun.sleep(10);
+    await testSleep(10);
   }
   await key('\x1b');
   await wait('New Run >');
@@ -144,7 +146,7 @@ try {
   await wait('ScopeFresh000 [available]');
   const release = await fetch(new URL('release-page', input.control), { signal: abort.signal });
   await release.arrayBuffer();
-  await Bun.sleep(200);
+  await testSleep(200);
   await key('\x1b[B');
   await wait('ScopeFresh000 [available]');
   await key('\x1b[A');
@@ -163,7 +165,7 @@ try {
   await wait('New Run >');
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!host.ended && Date.now() < end) await Bun.sleep(50);
+  while (!host.ended && Date.now() < end) await testSleep(50);
   const [exit] = await ptyDeadline(
     Promise.all([host.host.exited, host.eof]),
     3000,

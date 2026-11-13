@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { FileSnapshot } from '../../../src/tools/files';
 import { fileChangePreview } from '../../../src/tools/files-diff';
 

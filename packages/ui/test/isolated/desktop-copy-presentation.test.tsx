@@ -1,8 +1,8 @@
-import { expect, spyOn, test } from 'bun:test';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, spyOn, test } from '#kite-test';
 import { ConversationActivityContext } from '../../src/conversation-activity';
 import { useTextCopy } from '../../src/desktop/clipboard';
 import { MessageCopyButton } from '../../src/desktop/MessageCopyButton';

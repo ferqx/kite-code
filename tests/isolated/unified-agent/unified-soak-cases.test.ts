@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { fixtureNodeExecutable } from '../../../packages/agent/test/fixtures/node-runtime';
 import { verifyMcpStdioJobHandoff } from '../../../scripts/runtime/unified-soak-mcp-handoff';
 import { runFunctionalCase } from '../../fixtures/unified-agent/soak/cases';
 
@@ -17,15 +18,15 @@ for (const caseId of [
     try {
       const evidence = await runFunctionalCase(root, caseId, {
         guardianPath: join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../packages/agent/dist/mcp',
           process.platform === 'win32' ? 'windows-stdio-guardian.js' : 'stdio-guardian.js',
         ),
-        bunExecutable: process.execPath,
+        runtimeExecutable: fixtureNodeExecutable(),
         ...(caseId === 'mcp_churn' && process.platform === 'linux'
           ? {
               linux: (
-                await import(join(import.meta.dir, '../../../packages/agent/dist/mcp/index.js'))
+                await import(join(import.meta.dirname, '../../../packages/agent/dist/mcp/index.js'))
               ).mcpStdioLinuxAssets(),
             }
           : {}),

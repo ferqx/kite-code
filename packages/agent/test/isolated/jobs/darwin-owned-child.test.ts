@@ -1,9 +1,13 @@
-import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { dlopen, ptr, toArrayBuffer } from '@kite-ai/agent/runtime-ffi';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import type { Subprocess } from '../../../../../scripts/tooling/process';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   type DarwinOwnedChild,
   startDarwinOwnedChild,
@@ -70,7 +74,7 @@ beforeAll(async () => {
   executable = join(root, 'fixture');
   const source = join(root, 'fixture.c');
   writeFileSync(source, fixture);
-  const compiler = Bun.spawn(
+  const compiler = spawnProcess(
     ['/usr/bin/xcrun', 'clang', '-Wall', '-Wextra', '-Werror', source, '-o', executable],
     { stdout: 'pipe', stderr: 'pipe' },
   );
@@ -129,7 +133,7 @@ async function absent(pid: number) {
       if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
       throw error;
     }
-    await Bun.sleep(20);
+    await sleepTimer(20);
   } while (Date.now() < deadline);
   return false;
 }
@@ -138,12 +142,15 @@ darwinTest('cold import never loads native libraries or starts a child', async (
   const script = join(root, 'cold.ts');
   writeFileSync(
     script,
-    `import {mock} from 'bun:test';
-mock.module('bun:ffi',()=>({dlopen(){throw Error('cold_dlopen')},ptr(){throw Error('cold_ptr')},toArrayBuffer(){throw Error('cold_memory')}}));
-await import(${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))});
+    `import {mock} from '#kite-test';
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)},()=>({dlopen(){throw Error('cold_dlopen')},ptr(){throw Error('cold_ptr')},toArrayBuffer(){throw Error('cold_memory')}}));
+await import(${JSON.stringify(join(import.meta.dirname, '../../../src/platform/process/darwin-owned-child.ts'))});
 console.log('cold-ok');`,
   );
-  const processChild = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+  const processChild = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const outputs = await Promise.all([
     new Response(processChild.stdout).text(),
     new Response(processChild.stderr).text(),
@@ -190,7 +197,7 @@ darwinTest(
       });
       expect(held.reaped).toBe(false);
       expect(waitable(child.pid)).toMatchObject({ result: -1, errno: 10 });
-      const unrelated = Bun.spawn(['/bin/sleep', '2'], { stdout: 'ignore', stderr: 'ignore' });
+      const unrelated = spawnProcess(['/bin/sleep', '2'], { stdout: 'ignore', stderr: 'ignore' });
       try {
         expect(await child.terminateGroup(0)).toEqual(stopped);
         child.reapAfterConfirmedStop();
@@ -213,15 +220,15 @@ darwinTest(
     const script = join(root, 'read-error-capture.ts');
     writeFileSync(
       script,
-      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from 'bun:ffi';
-import {mock,expect} from 'bun:test';
+      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from '@kite-ai/agent/runtime-ffi';
+import {mock,expect} from '#kite-test';
 import * as fs from 'node:fs';
 const actualDlopen=nativeDlopen,actualReadSync=fs.readSync;
 const library=actualDlopen('/usr/lib/libSystem.B.dylib',{__error:{args:[],returns:'ptr'}});
 const errno=new DataView(toArrayBuffer(library.symbols.__error(),0,4));
 let transientReads=0;
 const interfere=()=>{errno.setInt32(0,1,true);if(errno.getInt32(0,true)!==1)throw Error('errno_interference_missing');};
-mock.module('bun:ffi',()=>({ptr,toArrayBuffer,dlopen(path,options){
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)},()=>({ptr,toArrayBuffer,dlopen(path,options){
  const library=actualDlopen(path,options),symbols={...library.symbols};
  if(symbols.read){const read=symbols.read;symbols.read=(...args)=>{
   const result=read(...args);
@@ -234,7 +241,7 @@ mock.module('node:fs',()=>({...fs,readSync(...args){
  try{return actualReadSync(...args);}
  catch(error){if(error.code==='EAGAIN'||error.code==='EINTR')transientReads++;interfere();throw error;}
 }}));
-const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))});
+const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dirname, '../../../src/platform/process/darwin-owned-child.ts'))});
 const child=startDarwinOwnedChild({executable:${JSON.stringify(executable)},argv:['gapped-output'],cwd:${JSON.stringify(root)},env:{}});
 const drain=async(stream)=>{const chunks=[];for await(const chunk of stream)chunks.push(Buffer.from(chunk));return Buffer.concat(chunks).toString();};
 const output=Promise.all([drain(child.stdout),drain(child.stderr)]);
@@ -253,7 +260,10 @@ try {
 }
 `,
     );
-    const probe = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+    const probe = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const timer = setTimeout(() => probe.kill('SIGKILL'), 3000);
     try {
       const [stdout, stderr] = await Promise.all([
@@ -291,7 +301,7 @@ darwinTest(
     try {
       expect(await child.exited).toBe(23);
       const deadline = Date.now() + 2000;
-      while (!stdout.includes('\n') && Date.now() < deadline) await Bun.sleep(10);
+      while (!stdout.includes('\n') && Date.now() < deadline) await sleepTimer(10);
       const ids = /root=(\d+) child=(\d+) grand=(\d+) pgid=(\d+) sid=(\d+)/u.exec(stdout)!;
       expect(ids).not.toBeNull();
       const descendant = Number(ids[2]);
@@ -326,10 +336,10 @@ darwinTest(
     const script = join(root, 'failed-starts.ts');
     writeFileSync(
       script,
-      `import {dlopen,ptr,toArrayBuffer} from 'bun:ffi';
-import {expect} from 'bun:test';
+      `import {dlopen,ptr,toArrayBuffer} from '@kite-ai/agent/runtime-ffi';
+import {expect} from '#kite-test';
 import {readdirSync} from 'node:fs';
-import {startDarwinOwnedChild} from ${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))};
+import {startDarwinOwnedChild} from ${JSON.stringify(join(import.meta.dirname, '../../../src/platform/process/darwin-owned-child.ts'))};
 const root=${JSON.stringify(root)},executable=${JSON.stringify(executable)};
 const descriptors=()=>readdirSync('/dev/fd').sort();
 const before=descriptors();
@@ -356,16 +366,16 @@ try {
     );
     // P_ALL must inspect only the failed-start owner's namespace. A live unrelated
     // harness child legitimately makes the parent's global waitid return zero.
-    const unrelated = Bun.spawn(['/bin/sleep', '10'], {
+    const unrelated = spawnProcess(['/bin/sleep', '10'], {
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',
     });
-    let probe: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let probe: Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       expect(waitable(unrelated.pid)).toMatchObject({ result: 0, pid: 0 });
-      const child = Bun.spawn([process.execPath, script], {
+      const child = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -401,18 +411,18 @@ darwinTest(
     const script = join(root, 'count-cleanup.ts');
     writeFileSync(
       script,
-      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from 'bun:ffi';
-import {mock} from 'bun:test';
+      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from '@kite-ai/agent/runtime-ffi';
+import {mock} from '#kite-test';
 const actualDlopen=nativeDlopen;
 let signals=0,reaps=0,reaped=false,lateSignals=0;
-mock.module('bun:ffi',()=>({ptr,toArrayBuffer,dlopen(path,options){
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)},()=>({ptr,toArrayBuffer,dlopen(path,options){
  const library=actualDlopen(path,options);
  const symbols={...library.symbols};
  if(symbols.kill){const kill=symbols.kill;symbols.kill=(...args)=>{signals++;if(reaped)lateSignals++;return kill(...args)};}
  if(symbols.waitpid){const waitpid=symbols.waitpid;symbols.waitpid=(...args)=>{reaps++;const result=waitpid(...args);if(result===args[0])reaped=true;return result};}
  return {...library,symbols,close:()=>library.close()};
 }}));
-const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))});
+const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dirname, '../../../src/platform/process/darwin-owned-child.ts'))});
 const child=startDarwinOwnedChild({executable:${JSON.stringify(executable)},argv:['tree'],cwd:${JSON.stringify(root)},env:{}});
 const drain=Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text()]);
 if(await child.exited!==23)throw Error('wrong-root-status');
@@ -426,7 +436,10 @@ await child.terminateGroup(0);
 await drain;
 console.log(JSON.stringify({signals,reaps,lateSignals}));`,
     );
-    const processChild = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+    const processChild = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const outputs = await Promise.all([
       new Response(processChild.stdout).text(),
       new Response(processChild.stderr).text(),
@@ -444,17 +457,18 @@ darwinTest(
     const script = join(root, 'gc-launch.ts');
     writeFileSync(
       script,
-      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from 'bun:ffi';
-import {mock} from 'bun:test';
+      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from '@kite-ai/agent/runtime-ffi';
+import {mock} from '#kite-test';
 const actualDlopen=nativeDlopen;
 let collections=0;
-mock.module('bun:ffi',()=>({ptr,toArrayBuffer,dlopen(path,options){
+if(typeof globalThis.gc!=='function')throw Error('native_spawn_fixture_requires_expose_gc');
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)},()=>({ptr,toArrayBuffer,dlopen(path,options){
  const library=actualDlopen(path,options);
  const symbols={...library.symbols};
- if(symbols.posix_spawn){const spawn=symbols.posix_spawn;symbols.posix_spawn=(...args)=>{Bun.gc(true);collections++;return spawn(...args)};}
+ if(symbols.posix_spawn){const spawn=symbols.posix_spawn;symbols.posix_spawn=(...args)=>{globalThis.gc();collections++;return spawn(...args)};}
  return {...library,symbols,close:()=>library.close()};
 }}));
-const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))});
+const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dirname, '../../../src/platform/process/darwin-owned-child.ts'))});
 const child=startDarwinOwnedChild({executable:${JSON.stringify(executable)},argv:['args',${JSON.stringify(argument)}],cwd:${JSON.stringify(root)},env:{OWNED_ENV:${JSON.stringify(environment)}}});
 const drain=Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text()]);
 if(await child.exited!==23)throw Error('wrong-root-status');
@@ -464,7 +478,10 @@ child.reapAfterConfirmedStop();
 const outputs=await drain;
 console.log(JSON.stringify({collections,stdout:outputs[0],stderr:outputs[1]}));`,
     );
-    const processChild = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+    const processChild = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     const outputs = await Promise.all([
       new Response(processChild.stdout).text(),
       new Response(processChild.stderr).text(),

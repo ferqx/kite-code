@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   captureTemporaryWorktreeRoots,
   inspectTemporaryWorktreeTarget,

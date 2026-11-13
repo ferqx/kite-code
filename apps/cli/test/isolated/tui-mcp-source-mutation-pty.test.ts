@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -13,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
@@ -26,6 +26,14 @@ import { ClientError, createClient, requiresInteractionAttachment } from '@kite-
 import { launchPairedService } from '@kite-ai/service/paired';
 import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpSourceMutationFact } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { serviceBundledDependencies } from '../../../service/bundled-dependencies';
 import type { CLIServiceArtifact } from '../../host';
@@ -34,7 +42,7 @@ import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { decodeMcpSourceMutationFact } from '../../host/tui-mcp-source-mutation';
 import { installedDependency, verifyBuiltDependency } from '../fixtures/built-dependency-proof';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const privateFile = (path: string, value: unknown) =>
   writeFileSync(path, JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' });
@@ -50,7 +58,7 @@ async function until<T>(
     signal.throwIfAborted();
     if (value !== undefined) return value;
     if (performance.now() > deadline) throw Error(`source_mutation_pty_deadline:${label}`);
-    await Bun.sleep(10);
+    await testSleep(10);
   }
 }
 type Wire = {
@@ -91,12 +99,11 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
     subjectId: string | undefined;
   let artifact: CLIServiceArtifact | undefined,
     candidateAccess: ReturnType<typeof acquireArtifactAccess> | undefined;
-  let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let build: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     observer: ReturnType<typeof createClient> | undefined;
-  let control: ReturnType<typeof Bun.serve> | undefined,
-    model: ReturnType<typeof Bun.serve> | undefined;
+  let control: FixtureServer | undefined, model: FixtureServer | undefined;
   let modelCalls = 0,
     success = false,
     cleanupConfirmed = false,
@@ -148,7 +155,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
     }
   }
   try {
-    model = Bun.serve({
+    model = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch() {
@@ -156,9 +163,10 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         return new Response('owned_model_forbidden', { status: 500 });
       },
     });
-    build = Bun.spawn(
+    build = testSpawn(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -226,12 +234,12 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const helperPath = join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-pty.ts');
-    const compiled = await Bun.build({
+    const helperPath = join(import.meta.dirname, '../fixtures/tui-mcp-source-mutation-pty.ts');
+    const compiled = await testBuild({
       entrypoints: [helperPath],
       outdir: root,
       naming: 'host.js',
-      target: 'bun',
+      target: 'node',
       packages: 'external',
     });
     expect(compiled.success).toBe(true);
@@ -247,7 +255,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       helperSourceSha256: sha(readFileSync(helperPath)),
       compiledSha256: artifact.entrypointSha256,
       driverSha256: sha(
-        readFileSync(join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-driver.ts')),
+        readFileSync(join(import.meta.dirname, '../fixtures/tui-mcp-source-mutation-driver.ts')),
       ),
       candidateDigest: candidate.digest,
     });
@@ -679,7 +687,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         return Response.json({ error: 'owned_source_mutation_control_failed' }, { status: 500 });
       }
     }
-    control = Bun.serve({
+    control = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch(request) {
@@ -690,11 +698,11 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
       },
     });
     writeFileSync(join(evidence, 'pty-owned.jsonl'), '', { mode: 0o600, flag: 'wx' });
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
-        join(import.meta.dir, '../fixtures/tui-mcp-source-mutation-driver.ts'),
+        ...testRuntimeFlags,
+        join(import.meta.dirname, '../fixtures/tui-mcp-source-mutation-driver.ts'),
         control.url.href,
         process.execPath,
         join(root, 'host.js'),

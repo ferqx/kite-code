@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   lstatSync,
@@ -13,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import type { AuthorizationRequest } from '../../../src/extensions';
 import { createPermissionPolicy, type PermissionPolicySnapshot } from '../../../src/permissions';
 import {
@@ -37,7 +37,7 @@ async function fixture() {
     configurationId: 'flat-input-policy',
     env: { PATH: '/usr/bin:/bin', FIXED: 'original' },
     supervisorPath: process.platform === 'linux' ? '/bin/true' : supervisor,
-    bunExecutable: process.execPath,
+    runtimeExecutable: process.execPath,
     shellExecutable: '/bin/sh',
     host: {
       controlBase: join(root, 'control'),

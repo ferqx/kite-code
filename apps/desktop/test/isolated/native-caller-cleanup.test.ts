@@ -1,7 +1,13 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import {
+  which as findFixtureExecutable,
+  type Subprocess,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { cleanupNativeCaller } from '../native-caller-cleanup.fixture';
 import { openNativeShellObservation } from '../native-shell-observation.fixture';
@@ -15,7 +21,7 @@ test.skipIf(process.platform !== 'darwin')(
     const electronExecutable = require('electron') as string;
     const instances: {
       root: string;
-      driver: ReturnType<typeof Bun.spawn>;
+      driver: Subprocess;
       pid?: number;
       servicePid?: number;
       serviceEntrypoint: string;
@@ -36,7 +42,7 @@ test.skipIf(process.platform !== 'darwin')(
         script,
         `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(electronExecutable)},[${JSON.stringify(app)},${JSON.stringify(`--user-data-dir=${join(owned, 'caller-electron-data')}`)}],{detached:true,stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(`${owned}-native-caller-window-fault.pid.json`)},JSON.stringify({pid:child.pid})); setInterval(()=>{},1000);`,
       );
-      const driver = Bun.spawn([realpathSync(Bun.which('node')!), script], {
+      const driver = spawnFixtureProcess([realpathSync(findFixtureExecutable('node')!), script], {
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',
@@ -46,7 +52,7 @@ test.skipIf(process.platform !== 'darwin')(
       const deadline = Date.now() + 10000;
       while (!existsSync(join(owned, 'ready.json'))) {
         if (Date.now() >= deadline) throw Error('cleanup_fault_window_not_ready');
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
       const ready = JSON.parse(readFileSync(join(owned, 'ready.json'), 'utf8')) as {
         pid: number;

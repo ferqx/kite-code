@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { parseDesktopMarkdown } from '@kite-ai/ui/desktop/markdown';
 import { build } from 'vite';
+import { expect, test } from '#kite-test';
 import { desktopMarkdownDecoderAlias } from '../scripts/markdown-worker-resolution';
 
 test('the actual browser Worker bundle decodes full GFM without document, window or Node authority', async () => {
@@ -14,7 +14,7 @@ test('the actual browser Worker bundle decodes full GFM without document, window
       write: false,
       minify: false,
       lib: {
-        entry: resolve(import.meta.dir, '../src/native-markdown-worker.ts'),
+        entry: resolve(import.meta.dirname, '../src/native-markdown-worker.ts'),
         formats: ['iife'],
         name: 'NativeMarkdownWorker',
       },

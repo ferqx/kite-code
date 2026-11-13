@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { runServiceProcess } from '@kite-ai/service/main';
 
 await runServiceProcess({
@@ -31,7 +32,7 @@ await runServiceProcess({
             while (!existsSync(release)) {
               signal.throwIfAborted();
               if (Date.now() > until) throw new Error('fixture_deadline');
-              await Bun.sleep(5);
+              await fixtureDelay(5);
             }
             yield { type: 'text_delta', text: 'fixed complete body' } as const;
             yield {

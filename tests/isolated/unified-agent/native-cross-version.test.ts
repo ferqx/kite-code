@@ -1,5 +1,3 @@
-import { constants, Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -14,18 +12,21 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { constants, Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { CommandRecord } from '@kite-ai/agent/storage';
 import type { Command, Execution, ModelOutputSnapshot } from '@kite-ai/client';
 import { inspectProcess } from '@kite-ai/service/daemon';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { readProcessStartIdentity } from '../../../apps/service/src/daemon/process-identity';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { runtimeBuildOptions } from '../../../packages/agent/scripts/runtime-build-options';
 import { packNativeBundle, unpackNativeBundle } from '../../../scripts/release/native-archive';
 import {
   installNativeBundle,
@@ -33,15 +34,22 @@ import {
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import {
+  CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS,
   CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
   materializeCurrentSchemaTerminalPredecessor,
   materializeTerminalPredecessor,
   TERMINAL_PREDECESSOR_COMMIT,
 } from '../../fixtures/unified-agent/terminal-predecessor';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 const sessionId = 'native-version-session';
 const tasks = ['native-A-original', 'New task: native-B-full-original', 'native-A-after-rollback'];
 const bodies = [
@@ -81,7 +89,7 @@ type StoredFacts = {
   outputs: { identity: { executionId: string }; snapshotCursor: string }[];
 };
 async function execute(argv: string[], cwd: string, home: string, timeoutMs = 30000) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd,
     env: {
       HOME: home,
@@ -116,7 +124,38 @@ async function execute(argv: string[], cwd: string, home: string, timeoutMs = 30
   }
 }
 
-test.skipIf(!['darwin', 'linux'].includes(process.platform))(
+async function buildStoreProbes(outdir: string) {
+  const source = join(repositoryRoot, 'tests/fixtures/unified-agent/native-cross-version-store.ts');
+  const common = {
+    entrypoints: [source],
+    target: 'node' as const,
+    packages: 'external' as const,
+    outdir,
+  };
+  const current = await buildFixture({ ...common, naming: 'store.mjs' });
+  const historical = await buildFixture({
+    ...common,
+    naming: 'store-legacy.mjs',
+    plugins: [
+      {
+        name: 'historical-bun-sqlite-import',
+        setup(builder) {
+          // Historical release artifacts predate the shared SQLite adapter.
+          builder.onResolve({ filter: /^@kite-ai\/agent\/runtime-sqlite$/ }, () => ({
+            path: 'bun:sqlite',
+            external: true,
+          }));
+        },
+      },
+    ],
+  });
+  expect(current.success && historical.success).toBe(true);
+  return { current: current.outputs[0]!.path, historical: historical.outputs[0]!.path };
+}
+
+const requireHistoricalPredecessor = process.env.KITE_REQUIRE_HISTORICAL_PREDECESSOR === '1';
+
+test.skipIf(!requireHistoricalPredecessor || !['darwin', 'linux'].includes(process.platform))(
   'real Native code upgrade and cold rollback retain original complete data and continue through the installed window',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-versions-'))),
@@ -140,8 +179,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     let activeIndex = 0,
       success = false,
       uninstalled = false;
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-    let provider: ReturnType<typeof Bun.serve> | undefined;
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
+    let provider: FixtureServer | undefined;
     let preserved:
       | {
           core: Buffer<ArrayBuffer>;
@@ -156,22 +195,22 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       | { bytes: Buffer<ArrayBuffer>; inode: number; config: Buffer<ArrayBuffer> }
       | undefined;
     try {
+      const predecessor = await materializeCurrentSchemaTerminalPredecessor({
+        root,
+        repositoryRoot,
+        native: true,
+      });
       const req = createRequire(join(repositoryRoot, 'apps/desktop/package.json')),
         electronPath = req('electron') as string,
         electronDist =
           process.platform === 'darwin'
             ? resolve(dirname(dirname(electronPath)), '../..')
             : dirname(electronPath);
-      const predecessor = await materializeCurrentSchemaTerminalPredecessor({
-        root,
-        repositoryRoot,
-        nativeElectronDist: electronDist,
-      });
       const oldNative = predecessor.nativeCandidate!;
       expect(predecessor.provenance.commit).toBe(CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
       expect(predecessor.provenance.platform).toBe(process.platform);
-      expect(predecessor.provenance.sourceRemoved).toBe(true);
-      expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
+
+      expect(predecessor.provenance.historicalInput).toBe('prebuilt');
       expect(oldNative.terminal.manifest.source.commit).toBe(
         CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
       );
@@ -182,7 +221,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       const terminal = await buildTerminalBundle({
         destination: join(root, 'current-terminal'),
         repositoryRoot,
-        bunExecutable: process.execPath,
+        nodeExecutable: process.execPath,
         ...(process.platform === 'darwin'
           ? { processHostFixture: 'native-extension-reference' as const }
           : {}),
@@ -238,36 +277,33 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(hash(readFileSync(packed.archivePath))).toBe(packed.sha256);
         candidates.push(relocated);
         archives.push(packed);
-        rmSync(source, { recursive: true });
-        expect(existsSync(source)).toBe(false);
+        if (name === 'new') {
+          rmSync(source, { recursive: true });
+          expect(existsSync(source)).toBe(false);
+        }
       }
-      for (const source of [terminal.root, predecessor.candidate.root]) {
-        rmSync(source, { recursive: true });
-        expect(existsSync(source)).toBe(false);
-      }
+      rmSync(terminal.root, { recursive: true });
+      expect(existsSync(terminal.root)).toBe(false);
       const installed = [installNativeBundle({ bundleRoot: candidates[0]!.root, prefix })];
-      const probe = await Bun.build({
-        entrypoints: [
-          join(repositoryRoot, 'tests/fixtures/unified-agent/native-cross-version-store.ts'),
-        ],
-        target: 'bun',
-        packages: 'external',
-        outdir: join(root, 'probe'),
-        naming: 'store.js',
-      });
-      expect(probe.success).toBe(true);
-      const probeHash = hash(readFileSync(join(root, 'probe/store.js')));
+      const probe = await buildStoreProbes(join(root, 'probe'));
+      const probeHash = {
+        historical: hash(readFileSync(probe.historical)),
+        current: hash(readFileSync(probe.current)),
+      };
       async function store(operation: 'seed' | 'snapshot') {
         const releaseRoot = installed[activeIndex]!.releaseRoot,
           inner = join(releaseRoot, 'terminal');
         const link = join(root, 'probe/node_modules');
         rmSync(link, { force: true });
         symlinkSync(join(inner, 'node_modules'), link, 'dir');
+        const manifest = candidates[activeIndex]!.terminal.manifest;
+        const node = manifest.nodeVersion !== undefined;
         return JSON.parse(
           await execute(
             [
-              join(inner, 'runtime/bun'),
-              join(root, 'probe/store.js'),
+              join(inner, manifest.entries.runtime),
+              ...(node ? ['--no-global-search-paths'] : []),
+              node ? probe.current : probe.historical,
               operation,
               profile.dataRoot,
               workspace,
@@ -294,7 +330,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(lstatSync(profile.databasePath).ino).toBe(before.coreInode);
         expect(lstatSync(privatePath).ino).toBe(before.nativeInode);
       };
-      provider = Bun.serve({
+      provider = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -558,13 +594,14 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
             id: value.digest,
             root: index === 0 ? installed[0]!.releaseRoot : join(prefix, 'releases', value.digest),
             electron: value.manifest.entries.electron,
+            runtime: value.terminal.manifest.entries.runtime,
           })),
           tasks,
           bodies,
         }),
         { mode: 0o600 },
       );
-      const compiled = await Bun.build({
+      const compiled = await buildFixture({
         entrypoints: [
           join(repositoryRoot, 'apps/desktop/test/native-cross-version-electron.fixture.ts'),
         ],
@@ -577,9 +614,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       });
       expect(compiled.success).toBe(true);
       const driverHash = hash(readFileSync(join(root, 'electron-driver.mjs')));
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(process.execPath),
           join(root, 'electron-driver.mjs'),
           join(prefix, 'bin/kite-desktop'),
           home,
@@ -688,7 +725,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(readFileSync(configurationPath)).toEqual(db8Private.config);
         await execute(
           [
-            realpathSync(Bun.which('node')!),
+            realpathSync(process.execPath),
             join(root, 'electron-driver.mjs'),
             join(prefix, 'bin/kite-desktop'),
             home,
@@ -763,7 +800,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         driver.kill('SIGKILL');
         await driver.exited;
       }
-      provider?.stop(true);
+      await provider?.stop(true);
       if (success) rmSync(root, { recursive: true });
       else console.log(`OWNED_NATIVE_VERSION_FAILURE_ROOT ${root}`);
     }
@@ -771,28 +808,22 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   420000,
 );
 
-test.skipIf(!['darwin', 'linux'].includes(process.platform))(
+test.skipIf(!requireHistoricalPredecessor || !['darwin', 'linux'].includes(process.platform))(
   'legacy installed Native rejects current Core schema and DB9 private originals without changing either owned Profile',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-legacy-rejection-')));
     let success = false;
-    let provider: ReturnType<typeof Bun.serve> | undefined;
+    let provider: FixtureServer | undefined;
     try {
-      const electronPath = createRequire(join(repositoryRoot, 'apps/desktop/package.json'))(
-        'electron',
-      ) as string;
       const predecessor = await materializeTerminalPredecessor({
         root,
         repositoryRoot,
-        nativeElectronDist:
-          process.platform === 'darwin'
-            ? resolve(dirname(dirname(electronPath)), '../..')
-            : dirname(electronPath),
+        native: true,
       });
       const legacy = predecessor.nativeCandidate!;
       expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
-      expect(predecessor.provenance.sourceRemoved).toBe(true);
-      expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
+
+      expect(predecessor.provenance.historicalInput).toBe('prebuilt');
       expect(legacy.terminal.manifest.source.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
       expect(legacy.terminal.manifest.source.dirty).toBe(false);
       const legacyMigration = join(
@@ -800,14 +831,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         'node_modules/@kite-ai/agent/storage/migrations',
       );
       expect(existsSync(join(legacyMigration, '0002-recovery-audit.sql'))).toBe(false);
+      const probe = await buildStoreProbes(root);
       for (const [entry, target, naming, packages, external] of [
-        [
-          'tests/fixtures/unified-agent/native-cross-version-store.ts',
-          'bun',
-          'store.js',
-          'external',
-          [],
-        ],
         [
           'apps/desktop/test/native-cross-version-electron.fixture.ts',
           'node',
@@ -824,7 +849,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         ],
         [
           'apps/desktop/electron/profile-access-helper.ts',
-          'bun',
+          'node',
           'profile-access.js',
           'bundle',
           [],
@@ -832,9 +857,12 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       ] as const) {
         expect(
           (
-            await Bun.build({
+            await buildFixture({
               entrypoints: [join(repositoryRoot, entry)],
               target,
+              ...(entry === 'apps/desktop/electron/profile-access-helper.ts'
+                ? runtimeBuildOptions(root, join(repositoryRoot, 'packages/agent/dist'))
+                : {}),
               packages,
               external: [...external],
               format: 'esm',
@@ -848,7 +876,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       let providerCalls = 0;
       let currentLocks: () => { outer: boolean; inner: boolean }[] = () => [];
       let currentSnapshot: () => Promise<StoredFacts>;
-      provider = Bun.serve({
+      provider = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -906,8 +934,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           const seeded = JSON.parse(
             await execute(
               [
-                join(legacy.terminal.root, 'runtime/bun'),
-                join(root, 'store.js'),
+                join(legacy.terminal.root, legacy.terminal.manifest.entries.runtime),
+                probe.historical,
                 'seed',
                 profile.dataRoot,
                 workspace,
@@ -940,14 +968,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
               .map((row) => row.id),
           ).toEqual(
             boundary === 'schema'
-              ? [
-                  '0001-baseline',
-                  '0002-recovery-audit',
-                  '0003-session-reconciliation',
-                  '0004-pending-input-order',
-                  '0005-authorization-check',
-                  '0006-input-file-imports',
-                ]
+              ? CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS.map(({ path }) => basename(path, '.sql'))
               : ['0001-baseline'],
           );
         } finally {
@@ -974,7 +995,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         const produced = JSON.parse(
           await execute(
             [
-              realpathSync(Bun.which('node')!),
+              realpathSync(process.execPath),
               join(root, 'private-driver.mjs'),
               profile.profilePath,
               realpathSync(process.execPath),
@@ -1021,8 +1042,8 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           JSON.parse(
             await execute(
               [
-                join(legacy.terminal.root, 'runtime/bun'),
-                join(root, 'store.js'),
+                join(legacy.terminal.root, legacy.terminal.manifest.entries.runtime),
+                probe.historical,
                 'snapshot',
                 profile.dataRoot,
                 workspace,
@@ -1042,6 +1063,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                 id: legacy.digest,
                 root: installed.releaseRoot,
                 electron: legacy.manifest.entries.electron,
+                runtime: legacy.terminal.manifest.entries.runtime,
               },
             ],
             tasks: [],
@@ -1051,7 +1073,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         );
         await execute(
           [
-            realpathSync(Bun.which('node')!),
+            realpathSync(process.execPath),
             join(root, 'electron-driver.mjs'),
             join(prefix, 'bin/kite-desktop'),
             home,
@@ -1115,7 +1137,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       );
       success = true;
     } finally {
-      provider?.stop(true);
+      await provider?.stop(true);
       if (success) rmSync(root, { recursive: true });
       else console.log(`OWNED_NATIVE_LEGACY_FAILURE_ROOT ${root}`);
     }

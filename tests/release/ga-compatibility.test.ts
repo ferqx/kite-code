@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { verifyGaCompatibilityFixture } from '../../scripts/release/ga-compatibility';
 
 const digest = `sha256:${'c'.repeat(64)}` as const;

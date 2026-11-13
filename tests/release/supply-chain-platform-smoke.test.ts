@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, describe, expect, test } from '#kite-test';
 import { RELEASE_MANIFEST_FILE, RELEASE_PAYLOAD_FILE } from '../../scripts/release/artifact-layout';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
 import {

@@ -1,6 +1,7 @@
-import { afterAll, beforeAll } from 'bun:test';
 import { appendFileSync, readdirSync } from 'node:fs';
+import { afterAll, beforeAll } from '#kite-test';
 import { readOsProcessStartIdentity } from '../../../../scripts/runtime/process-start-identity';
+import { spawnSync as runFixtureProcess } from '../../../../scripts/tooling/process';
 import { settleSameProcessResourceSample } from './fault-soak-resource-settle';
 
 interface ProcessResourceSample {
@@ -40,7 +41,7 @@ interface FaultSoakLifecycleGlobal {
 function descendantPids(rootPid: number): number[] | undefined {
   if (process.platform === 'win32') return undefined;
   try {
-    const listing = Bun.spawnSync(['ps', '-Ao', 'pid=,ppid='], {
+    const listing = runFixtureProcess(['ps', '-Ao', 'pid=,ppid='], {
       stdout: 'pipe',
       stderr: 'ignore',
     });
@@ -109,8 +110,9 @@ if (telemetryFile) {
   const deadlineMs =
     Number.isInteger(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : 180_000;
   beforeAll(async () => {
-    sequence += 1;
-    (globalThis as FaultSoakLifecycleGlobal).__KITE_FAULT_SOAK_LIFECYCLE_SEQUENCE__ = sequence;
+    const state = globalThis as FaultSoakLifecycleGlobal;
+    sequence = (state.__KITE_FAULT_SOAK_LIFECYCLE_SEQUENCE__ ?? 0) + 1;
+    state.__KITE_FAULT_SOAK_LIFECYCLE_SEQUENCE__ = sequence;
     await settleSameProcessResourceSample(repeatCount);
     startedAt = performance.now();
     before = sample();
@@ -126,7 +128,7 @@ if (telemetryFile) {
       parentPid: process.ppid,
       sequence,
       caseId: process.env.KITE_FAULT_SOAK_CASE_ID ?? 'unknown',
-      lifecycleId: process.env.KITE_FAULT_SOAK_LIFECYCLE_ID ?? 'bun-test-probe',
+      lifecycleId: process.env.KITE_FAULT_SOAK_LIFECYCLE_ID ?? 'node-test-probe',
       processStartNonce,
       osProcessStartIdentity: readOsProcessStartIdentity(process.pid),
       lifecycleGroupNonce,

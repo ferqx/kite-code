@@ -1,7 +1,7 @@
-import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import type { ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
 
@@ -244,6 +244,24 @@ test('content glob filtering and path discovery share invalid pattern boundaries
     });
   }
   expect((await files.search({ text: 'needle', glob: '**/*.ts' })).matches).toHaveLength(1);
+});
+
+test('glob and search preserve negation, extglobs, dotfiles and zero-level globstar', async () => {
+  const { files, put, dir } = fixture();
+  dir('nested');
+  for (const path of ['.hidden.ts', 'a.ts', 'b.tsx', 'nested/a.ts', 'nested/z.md'])
+    put(path, 'needle');
+  for (const [pattern, paths] of [
+    ['**/*.{ts,tsx}', ['.hidden.ts', 'a.ts', 'b.tsx', 'nested/a.ts']],
+    ['!(a).ts', ['.hidden.ts']],
+    ['!*.ts', ['b.tsx', 'nested/z.md']],
+    ['!!a.ts', ['a.ts', 'nested/a.ts']],
+  ] as const) {
+    expect((await files.glob({ pattern })).paths).toEqual([...paths]);
+    expect(
+      (await files.search({ text: 'needle', glob: pattern })).matches.map((match) => match.path),
+    ).toEqual([...paths]);
+  }
 });
 
 test('read observations distinguish complete selected windows from complete file content', async () => {

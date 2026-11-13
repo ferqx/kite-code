@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -23,6 +22,9 @@ import {
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { maximumAuthorizationCheckTimeoutMs } from '../../../src/execution/authorization-timing';
 
 const create = () => {
@@ -366,10 +368,11 @@ test('two actual processes reject stale field CAS and a fresh edit preserves bot
     writeFileSync(f.path, '{ // preserved\n"unknown": 7\n}');
     const original = readConfigurationFile({ path: f.path });
     const launch = (key: string) =>
-      Bun.spawn(
+      spawnProcess(
         [
           process.execPath,
-          join(import.meta.dir, 'config-child.ts'),
+          ...testRuntimeFlags,
+          join(import.meta.dirname, 'config-child.ts'),
           'cas',
           f.path,
           original.etag,
@@ -410,8 +413,14 @@ test('real child-held OS lock prevents publication until EOF releases it', async
   try {
     writeFileSync(f.path, '{}');
     const original = readConfigurationFile({ path: f.path });
-    const child = Bun.spawn(
-      [process.execPath, join(import.meta.dir, 'config-child.ts'), 'hold', f.path],
+    const child = spawnProcess(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        join(import.meta.dirname, 'config-child.ts'),
+        'hold',
+        f.path,
+      ],
       { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
     );
     try {
@@ -455,8 +464,14 @@ test('temporary credential revocation blocks future reads and restart cannot ret
   await vault.revoke(ref);
   await expect(vault.resolve(ref)).rejects.toThrow('credential_revoked');
   expect(alreadyResolved).toBe('only-temporary-secret');
-  const child = Bun.spawn(
-    [process.execPath, join(import.meta.dir, 'config-child.ts'), 'credential', ref.id],
+  const child = spawnProcess(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      join(import.meta.dirname, 'config-child.ts'),
+      'credential',
+      ref.id,
+    ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
   expect(await new Response(child.stdout).json()).toEqual({ code: 'credential_unavailable' });

@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { createRuntime } from '@kite-ai/agent';
@@ -10,6 +10,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -59,18 +60,15 @@ const finish: ModelEvent = {
 type Call = { id: string; path?: string; paths?: string[] };
 async function wireRequest(request: ModelRequest, protocol: 'responses' | 'chat-completions') {
   let wire: Record<string, unknown> = {};
-  const fetcher = Object.assign(
-    async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      wire = JSON.parse(String(init?.body));
-      return new Response(
-        protocol === 'responses'
-          ? 'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n'
-          : 'data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
-        { headers: { 'content-type': 'text/event-stream' } },
-      );
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const fetcher = Object.assign(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    wire = JSON.parse(String(init?.body));
+    return new Response(
+      protocol === 'responses'
+        ? 'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n'
+        : 'data: {"id":"fixture","object":"chat.completion.chunk","created":1,"model":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  }, {});
   const binding = createCompatibleModelBinding({
     modelId: 'fixed',
     baseURL: 'https://fixture.invalid/v1',
@@ -225,7 +223,7 @@ async function fixture() {
           throw Error(
             `image_fixture_deadline:${JSON.stringify(await runtime.getCommand(commandId))}`,
           );
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
     },
     async close() {

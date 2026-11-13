@@ -14,8 +14,10 @@ import {
 import { basename, dirname, join, resolve } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
-import { macosDesktopRuntimeEntries } from '@kite-ai/service/runtime-assets';
+import { macosNodeDesktopRuntimeEntries } from '@kite-ai/service/runtime-assets';
+import { spawn as spawnProcess } from '../../tooling/process';
 import { runNativeRelease } from '../native';
+import { cachedNodeDistribution } from '../node-inputs';
 import { rejectBundleOutput } from '../terminal-paths';
 import {
   assertDeveloperIdIdentity,
@@ -57,11 +59,13 @@ async function imageDigest(image: string) {
 }
 
 async function run(command: string[], failure: string) {
-  const child = Bun.spawn(command, { stdin: 'ignore', stdout: 'ignore', stderr: 'inherit' });
+  const child = spawnProcess(command, { stdin: 'ignore', stdout: 'ignore', stderr: 'inherit' });
   if ((await child.exited) !== 0) throw Error(failure);
 }
 
-type MacosDmgInputs = Readonly<Partial<Record<'directory' | 'native' | 'electron', string>>>;
+type MacosDmgInputs = Readonly<
+  Partial<Record<'directory' | 'native' | 'electron' | 'node-distribution', string>>
+>;
 
 export async function buildMacosDmg(
   root: string,
@@ -87,7 +91,8 @@ export async function buildMacosDmgCandidate(
 ) {
   if (process.platform !== 'darwin' || process.arch !== 'arm64')
     throw Error('macos_dmg_requires_macos_arm64');
-  if (values.native && (values.electron || signing)) throw Error('release_arguments_invalid');
+  if (values.native && (values.electron || values['node-distribution'] || signing))
+    throw Error('release_arguments_invalid');
 
   const requested = resolve(
     values.directory ??
@@ -110,6 +115,8 @@ export async function buildMacosDmgCandidate(
           candidate,
           '--desktop-only',
           'true',
+          '--node-distribution',
+          resolve(values['node-distribution'] ?? cachedNodeDistribution(root)),
           ...(values.electron ? ['--electron', resolve(values.electron)] : []),
         ],
         root,
@@ -139,7 +146,7 @@ export async function buildMacosDmgCandidate(
           'arm64',
           `-mmacosx-version-min=${launcherDeploymentTarget}`,
           '-O2',
-          join(import.meta.dir, 'launcher.c'),
+          join(import.meta.dirname, 'launcher.c'),
           '-o',
           executable,
         ],
@@ -156,8 +163,10 @@ export async function buildMacosDmgCandidate(
         try {
           const original = verifyNativeRuntimeBundle(candidate);
           const { files, links, directories } = original.manifest;
+          const { entries } = original.terminal.manifest;
           if (
-            original.terminal.manifest.entries.service !== macosDesktopRuntimeEntries.service ||
+            entries.service !== macosNodeDesktopRuntimeEntries.service ||
+            entries.runtime !== macosNodeDesktopRuntimeEntries.runtime ||
             [
               ...files.map(({ path }) => path),
               ...links.map(({ path }) => path),
@@ -200,7 +209,7 @@ export async function buildMacosDmgCandidate(
       'macos_dmg_icon_build_failed',
     );
     await run(
-      ['/usr/bin/python3', join(import.meta.dir, 'finder-layout.py'), volume],
+      ['/usr/bin/python3', join(import.meta.dirname, 'finder-layout.py'), volume],
       'macos_dmg_finder_layout_failed',
     );
     if (signing) {

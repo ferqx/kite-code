@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { type BrowserView, ClientError, type Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
 import { WebController, type WebUpdate } from '../src/controller';
 
 function view(sessionId = 'a', active = false, nextSeq = '1'): BrowserView {
@@ -55,7 +56,7 @@ async function until(check: () => boolean) {
   const deadline = Date.now() + 1000;
   while (!check()) {
     if (Date.now() > deadline) throw new Error('web_test_deadline');
-    await Bun.sleep(1);
+    await fixtureDelay(1);
   }
 }
 function port(
@@ -102,19 +103,19 @@ test('only selected visible actual activity polls; status text alone never start
   try {
     await controller.selectSession('a');
     const initial = p.counters.views;
-    await Bun.sleep(35);
+    await fixtureDelay(35);
     expect(p.counters.views).toBe(initial);
     controller.setVisible(true);
     await until(() => p.counters.views >= initial + 4);
     controller.setVisible(false);
     const hidden = p.counters.views;
-    await Bun.sleep(35);
+    await fixtureDelay(35);
     expect(p.counters.views).toBe(hidden);
     active = false;
     controller.setVisible(true);
     await until(() => p.counters.views >= hidden + 2);
     const idle = p.counters.views;
-    await Bun.sleep(35);
+    await fixtureDelay(35);
     expect(p.counters.views).toBe(idle);
     expect(controller.snapshot?.view.runs[0]?.status).toBe('running');
     expect(controller.snapshot?.view.runs[0]?.isActive).toBe(false);
@@ -270,7 +271,7 @@ test('dispose aborts only this controller read, publishes nothing late and never
   expect(p.signals[0]?.aborted).toBe(true);
   held.release();
   expect(await pending).toBeUndefined();
-  await Bun.sleep(25);
+  await fixtureDelay(25);
   expect(updates.map((update) => update.phase)).toEqual(['loading']);
   expect(p.counters).toMatchObject({ close: 0, dispose: 0, cancel: 0, pages: 0 });
   await expect(controller.refresh()).rejects.toThrow('controller_disposed');
@@ -295,13 +296,13 @@ test('a failed initial read retries without an active Run and stops on hide or d
     await until(() => p.counters.views >= 2);
     controller.setVisible(false);
     const hidden = p.counters.views;
-    await Bun.sleep(45);
+    await fixtureDelay(45);
     expect(p.counters.views).toBe(hidden);
     failing = false;
     controller.setVisible(true);
     await until(() => updates.at(-1)?.phase === 'ready');
     const recovered = p.counters.views;
-    await Bun.sleep(35);
+    await fixtureDelay(35);
     expect(p.counters.views).toBe(recovered);
     expect(controller.snapshot?.sessionId).toBe('a');
     expect(p.counters.cancel).toBe(0);
@@ -329,7 +330,7 @@ test('failed idle history keeps recovering after more than three failed reads, t
     await until(() => updates.at(-1)?.phase === 'ready');
     expect(p.counters.views).toBe(6);
     const settled = p.counters.views;
-    await Bun.sleep(50);
+    await fixtureDelay(50);
     expect(p.counters.views).toBe(settled);
   } finally {
     controller.disposeObserver();

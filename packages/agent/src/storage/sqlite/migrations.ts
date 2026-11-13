@@ -1,6 +1,6 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { Database } from '../../runtime-sqlite';
 
 export const schemaQuery =
   "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name";
@@ -10,6 +10,9 @@ export type SchemaVersion = {
   migrations: { id: string; checksum: string; sql: string }[];
 };
 const cache = new Map<string, SchemaVersion[]>();
+export function invalidateSchemaCache(baseline: URL): void {
+  cache.delete(baseline.href);
+}
 /** Closed, explicitly supported reviewed schema versions; no arbitrary migration discovery. */
 export function supportedSchemas(
   baseline = new URL('../migrations/0001-baseline.sql', import.meta.url),

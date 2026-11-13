@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, Message, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createTuiHistoryReader } from '../host/tui-history';
 import { createTuiSessionReader } from '../host/tui-session';
 

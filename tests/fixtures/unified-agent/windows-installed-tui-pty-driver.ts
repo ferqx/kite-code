@@ -1,6 +1,7 @@
 import { once } from 'node:events';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openWindowsTestPty } from '../../tui-system/harness/pty-windows';
 
 const MAX_FRAME = 2 * 1024 * 1024;
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -74,10 +75,6 @@ async function main() {
     ready = false,
     eof = false;
   const initial: Uint8Array[] = [];
-  let resolveEOF!: (code: number) => void;
-  const ptyEOF = new Promise<number>((resolve) => {
-    resolveEOF = resolve;
-  });
   const emitOutput = (bytes: Uint8Array) => {
     for (let offset = 0; offset < bytes.length; offset += 32768) {
       const part = bytes.subarray(offset, offset + 32768);
@@ -89,33 +86,32 @@ async function main() {
       });
     }
   };
-  const product = Bun.spawn({
-    cmd: [config.launcher, ...(config.argv as string[])],
-    cwd: config.cwd,
-    env: config.env as Record<string, string>,
-    terminal: {
+  const product = openWindowsTestPty(
+    config.launcher,
+    config.argv as string[],
+    {
+      cwd: config.cwd,
+      env: config.env as Record<string, string>,
       cols: 80,
       rows: 24,
-      data(_terminal, bytes) {
-        if (eof) throw Error('tui_pty_output_after_eof');
-        if (ready) emitOutput(bytes);
-        else initial.push(bytes.slice());
-      },
-      exit(_terminal, code) {
-        eof = true;
-        resolveEOF(code);
-      },
     },
-  });
+    (bytes) => {
+      if (eof) throw Error('tui_pty_output_after_eof');
+      if (ready) emitOutput(bytes);
+      else initial.push(bytes.slice());
+    },
+  );
   await send({ type: 'ready', productPid: product.pid });
   ready = true;
   for (const bytes of initial) emitOutput(bytes);
   const completion = (async () => {
-    const [productExitCode, ptyExitCode] = await Promise.all([product.exited, ptyEOF]);
+    const productExitCode = await product.exited;
+    // ConPTY's native exit event follows closure of its original output pipe.
+    eof = true;
+    const ptyExitCode = productExitCode;
     await sendQueue;
     await send({ type: 'terminal', sequence, productExitCode, ptyExitCode, outputBytes });
     if (productExitCode !== 0 || ptyExitCode !== 0) throw Error('tui_pty_unsuccessful_exit');
-    product.terminal?.close();
   })();
   void completion.catch(() => {});
   const commands = (async () => {
@@ -133,7 +129,7 @@ async function main() {
       if (Date.now() >= deadline || eof) throw Error('tui_pty_write_closed');
       const bytes = Buffer.from(command.data, 'base64');
       if (!bytes.length || bytes.length > 65536) throw Error('tui_pty_write_invalid');
-      if (product.terminal?.write(bytes) !== bytes.length) throw Error('tui_pty_write_unaccepted');
+      await product.write(bytes);
       await send({ type: 'written', id: command.id });
     }
     throw Error('tui_pty_parent_eof');
@@ -151,6 +147,7 @@ async function main() {
   } finally {
     clearTimeout(timer);
     process.stdin.destroy();
+    if (!eof) product.kill();
   }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -86,31 +86,28 @@ async function launch() {
     const t = globalThis as FixtureGlobals;
     t.jobPhysical = [];
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        const row: Physical = {
-          path: url.pathname,
-          query: url.search,
-          method: args[1]?.method ?? 'GET',
-        };
-        t.jobPhysical.push(row);
-        const response = await original(...args);
-        if (/\/output$/.test(url.pathname) && response.ok) {
-          const body = await response.clone().text();
-          const dto = JSON.parse(body);
-          Object.assign(row, {
-            bytes: Buffer.byteLength(body),
-            entries: dto.items?.length,
-            highWaterSeq: dto.highWaterSeq,
-            complete: dto.complete,
-            revision: dto.revision,
-          });
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0]));
+      const row: Physical = {
+        path: url.pathname,
+        query: url.search,
+        method: args[1]?.method ?? 'GET',
+      };
+      t.jobPhysical.push(row);
+      const response = await original(...args);
+      if (/\/output$/.test(url.pathname) && response.ok) {
+        const body = await response.clone().text();
+        const dto = JSON.parse(body);
+        Object.assign(row, {
+          bytes: Buffer.byteLength(body),
+          entries: dto.items?.length,
+          highWaterSeq: dto.highWaterSeq,
+          complete: dto.complete,
+          revision: dto.revision,
+        });
+      }
+      return response;
+    }, {});
   });
   return page;
 }

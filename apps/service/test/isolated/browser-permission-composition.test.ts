@@ -1,9 +1,12 @@
-import { expect, mock, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { JobDefinition, Json, ToolContext } from '@kite-ai/agent/extensions';
+import { expect, mock, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   NativeBrowserPageHost,
   serializeBrowserPageFailure,
@@ -136,7 +139,7 @@ async function scenario(kind: string) {
     browser: {
       executable,
       browserPath: executable,
-      darwin: { guardianPath: executable, bunExecutable: executable },
+      darwin: { guardianPath: executable, runtimeExecutable: executable },
       linux: { bubblewrapPath: executable, initExecutable: executable },
       runtimeDirectory: join(root, 'browser-private'),
     },
@@ -226,50 +229,47 @@ async function scenario(kind: string) {
   const requests: Record<string, unknown>[] = [];
   let proposal: Record<string, unknown> | undefined;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async (url: string | URL | Request, input?: RequestInit) => {
-      expect(String(url)).toBe('http://127.0.0.1:9/kite-page');
-      const request = JSON.parse(String(input?.body)) as Record<string, unknown>;
-      requests.push(request);
-      if (request.op === 'prepareGrant') {
-        expect(request.requireExisting).toBe(requireExisting ? true : undefined);
-        expect(request.existingPage).toEqual(requireExisting ? releasedIdentity : undefined);
-      }
-      if (main) {
-        try {
-          return Response.json({ ok: true, value: await main.request(request) });
-        } catch (error) {
-          return Response.json(
-            {
-              ok: false,
-              error: (error as Error).message,
-              failure: serializeBrowserPageFailure(error, request),
-            },
-            { status: 400 },
-          );
-        }
-      }
-      if (request.op === 'prepareGrant') {
-        proposal = {
-          requestId: request.requestId,
-          url: request.url,
-          state: 'question',
-          ...(request.requireExisting ? { requireExisting: true } : {}),
-          page: {
-            kind: 'existing',
-            id: 'page',
-            title: 'Local page',
-            url: requireExisting ? 'https://example.test/' : 'https://example.test/current',
+  globalThis.fetch = Object.assign(async (url: string | URL | Request, input?: RequestInit) => {
+    expect(String(url)).toBe('http://127.0.0.1:9/kite-page');
+    const request = JSON.parse(String(input?.body)) as Record<string, unknown>;
+    requests.push(request);
+    if (request.op === 'prepareGrant') {
+      expect(request.requireExisting).toBe(requireExisting ? true : undefined);
+      expect(request.existingPage).toEqual(requireExisting ? releasedIdentity : undefined);
+    }
+    if (main) {
+      try {
+        return Response.json({ ok: true, value: await main.request(request) });
+      } catch (error) {
+        return Response.json(
+          {
+            ok: false,
+            error: (error as Error).message,
+            failure: serializeBrowserPageFailure(error, request),
           },
-        };
-      } else if (request.op === 'commitGrant') {
-        proposal!.state = 'committed';
-      } else if (request.op === 'cancelGrant') proposal!.state = 'cancelled';
-      else if (request.op !== 'inspectGrant') throw Error('unexpected_private_rpc');
-      return Response.json({ ok: true, value: proposal });
-    },
-    { preconnect: originalFetch.preconnect },
-  );
+          { status: 400 },
+        );
+      }
+    }
+    if (request.op === 'prepareGrant') {
+      proposal = {
+        requestId: request.requestId,
+        url: request.url,
+        state: 'question',
+        ...(request.requireExisting ? { requireExisting: true } : {}),
+        page: {
+          kind: 'existing',
+          id: 'page',
+          title: 'Local page',
+          url: requireExisting ? 'https://example.test/' : 'https://example.test/current',
+        },
+      };
+    } else if (request.op === 'commitGrant') {
+      proposal!.state = 'committed';
+    } else if (request.op === 'cancelGrant') proposal!.state = 'cancelled';
+    else if (request.op !== 'inspectGrant') throw Error('unexpected_private_rpc');
+    return Response.json({ ok: true, value: proposal });
+  }, {});
   const wait = async (context: ToolContext, definitionId: string, input: Json) => {
     const ref = await context.operations.ensure({
       key: definitionId,
@@ -309,7 +309,7 @@ async function scenario(kind: string) {
                         const limit = Date.now() + 5000;
                         while (sessionStarts === 0) {
                           if (Date.now() > limit) throw Error('session_dispatch_timeout');
-                          await Bun.sleep(5);
+                          await sleepTimer(5);
                         }
                       }
                       return {
@@ -453,11 +453,14 @@ if (process.env.KITE_BROWSER_PERMISSION_COMPOSITION) {
     'existing-new-url',
   ])
     test(`ordinary Native configuration ${kind} dispatches browser control with no checker or approval`, async () => {
-      const child = Bun.spawn([process.execPath, fileURLToPath(import.meta.url)], {
-        env: { ...process.env, KITE_BROWSER_PERMISSION_COMPOSITION: kind },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const child = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, fileURLToPath(import.meta.url)],
+        {
+          env: { ...process.env, KITE_BROWSER_PERMISSION_COMPOSITION: kind },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
       const [status, stdout, stderr] = await Promise.all([
         child.exited,
         new Response(child.stdout).text(),

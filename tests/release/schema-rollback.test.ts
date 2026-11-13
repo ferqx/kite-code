@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { verifyReleaseSchemaRollbackFixture } from '../../scripts/release/schema-rollback';
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;

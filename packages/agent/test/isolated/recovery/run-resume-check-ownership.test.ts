@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -11,7 +9,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -153,7 +156,7 @@ async function seed(root: string, failed: boolean) {
       .interactions.length
   ) {
     if (Date.now() > end) throw Error('check_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   ready();
   await new Promise<void>(() => {});
@@ -169,7 +172,10 @@ async function fixture(failed: boolean) {
     script,
     `import {join} from 'node:path';import {writeFileSync,renameSync} from 'node:fs';import {pathToFileURL} from 'node:url';import {createRuntime} from ${JSON.stringify(imports[0])};import {openSqliteStore} from ${JSON.stringify(imports[1])};import {createArtifactStore} from ${JSON.stringify(imports[2])};await (${seed.toString()})(${JSON.stringify(root)},${failed});`,
   );
-  const child = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   let childSettled = false;
   void child.exited.then(() => {
     childSettled = true;
@@ -184,7 +190,7 @@ async function fixture(failed: boolean) {
         await child.exited;
         throw Error(await new Response(child.stderr).text());
       }
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     if (!childSettled) child.kill('SIGKILL');
     await child.exited;

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +7,10 @@ import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/mainte
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { openTuiDraftFile } from '../../host/tui-drafts';
@@ -22,7 +25,7 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const cleanups: (() => Promise<void>)[] = [];
   let calls = 0;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -105,7 +108,7 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
     }
     const build = await compileFileRecoveryTUI(
       root,
-      join(import.meta.dir, 'tui-drafts.fixture.ts'),
+      join(import.meta.dirname, 'tui-drafts.fixture.ts'),
     );
     if (!build.success) throw new AggregateError(build.logs, 'owned host build');
     const hostPath = join(root, 'tui-drafts.fixture.js');
@@ -119,11 +122,11 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
     const path = join(profile.profilePath, 'ui', 'tui.json');
     let newStoreId: string | undefined;
     const run = async (mode: string) => {
-      const child = Bun.spawn(
+      const child = testSpawn(
         [
           process.execPath,
-          '--no-install',
-          join(import.meta.dir, '../fixtures/tui-drafts-pty.ts'),
+          ...testRuntimeFlags,
+          join(import.meta.dirname, '../fixtures/tui-drafts-pty.ts'),
           JSON.stringify({ mode, root, hostPath, input, pidPath, storeId }),
         ],
         {

@@ -250,6 +250,7 @@
       "id": "runtime-workspace-boundaries",
       "sources": [
         "bun.lock",
+        "bunfig.toml",
         "tsconfig.json",
         "tsconfig.typecheck.json",
         "scripts/run-runtime-workspace-script.ts"
@@ -260,10 +261,13 @@
       "id": "test-system",
       "sources": [
         "scripts/run-default-tests.ts",
+        "scripts/run-test-files.ts",
+        "scripts/tooling/**",
         "scripts/unified-test-plan.ts",
         "scripts/run-owned-tests.ts",
         "scripts/test-suite.ts",
         "scripts/check-test-ownership.ts",
+        "tests/fast/**",
         "lefthook.yml",
         ".github/workflows/required.yml",
         "tests/integration/scripts/check-test-ownership.test.ts",

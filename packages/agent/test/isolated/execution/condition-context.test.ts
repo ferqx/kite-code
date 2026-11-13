@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type {
   AcceptedInformation,
@@ -39,7 +40,7 @@ async function fact<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw new Error('condition_context_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function rejected(promise: Promise<unknown>, code: string) {

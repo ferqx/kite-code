@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { initializeDefaultSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { z } from 'zod';
 import { exportOtelSpans, type OtelSendAuthorization } from './exporter';
 import { materializeSpan } from './mapping';
@@ -60,6 +61,7 @@ async function invoke(method: string, input: unknown): Promise<unknown> {
   if (method === 'initialize') {
     if (store) throw Error('otel_already_initialized');
     const { grant, ...options } = initializationSchema.parse(input);
+    initializeDefaultSqliteEngine();
     store = new OtelAdapterStore(options as OtelStoreOptions);
     store.setGrant(grant);
     return null;

@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import {
   parseCursorSequence,
   readSSE,
@@ -121,7 +122,7 @@ test('cursor bounds preserve signed 64-bit values and reject future, expired and
 
 test('real loopback fetch streams UTF-8 SSE without buffering the entire response', async () => {
   let sawHeader = false;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

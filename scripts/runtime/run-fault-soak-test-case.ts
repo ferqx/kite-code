@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn as spawnProcess } from '../tooling/process';
+import { testRuntimeFlags } from '../tooling/test-command';
+
+const repeatedTest = fileURLToPath(new URL('./fault-soak-repeat-test.ts', import.meta.url));
 
 function readOption(args: readonly string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -61,25 +66,28 @@ for (const file of files) {
     ? repeatCount + (prewarmFiles.has(fileName) ? prewarmCount : 0)
     : 1;
   console.log(`[fault-soak-case] ${file}`);
-  const proc = Bun.spawn(
+  const env = {
+    ...process.env,
+    KITE_FAULT_SOAK_LIFECYCLE_ID: basename(file),
+    KITE_FAULT_SOAK_LIFECYCLE_GROUP_NONCE: lifecycleGroupNonce,
+    KITE_FAULT_SOAK_REPEAT_COUNT: String(fileRepeatCount),
+  };
+  delete (env as NodeJS.ProcessEnv).NODE_TEST_CONTEXT;
+  delete (env as NodeJS.ProcessEnv).NODE_TEST_WORKER_ID;
+  const proc = spawnProcess(
     [
       process.execPath,
-      'test',
-      '--preload',
+      ...testRuntimeFlags,
+      '--test-reporter=spec',
+      ...(testNameArgs.length ? ['--test-name-pattern', testNameArgs[1]!] : []),
+      repeatedTest,
       resolve(preload),
-      '--max-concurrency=1',
-      ...(fileRepeatCount > 1 ? [`--rerun-each=${fileRepeatCount}`] : []),
       absoluteFile,
-      ...testNameArgs,
+      String(fileRepeatCount),
     ],
     {
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        KITE_FAULT_SOAK_LIFECYCLE_ID: basename(file),
-        KITE_FAULT_SOAK_LIFECYCLE_GROUP_NONCE: lifecycleGroupNonce,
-        KITE_FAULT_SOAK_REPEAT_COUNT: String(fileRepeatCount),
-      },
+      env,
       stdin: 'ignore',
       stdout: 'inherit',
       stderr: 'inherit',

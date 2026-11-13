@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import {
   createTaskQualityResearchFixture,
   taskQualityCompleteFixtureRead,
@@ -63,7 +64,7 @@ for (const trial of [1, 2]) {
         mkdirSync(dirname(join(root, path)), { recursive: true });
         writeFileSync(join(root, path), content);
       }
-      const child = Bun.spawn([process.execPath, join(root, 'apps/service/main.ts')], {
+      const child = spawnFixtureProcess([process.execPath, join(root, 'apps/service/main.ts')], {
         stdout: 'pipe',
         stderr: 'pipe',
       });

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -16,7 +14,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { type ArtifactStore, createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -291,7 +294,10 @@ test('two real processes publish one immutable hash and original ref without tem
   const f = await fixture();
   const child = fileURLToPath(new URL('./publish-child.ts', import.meta.url));
   const children = [0, 1].map(() =>
-    Bun.spawn([process.execPath, child, f.profile.dataRoot], { stdout: 'pipe', stderr: 'pipe' }),
+    spawnProcess([process.execPath, ...testRuntimeFlags, child, f.profile.dataRoot], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }),
   );
   const results = await Promise.all(
     children.map(async (child) => {
@@ -417,7 +423,7 @@ test('Artifact host admission is bounded and close drains accepted publications 
     }),
   );
   const admissionDeadline = Date.now() + 5000;
-  while (entered < 8 && Date.now() < admissionDeadline) await Bun.sleep(1);
+  while (entered < 8 && Date.now() < admissionDeadline) await sleepTimer(1);
   expect(entered).toBe(8);
   const queued = Array.from({ length: 64 }, (_, i) =>
     f.artifact.publish({ ...common, refId: `queued-${i}` }),

@@ -6,7 +6,7 @@
  * evidence boundary for prompt roles, project instructions, runtime state and
  * phase-stable tool disclosure plus Runtime-owned phase policy.
  */
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { currentPlanWorkResponses } from '../harness/current-plan';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
@@ -24,11 +24,11 @@ const PROJECT_MARKER = 'V2 production PTY project instruction marker.';
 
 describe('TUI PTY System — production Prompt Contract V2', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       files: { 'AGENTS.md': PROJECT_MARKER },
       configOverrides: {

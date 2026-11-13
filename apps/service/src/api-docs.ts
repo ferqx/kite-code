@@ -1,4 +1,4 @@
-import specification from '../generated/openapi.json';
+import specification from '../generated/openapi.json' with { type: 'json' };
 
 const escapeMarkup = (value: string) =>
   value

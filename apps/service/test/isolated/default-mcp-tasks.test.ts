@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
@@ -10,6 +9,8 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createMcpConfiguration } from '../../src/mcp-configuration';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
@@ -187,7 +188,7 @@ async function fixture() {
   let askTask = false,
     denyTask = false;
   const steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {

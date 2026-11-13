@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -6,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import { expect, test } from '#kite-test';
 import { defaultWindowsPathSecurity } from '../../../packages/agent/src/platform/windows-path-security';
 import {
   directoryLink,
@@ -101,7 +101,7 @@ test('public-permission counterexamples change the actual platform policy and re
 });
 
 test('current shared test fixtures do not depend on a fixed POSIX temp root or concatenate file URLs', () => {
-  const repository = resolve(import.meta.dir, '../../..'),
+  const repository = resolve(import.meta.dirname, '../../..'),
     failures: string[] = [];
   function scan(directory: string): void {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {

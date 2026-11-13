@@ -1,13 +1,14 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 
 // Actual compiler-child lifetime; Windows policy and PE input do not claim native qualification.
 test('Windows launcher compiler stream failure waits for actual child exit despite a failed signal before closing pins or output', () => {
   const path = (name: string) => fileURLToPath(new URL(`../../../${name}`, import.meta.url));
   const code = `
-import {mock} from 'bun:test';import assert from 'node:assert/strict';
-import * as actualFs from 'node:fs';import {join} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';
+import {mock} from '#kite-test';import assert from 'node:assert/strict';
+import actualFs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';import {join} from 'node:path';import {tmpdir} from 'node:os';import {createHash} from 'node:crypto';
 const fs={...actualFs};
 const root=fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'kite-launcher-owned-'))),outdir=join(root,'new-output'),verifierPath=join(root,'verifier.exe');
 const pe=Buffer.alloc(2048);pe.write('MZ');pe.writeUInt32LE(128,60);pe.write('PE\\0\\0',128);pe.writeUInt16LE(0x8664,132);pe.writeUInt16LE(1,134);pe.writeUInt16LE(240,148);
@@ -16,16 +17,16 @@ const section=optional+240;pe.writeUInt32LE(4096,section+12);pe.writeUInt32LE(15
 const streamFailure=Error('original_compiler_stream_failure'),signalFailure=Error('original_compiler_signal_failure');
 let actual,signals=0,exitObserved=false,releases=0;const events=[];
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
-mock.module('node:fs',()=>({...fs,rmSync(p,options){assert.ok(actual);assert.equal(actual.exitCode,0);assert.equal(exitObserved,true);events.push('rm:'+p);fs.rmSync(p,options);}}));
+actualFs.rmSync=(p,options)=>{assert.ok(actual);assert.equal(actual.exitCode,0);assert.equal(exitObserved,true);events.push('rm:'+p);fs.rmSync(p,options);};syncBuiltinESMExports();
 mock.module(${JSON.stringify(path('packages/agent/src/platform/windows-path-security.ts'))},()=>({defaultWindowsPathSecurity:()=>({}),privateDirectory(p){assert.ok([outdir,join(outdir,'compiler')].includes(p));assert.equal(fs.existsSync(p),false);fs.mkdirSync(p);}}));
 mock.module(${JSON.stringify(path('packages/agent/src/platform/windows-candidate-files.ts'))},()=>({retainWindowsCandidateFiles(p,files){assert.equal(p,root);assert.deepEqual(files,['verifier.exe']);return {verify(){},release(){assert.equal(actual.exitCode,0);assert.equal(exitObserved,true);releases++;events.push('pin-release');}};}}));
-const originalSpawn=Bun.spawn;
-Bun.spawn=new Proxy(originalSpawn,{apply(target,receiver,args){
+const processModule=await import(${JSON.stringify(path('scripts/tooling/process.ts'))});
+mock.module(${JSON.stringify(path('scripts/tooling/process.ts'))},()=>({...processModule,spawn:new Proxy(processModule.spawn,{apply(target,receiver,args){
  assert.equal(args[1].cwd,join(outdir,'compiler'));assert.equal(args[1].stdout,'pipe');assert.equal(args[1].stderr,'pipe');
  actual=Reflect.apply(target,receiver,[[process.execPath,'-e','setTimeout(() => process.exit(0), 150);'],args[1]]);
  actual.exited.then(code=>{assert.equal(code,0);exitObserved=true;events.push('actual-exit:0');});
  return new Proxy(actual,{get(child,key){if(key==='stderr')return new ReadableStream({start(controller){controller.error(streamFailure);}});if(key==='kill')return ()=>{signals++;assert.equal(child.exitCode,null);throw signalFailure;};const value=Reflect.get(child,key,child);return typeof value==='function'?value.bind(child):value;}});
-}});
+}})}));
 try {
  const {buildWindowsTerminalLauncher}=await import(${JSON.stringify(path('scripts/release/build-windows-terminal-launcher.ts'))});
  const started=performance.now();
@@ -34,12 +35,21 @@ try {
  assert.equal(releases,1);assert.equal(events[0],'actual-exit:0');assert.equal(events[1],'pin-release');assert.deepEqual(events.filter(e=>e.startsWith('rm:')),['rm:'+join(outdir,'compiler'),'rm:'+outdir]);assert.equal(events.at(-1),'rm:'+outdir);assert.equal(fs.existsSync(outdir),false);assert.deepEqual(fs.readFileSync(verifierPath),pe);
  assert.equal(await new Response(actual.stderr).text(),'');
 }finally{
- Bun.spawn=originalSpawn;
  if(actual&&actual.exitCode===null){actual.kill('SIGKILL');await actual.exited;}
  if(!actual||actual.exitCode!==null)fs.rmSync(root,{recursive:true,force:true});
 }
 `;
-  const child = spawnSync(process.execPath, ['--eval', code], { encoding: 'utf8', timeout: 4000 });
+  const child = spawnSync(
+    process.execPath,
+    [
+      ...testRuntimeFlags,
+      '--disable-warning=ExperimentalWarning',
+      '--input-type=module',
+      '--eval',
+      code,
+    ],
+    { encoding: 'utf8', timeout: 4000 },
+  );
   if (child.status !== 0)
     throw Error(
       `Windows compiler ownership fixture failed: ${child.error?.message ?? ''}\n${child.stderr}`,

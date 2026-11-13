@@ -1,13 +1,14 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { ToolSchema } from '@modelcontextprotocol/sdk/types.js';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { UserMcpSettingsOperation } from '../../src/http/schema/user-mcp';
 import { createUserMcpManagement } from '../../src/user-mcp-management';
@@ -37,7 +38,7 @@ async function fixture() {
       guardianPath: fileURLToPath(
         new URL('../../../../packages/agent/dist/mcp/windows-stdio-guardian.js', import.meta.url),
       ),
-      bunExecutable: process.execPath,
+      runtimeExecutable: process.execPath,
     },
   });
   let sequence = 0;
@@ -53,7 +54,7 @@ async function fixture() {
     const deadline = Date.now() + 70000;
     while (result.state === 'pending') {
       if (Date.now() > deadline) throw Error('windows_mcp_stdio_deadline');
-      await Bun.sleep(20);
+      await sleepTimer(20);
       result = await manager.lookup({ ...identity, commandId });
     }
     return result;

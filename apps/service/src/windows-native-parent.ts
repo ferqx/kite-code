@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { win32 } from 'node:path';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 
 const retained = new Set<object>();
 const invalid = 18446744073709551615n;
@@ -15,7 +16,6 @@ let backend: ReturnType<typeof native> | undefined;
 function native() {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     fail('windows_native_parent_platform_unsupported');
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetCurrentProcessId: { args: [], returns: 'u32' },

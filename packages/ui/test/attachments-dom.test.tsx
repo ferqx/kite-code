@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Interaction } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { type AttachmentReader, InteractionCard } from '../src';
 import { card } from './interactions.test';
 
@@ -106,13 +107,13 @@ test('actual DOM keyboard cannot approve unseen/failed attachments; complete loa
     await render(fixtureCard());
     mode = 'corrupt';
     await click('Load complete attachment');
-    await act(async () => await Bun.sleep(5));
+    await act(async () => await fixtureDelay(5));
     expect(button('仅此次').disabled).toBe(true);
     expect(host.textContent).toContain('could not be verified');
     expect(calls).toHaveLength(0);
     mode = 'encoding';
     await click('Load complete attachment');
-    await act(async () => await Bun.sleep(5));
+    await act(async () => await fixtureDelay(5));
     expect(button('仅此次').disabled).toBe(true);
     expect(host.querySelector('[data-complete-attachment]')).toBeNull();
     mode = 'late';
@@ -123,12 +124,12 @@ test('actual DOM keyboard cannot approve unseen/failed attachments; complete loa
     expect(calls).toHaveLength(0);
     await render(fixtureCard('two'));
     release();
-    await act(async () => await Bun.sleep(5));
+    await act(async () => await fixtureDelay(5));
     expect(host.querySelector('[data-complete-attachment]')).toBeNull();
     expect(button('仅此次').disabled).toBe(true);
     mode = 'valid';
     await click('Load complete attachment');
-    await act(async () => await Bun.sleep(5));
+    await act(async () => await fixtureDelay(5));
     expect(host.querySelector('[data-complete-attachment]')?.textContent).toBe('{}');
     expect(button('仅此次').disabled).toBe(false);
     await act(async () => {
@@ -204,7 +205,7 @@ test('actual >=17MiB public Auto attachment renders complete DOM text before a k
     const end = Date.now() + 7000;
     while (!host.querySelector('[data-complete-attachment]')) {
       if (Date.now() > end) throw new Error('attachment_dom_deadline');
-      await act(async () => await Bun.sleep(5));
+      await act(async () => await fixtureDelay(5));
     }
     const text = host.querySelector('[data-complete-attachment]')!.textContent!;
     expect(new TextEncoder().encode(text).byteLength).toBeGreaterThan(17 * 1024 * 1024);

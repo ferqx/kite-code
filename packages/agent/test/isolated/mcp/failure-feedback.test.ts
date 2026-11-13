@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { expect, test } from '#kite-test';
 import type { JobContext, Json, ToolContext, ToolResult } from '../../../src/extensions';
 import { defineExtension } from '../../../src/extensions';
 import { createMcpAdapter } from '../../../src/mcp';
@@ -200,7 +201,7 @@ test('a detached remote Task failure waits while idle and reaches the next ordin
     let terminal = await store.getExecution(pending.id);
     while (terminal?.status !== 'failed') {
       if (Date.now() > deadline) throw Error('remote_task_terminal_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
       terminal = await store.getExecution(pending.id);
     }
     expect(terminal.delivery).toBe('pending');

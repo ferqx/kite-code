@@ -35,62 +35,59 @@ const profileInput = JSON.parse(profileJson!),
   input = JSON.parse(requestJson!) as CallerCommandRequest;
 const actual = globalThis.fetch;
 let drop = true;
-globalThis.fetch = Object.assign(
-  async (...args: Parameters<typeof fetch>) => {
-    const method = args[1]?.method ?? 'GET',
-      url = String(args[0]),
-      path = new URL(url).pathname;
-    appendFileSync(
-      wire!,
-      `${JSON.stringify({
-        mode,
-        method,
-        path,
-        body: args[1]?.body ? JSON.parse(String(args[1].body)) : null,
-      })}\n`,
-    );
-    if (
-      drop &&
-      ((mode === 'post' && method === 'POST' && path === `/v1/sessions/${sessionId}/commands`) ||
-        (mode === 'get' && method === 'GET' && path === `/v1/commands/${input.commandId}`))
-    ) {
-      drop = false;
-      return await new Promise<Response>((resolve, reject) => {
-        const req = httpRequest(
-          url,
-          { method, headers: args[1]?.headers as Record<string, string> },
-          (res) => {
-            const socket = res.socket;
-            const body = new ReadableStream<Uint8Array>({
-              start(controller) {
-                res.on('data', () => {
-                  socket.destroy();
-                  controller.error(Error('owned_physical_loss'));
-                  if (mode === 'post') process.kill(process.pid, 'SIGKILL');
-                });
-                res.on('error', (e) => controller.error(e));
-              },
-            });
-            resolve(
-              new Response(body, {
-                status: res.statusCode,
-                headers: { 'content-type': 'application/json' },
-              }),
-            );
-          },
-        );
-        req.on('error', reject);
-        req.end(args[1]?.body);
-      });
-    }
-    return actual(...args);
-  },
-  { preconnect: actual.preconnect },
-);
+globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+  const method = args[1]?.method ?? 'GET',
+    url = String(args[0]),
+    path = new URL(url).pathname;
+  appendFileSync(
+    wire!,
+    `${JSON.stringify({
+      mode,
+      method,
+      path,
+      body: args[1]?.body ? JSON.parse(String(args[1].body)) : null,
+    })}\n`,
+  );
+  if (
+    drop &&
+    ((mode === 'post' && method === 'POST' && path === `/v1/sessions/${sessionId}/commands`) ||
+      (mode === 'get' && method === 'GET' && path === `/v1/commands/${input.commandId}`))
+  ) {
+    drop = false;
+    return await new Promise<Response>((resolve, reject) => {
+      const req = httpRequest(
+        url,
+        { method, headers: args[1]?.headers as Record<string, string> },
+        (res) => {
+          const socket = res.socket;
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              res.on('data', () => {
+                socket.destroy();
+                controller.error(Error('owned_physical_loss'));
+                if (mode === 'post') process.kill(process.pid, 'SIGKILL');
+              });
+              res.on('error', (e) => controller.error(e));
+            },
+          });
+          resolve(
+            new Response(body, {
+              status: res.statusCode,
+              headers: { 'content-type': 'application/json' },
+            }),
+          );
+        },
+      );
+      req.on('error', reject);
+      req.end(args[1]?.body);
+    });
+  }
+  return actual(...args);
+}, {});
 const access = await acquireDesktopProfileAccess({
     profile: profileInput,
-    bunExecutable: bunExecutable!,
-    bunSha256: bunSha256!,
+    runtimeExecutable: bunExecutable!,
+    runtimeSha256: bunSha256!,
     helperPath: helperPath!,
     helperSha256: helperSha256!,
     ...(windowsAssetJson ? { windowsAsset: JSON.parse(windowsAssetJson) } : {}),

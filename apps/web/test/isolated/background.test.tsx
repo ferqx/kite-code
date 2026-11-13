@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { type BackgroundExecutionItem, ClientError } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { BackgroundExecutions } from '../../src/background';
 import { installGlobals } from '../globals.fixture';
 
@@ -145,7 +146,7 @@ test('background UI uses exact metadata, opens original child, reads full saved 
           onOpen={(id) => opened.push(id)}
         />,
       );
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   async function click(text: string) {
@@ -153,7 +154,7 @@ test('background UI uses exact metadata, opens original child, reads full saved 
       [...dom.window.document.querySelectorAll<HTMLElement>('button,a')]
         .find((element) => element.textContent === text)!
         .click();
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
   }
   try {
@@ -182,7 +183,7 @@ test('background UI uses exact metadata, opens original child, reads full saved 
     });
     await act(async () => {
       dom.window.document.dispatchEvent(new dom.window.Event('visibilitychange'));
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
     expect(outputSignal.aborted).toBe(true);
     releaseOutput();
@@ -193,7 +194,7 @@ test('background UI uses exact metadata, opens original child, reads full saved 
     });
     await act(async () => {
       dom.window.document.dispatchEvent(new dom.window.Event('visibilitychange'));
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
     expect(text()).not.toContain('tail β');
 
@@ -211,7 +212,7 @@ test('background UI uses exact metadata, opens original child, reads full saved 
     expect(pending.aborted).toBe(true);
     release();
     await act(async () => {
-      await Bun.sleep(0);
+      await fixtureDelay(0);
     });
     expect(text()).not.toContain('Execution job');
     expect(text()).not.toContain('tail β');

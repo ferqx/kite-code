@@ -1,11 +1,17 @@
 # 真实模型 E2E 套件
 
+当前 checkout 通过 Bun 分派脚本，runner 使用 Node.js 26.13.1。从仓库根目录执行已授权的真实模型命令。可用以下命令运行本目录的本地合成 Provider、证据和进程回归，无需模型凭据。
+
+```sh
+node --no-global-search-paths --experimental-test-module-mocks --import ./scripts/tooling/register.mjs --test --test-concurrency=1 tests/e2e/live/model/*.test.ts
+```
+
 ## 计划业务人答与当前工具权限
 
 [业务审批入口](planning-business-approval.live.ts)通过原 Service／HTTP／SQLite、正式 Codex adapter 和本机原生 Shell 验证新合同；固定 Provider 的同入口夹具归[整文件](planning-business-approval-fixture.test.ts)。显式真实运行必须使用现有已授权登录、`gpt-6-luna`／`medium` 和不存在的自有绝对输出路径：
 
 ```bash
-KITE_RUN_LIVE_PLANNING_BUSINESS=1 bun tests/e2e/live/model/planning-business-approval.live.ts --model=gpt-6-luna --reasoning-effort=medium --output=/absolute/repository/dist/acceptance/new-planning-business.json
+KITE_RUN_LIVE_PLANNING_BUSINESS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/planning-business-approval.live.ts --model=gpt-6-luna --reasoning-effort=medium --output=/absolute/repository/dist/acceptance/new-planning-business.json
 ```
 
 矩阵分别核三模式计划人答、pending 六向模式切换、实际 general/explore 子 Agent、内外工作区和普通 question 不授工具许可。原业务卡／accepted proof、当前真实权限、Tool 与自身 Job 的准确次数、唯一效果、原生全树停止与冷原行零重放均须保留。模型最终正文无格式要求；计划完成仍须真实执行回执，夹具启用原 `read_execution_evidence` 正式入口找回 Execution UUID，不能拿 `shell_id`、operation key 或测试私有 Store 数据代替。自动 reviewer 保留独立 low 与生产默认8秒，不能用业务 medium、固定 Provider 或人工等候混算审核时延。
@@ -41,8 +47,8 @@ KITE_RUN_LIVE_PLANNING_BUSINESS=1 bun tests/e2e/live/model/planning-business-app
 [性能入口](approval-reuse.benchmark.ts)使用当前默认模型配置，或以 `--model`／`--reasoning-effort` 明确选择已有登录模型和业务思考设置，在隔离 Workspace／Store 中用确定业务调用驱动真实 reviewer。生产 Shell owner 负责解析、材料及风险解释，原 Runtime／SQLite 负责审核和范围接纳；Shell Job 换成只记录参数的隔离 adapter，合成 force-push／私钥外传从不执行。`--scoped` 使用准确的 `filesystem/network` 公开申请与 macOS scope-aware owner；它不授予测试进程实际执行危险命令的权限。受控旧行为保业务 reasoning、10秒、旧单条检索路径及不覆盖默认检查的 grant，该对照的新行为显式使用 low／5秒（不同于当前生产默认8秒）、字面量链与显式 grant 覆盖；下方早期 DeepSeek／Luna R3 的3秒记录保留原预算。适配器支持输出上限时，两组均保留最多256 tokens；Codex 登录通道不支持该参数，两组均不硬传256，不把无上限写成256上限。该对照不是运行旧制品，不修改用户配置或用户库，也不是真实业务模型完成工具任务或客户端 UI 验收。
 
 ```bash
-KITE_RUN_LIVE_APPROVAL_REUSE=1 bun tests/e2e/live/model/approval-reuse.benchmark.ts --scoped --repeats=2 --output=/absolute/repository/dist/acceptance/new-approval-reuse
-KITE_RUN_LIVE_APPROVAL_REUSE=1 bun tests/e2e/live/model/approval-reuse.benchmark.ts --model=gpt-6-luna --reasoning-effort=medium --scoped --case=single-search,literal-search-chain,ordinary-script,ordinary-public-key-read,high-private-data-upload,critical-synthetic,high-main-grant --repeats=2 --output=/absolute/repository/dist/acceptance/new-luna-medium-approval-reuse
+KITE_RUN_LIVE_APPROVAL_REUSE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-reuse.benchmark.ts --scoped --repeats=2 --output=/absolute/repository/dist/acceptance/new-approval-reuse
+KITE_RUN_LIVE_APPROVAL_REUSE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-reuse.benchmark.ts --model=gpt-6-luna --reasoning-effort=medium --scoped --case=single-search,literal-search-chain,ordinary-script,ordinary-public-key-read,high-private-data-upload,critical-synthetic,high-main-grant --repeats=2 --output=/absolute/repository/dist/acceptance/new-luna-medium-approval-reuse
 ```
 
 `--pilot` 只运行 ordinary/high/critical，`--case=ordinary-script,high-main-grant,critical-synthetic` 可补准确范围与同命令复用。输出目录必须为仓库 `dist/acceptance` 下不存在的新路径；报告只含模型公开名称、去敏设置、原审核 timing、决定和合成内容，不保存 endpoint、认证 header 或凭据。完成判定、技术失败与 timeout 分列；调用次数／准确效果／原卡路径须真正到达才有验收资格。`adapterCold` 只表示该 adapter 的第一次真实请求，不声称控制了 Provider 服务端缓存。
@@ -175,19 +181,19 @@ Auto explore 的准确外工作区 Files read 另由 `auto-explore-external-read
 [工作树 runner](git-worktree.live.ts)使用当前已配置的默认真实模型、实际 Service／HTTP Client／SQLite 和 macOS 原生 Shell。`primary` 验证 list、新分支 create、正常 remove，以及删除后由测试操作员重建同路径实体时的原 key 历史回执；`child-approval` 通过实际默认可写子 Agent 完成三个 action，要求创建／删除各一张业务卡且内部 Job 精确复用；`child-auto` 要求两次原业务审核且无重复内部审核；`child-notification` 验证工具成功通知沿 parent 原消息进入模型，再由 parent 转给已存在的可写 B，B 在新树实际读／写／读回；`child-readonly` 通过实际 explore 子 Agent 查询并解释角色边界。`child-default` 保留普通 Shell 能力，要求默认 child 省略 create.path，再按真实回执路径删除。静态只读证明只覆盖字面量闭集；复杂 Shell 进入 `reviewRequirements` 并保留 needs_review，由独立原文／SQL 复核其实际效果，不能自动当作违规或通过，也不提前中止其他业务、审批及消费断言。实际 Shell 创建或删除仍违反该场景的工具路线。模型事件和回复不改写，不设置累计请求数、整场或额外 HTTP 期限；操作员中止不算通过。
 
 ```bash
-KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=primary --output=/absolute/path/to/kite-code/dist/acceptance/new-primary
-KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-approval --output=/absolute/path/to/kite-code/dist/acceptance/new-child-approval
-KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-readonly --output=/absolute/path/to/kite-code/dist/acceptance/new-child-readonly
-KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-auto --output=/absolute/path/to/kite-code/dist/acceptance/new-child-auto
-KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-notification --output=/absolute/path/to/kite-code/dist/acceptance/new-child-notification
-KITE_RUN_LIVE_GIT_WORKTREE=1 bun tests/e2e/live/model/git-worktree.live.ts --case=child-default --output=/absolute/path/to/kite-code/dist/acceptance/new-child-default
+KITE_RUN_LIVE_GIT_WORKTREE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/git-worktree.live.ts --case=primary --output=/absolute/path/to/kite-code/dist/acceptance/new-primary
+KITE_RUN_LIVE_GIT_WORKTREE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/git-worktree.live.ts --case=child-approval --output=/absolute/path/to/kite-code/dist/acceptance/new-child-approval
+KITE_RUN_LIVE_GIT_WORKTREE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/git-worktree.live.ts --case=child-readonly --output=/absolute/path/to/kite-code/dist/acceptance/new-child-readonly
+KITE_RUN_LIVE_GIT_WORKTREE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/git-worktree.live.ts --case=child-auto --output=/absolute/path/to/kite-code/dist/acceptance/new-child-auto
+KITE_RUN_LIVE_GIT_WORKTREE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/git-worktree.live.ts --case=child-notification --output=/absolute/path/to/kite-code/dist/acceptance/new-child-notification
+KITE_RUN_LIVE_GIT_WORKTREE=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/git-worktree.live.ts --case=child-default --output=/absolute/path/to/kite-code/dist/acceptance/new-child-default
 ```
 
 输出必须是 runner 所在仓库 `dist/acceptance/` 下不存在的新绝对目录，不随调用 cwd 改变。现存路径、dangling entry、链接祖先和物理路径不一致均拒绝，子进程独占创建最终目录，不合并旧证据。只有合成仓库传给模型；原请求、事件、wire、canonical、完整分页输出、SQLite、意图记录及失败／替代工作树均保留，不递归清理、不 force、不自动删分支。真实 Shell Job 的集合须与唯一保存 ref 完全对应；允许模型追加只读 list 核验，但每个变更及其 prepare 仍各执行一次。完整回执送达不代替逐份业务语义复核。
 
-所有 case 都由启动器在子进程启动前设置隔离 HOME／USERPROFILE，HOME 是 `${output}.home`；原 Provider 配置只传原绝对路径并在内存解析，不复制凭据。macOS 的 Bun homedir 缓存启动位置；Windows 会随后续环境变化，夹具另外冻结模块首次读取的 HOME，并与当前值及两个环境变量比较，不能靠进程内修改环境冒充启动隔离。父进程要求 output 和相邻 home 均未存在，子进程在 Provider／Git 前核上述 HOME、实际默认根与输出位置；原生依赖预创建的私有 Library 只允许本次已检查的普通 owner 目录。
+所有 case 都由启动器在子进程启动前设置隔离 HOME／USERPROFILE，HOME 是 `${output}.home`；原 Provider 配置只传原绝对路径并在内存解析，不复制凭据。夹具冻结模块首次读取的 HOME，并与当前值及两个环境变量比较。进程内修改环境无法通过启动隔离核对。父进程要求 output 和相邻 home 均未存在，子进程在 Provider／Git 前核上述 HOME、实际默认根与输出位置；原生依赖预创建的私有 Library 只允许本次已检查的普通 owner 目录。
 
-随后[原生预检](git-worktree-native-preflight.ts)经相同 Bun／supervisor／controlBase 和既有权限、Job、监管执行一次固定只读 printf，准确范围为 workspace_write／none。独立 preflight Store 保存原 ref／Command、完整输出、原生停止证明、Runtime close 和冷读静止；确认后才读取源码 Git 摘要、初始化合成仓库并构造 Provider。失败、取消或关闭不确定即保留报告并停止；close／cold-read 间隙的取消也不能返回通过。`--launch-preflight` 只运行这一启动与原生链路，零 Git／零 Provider，不授予工作树业务资格。该独立固定模型／只读 Job 不计入业务真实模型请求或 Worktree Job 集合，原报告保存在 `native-preflight/report.json`。
+随后[原生预检](git-worktree-native-preflight.ts)经相同 Node／supervisor／controlBase 和既有权限、Job、监管执行一次固定只读 printf，准确范围为 workspace_write／none。独立 preflight Store 保存原 ref／Command、完整输出、原生停止证明、Runtime close 和冷读静止；确认后才读取源码 Git 摘要、初始化合成仓库并构造 Provider。失败、取消或关闭不确定即保留报告并停止；close／cold-read 间隙的取消也不能返回通过。`--launch-preflight` 只运行这一启动与原生链路，零 Git／零 Provider，不授予工作树业务资格。该独立固定模型／只读 Job 不计入业务真实模型请求或 Worktree Job 集合，原报告保存在 `native-preflight/report.json`。
 
 [证据 helper](git-worktree-evidence.ts)负责普通只读 Shell 的闭集、原引用与完整分页输出；Shell／worker 仅接收原 stdout/stderr，Agent Job 的原 progress 单独完整保存，不能混作 worker 帧，也不能静默丢弃。业务采证、关闭和冷读全部结束后才核最终验收；`operatorNotCancelled` 按 signal.aborted 判定，即使取消原因为 null，也不能把收尾间隙的中止报告为 assertions_passed。[共享 Worktree 证据夹具](../../../fixtures/worktree-execution-evidence.ts)复用生产 request/frame 和完整输出解析，核原记录、封闭 ref、Command、准确 payload／Job、唯一集合及停止证明。自动回归由[证据故障](../../../isolated/unified-agent/git-worktree-live-evidence.test.ts)、[完整启动器](../../../isolated/unified-agent/git-worktree-live-launch.test.ts)、[原生取消及缺资产](../../../isolated/unified-agent/git-worktree-native-preflight.test.ts)和[Service 两文件](../../../../apps/service/test/isolated/git-worktree-configuration.test.ts)维护，覆盖错误 ref、输出缺块／零丢字节伪区间、200条以上分页、模型结果未消费、启动 HOME、链接与旧目录。Service 初始化及测试主体失败仍单次关闭原 Runtime 和 HTTP listener，主体错误与关闭错误同时保留。
 
@@ -249,8 +255,8 @@ r3 的 `evidence/semantic-review.json` 对照全部 canonical／wire 原文、SQ
 该驱动可显式选择 `--model=gpt-6-luna|gpt-6.1-terra` 和 `--reasoning-effort=low|high`，默认仍为 `gpt-6-luna/low`；选择须命中现有本机模型，未知值在请求前拒绝。`--review=default-risk` 使用默认风险合同；`--review-timeout-ms=30000` 只扩大本次隔离审核观察窗口，不能据此宣称产品默认10秒的时延或超时行为已验收。模型与思考程度的配置对照并非单变量能力比较，不能直接把样本差异归因于模型或思考等级。
 
 ```bash
-KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --review=default-risk --review-timeout-ms=30000 --model=gpt-6-luna --reasoning-effort=high --case=natural --output=/absolute/new-luna-high.json
-KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --review=default-risk --review-timeout-ms=30000 --model=gpt-6.1-terra --reasoning-effort=low --case=natural --output=/absolute/new-terra-low.json
+KITE_RUN_LIVE_APPROVALS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-execution.live.ts --review=default-risk --review-timeout-ms=30000 --model=gpt-6-luna --reasoning-effort=high --case=natural --output=/absolute/new-luna-high.json
+KITE_RUN_LIVE_APPROVALS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-execution.live.ts --review=default-risk --review-timeout-ms=30000 --model=gpt-6.1-terra --reasoning-effort=low --case=natural --output=/absolute/new-terra-low.json
 ```
 
 2026-11-05，macOS arm64／Bun1.4.2，普通缺失与英文工具反馈修复后的自然任务对照保存在本机 `dist/acceptance/tool-feedback-20261105-high/`。`luna-high-natural.json` 为9例138次请求，`terra-low-natural.json` 为9例124次请求；两份均退出1、`needs_review`，机械合计12过6败，独立业务复核认定15例核心要求达成但保留各自噪声／夹具限定，另3例未完整完成。逐案全文、原业务结果、wire 和冷 Store 核对见两份 `*-independent-review.json` 及 `natural-matrix-independent-summary.json`。执行期间非 Markdown 摘要均为 `62f5ff1bcaa5e0a07974c4c30d929f07336d2e8990bf53e6007545630a22c9b2`；没有修改原任务、放宽业务 oracle 或覆盖原失败。
@@ -306,7 +312,7 @@ KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --
 Full 外部文件修复后的新命令：
 
 ```bash
-KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --review=default-risk --case=full-files-full,natural-main-full,natural-child-full --output=/absolute/new-full-files.json
+KITE_RUN_LIVE_APPROVALS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-execution.live.ts --review=default-risk --case=full-files-full,natural-main-full,natural-child-full --output=/absolute/new-full-files.json
 ```
 
 同日以相同模型／低思考在冻结代码摘要 `98526a2ce56309540e3302661d95833da256abc75eabbf7580d32dc7aa8bf9d7` 运行三例31次真实请求，原报告及完整 SQLite、canonical/wire 和结果在本机 `dist/acceptance/full-external-files-20261105/full-model-verification.json` 及同名 `.workspace`。`full-files-full` 是指定文件工具的能力验收：缺失外部父目录的新建、真实 read baseline、edit 与最终 readback 都成功，两个修改保留不可变 Artifact，不进入 Workspace 检查点，零 Shell／网络／委派／审批。原自然主 Full 例保持任务文本，已完成旧快照缺失／validator17诊断纠正、一次 GET、准确外部 JSON 和真实读回。
@@ -340,8 +346,8 @@ KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --
 [语义驱动](approval-review-semantics.live.ts)另将27份准确合成操作交给当前自动审核指引，检验动作风险、任务授权和执行范围的分离，包含允许中间暂存但限制最终交付、助手自定步骤不撤销用户授权、真实前置条件、禁止写入不可改称暂存、Python 只读检查；它不执行送审命令，也不替代真实派发。两入口显式使用现有 ChatGPT 登录中的 `gpt-6-luna`／`low`，逐次核实际 HTTP body，保持用户日常模型配置不变，不创建 API key。
 
 ```bash
-KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --output=/absolute/new-execution.json
-KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-review-semantics.live.ts --output=/absolute/new-review.json
+KITE_RUN_LIVE_APPROVALS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-execution.live.ts --output=/absolute/new-execution.json
+KITE_RUN_LIVE_APPROVALS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-review-semantics.live.ts --output=/absolute/new-review.json
 ```
 
 执行驱动可用 `--case=case-id,case-id` 定向验证，普通例最多240秒，自然选择例330秒，操作员等待单列；原模型、审核决定、审批卡时序、实际 Tool／Job、Store 和失败均保留，输出路径不能复用。`assertions_passed` 仍需全文审阅最终回答与理由，不能只凭 HTTP 200、随机值出现或 Run 结束验收。共享[原始输入采证](live-canonical-evidence.ts)按公开 inspector 合同仅省略私有 `continuation` 后逐字段比较捕获请求，其他正文及身份必须准确相等；私有原请求和 wire 另存。SQLite 冷重读仅证明原记录可读取且无新效果，不代表冷 Runtime 恢复或客户端窗口验收。
@@ -383,7 +389,7 @@ KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-review-semantics.liv
 该组沿默认Service权限、真实原生Shell、SQLite及Client；显式选择Files、Shell和Task委派／事件／列表目录，以实际模型同时驱动主、子及Auto审核，不注入Provider故障或预制审批JSON。当前不设请求总量或整场测试期限。使用现有登录的 `gpt-6-luna`／`low`，不修改日常配置。人工卡保存原input、来源Session与执行身份、作用前快照到 `pending-*.json`；隔离测试操作人核对准确授权后，写独立 `.answer.json` 的 `decision` 与 `reason`，才通过正式Interaction答复。卡片展示位置与实际执行来源分别核实，无法确认的额外操作不自动批准。需要人工核实的父级只读检查另保存 `parent-observation-*.json` 和独立审阅理由；这些入口仅存在于本显式测试驱动，不向普通客户端开放，也不构成审批UI验收。
 
 ```bash
-KITE_RUN_LIVE_APPROVALS=1 bun tests/e2e/live/model/approval-execution.live.ts --case=natural --output=/absolute/new-natural.json
+KITE_RUN_LIVE_APPROVALS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/approval-execution.live.ts --case=natural --output=/absolute/new-natural.json
 ```
 
 断言依据原Job完整输出和实际作用，不把成功启动、最外层Shell退出0或最终文字当成业务成功。模型可选择前台执行或启动后读取；复合命令也可能完整返回子程序错误而外层退出0。诊断必须是原两流中的实际独立诊断行，不能把读取校验脚本中的echo文本当作运行失败；[离线回归](approval-execution-fixture.test.ts)覆盖这项真实假阳性。原诊断、失败回执及call/source必须进入正确执行者的下一模型；交付字节、准确一次GET及只读零作用分别核实。人工拒绝核Tool／Job独立身份、未派发与零重放；Auto逐条核原审核目标／定义版本／完整input，真实 `ask_user` 仍可人工处理，Full不应产生常规审批。子场景等原carrier结算、结果接纳及关联父轮真实终态，父普通进度结束不能直接截断child；原父Run和最终相关父Run分别保留，没有自然发生的跨Run续轮不算实测覆盖。封存请求、原执行、两流输出、原始wire、代码摘要与失败保留，`assertions_passed` 之后仍须人工审阅完整轨迹、模型是否实际核对准确文件及最终归因。历史预算拒发另记 `fixtureBudgetStops`，不冒充Provider／Auto技术故障；当前无预算运行该字段为空。没有实际发生的Auto拒绝或技术故障不算覆盖，限定本机工具目录的样本不代表完整客户端或独立的只读OS禁写边界。
@@ -401,7 +407,7 @@ R2至R5逐一核了68条已结算失败Tool的后继实际模型输入，首例�
 [连续性驱动](loop-continuity.live.ts)使用同一 `gpt-6-luna / low`、正式 Service 的 Files／Shell／执行证据目录和标准真实摘要器，在独立 Python 项目修复八个源码模块。启动时登记真实纠正，保留初始用户 dirty。只有新增源码字节变化、对应原单项测试的真实 nonce 通过记录及独立验证同时成立，才触发一次自动压缩；要求至少三次具有新进展的已发布摘要。任务声明逐模块修复和验证，具体工具、命令及参数仍由模型选择。摘要触发属于隔离夹具调度，不代表生产 token 水位资格。
 
 ```bash
-KITE_RUN_LIVE_LOOP_CONTINUITY=1 bun tests/e2e/live/model/loop-continuity.live.ts /absolute/new-continuity-directory
+KITE_RUN_LIVE_LOOP_CONTINUITY=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/loop-continuity.live.ts /absolute/new-continuity-directory
 ```
 
 单例最多80次请求／600秒，保留完整原模型输入输出、实际摘要、Shell 输出、Git 初始状态和独立业务 oracle；原测试、README、用户 dirty、Git HEAD 及准确八个源码改动分别核实。没有自然调用 `read_execution_evidence` 时，只能证明该样本的摘要／原目标连续性，不能宣称历史回执恢复能力已经实测。
@@ -436,13 +442,13 @@ Auto驱动按准确原目标、真实`authorization_check_timeout`结果和原ch
 
 [前台工具／压缩 runner](foreground-guidance-boundaries.live.ts)使用真实已配置模型、默认标准摘要器、真实 Runtime／SQLite／HTTP，以及 Native 的 Main 队列 owner 与原 caller journal。三例分别验证回复引导后继续工具、引导先于自动压缩、真实摘要内容已到达时提交引导。同步门只延迟原工具或实际 Provider 事件，既不生成也不改写模型回复。每节只读一次，独立核实工具必须实际执行一次；引导后的首个业务响应先有正文、后有工具调用，再由后续真实模型完成报告。原始请求、流事件、摘要发布身份及独立 user sourceID 保留供全文审阅。
 
-`KITE_RUN_LIVE_COLLABORATION=1 bun run tests/e2e/live/model/foreground-guidance-boundaries.live.ts /absolute/evidence-directory`，上限30次请求／600秒。初始[浏览器 runner](foreground-guidance.live.ts)与[明确生产组件制品](../../../../apps/desktop/test/foreground-guidance-build.fixture.ts)另覆盖 Enter只排队、条目旁按钮、原工具完成后才交付；它使用共享 Composer／队列 hook 与真实 Main owner、HTTP、模型，不冒充完整 NativeDesktop／Electron IPC窗口。
+`KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/foreground-guidance-boundaries.live.ts /absolute/evidence-directory`，上限30次请求／600秒。初始[浏览器 runner](foreground-guidance.live.ts)与[明确生产组件制品](../../../../apps/desktop/test/foreground-guidance-build.fixture.ts)另覆盖 Enter只排队、条目旁按钮、原工具完成后才交付；它使用共享 Composer／队列 hook 与真实 Main owner、HTTP、模型，不冒充完整 NativeDesktop／Electron IPC窗口。
 
 2026-10-28，Windows x64／Bun1.4.3，当前工作树：`deepseek-v4-flash`／chat-completions／high／4096，三类扩展场景3／4／5次实际请求全部HTTP200，共12次。正文全文已审阅：均先回答当前进度，再调用尚未执行的核实工具，最后交付30项检查、3项待复核及实际确认码。压缩前引导产生1份标准自动摘要；摘要中引导产生2次真实摘要调用，仅含该引导的新摘要发布，旧摘要正文没有进入后继业务请求。各业务请求保留完整独立引导一次，原三节均仅读取一次，核实工具一次、同一Run完成，终态只读零新请求。证据在本机 `dist/acceptance/foreground-guidance-boundaries/`；初始2请求浏览器过程和夹具键修复证据另在 `dist/acceptance/foreground-guidance/`。这是当前模型和明确交错的限定样本，未覆盖其他模型、完整安装客户端或跨平台。
 
 ## 默认子角色与创建回执
 
-[子角色 runner](child-spawn.live.ts)通过实际 Service／HTTP／SQLite、默认角色与知识目录运行 `worker/explore/review × accept_edits/auto/full` 九格。显式入口为 `KITE_RUN_LIVE_CHILD_SPAWN=1 bun tests/e2e/live/model/child-spawn.live.ts <dist/acceptance 下新的自有绝对目录>`，固定使用 `gpt-6.1-terra`、低思考，不设置测试总请求数、总期限或单 HTTP 期限。保留原产品取消、子执行期限、权限及 10000ms 自动审核规则；逐张人工卡保存准确请求，由操作者核范围后提供原答案，不批量伪造批准。输入、输出、wire 和 Tool→执行引用均保留原身份并完整分页；业务结论必须另外阅读原始证据核验。
+[子角色 runner](child-spawn.live.ts)通过实际 Service／HTTP／SQLite、默认角色与知识目录运行 `general/explore × accept_edits/auto/full` 六格。显式入口为 `KITE_RUN_LIVE_CHILD_SPAWN=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/child-spawn.live.ts <dist/acceptance 下新的自有绝对目录>`，固定使用 `gpt-6.1-terra`、低思考，不设置测试总请求数、总期限或单 HTTP 期限。保留原产品取消、子执行期限、权限及 8000ms 自动审核规则；逐张人工卡保存准确请求，由操作者核范围后提供原答案，不批量伪造批准。输入、输出、wire 和 Tool→执行引用均保留原身份并完整分页；业务结论必须另外阅读原始证据核验。
 
 该测试保留父默认的真实 `computer-use` 知识和浏览器能力，验证分析子角色收窄能力后能省略不适用的默认知识，普通子角色保留能力。源码装配的资产定位仅桥接到真实发布 guardian，其他实现使用当前源码；不模拟能力可用，也不进行浏览器操作。[离线回归](../../../isolated/unified-agent/child-spawn-live-preparation.test.ts)验证同一准备路径和真实报告判定，零外部模型请求。当前 runner 保留 SDK 的中性错误分类，让暂时性模型错误继续走原 Runtime 重试；不会用测试包装异常取消该资格，也不自建重试。
 
@@ -461,7 +467,7 @@ Auto 三格七次 Shell 各对应唯一原执行：四次普通风险批准、�
 [任务 runner](agent-task-quality.live.ts)复用原模型 fixture、完整原输入/输出 inspector 和真实 SQLite/Files/Task，每种场景使用两个独立合成工作区。搜索场景包含单文件、根搜索、二进制和非法编码、忽略的构建目录，以及当前入口与旧同名实现；核实际读取链、随机真实值和未检查范围。委派场景由父模型根据公开角色说明自行选择可写角色，唯一子 Agent 读原输入并写一次结果，父实际读回并验收，核准确完整结果 Source 在每份后继输入中仅出现一次。
 
 ```bash
-KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality.live.ts --evidence-root=/absolute/new-owned-directory
+KITE_RUN_LIVE_TASK_QUALITY=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/agent-task-quality.live.ts --evidence-root=/absolute/new-owned-directory
 ```
 
 入口只在显式测试制品中读取已配置模型与凭据，不修改用户配置。权限是合成工作区的 owned-fixture 声明，不能称作默认 Service 权限或客户端窗口资格；生产无新入口。保存逐 trial 结果、实际工具/用量、原请求、完整 Model inspector 与原 Store；失败不覆盖。`assertions_passed` 只表示准确搜索参数、真实内容、读写因果、角色及结果来源等机械断言通过，`manualReviewRequired:true` 要求结合完整轨迹核对最终表述，关键词出现不证明主张方向正确。只评准确最后一次父交付，不拼接旧回复补齐最终结果；其他回复仍完整保存。调用数与时延用于观察效率，不能替代任务内容正确性。不同模型、平台、安装制品与长期运行不由本机结果推导。
@@ -544,12 +550,12 @@ r9 全文观察到委派不再要求逐字符展开或专门字节算术报告�
 [双 checkout 驱动](agent-task-quality-checkout-ab.live.ts)沿用相同两类研究任务、两种 profile 与八次均衡顺序。A 是 `a10b781e2` 的独立生产 checkout（已经包含简洁工具呈现）；B 是冻结后的候选。两侧在各自目录启动相同测试代码，解析各自生产模块、native Files 与独立锁定依赖，不覆盖 Runtime formatter。固定 `deepseek-v4-flash`／deepseek／Chat Completions／medium／4096 输出上限，单样本原72请求／480秒预算不变。最终处理变量为工具声明、搜索版本与默认粒度；系统合同、任务字节、同 pair 物理文件与 nonce、模型参数和测试权限保持。早期首轮还包含后来撤回的研究状态实验，不能与最终实现混为一轮。
 
 ```bash
-KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality-checkout-ab.live.ts --baseline=/absolute/committed-baseline --candidate=/absolute/frozen-candidate --evidence-root=/absolute/new-owned-directory
+KITE_RUN_LIVE_TASK_QUALITY=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/agent-task-quality-checkout-ab.live.ts --baseline=/absolute/committed-baseline --candidate=/absolute/frozen-candidate --evidence-root=/absolute/new-owned-directory
 ```
 
 先零 Provider 探测，封存实际解析路径、生产源码／manifest／lock、全部本目录 TypeScript harness 与根类型配置摘要；每次 child 前后以及 parent 每 trial 前后复核两侧。初始系统／任务消息按 pair 精确比较，每 arm 工具目录固定。所有实际 root／child 请求逐一与 wire 正文核角色、顺序、完整工具与来源正文及调用身份；Store 关闭前再按原 scope `readModelInput`，将封存 request 与实际捕获的完整 request 深等，记录 `canonical.requestIdentity`，缺失或失配均停止。独立 SQLite 回归通过后才允许 Provider，不用自造旧格式样例替代两侧真实 producer。
 
-最终模型目录严格为两侧各自生产 Files 五项与 Task 六项，零 Provider 的真实 Runtime／SQLite 回归及 live preflight 均拒绝额外、缺失或重复工具。普通 Service 的15／20项默认目录另由真实配置回归覆盖，不能用此窄夹具代替。最终必须阅读完整父子轨迹，区分当前事实、搜索范围、子报告误读、逐项采用和未决连接。全部预定样本、原始失败、Store、canonical、wire 和清理结果保留；不追加样本或以少检索替代结论正确。
+历史研究矩阵锁定 Files 五项与 Task 六项。当前生产目录已移除 `list_directory`、`glob_files` 和 `search_content`，因此本 checkout 在 Provider 调用前拒绝运行该矩阵。Runtime／SQLite 回归保留当前目录和历史矩阵的严格检查。普通 Service 的15／20项默认目录另由真实配置回归覆盖，不能用此窄夹具代替。最终必须阅读完整父子轨迹，区分当前事实、搜索范围、子报告误读、逐项采用和未决连接。全部预定样本、原始失败、Store、canonical、wire 和清理结果保留；不追加样本或以少检索替代结论正确。
 
 首轮 `research-tools-ab-r1` 在 macOS arm64／Bun1.4.2 完成全部预定8次，8项机械断言通过；两侧生产与harness摘要各自全程一致，93/93请求（含8个child请求）的 sealed canonical、实际捕获 request 和 wire 全文／身份相同，HTTP均200，采证与清理无错。以下为实际任务总量，包含父子和重复历史输入，不是相同回执的呈现压缩比。
 
@@ -586,7 +592,7 @@ KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality-checkou
 [配对驱动](agent-task-quality-presentation-ab.live.ts)只改变模型看到的工具／child 结果正文；系统合同、研究任务、模型与推理／输出设置、工具声明保持。预先固定 `current-chain`、`claim-adoption` 各两种 profile，共四对八次，raw／compact 先后顺序交错；每对共享同一物理工作区、nonce 与文件字节，使用独立 Profile／Store。raw 仅在隔离 Runtime 实例覆盖私有呈现方法，原 Artifact 验证继续执行；生产没有 baseline 开关。原任务字节 hash 另由确定性回归锁定。
 
 ```bash
-KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality-presentation-ab.live.ts --evidence-root=/absolute/new-owned-directory
+KITE_RUN_LIVE_TASK_QUALITY=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/agent-task-quality-presentation-ab.live.ts --evidence-root=/absolute/new-owned-directory
 ```
 
 每轮前后核全工作区 manifest，派发前核绑定及配对首次系统／任务／工具／wire 正文；保存原 Store、封存真实输入、Adapter 请求及实际 HTTP body，body 不含 URL、headers 或凭据。每个 wire 请求按准确 requestId、角色、顺序、Tool call ID 与完整正文核对。读取检查独立解析行窗、原文与完整基线；child 检查按 UTF-8 字节段核原报告和原工具 excerpt、身份与范围，不依赖 formatter 自证或关键词。质量失败保留并继续预定样本，配置漂移、文件变动、网络／采证／清理失败才停止并报告未完成数；不追加样本筛选结果。
@@ -619,7 +625,7 @@ KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality-present
 [整窗口 runner](session-anomalies-native-window.live.ts)在 macOS 从当前源码构建普通 Native Main／preload／renderer 和配套 Service，固定 `testDiagnostics:false`，读取已配置默认模型、协议与 preset，凭据仅在进程内解析。隔离 HOME／Profile／Workspace 与明确 `files.write@2` 权限不改变用户配置。真实 Provider 请求及响应原样转发，不替换工具调用或回复；每轮最多 20 次实际 HTTP、600 秒，单请求 60 秒，输出最多 4096 token，无外围重试或换模型。
 
 ```bash
-bun tests/e2e/live/model/session-anomalies-native-window.live.ts --output=/absolute/owned-directory/report.json --checkpoint=/absolute/owned-directory/checkpoints
+node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/session-anomalies-native-window.live.ts --output=/absolute/owned-directory/report.json --checkpoint=/absolute/owned-directory/checkpoints
 ```
 
 故障由外部 driver 注入 Main→Service 的实际 socket：断开并恢复连接；原 POST 收到 202 和正文数据后丢回执；原 Model 已派发且收到真实 200／首块响应、尚未向 Service 转发正文时，对所属 Main／Service 执行 SIGKILL。最后正常退出再冷开三个会话。响应 gate 证明真实响应交付边界，不证明远端仍在计算。逐段核原 Command／Run／Execution、请求 digest、原 ID 查询、五份实际文件、原中断任务零工具、后续输入与冷读零重放，以及每次 Main／Service 的出生身份和实际退出。
@@ -639,7 +645,7 @@ bun run test:model:image:live --images=10 --output=C:/absolute/new-owned-directo
 [性能 runner](image-reading.benchmark.ts)使用默认 Service、真实 SQLite/Artifact 和固定模型，零 Provider，原五组共54次单图调用覆盖界面 PNG、12MP噪声JPEG、32MP平坦PNG、透明WebP和30次连续界面图。每次新会话，分别记录工具耗时、包含后继模型输入封存的整链路耗时、主进程RSS与10ms计时观察；子进程内存不在主RSS中。新增`ui-batch10`组为6次调用、每次10张不同路径的相同合成界面图，核模型接收数量和metadata顺序；默认全部为60次调用／114张图。可用 `--case=ui|jpeg12mp|flat32mp|alpha|ui-soak|ui-batch10` 收窄复测。
 
 ```powershell
-bun tests/e2e/live/model/image-reading.benchmark.ts --output=C:/absolute/new-owned-directory/image-performance.json
+node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/image-reading.benchmark.ts --output=C:/absolute/new-owned-directory/image-performance.json
 ```
 
 两个程序都要求报告和 `<output>.workspace` 不存在，保留自有合成源、持久数据与结果供复核，不改用户配置。[当前证据与限制](../../../../packages/agent/src/tools/files/README.md#当前验证与性能)限Windows本机，不代长期SLO、其他平台或完整Native安装资格。
@@ -681,7 +687,7 @@ KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/own
 
 ```powershell
 $env:KITE_RUN_LIVE_MODEL_TOOLS = '1'
-bun tests/e2e/live/model/model-tools-all.live.ts --mode=auto --model=gpt-6-luna --reasoning-effort=medium --output=D:/absolute/new/report.json
+node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/model-tools-all.live.ts --mode=auto --model=gpt-6-luna --reasoning-effort=medium --output=D:/absolute/new/report.json
 ```
 
 当前10组为`files-shell`、`question`、`planning`、`skills`、`mcp`、`web`、`agents`、`images`、`execution-evidence`、`worktree-list`；`--scenario=<组名>`只验证该组，省略才覆盖32个公开工具族及动态MCP。Worktree本组只核真实list，创建／移除及其单次确认由独立入口负责。不换模型、协议，不改写模型回复或外围自动重试；没有测试轮次上限不意味着忽略真实失败或unknown。问答和计划通过真实公开Interaction API回答，由测试operator选择首项／批准，不能当作真人或客户端视觉验收。原报告和历史有限预算资格保持各自事实。
@@ -700,7 +706,7 @@ bun tests/e2e/live/model/model-tools-all.live.ts --mode=auto --model=gpt-6-luna 
 
 ```powershell
 $env:KITE_RUN_LIVE_MODEL_TOOLS = '1'
-bun tests/e2e/live/model/model-tools-all.live.ts --extended --mode=auto --model=gpt-6-luna --reasoning-effort=medium --output=D:/absolute/new/extended.json
+node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/model-tools-all.live.ts --extended --mode=auto --model=gpt-6-luna --reasoning-effort=medium --output=D:/absolute/new/extended.json
 ```
 
 [扩展用例](model-tools-extended-cases.ts)分别核对以下行为：
@@ -735,14 +741,14 @@ bun tests/e2e/live/model/model-tools-all.live.ts --extended --mode=auto --model=
 [统一收件 runner](collaboration-unified-inbox.live.ts)复用通用真实 Provider fixture，每次运行一个准确用例。`U01-active-unified-inbox` 在父第二次真实请求的原工具事件处暂挂，等普通邮件和最终结果进入同一邮箱后原样释放；核原只读工具只成功一次、同 Run 接收、完整低信任正文和唯一 Source，以及随后准确 `input.steer` 的原用户来源。`U02-idle-continuation-denied` 先让父正常完成，再实际发送普通邮件、发布最终结果，核普通消息不唤醒，当前续跑授权拒绝时两者保持排队，零 Source、新父 Run 或父模型请求。两例直接使用 owned Runtime／SQLite 与明确允许的工具策略，不授默认审批或客户端资格。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration.live.ts --group=unified-inbox --case=U01-active-unified-inbox --output=/absolute/owned-directory/active.json
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration.live.ts --group=unified-inbox --case=U02-idle-continuation-denied --output=/absolute/owned-directory/denied.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration.live.ts --group=unified-inbox --case=U01-active-unified-inbox --output=/absolute/owned-directory/active.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration.live.ts --group=unified-inbox --case=U02-idle-continuation-denied --output=/absolute/owned-directory/denied.json
 ```
 
 [普通 Native 收件窗口 runner](collaboration-unified-native-window.live.ts)另从当前源码构建 `testDiagnostics:false` 的 Main／preload／renderer 和配套 Service。隔离 HOME 仅保存 loopback 配置，原凭据只在透明代理内存中使用；沿普通 UI 选择完全访问、输入任务、查看准确子详情和正常退出／冷开。测试只启用文件读取和 Agent 工具，明确选择实际目录中的 `code` 预设以保留消息能力。HTTP 200 后的响应时序门只延迟原正文，不生成、改写或重放模型回复；记录这一边界，不将其称作远端仍在计算。每次最多 40 次真实 HTTP、600 秒，单请求 60 秒，输出最多 4096 token，保留配置的模型／协议／推理设置，无外围重试或换模型。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/window.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/window.json
 ```
 
 窗口制品保存父已结束而 child 仍运行、普通邮件仅排队、idle 结果先于父回复可见、active 原轮接收、准确 child 正文、父完成和冷开两会话的阶段截图及 150ms 连续帧。另保存真实邮箱／Source 回执、完整 canonical Model input/output 和实际 Provider 输入。公开展示若把普通邮件占位当用户气泡，或把原 Run 拆成两段处理过程，独立断言必须失败并保留失败现场及此前过程帧，不以底层收件或最后截图通过覆盖展示异常。本机实际结果和未取得的展示资格由 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)维护，Core 真实收件结果归 [Store owner](../../../../packages/agent/src/storage/README.md#统一消息接收)。
@@ -762,7 +768,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-nat
 正常最终结果流程使用独立 `--final-results-only` 范围，不能与 `--parent-compaction-only` 同用。子任务只读取一次材料并直接结束，不要求发送普通邮件，也不注入用户引导或压缩。普通 Agent 消息工具仍沿实际 `code` 预设提供，原任务、实际 Tool 执行、全库 Command 和公开展示分别核零额外邮件；不会通过删去工具来制造零邮件结果。默认混合场景继续保留普通邮件与压缩覆盖。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/final-results.json --final-results-only
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/final-results.json --final-results-only
 ```
 
 该范围先核父原 Turn 正常结束，再释放子真实最终响应；原结果经当前资格与授权创建唯一续 Run，准确发送者和完整结果气泡必须先于被暂挂的父续跑回复可见。另一场景在父原 Turn 活动时让子结果进入邮箱，由原检查点与一次 `wait_agent_events` 接入本轮，完整结果进入后继实际 Model 请求，等待工具的完成事件和准确子详情可读；父始终只有原 Run、一段处理过程，完成及冷开后也不补气泡。子最终响应的时序门以真实 `read_user_file` 调用及准确配对的完整读取回执识别，不依赖请求序号或普通邮件。公开结果正文、原 carrier／revision／Source、完整低信任 Provider 输入和父最终事实分别比对；两会话冷开须保持请求及持久记录数量。阶段截图、连续帧、原输入输出与时序事实沿现有证据目录保存，本机执行资格仍由 Desktop owner 维护。
@@ -770,7 +776,7 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-nat
 `--steering-boundaries` 是同一普通窗口的独立交错范围，与另两个参数互斥。idle 仍核仅最终结果的唯一续跑；active 在原子最终结果已排队时，从 Composer 发送第一波 Blue 引导；其后实际 Provider 的首个内容 delta 已交付并显示，再发送第二波 Green 更正和明确的一次大材料读取；实际自动摘要进行时发送第三波 Purple 更正。SSE 时序门只按完整原事件划分交付，原始与实际转发字节的 SHA256 必须相同，不重写任何 delta。摘要期间的 accepted 引导阻止旧冻结摘要发布；后续若再次摘要，核新覆盖与三条原文，若沿旧窗口继续，核完整原材料及三条原文，不能为测试预设而放宽发布门禁。最终核中文、仅最新 Purple、三条引导核验码、子结果与原任务码、材料内独立事实、一次实际读取、同 Run／单过程，以及终态折叠、展开全文原序与冷开零重放。报告据实际分支记录旧摘要拒绝与新摘要是否发布；普通邮件仍为零。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/steering-boundaries.json --steering-boundaries
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/steering-boundaries.json --steering-boundaries
 ```
 
 ## 输入、审批、标题与竞争
@@ -828,15 +834,15 @@ KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=inpu
 report恢复比较原child业务事实，Store全局cursor及root owner接管/释放投影另按当前值核对；不要求恢复后全局元数据停留在强杀前。有限cold/resume阶段先保存实际exit、signal、stderr与失败，再做退出分类。决定提交窗口使用明确的新有限业务请求；模型合法解释成progress时记未进入目标窗口，不改写为已提交业务。
 
 ```bash
-KITE_RUN_LIVE_REPORT_CRASH=1 bun tests/e2e/live/model/collaboration-report-crash.live.ts run /absolute/owned-directory/C03.json
-KITE_RUN_LIVE_INPUT_CRASH=1 bun tests/e2e/live/model/collaboration-input-crash.live.ts run /absolute/owned-directory/C04.json
-KITE_RUN_LIVE_INPUT_CRASH=1 bun tests/e2e/live/model/collaboration-input-crash.live.ts run /absolute/owned-directory/C04-decision.json decision
+KITE_RUN_LIVE_REPORT_CRASH=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-report-crash.live.ts run /absolute/owned-directory/C03.json
+KITE_RUN_LIVE_INPUT_CRASH=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-input-crash.live.ts run /absolute/owned-directory/C04.json
+KITE_RUN_LIVE_INPUT_CRASH=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-input-crash.live.ts run /absolute/owned-directory/C04-decision.json decision
 ```
 
 [有限邮箱 runner](collaboration-agent-events.live.ts)的`A03-finite-mailbox`使用真实child读取、发给parent的邮件与完成事件，验证正式Store端口`limit:1`分页、准确`nextSeq`及重复只读。隔离SQL retention-floor对照不删除事件，结束时恢复原值；核`cursor_expired`、准确恢复边界、从0不假装恢复，以及全业务表、Source和实际Model请求零新增。当前六工具没有`limit`，小页属于Host观察端口；该对照不授自然生产保留清理、模型在缺口后采用边界或断线重连资格。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-agent-events.live.ts --case=A03-finite-mailbox --output=/absolute/owned-directory/A03.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-agent-events.live.ts --case=A03-finite-mailbox --output=/absolute/owned-directory/A03.json
 KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=task-presets --case=A11-trusted-read-only-preset-same-child-followup --output=/absolute/owned-directory/A11-read-only.json
 KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=task-presets --case=A11-trusted-catalogue-omitted-preset-default-same-child-followup --output=/absolute/owned-directory/A11-default.json
 ```
@@ -846,13 +852,13 @@ KITE_RUN_LIVE_COLLABORATION=1 bun run test:model:collaboration:live --group=task
 [C06自然工具错误 runner](collaboration-natural-tools.live.ts)分别尝试旧名task_wait、准确不存在的agent_id、未知timeout_ms字段。只有原完整SSE批次实际生成目标错误、实际SDK完整调用一致、真实native拒绝及准确后续成功Model收到完整配对反馈，才可授该自然负例；合规纠正或拒绝生成错误记not_hit。自然非法JSON、不完整批次、外来Store及协议损坏对照仍分开未测。原始响应字节与失败输入/输出留在私有证据目录，机械通过后仍核完整解释。
 
 ```bash
-KITE_RUN_LIVE_NATURAL_TOOLS=1 bun tests/e2e/live/model/collaboration-natural-tools.live.ts C06-natural-missing-agent-id /absolute/owned-directory/C06.json
+KITE_RUN_LIVE_NATURAL_TOOLS=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-natural-tools.live.ts C06-natural-missing-agent-id /absolute/owned-directory/C06.json
 ```
 
 [C07传输故障 runner](collaboration-transport-fault.live.ts)是显式隔离对照：实际HTTP200/SSE头已收到、SDK正文尚为0字节时，确认取消原body后只在首次pull注入ECONNRESET，保原typed SDK错误和Core正式重试/退避/前驱。首次cancel的原Promise是唯一清理依据，拒绝或超时不准用第二次cancel假确认；不伪造EOF、finish或usage。它不授自然网络异常、已收到正文/Tool批次/真实效果后回程窗口。C06/C07均为独立40HTTP/600秒、4096/medium、单HTTP60秒；共用fixture的可选响应观察和保留typed错误只供这些隔离测试，不新增普通客户端入口。
 
 ```bash
-KITE_RUN_LIVE_TRANSPORT_FAULT=1 bun tests/e2e/live/model/collaboration-transport-fault.live.ts run /absolute/owned-directory/C07.json
+KITE_RUN_LIVE_TRANSPORT_FAULT=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-transport-fault.live.ts run /absolute/owned-directory/C07.json
 ```
 
 [真实 Provider 负载 runner](provider-load.live.ts)单独使用原始HTTP流观察器，字节原样交付，真实终止帧到达即退出active计数。L01测两根各一个child、一支准确取消与另一支完整自然EOF/Source。L02按原4/16/32槽三档、每档90秒、32流连续30秒、64KiB正文及3秒自然drain门槛执行；任一档未达即停止后续档。独立物理HTTP上限L01为40、L02为120（原断言最少需88），不改变通用40或4096/medium；取消清理不冒充自然drain，Service同进程采样不替代合同25的独立进程收束门禁。完整输入与每次原prepare Source资格由[私有观察helper](live-context-prepare-evidence.ts)保存，失败尝试同样保留。
@@ -860,8 +866,8 @@ KITE_RUN_LIVE_TRANSPORT_FAULT=1 bun tests/e2e/live/model/collaboration-transport
 并发读取支持正式ModelOutput的inline和Artifact正文；child尚无完整输出时，可准确读取已成功的原root Model全文，保留读前后活动HTTP身份与正文hash/bytes。该只读核验不代替幸存child的自然EOF和最终Source。L02的初始四root流、后续四root/十二child联合窗口及各档持续门槛分别记录，错过后者不推定Provider不能承载前者，也不降低原门槛。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/provider-load.live.ts --case=L01-real-provider-attached-cancel-isolation --output=/absolute/owned-directory/L01.json
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/provider-load.live.ts --case=L02-real-provider-original-three-stages --output=/absolute/owned-directory/L02.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/provider-load.live.ts --case=L01-real-provider-attached-cancel-isolation --output=/absolute/owned-directory/L01.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/provider-load.live.ts --case=L02-real-provider-original-three-stages --output=/absolute/owned-directory/L02.json
 ```
 
 
@@ -890,7 +896,7 @@ I14的child资料工具也在父配置的能力上限内声明，工具实现禁
 [事件等待runner](collaboration-agent-events.live.ts)独立管理自己的fixture与报告，不经通用group包装。`A03-snapshot / A03-timeout / A03-input / A03-root-stop` 分别核真实空SQL页后的零快照、1200ms有限超时、正式raw输入唤醒与根停止，原child、cursor与Source保持；不代证分页或旧游标缺口。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-agent-events.live.ts --case=A03-input --output=/absolute/owned-directory/events.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-agent-events.live.ts --case=A03-input --output=/absolute/owned-directory/events.json
 ```
 
 ## 普通客户端真实窗口
@@ -900,9 +906,9 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-agent-event
 [普通TUI runner](collaboration-tui-window.live.ts)通过正式Unix bootstrap和80×24真实PTY进入普通TUI；信任、`/permissions`、业务输入、Ctrl+B选child、批准与Esc拒绝均走键盘。默认resolver及审核注入同一真实计数adapter；附加守卫仅限制本例两个合成外部目标，不制造allowed。两个客户端都将U01审批与U03冷客户端重开子集分别报告。
 
 ```bash
-KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-native-window.live.ts --output=/absolute/owned-directory/native.json
-KITE_RUN_LIVE_TUI_WINDOW=1 bun tests/e2e/live/model/collaboration-tui-window.live.ts --output=/absolute/owned-directory/tui.json
-KITE_RUN_LIVE_TUI_WINDOW=1 bun tests/e2e/live/model/collaboration-tui-two-round.live.ts --output=/absolute/owned-directory/tui-two-round.json
+KITE_RUN_LIVE_COLLABORATION=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-native-window.live.ts --output=/absolute/owned-directory/native.json
+KITE_RUN_LIVE_TUI_WINDOW=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-tui-window.live.ts --output=/absolute/owned-directory/tui.json
+KITE_RUN_LIVE_TUI_WINDOW=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-tui-two-round.live.ts --output=/absolute/owned-directory/tui-two-round.json
 ```
 
 单例仍至多40次实际HTTP、600秒及4096输出token，不通过普通客户端环境名/URL/启动参数开放诊断。Native成功后保留私有canonical现场及manifest用于窗口交叉核验；单轮TUI成功后先核保存事实与资源关闭再删除自有根。两轮TUI的显式证据根始终保留，支持结束后独立读取canonical Store；此前已删除的成功样本不能追改为保留。失败和未命中现场均保留。冷客户端子集只证明同Store普通历史重开与零请求、新业务/Source记录及重放，不证明Service强杀恢复、断线事件、所有子上下文或其他平台。
@@ -920,7 +926,7 @@ Native另有同一child两轮的U02可达子集：正常切换会话/返回，�
 共享caller journal中的accepted原请求在TUI冷开时先保守恢复为unknown；先在普通`/recovery`高亮确切原ID并用Ctrl+L查回，看到原accepted/applied后才提交一次新澄清。查回必须零Provider及canonical变化，不能清journal、假记applied或绕过未知保护。
 
 ```bash
-KITE_RUN_LIVE_CROSS_CLIENT=1 bun tests/e2e/live/model/collaboration-cross-client.live.ts --output=/absolute/owned-directory/cross-client.json
+KITE_RUN_LIVE_CROSS_CLIENT=1 node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/collaboration-cross-client.live.ts --output=/absolute/owned-directory/cross-client.json
 ```
 
 2026-10-20，冻结摘要 `9d44e31657e152f2c231cb4e07fb6c83e159523860c2809fcb9ec2e0502285c5` 上，Native三份普通窗口和TUI三份PTY均取得U01及有限U03通过，分别23与21次真实HTTP；P04六种精确顺序各三份全部通过，58次HTTP。逐项69/80状态、输入交错复验、原失败及不足范围统一归[用例执行记录](collaboration-v1.1-cases.md)。TUI测试发现Esc误取消根工作，现沿原准确卡提交deny；没有修改手册来降低既有“拒绝当前审批”承诺。
@@ -931,7 +937,7 @@ KITE_RUN_LIVE_CROSS_CLIENT=1 bun tests/e2e/live/model/collaboration-cross-client
 
 R08和R12在显式证据根中保存 `canonical-model-evidence.json`，逐项由原 `readModelInput`／`readModelOutput` 读取准确scope及完整正文，并确认成功输出EOF；机械报告不复制这些正文。结束后的语义复核应比较该原输入、完整输出与carrier/Source，不能把有限的数据库result预览当作全文。`semanticReviewRequired` 表示仍须单列这一审计，机械passed不自动证明叙述准确。
 
-当前runner先核准准确回执、Source、实际 ModelInput、文件字节及资源关闭，再按各自现场策略删除自有根或保留已关闭证据。精确交错模块指定报告路径时可保留成功样本的 canonical；Native也保留，普通TUI成功后删除，准确状态以原报告的 `canonicalEvidenceRetained` 为准。指定报告路径的非通过用例在关闭资源后保留原 canonical Store 和合成文件于对应 `.workspace`，仅用于准确本地复核；不另复制正文到诊断日志。关闭失败明确 failed 并保留现场。早期尝试不反推符合这项留存规则，其准确缺口见[执行结果](collaboration-v1.1-cases.md#2026-10-19utc真实执行结果)。报告仅包含代码 HEAD/非 Markdown 工作树摘要、OS/Bun、模型/Provider/协议、preset、时间、状态码、可信 schema 中的工具与字段名称、usage、断言和闭集失败类别，不包含凭据、endpoint、原身份、路径或请求/响应正文。
+当前runner先核准准确回执、Source、实际 ModelInput、文件字节及资源关闭，再按各自现场策略删除自有根或保留已关闭证据。精确交错模块指定报告路径时可保留成功样本的 canonical；Native也保留，普通TUI成功后删除，准确状态以原报告的 `canonicalEvidenceRetained` 为准。指定报告路径的非通过用例在关闭资源后保留原 canonical Store 和合成文件于对应 `.workspace`，仅用于准确本地复核；不另复制正文到诊断日志。关闭失败明确 failed 并保留现场。早期尝试不反推符合这项留存规则，其准确缺口见[执行结果](collaboration-v1.1-cases.md#2026-10-19utc真实执行结果)。报告仅包含代码 HEAD/非 Markdown 工作树摘要、OS/Node、模型/Provider/协议、preset、时间、状态码、可信 schema 中的工具与字段名称、usage、断言和闭集失败类别，不包含凭据、endpoint、原身份、路径或请求/响应正文。
 
 公网 `test:mcp:live` 仍使用固定模型，只证明实际远端 MCP 链路。本目录旧 background、compaction 与旧 MCP 文件保留历史范围，不是当前 V1.1 或全平台验收入口。
 
@@ -941,7 +947,7 @@ R08和R12在显式证据根中保存 `canonical-model-evidence.json`，逐项由
 
 ```powershell
 $env:KITE_RUN_LIVE_QUESTIONNAIRE='1'
-bun tests/e2e/live/model/questionnaire.live.ts --output=D:/owned-directory/questionnaire.json
+node --no-global-search-paths --import ./scripts/tooling/register.mjs tests/e2e/live/model/questionnaire.live.ts --output=D:/owned-directory/questionnaire.json
 ```
 
 未显式开启时，在读取配置与访问网络前拒绝。测试自行构建当前组件、Native CSS 和字体；Windows 默认使用本机 Chrome，其他安装位置可显式设置 `KITE_TEST_CHROME`。报告路径可省略，提供时必须为尚不存在的绝对路径，并在同位置附一张合成问卷截图。隔离 [浏览器入口](questionnaire-browser.fixture.tsx)不进入 dev/prod。

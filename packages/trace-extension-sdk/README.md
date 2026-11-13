@@ -11,10 +11,10 @@ context 只提供自身 settings、获准历史请求、当前批的 Evidence op
 本地模板见 [metadata.ts](examples/metadata.ts)和 [manifest](examples/metadata.manifest.json)。在仓库根运行：
 
 ```sh
-bun packages/trace-extension-sdk/scripts/pack.ts packages/trace-extension-sdk/examples/metadata.ts packages/trace-extension-sdk/examples/metadata.manifest.json /tmp/kite-metadata-extension.json
+node --import ./scripts/tooling/register.mjs packages/trace-extension-sdk/scripts/pack.ts packages/trace-extension-sdk/examples/metadata.ts packages/trace-extension-sdk/examples/metadata.manifest.json /tmp/kite-metadata-extension.json
 ```
 
-输出包含原 manifest 和 `{apiVersion,source,sha256}` 单脚本 bundle；同名输出存在时拒绝覆盖。`@kite-ai/trace-extension-sdk/bundle` 是构建时叶子，不导入 guest。Host 校验 manifest、API 和完整 hash 后安装；安装默认关闭，配置和授权后才能开启 live，首次 enable 只消费其固定起点后的事实，更早历史须单独请求。disable 保留未交付事实，更新和减权退休旧 engine，新权限不继承；uninstall 终止消费义务，重装有新安装身份。扩展脚本在独立进程的无默认 I/O engine 中执行，不是 Node／Bun 插件；不支持外部 import、native addon、宿主 fetch 或任意文件访问。
+输出包含原 manifest 和 `{apiVersion,source,sha256}` 单脚本 bundle；同名输出存在时拒绝覆盖。`@kite-ai/trace-extension-sdk/bundle` 是源码 checkout 的构建入口；Terminal 和桌面运行包只携带扩展运行时契约。Host 校验 manifest、API 和完整 hash 后安装；安装默认关闭，配置和授权后才能开启 live，首次 enable 只消费其固定起点后的事实，更早历史须单独请求。disable 保留未交付事实，更新和减权退休旧 engine，新权限不继承；uninstall 终止消费义务，重装有新安装身份。扩展脚本在独立进程的无默认 I/O engine 中执行，不是 Node／Bun 插件；不支持外部 import、native addon、宿主 fetch 或任意文件访问。
 
 workspace 的 `build` 对公共接口和构建叶子保留外部依赖，由发行闭包复制声明的 workspace／第三方依赖及 notices。上面的第三方扩展打包器另行生成可交给 Host 的完整 IIFE 单脚本；workspace 构建产物不直接充当 guest 脚本。manifest 保持 API 1，声明的是可请求能力，实际使用仍须安装后独立 grant。
 

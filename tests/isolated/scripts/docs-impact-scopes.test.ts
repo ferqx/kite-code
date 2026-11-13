@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, describe, expect, it } from '#kite-test';
 import { changedFilesForScope } from '../../../scripts/check-docs-impact';
+import { spawnSync as runFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
 let repository = '';
 
 function git(...args: string[]): string {
-  const result = Bun.spawnSync({
-    cmd: ['git', ...args],
+  const result = runFixtureProcess(['git', ...args], {
     cwd: repository,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -68,9 +69,9 @@ describe('documentation impact Git scopes', () => {
 });
 
 describe('documentation impact command outcomes', () => {
-  const script = join(import.meta.dir, '../../../scripts/check-docs-impact.ts');
+  const script = join(import.meta.dirname, '../../../scripts/check-docs-impact.ts');
   function run(...args: string[]) {
-    return Bun.spawnSync(['bun', script, ...args], {
+    return runFixtureProcess(testNodeCommand(script, args), {
       cwd: repository,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -158,9 +159,13 @@ describe('documentation impact command outcomes', () => {
     ]) {
       writeFileSync(join(repository, path), '# 导航\n');
     }
-    const structureScript = join(import.meta.dir, '../../../scripts/check-docs.ts');
+    const structureScript = join(import.meta.dirname, '../../../scripts/check-docs.ts');
     const structure = () =>
-      Bun.spawnSync(['bun', structureScript], { cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+      runFixtureProcess(testNodeCommand(structureScript), {
+        cwd: repository,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
     expect(structure().exitCode).toBe(0);
     writeFileSync(
       join(repository, 'docs/handbook/clients/tui/guides/input.md'),
@@ -200,9 +205,13 @@ describe('documentation impact command outcomes', () => {
       join(repository, technical),
       '# 当前实现\n> 已确认设计，尚未实现：[方案](../../plans/feature.md)\n',
     );
-    const structureScript = join(import.meta.dir, '../../../scripts/check-docs.ts');
+    const structureScript = join(import.meta.dirname, '../../../scripts/check-docs.ts');
     const check = () =>
-      Bun.spawnSync(['bun', structureScript], { cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+      runFixtureProcess(testNodeCommand(structureScript), {
+        cwd: repository,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
     expect(check().exitCode).toBe(0);
     unlinkSync(join(repository, plan));
     expect(check().exitCode).toBe(1);
@@ -230,9 +239,13 @@ describe('documentation impact command outcomes', () => {
     ]) {
       writeFileSync(join(repository, path), '# 导航\n');
     }
-    const structureScript = join(import.meta.dir, '../../../scripts/check-docs.ts');
+    const structureScript = join(import.meta.dirname, '../../../scripts/check-docs.ts');
     const check = () =>
-      Bun.spawnSync(['bun', structureScript], { cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+      runFixtureProcess(testNodeCommand(structureScript), {
+        cwd: repository,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
     writeFileSync(
       join(repository, '.agents/notes/rejected/process/2026-01-01-history.md'),
       '# Agent Note: 当时记录\n\nStatus: rejected — historical\n\n## Problem\n[旧路径](removed.ts)\n\n## Proposal\nOld choice.\n\n## Alternatives considered\nOther choice.\n',
@@ -271,9 +284,13 @@ describe('documentation impact command outcomes', () => {
     ]) {
       writeFileSync(join(repository, path), '# 导航\n');
     }
-    const structureScript = join(import.meta.dir, '../../../scripts/check-docs.ts');
+    const structureScript = join(import.meta.dirname, '../../../scripts/check-docs.ts');
     const check = () =>
-      Bun.spawnSync(['bun', structureScript], { cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+      runFixtureProcess(testNodeCommand(structureScript), {
+        cwd: repository,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
     const proposed = '.agents/notes/proposed/architecture/2026-01-01-proposal.md';
     writeFileSync(
       join(repository, proposed),

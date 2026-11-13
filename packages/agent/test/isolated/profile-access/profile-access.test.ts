@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { type ChildProcess, fork, spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -17,8 +16,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
 import { acquireProfileMaintenanceAccess } from '../../../src/platform/profile';
 import { acquireInheritedProfileAccess, acquireProfileAccess } from '../../../src/profile-access';
+import {
+  fixtureNodeExecutable,
+  fixtureNodeLoader,
+  fixtureRuntimeBuild,
+} from '../../fixtures/node-runtime';
 
 const helper = fileURLToPath(new URL('./helper.ts', import.meta.url));
 const holder = fileURLToPath(new URL('./node-holder.cjs', import.meta.url));
@@ -77,8 +83,16 @@ async function kill(child: ChildProcess) {
 }
 function exclusive(f: ReturnType<typeof fixture>, busy: boolean) {
   const result = spawnSync(
-    process.execPath,
-    [helper, 'exclusive', f.options.dataRoot, f.options.profile],
+    fixtureNodeExecutable(),
+    [
+      '--no-global-search-paths',
+      '--import',
+      fixtureNodeLoader,
+      helper,
+      'exclusive',
+      f.options.dataRoot,
+      f.options.profile,
+    ],
     { encoding: 'utf8', timeout: 10000 },
   );
   expect(result.status).toBe(busy ? 75 : 0);
@@ -164,15 +178,22 @@ test.skipIf(!posix)(
 );
 
 test.skipIf(!posix)(
-  'actual Node fd keeps shared profile-use lock after one-shot Bun release/exit, independent child exit and SIGKILL release only owned copies',
+  'actual Node fd keeps shared profile-use lock after one-shot helper release/exit, independent child exit and SIGKILL release only owned copies',
   async () => {
     const f = fixture(),
       nodes = new Set<ChildProcess>();
     async function start() {
       const child = fork(
         holder,
-        [process.execPath, helper, f.options.dataRoot, f.options.profile, f.path],
-        { execPath: 'node', stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
+        [
+          fixtureNodeExecutable(),
+          fixtureNodeLoader,
+          helper,
+          f.options.dataRoot,
+          f.options.profile,
+          f.path,
+        ],
+        { execPath: fixtureNodeExecutable(), stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
       );
       nodes.add(child);
       child.once('exit', () => nodes.delete(child));
@@ -217,18 +238,18 @@ test.skipIf(!posix)(
 );
 
 test.skipIf(!posix)(
-  'built profile identity remains pure Node and public profile-access leaf admits Bun consumers outside source tree',
+  'built profile identity remains pure Node and public profile-access leaf admits Node consumers outside source tree',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-profile-access-build-')));
     try {
       const outdir = join(root, 'built');
-      const result = await Bun.build({
+      const result = await buildBundle({
         entrypoints: [
           fileURLToPath(new URL('../../../src/profile.ts', import.meta.url)),
           fileURLToPath(new URL('../../../src/profile-access.ts', import.meta.url)),
         ],
         outdir,
-        target: 'bun',
+        ...fixtureRuntimeBuild(outdir),
         packages: 'external',
         naming: '[name].js',
       });
@@ -236,7 +257,7 @@ test.skipIf(!posix)(
       const dataRoot = join(root, 'new-data');
       const options = { dataRoot, profile: 'test' };
       const node = spawnSync(
-        'node',
+        fixtureNodeExecutable(),
         [
           '--input-type=module',
           '--eval',
@@ -248,16 +269,20 @@ test.skipIf(!posix)(
       const identity = JSON.parse(node.stdout);
       expect(identity.profile).toBe('test');
       expect(() => lstatSync(dataRoot)).toThrow();
-      const bun = spawnSync(
-        process.execPath,
+      const acquired = spawnSync(
+        fixtureNodeExecutable(),
         [
+          '--input-type=module',
           '--eval',
           `import {acquireProfileAccess} from ${JSON.stringify(join(outdir, 'profile-access.js'))};const access=acquireProfileAccess(${JSON.stringify(options)});console.log(JSON.stringify({key:access.profileAccessKey,mode:access.lock.mode}));access.lock.release();`,
         ],
         { cwd: root, encoding: 'utf8', timeout: 10000 },
       );
-      expect(bun.status).toBe(0);
-      expect(JSON.parse(bun.stdout)).toEqual({ key: identity.profileAccessKey, mode: 'shared' });
+      expect(acquired.status).toBe(0);
+      expect(JSON.parse(acquired.stdout)).toEqual({
+        key: identity.profileAccessKey,
+        mode: 'shared',
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

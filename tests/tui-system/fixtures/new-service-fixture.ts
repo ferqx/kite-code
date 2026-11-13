@@ -8,6 +8,7 @@ import { type CLIServiceArtifact, parseCLIServiceArtifact } from '../../../apps/
 import { runTUIProcess } from '../../../apps/cli/host/tui-main';
 import { waitForTuiProfileAccess } from '../../../apps/cli/host/tui-startup-wait';
 import { buildOwnedDaemon } from '../../../apps/cli/test/fixtures/daemon-host-build';
+import { build as testBuild } from '../../../scripts/tooling/build';
 export type SpecialFixture =
   | 'cancel-successor'
   | 'presentation-race'
@@ -138,7 +139,7 @@ export async function runSpecialFixture(mode: SpecialFixture) {
       executableSha256: sha(executable),
       apiMajor: 1 as const,
     };
-    const entry = join(import.meta.dir, 'new-service-special.ts');
+    const entry = join(import.meta.dirname, 'new-service-special.ts');
     const digest = createHash('sha256')
       .update(readFileSync(entry))
       .update(base.entrypointSha256)
@@ -149,10 +150,10 @@ export async function runSpecialFixture(mode: SpecialFixture) {
       .digest('hex');
     const outdir = join(artifactRoot, 'fixture');
     mkdirSync(outdir, { recursive: true });
-    const build = await Bun.build({
+    const build = await testBuild({
       entrypoints: [entry],
       outdir,
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       naming: 'main.js',
       define: {

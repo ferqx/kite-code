@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { approvalOptions, grantDigest, grantScopeDigest } from '../../../src/permission-grants';

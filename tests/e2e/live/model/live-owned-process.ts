@@ -1,6 +1,7 @@
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 /** Only handles produced by this fixture's own spawn are accepted for signals. */
 export function spawnOwnedStage(script: string, phase: string, root: string) {
-  return Bun.spawn([process.execPath, ...process.execArgv, script, phase, root], {
+  return spawnFixtureProcess([process.execPath, ...process.execArgv, script, phase, root], {
     stdout: 'pipe',
     stderr: 'pipe',
     stdin: 'ignore',

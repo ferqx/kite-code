@@ -1,6 +1,9 @@
-import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { lookupRecovery, type RecoveryIntent, submitRecovery } from '../../src/recovery';
 import { untilRecovery } from '../fixtures/recovery-profile';
 import { recoveryReportProfile } from '../fixtures/recovery-report-profile';
@@ -66,19 +69,20 @@ test('compiled paired CLI report recovery and journal reference lookup preserve 
       network = join(f.root, 'cli-report-network');
     writeFileSync(
       source,
-      `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(fileURLToPath(new URL('../../host/main.ts', import.meta.url)))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');return actual(...args);},{preconnect:actual.preconnect});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
+      `import {appendFileSync} from 'node:fs';import {runCLIProcess} from ${JSON.stringify(fileURLToPath(new URL('../../host/main.ts', import.meta.url)))};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');return actual(...args);});process.exitCode=await runCLIProcess({profile:'owned',argv:process.argv.slice(2),resolveArtifact:()=>(${JSON.stringify(f.artifact)})});`,
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [source],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: join(f.root, 'artifact'),
     });
     expect(built.success).toBe(true);
     const invoke = async (action: 'report' | 'lookup') => {
-      const child = Bun.spawn(
+      const child = testSpawn(
         [
           process.execPath,
+          ...testRuntimeFlags,
           join(f.root, 'artifact/cli-report.js'),
           'recovery',
           action,

@@ -1,5 +1,5 @@
-import { dlopen, ptr } from 'bun:ffi';
 import { spawnSync } from 'node:child_process';
+import { dlopen, ptr } from '../../../packages/agent/src/runtime-ffi';
 
 export interface NativeShellProcessIncarnation {
   pid: number;

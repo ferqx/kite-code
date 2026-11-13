@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { createSkillSource } from '../../../src/skills';
 
 test('Skill discovery is summary only; explicit body/resource identity and no script execution', async () => {

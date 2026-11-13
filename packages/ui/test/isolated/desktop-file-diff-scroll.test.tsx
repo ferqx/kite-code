@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { NativeScrollbars, ScrollArea } from '../../src/desktop/components/ui/scroll-area';
 import { FileChanges, FileDiff } from '../../src/desktop/FileChanges';
 import type { Message } from '../../src/desktop/types';

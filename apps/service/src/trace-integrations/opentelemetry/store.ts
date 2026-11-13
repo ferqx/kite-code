@@ -1,7 +1,7 @@
-import { constants, Database } from 'bun:sqlite';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { constants, Database } from '@kite-ai/agent/runtime-sqlite';
 import {
   canonicalSerialize,
   type TraceDeliveryResult,
@@ -14,6 +14,7 @@ import {
   type TraceConsumerInspection,
   traceConsumerInspectionSchema,
 } from '../../trace-extensions/consumer';
+import { readTraceRow, readTraceRows } from '../../trace-extensions/sqlite-statements';
 import type { OtelExportOutcome } from './exporter';
 import {
   eventSpanIdentity,
@@ -92,9 +93,10 @@ export class OtelAdapterStore {
         'PRAGMA foreign_keys=ON; PRAGMA busy_timeout=100; PRAGMA synchronous=FULL; PRAGMA journal_mode=WAL',
       );
       if (
-        !this.db
-          .query("SELECT name FROM sqlite_schema WHERE type='table' AND name='integration'")
-          .get()
+        !readTraceRow(
+          this.db,
+          "SELECT name FROM sqlite_schema WHERE type='table' AND name='integration'",
+        )
       )
         this.db.exec(`
         BEGIN IMMEDIATE;
@@ -105,18 +107,13 @@ export class OtelAdapterStore {
         CREATE TABLE open_span(task_id TEXT NOT NULL,identity TEXT NOT NULL,first_json TEXT NOT NULL,last_json TEXT NOT NULL,PRIMARY KEY(task_id,identity));
         CREATE TABLE spool(key TEXT PRIMARY KEY,task_id TEXT NOT NULL,revision TEXT NOT NULL,epoch TEXT NOT NULL,status TEXT NOT NULL,envelope_json TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL DEFAULT 0,code TEXT,rejected_count INTEGER,possible_duplicate INTEGER NOT NULL DEFAULT 0);
         COMMIT;`);
-      const integration = this.db
-        .query<
-          {
-            version: number;
-            mapping_version: number;
-            installation_id: string;
-            endpoint: string;
-            identity_key: string;
-          },
-          []
-        >('SELECT * FROM integration WHERE singleton=1')
-        .get();
+      const integration = readTraceRow<{
+        version: number;
+        mapping_version: number;
+        installation_id: string;
+        endpoint: string;
+        identity_key: string;
+      }>(this.db, 'SELECT * FROM integration WHERE singleton=1');
       if (!integration)
         this.db.run('INSERT INTO integration VALUES(1,1,?,?,?,?,?,?,0)', [
           mappingVersion,
@@ -133,9 +130,10 @@ export class OtelAdapterStore {
         integration.endpoint !== endpoint.href
       )
         throw Error('otel_store_incompatible');
-      this.identityKey = this.db
-        .query<{ identity_key: string }, []>('SELECT identity_key FROM integration')
-        .get()!.identity_key;
+      this.identityKey = readTraceRow<{ identity_key: string }>(
+        this.db,
+        'SELECT identity_key FROM integration',
+      )!.identity_key;
       // A previous process may have sent remotely. Retain the envelope and explicit duplicate risk.
       this.db.run(
         "UPDATE spool SET status='retry_wait',possible_duplicate=CASE WHEN attempts>0 THEN 1 ELSE possible_duplicate END WHERE status='sending'",
@@ -157,11 +155,10 @@ export class OtelAdapterStore {
     }
   }
   grant(): OtelGrantStamp {
-    const row = this.db
-      .query<{ revision: string; epoch: string; active: number }, []>(
-        'SELECT revision,epoch,active FROM integration',
-      )
-      .get()!;
+    const row = readTraceRow<{ revision: string; epoch: string; active: number }>(
+      this.db,
+      'SELECT revision,epoch,active FROM integration',
+    )!;
     return { revision: row.revision, epoch: row.epoch, active: row.active === 1 };
   }
   setGrant(stamp: OtelGrantStamp): void {
@@ -187,9 +184,13 @@ export class OtelAdapterStore {
       throw Error('otel_permission_revoked');
     if (
       taskId &&
-      !this.db
-        .query('SELECT id FROM task WHERE id=? AND revision=? AND epoch=? AND active=1')
-        .get(taskId, revision, epoch)
+      !readTraceRow(
+        this.db,
+        'SELECT id FROM task WHERE id=? AND revision=? AND epoch=? AND active=1',
+        taskId,
+        revision,
+        epoch,
+      )
     )
       throw Error('otel_task_cancelled');
   }
@@ -243,11 +244,12 @@ export class OtelAdapterStore {
       this.authorized(batch.grantRevision, batch.partition.subscriptionEpoch, taskId);
       for (const event of batch.events) {
         const hash = createHash('sha256').update(canonicalSerialize(event)).digest('hex');
-        const prior = this.db
-          .query<{ digest: string }, [string, string]>(
-            'SELECT digest FROM accepted WHERE task_id=? AND event_id=?',
-          )
-          .get(taskId, event.eventId);
+        const prior = readTraceRow<{ digest: string }>(
+          this.db,
+          'SELECT digest FROM accepted WHERE task_id=? AND event_id=?',
+          taskId,
+          event.eventId,
+        );
         if (prior) {
           if (prior.digest !== hash) throw Error('otel_event_conflict');
           continue;
@@ -262,11 +264,12 @@ export class OtelAdapterStore {
           Number.isSafeInteger(event.occurredAt) &&
           event.occurredAt >= 0
         ) {
-          const old = this.db
-            .query<{ first_json: string }, [string, string]>(
-              'SELECT first_json FROM open_span WHERE task_id=? AND identity=?',
-            )
-            .get(taskId, identity.identity);
+          const old = readTraceRow<{ first_json: string }>(
+            this.db,
+            'SELECT first_json FROM open_span WHERE task_id=? AND identity=?',
+            taskId,
+            identity.identity,
+          );
           const terminal = ['completed', 'failed', 'cancelled'].includes(event.phase);
           if (!terminal) {
             const starts =
@@ -289,16 +292,7 @@ export class OtelAdapterStore {
                 : event.kind !== 'run' && event.scope.runRef && event.scope.runOriginStoreRef
                   ? `${event.scope.runOriginStoreRef}:${event.scope.runRef}`
                   : undefined;
-            const parent = parentRef
-              ? this.db
-                  .query<{ identity: string; trace_id: string; span_id: string }, [string]>(
-                    'SELECT identity,trace_id,span_id FROM span_identity WHERE reference=? LIMIT 1',
-                  )
-                  .get(parentRef)
-              : null;
-            const relation = parent
-              ? { identity: parent.identity, traceId: parent.trace_id, spanId: parent.span_id }
-              : undefined;
+            const relation = parentRef ? this.spanIdentity(parentRef) : undefined;
             const links: OtelSpanIdentity[] =
               relation && relation.traceId !== identity.traceId ? [relation] : [];
             if (
@@ -306,19 +300,10 @@ export class OtelAdapterStore {
               event.attributes.previousExecutionRef &&
               event.attributes.previousExecutionOriginStoreRef
             ) {
-              const previous = this.db
-                .query<{ identity: string; trace_id: string; span_id: string }, [string]>(
-                  'SELECT identity,trace_id,span_id FROM span_identity WHERE reference=? LIMIT 1',
-                )
-                .get(
-                  `${event.attributes.previousExecutionOriginStoreRef}:${event.attributes.previousExecutionRef}`,
-                );
-              if (previous)
-                links.push({
-                  identity: previous.identity,
-                  traceId: previous.trace_id,
-                  spanId: previous.span_id,
-                });
+              const previous = this.spanIdentity(
+                `${event.attributes.previousExecutionOriginStoreRef}:${event.attributes.previousExecutionRef}`,
+              );
+              if (previous) links.push(previous);
             }
             const envelope: OtelSpanEnvelope = {
               ...identity,
@@ -359,13 +344,14 @@ export class OtelAdapterStore {
         } else if (identity) result = 'timing_unavailable';
         this.db.run('INSERT INTO accepted VALUES(?,?,?,?)', [taskId, event.eventId, hash, result]);
       }
-      const cost = this.db
-        .query<{ bytes: number; count: number }, []>(`SELECT
+      const cost = readTraceRow<{ bytes: number; count: number }>(
+        this.db,
+        `SELECT
         (SELECT COALESCE(SUM(length(first_json)+length(last_json)),0) FROM open_span)+
         (SELECT COALESCE(SUM(length(envelope_json)),0) FROM spool)+
         (SELECT COALESCE(SUM(length(event_id)+length(digest)+length(task_id)+length(result)+64),0) FROM accepted) AS bytes,
-        (SELECT COUNT(*) FROM accepted) AS count`)
-        .get()!;
+        (SELECT COUNT(*) FROM accepted) AS count`,
+      )!;
       if (
         cost.bytes > (this.options.maxBytes ?? 64 * 1024 * 1024) ||
         cost.count > (this.options.maxAcceptedEvents ?? 100000)
@@ -381,24 +367,28 @@ export class OtelAdapterStore {
       };
     });
   }
+  private spanIdentity(reference: string) {
+    return readTraceRow<OtelSpanIdentity>(
+      this.db,
+      'SELECT identity,trace_id AS traceId,span_id AS spanId FROM span_identity WHERE reference=? LIMIT 1',
+      reference,
+    );
+  }
   next(now = Date.now()): OtelSpoolRow | null {
     return this.transaction(() => {
-      const row = this.db
-        .query<
-          {
-            key: string;
-            task_id: string;
-            revision: string;
-            epoch: string;
-            envelope_json: string;
-            attempts: number;
-            possible_duplicate: number;
-          },
-          [number]
-        >(
-          "SELECT * FROM spool WHERE status IN ('pending','retry_wait') AND next_at<=? ORDER BY rowid LIMIT 1",
-        )
-        .get(now);
+      const row = readTraceRow<{
+        key: string;
+        task_id: string;
+        revision: string;
+        epoch: string;
+        envelope_json: string;
+        attempts: number;
+        possible_duplicate: number;
+      }>(
+        this.db,
+        "SELECT * FROM spool WHERE status IN ('pending','retry_wait') AND next_at<=? ORDER BY rowid LIMIT 1",
+        now,
+      );
       if (!row) return null;
       this.authorized(row.revision, row.epoch, row.task_id);
       this.db.run("UPDATE spool SET status='sending' WHERE key=?", [row.key]);
@@ -416,14 +406,19 @@ export class OtelAdapterStore {
   admitSend(row: OtelSpoolRow): void {
     this.transaction(() => {
       this.authorized(row.revision, row.epoch, row.taskId);
-      if (!this.db.query("SELECT key FROM spool WHERE key=? AND status='sending'").get(row.key))
+      if (!readTraceRow(this.db, "SELECT key FROM spool WHERE key=? AND status='sending'", row.key))
         throw Error('otel_send_retired');
-      const attempts = this.db
-        .query<{ attempts: number }, [string]>('SELECT attempts FROM spool WHERE key=?')
-        .get(row.key)!.attempts;
+      const attempts = this.sendAttempts(row.key)!.attempts;
       if (attempts >= 8) throw Error('otel_retry_exhausted');
       this.db.run('UPDATE spool SET attempts=attempts+1 WHERE key=?', [row.key]);
     });
+  }
+  private sendAttempts(key: string) {
+    return readTraceRow<{ attempts: number }>(
+      this.db,
+      'SELECT attempts FROM spool WHERE key=?',
+      key,
+    );
   }
   finish(
     row: OtelSpoolRow,
@@ -431,10 +426,7 @@ export class OtelAdapterStore {
     now = Date.now(),
   ): void {
     this.transaction(() => {
-      const actualAttempts =
-        this.db
-          .query<{ attempts: number }, [string]>('SELECT attempts FROM spool WHERE key=?')
-          .get(row.key)?.attempts ?? 0;
+      const actualAttempts = this.sendAttempts(row.key)?.attempts ?? 0;
       const blocked = outcome.kind === 'unconfirmed' && outcome.attempts === 0;
       const exhausted = actualAttempts >= 8 && (outcome.kind === 'transient' || blocked);
       const status = exhausted
@@ -486,55 +478,47 @@ export class OtelAdapterStore {
 function readInspection(db: Database) {
   return {
     grant: (() => {
-      const row = db
-        .query<{ revision: string; epoch: string; active: number }, []>(
-          'SELECT revision,epoch,active FROM integration WHERE singleton=1',
-        )
-        .get()!;
+      const row = readTraceRow<{ revision: string; epoch: string; active: number }>(
+        db,
+        'SELECT revision,epoch,active FROM integration WHERE singleton=1',
+      )!;
       return { ...row, active: row.active === 1 };
     })(),
-    openSpans: db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM open_span').get()!
+    openSpans: readTraceRow<{ count: number }>(db, 'SELECT COUNT(*) AS count FROM open_span')!
       .count,
-    acceptedEvents: db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM accepted').get()!
+    acceptedEvents: readTraceRow<{ count: number }>(db, 'SELECT COUNT(*) AS count FROM accepted')!
       .count,
-    unmappedEvents: db
-      .query<
-        {
-          notSpan: number;
-          identityUnavailable: number;
-          timingUnavailable: number;
-          incompletePrefix: number;
-        },
-        []
-      >(`SELECT
+    unmappedEvents: readTraceRow<{
+      notSpan: number;
+      identityUnavailable: number;
+      timingUnavailable: number;
+      incompletePrefix: number;
+    }>(
+      db,
+      `SELECT
         COALESCE(SUM(result='not_span'),0) AS notSpan,
         COALESCE(SUM(result='identity_unavailable'),0) AS identityUnavailable,
         COALESCE(SUM(result='timing_unavailable'),0) AS timingUnavailable,
-        COALESCE(SUM(result='incomplete_prefix'),0) AS incompletePrefix FROM accepted`)
-      .get()!,
-    outgoingTotal: db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM spool').get()!
+        COALESCE(SUM(result='incomplete_prefix'),0) AS incompletePrefix FROM accepted`,
+    )!,
+    outgoingTotal: readTraceRow<{ count: number }>(db, 'SELECT COUNT(*) AS count FROM spool')!
       .count,
-    outgoingStates: db
-      .query<{ status: string; count: number }, []>(
-        'SELECT status,COUNT(*) AS count FROM spool GROUP BY status ORDER BY status',
-      )
-      .all(),
-    outgoing: db
-      .query<
-        {
-          key: string;
-          taskId: string;
-          status: string;
-          code: string | null;
-          attempts: number;
-          rejectedCount: number | null;
-          possibleDuplicate: number;
-        },
-        []
-      >(
-        'SELECT key,task_id AS taskId,status,code,attempts,rejected_count AS rejectedCount,possible_duplicate AS possibleDuplicate FROM spool ORDER BY rowid DESC LIMIT 200',
-      )
-      .all(),
+    outgoingStates: readTraceRows<{ status: string; count: number }>(
+      db,
+      'SELECT status,COUNT(*) AS count FROM spool GROUP BY status ORDER BY status',
+    ),
+    outgoing: readTraceRows<{
+      key: string;
+      taskId: string;
+      status: string;
+      code: string | null;
+      attempts: number;
+      rejectedCount: number | null;
+      possibleDuplicate: number;
+    }>(
+      db,
+      'SELECT key,task_id AS taskId,status,code,attempts,rejected_count AS rejectedCount,possible_duplicate AS possibleDuplicate FROM spool ORDER BY rowid DESC LIMIT 200',
+    ),
   };
 }
 
@@ -566,14 +550,15 @@ export function inspectOtelStore(options: {
   );
   try {
     db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=0; BEGIN');
-    const identity = db
-      .query<
-        { version: number; mapping_version: number; installation_id: string; endpoint: string },
-        []
-      >(
-        'SELECT version,mapping_version,installation_id,endpoint FROM integration WHERE singleton=1',
-      )
-      .get();
+    const identity = readTraceRow<{
+      version: number;
+      mapping_version: number;
+      installation_id: string;
+      endpoint: string;
+    }>(
+      db,
+      'SELECT version,mapping_version,installation_id,endpoint FROM integration WHERE singleton=1',
+    );
     if (
       identity?.version !== 1 ||
       identity.mapping_version !== mappingVersion ||

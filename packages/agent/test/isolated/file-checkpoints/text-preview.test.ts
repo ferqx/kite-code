@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { checkpointTextChange } from '../../../src/business/file-checkpoints';
 
 const bytes = (value: string) => new TextEncoder().encode(value);

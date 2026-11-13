@@ -2,10 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 
 const require = createRequire(import.meta.url);
 const { readProcessStartIdentity, inspectProcess } = require(
-  resolve(import.meta.dir, '../../service/src/daemon/process-identity.ts'),
+  resolve(import.meta.dirname, '../../service/src/daemon/process-identity.ts'),
 ) as {
   readProcessStartIdentity(pid: number): string | undefined;
   inspectProcess(pid: number, birth: string): 'alive' | 'dead' | 'uncertain';
@@ -180,7 +181,7 @@ export class NativeOwnedProcesses {
         this.record(Error('native_owned_cleanup_not_confirmed'));
         return;
       }
-      await Bun.sleep(Math.min(20, remaining));
+      await fixtureDelay(Math.min(20, remaining));
     }
   }
 }

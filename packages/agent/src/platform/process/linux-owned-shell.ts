@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { fstatSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { Readable } from 'node:stream';
+import { dlopen, ptr, toArrayBuffer } from '../../runtime-ffi';
 
 export type LinuxShellMode = 'workspace' | 'full' | 'confined';
 export interface LinuxOwnedShellEvidence {
@@ -168,7 +169,6 @@ function processIdentity(value: number) {
 function native(admission: { nonce: string; mode: LinuxShellMode }) {
   if (process.platform !== 'linux' || !['x64', 'arm64'].includes(process.arch))
     throw error('unsupported');
-  const { dlopen, ptr, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
   const library = dlopen('libc.so.6', {
     socketpair: { args: ['i32', 'i32', 'i32', 'ptr'], returns: 'i32' },
     setsockopt: { args: ['i32', 'i32', 'i32', 'ptr', 'u32'], returns: 'i32' },

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
@@ -11,6 +10,9 @@ import {
   decodeSessionRecoveryCommand,
   type RecoverSessionRequest,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
@@ -47,9 +49,10 @@ for (const mode of ['tool', 'model'] as const)
     const root = realpathSync(temporaryDirectory('kite-http-session-recovery-'));
     const ledger = join(root, 'effects');
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(
           new URL(
             '../../../../packages/agent/test/isolated/recovery/crash-child.ts',

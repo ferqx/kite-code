@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { expect, test } from '#kite-test';
+import { pairedNodeChild } from '../../src/node-process';
 import { launchPairedService, type PairedServiceSpawner } from '../../src/paired';
+import { spawnFixtureNodeService } from '../fixtures/node-service-process';
 
 const proxyKeys = [
   'HTTP_PROXY',
@@ -27,6 +29,13 @@ const secretEnvironment = {
   BUN_OPTIONS: '--smol',
   NODE_EXTRA_CA_CERTS: 'fixture-not-an-extra-ca.pem',
 };
+const linuxBus =
+  process.platform === 'linux'
+    ? {
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+        XDG_RUNTIME_DIR: '/run/user/1000',
+      }
+    : {};
 async function environment<T>(values: Record<string, string | undefined>, run: () => Promise<T>) {
   const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
   try {
@@ -87,14 +96,15 @@ test.each([
     const httpUrl = 'http://paired-proxy.invalid/outbound';
     const httpsUrl = 'https://paired-proxy.invalid/outbound';
     const directUrl = `http://127.0.0.1:${originAddress.port}/bypass`;
-    const spawnChild: PairedServiceSpawner = (command, { env }) => {
+    const spawnChild: PairedServiceSpawner = ([, entrypoint], { env }) => {
       captured = env;
-      return Bun.spawn([...command], { env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+      return pairedNodeChild(spawnFixtureNodeService([entrypoint!], env));
     };
     await environment(
       {
         ...Object.fromEntries(proxyKeys.map((key) => [key, undefined])),
         ...secretEnvironment,
+        ...linuxBus,
         ALL_PROXY: 'http://fixture-unused-all-proxy.invalid',
         all_proxy: 'http://fixture-unused-lower-all-proxy.invalid',
         ...selected,
@@ -109,7 +119,8 @@ test.each([
           }),
         );
         service = await launchPairedService({
-          entrypoint: join(import.meta.dir, '../fixtures/paired-proxy-child.ts'),
+          spawnChild,
+          entrypoint: join(import.meta.dirname, '../fixtures/paired-proxy-child.ts'),
           profile,
           instanceId: `proxy-${casing}`,
           buildId: 'fixture-proxy-build',
@@ -119,7 +130,6 @@ test.each([
             report: join(root, 'report.json'),
             requests: [httpUrl, httpsUrl, directUrl],
           },
-          ...(casing === 'lower' ? { spawnChild } : {}),
         });
       },
     );
@@ -162,10 +172,12 @@ test.each([
           'HOME',
           ...(process.platform === 'win32' ? ['USERPROFILE'] : []),
           ...Object.keys(expectedProxies),
+          ...Object.keys(linuxBus),
           'CODEX_HOME',
         ].sort(),
       );
       for (const [key, value] of Object.entries(expectedProxies)) expect(captured[key]).toBe(value);
+      for (const [key, value] of Object.entries(linuxBus)) expect(captured[key]).toBe(value);
       expect(captured.CODEX_HOME).toBe(codexHome);
     }
     await service!.close();

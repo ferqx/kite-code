@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -14,18 +12,26 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { terminalSqliteEngineRoot } from '@kite-ai/service/sqlite-release-assets';
+import { expect, test } from '#kite-test';
 import { testToolchainEnvironment } from '../../../../scripts/test-environment';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { verifyTerminalMarkdownAssets } from '../fixtures/terminal-markdown-assets';
 import { verifyTerminalPdfAssets } from '../fixtures/terminal-pdf-assets';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 for (const mode of ['complete'] as readonly string[]) {
   test(`formal Terminal PTY reads original tail result/reason and exports frozen giant text in the original profile`, async () => {
     const started = Date.now();
@@ -51,7 +57,7 @@ for (const mode of ['complete'] as readonly string[]) {
         `${JSON.stringify({ stage: name, elapsedMs: Date.now() - started, at: Date.now() })}\n`,
       );
     let passed = false;
-    let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let child: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let calls = 0;
     let reviewCalls = 0;
     let completeSource = false;
@@ -59,7 +65,7 @@ for (const mode of ['complete'] as readonly string[]) {
     if (mode === 'complete')
       writeFileSync(join(workspace, 'source.txt'), `${'中'.repeat(3 * 1024 * 1024)}${sourceTail}`);
     const tail = 'ACTUAL_HOST_VERIFIED_TAIL';
-    const provider = Bun.serve({
+    const provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       maxRequestBodySize: 64 * 1024 * 1024,
@@ -119,9 +125,10 @@ for (const mode of ['complete'] as readonly string[]) {
       },
     });
     try {
-      const build = Bun.spawn(
+      const build = testSpawn(
         [
           process.execPath,
+          ...testRuntimeFlags,
           join(repository, 'scripts/release/terminal.ts'),
           'build',
           '--directory',
@@ -236,10 +243,10 @@ for (const mode of ['complete'] as readonly string[]) {
       } finally {
         await seed.close();
       }
-      child = Bun.spawn(
+      child = testSpawn(
         [
           process.execPath,
-          '--no-install',
+          ...testRuntimeFlags,
           join(repository, 'apps/cli/test/fixtures/tui-export-driver.ts'),
           JSON.stringify({
             executable: artifact.executable,

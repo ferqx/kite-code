@@ -1,8 +1,8 @@
-import { afterAll, expect, mock, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { Activity, act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { afterAll, expect, mock, test } from '#kite-test';
 import {
   ConversationActivityContext,
   type RetainedConversationResource,

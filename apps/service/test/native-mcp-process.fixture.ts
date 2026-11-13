@@ -20,7 +20,7 @@ const configure: ConfigureProcessHost = (startup, context) =>
     ],
     mcpSources: {
       http: { allowLoopbackForTests: true, trustedTestCertificate: certificate },
-      stdio: { guardianPath: mcpStdioGuardianAsset(), bunExecutable: process.execPath },
+      stdio: { guardianPath: mcpStdioGuardianAsset(), runtimeExecutable: process.execPath },
       oauth: {
         network: { allowLoopbackForTests: true, trustedTestCertificate: certificate },
       },

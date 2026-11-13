@@ -1,13 +1,18 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 test('bundled Native MCP validation runs in actual Node without source modules or loose UMD requires', async () => {
   const root = temporaryDirectory('kite-native-mcp-input-node-');
   try {
     const entry = join(root, 'entry.ts');
-    const parser = resolve(import.meta.dir, '../../electron/mcp-input.ts');
+    const parser = resolve(import.meta.dirname, '../../electron/mcp-input.ts');
     writeFileSync(
       entry,
       `
@@ -20,7 +25,7 @@ test('bundled Native MCP validation runs in actual Node without source modules o
       console.log('native_mcp_node_validated');
     `,
     );
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [entry],
       target: 'node',
       format: 'cjs',
@@ -30,9 +35,9 @@ test('bundled Native MCP validation runs in actual Node without source modules o
     expect(built.success).toBe(true);
     const isolated = join(root, 'empty');
     mkdirSync(isolated);
-    const node = Bun.which('node');
+    const node = findFixtureExecutable('node');
     expect(node).not.toBeNull();
-    const child = Bun.spawn([node!, join(root, 'parser.cjs')], {
+    const child = spawnFixtureProcess([node!, join(root, 'parser.cjs')], {
       cwd: isolated,
       stdout: 'pipe',
       stderr: 'pipe',

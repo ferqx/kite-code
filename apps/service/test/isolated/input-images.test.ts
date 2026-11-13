@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { AgentClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 
 test('authenticated Client uploads image bytes and submits only immutable metadata through HTTP', async () => {

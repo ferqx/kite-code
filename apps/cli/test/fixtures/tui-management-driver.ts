@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { inspectProcess } from '@kite-ai/service/daemon';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
@@ -49,9 +50,9 @@ const open = () => {
   active = spawnTuiPTY({
     cmd: [
       input.executable,
-      '--preload',
+      '--import',
       input.preload,
-      `${import.meta.dir}/tui-diagnostics-entry.ts`,
+      `${import.meta.dirname}/tui-diagnostics-entry.ts`,
       input.script,
       '--thread',
       'a',
@@ -67,7 +68,7 @@ const open = () => {
 };
 const pump = async () => {
   abort.signal.throwIfAborted();
-  await Bun.sleep(500);
+  await testSleep(500);
   await active!.drain();
 };
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Original terminal control stripping.
@@ -82,7 +83,7 @@ const wait = async (text: string) => {
     if (frame.fresh && (material.includes(text) || current.includes(text))) return;
     if (active!.ended || Date.now() > deadline)
       throw Error(`expected ${text} tail=${material.slice(-3000)}`);
-    await Bun.sleep(100);
+    await testSleep(100);
   }
 };
 const key = async (text: string) => {
@@ -98,7 +99,7 @@ const normalClose = async () => {
   const owned = readOwned();
   const observeEnd = Date.now() + 6000;
   while (!active!.ended && Date.now() < observeEnd) {
-    await Bun.sleep(100);
+    await testSleep(100);
     await active!.drain();
   }
   const [exit] = await ptyDeadline(
@@ -110,7 +111,7 @@ const normalClose = async () => {
   const deadline = Date.now() + 3000;
   while (inspectProcess(owned.pid, owned.start) !== 'dead') {
     if (Date.now() > deadline) throw Error('management_owned_service_exit_unknown');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
   const exited = JSON.parse(readFileSync(`${observationPath()}.exit`, 'utf8')) as {
     pid: number;

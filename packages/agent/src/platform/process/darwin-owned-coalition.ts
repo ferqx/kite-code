@@ -1,4 +1,4 @@
-import { dlopen, ptr } from 'bun:ffi';
+import { dlopen, ptr } from '../../runtime-ffi';
 import type { DarwinOwnedChild } from './darwin-owned-child';
 
 // Apple proc_info_private.h / mach/coalition.h ABI, arm64 and x86_64.

@@ -1,6 +1,7 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
+import { afterAll, afterEach, expect, test } from '#kite-test';
 import type {
   NativeBrowserMenuAction,
   NativeBrowserMenuRequest,
@@ -73,7 +74,7 @@ function Harness({
 const flush = (action: () => void = () => {}) =>
   act(async () => {
     action();
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   });
 async function render(props: Parameters<typeof Harness>[0] = {}) {
   root ??= createRoot(document.body);

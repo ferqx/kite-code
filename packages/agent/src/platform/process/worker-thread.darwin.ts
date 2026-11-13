@@ -1,3 +1,4 @@
+import { dlopen, ptr } from '../../runtime-ffi';
 export interface DarwinWorkerThreadRecord {
   readonly platform: 'darwin';
   readonly pid: number;
@@ -14,7 +15,6 @@ const maximumThreadId = 0xffffffffffffffffn;
 function load() {
   if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch))
     throw Error('worker_thread_platform_unsupported');
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const library = dlopen('/usr/lib/libSystem.B.dylib', {
     mach_thread_self: { args: [], returns: 'u32' },
     pthread_threadid_np: { args: ['ptr', 'ptr'], returns: 'i32' },

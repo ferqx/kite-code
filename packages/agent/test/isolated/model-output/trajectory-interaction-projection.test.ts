@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { Json, ToolContext } from '../../../src/extensions';
 import { createAskUserExtension } from '../../../src/tools/ask-user';
 import { interactionEvidence } from '../../../src/trajectory/evidence-projection';

@@ -1,9 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, describe, expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { semanticDigest } from '../../../src/json';
 import { acquireProfileAccess, resolveProfile } from '../../../src/platform/profile';
 import { privateDirectory } from '../../../src/platform/windows-path-security';
@@ -117,7 +120,7 @@ describe('real unified SQLite Store', () => {
           return { error };
         },
       );
-      await Bun.sleep(1350);
+      await sleepTimer(1350);
       expect(outcome).toBe('pending');
       expect(await store.getCommand('blocked')).toBeNull();
       expect((await store.getView('s')).snapshotCursor).toBe(before);
@@ -373,11 +376,18 @@ describe('real unified SQLite Store', () => {
     const { store, options } = await setup();
     const owner = (await store.acquireSessionOwner('s', 'parent'))!;
     const spawn = () =>
-      Bun.spawn([process.execPath, fileURLToPath(new URL('./open-child.ts', import.meta.url))], {
-        env: { ...process.env, TEST_DATA_ROOT: options.dataRoot, TEST_SESSION: 's' },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      spawnProcess(
+        [
+          process.execPath,
+          ...testRuntimeFlags,
+          fileURLToPath(new URL('./open-child.ts', import.meta.url)),
+        ],
+        {
+          env: { ...process.env, TEST_DATA_ROOT: options.dataRoot, TEST_SESSION: 's' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
     const child = spawn();
     expect(await child.exited).toBe(0);
     expect(JSON.parse(await new Response(child.stdout).text()).owner).toBeNull();

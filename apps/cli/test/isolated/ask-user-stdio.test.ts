@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +15,8 @@ import type { Interaction } from '@kite-ai/client';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 
@@ -24,7 +25,7 @@ const questions: Json = {
     {
       question: 'First?',
       options: [
-        { label: 'q1-o2', description: 'Exact label', recommended: true },
+        { label: 'q1-o2', description: 'Exact label' },
         { label: 'Second', description: 'Other' },
       ],
     },
@@ -51,7 +52,7 @@ async function fixture() {
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   privateDirectory(profile.profilePath);
   const requests: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

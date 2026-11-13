@@ -1,14 +1,85 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { retainWindowsCandidateFiles } from '../../packages/agent/src/platform/windows-candidate-files';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
 } from '../../packages/agent/src/platform/windows-path-security';
+import { build } from '../tooling/bun-build';
+import { type Subprocess, spawn } from '../tooling/process';
 
 const pendingLauncherBuilds = new Set<object>();
+
+/** Bundle the Windows verifier, then produce the independent pinned Node executable. */
+export async function compileWindowsNodeVerifier(input: {
+  runtime: string;
+  addonSha256: string;
+  entrypoint: string;
+  outfile: string;
+}) {
+  if (process.platform !== 'win32' || process.arch !== 'x64')
+    throw Error('windows_terminal_launcher_platform_unsupported');
+  const directory = dirname(input.outfile);
+  const built = await build({
+    entrypoints: [input.entrypoint],
+    target: 'node',
+    format: 'esm',
+    packages: 'bundle',
+    outdir: directory,
+    naming: 'verifier.mjs',
+    define: {
+      __KITE_EMBEDDED_RUNTIME_NATIVE__: JSON.stringify({
+        path: './runtime-native.node',
+        sha256: input.addonSha256,
+      }),
+    },
+  });
+  if (!built.success || built.outputs.length !== 1)
+    throw new AggregateError(built.logs, 'windows_node_verifier_bundle_failed');
+  const config = join(directory, 'sea.json');
+  if (existsSync(input.outfile)) throw Error('windows_node_verifier_destination_exists');
+  writeFileSync(
+    config,
+    JSON.stringify({
+      main: join(directory, 'verifier.mjs'),
+      mainFormat: 'module',
+      executable: input.runtime,
+      output: input.outfile,
+      disableExperimentalSEAWarning: true,
+      execArgv: ['--no-global-search-paths'],
+      execArgvExtension: 'none',
+    }),
+    { flag: 'wx' },
+  );
+  const pin = retainWindowsCandidateFiles(dirname(input.runtime), [basename(input.runtime)]);
+  try {
+    const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        input.runtime,
+        ['--build-sea', config],
+        {
+          cwd: directory,
+          env: {
+            SystemRoot: systemRoot,
+            PATH: join(systemRoot, 'System32'),
+            TMP: directory,
+            TEMP: directory,
+          },
+          windowsHide: true,
+          timeout: 60_000,
+          maxBuffer: 1_048_576,
+        },
+        (error) => (error ? reject(error) : resolve()),
+      );
+    });
+    pin.verify();
+  } finally {
+    pin.release();
+  }
+}
 
 function pe(bytes: Buffer, subsystem: number | readonly number[] = 3) {
   const denied = (): never => {
@@ -412,76 +483,6 @@ export function copyWindowsSystemExecutable(
   if (failed) throw failure;
 }
 
-/** Bun 1.4.2 copies the compiling process executable's DACL, even with executablePath.
- * Compile inside the qualified private runtime instead of repairing an unsafe output.
- */
-export async function compileWindowsVerifier(input: {
-  runtime: string;
-  entrypoint: string;
-  outfile: string;
-}): Promise<void> {
-  if (process.platform !== 'win32' || process.arch !== 'x64')
-    throw Error('windows_terminal_launcher_platform_unsupported');
-  for (const path of [input.runtime, input.entrypoint, input.outfile])
-    if (!isAbsolute(path)) throw Error('windows_terminal_launcher_input_invalid');
-  if (existsSync(input.outfile)) throw Error('windows_terminal_launcher_input_invalid');
-  const pin = retainWindowsCandidateFiles(dirname(input.runtime), [basename(input.runtime)]);
-  let failure: unknown;
-  let failed = false;
-  try {
-    systemImportSearch(readFileSync(input.runtime), true);
-    const script = `const result=await Bun.build(${JSON.stringify({
-      entrypoints: [input.entrypoint],
-      target: 'bun',
-      packages: 'bundle',
-      compile: {
-        executablePath: input.runtime,
-        outfile: input.outfile,
-        autoloadDotenv: false,
-        autoloadBunfig: false,
-        autoloadTsconfig: false,
-        autoloadPackageJson: false,
-      },
-    })});if(!result.success)throw new AggregateError(result.logs,'windows_verifier_build_failed');`;
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        input.runtime,
-        ['--no-env-file', '--no-clear-screen', '--eval', script],
-        {
-          cwd: dirname(input.outfile),
-          env: {
-            PATH: process.env.PATH ?? '',
-            SystemRoot: process.env.SystemRoot ?? '',
-            TEMP: process.env.TEMP ?? '',
-            TMP: process.env.TMP ?? '',
-          },
-          windowsHide: true,
-          timeout: 60000,
-          maxBuffer: 1048576,
-        },
-        (error, _stdout, stderr) => {
-          if (error) reject(new Error(`windows_verifier_build_failed:${stderr}`, { cause: error }));
-          else resolve();
-        },
-      );
-    });
-    pin.verify();
-    defaultWindowsPathSecurity()!.verifyFile(input.outfile);
-  } catch (error) {
-    failed = true;
-    failure = error;
-  }
-  try {
-    pin.release();
-  } catch (error) {
-    throw new AggregateError(
-      [...(failed ? [failure] : []), error],
-      'windows_verifier_build_close_unknown',
-    );
-  }
-  if (failed) throw failure;
-}
-
 /** Audit the first-stage loader before any of its code can set a DLL search policy. */
 function verifyLauncher(bytes: Buffer) {
   const image = pe(bytes);
@@ -530,7 +531,14 @@ export async function buildWindowsTerminalLauncher(
     verifierSha256: string;
     verifierSize: number;
     kind?: 'native' | 'desktop';
-    desktopRuntime?: { sha256: string; size: number };
+    desktopRuntime?: {
+      sha256: string;
+      size: number;
+      runtimeKind?: 'node' | 'bun';
+      addonSha256?: string;
+      addonSize?: number;
+    };
+    verifierAddon?: { sha256: string; size: number };
   },
   compiler = process.env.KITE_WINDOWS_MSVC,
 ) {
@@ -551,8 +559,20 @@ export async function buildWindowsTerminalLauncher(
   )
     throw Error('windows_terminal_launcher_input_invalid');
   const desktop = input.kind === 'desktop';
+  const nodeDesktop = input.desktopRuntime?.runtimeKind === 'node';
+  const addon = nodeDesktop
+    ? { sha256: input.desktopRuntime?.addonSha256, size: input.desktopRuntime?.addonSize }
+    : input.verifierAddon;
   if (
     desktop !== Boolean(input.desktopRuntime) ||
+    (desktop && input.verifierAddon !== undefined) ||
+    (addon &&
+      (!addon.sha256 ||
+        !/^[a-f0-9]{64}$/.test(addon.sha256) ||
+        !addon.size ||
+        !Number.isSafeInteger(addon.size) ||
+        addon.size < 1 ||
+        addon.size > 16 * 1048576)) ||
     (input.desktopRuntime &&
       (!/^[a-f0-9]{64}$/.test(input.desktopRuntime.sha256) ||
         !Number.isSafeInteger(input.desktopRuntime.size) ||
@@ -578,7 +598,7 @@ export async function buildWindowsTerminalLauncher(
   const owner: {
     input: typeof input;
     verifierPin: typeof verifierPin;
-    child?: ReturnType<typeof Bun.spawn>;
+    child?: Subprocess;
   } = { input, verifierPin };
   pendingLauncherBuilds.add(owner);
   let succeeded = false;
@@ -594,7 +614,7 @@ export async function buildWindowsTerminalLauncher(
       }
     | undefined;
   try {
-    const child = Bun.spawn(
+    const child = spawn(
       [
         compiler,
         '/nologo',
@@ -613,9 +633,22 @@ export async function buildWindowsTerminalLauncher(
               `/DKITE_DESKTOP_RUNTIME_SIZE=${input.desktopRuntime.size}ULL`,
             ]
           : []),
+        ...(nodeDesktop
+          ? [
+              '/DKITE_DESKTOP_NODE_RUNTIME',
+              `/DKITE_DESKTOP_ADDON_SHA256="${addon!.sha256}"`,
+              `/DKITE_DESKTOP_ADDON_SIZE=${addon!.size}ULL`,
+            ]
+          : []),
+        ...(input.verifierAddon
+          ? [
+              `/DKITE_VERIFIER_ADDON_SHA256="${input.verifierAddon.sha256}"`,
+              `/DKITE_VERIFIER_ADDON_SIZE=${input.verifierAddon.size}ULL`,
+            ]
+          : []),
         `/DKITE_TERMINAL_VERIFIER_SHA256="${input.verifierSha256}"`,
         `/DKITE_TERMINAL_VERIFIER_SIZE=${input.verifierSize}ULL`,
-        join(import.meta.dir, 'native/terminal-launcher.cc'),
+        join(import.meta.dirname, 'native/terminal-launcher.cc'),
         `/Fo${join(compileRoot, 'terminal-launcher.obj')}`,
         `/Fe${output}`,
         '/link',

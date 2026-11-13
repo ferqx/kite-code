@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import {
@@ -17,8 +15,11 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, preflightSqliteStore, sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, spyOn, test } from '#kite-test';
+import { fixtureNodeExecutable } from '../../../apps/service/test/fixtures/node-service-process';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   createDevelopmentDesktopDirectory,
@@ -28,6 +29,8 @@ import {
   initializeDesktopBuildEnvironment,
   type WindowsDesktopBuildTools,
 } from '../../../scripts/development/windows-desktop-environment';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 import { fixturePermissions, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const visualStudio = 'C:\\Program Files\\开发工具\\Visual Studio',
@@ -221,16 +224,19 @@ test('desktop development application directories are private and independent of
 test('desktop development pure help and missing built Service never build, launch or write a checkout/profile', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-desktop-')));
   const entry = pathToFileURL(
-    join(import.meta.dir, '../../../scripts/development/unified-desktop.ts'),
+    join(import.meta.dirname, '../../../scripts/development/unified-desktop.ts'),
   ).href;
   const execute = async (argv: readonly string[]) => {
     const program = `import {runDevelopmentDesktop} from ${JSON.stringify(entry)};try{process.exitCode=await runDevelopmentDesktop({argv:${JSON.stringify(argv)},root:${JSON.stringify(root)},executable:'/absent-development-runtime'});}catch(error){console.error(error.code??error.message);process.exitCode=1;}`;
-    const child = Bun.spawn([process.execPath, '-e', program], {
-      cwd: root,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const child = spawnFixtureProcess(
+      [process.execPath, ...testRuntimeFlags, '--input-type=module', '-e', program],
+      {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
     try {
       const [code, stdout, stderr] = await Promise.all([
@@ -296,7 +302,7 @@ for (const { formatMajor, currentChecksum, label } of [
               .update(
                 readFileSync(
                   join(
-                    import.meta.dir,
+                    import.meta.dirname,
                     '../../../packages/agent/src/storage/migrations/0001-baseline.sql',
                   ),
                 ),
@@ -322,16 +328,19 @@ for (const { formatMajor, currentChecksum, label } of [
     );
     const launchMarker = join(root, 'unexpected-launch');
     const entry = pathToFileURL(
-      join(import.meta.dir, '../../../scripts/development/unified-desktop.ts'),
+      join(import.meta.dirname, '../../../scripts/development/unified-desktop.ts'),
     ).href;
     const program = `import {writeFileSync} from 'node:fs';import {runDevelopmentDesktop} from ${JSON.stringify(entry)};try{process.exitCode=await runDevelopmentDesktop({argv:[],root:${JSON.stringify(root)},executable:process.execPath,spawnElectron(){writeFileSync(${JSON.stringify(launchMarker)},'launched');throw Error('unexpected_electron_launch');}});}catch(error){console.error(error.code??error.message);process.exitCode=1;}`;
-    const child = Bun.spawn([process.execPath, '-e', program], {
-      cwd: root,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: { ...process.env, ...userConfiguration.homeEnvironment },
-    });
+    const child = spawnFixtureProcess(
+      [process.execPath, ...testRuntimeFlags, '--input-type=module', '-e', program],
+      {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+        env: { ...process.env, ...userConfiguration.homeEnvironment },
+      },
+    );
     const timeout = setTimeout(() => child.kill('SIGKILL'), 5000);
     try {
       const [code, stdout, stderr] = await Promise.all([
@@ -480,6 +489,10 @@ for (const target of ['manifest', 'baseline'] as const)
           const header = readFileSync(manifest);
           const failedPath =
             target === 'manifest' ? manifest : fileURLToPath(sqliteStorageAssets().baseline);
+          const incompatible =
+            target === 'manifest'
+              ? '{"formatMajor":2}'
+              : `${readFileSync(failedPath, 'utf8')}\n-- Different migration checksum\n`;
           const originalRead = fs.readFileSync;
           let reads = 0;
           let confirmations = 0;
@@ -490,7 +503,7 @@ for (const target of ['manifest', 'baseline'] as const)
                 throw Object.assign(new Error('fixture_read_failed'), { code });
               // The first observation can be incompatible while a peer repairs
               // the profile before EX admission. Only the second read then fails.
-              return target === 'manifest' ? '{"formatMajor":2}' : Buffer.from('old baseline');
+              return incompatible;
             }
             return (originalRead as (...args: unknown[]) => unknown)(path, ...args);
           }) as typeof fs.readFileSync);
@@ -571,7 +584,7 @@ test('development recovery refuses active profile use and pending restore withou
 test.skipIf(process.platform !== 'darwin')(
   'real development Main reports Service admission failure, waits for readiness and drains its owned process',
   async () => {
-    const repository = realpathSync(join(import.meta.dir, '../../..'));
+    const repository = realpathSync(join(import.meta.dirname, '../../..'));
     const cache = join(repository, '.cache');
     mkdirSync(cache, { recursive: true });
     const root = realpathSync(mkdtempSync(join(cache, 'desktop-startup-')));
@@ -591,9 +604,9 @@ test.skipIf(process.platform !== 'darwin')(
       join(root, 'apps/service/dist'),
     ])
       mkdirSync(directory, { recursive: true });
-    writeFileSync(join(dependency, 'package.json'), '{"type":"module","main":"index.ts"}');
+    writeFileSync(join(dependency, 'package.json'), '{"type":"module","main":"index.js"}');
     writeFileSync(
-      join(dependency, 'index.ts'),
+      join(dependency, 'index.js'),
       "export * from '../../../packages/client/src/observation.ts';",
     );
     writeFileSync(join(client, 'known.ts'), 'export const available = 1;');
@@ -613,19 +626,27 @@ test.skipIf(process.platform !== 'darwin')(
       `export * from ${JSON.stringify(pathToFileURL(join(repository, 'packages/agent/dist/jobs/shell.js')).href)};`,
     );
     const driver = join(root, 'driver.ts');
-    const observeService =
-      "const cp=require('node:child_process');const spawn=cp.spawn;cp.spawn=function(...args){const child=spawn.apply(this,args);if(String(args[1]?.[0]).endsWith('/main.js'))process.stdout.write('SERVICE_PID='+child.pid+'\\n');return child;};";
+    const observeService = `const cp=require('node:child_process');
+const spawn=cp.spawn;
+cp.spawn=function(...args){
+  if(!String(args[1]?.[0]).endsWith('/main.js'))return spawn.apply(this,args);
+  if(args[0]!==${JSON.stringify(fixtureNodeExecutable())})throw Error('development_service_node_not_selected');
+  const child=spawn.apply(this,args);
+  process.stdout.write('SERVICE_PID='+child.pid+'\\n');
+  return child;
+};`;
     writeFileSync(
       driver,
       `import {mkdirSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {runDevelopmentDesktop} from ${JSON.stringify(pathToFileURL(join(repository, 'scripts/development/unified-desktop.ts')).href)};
-try { const code=await runDevelopmentDesktop({root:${JSON.stringify(root)},spawnElectron(executable,outdir,env){if(process.platform==='darwin'&&process.arch==='arm64'&&executable!==join(outdir,'electron/Electron.app/Contents/MacOS/Electron'))throw Error('development_resize_runtime_not_selected');const data=join(outdir,'isolated-electron-data');mkdirSync(data,{mode:0o700});writeFileSync(join(outdir,'isolated-main.cjs'),${JSON.stringify(observeService)}+\`const {app}=require('electron');app.setPath('userData',\${JSON.stringify(data)});app.setPath('sessionData',\${JSON.stringify(data)});require('./main.cjs');if(process.platform==='darwin'&&process.arch==='arm64'&&!app.commandLine.getSwitchValue('enable-features').split(',').includes('CATransactionV2'))throw Error('development_resize_policy_not_selected');\`);writeFileSync(join(outdir,'package.json'),JSON.stringify({main:'isolated-main.cjs'}));const child=Bun.spawn([executable,outdir],{cwd:${JSON.stringify(root)},env,stdin:'pipe',stdout:'pipe',stderr:'inherit'});void(async()=>{for await(const chunk of child.stdout)process.stdout.write(chunk);})();process.stdout.write('ELECTRON_PID='+child.pid+'\\n');return child;}});process.stdout.write('DEVELOPMENT_EXIT='+code+'\\n');process.exitCode=code; }
+import {spawn as spawnFixtureProcess} from ${JSON.stringify(new URL('../../../scripts/tooling/process.ts', import.meta.url).href)};
+try { const code=await runDevelopmentDesktop({root:${JSON.stringify(root)},executable:${JSON.stringify(fixtureNodeExecutable())},spawnElectron(executable,outdir,env){if(process.platform==='darwin'&&process.arch==='arm64'&&executable!==join(outdir,'electron/Electron.app/Contents/MacOS/Electron'))throw Error('development_resize_runtime_not_selected');const data=join(outdir,'isolated-electron-data');mkdirSync(data,{mode:0o700});writeFileSync(join(outdir,'isolated-main.cjs'),${JSON.stringify(observeService)}+\`const {app}=require('electron');app.setPath('userData',\${JSON.stringify(data)});app.setPath('sessionData',\${JSON.stringify(data)});require('./main.cjs');if(process.platform==='darwin'&&process.arch==='arm64'&&!app.commandLine.getSwitchValue('enable-features').split(',').includes('CATransactionV2'))throw Error('development_resize_policy_not_selected');\`);writeFileSync(join(outdir,'package.json'),JSON.stringify({type:'module',main:'isolated-main.cjs'}));const child=spawnFixtureProcess([executable,outdir],{cwd:${JSON.stringify(root)},env,stdin:'pipe',stdout:'pipe',stderr:'inherit'});void(async()=>{for await(const chunk of child.stdout)process.stdout.write(chunk);})();process.stdout.write('ELECTRON_PID='+child.pid+'\\n');return child;}});process.stdout.write('DEVELOPMENT_EXIT='+code+'\\n');process.exitCode=code; }
 catch(error){console.error(error);process.exitCode=1;}`,
     );
     try {
       for (const scenario of ['load-failed', 'failed', 'ready'] as const) {
         const observation = join(client, 'observation.ts');
         const invalid =
-          "import {missingObservation} from './known';export const observation=missingObservation();";
+          "import {missingObservation} from './known.ts';export const observation=missingObservation();";
         writeFileSync(
           observation,
           scenario === 'load-failed' ? invalid : 'export const observation = 1;',
@@ -633,10 +654,10 @@ catch(error){console.error(error);process.exitCode=1;}`,
         writeFileSync(
           join(source, 'main.ts'),
           scenario === 'failed'
-            ? "if(import.meta.main) throw Error('isolated_service_startup_failure');"
-            : `import {observation} from '@kite-ai/startup-fixture';export {observation};import {runServiceProcess} from ${JSON.stringify(join(repository, 'apps/service/src/main.ts'))};if(import.meta.main)await runServiceProcess();`,
+            ? "export function runServiceProcess(){throw Error('isolated_service_startup_failure');}"
+            : `import {observation} from '@kite-ai/startup-fixture';export {observation};export {runServiceProcess} from ${JSON.stringify(join(repository, 'apps/service/src/main.ts'))};`,
         );
-        const child = Bun.spawn([process.execPath, driver], {
+        const child = spawnFixtureProcess([process.execPath, ...testRuntimeFlags, driver], {
           cwd: root,
           stdin: 'ignore',
           stdout: 'pipe',

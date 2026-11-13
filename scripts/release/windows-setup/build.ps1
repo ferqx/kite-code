@@ -3,7 +3,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Sha256,
   [Parameter(Mandatory = $true)][string]$ZstdArchive,
   [Parameter(Mandatory = $true)][string]$OutFile,
-  [string]$Bun = 'bun.exe',
+  [string]$Node = 'node.exe',
   [switch]$Fixture
 )
 
@@ -20,7 +20,7 @@ if ((Get-FileHash -LiteralPath $decoderArchive -Algorithm SHA256).Hash -ine
   throw 'Expected the verified Zstandard 1.5.7 release source archive.'
 }
 
-$bunPath = (Get-Command $Bun -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$nodePath = (Get-Command $Node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $gitPath = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $bash = Join-Path (Split-Path -Parent (Split-Path -Parent $gitPath)) 'bin/bash.exe'
 $vswhere = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -64,7 +64,7 @@ try {
   } finally {
     Pop-Location
   }
-  & $bunPath run (Join-Path $PSScriptRoot 'prepare.ts') $bundle $Sha256 (Join-Path $zstd 'LICENSE') $work
+  & $nodePath --import (Join-Path $repo 'scripts/tooling/register.mjs') (Join-Path $PSScriptRoot 'prepare.ts') $bundle $Sha256 (Join-Path $zstd 'LICENSE') $work
   if ($LASTEXITCODE) { throw 'Windows setup payload preparation failed.' }
   & cl.exe /nologo /c /MT /O2 /utf-8 /W3 /Fozstddeclib.obj $decoder
   if ($LASTEXITCODE) { throw 'Zstandard decoder compilation failed.' }

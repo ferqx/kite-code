@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { createRuntime, type RuntimeOptions } from '@kite-ai/agent';
@@ -24,6 +24,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createRunModelAdapters } from '../../src/authorization-check-model';
@@ -65,7 +67,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw new Error('default_auto_deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 type CheckResponse = 'approve_once' | 'reject' | 'ask_user' | 'invalid' | 'failure' | 'length';
@@ -96,87 +98,89 @@ async function fixture(
     step = 0;
   let blockCheck = false;
   let releaseCheck!: () => void;
-  const providers = ['a', 'b'].map((route) =>
-    Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      async fetch(request) {
-        const body = (await request.json()) as Record<string, unknown>;
-        if (options.rejectReasoningParameter && Object.hasOwn(body, 'reasoning_effort'))
-          return new Response('unsupported reasoning parameter', { status: 400 });
-        const messages = body.messages as { role: string; content: string }[];
-        let payload: Record<string, unknown> | undefined;
-        try {
-          const content = messages
-            .slice()
-            .reverse()
-            .find((message) => message.role === 'user')?.content;
-          const parsed = JSON.parse(content ?? '') as Record<string, unknown>;
-          if (parsed.purpose === 'authorization_check') payload = parsed;
-        } catch {}
-        let call: { name: string; arguments: string } | undefined;
-        let content = 'finished';
-        if (payload) {
-          checks.push({ route, body, payload });
-          if (blockCheck) await new Promise<void>((resolve) => (releaseCheck = resolve));
-          if (decision === 'failure') return new Response('fixture failure', { status: 503 });
-          content = JSON.stringify({
-            decision: ['invalid', 'length'].includes(decision) ? 'approve_once' : decision,
-            reason: 'exact original operation only',
-            ...(decision === 'invalid' ? { executionId: 'self-reported-is-not-proof' } : {}),
-          });
-        } else {
-          normalRequests.push({ route, body });
-          if (step++ === 0)
-            call = {
-              name: 'write_file',
-              arguments: JSON.stringify({
-                path: `${workId}.txt`,
-                content: `actual ${workId}`,
-              }),
-            };
-        }
-        const chunk = {
-          id: 'response',
-          object: 'chat.completion.chunk',
-          created: 1,
-          model: `remote-${route}`,
-          choices: [
+  const providers = await Promise.all(
+    ['a', 'b'].map((route) =>
+      fixtureServe({
+        hostname: '127.0.0.1',
+        port: 0,
+        async fetch(request) {
+          const body = (await request.json()) as Record<string, unknown>;
+          if (options.rejectReasoningParameter && Object.hasOwn(body, 'reasoning_effort'))
+            return new Response('unsupported reasoning parameter', { status: 400 });
+          const messages = body.messages as { role: string; content: string }[];
+          let payload: Record<string, unknown> | undefined;
+          try {
+            const content = messages
+              .slice()
+              .reverse()
+              .find((message) => message.role === 'user')?.content;
+            const parsed = JSON.parse(content ?? '') as Record<string, unknown>;
+            if (parsed.purpose === 'authorization_check') payload = parsed;
+          } catch {}
+          let call: { name: string; arguments: string } | undefined;
+          let content = 'finished';
+          if (payload) {
+            checks.push({ route, body, payload });
+            if (blockCheck) await new Promise<void>((resolve) => (releaseCheck = resolve));
+            if (decision === 'failure') return new Response('fixture failure', { status: 503 });
+            content = JSON.stringify({
+              decision: ['invalid', 'length'].includes(decision) ? 'approve_once' : decision,
+              reason: 'exact original operation only',
+              ...(decision === 'invalid' ? { executionId: 'self-reported-is-not-proof' } : {}),
+            });
+          } else {
+            normalRequests.push({ route, body });
+            if (step++ === 0)
+              call = {
+                name: 'write_file',
+                arguments: JSON.stringify({
+                  path: `${workId}.txt`,
+                  content: `actual ${workId}`,
+                }),
+              };
+          }
+          const chunk = {
+            id: 'response',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: `remote-${route}`,
+            choices: [
+              {
+                index: 0,
+                delta: call
+                  ? {
+                      tool_calls: [
+                        { index: 0, id: `call-${workId}`, type: 'function', function: call },
+                      ],
+                    }
+                  : { content },
+                finish_reason: null,
+              },
+            ],
+          };
+          const finish = {
+            ...chunk,
+            choices: [
+              {
+                index: 0,
+                delta: {},
+                finish_reason: call
+                  ? 'tool_calls'
+                  : payload && decision === 'length'
+                    ? 'length'
+                    : 'stop',
+              },
+            ],
+          };
+          return new Response(
+            `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(finish)}\n\ndata: [DONE]\n\n`,
             {
-              index: 0,
-              delta: call
-                ? {
-                    tool_calls: [
-                      { index: 0, id: `call-${workId}`, type: 'function', function: call },
-                    ],
-                  }
-                : { content },
-              finish_reason: null,
+              headers: { 'content-type': 'text/event-stream' },
             },
-          ],
-        };
-        const finish = {
-          ...chunk,
-          choices: [
-            {
-              index: 0,
-              delta: {},
-              finish_reason: call
-                ? 'tool_calls'
-                : payload && decision === 'length'
-                  ? 'length'
-                  : 'stop',
-            },
-          ],
-        };
-        return new Response(
-          `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(finish)}\n\ndata: [DONE]\n\n`,
-          {
-            headers: { 'content-type': 'text/event-stream' },
-          },
-        );
-      },
-    }),
+          );
+        },
+      }),
+    ),
   );
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {

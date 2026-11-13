@@ -2,7 +2,7 @@
 
 ## 类型检查
 
-`bun run typecheck` 使用 Bun 1.4.4，以 `bun check -b -p tsconfig.typecheck.json` 单进程检查原根和精确十 workspace；[聚合配置](../tsconfig.typecheck.json)不覆盖项目设置，各包独立检查与[原 runner](../scripts/run-runtime-workspace-script.ts)保留。开发要求见[本地开发](../docs/development/local-development.md)。此前 2026-11-04，Windows x64、源码基线 `4f29be4e0` 加上一轮迁移改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同。原九份 tsconfig 与严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。
+`bun run typecheck` 使用锁定的 TypeScript，以 `tsc -b tsconfig.typecheck.json` 单进程检查原根和精确十 workspace；[聚合配置](../tsconfig.typecheck.json)不覆盖项目设置，各包独立检查与[原 runner](../scripts/run-runtime-workspace-script.ts)保留。开发要求见[本地开发](../docs/development/local-development.md)。此前 2026-11-04，Windows x64、源码基线 `4f29be4e0` 加上一轮迁移改动，逐配置对照 `tsc --listFilesOnly -p <config>` 与 `bun check --listFilesOnly -p <config>`：排除外部依赖和检查器自带标准库后，仓库文件及本地声明的导入闭包完全相同。原九份 tsconfig 与严格选项未修改；相同文件范围不表示 TypeScript 5.9.3 和 Bun 内置 7.0.2 的标准库或诊断语义完全相同。
 
 2026-11-08，`e8a483d65` 加 Trajectory／Trace 工作树，macOS arm64／Bun1.4.4：根构建十个 workspace 通过，聚合类型检查覆盖原根及十包共11个项目。quality 下载缓存键同步两个新增 manifest；[CI 消费闭包](integration/scripts/unified-ci.test.ts)完整25项／513断言通过，原命令、action 与预算保持。此为本机配置与构建验证，不代表 hosted workflow 或新增平台资格；下表保留此前九配置对照的原范围。
 
@@ -20,9 +20,9 @@
 
 [并行 Tool 测试](../packages/agent/test/isolated/execution/parallel-tools.test.ts)的两组工具定义使用 `satisfies ToolDefinition[]` 恢复上下文参数和结果联合类型，消除原六处诊断；执行、故障注入及原断言保持。实际 `bun run typecheck` 的根与八 workspace 全部通过，该测试整文件 3 项／64 断言通过。CI 的 `quality` 使用 1.4.4；运行时与正式发布仍沿[原基线](../docs/active/release-control.md#当前发行与源身份)，不由本次本机检查取得 hosted CI 或完整产品资格。
 
-上一轮[CI 基线](integration/scripts/ci-bun-baseline.test.ts)与[工作区合同](integration/scripts/unified-workspaces.test.ts)两份整文件为 12 项／177 断言通过；原 TypeScript 5.9.3 的 Agent 配置亦通过。当时附带执行[CI 消费闭包](integration/scripts/unified-ci.test.ts)为 21 项通过、1 项失败，已用原 HEAD 检查器复现。现已查明负例模板仍包含退役的 Workflow 测试，使替换没有发生；本轮更新模板和对应负例，并逐项断言输入确实变异，生产准入条件和 TUI workflow 未改。
+上一轮[CI 基线](integration/scripts/ci-node-baseline.test.ts)与[工作区合同](integration/scripts/unified-workspaces.test.ts)两份整文件为 12 项／177 断言通过；原 TypeScript 5.9.3 的 Agent 配置亦通过。当时附带执行[CI 消费闭包](integration/scripts/unified-ci.test.ts)为 21 项通过、1 项失败，已用原 HEAD 检查器复现。现已查明负例模板仍包含退役的 Workflow 测试，使替换没有发生；本轮更新模板和对应负例，并逐项断言输入确实变异，生产准入条件和 TUI workflow 未改。
 
-本轮基于 `b9a25f082` 加未提交改动、Windows x64／Bun 1.4.4，实际逐项目文件清单与聚合清单均列出 6094 个仓库文件条目／2566 个唯一文件，含本地声明；各项目重叠文件的出现次数亦相同，无新增或遗漏。临时夹具继承原九份配置并分别注入 TS2322，逐项目与聚合检查均返回1并报告相同诊断；有效夹具通过，没有生成 JS／声明／build-info。实际根聚合检查通过九项目；[CI 消费闭包](integration/scripts/unified-ci.test.ts)、[工作区合同](integration/scripts/unified-workspaces.test.ts)和[版本基线](integration/scripts/ci-bun-baseline.test.ts)三份整文件共37项／678断言通过。六类原边界违规及合并 CLI 的错误退出／pending 提示均已核对；子进程探针独立执行，不进入并行 integration 测试。同机三轮交替测量旧逐项目入口与新聚合入口，wall time 中位数为5.136秒与2.050秒；仅说明本机该轮结果，不外推 hosted CI。
+本轮基于 `b9a25f082` 加未提交改动、Windows x64／Bun 1.4.4，实际逐项目文件清单与聚合清单均列出 6094 个仓库文件条目／2566 个唯一文件，含本地声明；各项目重叠文件的出现次数亦相同，无新增或遗漏。临时夹具继承原九份配置并分别注入 TS2322，逐项目与聚合检查均返回1并报告相同诊断；有效夹具通过，没有生成 JS／声明／build-info。实际根聚合检查通过九项目；[CI 消费闭包](integration/scripts/unified-ci.test.ts)、[工作区合同](integration/scripts/unified-workspaces.test.ts)和[版本基线](integration/scripts/ci-node-baseline.test.ts)三份整文件共37项／678断言通过。六类原边界违规及合并 CLI 的错误退出／pending 提示均已核对；子进程探针独立执行，不进入并行 integration 测试。同机三轮交替测量旧逐项目入口与新聚合入口，wall time 中位数为5.136秒与2.050秒；仅说明本机该轮结果，不外推 hosted CI。
 
 上一轮[独立边界回归](isolated/scripts/unified-agent-boundary.test.ts)整文件实际20项通过、1项失败：本机 Windows 在创建文件符号链接时返回 `EPERM`，沙箱外重试相同，尚未进入该例的链接拒绝断言。该轮边界实现与测试文件未修改，未加平台 skip 或放宽链接判断；静态 pre-release architecture／API 检查已通过，不将此结果记为完整边界回归或三平台资格。
 
@@ -30,7 +30,7 @@
 
 [侧栏回归](../apps/desktop/test/isolated/sidebar-actions-browser.test.ts)由默认 `bun run test` 和 Required unit 收集，在独立进程中以 `NODE_ENV=production` 构建实际 Native 页面及生产 CSS。它沿[既有浏览器夹具](../apps/desktop/test/session-shell-browser-runner.fixture.ts)的 `--sidebar-actions` 分支检查深浅主题、发送逐帧显隐、添加空间等待与取消、DOM 保留、键盘／菜单及触屏；按钮最高优先级透明度的变异也不能使父容器中的隐藏操作显现。没有浏览器时测试失败，不静默跳过。
 
-本机可使用已安装的 Google Chrome；安装了当前锁定 Playwright 配套 Chromium 时自动优先使用它。Required unit 使用 `bun apps/desktop/node_modules/playwright/cli.js install --with-deps chromium` 准备配套浏览器，通过固定的 `PLAYWRIGHT_BROWSERS_PATH` 供安装与隔离 HOME 下的测试共同读取。定向命令为 `bun test apps/desktop/test/isolated/sidebar-actions-browser.test.ts`；纯 DOM 测试继续核原事件、菜单和节点合同，不替代此处的真实 CSS 绘制断言。该夹具使用隔离 bridge，不调用模型、原生目录选择器或用户数据，也不代表完整安装窗口资格。
+本机可使用已安装的 Google Chrome；安装了当前锁定 Playwright 配套 Chromium 时自动优先使用它。Required unit 使用 `node --import ./scripts/tooling/register.mjs apps/desktop/node_modules/playwright/cli.js install --with-deps chromium` 准备配套浏览器，通过固定的 `PLAYWRIGHT_BROWSERS_PATH` 供安装与隔离 HOME 下的测试共同读取。定向命令为 `node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts apps/desktop/test/isolated/sidebar-actions-browser.test.ts`；纯 DOM 测试继续核原事件、菜单和节点合同，不替代此处的真实 CSS 绘制断言。该夹具使用隔离 bridge，不调用模型、原生目录选择器或用户数据，也不代表完整安装窗口资格。
 
 ## 质量作业冷安装与边界缓存
 
@@ -44,6 +44,12 @@ Required quality 的依赖安装、Web 资产准备与原全部检查由[CI 回�
 
 ## 运行时升级与模型连接池
 
+当前仓库使用 Node 26.13.1 执行源码和正式测试，Bun 1.4.4 按 `bun.lock` 冻结安装并打包产品 JS／TS。本机另有[快速单测](#本机快速单测)入口。独立测试文件仍按原计划隔离执行，TUI harness 使用真实 PTY。安装候选验证用候选自身的运行时。源码运行测试先准备 Agent 原生插件、SQLite 与 Worker；quality 只准备 Web。当前本机安装结果见[Terminal](../apps/cli/docs/terminal-release.md)与[Native](../apps/desktop/docs/native-release.md)。源码浏览器和原生构建按平台保留依赖，Windows 的测试 ConPTY 使用锁定的 `node-pty`，与用户发行包的依赖分开。
+
+2026-11-13 macOS arm64 切回 Bun 安装，冻结安装及 Files 原生 postinstall、十 workspace 构建和类型检查均通过。两份锁均锁定 1,020 个相同的 registry 包版本，完整性摘要逐项一致。实际安装图有两条 peer 边变化。Bun 将 `@hono/node-server` 的 Hono peer 解析到 `4.12.27`，将开发工具 shadcn 下 `zod-to-json-schema` 的 Zod peer 解析到 `3.25.76`。快速单测用 Bun 与 Node 各通过 137 项，CI 合同 32 项及发行依赖图回归 14 项通过。MCP／标题定向回归 25 项通过 24 项，MCP HTTP 实际连接派发用例在原 pnpm 安装树也复现相同断言失败。[MCP HTTP](../apps/service/test/isolated/mcp-http-port.test.ts)
+
+2026-11-13 本机 macOS arm64：冻结离线安装（含 Files postinstall）、十 workspace 构建与聚合类型检查通过。[TUI harness](isolated/unified-agent/unified-tui-runner.test.ts) 134 项通过，Terminal 安装整文件 3 项通过，包含归档搬迁后实际 CLI/TUI、升级、回滚和卸载。[模型输入目录](../apps/desktop/test/native-model-input.test.ts)从已核 View 建立 SSE 读取基线，再读取同一会话的 205 条请求，实际取得两页并核对原内容和零新增模型请求。桌面输入与导航 66 项、CLI 普通测试及 CI 合同 248 项定向复验通过；整仓默认一轮在 CLI 的异步拒绝断言处停止，该用例已修正并通过定向复验，整仓未取得完整通过。正式历史前驱资格因 SQLite baseline 不符在安装前拒绝，见[发布约束](../docs/active/release-control.md#当前发行与源身份)。
+
 本轮 quality 下载缓存另以两个独立物理源码副本验证：均没有依赖目录、Web dist、Files 资产和 Cargo target，PATH 不含 Rust。空缓存冻结安装838个包约272.13秒；第二副本仅凭同一下载缓存以 `--offline --frozen-lockfile --ignore-scripts` 安装约33.14秒，再按原 workflow 安装命令复验通过。两者的锁文件、清单和九份原配置字节未变，八个 workspace 链接均只指向各自副本。最终在两份副本按 workflow 执行 Web 准备及原全部 quality 检查，连同当前覆盖的 docs-impact all 均通过；分别变异清单和隐藏 Web 导出后，仍准确返回 frozen-lockfile／workspace-export-invalid，恢复后边界通过。这是本机冷／热下载验证，耗时包含当时网络和磁盘条件，不代表 hosted cache action 已执行或承诺加速比例。
 
 2026-11-04，接入 FetchSession 前，基于 `b9a25f082` 加当时已有工具链改动，Windows x64：从官方分发下载独立 Bun1.4.3，与本机1.4.4使用相同源码、同样25个完整测试文件、原测试运行器的私有 runtime／HOME／TEMP和原时限串行对照。两版均21文件通过、4文件失败，失败文件与测试名相同，无新增版本失败；通过范围包含代理／Codex／模型选择与配置、提供商与网页装配、Service取消／恢复、Store／rollback／statement ACK生命周期、crash、HTTP／paired关闭、Client SSE及真实Windows sealed Bun／standalone verifier。它是有限兼容对照，不是全仓、三平台、installed或正式发布资格。
@@ -52,7 +58,7 @@ Required quality 的依赖安装、Web 资产准备与原全部检查由[CI 回�
 
 另用真实本地Service与SQLite Worker各执行500次View读取和15秒空闲采样：旧／新P50为1.213／1.022ms，P95为1.519／1.467ms；末尾进程RSS约115.8／119.2MB，没有观察到RSS下降。`process.cpuUsage`空闲采样为218／0ms，受短窗口和系统计时粒度影响，不能解释为零CPU或承诺收益；没有强制GC，主线程heap不是所有Worker的内存总和。独立内存DB探针确认两版内嵌SQLite均为3.53.4、sourceId `2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e09459bcc`，原已审查来源白名单未修改。
 
-当前workflow与fault-soak／完整blocked collection的Bun预期固定1.4.4，原source、receipt、迭代、期限、资源拒绝、OS矩阵和实际调用命令保留；旧1.4.2历史／legacy格式夹具仍标注原环境，不因此取得新资格。配套`@types/bun`由1.3.14固定到1.4.4，lock只更新该包、`bun-types`及其新增`undici-types`依赖；原九份tsconfig未改。新增类型把launcher signal扩为数值时，OAuth观察仍只接受原字符串／null，原numeric拒绝继续核对，未升级证据格式。
+此前 workflow 与 fault-soak／完整 blocked collection 的 Bun 预期固定 1.4.4，原source、receipt、迭代、期限、资源拒绝、OS矩阵和实际调用命令保留；旧1.4.2历史／legacy格式夹具仍标注原环境，不因此取得新资格。配套`@types/bun`由1.3.14固定到1.4.4，lock只更新该包、`bun-types`及其新增`undici-types`依赖；原九份tsconfig未改。新增类型把launcher signal扩为数值时，OAuth观察仍只接受原字符串／null，原numeric拒绝继续核对，未升级证据格式。
 
 FetchSession 接线后的[代理](../apps/service/test/isolated/model-transport.test.ts)、[标题](../apps/service/test/isolated/session-title.test.ts)与[提供商](../apps/service/test/isolated/provider-settings.test.ts)完整文件均已通过。原认证／取消／恢复拒绝、两 SDK 协议、空闲池隔离与实际 owner 清理均保留；此处使用本地合成服务，不调用真实付费 Provider，不替代普通窗口全过程或发布资格。
 
@@ -74,7 +80,7 @@ Windows 每个正式测试作业使用自有私有 HOME 与其下私有 TEMP/TMP
 
 [Agent 任务质量真实验证](e2e/live/model/README.md#工具反馈与任务质量)使用独立合成工作区、真实 Files/Task/SQLite 和已配置模型，核搜索范围、当前调用链、角色选择、子交付与父验收。它沿显式测试入口执行，不进入默认测试发现；原始模型输入、工具回执与最终内容一起核对，保留失败，不能只以最终文本标记或工具调用计数判定正确。
 
-[共享启动器](../scripts/test-suite.ts)把计划中的测试文件转成绝对路径传给Bun；相对路径只用于日志。裸相对字符串会被Bun当作发现filter，可能同时匹配忽略目录里的同名证据副本。当前[默认计划回归](integration/scripts/unified-default-plan.test.ts)在真实ignored archive存在同名broken测试时，核计划与库存不变，并实际验证只执行原计划文件；保留归档不要求删除或重命名原证据。此修正不改变并发、独占、隔离、时限或发现范围。
+[共享启动器](../scripts/test-suite.ts)把计划中的测试文件转成绝对路径传给 Node 测试运行器；相对路径只用于日志。按文件精确执行，避免匹配忽略目录里的同名证据副本。当前[默认计划回归](integration/scripts/unified-default-plan.test.ts)在真实ignored archive存在同名broken测试时，核计划与库存不变，并实际验证只执行原计划文件；保留归档不要求删除或重命名原证据。此修正不改变并发、独占、隔离、时限或发现范围。
 
 该修正后的freeze32完整默认已一次执行751作业/948文件及全部七独占，退出0；4397非Markdown输入与HEAD前后无漂移。准确结果及原失败边界归[本轮协作验证](e2e/live/model/collaboration-v1.1-cases.md)，不从受控默认通过推成真实模型或其他平台通过。
 
@@ -90,7 +96,7 @@ Caller、Recovery、MCP Selection／Connection／Reconnection／Source Approval 
 
 [测试运行器](../scripts/test-suite.ts)在分配隔离HOME之前，用[显式工具链环境](../scripts/test-environment.ts)固定Cargo／Rustup缓存；TUI子进程沿相同规则传递这两个路径，避免每个临时HOME重新安装工具链。应用配置仍只读取自有HOME，不拷贝用户配置或凭据。共享workspace夹具每个实际构建子命令上限为120秒，TUI就绪等待为60秒；各外层测试预算仍生效。恢复夹具在派发前建立并持有同一只读WAL观察连接，结束后先关闭再删自有根；Provider原调用核模型公开名及SDK的`write_file` wire身份，持久层继续核`files.write`。Run绑定夹具先结束Runtime，再关闭自己提供的串行锁和Store，最后删根。具体取舍和本轮证据见[测试环境决定](../.agents/notes/implemented/testing/2026-10-18-portable-test-environment.md)。
 
-正式默认／统一／TUI测试入口遇到Windows Bun安装路径不满足原候选制品ACL条件时，只在自有私有目录复制同字节Bun并复核SHA及实际原生pin，再用它执行原入口与全部原参数；不改安装目录权限。成功并确认关闭后清理自有副本，失败保留准确目录；未知pin关闭直接失败。`--list`和非法参数仍直接只读处理。该准备不提供MSVC或Windows Shell能力。TUI模型夹具保留所有请求的完整观察，另提供显式普通工作请求视图，避免自动标题子会话消耗普通响应队列；精确标题请求必须无Tool。原工具映射核SDK wire名及准确Core ID，Files baseline使用真实原生身份与完整EOF／SHA，未声明或歧义映射继续拒绝。
+正式默认／统一／TUI 测试入口遇到 Windows 的 Node 安装路径不满足原候选制品 ACL 条件时，只在自有私有目录复制同字节 Node 并复核 SHA 及实际原生 pin，再用它执行原入口与全部原参数；不改安装目录权限。成功并确认关闭后清理自有副本，失败保留准确目录；未知pin关闭直接失败。`--list`和非法参数仍直接只读处理。该准备不提供MSVC或Windows Shell能力。TUI模型夹具保留所有请求的完整观察，另提供显式普通工作请求视图，避免自动标题子会话消耗普通响应队列；精确标题请求必须无Tool。原工具映射核SDK wire名及准确Core ID，Files baseline使用真实原生身份与完整EOF／SHA，未声明或歧义映射继续拒绝。
 
 [daemon宿主](../apps/cli/test/daemon-host.test.ts)、[共享CLI](../apps/cli/test/isolated/shared-cli.test.ts)、[管理](../apps/cli/test/isolated/shared-management.test.ts)、[状态](../apps/cli/test/isolated/status-host.test.ts)和[Skills](../apps/cli/test/isolated/shared-skills.test.ts)夹具的 `beforeAll` 必须沿各自用例的同一既有平台条件：前四份在macOS/Linux构建，Skills保持仅macOS。构建入口的file URL用 `fileURLToPath` 转成真实本地路径。Windows不执行这些原已跳过用例的构建准备，实际适用的恢复等调用者仍执行共享构建器明确选择的完整workspace闭包。共享构建器的每个子命令现为120秒，上述五份文件的准备60秒保持。[构建环境原语](fixtures/build-tool-environment.ts)为直接运行的构建子进程定位已安装的标准Cargo／rustup目录，并保留显式工具链环境；运行时HOME和来源隔离不变。Windows专属endpoint／pipe及实际安装链另行验证，不能将平台跳过计作Windows daemon能力通过。
 
@@ -120,7 +126,7 @@ Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认�
 
 历史 Store9/11 确属旧数据库格式；其转换按 D08 不适用，对应旅程改验隔离的新 Store／Profile 的会话、重启和维护能力，不能将这些结果记作旧格式兼容；实际旧 State26 文件只作为不读取、不覆盖的隔离反例，遵守 D08。当前新 Store 的版本与维护恢复验证继续由正式测试负责。可选的旧 lifecycle 诊断 fixture 与 `in-process-service-connector` 尚属历史参考，不参与当前 52 个旅程，也不证明全 Runtime 资源或出生后代资格。当前完整执行结果归[进度](../docs/plans/unified-agent-refactor-v1-progress.md)，下面此前默认结果保持其原提交和范围。
 
-当前源码发现由 `bun run scripts/run-default-tests.ts --list` 精确列出；下述合并时的历史库存为 985 个默认文件；新增的权限树回归沿实际 Shell／Files consumer 核节点边界、错误优先级与独立叶校验。Files／MCP intent 文件、Native 分片和目录分页的测试继续保留各自业务断言，共享夹具只集中同域重复数据或传输，不改变默认发现、隔离与预算。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
+当前源码发现由 `bun run test --list` 精确列出；下述合并时的历史库存为 985 个默认文件；新增的权限树回归沿实际 Shell／Files consumer 核节点边界、错误优先级与独立叶校验。Files／MCP intent 文件、Native 分片和目录分页的测试继续保留各自业务断言，共享夹具只集中同域重复数据或传输，不改变默认发现、隔离与预算。此前 812 文件／638 作业（含 7 个 exclusive）的完整执行和新增改动的有限验证分别记录，失败修复按受影响原整文件验收，仍以[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md)的最终结果为准；不能把分批修复证据写成同次默认命令全绿。普通 UI 的已完成正文位于终端原生历史；巨正文导出夹具用真实 PTY 字节流逐字核全文和准确操作材料，不让测试端 headless 解析队列阻塞用户按键，其他屏幕断言继续使用原 screen 模式。 本轮 TUI 全库存 112 文件已逐整文件通过（首轮 75、项目 MCP 审批修正后 1、补跑未启动 36），包含全部原 52 场景；首轮命令实际退出 1，保留失败记录，不记作单次全绿。Ctrl+T 按用户决定移除，完整 reasoning 由现有 reader 与导出原文继续核实。
 
 本轮原 TUI 迁移前最近完整默认为macOS `a99fdf29` 加当轮最终冻结改动的原 `bun run test`：754完整文件／611唯一正式作业全部通过、actual0／1472.848秒，原四并发／604排空后7独占保持；4493输入、11资产、HEAD和Git零漂移。恢复Actions守卫、四份正式恢复、原Terminal／Web／80×24 TUI与Native头部错误／草稿完整文件均在该图内通过，原三轮失败及修复证据保留。准确冻结、原log与result归[集中收尾进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13actions-恢复接线与-sql-语句缓存-owner-收尾)。最终结果归档仅补文档，不重新命名未变执行输入为新一轮测试；原RSS／完整资源与出生后代仍未闭合，wholeV13／phaseExit保持false，Win/Linux只有配置完成与未实测备注。
 
@@ -140,11 +146,11 @@ Native Provider／MCP 的实际 macOS 凭据场景使用[自有 HOME 的默认�
 
 ## 环境基线与 owner
 
-[Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。
+[Windows installed TUI 完整调用者](fixtures/unified-agent/windows-installed-tui.qualification.ts)以 `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>` 消费同 release job 已构建的两种准确候选；actual win32/x64 required，无 backend availability skip。真实 80×24 ConPTY 先用独立 Terminal，再登记 Native 到同一稳定前门，每模式 120 秒、各 PTY 30 秒、写操作最多 10 秒，核提交／全文／思考／导出／精确取消／未提交草稿／普通退出／冷读零重放及最终卸载保数据。原 Job0／完整 EOF／strict Close 与未 Terminate 是成功条件，强制收尾不能改成通过；这条新 caller 不修改原 POSIX 窗口或默认 isolated 调度，也不代 Windows 真正跨代码／Shell／MCP／RSS／完整阶段资格。
 
 [Windows TUI 私有记录完整文件](../apps/cli/test/isolated/windows-tui-private-files.test.ts)归 CLI owner，九份 closed 文件、9 MiB 原记录／CAS、recovery 262144／config 8 MiB 边界和原 native hardlink／rebound 拒绝只能由实际 Windows 执行；本机另核非平台拒绝与验证期 Close mock，不能 availability skip 冒充通过。原九份 journal 单测和四份 Profile／路径邻接整文件分别保持原断言与预算。准确输入／日志与未执行范围见 [当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)；Win/Linux 实机按用户最新安排留到最后交 GitHub Actions，用户独立 Windows 验证不由本机 mock 代替，现有接线保留。
 
-Required CI、正式 soak 与 macOS／Linux 保持 Bun 1.4.2；现有七份含 Windows 的验证矩阵只在 Windows 选择 1.4.3，以覆盖已复现的 tsconfig override 路径问题。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
+当前 Required CI、正式 soak 与三平台验证矩阵使用固定 Node 26.13.1。此前 Windows 选择 Bun 1.4.3 的原因和结果只适用于原历史版本。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
 
 正式 Terminal wrapper 夹具的子环境保三端必要宿主变量及私有HOME／Profile，但清除测试运行器内部 `BUN_FEATURE_FLAG_NO_ORPHANS`：该模式只属于外层测试进程，不能传给短命CLI而提前关闭有明确stop责任的独立daemon。默认运行器原 `--no-orphans`、原完整文件／业务断言／预算及实际daemon stop保持；同默认flag的完整文件已验证此边界，不以关闭全局门禁或自动重试解决失败。
 
@@ -231,6 +237,22 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 原 TUI 补齐的源码对照与验证归 [TUI owner](../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。新 [14 行主屏](../packages/ui/test/tui/subagent-layout-integration.test.tsx)通过普通 TuiSession 核真实并发子项预算；[错误页与真实 Host](../apps/cli/test/isolated/tui-render-failure-host.test.ts)核明确退出和所属 Service 收尾；[上下文估算](../packages/agent/test/context/context-estimate.test.ts)与 [Host 显示](../apps/cli/test/isolated/tui-display.test.ts)核准确原请求和容量来源。新增测试使用便携 Ink／PTY 端口，不以当前 macOS 执行代替 Win/Linux 系统资格。
 
+## 本机快速单测
+
+用 Bun 1.4.4 冻结安装依赖后，可在仓库根快速跑指定的已有单测。`--node` 用常规 Node 测试入口跑相同文件。两种模式使用同一版本的 `expect` 断言库。
+
+```sh
+bun run test:fast tui desktop
+bun run test:fast --node tui desktop
+bun run test:fast --help
+```
+
+[入口](fast/run.mjs)列出 `trajectory`、`agent`、`ai`、`tui` 和 `desktop` 五组。省略组名执行全部。所选测试覆盖协议、上下文估算、用替身传输验证模型请求、TUI 输入与草稿、桌面展示投影。实际 PTY、Electron、Service、SQLite 和发行制品继续由各自的 Node 测试验证。`bun run test` 是默认测试，使用同一批已有用例以及其他正式回归。出现 Bun 和 Node 结果分歧时，以 Node 复跑判断正式测试结果。
+
+2026-11-13，macOS arm64、Bun 1.4.4 与 Node 26.13.1，交替执行上述入口，各模式预热一轮，再取七轮总耗时中位数。全部 20 文件、137 项在两边均通过，Bun 0.86 秒、常规 Node 4.09 秒。单选 `tui desktop` 的 77 项在两边也均通过，分别为 0.45 秒和 2.31 秒。Bun 在一个进程内运行这批用例，Node 仍按文件隔离。本结果只比较这一组开发反馈命令。
+
+同日，Bun 打包接入后再次验证两种模式各 137 项通过。AI、Service 的 JS 打包分别在预热一轮后交替执行五轮，含 Node 构建进程启动与写入临时输出。用时中位数由 esbuild 的 104／145 毫秒降至 Bun 的 85／107 毫秒。原生构建、Vite 和制品封装未计入。
+
 ## 默认执行与隔离
 
 [Windows 普通 Files 专项](../packages/agent/test/isolated/files/windows.test.ts)按同一默认计划发现完整文件，actual win32 必须执行六工具、真实 Core 大正文、binary 恢复和 Windows 路径保护，无 backend availability skip；本机 macOS 四例平台 skip 不计资格。共享原完整 Files 文件及正式 default／assets／Fork／恢复后新 Store 作业已按原独立进程验证；完整断言／预算不变，范围和保留失败见[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)。这些本机证据不代证 Windows syscall／installed caller，也不把 file flush当POSIX目录fsync。
@@ -239,7 +261,7 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 安装收尾mock按原库存区分active与不存在的可选CLI登记，第三例明确Terminal marker存在／Native marker不存在；coordination保实际纯use-key派生export，I/O仍是隔离port。原parser／准入／关闭检查不旁路，所有原错误对象／保锁／顺序断言与4000ms subprocess及默认5秒预算保持。真实默认失败、原完整文件3pass／12expects／61ms及冻结边界归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，该本机结果不计Windows原生／installed资格。
 
-Windows 完整 installed 链另有显式 `bun run tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts --candidate <absolute-existing-candidate>`，只消费准确已构建 Terminal，不能 availability skip、偷偷重建或借本机邻接通过。原120秒整链/30秒命令、实际 paired Run 与双 EOF/关闭、A 使用中升级/回退及冷读零重放、最终全 EX/保数据卸载保持；B仅版本标签，TUI只help/version，正式 `kite.exe` busy backup→backup/inspect/status/restore/status/GC→新 Store 原完整历史冷读链要求完整媒体、原 config/preferences、旧 Store 拒绝、引用/近期保留和零重放；只核近期 GC，不冒称过宽限删除。当前安装／维护及新增Daemon整链原生均未执行，Native/PTY/完整恢复窗口/跨代码及持续资源仍不在此工具证明范围。release Windows MSVC→Terminal build→qualification 已接并由原 CI guard/mutation 核对，common 原 whole/native/always formal 门禁保留；平台旧 POSIX fixture 和未资格 guard 的真实失败不能过滤。按用户安排留重构后 Actions 执行，本地未 dispatch。证据与实际未验范围归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-daemon-与原实例版本交接源码)。
+Windows 完整 installed 链另有显式 `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts --candidate <absolute-existing-candidate>`，只消费准确已构建 Terminal，不能 availability skip、偷偷重建或借本机邻接通过。原120秒整链/30秒命令、实际 paired Run 与双 EOF/关闭、A 使用中升级/回退及冷读零重放、最终全 EX/保数据卸载保持；B仅版本标签，TUI只help/version，正式 `kite.exe` busy backup→backup/inspect/status/restore/status/GC→新 Store 原完整历史冷读链要求完整媒体、原 config/preferences、旧 Store 拒绝、引用/近期保留和零重放；只核近期 GC，不冒称过宽限删除。当前安装／维护及新增Daemon整链原生均未执行，Native/PTY/完整恢复窗口/跨代码及持续资源仍不在此工具证明范围。release Windows MSVC→Terminal build→qualification 已接并由原 CI guard/mutation 核对，common 原 whole/native/always formal 门禁保留；平台旧 POSIX fixture 和未资格 guard 的真实失败不能过滤。按用户安排留重构后 Actions 执行，本地未 dispatch。证据与实际未验范围归[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-正式-daemon-与原实例版本交接源码)。
 
 该同一工具新增必须执行的[Windows installed Daemon helper](fixtures/unified-agent/windows-daemon-qualification.ts)，保原整链期限/所有原断言：真实B start/status/Web、rollbackA仍reuse B/原SH、A前门共享完整Model、原Client dispose仅detach、busy拒绝/明确cancel restart、原HANDLE实际dead、新A完整原结果零重放、正常stop/双EX/恢复原config，再执行原卸载保数据。新[source叶子](../apps/service/src/daemon/README.md)的五个完整测试文件分别覆盖有限SID/原process/pipe/record/完整bootstrap接线及初始artifact关闭未知保活接线；本机mock和原Windows native skips不算原生通过。此工具仍不证明Native/PTY/Shell/stdio MCP/跨代码/持续资源或最终退役。
 
@@ -404,7 +426,7 @@ Native公共扩展的[实际HTTP链](../apps/desktop/test/isolated/native-extens
 
 原[窗口 IPC](../apps/desktop/test/native-window-ipc.test.ts)核文本原文、1 MiB UTF-8 边界、闭合 payload、准确 frame 和零业务 caller；[实际 Native header DOM](../apps/desktop/test/isolated/native-window-actions-dom.test.tsx)核左键／双击／控件过滤、双栏回调、失败提示与草稿保持，原轮次 DOM 保完整正文复制门禁。原[源码外 macOS 整窗口](../apps/desktop/test/isolated/native-bundle.test.ts)使用实际 Main 系统剪贴板核首次／冷读正文，浏览器 fallback 明确抛错；[JXA 保护进程](../apps/desktop/test/native-clipboard-guard.fixture.jxa)在内存保留原剪贴板各格式，stdin EOF 时恢复，不向日志或文件导出内容。header DOM 回调核实际 BrowserWindow 的 maximize／unmaximize，不代证物理双击或拖拽；保原任务、审批、冷读、双锁收尾与 120／45／10 秒预算。准确结果与未验范围归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原消息复制与标题栏缩放)。
 
-Main 的 Git／编辑器 launcher [所属进程整例](../apps/desktop/test/isolated/native-processes.test.ts)在实际 Node 中运行同一 owner 和 Caller，核原 ChildProcess close、双 EOF、准确原 handle、关闭后禁止准入、首个 error／timeout 只在实际 close 后结算；实际 Git／editor leaf 的调用参数继续保15秒／10秒。编辑器仅替换为本任务隔离 Node child，未操作个人应用，不代证真实编辑器窗口。原[首次发送真实 Git](../apps/desktop/test/native-conversation.test.ts)、[文件入口](../apps/desktop/test/native-file-changes.test.ts)和上述源码外完整窗口分别核业务、目标／frame以及默认 Main 关闭与 lease 顺序；本轮不增加已闭合窗口的故障矩阵或放宽预算。实际执行与保留限制归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10native-普通用户操作的所属-helper-收尾)。
+Main 的 Git／编辑器 launcher [所属进程整例](../apps/desktop/test/isolated/native-processes.test.ts)在实际 Node 中运行同一 owner 和 Caller，核原 ChildProcess close、双 EOF、准确原 handle、关闭后禁止准入、首个 error／timeout 只在实际 close 后结算；实际 Git／editor leaf 的调用参数继续保15秒／10秒。编辑器仅替换为本任务隔离 Node child，未操作个人应用，不代证真实编辑器窗口。原[首次发送真实 Git](../apps/desktop/test/isolated/native-conversation.test.ts)、[文件入口](../apps/desktop/test/native-file-changes.test.ts)和上述源码外完整窗口分别核业务、目标／frame以及默认 Main 关闭与 lease 顺序；本轮不增加已闭合窗口的故障矩阵或放宽预算。实际执行与保留限制归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10native-普通用户操作的所属-helper-收尾)。
 
 原四项[主题 DOM](../apps/desktop/test/isolated/native-theme-dom.test.tsx)迁至当前 Native Hook，保全部原断言；[主题 IPC](../apps/desktop/test/native-theme-ipc.test.ts)核三档、闭合输入、当前主 frame、销毁窗口和 Service 连接失败时仍不打开业务 caller。原[默认源码外 macOS 整窗口](../apps/desktop/test/isolated/native-bundle.test.ts)操作原菜单，核真实 nativeTheme、窗口／页面底色、引擎变化和冷启动偏好。Playwright 默认浅色媒体覆盖须通过 `emulateMedia({colorScheme:null})` 取消；保颜色一致、10秒 UI、45秒driver和全部原业务断言。引擎信号不冒称真实 OS 设置切换，高速人工拉伸与完整视觉资格仍未由本测试证明。准确输入、原失败与结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原主题与窗口背景联动)。
 
@@ -527,7 +549,7 @@ Windows managed Native 源码现另接四个稳定前门、两跳实际创建证
 
 [原完整报告](isolated/unified-agent/unified-soak.test.ts)和[原九点 crash series](isolated/unified-agent/unified-soak-series.test.ts)保全部原业务断言／预算，追加所属 probe 的实际出生、原退出码与 kernelState：同一 attempt 的三类普通 probe 及各原 crash／recover 都须确认准确身份已退出。纯反例核当前未知／仍存活／外来身份和 full collection 缺收据拒绝，不将 synthetic 输入称原生资格。stderr 使用真实 pipe EOF、停止只作用尚未结算的原 child handle，不能以 PID 数值、目录删除或退出字段推断正常。原 macOS／Linux syscall 和 Windows 不支持条件保持；这些有限证明不解除完整后代、Bun 指标或 RSS 门禁。准确结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12资格收尾来源与-web-固定能力归属)。
 
-macOS 另可显式执行 `bun run scripts/runtime/unified-soak.ts --profile=qualification --collect-blocked --output="${TMPDIR%/}/kite-full-soak/report.json"`，按原完整8outer／九点／60—168分钟预算采集，而不缩短到preflight。报告必须位于当前用户拥有且其他用户不可写的父目录；共享 `/private/tmp` 不能直接作父目录。支持的检查通过后仍blocked／inconclusive及退出1；实际失败则failed／退出1，formal拒绝保持。完成的各阶段复用原最终保留资源增长判定，增长失败保留私有原root与JSON，不以提前退出充作八轮通过。完整默认continuous消费父runner的同一已核验候选，源码外编译测试仍保两cycle／40Command、全部原断言与180秒预算，并核候选摘要和零重建。当前真实九点RSS增长失败、缺失Bun资源指标及全体后代资格仍单独记未具备，证据归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
+macOS 另可显式执行 `node --expose-gc --import ./scripts/tooling/register.mjs scripts/runtime/unified-soak.ts --profile=qualification --collect-blocked --output="${TMPDIR%/}/kite-full-soak/report.json"`，按原完整8outer／九点／60—168分钟预算采集，而不缩短到preflight。报告必须位于当前用户拥有且其他用户不可写的父目录；共享 `/private/tmp` 不能直接作父目录。支持的检查通过后仍blocked／inconclusive及退出1；实际失败则failed／退出1，formal拒绝保持。完成的各阶段复用原最终保留资源增长判定，增长失败保留私有原root与JSON，不以提前退出充作八轮通过。完整默认continuous消费父runner的同一已核验候选，源码外编译测试仍保两cycle／40Command、全部原断言与180秒预算，并核候选摘要和零重建。当前真实九点RSS增长失败、缺失Bun资源指标及全体后代资格仍单独记未具备，证据归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08macos-完整负载采集与冻结候选)。
 
 [默认连续 Shell 夹具](fixtures/unified-agent/soak/continuous-default-shell.ts)按当前轮的准确 Tool call ID、名称、参数与唯一结果推进 Files、child 和 Shell。`input_pending` 等刷新回执只有在公共 SessionView 核实原 Store／Session／Run／rootWork、准确调用、未派发及未尝试适配器后才允许重新准备原请求；成功启动后仅按返回的 Shell 身份读取，不凭结果个数跳步，也不重发未知效果。当前 macOS arm64／Bun 1.4.2 的[原整文件](isolated/unified-agent/unified-default-shell-continuous.test.ts)为 1 pass／25 expects、82.83 秒，保留两 cycle／40 Command、20 Session、4 slots、每个 Shell 的 65536 单元、准确 child 完成、cold read、no replay 与原退出证据；180 秒期限和 formal／平台未取得的资格不变。
 
@@ -666,12 +688,7 @@ fail-closed 和历史恢复测试继续保留，但使用领域化 compatibility
 
 `bun run check:test-ownership` 验证目录、deep import、root 散落、isolated 分类和 test discovery。
 `bun run test` 验证默认执行，系统/qualification 使用各自显式命令。
-`tests/integration/scripts/ci-bun-baseline.test.ts` 验证所有 `setup-bun` workflow 与 formal qualification
-共同 pin Bun `1.4.2`，普通Required/keyring/stdio/transport/ACL workflow只取消同一PR/ref的过期运行，正式release/platform
-evidence不自动取消，并确保native keyring push只覆盖`main`且path filter与执行命令共同指向
-`tests/qualification/mcp-keyring-platform-smoke.test.ts`。同一测试还验证平台job有界timeout、stdio只有一个workflow owner，以及
-execution-boundary workflow 的触发路径与 adversarial command 全部使用迁移后的 `apps/kite-service/test/**` current
-owner，并显式拒绝旧 `apps/kite-cli/test/**` 路径。stateful TUI overlay journey在发送确认键前等待对应action footer，
+[CI 基线测试](integration/scripts/ci-node-baseline.test.ts)由默认测试的 root 脚本计划执行，核对需要依赖的作业固定 Node `26.13.1` 和 Bun `1.4.4`，按 `bun.lock` 冻结安装，并使用 Node 执行正式测试。普通 Required／keyring／stdio／transport／ACL 作业只取消同一 PR/ref 的过期运行，正式 release／platform evidence 不自动取消。native keyring push 只覆盖 `main`，验证前先准备锁定的 Node 和 SQLite 构建输入。stateful TUI overlay journey 在发送确认键前等待对应 action footer，
 避免把标题已渲染误作输入层已ready；mutation次数与最终disk/Session断言不放宽。fixture lifecycle owner test使用真实
 explicit Kite home/state absent组合，先验证manager stop fence，再验证其余server/workspace cleanup与聚合错误顺序。
 

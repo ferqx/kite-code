@@ -1,12 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { expect, test } from '#kite-test';
 import {
   authorizationCheckInput,
   withoutTaskProjectionMarker,
 } from '../../../src/authorization-check-input';
 import { canonicalJson } from '../../../src/json';
+import { Database } from '../../../src/runtime-sqlite';
 import {
   authorizationTaskContext,
   usesTaskAuthorizationInput,

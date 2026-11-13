@@ -25,9 +25,7 @@ import {
 } from './paths';
 import { limits } from './protocol';
 
-/** Bun's Windows pipe creation fails under the host's write-restricted token.
- * Inherited ordinary file handles keep the original token and Job unchanged.
- */
+/** Use inherited ordinary file handles under the original restricted token and Job. */
 export async function runWindowsGitProcess(
   executable: string,
   args: readonly string[],

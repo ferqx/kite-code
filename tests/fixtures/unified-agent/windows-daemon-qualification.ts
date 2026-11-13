@@ -2,15 +2,255 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import type { DaemonBootstrap } from '../../../apps/service/src/daemon/bootstrap';
+import {
+  type TerminalBundleManifest,
+  windowsTerminalRuntimeArguments,
+} from '../../../apps/service/src/runtime-assets';
+import { acquireArtifactAccess } from '../../../packages/agent/src/artifact-access';
+import {
+  startWindowsOwnedChild,
+  type WindowsOwnedChild,
+  WindowsOwnedChildStartError,
+} from '../../../packages/agent/src/platform/process/windows-owned-child';
+import type { OpenSqliteStoreOptions } from '../../../packages/agent/src/sqlite';
+import type { Store } from '../../../packages/agent/src/storage/port';
 import type { AgentClient } from '../../../packages/client/src';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 
 // Late opening/unknown closing never loses its original Store owner on deadline rejection.
 const pendingColdOwners = new Set<object>();
 
-type Candidate = { releaseRoot: string; candidateId: string; buildId: string };
+type Candidate = {
+  releaseRoot: string;
+  candidateId: string;
+  buildId: string;
+  manifest: TerminalBundleManifest;
+};
+type QualificationStore = Pick<
+  Store,
+  | 'close'
+  | 'createSession'
+  | 'createWorkspace'
+  | 'getCommand'
+  | 'getExecution'
+  | 'getMetadata'
+  | 'getModelOutputSnapshot'
+  | 'getView'
+  | 'listExecutions'
+  | 'listMessages'
+>;
+type StoreRequest = Exclude<keyof QualificationStore, 'close'>;
+const pendingStoreProcesses = new Map<
+  WindowsOwnedChild,
+  ReturnType<typeof acquireArtifactAccess>
+>();
+
+/** Keep Store and its Worker on the installed runtime, including when reading Bun predecessors. */
+export function windowsQualificationStore(input: {
+  root: string;
+  manifest: Pick<TerminalBundleManifest, 'nodeVersion' | 'sqlite'> & {
+    entries: { runtime: string };
+  };
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  remaining(): number;
+}) {
+  const { root, manifest } = input;
+  return {
+    async openSqliteStore(options: OpenSqliteStoreOptions): Promise<QualificationStore> {
+      input.remaining();
+      const bounded = async <T>(promise: Promise<T>): Promise<T> => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => {
+              const ms = Math.min(30000, input.remaining());
+              if (ms <= 0) throw Error('qualification_store_deadline');
+              timer = setTimeout(() => reject(Error('qualification_store_deadline')), ms);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      const artifact = acquireArtifactAccess({ root, mode: 'shared' });
+      let owner: WindowsOwnedChild;
+      try {
+        owner = startWindowsOwnedChild({
+          executable: join(root, manifest.entries.runtime),
+          argv: [
+            ...windowsTerminalRuntimeArguments(root, manifest.nodeVersion ? 'node' : 'bun'),
+            fileURLToPath(
+              new URL('./windows-daemon-qualification-store-driver.mjs', import.meta.url),
+            ),
+            root,
+            JSON.stringify(options),
+            manifest.sqlite.version,
+            manifest.sqlite.sourceId,
+          ],
+          cwd: input.cwd,
+          env: Object.fromEntries(
+            Object.entries(input.env).filter(
+              (row): row is [string, string] =>
+                row[1] !== undefined &&
+                ![
+                  'NODE_OPTIONS',
+                  'NODE_PATH',
+                  'NODE_COMPILE_CACHE',
+                  'NODE_V8_COVERAGE',
+                  'BUN_OPTIONS',
+                  'BUN_BE_BUN',
+                ].includes(row[0].toUpperCase()),
+            ),
+          ),
+          stdin: 'pipe',
+        });
+      } catch (error) {
+        if (error instanceof WindowsOwnedChildStartError) {
+          try {
+            await bounded(error.cleanup);
+          } catch (cleanup) {
+            pendingColdOwners.add(artifact);
+            throw new AggregateError([error, cleanup], 'qualification_store_start_unknown');
+          }
+        }
+        try {
+          artifact.release();
+        } catch (cleanup) {
+          pendingColdOwners.add(artifact);
+          throw new AggregateError([error, cleanup], 'qualification_store_artifact_close_unknown');
+        }
+        throw error;
+      }
+      pendingStoreProcesses.set(owner, artifact);
+      const wait = new Map<
+        number,
+        { resolve(value: unknown): void; reject(error: unknown): void }
+      >();
+      let failure: unknown;
+      const fail = (error: unknown) => {
+        failure ??= error;
+        for (const pending of wait.values()) pending.reject(failure);
+        wait.clear();
+      };
+      const result = (id: number) =>
+        new Promise<unknown>((resolve, reject) => {
+          if (failure !== undefined) reject(failure);
+          else wait.set(id, { resolve, reject });
+        });
+      const ready = result(0);
+      const stdout = (async () => {
+        const lines = createInterface({ input: Readable.from(owner.stdout), crlfDelay: Infinity });
+        for await (const line of lines) {
+          assert(Buffer.byteLength(line) <= 16 * 1024 * 1024, 'qualification_store_result_limit');
+          const reply: unknown = JSON.parse(line);
+          assert(
+            Array.isArray(reply) &&
+              reply.length === 2 &&
+              Array.isArray(reply[1]) &&
+              reply[1].length <= 1,
+          );
+          const pending = wait.get(reply[0]);
+          assert(pending, 'qualification_store_reply_unexpected');
+          wait.delete(reply[0]);
+          pending.resolve(reply[1][0]);
+        }
+        assert.equal(wait.size, 0, 'qualification_store_eof_before_reply');
+      })();
+      const stderr = (async () => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        for await (const bytes of owner.stderr) {
+          size += bytes.length;
+          assert(size <= 64 * 1024, 'qualification_store_stderr_limit');
+          chunks.push(Buffer.from(bytes));
+        }
+        return Buffer.concat(chunks).toString('utf8');
+      })();
+      const completion = Promise.all([owner.exited, stdout, stderr]);
+      void completion.then(([code, , errors]) => {
+        fail(Error(`qualification_store_exit:${code}:${errors}`));
+      }, fail);
+      let id = 0;
+      const request = async (method: StoreRequest | 'close', args: unknown[]) => {
+        if (failure !== undefined) throw failure;
+        const requestId = ++id;
+        const response = result(requestId);
+        try {
+          const write = owner.writeStdin(
+            Buffer.from(`${JSON.stringify([requestId, method, args])}\n`),
+          );
+          const [, value] = await bounded(Promise.all([write, response]));
+          return value;
+        } catch (error) {
+          fail(error);
+          throw error;
+        }
+      };
+      let close: Promise<void> | undefined;
+      const release = async () => {
+        await bounded(owner.close());
+        const evidence = owner.readEvidence();
+        assert(evidence.closed && !evidence.closeUnknown && evidence.root.waitConfirmed);
+        assert(evidence.job.treeStopped && evidence.job.activeProcesses === 0);
+        artifact.release();
+        pendingStoreProcesses.delete(owner);
+        return evidence;
+      };
+      const cleanup = async (first: unknown): Promise<never> => {
+        try {
+          await release();
+        } catch (error) {
+          throw new AggregateError([first, error], 'qualification_store_close_unknown');
+        }
+        throw first;
+      };
+      try {
+        await bounded(ready);
+      } catch (error) {
+        return cleanup(error);
+      }
+      const invoke =
+        <K extends StoreRequest>(method: K) =>
+        (...args: Parameters<Store[K]>) =>
+          request(method, args) as ReturnType<Store[K]>;
+      return {
+        close: () =>
+          (close ??= (async () => {
+            let normal = false;
+            try {
+              await request('close', []);
+              const [code, , errors] = await bounded(completion);
+              assert.equal(code, 0, errors);
+              assert.equal(errors, '');
+              normal = true;
+              const evidence = await release();
+              assert.equal(evidence.job.terminationRequested, false);
+            } catch (error) {
+              if (!normal) return cleanup(error);
+              throw error;
+            }
+          })()),
+        createSession: invoke('createSession'),
+        createWorkspace: invoke('createWorkspace'),
+        getCommand: invoke('getCommand'),
+        getExecution: invoke('getExecution'),
+        getMetadata: invoke('getMetadata'),
+        getModelOutputSnapshot: invoke('getModelOutputSnapshot'),
+        getView: invoke('getView'),
+        listExecutions: invoke('listExecutions'),
+        listMessages: invoke('listMessages'),
+      };
+    },
+  };
+}
+
 export interface WindowsDaemonQualificationContext {
   home: string;
   cli: string;
@@ -18,6 +258,7 @@ export interface WindowsDaemonQualificationContext {
   dataRoot: string;
   userConfigurationPath: string;
   workspace: string;
+  readerEnvironment: NodeJS.ProcessEnv;
   candidateA: Candidate;
   candidateB: Candidate;
   execute(
@@ -76,9 +317,13 @@ export async function qualifyInstalledWindowsDaemon(
   const clientModule = (await import(
     load('client', 'index.js')
   )) as typeof import('../../../packages/client/src');
-  const sqlite = (await import(
-    load('agent', 'sqlite.js')
-  )) as typeof import('../../../packages/agent/src/sqlite');
+  const sqlite = windowsQualificationStore({
+    root: context.candidateB.releaseRoot,
+    manifest: context.candidateB.manifest,
+    cwd: context.home,
+    env: context.readerEnvironment,
+    remaining,
+  });
   const { selectProfile } = (await import(
     load('agent', 'profile.js')
   )) as typeof import('../../../packages/agent/src/profile');
@@ -123,7 +368,7 @@ export async function qualifyInstalledWindowsDaemon(
   const ready = new Promise<void>((resolve) => {
     announceHeld = resolve;
   });
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

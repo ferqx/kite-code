@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { runTestJob } from '../../../scripts/test-suite';
 import {
   FINITE_ROOT_SCRIPT_TESTS,
@@ -12,7 +12,7 @@ import {
   unifiedTestPlan,
 } from '../../../scripts/unified-test-plan';
 
-const root = join(import.meta.dir, '../../..');
+const root = join(import.meta.dirname, '../../..');
 
 test('default selection covers current public safety and formal lifecycle files exactly once', () => {
   const files = unifiedTestInventory(root);
@@ -34,6 +34,7 @@ test('default selection covers current public safety and formal lifecycle files 
     'packages/agent/test/isolated/jobs/confined-shell.test.ts',
     'tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts',
     'tests/isolated/unified-agent/native-install-lifecycle.test.ts',
+    'tests/integration/scripts/ci-node-baseline.test.ts',
   ])
     expect(files).toContain(file);
   for (const file of FINITE_ROOT_SCRIPT_TESTS) expect(files).toContain(file);
@@ -92,7 +93,7 @@ test('default jobs run only their explicit planned files despite ignored archive
     writeFileSync(join(fixture, '.gitignore'), 'dist/\n');
     writeFileSync(
       join(fixture, planned),
-      "import {expect,test} from 'bun:test';test('original planned file',()=>expect(true).toBe(true));\n",
+      "import {expect,test} from '#kite-test';test('original planned file',()=>expect(true).toBe(true));\n",
     );
     writeFileSync(
       join(fixture, archived),
@@ -102,7 +103,7 @@ test('default jobs run only their explicit planned files despite ignored archive
       mkdirSync(join(fixture, file, '..'), { recursive: true });
       writeFileSync(
         join(fixture, file),
-        "import {test} from 'bun:test';test('listed fixture',()=>{});\n",
+        "import {test} from '#kite-test';test('listed fixture',()=>{});\n",
       );
     }
     const inventory = unifiedTestInventory(fixture),

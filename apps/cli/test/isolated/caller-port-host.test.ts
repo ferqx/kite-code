@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setImmediate as yieldToIO } from 'node:timers/promises';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { callerTarget, type TuiCallerRequest } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { callerDigest, callerRequestDigest } from '../../host/caller-intents';
 import { openCallerJournal } from '../../host/caller-journal';
 import { createTuiCallerPort } from '../../host/caller-port';
@@ -38,13 +39,10 @@ test('actual owned caller port freezes large UTF8 Plan, steer, followup and orig
     path = join(f.profile.profilePath, 'ui/caller-intents.json');
   const actualFetch = globalThis.fetch;
   let posts = 0;
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      if (args[1]?.method === 'POST') posts++;
-      return actualFetch(...args);
-    },
-    { preconnect: actualFetch.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    if (args[1]?.method === 'POST') posts++;
+    return actualFetch(...args);
+  }, {});
   try {
     await warm.client.recoverSession('s', {
       kind: 'session.recover',
@@ -141,32 +139,26 @@ test('actual owned caller port freezes large UTF8 Plan, steer, followup and orig
       { subjectId: undefined },
       { requestDigest: undefined },
     ]) {
-      globalThis.fetch = Object.assign(
-        async (...args: Parameters<typeof fetch>) => {
-          const response = await actualFetch(...args);
-          if (
-            args[1]?.method !== 'POST' &&
-            new URL(String(args[0])).pathname === '/v1/commands/large-plan'
-          ) {
-            const json = await response.json();
-            return new Response(JSON.stringify({ ...json, ...bad }), {
-              status: response.status,
-              headers: response.headers,
-            });
-          }
-          return response;
-        },
-        { preconnect: actualFetch.preconnect },
-      );
+      globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+        const response = await actualFetch(...args);
+        if (
+          args[1]?.method !== 'POST' &&
+          new URL(String(args[0])).pathname === '/v1/commands/large-plan'
+        ) {
+          const json = await response.json();
+          return new Response(JSON.stringify({ ...json, ...bad }), {
+            status: response.status,
+            headers: response.headers,
+          });
+        }
+        return response;
+      }, {});
       expect((await port.lookup(prepared, new AbortController().signal)).phase).toBe('unknown');
     }
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        if (args[1]?.method === 'POST') posts++;
-        return actualFetch(...args);
-      },
-      { preconnect: actualFetch.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      if (args[1]?.method === 'POST') posts++;
+      return actualFetch(...args);
+    }, {});
     expect(posts).toBe(unchangedPosts);
     const dense = '大正文'.repeat(87000);
     let byteLimit = false;
@@ -207,6 +199,8 @@ test('actual owned caller port freezes large UTF8 Plan, steer, followup and orig
     }
     expect(byteLimit).toBe(true);
     for (let i = journal.list().length; i < 128; i++) {
+      // Model separate journal reservations without starving the real client's socket callbacks.
+      await yieldToIO();
       const request: TuiCallerRequest = {
         kind: 'run.start',
         expectedStoreId: f.storeId,

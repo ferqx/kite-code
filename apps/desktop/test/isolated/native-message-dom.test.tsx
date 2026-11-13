@@ -1,6 +1,6 @@
-import { expect, jest, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, Suspense, startTransition, useLayoutEffect, useState } from 'react';
+import { expect, jest, test } from '#kite-test';
 import {
   humanReadableOperationError,
   NativeToast,

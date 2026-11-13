@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { type ChildProcess, fork, spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -19,11 +18,18 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireArtifactAccess,
   acquireInheritedArtifactAccess,
 } from '../../../src/artifact-access';
+import {
+  fixtureNodeExecutable,
+  fixtureNodeLoader,
+  fixtureRuntimeBuild,
+} from '../../fixtures/node-runtime';
 
 const posix = process.platform === 'darwin' || process.platform === 'linux';
 const helper = fileURLToPath(new URL('./helper.ts', import.meta.url));
@@ -174,10 +180,14 @@ async function stop(child: ChildProcess, kill = false) {
   }
 }
 function exclusive(root: string, busy: boolean) {
-  const result = spawnSync(process.execPath, [helper, 'exclusive', root], {
-    encoding: 'utf8',
-    timeout: 10000,
-  });
+  const result = spawnSync(
+    fixtureNodeExecutable(),
+    ['--no-global-search-paths', '--import', fixtureNodeLoader, helper, 'exclusive', root],
+    {
+      encoding: 'utf8',
+      timeout: 10000,
+    },
+  );
   expect(result.status).toBe(busy ? 75 : 0);
   const reply = JSON.parse(result.stdout);
   expect(reply.ok).toBe(!busy);
@@ -191,8 +201,15 @@ test.skipIf(!posix)(
     async function start(killHelper = false) {
       const child = fork(
         holder,
-        [process.execPath, helper, f.root, f.path, killHelper ? 'kill_helper' : 'release'],
-        { execPath: 'node', stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
+        [
+          fixtureNodeExecutable(),
+          fixtureNodeLoader,
+          helper,
+          f.root,
+          f.path,
+          killHelper ? 'kill_helper' : 'release',
+        ],
+        { execPath: fixtureNodeExecutable(), stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
       );
       nodes.add(child);
       child.once('exit', () => nodes.delete(child));
@@ -240,10 +257,10 @@ test.skipIf(!posix)(
     try {
       const packageRoot = join(f.parent, 'node_modules/@kite-ai/agent');
       mkdirSync(packageRoot, { recursive: true });
-      const built = await Bun.build({
+      const built = await buildBundle({
         entrypoints: [fileURLToPath(new URL('../../../src/artifact-access.ts', import.meta.url))],
         outdir: join(packageRoot, 'dist'),
-        target: 'bun',
+        ...fixtureRuntimeBuild(join(packageRoot, 'dist')),
         packages: 'external',
         naming: 'artifact-access.js',
       });
@@ -256,7 +273,7 @@ test.skipIf(!posix)(
           exports: { './artifact-access': './dist/artifact-access.js' },
         }),
       );
-      const consumer = join(f.parent, 'consumer.js');
+      const consumer = join(f.parent, 'consumer.mjs');
       writeFileSync(
         consumer,
         `import {fstatSync} from 'node:fs';import {acquireArtifactAccess,acquireInheritedArtifactAccess} from '@kite-ai/agent/artifact-access';if(process.argv[3]==='exclusive'){try{const lease=acquireArtifactAccess({root:process.argv[2],mode:'exclusive'});lease.release();process.exit(0)}catch{process.exit(75)}}const lease=acquireInheritedArtifactAccess({root:process.argv[2],fd:3});lease.release();let closed=false;try{fstatSync(3)}catch(e){closed=e.code==='EBADF'};console.log(JSON.stringify({path:lease.path,mode:lease.mode,closed}));`,
@@ -264,13 +281,17 @@ test.skipIf(!posix)(
       const runner = join(f.parent, 'node.cjs');
       writeFileSync(
         runner,
-        `const fs=require('node:fs'),cp=require('node:child_process');const [bun,consumer,root,path]=process.argv.slice(2);const fd=fs.openSync(path,fs.constants.O_RDWR|fs.constants.O_NOFOLLOW);const child=cp.spawnSync(bun,[consumer,root],{cwd:root,stdio:['ignore','pipe','pipe',fd],encoding:'utf8'});if(child.status!==0)throw Error(child.stderr);const busy=cp.spawnSync(bun,[consumer,root,'exclusive'],{encoding:'utf8'});fs.closeSync(fd);const released=cp.spawnSync(bun,[consumer,root,'exclusive'],{encoding:'utf8'});console.log(JSON.stringify({child:JSON.parse(child.stdout),busy:busy.status,released:released.status}));`,
+        `const fs=require('node:fs'),cp=require('node:child_process');const [runtime,consumer,root,path]=process.argv.slice(2);const fd=fs.openSync(path,fs.constants.O_RDWR|fs.constants.O_NOFOLLOW);const child=cp.spawnSync(runtime,[consumer,root],{cwd:root,stdio:['ignore','pipe','pipe',fd],encoding:'utf8'});if(child.status!==0)throw Error(child.stderr);const busy=cp.spawnSync(runtime,[consumer,root,'exclusive'],{encoding:'utf8'});fs.closeSync(fd);const released=cp.spawnSync(runtime,[consumer,root,'exclusive'],{encoding:'utf8'});console.log(JSON.stringify({child:JSON.parse(child.stdout),busy:busy.status,released:released.status}));`,
       );
-      const actual = spawnSync('node', [runner, process.execPath, consumer, f.root, f.path], {
-        cwd: f.root,
-        encoding: 'utf8',
-        timeout: 10000,
-      });
+      const actual = spawnSync(
+        fixtureNodeExecutable(),
+        [runner, fixtureNodeExecutable(), consumer, f.root, f.path],
+        {
+          cwd: f.root,
+          encoding: 'utf8',
+          timeout: 10000,
+        },
+      );
       expect(actual.status).toBe(0);
       expect(JSON.parse(actual.stdout)).toEqual({
         child: { path: f.path, mode: 'shared', closed: true },

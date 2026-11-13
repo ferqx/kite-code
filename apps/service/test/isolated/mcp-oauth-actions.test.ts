@@ -1,16 +1,17 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type AgentRuntime, createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend, type McpSourceReadSet } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
@@ -37,7 +38,7 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
   while (Date.now() < end) {
     const value = await read();
     if (value !== null) return value;
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   throw Error('oauth_action_deadline');
 }

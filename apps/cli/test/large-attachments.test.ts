@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { run } from '../src';
 import { largeInteractionFixture } from './fixtures/large-interaction';
 

@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { probeNativeSqliteEngine } from '../../../apps/desktop/scripts/sqlite-engine';
 import { retainWindowsCandidateFiles } from '../../../packages/agent/src/platform/windows-candidate-files';
 import { defaultWindowsPathSecurity } from '../../../packages/agent/src/platform/windows-path-security';
@@ -16,7 +16,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
   async () => {
     const source = join(
       dirname(
-        createRequire(resolve(import.meta.dir, '../../../apps/desktop/package.json')).resolve(
+        createRequire(resolve(import.meta.dirname, '../../../apps/desktop/package.json')).resolve(
           'electron/package.json',
         ),
       ),

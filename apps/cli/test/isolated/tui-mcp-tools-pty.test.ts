@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import {
@@ -19,12 +19,20 @@ import {
   requiresInteractionAttachment,
 } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { managementActionWire } from '../fixtures/tui-activation-wire';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function until<T>(
   label: string,
@@ -38,7 +46,7 @@ async function until<T>(
     signal?.throwIfAborted();
     if (value !== undefined) return value;
     if (performance.now() >= deadline) throw Error(`owned_tools_deadline:${label}`);
-    await Bun.sleep(10);
+    await testSleep(10);
   }
 }
 type HttpRow = {
@@ -63,11 +71,11 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
   let modelCalls = 0,
     success = false,
     cleanupConfirmed = false;
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-  let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let build: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let observer: ReturnType<typeof createClient> | undefined;
   let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined;
-  let control: ReturnType<typeof Bun.serve> | undefined;
+  let control: FixtureServer | undefined;
   let artifact: CLIServiceArtifact | undefined;
   let storeId = '',
     subjectId: string | undefined,
@@ -84,7 +92,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
           .map((line) => JSON.parse(line))
       : [];
   const http = () => ledger('ui-http.jsonl') as HttpRow[];
-  const model = Bun.serve({
+  const model = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -92,7 +100,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
       return new Response('owned_model_forbidden', { status: 500 });
     },
   });
-  const peer = Bun.serve({
+  const peer = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -142,9 +150,10 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
     },
   });
   try {
-    build = Bun.spawn(
+    build = testSpawn(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -178,11 +187,11 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const bundled = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-tools.ts')],
+    const bundled = await testBuild({
+      entrypoints: [join(import.meta.dirname, '../fixtures/tui-mcp-tools.ts')],
       outdir: root,
       naming: 'host.js',
-      target: 'bun',
+      target: 'node',
       packages: 'external',
     });
     expect(bundled.success).toBe(true);
@@ -448,7 +457,7 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
         return Response.json({ error: String(error) }, { status: 500 });
       }
     };
-    control = Bun.serve({
+    control = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       idleTimeout: process.platform === 'win32' ? 90 : 30,
@@ -462,10 +471,10 @@ test('80x24 TUI reads later complete MCP Tool schemas in warm and cold original 
         return pending;
       },
     });
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         fileURLToPath(new URL('../fixtures/tui-mcp-tools-pty.ts', import.meta.url)),
         JSON.stringify({
           root,

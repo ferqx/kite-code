@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { ReadStream, WriteStream } from 'node:tty';
 import type { Execution, Message, SessionView } from '@kite-ai/client';
 import { render as renderInk } from 'ink';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 
 const execution = (id: string, extra: Partial<Execution> = {}): Execution => ({
@@ -149,7 +150,7 @@ test('ordinary main screen compresses actual concurrent child cards in a short t
   try {
     Object.defineProperty(app.stdout, 'rows', { configurable: true, get: () => 14 });
     app.stdout.emit('resize');
-    await Bun.sleep(40);
+    await fixtureDelay(40);
     const frame = app.lastFrame()!;
     expect(frame).toContain('Delegating · 4 agents');
     expect(frame).toContain('agents folded');
@@ -228,7 +229,7 @@ test('an unavailable optional model selection does not clear native history whil
     exitOnCtrlC: false,
   });
   try {
-    await Bun.sleep(100);
+    await fixtureDelay(100);
     expect(bytes).toContain('HISTORY_39');
     bytes = '';
     snapshot = {
@@ -236,7 +237,7 @@ test('an unavailable optional model selection does not clear native history whil
       environment: { workspacePath: '/owned', runtimeModel: snapshot.environment!.runtimeModel },
     };
     await controller.select('parent');
-    await Bun.sleep(100);
+    await fixtureDelay(100);
     expect(bytes).not.toContain('\u001b[3J');
     expect(bytes).not.toContain('HISTORY_');
   } finally {

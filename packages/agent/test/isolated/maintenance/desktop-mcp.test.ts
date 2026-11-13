@@ -1,9 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -13,8 +14,10 @@ import {
 } from '../../../src/maintenance';
 import { verifyDesktopMcpRecord, verifyDesktopMcpRows } from '../../../src/maintenance/desktop-mcp';
 import { selectProfile } from '../../../src/platform/profile';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage/types';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 import { nodeWindowsAccess } from './assets-fixture';
 import { nodeConfigurationAssets } from './desktop-configurations-fixture';
 
@@ -334,8 +337,8 @@ test('actual Node DB7 backup v15 inspect and restore preserve all original reque
       ...actions.map((_, i) => record(i, storeId)),
       userRecord({ kind: 'enabled', serverId, enabled: false }, 'global-original', storeId),
     ];
-    const node = Bun.which('node');
-    if (!node) throw Error('owned_node_unavailable');
+    const node = fixtureNodeExecutable();
+
     const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
     const source = join(root, 'mcp-driver.ts');
     const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
@@ -384,7 +387,7 @@ try {data=openPrivateData(input.profilePath,lease);
 `,
       { mode: 0o600 },
     );
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [source],
       target: 'node',
       packages: 'bundle',
@@ -400,7 +403,7 @@ try {data=openPrivateData(input.profilePath,lease);
       extra.bodySha256 = sha(extra.request);
       const { expectedStoreId: _store, commandId: _command, ...body } = extra.request;
       extra.requestSha256 = sha(body);
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
           node,
           join(root, 'mcp-driver.mjs'),
@@ -411,8 +414,8 @@ try {data=openPrivateData(input.profilePath,lease);
             profilePath: selectProfile(profile).profilePath,
             access: {
               profile,
-              bunExecutable: process.execPath,
-              bunSha256: digest(process.execPath),
+              runtimeExecutable: fixtureNodeExecutable(),
+              runtimeSha256: digest(fixtureNodeExecutable()),
               helperPath: helper,
               helperSha256: digest(helper),
               ...(windowsAsset ? { windowsAsset } : {}),
@@ -451,7 +454,7 @@ try {data=openPrivateData(input.profilePath,lease);
     original[1]!.phase = 'failed';
     original[2]!.phase = 'cancelled';
     produced.records = terminal.records;
-    const pad = Bun.spawn(
+    const pad = spawnProcess(
       [
         node,
         '--input-type=module',

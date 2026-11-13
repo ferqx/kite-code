@@ -1,9 +1,12 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 type Configuration = {
@@ -31,8 +34,8 @@ export async function runRecoveryPTY(
   config: Configuration,
   homeEnvironment: Record<string, string> = {},
 ) {
-  const driver = Bun.spawn(
-    [process.execPath, '--no-install', fileURLToPath(import.meta.url), JSON.stringify(config)],
+  const driver = testSpawn(
+    [process.execPath, ...testRuntimeFlags, fileURLToPath(import.meta.url), JSON.stringify(config)],
     {
       stdin: 'ignore',
       stdout: 'pipe',
@@ -54,7 +57,7 @@ async function drive(config: Configuration) {
   let active!: TuiPTY;
   const launch = () => {
     active = spawnTuiPTY({
-      cmd: [process.execPath, '--no-install', config.runner],
+      cmd: [process.execPath, ...testRuntimeFlags, config.runner],
       cwd: process.cwd(),
       onData: (bytes) => output.push(bytes),
     });
@@ -69,7 +72,7 @@ async function drive(config: Configuration) {
       const content = material ? active.text().replace(ansi, '') : frame.text;
       if ((material || frame.fresh) && content.replace(/\s+/g, ' ').includes(text)) return;
       if (active.ended) throw Error(`host ended before ${text}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     throw Error(`expected ${text} tail=${active.text().slice(-5000)}`);
   };
@@ -92,14 +95,14 @@ async function drive(config: Configuration) {
       if (journal.records.some((row) => row.phase === phase)) break;
       if (active.ended || Date.now() > end)
         throw Error('automatic original recovery GET not confirmed');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     await enterRecovery();
   };
   const exitNormally = async () => {
     await key('\x11');
     const end = Date.now() + 6000;
-    while (!active.ended && Date.now() < end) await Bun.sleep(50);
+    while (!active.ended && Date.now() < end) await testSleep(50);
     const [code] = await ptyDeadline(
       Promise.all([active.host.exited, active.eof]),
       3000,
@@ -192,7 +195,7 @@ async function drive(config: Configuration) {
       await wait('outcome_unknown');
       await wait(original.request.commandId);
       await key('\x03');
-      await Bun.sleep(100);
+      await testSleep(100);
       await automaticRecovery();
       await wait(config.mode === 'run' ? 'run · resumed' : 'interrupt · interrupted');
       await wait(original.request.commandId);

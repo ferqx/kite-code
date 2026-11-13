@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -9,6 +8,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/profile';
 import { openSqliteStore, resolveProfile } from '../../../src/sqlite';

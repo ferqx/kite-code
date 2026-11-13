@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { JobDefinition, Json, ToolContext } from '@kite-ai/agent/extensions';
 import { createShellExtension } from '@kite-ai/agent/shell';
+import { expect, test } from '#kite-test';
 import { AgentError } from '../../../../src/storage/types';
 
 function definition(): JobDefinition {

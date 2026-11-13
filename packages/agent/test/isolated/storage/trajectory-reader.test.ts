@@ -1,9 +1,9 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { type TrajectoryEvent, verifyTrajectoryPage } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import {

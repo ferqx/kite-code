@@ -188,6 +188,7 @@ const acquireFormalWindowsAccess = () => {
   const lease = acquireWindowsNativeCandidate({
     root: formalAssets.candidateRoot,
     serviceEntrypoint: formalAssets.serviceEntrypoint,
+    runtimeExecutable: formalAssets.runtimeExecutable,
     windowsAsset,
     files: formalAssets.windowsCandidateFiles,
     handoff: windowsHandoff,
@@ -246,8 +247,8 @@ async function openCaller(): Promise<NativeCaller> {
           artifactAccess.push(
             await acquireNodeArtifactAccess({
               root,
-              bunExecutable: assets.bunExecutable,
-              bunSha256: assets.bunSha256,
+              runtimeExecutable: assets.runtimeExecutable,
+              runtimeSha256: assets.runtimeSha256,
               helperPath: formalAssets.artifactHelper.path,
               helperSha256: formalAssets.artifactHelper.sha256,
               ...(windowsAsset ? { windowsAsset } : {}),
@@ -262,7 +263,7 @@ async function openCaller(): Promise<NativeCaller> {
       }
     }
     verifyNativeAsset(activeAssets.serviceEntrypoint, activeAssets.serviceSha256);
-    verifyNativeAsset(activeAssets.bunExecutable, activeAssets.bunSha256);
+    verifyNativeAsset(activeAssets.runtimeExecutable, activeAssets.runtimeSha256);
     const profile = selectProfile(
       assets.profile ?? {
         dataRoot: join(homedir(), '.kite-code', 'unified-agent'),
@@ -275,8 +276,8 @@ async function openCaller(): Promise<NativeCaller> {
     const acquirePrivateAccess = () =>
       acquireDesktopProfileAccess({
         profile,
-        bunExecutable: assets.bunExecutable,
-        bunSha256: assets.bunSha256,
+        runtimeExecutable: assets.runtimeExecutable,
+        runtimeSha256: assets.runtimeSha256,
         helperPath: join(app.getAppPath(), helper.relativePath),
         helperSha256: helper.sha256,
         ...(windowsAsset ? { windowsAsset } : {}),
@@ -300,7 +301,7 @@ async function openCaller(): Promise<NativeCaller> {
       ...(process.platform === 'win32' ? { windowsDesktop: true } : {}),
       profile,
       entrypoint: activeAssets.serviceEntrypoint,
-      executable: activeAssets.bunExecutable,
+      executable: activeAssets.runtimeExecutable,
       spawnChild(command, options) {
         ownedPairedChild = spawnNodePairedChild(command, options);
         return ownedPairedChild;

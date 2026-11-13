@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { ExecutionResources } from '../../../src/execution/resources';

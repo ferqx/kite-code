@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -11,6 +10,7 @@ import {
   type WebExtractor,
   webExtractorAsset,
 } from '@kite-ai/agent/web-fetch';
+import { expect, test } from '#kite-test';
 
 test('closing one bound default parser settles its active request while its sibling returns complete actual parser content', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-web-parser-binding-'));
@@ -36,18 +36,22 @@ test('closing one bound default parser settles its active request while its sibl
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const responseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/held`;
     const source = `
-import ${JSON.stringify(pathToFileURL(webExtractorAsset()).href)};
-const parse = self.onmessage;
-const publish = self.postMessage.bind(self);
+import { parentPort } from 'node:worker_threads';
+const publish = parentPort.postMessage.bind(parentPort);
+const register = parentPort.on;
 let held = false;
-self.postMessage = async (value) => {
+parentPort.postMessage = async (value) => {
   if (held) await (await fetch(${JSON.stringify(responseUrl)})).text();
   publish(value);
 };
-self.onmessage = (event) => {
-  held = new URL(event.data.url).pathname === '/held';
-  parse(event);
+parentPort.on = function (name, listener) {
+  return register.call(this, name, name === 'message' ? (data) => {
+    held = new URL(data.url).pathname === '/held';
+    listener(data);
+  } : listener);
 };
+await import(${JSON.stringify(pathToFileURL(webExtractorAsset()).href)});
+parentPort.on = register;
 `;
     const workerPath = join(root, 'actual-parser-response.ts');
     writeFileSync(workerPath, source);

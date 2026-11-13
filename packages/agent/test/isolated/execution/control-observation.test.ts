@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { ControlObservation } from '../../../src/execution/control-observation';
 import type { Store } from '../../../src/storage/port';
 import { AgentError, type ChangeEvent, type StoreMetadata } from '../../../src/storage/types';

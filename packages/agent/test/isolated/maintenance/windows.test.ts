@@ -1,7 +1,6 @@
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -13,6 +12,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
@@ -25,13 +28,20 @@ import {
 import { runProfileRestore } from '../../../src/maintenance/restore';
 import { openBackupDatabase } from '../../../src/maintenance/sqlite';
 import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
 import { createWindowsArtifactTemporary } from '../../../src/platform/windows-artifact-files';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
 } from '../../../src/platform/windows-path-security';
 import { openSqliteStore } from '../../../src/sqlite';
+import { defaultSqliteEngineAssets } from '../../../src/sqlite-engine';
 import { buildStorageAssets } from '../../../src/storage/worker/build-assets';
+import {
+  fixtureNodeExecutable,
+  fixtureNodeLoader,
+  fixtureRuntimeBuild,
+} from '../../fixtures/node-runtime';
 
 let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>> | undefined;
 beforeAll(async () => {
@@ -130,15 +140,18 @@ async function fixture() {
     const preload = join(root, 'selected-engine.ts');
     writeFileSync(
       preload,
-      `import {initializeSqliteEngine} from ${JSON.stringify(fileURLToPath(new URL('../../../src/sqlite-engine.ts', import.meta.url)))};initializeSqliteEngine(${JSON.stringify(qualified!.engine.selection)});\n`,
+      `import {initializeSqliteEngine} from ${JSON.stringify(new URL('../../../src/sqlite-engine.ts', import.meta.url).href)};initializeSqliteEngine(${JSON.stringify(qualified!.engine.selection)});\n`,
     );
     const scope = ['--data-root', profile.dataRoot, '--profile', profile.profile];
     const argv = async (args: string[]) => {
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
-          process.execPath,
-          '--preload',
-          preload,
+          fixtureNodeExecutable(),
+          ...nodeRuntimeFlags,
+          '--import',
+          fixtureNodeLoader,
+          '--import',
+          pathToFileURL(preload).href,
           fileURLToPath(new URL('../../../../../apps/cli/host/main.ts', import.meta.url)),
           'maintenance',
           ...args,
@@ -499,21 +512,24 @@ test.skipIf(process.platform !== 'win32')(
   'Windows built SQLite and maintenance leaves use both packaged migrations and a real Worker',
   async () => {
     const f = await fixture();
-    let child: ReturnType<typeof Bun.spawn> | undefined;
+    let child: ReturnType<typeof spawnProcess> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const packaged = join(f.root, 'package');
       const src = fileURLToPath(new URL('../../../src/', import.meta.url));
-      const build = await Bun.build({
+      const build = await buildBundle({
         entrypoints: [join(src, 'sqlite.ts'), join(src, 'maintenance/index.ts')],
         root: src,
         outdir: packaged,
-        target: 'bun',
+        ...fixtureRuntimeBuild(packaged),
         packages: 'bundle',
         splitting: true,
       });
       if (!build.success) throw new AggregateError(build.logs, 'built_sqlite_maintenance_failed');
       await buildStorageAssets(packaged);
+      cpSync(defaultSqliteEngineAssets().root, join(packaged, 'storage/engine'), {
+        recursive: true,
+      });
       writeFileSync(
         join(packaged, 'package.json'),
         JSON.stringify({
@@ -522,7 +538,7 @@ test.skipIf(process.platform !== 'win32')(
           exports: { './sqlite': './sqlite.js', './maintenance': './maintenance/index.js' },
         }),
       );
-      const script = join(packaged, 'consumer.ts');
+      const script = join(packaged, 'consumer.mjs');
       writeFileSync(
         script,
         `import {fileURLToPath} from 'node:url';
@@ -536,7 +552,7 @@ const backup=await createProfileBackup({profile:${JSON.stringify(f.profile)},des
 const inspected=await inspectProfileBackup({directory:backup.directory});
 console.log(JSON.stringify({storeId:meta.storeId,pending:pending.status,backupStore:inspected.manifest.source.storeId,migrations:assets.migrations.map(url=>url.pathname.split('/').at(-1))}));`,
       );
-      const running = Bun.spawn([process.execPath, '--preload', f.preload, script], {
+      const running = spawnProcess([fixtureNodeExecutable(), ...nodeRuntimeFlags, script], {
         cwd: packaged,
         stdout: 'pipe',
         stderr: 'pipe',

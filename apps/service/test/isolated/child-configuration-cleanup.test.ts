@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
@@ -10,6 +9,9 @@ import {
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import type { FixtureServer } from '../../../../scripts/tooling/http';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
@@ -60,7 +62,7 @@ for (const mode of modes)
     const proceed = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let resource: ReturnType<typeof Bun.serve> | undefined;
+    let resource: FixtureServer | undefined;
     let configuration: RunConfiguration | undefined;
     let preparationFailure: unknown;
     let originalSignal: AbortSignal | undefined;
@@ -77,7 +79,7 @@ for (const mode of modes)
       roles: [{ id: 'worker', version: '1', modelId: 'child', toolPolicy: 'parent' }],
       async resolve(input) {
         originalSignal = input.signal;
-        resource = Bun.serve({
+        resource = await fixtureServe({
           hostname: '127.0.0.1',
           port: 0,
           fetch: () => new Response('owned configuration preparation resource'),

@@ -6,10 +6,10 @@ export function browserExecutorWorkerAsset(): string {
   const path = fileURLToPath(
     new URL(
       import.meta.url.endsWith('.ts')
-        ? '../../../../dist/tools/browser/executor/worker.js'
+        ? '../../../../dist/tools/browser/executor/worker.mjs'
         : import.meta.url.endsWith('/tools/browser/executor/index.js')
-          ? './worker.js'
-          : './tools/browser/executor/worker.js',
+          ? './worker.mjs'
+          : './tools/browser/executor/worker.mjs',
       import.meta.url,
     ),
   );

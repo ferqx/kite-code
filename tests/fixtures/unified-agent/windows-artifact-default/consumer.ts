@@ -1,19 +1,22 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { ClientError, createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import { which as findFixtureExecutable } from '../../../../scripts/tooling/process';
 
 const [root] = process.argv.slice(2);
 assert(root);
-const resolver = createRequire(join(import.meta.dir, 'package.json'));
+const resolver = createRequire(join(import.meta.dirname, 'package.json'));
 for (const specifier of [
   '@kite-ai/agent/artifacts',
   '@kite-ai/agent/sqlite',
@@ -21,8 +24,8 @@ for (const specifier of [
   '@kite-ai/service/main',
 ]) {
   const path = resolver.resolve(specifier);
-  assert(path.startsWith(join(import.meta.dir, 'node_modules')) && path.endsWith('.js'));
-  assert(!existsSync(join(import.meta.dir, 'node_modules/@kite-ai/agent/src')));
+  assert(path.startsWith(join(import.meta.dirname, 'node_modules')) && path.endsWith('.js'));
+  assert(!existsSync(join(import.meta.dirname, 'node_modules/@kite-ai/agent/src')));
 }
 const profile = selectProfile({ dataRoot: join(root, 'private'), profile: 'owned' });
 const userConfiguration = ownedUserConfiguration(join(root, 'home'));
@@ -38,7 +41,7 @@ const requests: {
   messages: { role: string; content: string }[];
   tools?: { function: { name: string } }[];
 }[] = [];
-const provider = Bun.serve({
+const provider = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -166,7 +169,7 @@ try {
   let view = await client.getView('s');
   while (!view.runs.some((run) => run.status === 'completed')) {
     if (Date.now() > deadline) throw Error(`owned_model_deadline:${JSON.stringify(view.runs)}`);
-    await Bun.sleep(10);
+    await fixtureDelay(10);
     view = await client.getView('s');
   }
   assert.equal(view.runs.length, 1);
@@ -178,7 +181,8 @@ try {
   assert.equal(model.runId, run.id);
   assert.equal(requests.length, 1);
   const shellAvailable =
-    process.platform === 'darwin' || (process.platform === 'linux' && Bun.which('bwrap') !== null);
+    process.platform === 'darwin' ||
+    (process.platform === 'linux' && findFixtureExecutable('bwrap') !== null);
   const toolNames: [string, string][] = [
     ['ask_user', 'ask_user'],
     ['files.edit', 'edit_file'],

@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
 import type { WorkerRequest } from '../../../src/storage/worker/protocol';
 import { WorkerQueue } from '../../../src/storage/worker/queue';
 
@@ -45,7 +46,7 @@ test('an unstarted writer retains its queue position, capacity and close barrier
   expect(queue.size).toBe(4);
   expect(queue.next()?.method).toBe('getMetadata');
   expect(queue.next()).toBeUndefined();
-  await Bun.sleep(30);
+  await sleepTimer(30);
   expect(queue.next()).toBe(writer);
   expect(queue.next()?.method).toBe('cancelCommand');
   expect(queue.next()?.method).toBe('close');

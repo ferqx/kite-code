@@ -57,7 +57,7 @@ export function createLinuxShellJob(
   const shell = configuration.shellExecutable ?? '/bin/sh';
   const binaries = [
     configuration.initExecutable,
-    configuration.bunExecutable ?? process.execPath,
+    configuration.runtimeExecutable ?? process.execPath,
     shell,
   ];
   if (

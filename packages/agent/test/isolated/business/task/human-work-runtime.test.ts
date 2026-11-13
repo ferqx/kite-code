@@ -1,9 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
@@ -28,7 +29,7 @@ async function until(read: () => Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > deadline) throw Error('ordinary_input_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(

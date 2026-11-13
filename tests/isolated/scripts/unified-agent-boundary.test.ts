@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import { checkUnifiedAgentBoundary } from '../../../scripts/check-unified-agent-boundary';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 const roots: string[] = [];
 function fixture(sources: Record<string, string>): string {
@@ -43,6 +44,19 @@ function fixture(sources: Record<string, string>): string {
 }
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+test('computed Worker import exception is limited to the exact private observer expression', () => {
+  const observer = 'packages/agent/src/storage/worker/observer-preload.ts';
+  const root = fixture({
+    'apps/cli/host/main.ts': 'import "@kite-ai/agent/storage/worker/observer-preload";',
+    [observer]: 'await import(entrypoint.href);',
+  });
+  expect(checkUnifiedAgentBoundary(root).violations).toEqual([]);
+  writeFileSync(resolve(root, observer), 'await import(entrypoint.other);');
+  expect(checkUnifiedAgentBoundary(root).violations).toContainEqual(
+    expect.objectContaining({ file: observer, rule: 'host-dependency' }),
+  );
 });
 
 test('resolution caches observe missing, changed and removed files and changed manifests on the next check', () => {
@@ -337,18 +351,17 @@ test('CLI returns a failure exit code for an actual violating fixture', async ()
   const root = fixture({
     'packages/client/src/index.ts': 'import { Database } from "bun:sqlite";',
   });
-  const process = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
-      Bun.which('bun')!,
-      resolve(import.meta.dir, '../../../scripts/check-unified-agent-boundary.ts'),
+      process.execPath,
+      '--import',
+      resolve(import.meta.dirname, '../../../scripts/tooling/register.mjs'),
+      resolve(import.meta.dirname, '../../../scripts/check-unified-agent-boundary.ts'),
       root,
     ],
     { stdout: 'pipe', stderr: 'pipe' },
   );
-  const [exitCode, error] = await Promise.all([
-    process.exited,
-    new Response(process.stderr).text(),
-  ]);
+  const [exitCode, error] = await Promise.all([child.exited, new Response(child.stderr).text()]);
   expect(exitCode).toBe(1);
   expect(error).toContain('portable-dependency');
 });
@@ -411,10 +424,12 @@ test('actual checker CLI rejects a thin-app dynamic model dependency behind a ba
     'apps/desktop/src/index.ts': 'export * from "./bridge";',
     'apps/desktop/src/bridge.ts': 'const model = import("@kite-ai/ai");',
   });
-  const child = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
-      Bun.which('bun')!,
-      resolve(import.meta.dir, '../../../scripts/check-unified-agent-boundary.ts'),
+      process.execPath,
+      '--import',
+      resolve(import.meta.dirname, '../../../scripts/tooling/register.mjs'),
+      resolve(import.meta.dirname, '../../../scripts/check-unified-agent-boundary.ts'),
       root,
     ],
     { stdout: 'pipe', stderr: 'pipe' },

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   lstatSync,
@@ -20,6 +19,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { acquireProfileAccess } from '../../../packages/agent/src/platform/profile';
 import {
@@ -27,9 +27,16 @@ import {
   uninstallNativeBundle,
 } from '../../../scripts/release/native-install';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 test.skipIf(process.platform !== 'darwin')(
   'installed PC refuses an absent profile before and after restore-holder SIGKILL, then reads the explicitly reconciled original session',
   async () => {
@@ -42,8 +49,8 @@ test.skipIf(process.platform !== 'darwin')(
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
     });
-    let holder: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-      driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    let holder: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
+      driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
       holderOutput: Promise<string> | undefined,
       holderError: Promise<string> | undefined,
       installedCLI = '',
@@ -66,7 +73,7 @@ test.skipIf(process.platform !== 'darwin')(
     let lockIdentity: ReturnType<typeof identity>;
     let preservedCore: Buffer<ArrayBuffer>, preservedConfig: Buffer<ArrayBuffer>;
     const maintenance = async (args: string[]) => {
-      const child = Bun.spawn([installedCLI, 'maintenance', ...args], {
+      const child = spawnFixtureProcess([installedCLI, 'maintenance', ...args], {
         cwd: home,
         env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
         stdin: 'ignore',
@@ -93,7 +100,7 @@ test.skipIf(process.platform !== 'darwin')(
       }
     };
     const profileArguments = ['--data-root', profile.dataRoot, '--profile', profile.profile];
-    const control = Bun.serve({
+    const control = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -313,7 +320,7 @@ test.skipIf(process.platform !== 'darwin')(
           `initializeSqliteEngine(${JSON.stringify(engine)});\n` +
           `await runProfileRestore(${JSON.stringify({ profile: { dataRoot: profile.dataRoot, profile: profile.profile }, expectedStoreId: originalStoreId, backup, intent: 'replace_with_selected_backup' })}, async point => { if (point === 'old_directory_moved') { console.log(point); await new Promise(() => setInterval(() => {}, 1000)); } });\n`,
       );
-      holder = Bun.spawn([join(candidate.terminal.root, 'runtime/bun'), holderEntry], {
+      holder = spawnFixtureProcess([join(candidate.terminal.root, 'runtime/bun'), holderEntry], {
         cwd: home,
         env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
         stdin: 'ignore',
@@ -347,7 +354,7 @@ test.skipIf(process.platform !== 'darwin')(
       preservedDirectory = join(profile.dataRoot, journal!.journal.preservedName);
       expect(existsSync(profile.profilePath)).toBe(false);
       prepareNextRestore = async () => {
-        holder = Bun.spawn([join(candidate.terminal.root, 'runtime/bun'), holderEntry], {
+        holder = spawnFixtureProcess([join(candidate.terminal.root, 'runtime/bun'), holderEntry], {
           cwd: home,
           env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
           stdin: 'ignore',
@@ -384,7 +391,7 @@ test.skipIf(process.platform !== 'darwin')(
       const other = await openSqliteStore({ dataRoot: profile.dataRoot, profile: 'other' });
       await other.close();
       symlinkSync(join(candidate.terminal.root, 'node_modules'), join(root, 'node_modules'));
-      const driverBuild = await Bun.build({
+      const driverBuild = await buildFixture({
         entrypoints: [
           join(repositoryRoot, 'tests/fixtures/unified-agent/native-restore-electron.ts'),
         ],
@@ -395,9 +402,9 @@ test.skipIf(process.platform !== 'darwin')(
         naming: '[name].mjs',
       });
       expect(driverBuild.success).toBe(true);
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'native-restore-electron.mjs'),
           join(prefix, 'bin/kite-desktop'),
           home,

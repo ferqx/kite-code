@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { mcpStdioGuardianAsset, mcpStdioLinuxAssets } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -15,13 +17,18 @@ import { type CaseEvidence, sampleSoakResources, UNIFIED_SOAK_CASES } from './un
 function assert(condition: unknown, code: string): asserts condition {
   if (!condition) throw Error(code);
 }
+function collectGarbage() {
+  const gc = Reflect.get(globalThis, 'gc');
+  assert(typeof gc === 'function', 'unified_soak_node_gc_required');
+  gc();
+}
 async function until<T>(read: () => Promise<T>, check: (value: T) => boolean) {
   const deadline = performance.now() + 180_000;
   for (;;) {
     const value = await read();
     if (check(value)) return value;
     if (performance.now() >= deadline) throw Error('operation_deadline');
-    await Bun.sleep(10);
+    await sleep(10);
   }
 }
 function sample() {
@@ -64,7 +71,7 @@ export async function runProbe(
         if (hold) {
           yield { type: 'text_delta' as const, text: 'original partial' };
           entered?.();
-          while (!options.signal?.aborted) await Bun.sleep(10);
+          while (!options.signal?.aborted) await sleep(10);
           cancelled = true;
           throw Error('fixture_cancelled');
         }
@@ -94,7 +101,7 @@ export async function runProbe(
                       mode: 0o600,
                     });
                     writeFileSync(join(root, 'crash-entered'), 'entered', { mode: 0o600 });
-                    while (!context.signal.aborted) await Bun.sleep(10);
+                    while (!context.signal.aborted) await sleep(10);
                     throw Error('cancelled');
                   },
                 },
@@ -199,8 +206,8 @@ export async function runProbe(
         : points.length < cycles || performance.now() - workloadStarted < minimumDurationMs;
       sequence++
     ) {
-      Bun.gc(true);
-      await Bun.sleep(0);
+      collectGarbage();
+      await sleep(0);
       operationTimer ??= setTimeout(() => {
         console.error('operation_deadline');
         process.exit(1);
@@ -298,8 +305,8 @@ export async function runProbe(
           });
         }
         entered = undefined;
-        Bun.gc(true);
-        await Bun.sleep(0);
+        collectGarbage();
+        await sleep(0);
         completedCycles++;
         // Warmup then fixed observations across actual active work. Never
         // replace the earlier measured boundaries with the final few cycles.
@@ -356,7 +363,7 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
         await runTuiCase(
           join(root, caseId),
           artifact,
-          join(import.meta.dir, 'unified-soak-cases.js'),
+          fileURLToPath(new URL('./unified-soak-cases.mjs', import.meta.url)),
           cycles === 9 ? 9 : 2,
         ),
       );
@@ -364,10 +371,10 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
     }
     let combined: CaseEvidence | undefined;
     for (let sequence = 0; sequence < cycles; sequence++) {
-      Bun.gc(true);
-      await Bun.sleep(0);
-      Bun.gc(true);
-      await Bun.sleep(0);
+      collectGarbage();
+      await sleep(0);
+      collectGarbage();
+      await sleep(0);
       const beforeObservation = sample();
       const directory = join(root, `${caseId}-${sequence}`);
       const operationTimer = setTimeout(() => {
@@ -382,7 +389,7 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
           caseId === 'mcp_churn'
             ? {
                 guardianPath: mcpStdioGuardianAsset(),
-                bunExecutable: artifact.executable,
+                runtimeExecutable: artifact.executable,
                 ...(process.platform === 'linux' ? { linux: mcpStdioLinuxAssets() } : {}),
               }
             : undefined,
@@ -390,10 +397,10 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
       } finally {
         clearTimeout(operationTimer);
       }
-      Bun.gc(true);
-      await Bun.sleep(0);
-      Bun.gc(true);
-      await Bun.sleep(0);
+      collectGarbage();
+      await sleep(0);
+      collectGarbage();
+      await sleep(0);
       const afterObservation = sample();
       const point = {
         sequence,
@@ -422,6 +429,10 @@ export async function runCaseMatrix(root: string, cycles: number, artifact: CLIS
 }
 if (import.meta.main) {
   try {
+    assert(
+      !process.versions.bun && typeof Reflect.get(globalThis, 'gc') === 'function',
+      'unified_soak_node_gc_required',
+    );
     const root = process.argv[2]!,
       mode = process.argv[3] as 'lifecycle' | 'crash' | 'recover';
     if ((mode as string) === 'continuous') {

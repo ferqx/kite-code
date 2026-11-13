@@ -1,10 +1,12 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 const posixTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
-const source = join(import.meta.dir, '../../../src');
+const source = join(import.meta.dirname, '../../../src');
 const helper = String.raw`
 import {spawn} from 'node:child_process';
 import {appendFileSync,existsSync,writeFileSync} from 'node:fs';
@@ -37,7 +39,9 @@ process.stdin.on('end',()=>{appendFileSync(root+'/eof.log','eof\n');stop();});
 setInterval(()=>{if(existsSync(root+'/release'))stop();},10);
 `;
 
-const probe = String.raw`
+const probe = String.raw`import {build as buildBundle} from ${JSON.stringify(new URL('../../../../../scripts/tooling/build.ts', import.meta.url).href)};
+import {fixtureRuntimeBuild} from ${JSON.stringify(new URL('../../fixtures/node-runtime.ts', import.meta.url).href)};
+
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,writeFileSync,unlinkSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
@@ -45,7 +49,7 @@ const [source,root,scenario]=process.argv.slice(2);
 let cleanupCalls=0;const cleanupFixture=scenario.startsWith('spawn-cleanup-');
 let shellModule=source+'/jobs/shell.ts';
 if(cleanupFixture){
- const {mock}=await import('bun:test');const {resolve}=await import('node:path');
+ const {mock}=await import('#kite-test');const {resolve}=await import('node:path');
  // Only this private zero-spawn probe substitutes the OS event boundary. The
  // original Shell body is copied verbatim except its import locations.
  globalThis.fixtureSpawns=0;globalThis.fixtureEscaped=undefined;
@@ -65,14 +69,14 @@ if(scenario==='write-failure'){
  const {Writable}=await import('node:stream');const write=Writable.prototype.write;
  Writable.prototype.write=function(chunk,...args){if(typeof chunk==='string'&&chunk.includes('\"type\":\"start\"')){Writable.prototype.write=write;throw Error('fixture_start_write_failed');}return write.call(this,chunk,...args);};
 }
-const job=(cleanupFixture?createMacosHostShellJob:createShellJob)({cwd:root,env:{PATH:'/usr/bin:/bin',SCENARIO:scenario,FIXTURE_ROOT:root},supervisorPath:root+'/guardian.js',...((scenario==='spawn-failure'||cleanupFixture)?{bunExecutable:root}: {}),...(cleanupFixture?{controlBase:root}:{})});
+const job=(cleanupFixture?createMacosHostShellJob:createShellJob)({cwd:root,env:{PATH:'/usr/bin:/bin',SCENARIO:scenario,FIXTURE_ROOT:root},supervisorPath:root+'/guardian.js',...((scenario==='spawn-failure'||cleanupFixture)?{runtimeExecutable:root}: {}),...(cleanupFixture?{controlBase:root}:{})});
 const until=async check=>{const end=Date.now()+7000;while(!await check()){if(Date.now()>end)throw Error('fixture_condition_timeout');await new Promise(r=>originalTimer(r,10));}};
 let handle,store,runtime;
 try{
  if(scenario==='runtime-preflight'){
   const {createRuntime}=await import(source+'/index.ts');const {openSqliteStore}=await import(source+'/sqlite.ts');
   const {createFixedModel}=await import(source+'/../../ai/src/index.ts');const {createShellExtension}=await import(source+'/tools/shell.ts');
-  const built=await Bun.build({entrypoints:[source+'/platform/process/shell-supervisor.ts'],outdir:root+'/assets',target:'bun',naming:'real-guardian.js'});assert.equal(built.success,true);
+  const built=await buildBundle({entrypoints:[source+'/platform/process/shell-supervisor.ts'],outdir:root+'/assets',...fixtureRuntimeBuild(root+'/assets'),naming:'real-guardian.js'});assert.equal(built.success,true);
   const missing=root+'/missing-supervisor.js';assert.equal(existsSync(missing),false);
   store=await openSqliteStore({dataRoot:root+'/data',profile:'test'});let disposals=0;
   const finish={type:'finish',reason:'stop',usage:{inputTokens:1,outputTokens:1}};
@@ -170,12 +174,12 @@ posixTest.each([
   'Shell startup hands off its original resources: %s',
   async (scenario) => {
     const root = mkdtempSync(join(tmpdir(), 'kite-shell-startup-handoff-'));
-    let child: ReturnType<typeof Bun.spawn> | undefined;
+    let child: ReturnType<typeof spawnProcess> | undefined;
     try {
       writeFileSync(join(root, 'guardian.js'), helper);
       writeFileSync(join(root, 'probe.ts'), probe);
-      const probeProcess = Bun.spawn(
-        [process.execPath, join(root, 'probe.ts'), source, root, scenario],
+      const probeProcess = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, join(root, 'probe.ts'), source, root, scenario],
         {
           stdout: 'pipe',
           stderr: 'pipe',

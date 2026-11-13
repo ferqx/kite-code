@@ -7,6 +7,7 @@ import {
   readFileSync,
   readSync,
 } from 'node:fs';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 
 /** Diagnostic native observation only; callers supply their already-owned process IDs. */
 export interface NativeProcessObservation {
@@ -97,7 +98,6 @@ function createDarwinCollector() {
   if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(process.arch))
     throw Error('native_process_platform_unsupported');
   // Fixed public libproc ABI. Import of this module itself does not load a native library.
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const api = dlopen('/usr/lib/libproc.dylib', {
     proc_pidinfo: { args: ['i32', 'i32', 'u64', 'ptr', 'i32'], returns: 'i32' },
   });
@@ -313,7 +313,6 @@ function linuxResources(pid: number): NativeProcessResources {
 }
 let darwinResources: ReturnType<typeof createDarwinResourceCollector> | undefined;
 function createDarwinResourceCollector() {
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const api = dlopen('/usr/lib/libproc.dylib', {
     proc_pidinfo: { args: ['i32', 'i32', 'u64', 'ptr', 'i32'], returns: 'i32' },
   });

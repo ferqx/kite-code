@@ -1,7 +1,7 @@
-import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import type { ArtifactRef, ToolContext, ToolResult } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
 import {

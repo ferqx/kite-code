@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBrowserMenuAction,
   NativeBrowserMenuRequest,
@@ -46,7 +47,7 @@ async function fixture(options: Parameters<typeof browserFixture>[0] = {}) {
   const flush = (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
   const page = (
     phase: NonNullable<NativeBrowserState['control']>['phase'],
@@ -194,7 +195,7 @@ test('freshness recheck quietly retires a native popup selection that no longer 
       release = done;
     });
     await act(async () => {
-      await Bun.sleep(1700);
+      await fixtureDelay(1700);
     });
     expect(f.cancels).toHaveLength(0);
     await f.choose('handoff');

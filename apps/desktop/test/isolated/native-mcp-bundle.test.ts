@@ -1,5 +1,3 @@
-import { constants, Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   copyFileSync,
@@ -12,12 +10,22 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { constants, Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
@@ -40,8 +48,8 @@ test.skipIf(process.platform !== 'darwin')(
         profile: 'default',
       }),
       wire: Record<string, unknown>[] = [];
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-      server: ReturnType<typeof Bun.serve> | undefined,
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined,
+      server: FixtureServer | undefined,
       completed = false;
     let out: Promise<string> | undefined, err: Promise<string> | undefined;
     let cleanupUnconfirmed = false,
@@ -60,7 +68,7 @@ test.skipIf(process.platform !== 'darwin')(
       | undefined;
     try {
       const { buildTerminalBundle } = await import(
-        resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+        resolve(import.meta.dirname, '../../../../scripts/release/terminal-bundle.ts')
       );
       const terminal = await buildTerminalBundle({
         destination: join(root, 'terminal-build'),
@@ -175,7 +183,7 @@ else throw Error('owned_credential_operation_invalid');
         `#!/usr/bin/python3\n# coding: utf-8\nimport sys,json\nTOOLS=json.loads(${JSON.stringify(JSON.stringify(tools))})\nfor line in sys.stdin:\n try:\n  r=json.loads(line)\n  with open(${JSON.stringify(join(home, 'stdio-wire.jsonl'))},'a') as f: f.write(json.dumps(r)+'\\n')\n  if 'id' not in r: continue\n  m=r.get('method')\n  result={'protocolVersion':'2025-03-26','capabilities':{'tools':{}},'serverInfo':{'name':'owned-window-stdio','version':'1'}} if m=='initialize' else {'tools':TOOLS} if m=='tools/list' else {'content':[{'type':'text','text':'effect saved'}]} if m=='tools/call' else {}\n  if m=='tools/call':\n   with open(${JSON.stringify(join(home, 'stdio-effects'))},'a') as f: f.write(json.dumps(r)+'\\n')\n  print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)\n except Exception as e:\n  print(str(e),file=sys.stderr)\n`,
         { mode: 0o700 },
       );
-      server = Bun.serve({
+      server = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -282,14 +290,17 @@ else throw Error('owned_credential_operation_invalid');
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(resolve(import.meta.dir, '../native-mcp-electron.fixture.ts'), 'utf8').replace(
+        readFileSync(
+          resolve(import.meta.dirname, '../native-mcp-electron.fixture.ts'),
+          'utf8',
+        ).replace(
           "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
         ),
       );
       expect(
         (
-          await Bun.build({
+          await buildFixture({
             entrypoints: [fixture],
             target: 'node',
             format: 'esm',
@@ -312,9 +323,9 @@ else throw Error('owned_credential_operation_invalid');
           storeId: storeId!,
         }),
       );
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           moved,
           home,
@@ -500,7 +511,7 @@ else throw Error('owned_credential_operation_invalid');
             }
           })
         )
-          await Bun.sleep(20);
+          await fixtureDelay(20);
         const forced: number[] = [];
         for (const pid of owned)
           try {
@@ -526,7 +537,7 @@ else throw Error('owned_credential_operation_invalid');
         const disappearanceDeadline = Date.now() + 5000;
         let remaining = remainingOwned();
         while (remaining.length && Date.now() < disappearanceDeadline) {
-          await Bun.sleep(50);
+          await fixtureDelay(50);
           remaining = remainingOwned();
         }
         cleanupUnconfirmed = remaining.length > 0;

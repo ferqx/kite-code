@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from 'bun:test';
 import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, type watch } from 'node:fs';
@@ -7,9 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Workspace } from '@kite-ai/client';
-import { NativeProcessOwner } from '../electron/native-processes';
-import { NativeWorkspaceChanges } from '../electron/workspace-changes';
-import type { NativeWorkspaceChangeEvent } from '../src/workspace-changes-bridge';
+import { afterEach, expect, test } from '#kite-test';
+import { NativeProcessOwner } from '../../electron/native-processes';
+import { NativeWorkspaceChanges } from '../../electron/workspace-changes';
+import type { NativeWorkspaceChangeEvent } from '../../src/workspace-changes-bridge';
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {

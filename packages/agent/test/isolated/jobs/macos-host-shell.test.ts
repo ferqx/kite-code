@@ -1,4 +1,3 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -13,6 +12,10 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -26,6 +29,11 @@ import {
   shellProcessEvidenceEnded,
 } from '../../../src/jobs/shell';
 import { removeLaunchdRegistration } from '../../../src/platform/process/darwin-launchd-supervisor';
+import {
+  fixtureNodeExecutable,
+  fixtureNodeLoader,
+  fixtureRuntimeBuild,
+} from '../../fixtures/node-runtime';
 
 const macTest = process.platform === 'darwin' ? test : test.skip;
 let root: string;
@@ -86,17 +94,17 @@ beforeAll(async () => {
   writeFileSync(join(root, 'private', 'secret'), 'private');
   writeFileSync(join(workspace, 'tree.c'), source);
   tree = join(workspace, 'tree');
-  const compiler = Bun.spawn(
+  const compiler = spawnProcess(
     ['/usr/bin/clang', '-Wall', '-Wextra', '-Werror', join(workspace, 'tree.c'), '-o', tree],
     { stdout: 'pipe', stderr: 'pipe' },
   );
   const errors = await new Response(compiler.stderr).text();
   await new Response(compiler.stdout).text();
   expect(await compiler.exited, errors).toBe(0);
-  const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
+  const built = await buildBundle({
+    entrypoints: [join(import.meta.dirname, '../../../src/platform/process/shell-supervisor.ts')],
     outdir: assets,
-    target: 'bun',
+    ...fixtureRuntimeBuild(assets),
     naming: 'guardian.js',
   });
   expect(built.success).toBe(true);
@@ -120,7 +128,7 @@ macTest(
       { mode: 0o600 },
     );
     const invoke = async (...args: string[]) => {
-      const child = Bun.spawn(['/bin/launchctl', ...args], {
+      const child = spawnProcess(['/bin/launchctl', ...args], {
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',
@@ -139,7 +147,7 @@ macTest(
       const absentBy = Date.now() + 2000;
       let absence = await invoke('print', target);
       while (absence === 0 && Date.now() < absentBy) {
-        await Bun.sleep(20);
+        await sleepTimer(20);
         absence = await invoke('print', target);
       }
       expect(absence).toBe(113);
@@ -168,14 +176,10 @@ function options(full = false) {
     cwd: workspace,
     env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(root, 'home') },
     supervisorPath: guardian,
+    runtimeExecutable: fixtureNodeExecutable(),
     controlBase: control,
     protectedRoots: [join(root, 'private')],
-    runtimeReadOnlyRoots: [
-      dirname(process.execPath),
-      ...[Bun.which('node')]
-        .filter((path): path is string => path !== null)
-        .map((path) => dirname(realpathSync.native(path))),
-    ],
+    runtimeReadOnlyRoots: [dirname(fixtureNodeExecutable())],
     temporaryRoot: tempBase,
     filesystemScope: full ? ('full_access' as const) : ('workspace_write' as const),
   };
@@ -287,7 +291,7 @@ async function until(condition: () => boolean) {
   const deadline = Date.now() + 2500;
   while (!condition()) {
     if (Date.now() > deadline) throw Error('host_shell_deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 async function run(job: JobDefinition, command: string) {
@@ -356,7 +360,7 @@ macTest(
     const job = createMacosHostShellJob(options());
     const events = await run(
       job,
-      `printf '%s|' "$HOME"; /bin/cat ${quote(join(root, 'outside'))}; printf ok > workspace-effect; /bin/cat ${quote(join(root, 'private', 'secret'))}; printf bad > ${quote(join(root, 'outside'))}; ${quote(process.execPath)} -e 'const p=Bun.spawn(["/bin/echo","child-tool"],{stdout:"inherit",stderr:"inherit"});await p.exited;console.log("bun-tool")'`,
+      `printf '%s|' "$HOME"; /bin/cat ${quote(join(root, 'outside'))}; printf ok > workspace-effect; /bin/cat ${quote(join(root, 'private', 'secret'))}; printf bad > ${quote(join(root, 'outside'))}; ${quote(fixtureNodeExecutable())} -e 'const {spawn}=await import("node:child_process"); const child=spawn("/bin/echo",["child-tool"],{stdio:"inherit"}); await new Promise((resolve,reject)=>child.once("error",reject).once("exit",resolve)); console.log("node-tool")'`,
     );
     terminal(events);
     const output = events
@@ -371,7 +375,7 @@ macTest(
         .join(''),
     ).toContain(`${join(root, 'home')}|broad host read`);
     expect(output).toContain('child-tool');
-    expect(output).toContain('bun-tool');
+    expect(output).toContain('node-tool');
     expect(output).toContain('Operation not permitted');
     expect(readFileSync(join(root, 'outside'), 'utf8')).toBe('broad host read');
     expect(readFileSync(join(workspace, 'workspace-effect'), 'utf8')).toBe('ok');
@@ -399,9 +403,9 @@ macTest(
     try {
       const address = tcp.address();
       if (!address || typeof address === 'string') throw Error('test_tcp_address');
-      const positive = Bun.spawn(
+      const positive = spawnProcess(
         [
-          process.execPath,
+          fixtureNodeExecutable(),
           '-e',
           `import{createConnection}from'node:net';await new Promise((r,j)=>{const c=createConnection(${JSON.stringify(socketPath)});c.on('data',b=>process.stdout.write(b));c.on('end',r);c.on('error',j)})`,
         ],
@@ -418,7 +422,7 @@ macTest(
       const script = `import{createConnection}from'node:net';await new Promise((r,j)=>{const c=createConnection({host:'127.0.0.1',port:${address.port}});c.on('data',b=>process.stdout.write(b));c.on('end',r);c.on('error',j)});await new Promise(r=>{const c=createConnection(${JSON.stringify(socketPath)});c.on('connect',()=>{console.log('UNIX_ACCEPTED');c.end();r()});c.on('error',e=>{console.log('unix-denied:'+e.code);r()})})`;
       const events = await run(
         createMacosHostShellJob(options()),
-        `exec ${quote(process.execPath)} -e ${quote(script)}`,
+        `exec ${quote(fixtureNodeExecutable())} -e ${quote(script)}`,
       );
       terminal(events);
       const output = events
@@ -578,8 +582,12 @@ macTest(
   async () => {
     const job = createMacosHostShellJob(options());
     const pidFile = join(workspace, 'cancel-pids');
-    const foreign = Bun.spawn(
-      [process.execPath, '-e', 'setTimeout(()=>process.exit(0),10000);setInterval(()=>{},1000)'],
+    const foreign = spawnProcess(
+      [
+        fixtureNodeExecutable(),
+        '-e',
+        'setTimeout(()=>process.exit(0),10000);setInterval(()=>{},1000)',
+      ],
       { stdout: 'ignore', stderr: 'ignore' },
     );
     let handle: JobHandle | undefined;
@@ -618,7 +626,7 @@ macTest(
     try {
       const events = await run(
         job,
-        `exec ${quote(process.execPath)} -e 'process.stdout.write("字".repeat(100000));process.stderr.write("err")'`,
+        `exec ${quote(fixtureNodeExecutable())} -e 'process.stdout.write("字".repeat(100000));process.stderr.write("err")'`,
       );
       terminal(events);
       expect(
@@ -642,16 +650,19 @@ for (const mode of ['eof', 'kill'] as const)
     async () => {
       const pidFile = join(workspace, `parent-${mode}-pids`);
       const readyFile = join(workspace, `parent-${mode}-ready`);
-      const fixture = join(assets, `parent-${mode}.js`);
+      const fixture = join(assets, `parent-${mode}.mjs`);
       writeFileSync(
         fixture,
-        `import {createMacosHostShellJob} from ${JSON.stringify(join(import.meta.dir, '../../../src/jobs/shell.ts'))};const job=createMacosHostShellJob(${JSON.stringify(options())});const h=await job.start({command:${JSON.stringify(`exec ${quote(tree)} hold ${quote(pidFile)}`)}},{sessionId:'owned',executionId:'parent',signal:new AbortController().signal});await Bun.write(${JSON.stringify(readyFile)},JSON.stringify(h.reference));process.stdin.resume();process.stdin.on('end',()=>process.exit(0));setTimeout(()=>process.exit(3),10000);for await(const event of job.observe(h)){};`,
+        `import {createMacosHostShellJob} from ${JSON.stringify(join(import.meta.dirname, '../../../src/jobs/shell.ts'))};const job=createMacosHostShellJob(${JSON.stringify(options())});const h=await job.start({command:${JSON.stringify(`exec ${quote(tree)} hold ${quote(pidFile)}`)}},{sessionId:'owned',executionId:'parent',signal:new AbortController().signal});process.getBuiltinModule('node:fs').writeFileSync(${JSON.stringify(readyFile)},JSON.stringify(h.reference));process.stdin.resume();process.stdin.on('end',()=>process.exit(0));setTimeout(()=>process.exit(3),10000);for await(const event of job.observe(h)){};`,
       );
-      const parent = Bun.spawn([process.execPath, fixture], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const parent = spawnProcess(
+        [fixtureNodeExecutable(), '--import', fixtureNodeLoader, fixture],
+        {
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
       try {
         await until(() => existsSync(readyFile) && existsSync(pidFile));
         const reference = JSON.parse(readFileSync(readyFile, 'utf8'));
@@ -731,7 +742,7 @@ macTest(
               ...options(),
               executionScope: { filesystem, network },
             }),
-            `printf workspace > ${quote(`explicit-${marker}`)}; if printf external > ${quote(external)}; then printf EXTERNAL_ALLOWED; else printf EXTERNAL_DENIED; fi; ${quote(process.execPath)} -e ${quote(script)}`,
+            `printf workspace > ${quote(`explicit-${marker}`)}; if printf external > ${quote(external)}; then printf EXTERNAL_ALLOWED; else printf EXTERNAL_DENIED; fi; ${quote(fixtureNodeExecutable())} -e ${quote(script)}`,
           );
           terminal(events);
           const output = events

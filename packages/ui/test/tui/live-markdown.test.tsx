@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { updateMarkdownParseCache } from '../../src/tui/ink/MarkdownBlock';
 import { lastWrappedRows, wrapPlainText } from '../../src/tui/ink/plain-text-wrap';
 import { partitionLiveMarkdown } from '../../src/tui/live-markdown';

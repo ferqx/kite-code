@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -9,6 +9,8 @@ import type { PermissionMode } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -30,7 +32,7 @@ async function fixture(
     sockets = 0,
     normal = 0;
   const reviews: Record<string, unknown>[] = [];
-  const web = Bun.serve({
+  const web = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -44,7 +46,7 @@ async function fixture(
     },
   });
   const url = `http://fixture.test:${web.port}/page`;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -211,7 +213,7 @@ async function fixture(
           await client.listInteractions('s', { storeId: expectedStoreId, state: 'pending' })
         ).interactions[0];
         if (card) return card;
-        await Bun.sleep(10);
+        await sleepTimer(10);
       }
       throw new Error('web_permission_card_deadline');
     },

@@ -1,4 +1,5 @@
-import { ModelAttemptError } from '@kite-ai/ai';
+import { ModelAccessError, ModelAttemptError } from '@kite-ai/ai';
+import { AgentError } from './storage/types';
 
 /** One initial request followed by at most five transport reconnections. */
 export const modelMaxAttempts = 6;
@@ -32,4 +33,8 @@ export async function waitForModelRetry(attempt: number, signal: AbortSignal): P
 }
 export function modelRetryReason(error: unknown): ModelAttemptError['reason'] | null {
   return ModelAttemptError.isInstance(error) ? error.reason : null;
+}
+
+export function modelExecutionError(error: unknown): unknown {
+  return ModelAccessError.isInstance(error) ? new AgentError(error.code) : error;
 }

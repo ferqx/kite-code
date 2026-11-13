@@ -1,13 +1,15 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { candidate, probe } from '../../fixtures/formal-optional-capabilities/candidate';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
@@ -46,7 +48,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           >
         >
       | undefined;
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -202,7 +204,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       let rejected = await client.getCommand('no-shell');
       while (rejected.status === 'accepted') {
         if (Date.now() > deadline) throw Error('optional_command_deadline');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
         rejected = await client.getCommand('no-shell');
       }
       if (process.platform === 'darwin') {
@@ -211,7 +213,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         expect(id).toBeString();
         while ((await client.getRun(id!)).isActive) {
           if (Date.now() > deadline) throw Error('default_shell_run_deadline');
-          await Bun.sleep(10);
+          await fixtureDelay(10);
         }
         let jobs = (await client.getView('s')).executions.filter(
           (row) => row.definitionId === 'shell.command',
@@ -221,7 +223,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           ['planned', 'dispatching', 'running'].includes(jobs[0]!.status)
         ) {
           if (Date.now() > deadline) throw Error('default_shell_job_deadline');
-          await Bun.sleep(10);
+          await fixtureDelay(10);
           jobs = (await client.getView('s')).executions.filter(
             (row) => row.definitionId === 'shell.command',
           );
@@ -278,7 +280,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       const ordinaryDeadline = Date.now() + 15000;
       while (!run || run.isActive) {
         if (Date.now() > ordinaryDeadline) throw Error('ordinary_deadline');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
         command = await client.getCommand('ordinary');
         id = runId(command.receipt);
         run = id ? await client.getRun(id) : null;
@@ -315,7 +317,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         chat = chatId ? await client.getRun(chatId) : null;
       while (!chat || chat.isActive) {
         if (Date.now() > chatDeadline) throw Error('chat_deadline');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
         chatCommand = await client.getCommand('chat');
         chatId = runId(chatCommand.receipt);
         chat = chatId ? await client.getRun(chatId) : null;

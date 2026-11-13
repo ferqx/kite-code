@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { closeSync, constants, fsyncSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const [controlUrl, executable, host, root, evidence, detail, custom] = process.argv.slice(2) as [
@@ -24,7 +25,7 @@ const output: Uint8Array[] = [];
 const decoder = new TextDecoder('utf-8', { fatal: true });
 let utf8Failure: unknown;
 const owned = spawnTuiPTY({
-  cmd: [executable, '--no-install', host],
+  cmd: [executable, '--no-global-search-paths', host],
   cwd: root,
   env: {
     HOME: root,
@@ -73,7 +74,7 @@ const wait = async (text: string, input: { material?: boolean; ready?: boolean }
     }
     if (owned.ended || Date.now() > end)
       throw Error(`owned_question_frame_deadline:${text} tail=${actual.slice(-6000)}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string, retain = false) => {
@@ -99,7 +100,7 @@ const check = async (stage: string) => {
 };
 const waitExit = async () => {
   const end = Date.now() + 6000;
-  while (!owned.ended && Date.now() < end) await Bun.sleep(50);
+  while (!owned.ended && Date.now() < end) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([owned.host.exited, owned.eof]),
     3000,

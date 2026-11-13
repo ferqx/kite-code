@@ -1,9 +1,9 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore, preflightSqliteStore, sqliteStorageAssets } from '../../../src/sqlite';
 import { matchingSchema, supportedSchemas } from '../../../src/storage/sqlite/migrations';
 

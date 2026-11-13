@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
@@ -11,12 +10,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 async function child(argv: string[], cwd: string, home: string) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd,
     env: {
       HOME: home,
@@ -113,9 +114,11 @@ test('E13 two standalone artifacts replace at a new Run while original active Jo
     await runChild(
       [
         process.execPath,
-        'build',
+        '--import',
+        join(repository, 'scripts/tooling/register.mjs'),
+        join(repository, 'scripts/tooling/build-command.ts'),
         join(repository, 'tests/fixtures/extensions/upgrade/host.ts'),
-        '--target=bun',
+        '--target=node',
         '--packages=external',
         `--outfile=${join(app, 'host.js')}`,
       ],

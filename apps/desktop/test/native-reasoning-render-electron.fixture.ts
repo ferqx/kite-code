@@ -99,40 +99,37 @@ try {
     global.reasoningMessages = [];
     global.toolFactGate = { hold: true, blocked: 0, releases: [] };
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const response = await original(...args);
-        const path = new URL(args[0] instanceof Request ? args[0].url : String(args[0])).pathname;
-        if (response.ok && /\/executions\/[^/]+$/.test(path)) {
-          const execution = (await response.clone().json()) as { kind?: string; status?: string };
-          if (
-            execution.kind === 'tool' &&
-            !['planned', 'dispatching', 'running'].includes(execution.status ?? '') &&
-            global.toolFactGate.hold
-          ) {
-            global.toolFactGate.blocked++;
-            await new Promise<void>((resolve) => global.toolFactGate.releases.push(resolve));
-          }
-        }
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const response = await original(...args);
+      const path = new URL(args[0] instanceof Request ? args[0].url : String(args[0])).pathname;
+      if (response.ok && /\/executions\/[^/]+$/.test(path)) {
+        const execution = (await response.clone().json()) as { kind?: string; status?: string };
         if (
-          response.ok &&
-          /\/(?:messages|message-changes)$/.test(
-            new URL(args[0] instanceof Request ? args[0].url : String(args[0])).pathname,
-          )
+          execution.kind === 'tool' &&
+          !['planned', 'dispatching', 'running'].includes(execution.status ?? '') &&
+          global.toolFactGate.hold
         ) {
-          const result = (await response.clone().json()) as
-            | import('@kite-ai/client').Message[]
-            | { messages: import('@kite-ai/client').Message[] };
-          for (const message of Array.isArray(result) ? result : result.messages) {
-            const index = global.reasoningMessages.findIndex((old) => old.id === message.id);
-            if (index < 0) global.reasoningMessages.push(message);
-            else global.reasoningMessages[index] = message;
-          }
+          global.toolFactGate.blocked++;
+          await new Promise<void>((resolve) => global.toolFactGate.releases.push(resolve));
         }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+      }
+      if (
+        response.ok &&
+        /\/(?:messages|message-changes)$/.test(
+          new URL(args[0] instanceof Request ? args[0].url : String(args[0])).pathname,
+        )
+      ) {
+        const result = (await response.clone().json()) as
+          | import('@kite-ai/client').Message[]
+          | { messages: import('@kite-ai/client').Message[] };
+        for (const message of Array.isArray(result) ? result : result.messages) {
+          const index = global.reasoningMessages.findIndex((old) => old.id === message.id);
+          if (index < 0) global.reasoningMessages.push(message);
+          else global.reasoningMessages[index] = message;
+        }
+      }
+      return response;
+    }, {});
   });
   const installProbe = () => {
     type Sample = {

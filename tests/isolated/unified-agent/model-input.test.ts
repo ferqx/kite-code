@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +11,7 @@ import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '@kite-ai/service';
 import { startDevelopmentWeb } from '@kite-ai/service/development-web';
+import { expect, test } from '#kite-test';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -87,7 +87,7 @@ test('actual Core original Model input reaches Native and Browser intact, remain
     bootstrap: service.bootstrap,
     expected: { profile: host, apiMajor: 1, requiredCapabilities: ['model_inputs'] },
   });
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let coldRuntime: ReturnType<typeof createRuntime> | undefined;
   let serviceClosed = false;
@@ -138,7 +138,7 @@ test('actual Core original Model input reaches Native and Browser intact, remain
       authorization: { availability: 'available', revision: 'local-fixture', policy: null },
     });
     expect(BigInt(snapshot.bodyBytes) > 17n * 1024n * 1024n).toBe(true);
-    gateway = startDevelopmentWeb({ admittedClient: client });
+    gateway = await startDevelopmentWeb({ admittedClient: client });
     const document = await fetch(gateway.endpoint);
     await document.body?.cancel();
     const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -155,7 +155,7 @@ test('actual Core original Model input reaches Native and Browser intact, remain
               origin: gateway!.endpoint,
             },
           }),
-        { preconnect: fetch.preconnect },
+        {},
       ),
     });
     await browser.connect();

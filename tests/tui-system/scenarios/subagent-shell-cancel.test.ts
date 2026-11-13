@@ -1,7 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import {
   inspectProcess,
   readProcessStartIdentity,
@@ -38,7 +39,7 @@ test('cancels an executing child process and persists cleanup before the success
   const workspace = createTestWorkspace({
     configOverrides: { language: 'en-US', interactionMode: 'full', sandbox: { enabled: false } },
   });
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   let tui: PtyProcess | undefined;
   const prompt = 'CANCEL_REAL_CHILD_PROCESS';
   const successorPrompt = 'Run the successor after child cleanup';
@@ -52,7 +53,7 @@ test('cancels an executing child process and persists cleanup before the success
 writeFileSync('child.pid', String(process.pid));
 for (let i=0; i<300; i++) {
   appendFileSync('heartbeat.txt', String(i)+'\n');
-  await Bun.sleep(100);
+  await testSleep(100);
 }
 writeFileSync('late-side-effect.txt', 'unexpected completion');
 `,
@@ -252,7 +253,7 @@ writeFileSync('late-side-effect.txt', 'unexpected completion');
       },
     });
     const stable = readFileSync(heartbeat, 'utf8');
-    await Bun.sleep(2_200);
+    await testSleep(2_200);
     expect(inspectProcess(pid, birth!)).toBe('dead');
     expect(readFileSync(heartbeat, 'utf8')).toBe(stable);
     expect(existsSync(sentinel)).toBe(false);

@@ -1,15 +1,16 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as bundle } from '../../../../../scripts/tooling/bun-build';
 import { engineAssetNames, engineDigest, type TraceEngineAssets } from './assets';
 
 /** Explicit Service build leaf. The emitted runner bundles its JS dependency closure. */
 export async function buildTraceEngineAssets(directory: string): Promise<TraceEngineAssets> {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const result = await Bun.build({
+  const result = await bundle({
     entrypoints: [fileURLToPath(new URL('./runner.ts', import.meta.url))],
     outdir: directory,
-    target: 'bun',
+    target: 'node',
     format: 'esm',
     packages: 'bundle',
     minify: false,
@@ -20,11 +21,6 @@ export async function buildTraceEngineAssets(directory: string): Promise<TraceEn
     fileURLToPath(import.meta.resolve('@jitl/quickjs-wasmfile-release-sync/wasm')),
     join(directory, 'quickjs.wasm'),
   );
-  writeFileSync(
-    join(directory, 'empty-bunfig.toml'),
-    '# Trusted runner: no preloads or install settings.\n',
-  );
-  writeFileSync(join(directory, 'empty-tsconfig.json'), '{"compilerOptions":{}}\n');
   const manifest = JSON.stringify({
     schema: 'kite.trace-engine-assets',
     version: 1,

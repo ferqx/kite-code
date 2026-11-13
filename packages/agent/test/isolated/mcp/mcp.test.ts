@@ -1,16 +1,18 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import type { ToolContext } from '../../../src/extensions';
 import { defineExtension } from '../../../src/extensions';
 import { createMcpAdapter } from '../../../src/mcp';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
-const serverPath = join(import.meta.dir, '../../../../../tests/fixtures/mcp-leaf/stdio.ts');
+const serverPath = join(import.meta.dirname, '../../../../../tests/fixtures/mcp-leaf/stdio.ts');
 const descriptor = {
   name: 'external-tool',
   description: 'Remote operation',
@@ -63,7 +65,7 @@ async function until(read: () => boolean) {
   const deadline = Date.now() + 3000;
   while (!read()) {
     if (Date.now() > deadline) throw new Error('fixture_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -339,7 +341,7 @@ test('MCP real HTTP initializes on demand, bounds bodies and retains unknown eff
   let effects = 0;
   let lost = false;
   let large = false;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

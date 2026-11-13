@@ -14,14 +14,15 @@ import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { releaseErrorCode } from '../release/release-arguments';
+import { type Subprocess, spawn as spawnProcess } from '../tooling/process';
 import { selectDevelopmentServiceArtifact } from './unified-cli';
 import { initializeDesktopBuildEnvironment } from './windows-desktop-environment';
 import { ensureWindowsElectronPermissions } from './windows-electron-permissions';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 const help = `Kite desktop development
-  npm run desktop:dev
-  npm run desktop:dev -- --help
+  bun run desktop:dev
+  bun run desktop:dev --help
 Uses local Service sources, built workspace assets, and installed Electron.
 UI changes use Vite HMR; Service source changes rebuild and restart the paired Service.
 Development data stays in ~/.kite-code/development.
@@ -117,7 +118,7 @@ export async function runDevelopmentDesktop(
       electron: string,
       outdir: string,
       env: NodeJS.ProcessEnv,
-    ) => Bun.Subprocess<'pipe', 'pipe', 'inherit'>;
+    ) => Subprocess<'pipe', 'pipe', 'inherit'>;
   } = {},
 ): Promise<number> {
   const argv = input.argv ?? process.argv.slice(2);
@@ -174,7 +175,7 @@ export async function runDevelopmentDesktop(
     startDesktopControl,
   } = await import('./desktop-reload');
   const outdir = createDevelopmentDesktopDirectory(root);
-  let child: Bun.Subprocess<'pipe', 'pipe', 'inherit'> | undefined;
+  let child: Subprocess<'pipe', 'pipe', 'inherit'> | undefined;
   let requested: 'SIGINT' | 'SIGTERM' | undefined;
   let control: Awaited<ReturnType<typeof startDesktopControl>> | undefined;
   const watchAbort = new AbortController();
@@ -229,7 +230,7 @@ export async function runDevelopmentDesktop(
     if (watchError) throw watchError;
     reportTiming('Renderer and source watcher ready', rendererStartedAt);
     const serviceStartedAt = performance.now();
-    const service = await buildDevelopmentService(root, outdir);
+    const service = await buildDevelopmentService(root, outdir, artifact.executable);
     if (watchError) throw watchError;
     reportTiming('Service built and checked', serviceStartedAt);
     let sourceSha256 = service.sourceSha256;
@@ -239,8 +240,8 @@ export async function runDevelopmentDesktop(
         kind: 'development',
         serviceEntrypoint: join(outdir, 'services', service.id, 'main.js'),
         serviceSha256: service.sha256,
-        bunExecutable: artifact.executable,
-        bunSha256: artifact.executableSha256,
+        runtimeExecutable: artifact.executable,
+        runtimeSha256: artifact.executableSha256,
         buildId: `development-${service.sha256}`,
         apiMajor: artifact.apiMajor,
         requiredCapabilities: ['file_recovery'],
@@ -250,6 +251,7 @@ export async function runDevelopmentDesktop(
       {
         development: { ...renderer.configuration, control: control.configuration },
         macosResize: macosRuntime?.resize ?? null,
+        runtimeAddon: join(repositoryRoot, 'packages/agent/dist/runtime-native.node'),
       },
     );
     if (watchError) throw watchError;
@@ -261,7 +263,7 @@ export async function runDevelopmentDesktop(
       delete env[name];
     child =
       input.spawnElectron?.(electron, outdir, env) ??
-      Bun.spawn([electron, outdir], {
+      spawnProcess([electron, outdir], {
         cwd: root,
         env,
         stdin: 'pipe',
@@ -273,7 +275,7 @@ export async function runDevelopmentDesktop(
     if (watchError) throw watchError;
     reloadQueue = createDesktopReloadQueue({
       async reload() {
-        const fresh = await buildDevelopmentService(root, outdir);
+        const fresh = await buildDevelopmentService(root, outdir, artifact.executable);
         if (fresh.sourceSha256 === sourceSha256) return;
         await channel!.reload({ id: fresh.id, sha256: fresh.sha256 });
         sourceSha256 = fresh.sourceSha256;
@@ -327,7 +329,7 @@ if (import.meta.main) {
     if (code === 'development_service_load_failed' && error instanceof Error)
       process.stderr.write(`${error.message}\n`);
     if (code === 'development_service_asset_unavailable')
-      process.stderr.write('Build the local workspaces first: npm run build\n');
+      process.stderr.write('Build the local workspaces first: bun run build\n');
     if (code === 'store_incompatible')
       process.stderr.write(
         'The development Store is incompatible and could not be prepared automatically. Its data was preserved.\n',
@@ -336,7 +338,7 @@ if (import.meta.main) {
       process.stderr.write('Close other clients using the development profile, then retry.\n');
     if (code === 'development_profile_confirmation_required')
       process.stderr.write(
-        'Run npm run desktop:dev in an interactive terminal to confirm backing up the incompatible data and starting fresh. No data was changed.\n',
+        'Run bun run desktop:dev in an interactive terminal to confirm backing up the incompatible data and starting fresh. No data was changed.\n',
       );
     if (code === 'development_profile_reset_cancelled')
       process.stderr.write('Development profile recovery cancelled. No data was changed.\n');
@@ -360,7 +362,7 @@ if (import.meta.main) {
       code === 'windows_desktop_build_tools_unavailable'
     )
       process.stderr.write(
-        'Install Visual Studio C++ Build Tools (x64/x86) and a Windows SDK, then run npm run desktop:dev again.\n',
+        'Install Visual Studio C++ Build Tools (x64/x86) and a Windows SDK, then run bun run desktop:dev again.\n',
       );
     if (code === 'windows_desktop_build_environment_failed')
       process.stderr.write('Visual Studio x64 build environment initialization failed.\n');

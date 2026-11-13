@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { Execution, McpToolsSnapshot, SessionView } from '@kite-ai/client';
 import type { TuiPort } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { createTuiToolLabelsReader } from '../../host/tui-tool-labels';
 
 const digest = 'a'.repeat(64),

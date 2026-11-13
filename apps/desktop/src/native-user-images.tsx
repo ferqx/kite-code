@@ -302,30 +302,38 @@ export type NativePendingAttachmentNames = {
   images?: readonly { name: string }[];
 };
 
-export function NativePendingAttachments({ files, images }: NativePendingAttachmentNames) {
+export function NativePendingAttachments({
+  files,
+  images,
+  rejected,
+}: NativePendingAttachmentNames & { rejected?: boolean }) {
   return (
     <MessageAttachments count={(files?.length ?? 0) + (images?.length ?? 0)}>
       {files?.map((file, index) => (
         <AttachmentFileCard name={file.name} key={`file:${index}`} />
       ))}
-      {images?.map((image, index) => (
-        <Attachment
-          orientation="vertical"
-          className="composer-attachment native-user-image"
-          key={`image:${index}`}
-        >
-          <AttachmentMedia
-            variant="image"
-            className="composer-attachment-preview"
-            role="img"
-            aria-label="图片预览等待消息保存"
-            aria-busy="true"
-          />
-          <AttachmentTitle className="composer-attachment-name" title={image.name}>
-            {image.name}
-          </AttachmentTitle>
-        </Attachment>
-      ))}
+      {images?.map((image, index) =>
+        rejected ? (
+          <AttachmentFileCard name={image.name} key={`image:${index}`} />
+        ) : (
+          <Attachment
+            orientation="vertical"
+            className="composer-attachment native-user-image"
+            key={`image:${index}`}
+          >
+            <AttachmentMedia
+              variant="image"
+              className="composer-attachment-preview"
+              role="img"
+              aria-label="图片预览等待消息保存"
+              aria-busy="true"
+            />
+            <AttachmentTitle className="composer-attachment-name" title={image.name}>
+              {image.name}
+            </AttachmentTitle>
+          </Attachment>
+        ),
+      )}
     </MessageAttachments>
   );
 }

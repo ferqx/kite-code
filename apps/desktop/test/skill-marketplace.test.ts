@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   link,
@@ -15,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import { createSkillMarketplace } from '../electron/skill-marketplace';
 import { installedSkillIdPrefix } from '../src/skill-marketplace-contract';
 

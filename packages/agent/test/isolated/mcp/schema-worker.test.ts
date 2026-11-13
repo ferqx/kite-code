@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { expect, test } from '#kite-test';
 import type { ToolContext } from '../../../src/extensions';
 import { createMcpAdapter } from '../../../src/mcp';
 import { createMcpSchemaValidation } from '../../../src/mcp/schema-validation';
@@ -240,7 +241,7 @@ test('releasing one scope does not cancel another scope schema Worker on the sam
 test('idle pure Worker retirement preserves the original catalogue and validates a later new call', async () => {
   const f = await fixture();
   try {
-    await Bun.sleep(1100);
+    await sleepTimer(1100);
     expect((await f.tool.execute({ text: 'aaa' }, context())).outcome).toBe('succeeded');
     expect(f.calls()).toBe(1);
   } finally {

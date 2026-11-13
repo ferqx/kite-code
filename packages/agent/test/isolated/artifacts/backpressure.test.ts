@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
@@ -337,7 +338,7 @@ test('a real Run waits behind saturated publication admission and completes with
     });
     await Promise.race([
       publishing.promise,
-      Bun.sleep(3000).then(() => {
+      sleepTimer(3000).then(() => {
         throw new Error('Runtime did not reach artifact publication');
       }),
     ]);

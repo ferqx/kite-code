@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -12,12 +10,18 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { decodeShellProcessEvidence, shellProcessEvidenceEnded } from '@kite-ai/agent/jobs/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { type BackgroundExecutionItem, createClient, ExecutionOutputPages } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
+import { nodeServiceFixture } from '../fixtures/node-service-process';
 import {
   buildMixedShellSupervisor,
   type MixedShellLedger,
@@ -30,7 +34,7 @@ async function until(read: () => boolean | Promise<boolean>, name: string, ms = 
   const end = Date.now() + ms;
   while (!(await read())) {
     if (Date.now() > end) throw Error(`mixed_shell_deadline:${name}`);
-    await Bun.sleep(30);
+    await sleepTimer(30);
   }
 }
 const alive = (pid: number) => {
@@ -149,7 +153,7 @@ function provePendingInputRecomputation(
   throw Error(`mixed_shell_unproved_input_deferral:${executionId}`);
 }
 async function descriptors(pid: number) {
-  const child = Bun.spawn(['lsof', '-a', '-p', String(pid), '-Ff'], {
+  const child = spawnProcess(['lsof', '-a', '-p', String(pid), '-Ff'], {
     stdout: 'pipe',
     stderr: 'ignore',
   });
@@ -157,11 +161,11 @@ async function descriptors(pid: number) {
   await child.exited;
   return text.split('\n').filter((line) => /^f[0-9]+$/.test(line)).length;
 }
-function provider(shellCommand: (label: string) => string, slots: number) {
+async function provider(shellCommand: (label: string) => string, slots: number) {
   const active = new Map<string, { ticks: number; finish(): void }>();
   const cancelled = new Set<string>();
   let peak = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     idleTimeout: 120,
@@ -310,7 +314,7 @@ for (const slots of [4, 16])
       const workspace = join(directory, 'workspace');
       mkdirSync(workspace);
       const scripts = writeMixedShellScript(workspace);
-      const source = provider(scripts.shellCommand, slots);
+      const source = await provider(scripts.shellCommand, slots);
       const profile = selectProfile({ dataRoot: join(directory, 'data'), profile: 'mixed' });
       privateDirectory(profile.profilePath);
       const metricsPath = join(directory, 'metrics.json');
@@ -360,7 +364,8 @@ for (const slots of [4, 16])
       try {
         const supervisorPath = await buildMixedShellSupervisor(directory);
         host = await launchPairedService({
-          entrypoint: join(import.meta.dir, 'multi-session-shell-load.fixture.ts'),
+          ...nodeServiceFixture,
+          entrypoint: join(import.meta.dirname, 'multi-session-shell-load.fixture.ts'),
           profile,
           instanceId: `mixed-shell-${slots}`,
           buildId: 'isolated-real-shell-load',
@@ -621,7 +626,7 @@ for (const slots of [4, 16])
             await checkReady();
           }
           rounds++;
-          await Bun.sleep(250);
+          await sleepTimer(250);
         }
         const actualDurationMs = performance.now() - started;
         await phase('tail');
@@ -744,7 +749,7 @@ for (const slots of [4, 16])
             .filter((row) => !stopped.has(row.label))
             .map((row) => [row.label, row.seq]),
         );
-        await Bun.sleep(450);
+        await sleepTimer(450);
         expect(
           ledgers()
             .filter((row) => before.has(row.label) && !stopped.has(row.label) && !row.complete)
@@ -901,7 +906,7 @@ for (const slots of [4, 16])
           });
         }
         expect(readFailures).toBe(0);
-        await Bun.sleep(1000);
+        await sleepTimer(1000);
         await phase('quiescent');
         const report = {
           slots,
@@ -945,7 +950,7 @@ for (const slots of [4, 16])
         expect(await host.exited).toBe(0);
         expect([...ownPids].some(alive)).toBe(false);
         reports.push({ ...report, serviceExitCode: 0, allObservedOwnedPidsAbsent: true });
-        const out = join(import.meta.dir, '../../../../.cache/native-multi-session-rendering');
+        const out = join(import.meta.dirname, '../../../../.cache/native-multi-session-rendering');
         mkdirSync(out, { recursive: true });
         writeFileSync(
           join(out, 'service-shell-load.json'),

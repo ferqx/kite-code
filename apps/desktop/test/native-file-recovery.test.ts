@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeFileRecovery } from '../electron/file-recovery';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { memoryPrivateData } from './private-data.fixture';

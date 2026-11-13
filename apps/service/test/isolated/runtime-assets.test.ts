@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -15,22 +14,31 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { fixtureTerminalSqlite } from '../../../../tests/fixtures/unified-agent/sqlite-engine-fixture';
 import {
   type DesktopRuntimeManifest,
   macosDesktopRuntimeEntries,
+  macosNodeDesktopRuntimeEntries,
+  nodeNativeInstallerPath,
+  nodeNativeMaintenancePath,
   parseTerminalBundleManifest,
   parseTerminalRuntimeProtection,
   type TerminalBundleManifest,
   terminalBundleEntries,
   terminalEmptyAssetDirectories,
+  terminalHostEntrypoints,
   verifyTerminalRuntimeBundle,
   verifyTerminalRuntimeProtection,
   windowsDesktopRuntimeEntries,
   windowsTerminalRuntimeConfigFiles,
 } from '../../src/runtime-assets';
-import { desktopSqliteEngineRoot, reviewedSqliteSources } from '../../src/sqlite-release-assets';
+import {
+  desktopSqliteEngineRoot,
+  reviewedSqliteSources,
+  terminalSqliteEngineRoot,
+} from '../../src/sqlite-release-assets';
 
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -64,6 +72,29 @@ function desktopManifest(
   };
 }
 
+function nodeDesktopManifest() {
+  const { bunVersion: _, ...desktop } = desktopManifest(
+    { platform: 'darwin', arch: 'arm64' },
+    macosNodeDesktopRuntimeEntries,
+  );
+  return {
+    ...desktop,
+    nodeVersion: '26.13.1',
+    sqlite: { ...desktop.sqlite, driver: 'node-api:sqlite' },
+    files: [
+      ...desktop.files,
+      ...(
+        [
+          ['runtime/LICENSE.node', 420],
+          ['code/package.json', 420],
+          ['code/@kite-ai/agent/runtime-native.node', 493],
+          [`${desktopSqliteEngineRoot}/libsqlite3.dylib`, 420],
+        ] as const
+      ).map(([path, mode]) => ({ path, mode, size: 1, sha256: 'c'.repeat(64) })),
+    ],
+  };
+}
+
 test('Windows embedded runtime retains verification of the previous desktop layout', () => {
   const manifest = desktopManifest(
     { platform: 'win32', arch: 'x64' },
@@ -88,6 +119,7 @@ test('Windows embedded runtime retains verification of the previous desktop layo
 test.each([
   ['Windows', desktopManifest({ platform: 'win32', arch: 'x64' }, windowsDesktopRuntimeEntries)],
   ['macOS', desktopManifest({ platform: 'darwin', arch: 'arm64' }, macosDesktopRuntimeEntries)],
+  ['macOS Node', nodeDesktopManifest()],
 ] as const)('%s embedded desktop runtime excludes standalone clients and dependency directories', (_, manifest) => {
   expect(parseTerminalBundleManifest(manifest, true).entries).toEqual(manifest.entries);
   expect(() => parseTerminalBundleManifest(manifest)).toThrow('terminal_manifest_invalid');
@@ -131,6 +163,89 @@ test('macOS desktop manifest requires an Apple Silicon target and macOS executab
   ).toThrow('terminal_manifest_invalid');
 });
 
+test('Node desktop binds the Apple Silicon executable, addon, SQLite library and license', () => {
+  const manifest = nodeDesktopManifest();
+  expect(parseTerminalBundleManifest(manifest, true).nodeVersion).toBe(manifest.nodeVersion);
+  for (const [path, mode] of [
+    ['runtime/LICENSE.node', 493],
+    ['code/package.json', 493],
+    ['code/@kite-ai/agent/runtime-native.node', 420],
+    [`${desktopSqliteEngineRoot}/libsqlite3.dylib`, 493],
+  ] as const) {
+    expect(() =>
+      parseTerminalBundleManifest(
+        { ...manifest, files: manifest.files.filter((file) => file.path !== path) },
+        true,
+      ),
+    ).toThrow('terminal_manifest_invalid');
+    expect(() =>
+      parseTerminalBundleManifest(
+        {
+          ...manifest,
+          files: manifest.files.map((file) => (file.path === path ? { ...file, mode } : file)),
+        },
+        true,
+      ),
+    ).toThrow('terminal_manifest_invalid');
+  }
+  for (const invalid of [
+    { ...manifest, target: { platform: 'darwin', arch: 'x64' } },
+    { ...manifest, target: { platform: 'win32', arch: 'x64' } },
+    { ...manifest, entries: macosDesktopRuntimeEntries },
+    { ...manifest, bunVersion: '1.4.4' },
+    { ...manifest, sqlite: { ...manifest.sqlite, linkage: 'builtin' } },
+    { ...manifest, sqlite: { ...manifest.sqlite, driver: 'bun:sqlite' } },
+    {
+      ...manifest,
+      files: [
+        ...manifest.files,
+        { path: 'runtime/bun', mode: 493, size: 1, sha256: 'd'.repeat(64) },
+      ],
+    },
+  ])
+    expect(() => parseTerminalBundleManifest(invalid, true)).toThrow('terminal_manifest_invalid');
+});
+
+test('Apple Silicon admits a full Node Terminal and preserves the Bun desktop-only contract', () => {
+  const target = { platform: 'darwin', arch: 'arm64' };
+  const { bunVersion: _, ...desktop } = desktopManifest(target, macosDesktopRuntimeEntries);
+  const nodeVersion = '26.13.1';
+  const sqlite = { ...desktop.sqlite, driver: 'node-api:sqlite' };
+  const entries = terminalBundleEntries('darwin', 'node');
+  const files = [
+    ...Object.values(entries),
+    ...terminalHostEntrypoints,
+    nodeNativeInstallerPath,
+    nodeNativeMaintenancePath,
+    'entrypoints/package.json',
+    'runtime/LICENSE.node',
+    'node_modules/@kite-ai/agent/runtime-native.node',
+    `${terminalSqliteEngineRoot}/engine-selection.json`,
+    `${terminalSqliteEngineRoot}/engine-manifest.json`,
+    `${terminalSqliteEngineRoot}/libsqlite3.dylib`,
+  ].map((path) => ({
+    path,
+    size: 1,
+    sha256: sqlite.manifestSha256,
+    mode:
+      path === entries.runtime ||
+      path === nodeNativeInstallerPath ||
+      path === 'node_modules/@kite-ai/agent/runtime-native.node'
+        ? 493
+        : 420,
+  }));
+  const terminal = { ...desktop, nodeVersion, sqlite, entries, files };
+  expect(parseTerminalBundleManifest(terminal).nodeVersion).toBe(nodeVersion);
+  expect(parseTerminalBundleManifest(terminal, true).entries).toEqual(entries);
+  for (const invalid of [
+    { ...desktop, nodeVersion, sqlite },
+    { ...terminal, target: { ...target, arch: 'ia32' } },
+    { ...terminal, sqlite: { ...sqlite, linkage: 'builtin' } },
+    { ...terminal, sqlite: { ...sqlite, driver: 'bun:sqlite' } },
+  ])
+    expect(() => parseTerminalBundleManifest(invalid, true)).toThrow('terminal_manifest_invalid');
+});
+
 function fixture() {
   const root = realpathSync(temporaryDirectory('kite-runtime-closure-'));
   const entries = terminalBundleEntries(process.platform);
@@ -154,7 +269,7 @@ function fixture() {
     version: 1,
     apiMajor: 1,
     target: { platform: process.platform, arch: process.arch },
-    bunVersion: Bun.version,
+    bunVersion: '1.4.4',
     sqlite: fixtureTerminalSqlite(root, files),
     productVersion: '0.1.0',
     source: { commit: 'a'.repeat(40), dirty: true },
@@ -240,7 +355,7 @@ test('v1 worker closure requires only its fixed empty hooks directory and refuse
   }
 });
 
-test('real complete closure with actual Bun and declared internal link binds service and daemon to frozen original proof', () => {
+test('legacy candidate metadata and its declared internal link bind service and daemon to frozen original proof', () => {
   const f = fixture();
   try {
     const verified = verifyTerminalRuntimeBundle(f.root);
@@ -262,7 +377,7 @@ test('real complete closure with actual Bun and declared internal link binds ser
   }
 });
 
-test('wrong manifest proof, build, entrypoint, Bun or leaf alias cannot confer a protected candidate root', () => {
+test('wrong manifest proof, build, entrypoint, runtime path or leaf alias cannot confer a protected candidate root', () => {
   const f = fixture();
   try {
     expect(() =>

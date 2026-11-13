@@ -1,12 +1,16 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
+import type { FixtureServer } from '../../../../scripts/tooling/http';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService, type PairedServiceChild } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
@@ -27,7 +31,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
   const requests: ProviderBody[] = [],
     ownedChildren: PairedServiceChild[] = [],
     failures: unknown[] = [];
-  let provider: ReturnType<typeof Bun.serve> | undefined,
+  let provider: FixtureServer | undefined,
     child: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     reader: Store | undefined;
   const deadline = Date.now() + 45000;
@@ -53,7 +57,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
       const value = await bounded(read(), 'long_run_sources_deadline');
       if (matches(value)) return value;
       if (Date.now() >= deadline) throw Error('long_run_sources_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   };
   const readColdMessages = async (store: Store, upperSeq: string) => {
@@ -72,7 +76,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
     const userConfiguration = ownedUserConfiguration(ownedHome);
     privateDirectory(profile.profilePath);
     writeFileSync(join(workspace, 'AGENTS.md'), agents);
-    provider = Bun.serve({
+    provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -132,9 +136,9 @@ test('one ordinary Run retains complete project sources across 257 distinct File
     );
     child = await bounded(
       launchPairedService({
-        entrypoint: join(import.meta.dir, '../../src/main.ts'),
+        entrypoint: join(import.meta.dirname, '../../src/main.ts'),
         spawnChild: (command, { env }) => {
-          const process = Bun.spawn([...command], {
+          const process = spawnProcess([...command], {
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',

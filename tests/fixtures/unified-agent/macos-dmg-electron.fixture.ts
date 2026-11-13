@@ -36,18 +36,22 @@ const [configuration] = process.argv.slice(2);
 assert(configuration);
 const input: {
   desktopPackage: string;
-  phase: 'previous' | 'current' | 'fresh';
+  phase: 'previous' | 'current' | 'rollback' | 'fresh';
   executable: string;
   mainExecutable: string;
   runtime: string;
+  serviceEntrypoint: string;
   rendererUrl: string;
   home: string;
+  temporaryDirectory: string;
   storeId: string;
   sessionId: string;
   sessionTitle: string;
   modelId: string;
   message: string;
   answer: string;
+  freshMessage: string;
+  freshAnswer: string;
   screenshot: string;
 } = JSON.parse(configuration);
 const { _electron } = createRequire(input.desktopPackage)('playwright') as {
@@ -73,11 +77,18 @@ async function waitFor<T>(read: () => T | undefined | Promise<T | undefined>, me
   }
 }
 
+const env = {
+  HOME: input.home,
+  PATH: '/usr/bin:/bin',
+  TMPDIR: input.temporaryDirectory,
+  LANG: 'C.UTF-8',
+};
+execFileSync('/bin/sh', ['-c', '! command -v node && ! command -v bun'], { env });
 const application = await _electron.launch({
   executablePath: input.executable,
   args: [`--user-data-dir=${join(input.home, 'electron-data')}`],
   cwd: input.home,
-  env: { HOME: input.home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+  env,
   chromiumSandbox: true,
   timeout: 15000,
 });
@@ -95,21 +106,34 @@ try {
   page.setDefaultTimeout(10000);
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.getByRole('navigation', { name: '主要导航', exact: true }).waitFor();
-  const security = await application.evaluate(({ app, BaseWindow, webContents }, rendererUrl) => {
-    const renderer = webContents
-      .getAllWebContents()
-      .find((contents) => contents.getURL() === rendererUrl);
-    const preferences = renderer?.getLastWebPreferences();
-    return {
-      pid: process.pid,
-      visibleWindows: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length,
-      noSandbox: app.commandLine.hasSwitch('no-sandbox'),
-      sandbox: preferences?.sandbox,
-      contextIsolation: preferences?.contextIsolation,
-      nodeIntegration: preferences?.nodeIntegration,
-    };
-  }, input.rendererUrl);
+  const startup: string[] = [];
+  const security = await waitFor(async () => {
+    const frame = await page.evaluate(() => ({
+      busy: document.querySelector('.desktop-startup')?.getAttribute('aria-busy'),
+      failure: document.querySelector('.desktop-startup [role="alert"]')?.textContent,
+    }));
+    assert.equal(frame.failure, undefined, 'macos_dmg_renderer_startup_failed');
+    if (frame.busy === 'true' && !startup.includes('loading')) startup.push('loading');
+    if (!(await page.getByRole('navigation', { name: '主要导航', exact: true }).isVisible()))
+      return undefined;
+    const actual = await application.evaluate(({ app, BaseWindow, webContents }, rendererUrl) => {
+      const renderer = webContents
+        .getAllWebContents()
+        .find((contents) => contents.getURL() === rendererUrl);
+      const preferences = renderer?.getLastWebPreferences();
+      return {
+        pid: process.pid,
+        visibleWindows: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length,
+        noSandbox: app.commandLine.hasSwitch('no-sandbox'),
+        sandbox: preferences?.sandbox,
+        contextIsolation: preferences?.contextIsolation,
+        nodeIntegration: preferences?.nodeIntegration,
+      };
+    }, input.rendererUrl);
+    if (actual.visibleWindows === 0) return undefined;
+    startup.push('ready');
+    return actual;
+  }, 'macos_dmg_renderer_not_ready');
   assert.deepEqual(security, {
     pid: main.pid,
     visibleWindows: 1,
@@ -129,8 +153,20 @@ try {
   );
   assert.equal(children.length, 1);
   service = Number(children[0]![0]);
+  const command = execFileSync('/bin/ps', ['-ww', '-p', String(service), '-o', 'command='], {
+    encoding: 'utf8',
+  }).trim();
+  assert.equal(command, `${input.runtime} ${input.serviceEntrypoint}`);
   console.log(
-    JSON.stringify({ phase: input.phase, step: 'main_and_service_ready', ...security, service }),
+    JSON.stringify({
+      phase: input.phase,
+      step: 'main_and_service_ready',
+      startup,
+      ...security,
+      service,
+      command,
+      path: env.PATH,
+    }),
   );
 
   await page
@@ -177,6 +213,26 @@ try {
   assert.equal(await assistantArticle.count(), 1);
   assert.equal(await userMessage.count(), 1);
   assert.equal(await assistantMessage.count(), 1);
+  if (input.phase === 'fresh') {
+    await selectNativeFixtureModel(page, input.modelId);
+    await composer.fill(input.freshMessage);
+    await page.getByRole('button', { name: '发送明确的新轮次' }).click();
+    const freshUser = userArticle.getByText(input.freshMessage, { exact: true });
+    const freshAssistant = assistantArticle.getByText(input.freshAnswer, { exact: true });
+    await freshUser.waitFor();
+    await freshAssistant.waitFor();
+    const freshRun = await waitFor(async () => {
+      const view = await selection();
+      return view?.runs.length === 2
+        ? view.runs.find((item) => item.id !== run.id && item.status === 'completed')
+        : undefined;
+    }, 'macos_dmg_new_node_run_not_completed');
+    assert.equal(await freshUser.count(), 1);
+    assert.equal(await freshAssistant.count(), 1);
+    console.log(
+      JSON.stringify({ phase: input.phase, step: 'new_turn_completed', runId: freshRun.id }),
+    );
+  }
   assert.deepEqual(pageErrors, []);
   await page.screenshot({ path: input.screenshot });
   console.log(

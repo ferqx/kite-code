@@ -13,7 +13,7 @@
  * at new dimensions" — they pass on all platforms.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitUserMessage, typeText } from '../harness/input-helpers';
@@ -31,7 +31,7 @@ const TIMEOUT = 30000;
 
 describe('TUI PTY System — Terminal Resize', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let probeSequence = 0;
 
@@ -44,7 +44,7 @@ describe('TUI PTY System — Terminal Resize', () => {
   }
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
 
     // Provide an empty mock response so the TUI model provider

@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import type { JobEvent } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
@@ -33,7 +34,7 @@ await runServiceProcess({
       async *stream(request, options) {
         appendFileSync(join(profile.profilePath, 'models'), `${JSON.stringify(request)}\n`);
         if (++calls === 3) {
-          while (!existsSync(join(profile.profilePath, 'finish-model'))) await Bun.sleep(5);
+          while (!existsSync(join(profile.profilePath, 'finish-model'))) await testSleep(5);
         }
         yield* fixed.stream(request, options);
       },
@@ -94,7 +95,7 @@ await runServiceProcess({
               },
               async *observe(): AsyncIterable<JobEvent> {
                 const release = join(profile.profilePath, 'finish-job');
-                while (!existsSync(release)) await Bun.sleep(5);
+                while (!existsSync(release)) await testSleep(5);
                 yield {
                   type: 'terminal',
                   supervision: 'ended',

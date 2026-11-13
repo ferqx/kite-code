@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
 import {
   CLI_REGISTRATION_FILE,
   readCLIRegistration,
@@ -21,10 +21,12 @@ import {
   buildTerminalBundle,
   installTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 test.skipIf(process.platform !== 'darwin')(
   'actual installed standard and Native PATH entries run the selected full Native closure; cached standard recovers and Native-path stale hash is explicit',
   async () => {
@@ -60,7 +62,7 @@ test.skipIf(process.platform !== 'darwin')(
       caller: sha(readFileSync(join(profile.profilePath, 'ui/caller-intents.json'))),
     });
     let nativePrefix = '';
-    const provider = Bun.serve({
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -132,7 +134,7 @@ test.skipIf(process.platform !== 'darwin')(
     const execute = async (argv: string[], path: string) => {
       const started = performance.now();
       phase('execute_begin', { executable: argv[0] });
-      const child = Bun.spawn(argv, {
+      const child = spawnFixtureProcess(argv, {
         cwd: workspace,
         env: {
           ...userConfiguration.homeEnvironment,

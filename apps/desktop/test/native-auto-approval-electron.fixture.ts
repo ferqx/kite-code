@@ -142,17 +142,14 @@ try {
     const target = globalThis as typeof globalThis & { autoAnswerPosts: number };
     target.autoAnswerPosts = 0;
     const original = target.fetch;
-    target.fetch = Object.assign(
-      (...args: Parameters<typeof original>) => {
-        if (
-          args[1]?.method === 'POST' &&
-          /\/interactions\/[^/]+\/answer$/.test(new URL(String(args[0])).pathname)
-        )
-          target.autoAnswerPosts++;
-        return original(...args);
-      },
-      { preconnect: original.preconnect },
-    );
+    target.fetch = Object.assign((...args: Parameters<typeof original>) => {
+      if (
+        args[1]?.method === 'POST' &&
+        /\/interactions\/[^/]+\/answer$/.test(new URL(String(args[0])).pathname)
+      )
+        target.autoAnswerPosts++;
+      return original(...args);
+    }, {});
   });
   for (const id of cases) {
     await select(id);

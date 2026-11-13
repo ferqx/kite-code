@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +9,8 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../../scripts/tooling/http';
 import { TuiController, type TuiPort } from '../../../src/tui';
 
 test('actual invalid SSE with healthy HTTP cannot restore observation via snapshot; original validated ready can', async () => {
@@ -41,7 +42,7 @@ test('actual invalid SSE with healthy HTTP cannot restore observation via snapsh
     streams = 0,
     reads = 0,
     writes = 0;
-  const proxy = Bun.serve({
+  const proxy = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

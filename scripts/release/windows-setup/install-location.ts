@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { win32 } from 'node:path';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 import { readWindowsNativeInstallation } from '../../../apps/cli/host/windows-native-installation';
 import { windowsInstallationCoordination } from '../../../packages/agent/src/platform/windows-installation-coordination';
 import {
@@ -18,13 +19,12 @@ export function hideSetupCoordination(prefix: string) {
   const coordination = windowsInstallationCoordination(prefix);
   try {
     coordination.verify();
-    const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
     const kernel = dlopen('kernel32.dll', {
       GetFileAttributesW: { args: ['ptr'], returns: 'u32' },
       SetFileAttributesW: { args: ['ptr', 'u32'], returns: 'bool' },
     });
     try {
-      const path = Buffer.from(coordination.root + '\0', 'utf16le');
+      const path = Buffer.from(`${coordination.root}\0`, 'utf16le');
       const attributes = kernel.symbols.GetFileAttributesW(ptr(path));
       if (
         attributes === 0xffffffff ||

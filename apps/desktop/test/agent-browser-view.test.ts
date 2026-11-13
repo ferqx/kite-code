@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { PublicView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   agentBrowserHit,
   agentBrowserPoint,

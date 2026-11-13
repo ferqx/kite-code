@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
@@ -8,6 +7,7 @@ import {
   parseFileRecoveryIntent,
   planFileRecoveryIntent,
 } from '@kite-ai/client/file-recovery-intent';
+import { expect, test } from '#kite-test';
 import { privateDirectory, temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { createFileRecoveryPort } from '../host/file-recovery';
 import { openFileRecoveryJournal } from '../host/file-recovery-intents';

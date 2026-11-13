@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
@@ -13,12 +12,21 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { getLoadedSqliteEngine, initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { ClientError, createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { serviceBundledDependencies } from '../../../service/bundled-dependencies';
 import type { CLIServiceArtifact } from '../../host';
@@ -28,7 +36,7 @@ import { decodeMcpSourcePage } from '../../host/tui-mcp-source-approval';
 import { installedDependency, verifyBuiltDependency } from '../fixtures/built-dependency-proof';
 import { managementActionWire } from '../fixtures/tui-activation-wire';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const privateFile = (path: string, value: unknown) =>
   writeFileSync(path, JSON.stringify(value, null, 2), { mode: 0o600, flag: 'wx' });
@@ -44,7 +52,7 @@ async function until<T>(
     signal.throwIfAborted();
     if (value !== undefined) return value;
     if (performance.now() > end) throw Error(`source_pty_deadline:${label}`);
-    await Bun.sleep(10);
+    await testSleep(10);
   }
 }
 type Wire = {
@@ -99,33 +107,29 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
     peerCalls = 0,
     success = false,
     cleanupConfirmed = false;
-  let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
-    driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
+  let build: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined,
+    driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined,
     seed: Awaited<ReturnType<typeof launchPairedService>> | undefined,
     observer: ReturnType<typeof createClient> | undefined,
     artifact: CLIServiceArtifact | undefined,
-    control: ReturnType<typeof Bun.serve> | undefined;
+    control: FixtureServer | undefined;
   let failure: unknown;
   let candidateAccess: ReturnType<typeof acquireArtifactAccess> | undefined;
   const cleanupErrors: unknown[] = [],
     closing = new AbortController(),
     controlWork = new Set<Promise<Response>>();
-  let model: ReturnType<typeof Bun.serve> | undefined,
-    peer: ReturnType<typeof Bun.serve> | undefined;
+  let model: FixtureServer | undefined, peer: FixtureServer | undefined;
   const parentFetch = globalThis.fetch,
     observerHttp: { method: string; path: string }[] = [];
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      const request = args[0],
-        url = new URL(request instanceof Request ? request.url : String(request));
-      observerHttp.push({
-        method: args[1]?.method ?? (request instanceof Request ? request.method : 'GET'),
-        path: url.pathname,
-      });
-      return parentFetch(...args);
-    },
-    { preconnect: parentFetch.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const request = args[0],
+      url = new URL(request instanceof Request ? request.url : String(request));
+    observerHttp.push({
+      method: args[1]?.method ?? (request instanceof Request ? request.method : 'GET'),
+      path: url.pathname,
+    });
+    return parentFetch(...args);
+  }, {});
   const settings = () =>
     writeFileSync(
       join(root, 'settings.json'),
@@ -133,7 +137,7 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       { mode: 0o600 },
     );
   try {
-    model = Bun.serve({
+    model = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch() {
@@ -142,7 +146,7 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       },
     });
     const codes = new Map<string, { challenge: string; redirect: string }>();
-    peer = Bun.serve({
+    peer = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -216,9 +220,10 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       },
     });
     // Public builder reads real Git provenance and copies installed owner resolution; no source aliases or installs.
-    build = Bun.spawn(
+    build = testSpawn(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -279,11 +284,11 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const compiled = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../fixtures/tui-mcp-auth-pty.ts')],
+    const compiled = await testBuild({
+      entrypoints: [join(import.meta.dirname, '../fixtures/tui-mcp-auth-pty.ts')],
       outdir: root,
       naming: 'host.js',
-      target: 'bun',
+      target: 'node',
       packages: 'external',
     });
     expect(compiled.success).toBe(true);
@@ -544,7 +549,7 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
       }
       throw Error('owned_auth_control_unknown');
     }
-    control = Bun.serve({
+    control = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch(request) {
@@ -557,11 +562,11 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
         return work;
       },
     });
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
-        join(import.meta.dir, '../fixtures/tui-mcp-auth-driver.ts'),
+        ...testRuntimeFlags,
+        join(import.meta.dirname, '../fixtures/tui-mcp-auth-driver.ts'),
         JSON.stringify({
           controlURL: control.url.href,
           executable: artifact.executable,

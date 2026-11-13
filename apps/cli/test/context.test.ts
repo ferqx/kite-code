@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -9,18 +8,22 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { ModelRequest } from '@kite-ai/ai';
 import { createDesktopController } from '@kite-ai/desktop';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { nodeServiceFixture } from '../../service/test/fixtures/node-service-process';
 import { getContext, includeHistoricalResult, rewindContext, run } from '../src';
 
 test('actual paired Context rewind/include saves exact source without replay; only explicit next Run sees source', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-context-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const handle = await launchPairedService({
-    entrypoint: join(import.meta.dir, 'fixtures/context-child.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, 'fixtures/context-child.ts'),
     profile,
     instanceId: 'context-client',
     buildId: 'context-client',
@@ -67,7 +70,7 @@ test('actual paired Context rewind/include saves exact source without replay; on
       observedJobs = (await client.getView('s')).executions.filter((value) => value.kind === 'job');
       job = observedJobs.find((value) => value.status === 'succeeded');
       if (job) break;
-      await Bun.sleep(5);
+      await testSleep(5);
     }
     if (!job)
       console.error(

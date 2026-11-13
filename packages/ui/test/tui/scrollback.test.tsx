@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import type { ReadStream, WriteStream } from 'node:tty';
+import { stripVTControlCharacters as stripFixtureAnsi } from 'node:util';
 import type { ModelOutputSnapshot, SessionView } from '@kite-ai/client';
-import { Terminal } from '@xterm/headless';
+import headless from '@xterm/headless';
 import { Box, render, Text } from 'ink';
 import { render as renderFrames } from 'ink-testing-library';
 import stringWidth from 'string-width';
+import { expect, test } from '#kite-test';
 import {
   TuiController,
   type TuiPort,
@@ -15,6 +16,7 @@ import {
   useInkWindowSize,
 } from '../../src/tui';
 
+const { Terminal } = headless;
 const pause = () => new Promise((resolve) => setTimeout(resolve, 200));
 
 test('finite Plan controls reserve Host rows and retain every choice, description and draft across resize', async () => {
@@ -835,7 +837,7 @@ test('late verified giant body replaces its preview in original Static order bef
     expect(bytes.replace(/\s+/g, '')).toContain(toolResult);
     expect(
       Math.max(
-        ...Bun.stripANSI(bytes)
+        ...stripFixtureAnsi(bytes)
           .split('\n')
           .map((line) => stringWidth(line)),
       ),
@@ -847,7 +849,7 @@ test('late verified giant body replaces its preview in original Static order bef
     expect(bytes.replace(/\s+/g, '')).toContain(toolResult);
     expect(
       Math.max(
-        ...Bun.stripANSI(bytes)
+        ...stripFixtureAnsi(bytes)
           .split('\n')
           .map((line) => stringWidth(line)),
       ),

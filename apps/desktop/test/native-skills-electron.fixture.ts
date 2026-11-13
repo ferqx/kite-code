@@ -79,30 +79,27 @@ async function launch() {
     const t = globalThis as FixtureGlobals;
     t.skillsPhysical = [];
     const original = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        const row: Physical = {
-          path: url.pathname,
-          query: url.search,
-          method: args[1]?.method ?? 'GET',
-        };
-        t.skillsPhysical.push(row);
-        const response = await original(...args);
-        if (/\/skills$/.test(url.pathname) && response.ok) {
-          const body = await response.clone().text();
-          const dto = JSON.parse(body);
-          Object.assign(row, {
-            bytes: Buffer.byteLength(body),
-            entries: dto.entries?.length,
-            complete: dto.complete,
-            revision: dto.revision,
-          });
-        }
-        return response;
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0]));
+      const row: Physical = {
+        path: url.pathname,
+        query: url.search,
+        method: args[1]?.method ?? 'GET',
+      };
+      t.skillsPhysical.push(row);
+      const response = await original(...args);
+      if (/\/skills$/.test(url.pathname) && response.ok) {
+        const body = await response.clone().text();
+        const dto = JSON.parse(body);
+        Object.assign(row, {
+          bytes: Buffer.byteLength(body),
+          entries: dto.entries?.length,
+          complete: dto.complete,
+          revision: dto.revision,
+        });
+      }
+      return response;
+    }, {});
   });
   return page;
 }

@@ -1,12 +1,16 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
 } from '../../../../../tests/fixtures/test-filesystem';
 
-const module = pathToFileURL(join(import.meta.dir, '../../../src/jobs/launch-identity.ts')).href;
+const module = pathToFileURL(
+  join(import.meta.dirname, '../../../src/jobs/launch-identity.ts'),
+).href;
 for (const scenario of [
   'sizes-and-short-reads',
   'tail-change',
@@ -23,12 +27,13 @@ for (const scenario of [
 ] as const)
   test(`async launch proof retains full bytes and closes its bounded reads: ${scenario}`, async () => {
     const root = temporaryDirectory('kite-async-launch-');
-    const code = `
+    const code = `import {setTimeout as sleepTimer} from 'node:timers/promises';
+
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import * as fs from 'node:fs';
 import * as io from 'node:fs/promises';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 const original={...io}, root=${JSON.stringify(root)}, scenario=${JSON.stringify(scenario)};
 const path=root+'/binary', payload=Buffer.alloc(2*1024*1024+37,97);
 payload[payload.length-1]=121;fs.writeFileSync(path,payload,{mode:0o600});
@@ -68,7 +73,7 @@ mock.module('node:fs/promises',()=>({...original,
  }
 }));
 const {launchIdentityAsync,verifyLaunchIdentitiesAsync,mapAssetVerification}=await import(${JSON.stringify(module)});
-const until=async read=>{const deadline=Date.now()+3000;while(!read()){if(Date.now()>deadline)throw Error('fixture_deadline');await Bun.sleep(1);}};
+const until=async read=>{const deadline=Date.now()+3000;while(!read()){if(Date.now()>deadline)throw Error('fixture_deadline');await sleepTimer(1);}};
 if(scenario==='sizes-and-short-reads'){
  for(const size of [0,1,65536,payload.length]){
   fs.writeFileSync(path,payload.subarray(0,size));reads=[];buffers.clear();tracking=true;
@@ -89,7 +94,7 @@ if(scenario==='sizes-and-short-reads'){
 }else if(scenario==='cancel-reading'){
  const abort=new AbortController(),reason=Error('cancel-original');hold=true;let settled=false;
  const pending=launchIdentityAsync(path,true,abort.signal);pending.then(()=>settled=true,()=>settled=true);
- await until(()=>started===1);abort.abort(reason);await Bun.sleep(10);
+ await until(()=>started===1);abort.abort(reason);await sleepTimer(10);
  assert.equal(settled,false,'do not release an FD while its read is still in flight');assert.equal(live.size,1);
  hold=false;release();await assert.rejects(pending,error=>error===reason);assert.equal(live.size,0);
  assert.equal((await launchIdentityAsync(path,true)).digest,createHash('sha256').update(payload).digest('hex'));
@@ -100,7 +105,7 @@ if(scenario==='sizes-and-short-reads'){
  const queued=launchIdentityAsync(path,true,abort.signal);abort.abort(reason);
  await assert.rejects(queued,error=>error===reason);assert.equal(opened,8,'a cancelled waiter must not open a file');
  let admitted=false;const next=launchIdentityAsync(path,true).then(value=>{admitted=true;return value;});
- await Bun.sleep(10);assert.equal(admitted,false);assert.equal(opened,8);
+ await sleepTimer(10);assert.equal(admitted,false);assert.equal(opened,8);
  hold=false;release();await Promise.all([...active,next]);assert.ok(peak<=8);assert.equal(live.size,0);
 }else if(scenario==='close-failure'){
  await assert.rejects(launchIdentityAsync(path,true),/confined_launch_close_unknown/);
@@ -108,7 +113,7 @@ if(scenario==='sizes-and-short-reads'){
  hold=true;const active=Array.from({length:7},()=>launchIdentityAsync(path,true));
  await until(()=>started===7);assert.equal(peak,8);
  const abort=new AbortController();const queued=launchIdentityAsync(path,true,abort.signal);
- await Bun.sleep(10);assert.equal(opened,8,'unknown close must retain its resource permit');
+ await sleepTimer(10);assert.equal(opened,8,'unknown close must retain its resource permit');
  abort.abort(Error('cancel-after-unknown'));await assert.rejects(queued,/cancel-after-unknown/);
  hold=false;release();await Promise.all(active);assert.equal(live.size,1);
  await unknown.close();live.delete(unknown);
@@ -119,7 +124,7 @@ if(scenario==='sizes-and-short-reads'){
   return await launchIdentityAsync(path,true,signal);
  });
  pending.then(()=>settled=true,()=>settled=true);
- await until(()=>failed);await Bun.sleep(10);
+ await until(()=>failed);await sleepTimer(10);
  assert.equal(settled,false);assert.equal(live.size,7);assert.equal(opened,7);
  hold=false;release();await assert.rejects(pending,/batch-original/);
  assert.equal(opened,7,'failed batch stops claiming later work');assert.equal(live.size,0);
@@ -132,11 +137,14 @@ if(fs.existsSync(path))fs.chmodSync(path,0o600);
 console.log('async_launch_proof_passed');
 `;
     try {
-      const child = Bun.spawn([process.execPath, '--eval', code], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        windowsHide: true,
-      });
+      const child = spawnProcess(
+        [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+          windowsHide: true,
+        },
+      );
       const [exit, stdout, stderr] = await Promise.all([
         child.exited,
         new Response(child.stdout).text(),

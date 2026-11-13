@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { parse as parseToml } from '@iarna/toml';
 import { AgentError } from '@kite-ai/agent';
 import type { ReasoningEffort } from '@kite-ai/ai/sdk';
 import { parseModelPreset } from './model-options';
@@ -276,7 +277,8 @@ export function createCodexLocalSource(
       let preferred: string | undefined;
       let reasoningEffort: ReasoningEffort | undefined;
       try {
-        const config: unknown = Bun.TOML.parse(localText(join(base, 'config.toml'), authLimit));
+        const source = localText(join(base, 'config.toml'), authLimit);
+        const config: unknown = parseToml(source);
         if (
           object(config) &&
           (config.model_provider === undefined ||
@@ -326,62 +328,62 @@ export function createCodexLocalSource(
         return auth;
       };
       const original = current();
-      const boundFetch = Object.assign(
-        async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-          const request = input instanceof Request ? input : undefined;
-          let url: URL;
-          try {
-            url = new URL(request ? request.url : String(input));
-          } catch {
-            throw new AgentError('codex_request_invalid');
-          }
-          const method = init?.method ?? request?.method ?? 'GET';
-          if (url.href !== `${CODEX_BASE_URL}/responses` || method.toUpperCase() !== 'POST')
-            throw new AgentError('codex_request_invalid');
-          const signal = init?.signal ?? request?.signal;
+      const boundFetch = async (
+        input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        const request = input instanceof Request ? input : undefined;
+        let url: URL;
+        try {
+          url = new URL(request ? request.url : String(input));
+        } catch {
+          throw new AgentError('codex_request_invalid');
+        }
+        const method = init?.method ?? request?.method ?? 'GET';
+        if (url.href !== `${CODEX_BASE_URL}/responses` || method.toUpperCase() !== 'POST')
+          throw new AgentError('codex_request_invalid');
+        const signal = init?.signal ?? request?.signal;
+        signal?.throwIfAborted();
+        const raw = init?.body ?? (request ? await request.clone().text() : undefined);
+        if (typeof raw !== 'string') throw new AgentError('codex_request_invalid');
+        let body: string;
+        try {
+          body = requestBody(JSON.parse(raw));
+        } catch (error) {
+          if (error instanceof AgentError) throw error;
+          throw new AgentError('codex_request_invalid');
+        }
+        const auth = current();
+        const headers = new Headers(init?.headers ?? request?.headers);
+        headers.set('authorization', `Bearer ${auth.accessToken}`);
+        headers.set('chatgpt-account-id', auth.accountId);
+        headers.set('originator', 'kite-code');
+        headers.set('openai-beta', 'responses=experimental');
+        headers.set('accept', 'text/event-stream');
+        headers.set('content-type', 'application/json');
+        headers.delete('content-length');
+        signal?.throwIfAborted();
+        let response: Response;
+        try {
+          response = await transportFetch(url, {
+            ...init,
+            method: 'POST',
+            headers,
+            body,
+            signal,
+            credentials: 'omit',
+            redirect: 'manual',
+          });
+        } catch {
           signal?.throwIfAborted();
-          const raw = init?.body ?? (request ? await request.clone().text() : undefined);
-          if (typeof raw !== 'string') throw new AgentError('codex_request_invalid');
-          let body: string;
-          try {
-            body = requestBody(JSON.parse(raw));
-          } catch (error) {
-            if (error instanceof AgentError) throw error;
-            throw new AgentError('codex_request_invalid');
-          }
-          const auth = current();
-          const headers = new Headers(init?.headers ?? request?.headers);
-          headers.set('authorization', `Bearer ${auth.accessToken}`);
-          headers.set('chatgpt-account-id', auth.accountId);
-          headers.set('originator', 'kite-code');
-          headers.set('openai-beta', 'responses=experimental');
-          headers.set('accept', 'text/event-stream');
-          headers.set('content-type', 'application/json');
-          headers.delete('content-length');
-          signal?.throwIfAborted();
-          let response: Response;
-          try {
-            response = await transportFetch(url, {
-              ...init,
-              method: 'POST',
-              headers,
-              body,
-              signal,
-              credentials: 'omit',
-              redirect: 'manual',
-            });
-          } catch {
-            signal?.throwIfAborted();
-            throw new AgentError('codex_transport_failed');
-          }
-          if (response.status >= 300 && response.status < 400) {
-            await response.body?.cancel().catch(() => {});
-            throw new AgentError('codex_transport_failed');
-          }
-          return response;
-        },
-        { preconnect: globalThis.fetch.preconnect },
-      );
+          throw new AgentError('codex_transport_failed');
+        }
+        if (response.status >= 300 && response.status < 400) {
+          await response.body?.cancel().catch(() => {});
+          throw new AgentError('codex_transport_failed');
+        }
+        return response;
+      };
       return {
         apiKey: original.accessToken,
         headers: { 'chatgpt-account-id': original.accountId },

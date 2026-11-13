@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { OperationRef } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { startService } from '../../../apps/service/src';
 import { createClient, type Interaction } from '../../../packages/client/src';
 
@@ -17,7 +18,7 @@ async function until<T>(read: () => Promise<T>, valid: (value: T) => boolean): P
     if (valid(value)) return value;
     if (Date.now() > deadline)
       throw new Error(`Child interaction deadline: ${JSON.stringify(value)}`);
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 async function code(work: Promise<unknown>, expected: string) {

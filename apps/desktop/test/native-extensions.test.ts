@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type {
   AgentClient,
@@ -8,6 +7,7 @@ import type {
   ExtensionCommandRequest,
   PublicView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   callerTextDigest,
   canonicalNativeCallerRequest,

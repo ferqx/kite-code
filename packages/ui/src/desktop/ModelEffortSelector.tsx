@@ -40,7 +40,7 @@ export interface ModelEffortSelectorProps {
   onModelChange: (provider: string, name: string, id?: string) => void;
   reasoningEffort?: string;
   onReasoningEffortChange?: (effort: ThinkingEffort) => void;
-  modelSelectionHint?: string;
+  triggerDescription?: string;
   disabled?: boolean;
   scopeKey?: string;
 }
@@ -180,10 +180,12 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
               ? `思考程度：${effortLabel}`
               : `模型：${props.model?.name ?? '选择模型'}${mode === 'combined' && canAdjustEffort && effortLabel ? `，思考程度：${effortLabel}` : ''}`
           }
+          aria-description={props.triggerDescription}
           title={
-            mode !== 'effort' && props.model
+            props.triggerDescription ??
+            (mode !== 'effort' && props.model
               ? `${props.model.provider} / ${props.model.name}`
-              : undefined
+              : undefined)
           }
           disabled={disabled}
           suffix={
@@ -264,7 +266,6 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                 ) : null}
               </div>
             )}
-            {!selected && <p className="model-effort-unavailable">请先选择模型</p>}
           </div>
         ) : (
           <Tabs
@@ -349,9 +350,6 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                 </TabsContent>
               ))}
             </div>
-            {props.modelSelectionHint && (
-              <p className="model-selection-hint">{props.modelSelectionHint}</p>
-            )}
           </Tabs>
         )}
       </PopoverContent>

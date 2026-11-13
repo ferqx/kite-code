@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type {
@@ -8,6 +7,8 @@ import type {
   ExtensionRecord,
   Store,
 } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import {
   classifyWorktreeLiveVerification,
   completeJobOutput,
@@ -92,7 +93,7 @@ try {
 } catch {}
 console.log(JSON.stringify({accepted}));
 `;
-    const child = Bun.spawn([process.execPath, '--eval', probe], {
+    const child = spawnFixtureProcess([process.execPath, '--eval', probe], {
       env: {
         HOME: scenario === 'late-home' ? `${home}-old` : home,
         USERPROFILE:

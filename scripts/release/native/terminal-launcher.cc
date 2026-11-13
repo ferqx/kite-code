@@ -224,7 +224,8 @@ struct Attributes {
 };
 int wmain(int argc, wchar_t** argv) {
   try {
-    for (const wchar_t* name : {L"NODE_PATH", L"NODE_OPTIONS", L"BUN_OPTIONS", L"BUN_BE_BUN", L"ELECTRON_RUN_AS_NODE"}) {
+    for (const wchar_t* name : {L"NODE_PATH", L"NODE_OPTIONS", L"NODE_COMPILE_CACHE", L"NODE_V8_COVERAGE",
+                                L"BUN_OPTIONS", L"BUN_BE_BUN", L"ELECTRON_RUN_AS_NODE"}) {
       // Deleting an already absent variable is also a clean environment.
       need(SetEnvironmentVariableW(name, nullptr) || GetLastError() == ERROR_ENVVAR_NOT_FOUND);
     }
@@ -240,7 +241,11 @@ int wmain(int argc, wchar_t** argv) {
     const auto name = executable.substr(executable.find_last_of(L'\\') + 1);
 #ifdef KITE_DESKTOP_LAUNCHER
     need(name == L"kite-desktop.exe" && argc == 1);
+#ifdef KITE_DESKTOP_NODE_RUNTIME
+    const auto verifierPath = bin + L"\\native-verifier.mjs";
+#else
     const auto verifierPath = bin + L"\\native-verifier.js";
+#endif
 #elif defined(KITE_NATIVE_LAUNCHER)
     need(name == L"kite.exe" || name == L"kite-tui.exe" || name == L"kite-desktop.exe");
     const auto helperPath = bin + L"\\native-verifier.exe";
@@ -265,12 +270,29 @@ int wmain(int argc, wchar_t** argv) {
     const auto runtime = terminal + L"\\runtime";
     for (const auto& path : {releases, candidate, terminal, runtime})
       ancestors.emplace_back(path, true, policy, true);
+#ifdef KITE_DESKTOP_NODE_RUNTIME
+    const auto helperPath = runtime + L"\\node.exe";
+    const auto code = terminal + L"\\code";
+    const auto scope = code + L"\\@kite-ai";
+    const auto agent = scope + L"\\agent";
+    for (const auto& path : {code, scope, agent})
+      ancestors.emplace_back(path, true, policy, true);
+    Pin addon(agent + L"\\runtime-native.node", false, policy, true);
+    verifyBytes(addon, KITE_DESKTOP_ADDON_SIZE, KITE_DESKTOP_ADDON_SHA256);
+    addon.verify(policy, true);
+#else
     const auto helperPath = runtime + L"\\bun.exe";
+#endif
     Pin verifier(verifierPath, false, policy, true);
     verifyBytes(verifier, KITE_TERMINAL_VERIFIER_SIZE, KITE_TERMINAL_VERIFIER_SHA256);
     verifier.verify(policy, true);
 #endif
     Pin helper(helperPath, false, policy, true);
+#ifdef KITE_VERIFIER_ADDON_SHA256
+    Pin verifierAddon(bin + L"\\runtime-native.node", false, policy, true);
+    verifyBytes(verifierAddon, KITE_VERIFIER_ADDON_SIZE, KITE_VERIFIER_ADDON_SHA256);
+    verifierAddon.verify(policy, true);
+#endif
 #ifdef KITE_DESKTOP_LAUNCHER
     verifyBytes(helper, KITE_DESKTOP_RUNTIME_SIZE, KITE_DESKTOP_RUNTIME_SHA256);
 #else
@@ -281,8 +303,12 @@ int wmain(int argc, wchar_t** argv) {
     helper.verify(policy, true);
     std::wstring command = quoted(helperPath);
 #ifdef KITE_DESKTOP_LAUNCHER
+#ifdef KITE_DESKTOP_NODE_RUNTIME
+    command += L" --no-global-search-paths " + quoted(verifierPath);
+#else
     command += L" --no-env-file --no-install " + quoted(L"--config=\\\\.\\NUL") + L" " +
       quoted(L"--tsconfig-override=\\\\.\\NUL") + L" " + quoted(verifierPath);
+#endif
 #endif
     command += L" " + quoted(name == L"kite.exe" ? L"cli" : name == L"kite-tui.exe" ? L"tui" : L"desktop") + L" " + quoted(root);
 #ifdef KITE_NATIVE_LAUNCHER

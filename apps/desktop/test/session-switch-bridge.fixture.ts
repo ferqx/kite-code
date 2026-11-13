@@ -58,6 +58,7 @@ export function sessionSwitchBridge(
   let navigationSource = true;
   let heldDirectory = false;
   const unavailableWorkspaces = new Set<string>();
+  const disabledModels = new Set<string>();
   let releaseDirectory: (() => void) | undefined;
   const send = () => {
     for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
@@ -343,7 +344,7 @@ export function sessionSwitchBridge(
                 ...(protocol ? { protocol } : {}),
                 model: options.modelNames?.[model] ?? `Model ${model.toUpperCase()}`,
                 configured: true,
-                enabled: true,
+                enabled: !disabledModels.has(model),
                 diagnostics: [],
                 reasoningEffort: options.modelEfforts?.[model] ?? 'medium',
                 reasoningEffortChoices: ['low', 'medium', 'high'],
@@ -512,6 +513,9 @@ export function sessionSwitchBridge(
       options.modelErrors ??= {};
       if (code) options.modelErrors[sessionId] = code;
       else delete options.modelErrors[sessionId];
+    },
+    disableModel(id: string) {
+      disabledModels.add(id);
     },
     failReceipt(value: boolean) {
       receiptFailure = value;

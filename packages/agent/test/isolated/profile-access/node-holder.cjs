@@ -1,13 +1,17 @@
 const fs = require('node:fs'),
   cp = require('node:child_process');
-const [bun, helper, dataRoot, profile, path] = process.argv.slice(2);
+const [runtime, loader, helper, dataRoot, profile, path] = process.argv.slice(2);
 const fd = fs.openSync(path, fs.constants.O_RDWR | fs.constants.O_NOFOLLOW);
 let closed = false;
-const child = cp.spawnSync(bun, [helper, 'inherited', dataRoot, profile], {
-  stdio: ['ignore', 'pipe', 'pipe', fd],
-  encoding: 'utf8',
-  timeout: 10000,
-});
+const child = cp.spawnSync(
+  runtime,
+  ['--no-global-search-paths', '--import', loader, helper, 'inherited', dataRoot, profile],
+  {
+    stdio: ['ignore', 'pipe', 'pipe', fd],
+    encoding: 'utf8',
+    timeout: 10000,
+  },
+);
 if (child.status !== 0) throw Error(JSON.stringify(child));
 process.send({
   event: 'ready',

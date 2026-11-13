@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { createWorkspaceFiles } from '@kite-ai/agent/files';
+import { presentedFileRead } from '../../../packages/agent/test/fixtures/presented-file-read';
 
 export interface OriginalToolCall {
   id: string;
@@ -128,6 +129,22 @@ async function currentBaseline(path: string, scope: OriginalToolWorkspace) {
     await files.close();
   }
 }
+/** Use only the exact file reference returned in this model request's history. */
+function observedBaseRef(path: string, messages: Array<{ role?: string; content?: unknown }>) {
+  for (const message of messages.toReversed()) {
+    if (message.role !== 'tool' || typeof message.content !== 'string') continue;
+    const formatted = presentedFileRead(message.content);
+    if (formatted?.path === path) return formatted.baseRef;
+    try {
+      const value = JSON.parse(message.content);
+      if (value?.path === path && typeof value.base_ref === 'string') return value.base_ref;
+    } catch {
+      // Other finite tool results need not use JSON.
+    }
+  }
+  return undefined;
+}
+
 /** Explicit fixture-language migration. Unsupported semantics fail before emitting a response. */
 export async function migrateOriginalToolCall(
   call: OriginalToolCall,
@@ -213,25 +230,33 @@ export async function migrateOriginalToolCall(
       throw Error('retired_file_search_requires_shell_migration');
     case 'write_file':
       keys(a, ['path', 'content'], call.name);
-      args = {
-        path: workspacePath(text(a, 'path'), scope),
-        content: text(a, 'content'),
-        base: await currentBaseline(text(a, 'path'), scope),
-      };
-      if (isAbsolute(String(args.path))) throw Error('external_write_requires_shell');
+      {
+        const path = workspacePath(text(a, 'path'), scope);
+        if (isAbsolute(path)) throw Error('external_write_requires_shell');
+        const baseRef = request && observedBaseRef(path, request.messages);
+        const base = baseRef ? undefined : await currentBaseline(path, scope);
+        if (request && base && !baseRef)
+          throw Error('original_tool_write_requires_observed_baseline');
+        args = {
+          path,
+          content: text(a, 'content'),
+          ...(baseRef ? { baseRef } : request ? {} : { base }),
+        };
+      }
       break;
     case 'edit_file': {
       keys(a, ['path', 'old_string', 'new_string', 'replace_all'], call.name);
-      const path = text(a, 'path'),
+      const path = workspacePath(text(a, 'path'), scope),
         find = text(a, 'old_string'),
         replace = text(a, 'new_string');
       if (!find) throw Error('original_tool_edit_empty_find');
-      const base = await currentBaseline(path, scope);
-      if (!base) throw Error('original_tool_edit_baseline_missing');
+      if (isAbsolute(path)) throw Error('external_write_requires_shell');
+      const baseRef = request && observedBaseRef(path, request.messages);
+      const base = request ? undefined : await currentBaseline(path, scope);
+      if (!baseRef && !base) throw Error('original_tool_edit_baseline_missing');
       if (a.replace_all === true)
         throw Error('original_tool_edit_replace_all_requires_scenario_migration');
-      args = { path: workspacePath(path, scope), find, replace, occurrences: 1, base };
-      if (isAbsolute(String(args.path))) throw Error('external_write_requires_shell');
+      args = { path, find, replace, occurrences: 1, ...(baseRef ? { baseRef } : { base }) };
       break;
     }
     case 'shell_execute':

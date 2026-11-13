@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 test('Linux private directories are prepared only at authorized dispatch and retain the original namespace owner', () => {
   const jobPath = fileURLToPath(new URL('../../../src/jobs/shell.ts', import.meta.url));
@@ -9,7 +10,7 @@ test('Linux private directories are prepared only at authorized dispatch and ret
   );
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import * as actualFS from 'node:fs';
 import {mkdtempSync,mkdirSync,writeFileSync,realpathSync,existsSync,readdirSync,renameSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -30,7 +31,7 @@ try {
  for(const path of [workspace,tempBase,assets,profile])mkdirSync(path);
  const init=join(assets,'init'),bwrap=join(assets,'bwrap'),bun=join(assets,'bun'),shell=join(assets,'shell');
  for(const path of [init,bwrap,bun,shell])writeFileSync(path,'fixed test asset');
- const options={cwd:workspace,env:{PATH:'/usr/bin:/bin'},linux:{bubblewrapPath:bwrap,initExecutable:init},bubblewrapPath:bwrap,bunExecutable:bun,shellExecutable:shell,protectedRoots:[profile],readonlyAssets:[assets],temporaryRoot:tempBase,filesystemScope:'full_access'};
+ const options={cwd:workspace,env:{PATH:'/usr/bin:/bin'},linux:{bubblewrapPath:bwrap,initExecutable:init},bubblewrapPath:bwrap,runtimeExecutable:bun,shellExecutable:shell,protectedRoots:[profile],readonlyAssets:[assets],temporaryRoot:tempBase,filesystemScope:'full_access'};
  const job=createLinuxHostShellJob({...options,protectedFiles:[auth]});
  assert.equal(job.id,'shell.command');assert.equal(ownerCalls,0);assert.equal(existsSync(home),false);
  const before=readdirSync(tempBase);
@@ -52,10 +53,14 @@ try {
  assert.equal(ownerCalls,expectedCalls+1);assert.deepEqual(readdirSync(tempBase),before);assert.equal(descriptorPaths.size,0);
 } finally {rmSync(root,{recursive:true,force:true});}
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    timeout: 4000,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      timeout: 4000,
+      encoding: 'utf8',
+    },
+  );
   if (result.status !== 0) console.error(result.stderr);
   expect(result.error).toBeUndefined();
   expect(result.signal).toBeNull();
@@ -72,7 +77,7 @@ test('Linux ordinary Job preserves the full output, cancellation and retained un
   );
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import {PassThrough} from 'node:stream';
 import {mkdtempSync,mkdirSync,writeFileSync,realpathSync,existsSync,readdirSync,renameSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -104,7 +109,7 @@ mock.module(${JSON.stringify(ownerPath)},()=>({...actualOwner,startLinuxOwnedShe
  return {pid:p,stdout,stderr,ready:Promise.resolve(),completion,cancel(){finish('cancel');return completion;},readProcessEvidence(){return structuredClone(evidence);}};
 }}));
 const {createLinuxHostShellJob,decodeShellProcessEvidence,shellProcessEvidenceEnded}=await import(${JSON.stringify(jobPath)});
-const job=createLinuxHostShellJob({cwd:workspace,env:{PATH:'/usr/bin:/bin',HOME:'/original/home',FIXED:'selected',LD_PRELOAD:'forbidden',BASH_ENV:'forbidden'},linux:{bubblewrapPath:bwrap,initExecutable:init},bubblewrapPath:bwrap,bunExecutable:process.execPath,shellExecutable:'/bin/sh',protectedRoots:[profile,join(profile,'.coordination')],readonlyAssets:[assets],temporaryRoot:tempBase,filesystemScope:ctx=>ctx.executionId==='full'?'full_access':'workspace_write',maxQueuedBytes:1024});
+const job=createLinuxHostShellJob({cwd:workspace,env:{PATH:'/usr/bin:/bin',HOME:'/original/home',FIXED:'selected',LD_PRELOAD:'forbidden',BASH_ENV:'forbidden'},linux:{bubblewrapPath:bwrap,initExecutable:init},bubblewrapPath:bwrap,runtimeExecutable:process.execPath,shellExecutable:'/bin/sh',protectedRoots:[profile,join(profile,'.coordination')],readonlyAssets:[assets],temporaryRoot:tempBase,filesystemScope:ctx=>ctx.executionId==='full'?'full_access':'workspace_write',maxQueuedBytes:1024});
 const start=(input={command:'original command'},executionId='workspace')=>job.start(input,{sessionId:'s',executionId,signal:new AbortController().signal});
 const collect=async handle=>{const all=[];for await(const event of job.observe(handle))all.push(event);return all;};
 try {
@@ -128,10 +133,14 @@ try {
 } finally {rmSync(root,{recursive:true,force:true});}
 process.exit(0);
 `;
-  const result = spawnSync(process.execPath, ['--eval', source], {
-    timeout: 4000,
-    encoding: 'utf8',
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '--eval', source],
+    {
+      timeout: 4000,
+      encoding: 'utf8',
+    },
+  );
   if (result.status !== 0) console.error(result.stderr);
   expect(result.error).toBeUndefined();
   expect(result.signal).toBeNull();

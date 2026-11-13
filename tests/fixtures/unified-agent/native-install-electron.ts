@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { NativeState } from '../../../apps/desktop/src/native-bridge';
 import { selectNativeFixtureModel } from '../../../apps/desktop/test/native-model-selection.fixture';
 
@@ -13,6 +14,7 @@ interface Locator {
   waitFor(): Promise<void>;
 }
 interface Page {
+  url(): string;
   setDefaultTimeout(value: number): void;
   getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
   getByText(text: string, options: { exact: boolean }): Locator;
@@ -33,22 +35,26 @@ async function selectedState(page: Page, matches: (state: NativeState) => boolea
 }
 interface ElectronApp {
   process(): import('node:child_process').ChildProcess;
-  firstWindow(): Promise<Page>;
+  windows(): Page[];
   evaluate<T>(
-    fn: (input: {
-      app: { quit(): void; commandLine: { hasSwitch(name: string): boolean } };
-      BrowserWindow: {
-        getAllWindows(): {
-          webContents: {
+    fn: (
+      input: {
+        app: { quit(): void; commandLine: { hasSwitch(name: string): boolean } };
+        BaseWindow: { getAllWindows(): { isVisible(): boolean }[] };
+        webContents: {
+          getAllWebContents(): {
+            getURL(): string;
             getLastWebPreferences(): {
               sandbox?: boolean;
               contextIsolation?: boolean;
               nodeIntegration?: boolean;
             };
-          };
-        }[];
-      };
-    }) => T,
+          }[];
+        };
+      },
+      rendererUrl: string,
+    ) => T,
+    rendererUrl: string,
   ): Promise<T>;
   close(): Promise<void>;
 }
@@ -74,20 +80,37 @@ const displayEnvironment: Record<string, string> =
   process.platform === 'linux'
     ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
     : {};
-const security = async (current: ElectronApp) => {
-  const actual = await current.evaluate(({ app, BrowserWindow }) => ({
-    sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
-    windows: BrowserWindow.getAllWindows().map((window) => {
-      const options = window.webContents.getLastWebPreferences();
-      return {
-        sandbox: options.sandbox,
-        contextIsolation: options.contextIsolation,
-        nodeIntegration: options.nodeIntegration,
-      };
+async function primaryWindow(current: ElectronApp, rendererUrl: string) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const page = current.windows().find((candidate) => candidate.url() === rendererUrl);
+    if (page) return page;
+    if (Date.now() >= deadline) throw Error('native_installed_renderer_unavailable');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+const security = async (current: ElectronApp, rendererUrl: string) => {
+  const actual = await current.evaluate(
+    ({ app, BaseWindow, webContents }, url) => ({
+      sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
+      visibleWindows: BaseWindow.getAllWindows().filter((window) => window.isVisible()).length,
+      windows: webContents
+        .getAllWebContents()
+        .filter((contents) => contents.getURL() === url)
+        .map((contents) => {
+          const options = contents.getLastWebPreferences();
+          return {
+            sandbox: options.sandbox,
+            contextIsolation: options.contextIsolation,
+            nodeIntegration: options.nodeIntegration,
+          };
+        }),
     }),
-  }));
+    rendererUrl,
+  );
   assert.deepEqual(actual, {
     sandboxDisabled: false,
+    visibleWindows: 1,
     windows: [{ sandbox: true, contextIsolation: true, nodeIntegration: false }],
   });
 };
@@ -132,6 +155,14 @@ const query = async (path: string) => {
   }
 };
 try {
+  const identity = (await query('identity')) as {
+    firstId: string;
+    secondId: string;
+    firstRenderer: string;
+    firstRuntime: string;
+    secondRenderer: string;
+    secondRuntime: string;
+  };
   diagnostic('first_launch_begin');
   app = await _electron.launch({
     executablePath: launcher,
@@ -151,13 +182,14 @@ try {
     chromiumSandbox: true,
   });
   diagnostic('first_launch_ready');
-  const page = await app.firstWindow();
-  await security(app);
+  const firstUrl = pathToFileURL(identity.firstRenderer).href;
+  const page = await primaryWindow(app, firstUrl);
   page.setDefaultTimeout(10000);
   await page
     .getByRole('navigation', { name: '当前项目会话', exact: true })
     .getByRole('button', { name: 'Native installed', exact: true })
     .click();
+  await security(app, firstUrl);
   const state = await selectedState(
     page,
     (current) =>
@@ -174,9 +206,8 @@ try {
     .filter(
       (parts) =>
         Number(parts[1]) === app!.process().pid &&
-        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')).endsWith(
-          '/terminal/runtime/bun',
-        ),
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) ===
+          identity.firstRuntime,
     );
   assert.equal(ps.length, 1);
   childPid = Number(ps[0]![0]);
@@ -191,7 +222,7 @@ try {
   await page.getByText('轮次：completed', { exact: true }).waitFor();
   assert.equal((await query('count')).providerCalls, 1);
   const upgraded = await query('upgrade');
-  assert.equal(upgraded.previousCandidateId, (await query('identity')).firstId);
+  assert.equal(upgraded.previousCandidateId, identity.firstId);
   assert.deepEqual(await query('locks'), { outer: true, inner: true });
   assert.equal((await query('uninstall')).blocked, true);
   const pid = childPid!;
@@ -217,13 +248,14 @@ try {
   second
     .process()
     .once('close', (code, signal) => diagnostic('second_main_close', { code, signal }));
-  const cold = await second.firstWindow();
-  await security(second);
+  const secondUrl = pathToFileURL(identity.secondRenderer).href;
+  const cold = await primaryWindow(second, secondUrl);
   cold.setDefaultTimeout(10000);
   await cold
     .getByRole('navigation', { name: '当前项目会话', exact: true })
     .getByRole('button', { name: 'Native installed', exact: true })
     .click();
+  await security(second, secondUrl);
   await cold.getByText('Native installed complete', { exact: true }).waitFor();
   assert.equal((await query('count')).providerCalls, 1);
   assert.equal((await query('uninstall')).blocked, true);
@@ -234,9 +266,8 @@ try {
     .filter(
       (parts) =>
         Number(parts[1]) === second.process().pid &&
-        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')).endsWith(
-          '/terminal/runtime/bun',
-        ),
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) ===
+          identity.secondRuntime,
     );
   assert.equal(secondChildren.length, 1);
   childPid = Number(secondChildren[0]![0]);
@@ -259,7 +290,7 @@ try {
   diagnostic('second_service_locks_released');
   childPid = undefined;
   const rolled = await query('rollback');
-  assert.equal(rolled.candidateId, (await query('identity')).firstId);
+  assert.equal(rolled.candidateId, identity.firstId);
   assert.equal((await query('uninstall')).removed, true);
   diagnostic('before_success');
   console.log(

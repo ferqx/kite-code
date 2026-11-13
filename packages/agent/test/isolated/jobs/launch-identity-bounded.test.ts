@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 // Each child owns its fs mocks; unrelated Shell tests never inherit instrumentation.
 const scenarios = [
@@ -24,7 +26,7 @@ for (const scenario of scenarios)
         `
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import * as fs from 'node:fs';
 const actual = { ...fs };
 const root = ${JSON.stringify(root)}, scenario = ${JSON.stringify(scenario)};
@@ -58,7 +60,7 @@ mock.module('node:fs', () => ({ ...actual,
    return count;
  }
 }));
-const { launchIdentity, verifyLaunchIdentities } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dir, '../../../src/jobs/launch-identity.ts')).href)});
+const { launchIdentity, verifyLaunchIdentities } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, '../../../src/jobs/launch-identity.ts')).href)});
 function run(action) {
  tracking = true;
  try { return action(); } finally { tracking = false; assert.equal(live.size, 0, 'all opened descriptors close on success and failure'); }
@@ -90,7 +92,10 @@ if (scenario === 'sizes-and-short-reads') {
 }
 `,
       );
-      const child = Bun.spawn([process.execPath, script], { stdout: 'ignore', stderr: 'pipe' });
+      const child = spawnProcess([process.execPath, ...testRuntimeFlags, script], {
+        stdout: 'ignore',
+        stderr: 'pipe',
+      });
       const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
       expect(stderr).toBe('');
       expect(code).toBe(0);

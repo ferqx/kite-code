@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeConversationResult,
@@ -174,9 +174,9 @@ test('actual React DOM keeps the new selected view when an original creation rec
   try {
     await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Original A');
-    expect(
-      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
-    ).toBe('original text');
+    expect(promptValue(dom.window.document.querySelector('textarea.prompt-editor'))).toBe(
+      'original text',
+    );
     await click('在 Workspace 中新建对话');
     expect(posts).toBe(0);
     await act(async () => {
@@ -194,9 +194,9 @@ test('actual React DOM keeps the new selected view when an original creation rec
     await click('发送首条消息');
     expect(posts).toBe(1);
     await click('Other B');
-    expect(
-      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
-    ).toBe('other text');
+    expect(promptValue(dom.window.document.querySelector('textarea.prompt-editor'))).toBe(
+      'other text',
+    );
     await act(async () =>
       release({
         kind: 'conversation',
@@ -213,10 +213,10 @@ test('actual React DOM keeps the new selected view when an original creation rec
     ).toBe(true);
     expect(selected).toBe('b');
     expect(posts).toBe(1);
-    expect(
-      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
-    ).toBe('other text');
-    const composer = dom.window.document.querySelector('[role="textbox"][contenteditable]'),
+    expect(promptValue(dom.window.document.querySelector('textarea.prompt-editor'))).toBe(
+      'other text',
+    );
+    const composer = dom.window.document.querySelector('textarea.prompt-editor'),
       conversation = dom.window.document.querySelector('[aria-label="会话消息"]');
     expect(composer).not.toBeNull();
     expect(conversation).not.toBeNull();
@@ -228,10 +228,10 @@ test('actual React DOM keeps the new selected view when an original creation rec
     );
     expect(dom.window.document.querySelector('#native-session-tools')).toBeNull();
     expect(dom.window.document.querySelector('[aria-label="会话消息"]')).toBe(conversation);
-    expect(dom.window.document.querySelector('[role="textbox"][contenteditable]')).toBe(composer);
-    expect(
-      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
-    ).toBe('other text');
+    expect(dom.window.document.querySelector('textarea.prompt-editor')).toBe(composer);
+    expect(promptValue(dom.window.document.querySelector('textarea.prompt-editor'))).toBe(
+      'other text',
+    );
     expect(posts).toBe(1);
   } finally {
     if (submitted)

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { describe, expect, it } from '#kite-test';
 import {
   type DocumentationMap,
   documentationPatternError,
@@ -213,7 +213,7 @@ describe('documentation impact gate V2', () => {
   });
 
   it('assigns every workspace production file to exactly one documentation owner', () => {
-    const repositoryRoot = join(import.meta.dir, '..', '..');
+    const repositoryRoot = join(import.meta.dirname, '..', '..');
     const manifest = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
       workspaces: string[];
     };

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { createTuiSystemJourney } from './journey';
 
 describe('TUI system journey', () => {
@@ -57,7 +57,7 @@ describe('TUI system journey', () => {
     expect(settled).toBe(true);
   });
 
-  test('reports the active step before the outer Bun and file deadlines', async () => {
+  test('reports the active step before the outer test and file deadlines', async () => {
     const journey = createTuiSystemJourney();
     journey.step(
       'active at journey deadline',

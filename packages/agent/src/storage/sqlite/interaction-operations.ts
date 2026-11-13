@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 import Ajv from 'ajv';
-import { and, eq, or } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { executionConfirmationBinding } from '../../execution-confirmation';
 import { canonicalJson } from '../../json';
 import { selectedApprovalOption } from '../../permission-grants';
@@ -16,7 +14,6 @@ import {
 import { verifyHostControlReads } from './host-control-dispatch';
 import type { SqliteOperations } from './operations';
 import { revokePermissionGrant, savePermissionGrant } from './permission-grants';
-import { interactions } from './schema';
 
 type Row = Record<string, string | number | bigint | null | undefined>;
 const digest = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -583,23 +580,13 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
       if (!session) throw new AgentError('session_not_found');
       let result: unknown;
       if (method === 'getInteraction') {
-        const selected = drizzle(db.db)
-          .select({ id: interactions.id })
-          .from(interactions)
-          .where(
-            and(
-              eq(interactions.id, input.interactionId),
-              input.origin === 'all'
-                ? undefined
-                : eq(interactions.originStoreId, input.expectedStoreId),
-              or(
-                eq(interactions.sessionId, input.sessionId),
-                eq(interactions.presentationSessionId, input.sessionId),
-              ),
-            ),
-          )
-          .get();
-        const row = selected ? db.row('SELECT * FROM interaction WHERE id=?', selected.id) : null;
+        const row = db.row(
+          `SELECT * FROM interaction WHERE id=? AND (session_id=? OR presentation_session_id=?)${input.origin === 'all' ? '' : ' AND origin_store_id=?'}`,
+          input.interactionId,
+          input.sessionId,
+          input.sessionId,
+          ...(input.origin === 'all' ? [] : [input.expectedStoreId]),
+        );
         result = row ? record(row) : null;
       } else {
         if (

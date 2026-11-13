@@ -8,9 +8,9 @@
  * so live output continues to repaint.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { tuiSystemDelay } from '../harness/cancellation';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -55,11 +55,11 @@ type OldShell = {
 
 describe('TUI PTY System — cancel shell then render successor', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
         language: 'en-US',
@@ -115,7 +115,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
     tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
-      entryPath: resolve(import.meta.dir, '..', 'fixtures', 'cancel-successor-tui.tsx'),
+      entryPath: resolve(import.meta.dirname, '..', 'fixtures', 'cancel-successor-tui.tsx'),
       mockServer: server,
       workspace,
     });

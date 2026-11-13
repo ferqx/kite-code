@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { runInNewContext } from 'node:vm';
 import { JSDOM } from 'jsdom';
+import { expect, test } from '#kite-test';
 import { browserTypingCursorScript } from '../../electron/browser-typing-cursor';
 
 test('fixed focus read returns clipped viewport coordinates without reading text or changing focus', () => {

@@ -1,4 +1,3 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { createPermissionManagement } from '../../../apps/service/src/permission-management';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -19,17 +19,17 @@ const TIMEOUT = 30_000;
 
 describe('TUI PTY System - background sandbox startup', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace();
     workspace.env.CI = 'true';
     tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
-      entryPath: resolve(import.meta.dir, '..', 'fixtures', 'deferred-sandbox-tui.tsx'),
+      entryPath: resolve(import.meta.dirname, '..', 'fixtures', 'deferred-sandbox-tui.tsx'),
       mockServer: server,
       workspace,
     });
@@ -53,7 +53,7 @@ describe('TUI PTY System - background sandbox startup', () => {
 test(
   'sandbox unavailability does not block an unrelated TUI model turn',
   async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     const workspace = createTestWorkspace();
     let tui: PtyProcess | undefined;
     try {
@@ -61,7 +61,7 @@ test(
       tui = await spawnReadyTui({
         cols: 120,
         rows: 40,
-        entryPath: resolve(import.meta.dir, '..', 'fixtures', 'unavailable-sandbox-tui.tsx'),
+        entryPath: resolve(import.meta.dirname, '..', 'fixtures', 'unavailable-sandbox-tui.tsx'),
         mockServer: server,
         workspace,
       });
@@ -82,7 +82,7 @@ test(
 test(
   'external Git metadata drift does not block a TUI model turn or authorize its read root',
   async () => {
-    const server = createMockModelServer();
+    const server = await createMockModelServer();
     const workspace = createTestWorkspace();
     const externalGit = mkdtempSync(join(tmpdir(), 'kite-tui-external-git-'));
     const profile = selectProfile(workspace);

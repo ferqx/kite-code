@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   type AgentClient,
@@ -6,6 +5,7 @@ import {
   type InputFileImport,
   type InputFileUploadQuery,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeInputFiles } from '../electron/input-files';
 import { decodeNativeRequest } from '../electron/native-ipc';
 

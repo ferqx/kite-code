@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -12,6 +12,7 @@ import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '@kite-ai/service';
 import { startDevelopmentWeb } from '@kite-ai/service/development-web';
+import { expect, test } from '#kite-test';
 import { getCompleteContext } from '../../../apps/cli/src/context';
 import { readContext } from '../../../apps/web/src/diagnostics';
 
@@ -102,7 +103,7 @@ test('restored TUI and Cookie Context readers preserve original result provenanc
   });
   let service: Awaited<ReturnType<typeof startService>> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
-  let gateway: ReturnType<typeof startDevelopmentWeb> | undefined;
+  let gateway: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   let browser: ReturnType<typeof createBrowserClient> | undefined;
   const originalFetch = globalThis.fetch;
   try {
@@ -153,7 +154,7 @@ test('restored TUI and Cookie Context readers preserve original result provenanc
     let job = await client.getExecution(jobId);
     while (job.status !== 'succeeded') {
       if (Date.now() >= deadline) throw Error('original_job_not_complete');
-      await Bun.sleep(5);
+      await fixtureDelay(5);
       job = await client.getExecution(jobId);
     }
     const context = await client.getContext('session', { storeId: originalStoreId });
@@ -224,7 +225,7 @@ test('restored TUI and Cookie Context readers preserve original result provenanc
           methods.push(init?.method ?? (url instanceof Request ? url.method : 'GET'));
           return originalFetch(url, init);
         },
-        { preconnect: originalFetch.preconnect },
+        {},
       );
       client = createClient({
         endpoint: service.endpoint,
@@ -234,7 +235,7 @@ test('restored TUI and Cookie Context readers preserve original result provenanc
       });
       await client.connect();
       expect(client.serverInfo?.storeId).toBe(restored.storeId);
-      gateway = startDevelopmentWeb({ admittedClient: client });
+      gateway = await startDevelopmentWeb({ admittedClient: client });
       const document = await fetch(gateway.endpoint);
       await document.body?.cancel();
       const cookie = document.headers.get('set-cookie')!.split(';')[0]!;
@@ -249,7 +250,7 @@ test('restored TUI and Cookie Context readers preserve original result provenanc
             headers.set('origin', gatewayEndpoint);
             return fetch(url, { ...init, headers });
           },
-          { preconnect: fetch.preconnect },
+          {},
         ),
       });
       await browser.connect();

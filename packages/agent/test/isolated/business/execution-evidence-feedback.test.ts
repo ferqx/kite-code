@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createExecutionEvidenceExtension } from '../../../src/business/execution-evidence';
 import type { ToolContext } from '../../../src/extensions';
 import { AgentError } from '../../../src/storage/types';

@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { NativeInputFiles } from '../../electron/input-files';
 import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
 import { useNativeInputImages } from '../../src/native-input-images';

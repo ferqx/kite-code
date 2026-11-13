@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 const settings = JSON.parse(process.argv[2]!) as {
@@ -38,7 +40,7 @@ const wait = async (text: string, compact = false, deadline = Date.now() + 10000
       return;
     if (Date.now() > deadline) throw Error(`expected ${text} tail=${frame.text.slice(-5000)}`);
     if (active!.ended) throw Error('owned_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const choose = async (label: string, top = 'Project sources') => {
@@ -49,7 +51,7 @@ const choose = async (label: string, top = 'Project sources') => {
       if (frame.text.includes('❯')) return frame;
       if (Date.now() > deadline) throw Error(`owned_selection_absent:${label}`);
       if (active!.ended) throw Error('owned_pty_eof');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   };
   const initial = await selection();
@@ -68,7 +70,7 @@ const choose = async (label: string, top = 'Project sources') => {
       if (after.fresh && after.text !== before.text) break;
       if (Date.now() > deadline) throw Error(`owned_choice_deadline:${label}`);
       if (active!.ended) throw Error('owned_pty_eof');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   throw Error(`owned_choice_unavailable:${label}`);
@@ -77,7 +79,7 @@ const selectedConnection = (id: string) =>
   wait(`Originalconnection:${id}·Connectionoutcomeunknown;checkoriginal`, true);
 const start = async () => {
   active = spawnTuiPTY({
-    cmd: [process.execPath, '--no-install', join(settings.root, 'host.js')],
+    cmd: [process.execPath, ...testRuntimeFlags, join(settings.root, 'host.js')],
     cwd: settings.root,
     env: {
       HOME: settings.root,
@@ -115,7 +117,7 @@ const lookupDetail = async () => {
 const close = async () => {
   await key('\x11');
   const deadline = Date.now() + 6000;
-  while (!active!.ended && Date.now() < deadline) await Bun.sleep(50);
+  while (!active!.ended && Date.now() < deadline) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([active!.host.exited, active!.eof]),
     3000,

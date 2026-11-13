@@ -1,5 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, verifyModelInputSnapshot } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 import { readModelInputResponse } from '../../src/model-input';
@@ -94,9 +96,9 @@ test('public input verifier freezes its own complete bytes against alias mutatio
   ).toBe(controller.signal.reason);
 });
 
-function fixture(read: (request: Request) => Response | Promise<Response>) {
+async function fixture(read: (request: Request) => Response | Promise<Response>) {
   const requests: Request[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -172,7 +174,7 @@ test('malformed size metadata cancels an unconsumed body before releasing its ne
 test('real Native and Cookie-only reads verify complete original messages/schema beyond the ordinary JSON budget', async () => {
   const content = `BEGIN α${'x'.repeat(17 * 1024 * 1024)}\0 END`;
   const original = snapshot(content);
-  const f = fixture(() => body(original));
+  const f = await fixture(() => body(original));
   try {
     await f.native.connect();
     await f.browser.connect();
@@ -207,7 +209,7 @@ test('truncated, corrupt, foreign and unconfirmed-inconsistent snapshots fail wi
     { value: { ...snapshot(), confirmation: 'unconfirmed' }, code: 'model_input_hash_mismatch' },
   ];
   for (const sample of cases) {
-    const f = fixture(() => body(sample.value, sample.change));
+    const f = await fixture(() => body(sample.value, sample.change));
     try {
       await f.browser.connect();
       await expect(f.browser.getModelInput('session', 'model')).rejects.toThrow(sample.code);
@@ -225,7 +227,7 @@ test('pending wire reads are released locally and a prepared original request st
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const f = fixture(async () => {
+  const f = await fixture(async () => {
     entered = true;
     await gate;
     return body(original);
@@ -238,7 +240,7 @@ test('pending wire reads are released locally and a prepared original request st
     const deadline = Date.now() + 3000;
     while (!entered) {
       if (Date.now() > deadline) throw new Error('wire_read_deadline');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     abort.abort();
     expect(await rejected).toBeInstanceOf(Error);
@@ -261,7 +263,7 @@ test('abort and Browser disposal reject a large response while its producer is s
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const f = fixture(() => {
+    const f = await fixture(() => {
       let offset = 0;
       return new Response(
         new ReadableStream<Uint8Array>({
@@ -299,13 +301,13 @@ test('abort and Browser disposal reject a large response while its producer is s
       const deadline = Date.now() + 3000;
       while (!entered) {
         if (Date.now() > deadline) throw new Error('first_wire_chunk_deadline');
-        await Bun.sleep(1);
+        await fixtureDelay(1);
       }
       if (mode === 'native-abort') abort.abort();
       else f.browser.disposeNetwork();
       const result = await Promise.race([
         rejected,
-        Bun.sleep(1000).then(() => 'read_did_not_release'),
+        fixtureDelay(1000).then(() => 'read_did_not_release'),
       ]);
       expect(result).toBeInstanceOf(Error);
       expect(f.requests).toHaveLength(2);
@@ -344,7 +346,7 @@ test('directory bounds and exact Session identity are checked before publishing 
     ],
   };
   let selected = page;
-  const f = fixture(
+  const f = await fixture(
     () =>
       new Response(JSON.stringify(selected), {
         headers: { 'x-kite-web-identity': pageIdentity },

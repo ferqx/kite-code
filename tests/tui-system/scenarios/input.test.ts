@@ -5,8 +5,8 @@
  * and full message send → agent response cycle.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
@@ -31,11 +31,11 @@ const TIMEOUT = 30000;
 
 describe('TUI PTY System — Input & Message', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       files: {
         'package.json': '{"name":"input-search-fixture"}\n',

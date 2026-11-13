@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -9,6 +9,7 @@ import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { createDesktopController } from '@kite-ai/desktop';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { observeCommand } from '../../src';
 
 test('actual 40 sibling Job approvals: CLI exhausts original pending pages and Desktop reads/answers bounded window', async () => {
@@ -162,7 +163,7 @@ test('actual 40 sibling Job approvals: CLI exhausts original pending pages and D
         console.error(JSON.stringify({ directory, tail, view: await client.getView('s') }));
         throw Error('pending_fixture_timeout');
       }
-      await Bun.sleep(5);
+      await testSleep(5);
       directory = await client.listInteractions('s', { storeId, state: 'pending', limit: 20 });
       tail = directory.nextAfterId
         ? await client.listInteractions('s', {

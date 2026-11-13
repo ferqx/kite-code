@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { readTuiProgress } from '../host/tui-progress';
 
 const view = {

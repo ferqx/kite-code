@@ -1,6 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -150,7 +151,7 @@ export async function largeInteractionFixture() {
         .interactions[0];
       if (card) return card;
       if (Date.now() > end) throw new Error('large_interaction_deadline');
-      await Bun.sleep(5);
+      await testSleep(5);
     }
   }
   return {

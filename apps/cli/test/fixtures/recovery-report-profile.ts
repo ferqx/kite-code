@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
@@ -14,7 +13,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { loopbackModelEnvironment } from '../../../../tests/fixtures/loopback-model-environment';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -38,7 +40,7 @@ export async function recoveryReportProfile() {
     childCalls = 0,
     reviewCalls = 0;
   let warm: Awaited<ReturnType<typeof launchPairedService>> | undefined;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -168,9 +170,9 @@ await runServiceProcess({configure(startup){
   return host;
 }});`,
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [source],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: artifactRoot,
     });

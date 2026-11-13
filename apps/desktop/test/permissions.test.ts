@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +13,7 @@ import {
 } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { createDesktopController } from '../src';
 

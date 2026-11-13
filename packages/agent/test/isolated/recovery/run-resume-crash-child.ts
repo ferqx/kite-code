@@ -1,5 +1,6 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
@@ -53,7 +54,7 @@ const wrapped = new Proxy(store, {
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
-            await Bun.sleep(5);
+            await sleepTimer(5);
           }
         }
         return result;
@@ -68,7 +69,7 @@ const wrapped = new Proxy(store, {
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
             }
-            await Bun.sleep(5);
+            await sleepTimer(5);
           }
         }
         await new Promise<void>(() => {});
@@ -85,7 +86,7 @@ const wrapped = new Proxy(store, {
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
-            await Bun.sleep(5);
+            await sleepTimer(5);
           }
         }
 
@@ -108,7 +109,7 @@ const wrapped = new Proxy(store, {
                 (mode === 'group_queued' ? 4 : 3)
               )
                 await stop(root.executions.filter((item) => item.kind === 'model').at(-1)!.id);
-              await Bun.sleep(5);
+              await sleepTimer(5);
             }
           }
         }
@@ -178,7 +179,7 @@ const wrapped = new Proxy(store, {
               await stop(
                 root.executions.filter((execution) => execution.kind === 'model').at(-1)!.id,
               );
-            await Bun.sleep(5);
+            await sleepTimer(5);
           }
         }
         if (mode === 'dispatched' && (await store.getExecution(input.executionId))?.kind === 'tool')

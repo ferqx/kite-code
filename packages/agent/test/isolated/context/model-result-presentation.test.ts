@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { formatChildResult } from '../../../src/model-result-presentation';
 import type { ExecutionRecord, Json } from '../../../src/storage/types';
 

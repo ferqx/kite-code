@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createBrowserClient } from '../../src/browser';
 import { decodeResponse } from '../../src/decode';
 import {
@@ -186,7 +187,7 @@ test('Cookie SDK finite read targets and optional query values, wrong scopes and
     release: (() => void) | undefined,
     started: (() => void) | undefined;
   const requests: { url: string; method: string; authorization: string | null }[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {

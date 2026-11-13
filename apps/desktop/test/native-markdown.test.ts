@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { ModelOutputSnapshot } from '@kite-ai/client';
 import type { DesktopMarkdownTree } from '@kite-ai/ui/desktop';
+import { expect, test } from '#kite-test';
 import {
   type MarkdownWorker,
   NativeMarkdownOwner,

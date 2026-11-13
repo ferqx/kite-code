@@ -19,6 +19,7 @@ import type {
 } from '../extensions';
 import { JobStartError } from '../extensions';
 import { canonicalJson, semanticDigest } from '../json';
+import { modelExecutionError } from '../model-attempt';
 import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
@@ -1365,7 +1366,8 @@ export class UnifiedExecution {
         executionId,
         finishReason: finish.reason,
       };
-    } catch (error) {
+    } catch (cause) {
+      const error = modelExecutionError(cause);
       if (dispatched && (content || reasoning) && !output)
         await this.options.store
           .persistModelPartial({

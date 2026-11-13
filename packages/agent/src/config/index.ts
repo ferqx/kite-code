@@ -1,5 +1,6 @@
 /** Explicit host-only configuration/credential leaf. Import does not discover or open files. */
 
+export { acquireFileLock, assertLiveLock, LockBusyError } from '../platform/locks';
 export {
   type CredentialBackend,
   type CredentialReference,

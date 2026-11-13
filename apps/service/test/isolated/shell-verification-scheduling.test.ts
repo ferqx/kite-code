@@ -1,5 +1,7 @@
-import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
@@ -12,7 +14,7 @@ test.skipIf(process.platform !== 'win32')(
     const fixture = fileURLToPath(
       new URL('../fixtures/shell-verification-scheduling.ts', import.meta.url),
     );
-    const child = Bun.spawn([process.execPath, fixture, root], {
+    const child = spawnProcess([process.execPath, ...testRuntimeFlags, fixture, root], {
       stdout: 'pipe',
       stderr: 'pipe',
       windowsHide: true,

@@ -4,7 +4,9 @@
 
 ## 构建与操作
 
-Git Worktree 的独立 `tools/git-worktree/worker.js`、无 preload 配置、SHA256 manifest 与空 hooks 目录由 Agent 的同一次 build 发布，Terminal 在 build 时严格校验并纳入原文件库存。空目录由准确 worker/config/manifest 三文件闭包派生；现有 manifest v1不变，搬迁、Windows Native 私有复制和 Native/Terminal 解包只重建这个固定空目录，缺失、内容或链接都不能取得能力。Windows原生 pin 同时固定这份派生目录，保持原祖先和文件验证。
+新 Terminal 候选默认使用 Node 26.13.1，可交给完整 Native 构建。构建前先运行 `bun run prepare:node-inputs`；也可用 `--node-distribution` 传入目标平台的固定官方归档。`kite`、`kite-tui`、配套 Service、daemon 及系统助手从当前候选加载。独立 Terminal 登记到 Node Native 前需选用能读取 Node 清单的候选。归档和安装命令见 [Native 发行说明](../../desktop/docs/native-release.md#构建与安装)。
+
+Git Worktree 的独立 `tools/git-worktree/worker.js`、SHA256 manifest 与空 hooks 目录由 Agent 同次 build 生成，Terminal 构建时核对实际字节。Node Worker 不加载工作目录预置，空 hooks 目录从准确 worker/manifest 派生；旧 Bun 制品按原三文件闭包核验。manifest v1 不变，搬迁和解包只重建这个固定空目录；缺失、内容或链接都不能取得能力。
 
 2026-11-06，`8e350f99` 加本轮差量、macOS arm64／Bun1.4.4／Git2.54.0，[完整 Terminal bundle](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)1项1923断言通过：全新构建、归档、源码输出删除、重定位和临时安装后，用安装Bun/公开包和真实SQLite执行 `git_worktree` list/create/remove→5个原Shell Job，完整帧返回真实仓库、创建内容和删除事实，并确认新分支保留，再继续原CLI/daemon/维护旅程。隔离子进程显式使用回环测试代理旁路，避免本机OS SOCKS配置在到达受控Provider前拒绝；生产代理规则未改。macOS Git实际程序在首次Host装配封存，避免Apple调度桩的沙箱外xcrun缓存写入；未扩大权限或放宽异常stderr门禁。Linux/Windows实机制品、完整三平台资格仍未取得。
 
@@ -28,11 +30,18 @@ Git Worktree 的独立 `tools/git-worktree/worker.js`、无 preload 配置、SHA
 
 Windows 的完整原文件 owner 现可由同进程 verifier/归档复用；每次仍扫描准确库存、全部 SHA 和原对象/ACL，复制、错根、关闭或部分关闭的对象不提供权利。归档从原 HANDLE 读完整字节，压缩后复验保持。私有批量写入仅合并祖先持有，CREATE_NEW、每文件 Flush 和关闭未知保资源的合同保持。AI/Agent/Service/UI 的[明确普通 JS 构建声明](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)减少重复 npm 文件，React/React DOM、原生资产、WASM 和 jsdom 动态资源仍完整物化；构建扫描残余 bare import，并保安装声明图的原 manifest 摘要和许可全文。CLI renderer 与 hooks 共用 UI 的 Ink 入口。安装前门的错误出口优先保留有界业务 `code`（如 `owner_busy`），未知细节仍只返回原封闭 fallback；不把维护忙拒绝误写成注册失败。
 
-根 `npm run agent`／`npm run tui` 使用固定 `dist/unified-terminal`，先执行 `npm run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `npm run build` 后 `npm run cli:dev`／`npm run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
+根 `bun run agent`／`bun run tui` 使用固定 `dist/unified-terminal`，先执行 `bun run prepare:node-inputs` 和 `bun run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `bun run build` 后 `bun run cli:dev`／`bun run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
 
-在已经安装仓库依赖的 checkout 中，当前 CI 使用 Bun 1.4.4；本轮 Windows 定向对照范围见[运行时升级记录](../../../tests/README.md#运行时升级与模型连接池)，各平台完整发行资格仍须独立取得。所有目标路径由调用者明确指定；构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新的目录或本工具已经标记的安装根。下例的占位路径需要替换；SHA256 使用 pack 返回的准确值。
+在已经安装仓库依赖的 checkout 中，构建脚本和正式测试使用 Node 26.13.1。Bun 1.4.4 冻结安装 `bun.lock` 的依赖并打包 JS／TS。构建与解包目录、归档和校验 sidecar 必须不存在，安装 prefix 必须是新目录或本工具标记的安装根。下例的 SHA256 使用 pack 返回的准确值。
+
+2026-11-13，在 macOS arm64 实际验证 Node 候选 `e0f155e0fa95e00bb8422c146a952c668d93897eed6229e32c59d8a61e230aa2`。[终端整包测试](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)重新归档、搬迁、安装后核对 Node 26.13.1，`runtime/` 只含 Node 与许可证。系统 PATH 中没有 Node 或 Bun。CLI 执行回环模型和 Git Worktree，SQLite 读回原回复，真实 PTY 读取同一回复并正常退出。共享 daemon 保持原身份，升级、回滚、占用时拒绝卸载及停止后卸载保数据均通过。整文件 3 项／2193 断言通过。
+
+同日改用 Bun 1.4.4 打包，Node 候选 `dfe407d87e7c6f248c533b4a6b030148f4bd3a1c424a917e1ffb9254d6808688` 的 `runtime/` 仍只有 Node 26.13.1 和许可证。并行验证中一次在标题已保存后关闭 Service，后台标题任务被记为 `service_shutdown`。以同一候选单独重跑整文件 3 项通过，覆盖归档搬迁、已安装 CLI／真实 TUI、升级、回滚和卸载。
+
+同日切回 Bun 冻结安装后，Node 候选 `7d8c53ea2f9a219e1b6245446fae6893f1b90c773a4033d84899a0b19df11757` 通过完整清单校验，并在系统 PATH 下通过 CLI、daemon、Web 和退出检查。[正式入口](../../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)与[安装器](../../../tests/isolated/unified-agent/terminal-install.test.ts)共 9 项通过，覆盖真实 PTY、两次本地模型执行、升级、回滚和卸载保数据。[终端整包测试](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)在 Worktree `create` 启动阶段超时，切换前 pnpm 安装构建的候选 `9274e176` 也在同一阶段复现，整包用例未通过。
 
 ```sh
+bun run prepare:node-inputs
 bun run release:terminal build --directory /absolute/output/candidate
 bun run release:terminal verify --directory /absolute/output/candidate
 bun run release:terminal pack --directory /absolute/output/candidate --archive /absolute/output/terminal.tar.gz
@@ -45,11 +54,11 @@ bun run release:terminal uninstall --prefix /absolute/install/kite-terminal
 
 [命令入口](../../../scripts/release/terminal.ts)先核对完整参数。`install` 先在自己创建的临时目录验证并解包，再发布到明确 prefix，最后清理该临时目录。`unpack --archive … --sha256 … --directory …` 可独立物化候选；它不安装。archive SHA256 与 candidate ID 不同：前者绑定压缩字节，后者绑定完整 manifest 字节。输出 JSON 保留这两个实际身份，不从版本文字推导身份。
 
-安装器不修改 PATH、shell 配置或应用数据，也不启动、停止或替换已有服务。POSIX 运行入口是明确 prefix 下的 `bin/kite`、`bin/kite-tui`，Windows x64 的新实现使用 `bin/kite.exe`、`bin/kite-tui.exe`；无需系统 Bun。Windows 原生资格尚未取得，具体范围见下节。默认数据根为 `~/.kite-code/unified-agent`、profile 为 `default`，不读取旧正式配置或数据库。测试必须显式使用隔离 `--data-root`、工作区与固定 Provider。运行参数及 paired/shared 行为复用 [CLI owner](../README.md)，安装不会补齐尚未迁移的旧产品能力。
+安装器不修改 PATH、shell 配置或应用数据，也不启动、停止或替换已有服务。POSIX 运行入口是明确 prefix 下的 `bin/kite`、`bin/kite-tui`，Windows x64 的新实现使用 `bin/kite.exe`、`bin/kite-tui.exe`；无需系统 Node 或 Bun。Windows 原生资格尚未取得，具体范围见下节。默认数据根为 `~/.kite-code/unified-agent`、profile 为 `default`，不读取旧正式配置或数据库。测试必须显式使用隔离 `--data-root`、工作区与固定 Provider。运行参数及 paired/shared 行为复用 [CLI owner](../README.md)，安装不会补齐尚未迁移的旧产品能力。
 
 ## 制品闭包与身份
 
-[构建器](../../../scripts/release/terminal-bundle.ts)从八个 workspace 的 build 生成 Trajectory、Trace SDK、AI、Agent、Client、UI、Service、CLI，固定实际 Bun 文件，加入 Agent SQLite Worker、迁移、Shell/MCP 监督资源、Web extractor 和 Web 静态资产。workspace 的 exports 指向实际 JS。CLI/TUI 入口引用公开 CLI 子路径，保留 package-local npm 解析位置。
+[构建器](../../../scripts/release/terminal-bundle.ts)从八个 workspace 的 build 生成 Trajectory、Trace SDK、AI、Agent、Client、UI、Service、CLI，核对固定 Node 归档并复制可执行文件及许可证，加入 Agent SQLite Worker、迁移、Shell/MCP 监督资源、Web extractor 和 Web 静态资产。workspace 的 exports 指向实际 JS。CLI/TUI 入口引用公开 CLI 子路径，保留各包的 npm 解析位置。
 
 Windows 同次候选最多并发构建两个 workspace；每个包只读取源码／已安装依赖，并写入自己的准确 outdir，同一包内的 build segments 保持串行。任一失败后不再领取其他包，等待全部在途包及其原子进程退出后才执行原失败清理；退出结果未知返回 `terminal_build_close_unconfirmed` 并保留候选。POSIX 仍逐包构建。许可全文、残余 import 扫描、exports、完整库存和 SHA／原生权限 verifier 均不跳过，也不复用旧候选。真实子进程[顺序与失败回归](../../../tests/isolated/unified-agent/terminal-workspace-build.test.ts)核最多两包、六份独立原输出、逐包段顺序，以及一包失败后原兄弟包完成、所有原进程确实退出才清理。
 
@@ -59,7 +68,7 @@ Windows 候选测试由现有私有目录夹具创建 `root/build/candidate`；�
 
 本机诊断中，补齐已内联 UI 依赖声明后，一份候选由15,170文件减至4,267文件；优化前约36.44秒库存阶段中 `readFileSync` 占35.40秒，热读同候选约1.81秒，说明冷文件读取是当次瓶颈。500个新建同类文件的有界并发对照为436毫秒、串行为2,344毫秒，完整 SHA 相同；原生逐文件 pin／hash 对照更慢，未采用。异步读取后的实际完整候选约33秒生成 manifest、约46秒进入 Provider／PTY，这些是该机器和候选的分段观测，不是跨平台性能承诺或90秒整例通过。定向故障验证覆盖打开失败、读取失败、增长、截断和关闭失败：正常路径最多8个原 reader，其他失败均等待所有已打开对象关闭，关闭未知保留候选。
 
-[依赖复制器](../../../scripts/release/terminal-dependencies.ts)按已安装包的物理依赖图复制实际版本、正文、资源与许可证；每个包保留自己的依赖边，支持 peer、多版本、alias 与循环。POSIX 只允许指向候选内部的相对链接。Windows 采用全部普通文件的物理展开，以实际共同 `node_modules` 祖先放置每个查找名的确定默认源节点；版本或 peer context 冲突仍在局部放置准确源节点，原本缺失的 optional／peer 名称不提升。保留资源及许可证，不按版本文本合并不同源节点；同版本循环复用原祖先，无法有限表达的多版本遮蔽循环明确拒绝。它不在运行时搜索 checkout、全局 node_modules 或 PATH Bun；manifest 固定实际文件字节，并不证明 npm 来源或锁文件真实性。
+[依赖复制器](../../../scripts/release/terminal-dependencies.ts)核对 `bun.lock` 与 workspace 清单、仓库内隔离安装的依赖边和实际补丁标记，再按核验过的路径复制包文件、资源与许可证。每个包保留自己的依赖边，支持 peer、多版本、alias 与循环。POSIX 只允许指向候选内部的相对链接。Windows 采用全部普通文件的物理展开，以实际共同 `node_modules` 祖先放置每个查找名的确定默认源节点。版本或 peer context 冲突在局部放置准确源节点，原本缺失的 optional／peer 名称不提升。同版本循环复用原祖先，无法有限表达的多版本遮蔽循环明确拒绝。运行时在候选内部解析依赖。manifest 绑定实际制品字节，npm 来源和锁文件的真实性需要独立验证。
 
 Windows 文件复制复用目录递归已创建的父目录，由原生 CopyFile 保留源只读属性，不再逐文件重复创建同一父目录或改写 POSIX mode；包根、目录与链接分支的创建和拒绝检查保持，最终原生 ACL／对象身份／全部 SHA 验证保持。POSIX 原路径不变。本机600个实际依赖文件、共4.34 MB的两轮正反序对照中，原复制为695／728毫秒，去掉两项重复操作后为453／469毫秒；3,600份目标逐一核完整 SHA、mode 和原生私有权限，只读与可写源的 Windows 文件属性也一致。这是局部成本证据，不能代替完整候选的原90秒门禁。
 
@@ -75,19 +84,21 @@ manifest 中声明的裸 npm 名称必须按包自己的实际解析位置复制
 
 [归档器](../../../scripts/release/terminal-archive.ts)只写普通 tar 文件，POSIX 链接以 manifest 声明保存。解包先核明确传入的 archive SHA，再拒绝 traversal、真实 tar link、重复路径、坏 PAX 与文件/链接祖先冲突；POSIX 重建已核对的内部链接后再次完整验证；Windows 清单与解包均拒绝链接，并以当前 SID 私有 DACL 新建对象。默认解压字节上限 1 GiB，API 可明确指定其他正整数；这是外部归档输入边界，不是 Agent 执行额度。归档/sidecar 使用排他创建，拒绝覆盖既有文件或链接。归档与安装输出不能位于输入候选内部，包括现存祖先别名。
 
-`--archive` 可选择 `.tar.zst` 或 `.tar.gz`。Zstandard 的长距离匹配可复用相隔较远的相同字节，适用于 Bun 运行时与 standalone 校验器中的公共代码。安装和解包按压缩头识别格式，Zstandard 要求一个完整帧和不超过 128 MiB 的窗口。两种压缩都进入同一 tar 解析、默认 1 GiB 解压上限和完整清单校验。[归档回归](../../../tests/isolated/unified-agent/terminal-archive.test.ts)覆盖字节回读、截断、串联帧及输出上限。
+`--archive` 可选择 `.tar.zst` 或 `.tar.gz`。Zstandard 的长距离匹配可复用相隔较远的相同字节。安装和解包按压缩头识别格式，Zstandard 要求一个完整帧和不超过 128 MiB 的窗口。两种压缩都进入同一 tar 解析、默认 1 GiB 解压上限和完整清单校验。[归档回归](../../../tests/isolated/unified-agent/terminal-archive.test.ts)覆盖字节回读、截断、串联帧及输出上限。
 
 ## POSIX 安装生命周期
 
 安装器使用独立 `.install.lock`、managed marker、`releases/<candidateId>` 和唯一两行 `active` 文件；两行分别为 current 与 previous。新候选在独立 stage 复制、完整校验，文件和目录自底向上 fsync 后 rename，同步 releases，再持久发布 active。新安装根的父目录项也同步。已存在候选只复验，不原地覆盖；失败前已经存在的 active 不被改成未校验候选。
 
-stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OPTIONS/ELECTRON_RUN_AS_NODE 后执行候选内 Bun 和固定入口。实际业务启动取得候选 shared 使用锁再验证，生命周期内不重读 active。纯帮助、版本、trace 和 TUI 非终端拒绝保持在完整验证与 profile 创建之前返回。独立 Service/daemon wrapper 也持有自己的同候选 lease，因此 CLI 退出后 daemon 仍阻止卸载。锁实现见 [Agent 平台 owner](../../../packages/agent/src/platform/README.md)。
+稳定 shell 入口读取一次 active，清除继承的运行时配置后执行候选内 Node 和固定入口；回滚到旧候选时执行其随包 Bun。实际业务启动取得候选 shared 使用锁再验证，生命周期内不重读 active。纯帮助、版本、trace 和 TUI 非终端拒绝保持在完整验证与 profile 创建之前返回。独立 Service/daemon wrapper 也持有同候选 lease，因此 CLI 退出后 daemon 仍阻止卸载。锁实现见 [Agent 平台 owner](../../../packages/agent/src/platform/README.md)。
 
 升级只影响后续启动，原进程保持原 candidate。回滚完整验证 previous 后交换指针；它不恢复旧数据库或回放业务意图，本轮只验证相同新基线格式的候选组合，不宣称任意未来格式均可回滚。用户应先通过原实例的公开 `server stop` 结束要卸载的 daemon。卸载完整枚举已管理内容、拒绝未知条目/坏 active/坏候选，取得所有候选 exclusive 使用锁后重命名安装根再删除；任何 live lease 都立即拒绝，不强杀或猜测进程。独立 profile 数据保留。
 
 ## Windows managed Terminal 当前实现
 
-当前CI基线已按[运行时对照](../../../tests/README.md#运行时升级与模型连接池)选择Bun1.4.4；实际Windows sealed Bun、固定配置与standalone verifier在原1.4.3和新1.4.4均通过。两版内嵌SQLite均为原已审查3.53.4/sourceId，精确来源及原PE／System32／no-delay规则未放宽。此定向结果不替代下述完整安装／维护、Native或三平台门禁；历史候选和旧资源census保持原环境范围。
+新候选使用随包 `node.exe` 与基于 Node 单文件应用（SEA）的 verifier。首次安装由原 C 前门绑定 verifier 和 `runtime-native.node` 的长度与摘要，两个文件持续受原句柄保护。实际官方 Windows x64 Node 及其 SEA 副本已核对系统导入、无 delay directory 和 SEA 资源保留，未在 Windows 上执行。旧 Bun 前门无法启动新 Node 候选，旧 managed prefix 会在发布前返回 `terminal_windows_node_bootstrap_requires_new_prefix`，原选择和 Profile 保留。以下 Bun 实测为原候选的历史范围。
+
+此前 Bun 构建的 CI 基线已按[运行时对照](../../../tests/README.md#运行时升级与模型连接池)选择Bun1.4.4；实际Windows sealed Bun、固定配置与standalone verifier在原1.4.3和新1.4.4均通过。两版内嵌SQLite均为原已审查3.53.4/sourceId，精确来源及原PE／System32／no-delay规则未放宽。此定向结果不替代下述完整安装／维护、Native或三平台门禁；历史候选和旧资源census保持原环境范围。
 
 2026-10-17 范围审查按[因果分组](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md#scope-review)核对连续任务，撤回 Linux/macOS CI、formal soak 和实验 census 的版本迁移，只保 Windows Bun1.4.3；工具 smoke 恢复原每命令20秒。同进程借用新增库存反例先红后绿，许可记录补保完整原 manifest，不能以摘要代替仅在 manifest 内的声明。
 
@@ -129,31 +140,33 @@ selection EX、候选 use SH/EX 位于 prefix 外的稳定私有协调目录，�
 
 完整 installed 生命周期仍须独立执行。显式 [qualification 工具](../../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts)消费已构建候选，核前门、环境拒绝、真实 paired Run、A 保锁时发布 B／回退及冷读零重放、全部 EX 和卸载保数据。真实 Run 期间 busy backup 拒绝，退出后以同一 `kite.exe` 完成 backup／inspect／status／restore／status／GC及新 Store 原完整历史冷读，核原媒体和 config／preferences 字节、旧 Store 拒绝与零重放。前门 GC 只核 referenced／recent保留，过宽限删除由维护 owner 的 Windows 公共用例单独验收。
 
-正式 [Daemon编排](../host/daemon.ts)已接Windows当前SID私有pipe/原record/kernel process HANDLE，保HTTP生命周期和共享CLI/TUI准入。启动父在完整验证/固定Bun配置后持候选SH/full pin至原child实际退出或准确handoff；Daemon和只读preflight自身在endpoint/Store前取得独立使用权，pipe/record/候选关闭未知保原owner。原qualification在同一120秒整链／30秒命令内再调用[完整Daemon helper](../../../tests/fixtures/unified-agent/windows-daemon-qualification.ts)：B实际start/status/Web→rollbackA仍reuse原B→A前门共享完整Model→client detach／busy保原→明确cancel restart实际原birth退出→新A冷读完整原结果零重放→正常stop／两候选EX／恢复原config。原paired模型计数与全部维护/卸载断言保持，Daemon使用独立Provider计数。
+正式 [Daemon编排](../host/daemon.ts)已接Windows当前SID私有pipe/原record/kernel process HANDLE，保HTTP生命周期和共享CLI/TUI准入。启动父在完整验证并固定候选运行时后持候选SH/full pin至原child实际退出或准确handoff；Daemon和只读preflight自身在endpoint/Store前取得独立使用权，pipe/record/候选关闭未知保原owner。原qualification在同一120秒整链／30秒命令内再调用[完整Daemon helper](../../../tests/fixtures/unified-agent/windows-daemon-qualification.ts)：B实际start/status/Web→rollbackA仍reuse原B→A前门共享完整Model→client detach／busy保原→明确cancel restart实际原birth退出→新A冷读完整原结果零重放→正常stop／两候选EX／恢复原config。原paired模型计数与全部维护/卸载断言保持，Daemon使用独立Provider计数。
 
 B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也不代证跨代码、PTY、Native、Shell/stdio MCP、完整恢复发布窗口或RSS。release candidate准确命令和先MSVC后Terminal build顺序保持，按用户安排留重构后Actions验证。本机mock/依赖布局/PE字节只证各自断言；长期取舍及未完成验收见[安装提案](../../../.agents/notes/proposed/architecture/2026-10-10-windows-managed-terminal-frontdoor.md)和[私有Daemon决定](../../../.agents/notes/implemented/architecture/2026-10-02-daemon-private-bootstrap.md)。
 
 ## Windows installed TUI 正式调用者
 
-独立 [完整 TUI qualification](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费 release job 的准确 Terminal／Native 已构建候选，先安装 Terminal，再把 Native 注册到同一个稳定 `kite-tui.exe`。两种选择各使用实际所选候选内的 SQLite reader／Bun／TUI／Service，分别核同一 Store 的独立原会话；不借源码 Store 或全局 Bun。前门环境和 Workspace 预加载污染不进入产品，用户 HOME／Profile 保持私有。原仅 help/version 的 Windows installation 工具仍保其原范围，完整 PTY 由这条单独必需调用者负责。
+独立 [完整 TUI qualification](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费 release job 的准确 Terminal／Native 已构建候选，先安装 Terminal，再把 Native 注册到同一个稳定 `kite-tui.exe`。两种选择各使用实际所选候选内的 SQLite reader／Node／TUI／Service，分别核同一 Store 的独立原会话；不借源码 Store 或系统运行时。前门环境和 Workspace 预加载污染不进入产品，用户 HOME／Profile 保持私有。原仅 help/version 的 Windows installation 工具仍保其原范围，完整 PTY 由这条单独必需调用者负责。
 
 每种选择沿真实键盘完成普通任务、普通界面的完整正文自动读取、含已加载原思考的 Markdown 导出、准确原第二项任务 Ctrl+C、未提交 Unicode 草稿及 Ctrl+Q 正常退出；同一稳定前门冷启动读原草稿、全文／思考和完整 Command／Run／Execution，Provider／持久游标／journal／配置零重放与原字节保持。该 qualification 不启用测试诊断，最新 VT 解析缓冲按原全文与唯一尾标记绑定 complete Message，核完整正文及完成后的 Thinking 摘要；完整思考以原输出及导出逐字核验，不要求屏幕展开，也不能拿历史 stdout 确认当前画面。诊断模式的精确 ID 展示及 preview→Ctrl+O 读取门禁由[隔离 host 测试](../test/isolated/tui-host.test.ts)验证。第二项已取消 Model 的合法未完成 preview 保留。
 
-[ConPTY driver](../../../tests/fixtures/unified-agent/windows-installed-tui-pty-driver.ts)由 [PTY owner](../../../tests/fixtures/unified-agent/windows-installed-tui-pty.ts)通过创建前原 Windows Job 启动，再执行真实 80×24 `Bun.Terminal`。原成员 HANDLE／FILETIME／映像核 TUI／Service 和注册 Native 前门归属，数字 PID 只定位已证成员；普通退出须产品／PTY exit0、全部有序输出和 EOF、原 Job0／wait／strict Close 且未请求 Terminate，强制收尾不计成功。各模式独立 120 秒、每 PTY 30 秒、写操作最多 10 秒，失败保首次错误和原 owner。
+[ConPTY driver](../../../tests/fixtures/unified-agent/windows-installed-tui-pty-driver.ts)由 [PTY owner](../../../tests/fixtures/unified-agent/windows-installed-tui-pty.ts)通过创建前原 Windows Job 启动，再由测试用 `node-pty` 创建真实 80×24 ConPTY。原成员 HANDLE／FILETIME／映像核 TUI／Service 和注册 Native 前门归属，数字 PID 只定位已证成员；普通退出须产品／PTY exit0、全部有序输出和 EOF、原 Job0／wait／strict Close 且未请求 Terminate，强制收尾不计成功。各模式独立 120 秒、每 PTY 30 秒、写操作最多 10 秒，失败保首次错误和原 owner。
 
-运行命令为 `bun run tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；workflow 在双方完整 build／verify／smoke 后强制执行，守卫拒绝删步骤、错候选／平台、过滤、忽略失败和顺序错误。最后 Native 撤登记恢复独立前门，两者卸载保原 Store／配置／九份 TUI 私有数据。该链未切换两个真实代码候选，不代跨代码、Shell／MCP、完整恢复发布窗口、RSS／全资源或阶段门禁。当前 macOS 仅完成源码／CI／适用原测试，Win/Linux 实机按用户安排交后续 GitHub Actions；[持久取舍](../../../.agents/notes/proposed/testing/2026-10-11-windows-installed-tui-caller.md)与 [准确证据](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)保资格未闭合。
+运行命令为 `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-installed-tui.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；workflow 在双方完整 build／verify／smoke 后强制执行，守卫拒绝删步骤、错候选／平台、过滤、忽略失败和顺序错误。最后 Native 撤登记恢复独立前门，两者卸载保原 Store／配置／九份 TUI 私有数据。该链未切换两个真实代码候选，不代跨代码、Shell／MCP、完整恢复发布窗口、RSS／全资源或阶段门禁。当前 macOS 仅完成源码／CI／适用原测试，Win/Linux 实机按用户安排交后续 GitHub Actions；[持久取舍](../../../.agents/notes/proposed/testing/2026-10-11-windows-installed-tui-caller.md)与 [准确证据](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-installed-tui-私有持久化与正式调用者)保资格未闭合。
 
 ## Windows 真实代码升级与冷回退调用者
 
-[统一调用者](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)消费同 release job 已 build／verify／smoke 的准确 Terminal／Native，两者 inner 身份必须一致。[兼容前驱](../../../tests/fixtures/unified-agent/compatible-predecessor-input.ts)固定真实提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`：11项锁输入沿下文同一守卫核原字节相同或已审查的完整 raw 配对；`0001-baseline` 与 `0002-recovery-audit` 两份 SQL 仍同时核原字节和固定 checksum。该提交已具 Windows 两类 builder／build port 及 DB9，但仅支持当时的 `0001`／`0002` 基线，不具当前六迁移的完整往返资格；原源码自己的两个 builder 构建，成功后删除旧源码，不修改 manifest、版本或生产 helper。两版均为 `0.1.0`，完整候选和实际 Agent 字节必须不同。原 `837a2b8c` 输入、历史 SHA 与独立路径许可仍保为 legacy 守卫，不将仅支持旧 Core schema 的代码计作当前兼容回退。当前 Windows 原生资格仍待实际执行，不沿用 macOS 或历史前驱结果。
+[统一调用者](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)消费同一个 release job 校验过的 Terminal／Native，两者使用同一 Terminal 摘要。[制品准备](../../../scripts/ci/prepare-release-predecessors.ts)用固定 Bun 前驱的原锁文件和 builder。前驱 `a45ca81cf` 支持与当前相同的合并 Schema。两版同为 `0.1.0`，候选摘要和 Agent 字节必须不同。旧 `4a4c0e440` 与 `837a2b8c` 的输入和迁移摘要继续证明各自的历史范围。Windows 原生验收仍需实际执行。
 
-[Terminal 链](../../../tests/fixtures/unified-agent/windows-terminal-cross-version.qualification.ts)从稳定 `kite.exe` 执行 A 原任务，原 A paired CLI／Service 和使用锁仍 live 时选择 B，正常退出后 B 读取原历史并明确继续，再冷回退 A 读取 B、继续原会话，最终 B 冷读全部三任务。B 的352041 UTF-8字节完整 Unicode 正文必须实际进入回退后 A 的新 Provider 请求。各自安装候选的公开 Runtime 读取普通完整短正文及 sealed 长正文，核原 Store／Command／Run／Execution、完整 body／bytes／hash／出处及 readonly 游标；正式 `context read` 核完整原消息身份，不冒称该页面打印 sealed 全文。冷读零模型重放，指针切换不恢复数据；原 Job／HANDLE／FILETIME核进程，成功必须实际 exit0、双流 EOF、自然 Job0／未 Terminate、严格 Close、所有候选 EX及唯一卸载保原 DB／config。
+[Terminal 链](../../../tests/fixtures/unified-agent/windows-terminal-cross-version.qualification.ts)从旧 `kite.exe` 执行 A 原任务。A 和使用锁仍在时，核同前缀安装 Node B 被拒、旧选择逐字不变，再将 B 装到新前缀。A 正常退出后，B 冷读并继续原会话，随后用原前门回到 A，再用 B 冷读全部三任务。B 的 352041 UTF-8 字节正文须进入回到 A 后的新 Provider 请求。候选内 Runtime 核原 Store、Command、Run、Execution、正文摘要和只读游标；正式 `context read` 核消息身份。冷读期间 Provider 次数不增。原 Job、进程退出、双流 EOF、锁和两次卸载都核，卸载每个前缀时保留原 DB 与配置。
 
-执行 `bun run tests/fixtures/unified-agent/windows-cross-version.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；统一绝对期限1140000ms，分别保物化180秒、Terminal360秒／每命令30秒、Native基础420秒和维护180秒，并包含收尾。原同代码安装120秒、TUI及POSIX调用者／预算／断言保持；新mandatory步骤位于三条原Windows caller之后，CI守卫核准确双输入、六个无条件 build／verify／smoke、真实 Windows matrix／MSVC和顺序。当前源码与macOS读取验证不授Windows原生资格；实际构建／安装／回退交后续GitHub Actions，原RSS／观测／Shell合同和完整阶段门禁保持。Native窗口与维护行为归[Native owner](../../desktop/docs/native-release.md#windows-managed-native-当前实现)，准确证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
+执行 `node --import ./scripts/tooling/register.mjs tests/fixtures/unified-agent/windows-cross-version.qualification.ts --terminal=<absolute-terminal> --native=<absolute-native>`；统一绝对期限1140000ms，分别保物化180秒、Terminal360秒／每命令30秒、Native基础420秒和维护180秒，并包含收尾。原同代码安装120秒、TUI及POSIX调用者／预算／断言保持；新mandatory步骤位于三条原Windows caller之后，CI守卫核准确双输入、六个无条件 build／verify／smoke、真实 Windows matrix／MSVC和顺序。当前源码与macOS读取验证不授Windows原生资格；实际构建／安装／回退交后续GitHub Actions，原RSS／观测／Shell合同和完整阶段门禁保持。Native窗口与维护行为归[Native owner](../../desktop/docs/native-release.md#windows-managed-native-当前实现)，准确证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
 
 ## 验证边界
 
-2026-10-26 全量修复重新核对了前驱资格：POSIX 完整往返改用真实提交 `12628a616e7614cbd60666d71896b1db9f74b0f5`，其12项 manifest／lock／patch 输入全部与当前原字节一致，六份 `0001`–`0006` SQL 同时核历史字节、当前字节及固定 checksum。该版本早于当前 Model 输出公共投影修复，仍须证明实际 Agent／候选不同、原源码干净及由自身 builder 构建；没有改写旧 reader 或数据库。旧 `4a4c0e440` 只有当时的恢复审计迁移，不能再把它当作当前新增迁移后的可回退版本；其原输入守卫和历史证据继续保留。Windows 的独立前驱／平台资格不随 POSIX 调整而取得。
+2026-11-13，macOS arm64 通过[完整 Terminal 跨代码回归](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)三项。`a45ca81cf` 的随包 Bun 与当前随包 Node 实际安装后双向切换，回滚后旧版在同一会话继续工作，模型请求包含 Node 版生成的完整 352041 字节历史正文。`a2b6441f` 的旧 Schema reader 拒绝启动业务连接，原进程正常退出，Store、配置和原文件身份保留。
+
+2026-10-26 全量修复重新核对了前驱资格：POSIX 完整往返改用真实提交 `12628a616e7614cbd60666d71896b1db9f74b0f5`，其12项 manifest／lock／patch 输入与当时源码逐字节一致，六份 `0001`–`0006` SQL 同时核历史字节、当时工作树字节及固定 checksum。该版本早于当时的 Model 输出公共投影修复，仍须证明实际 Agent／候选不同、原源码干净及由自身 builder 构建；没有改写旧 reader 或数据库。旧 `4a4c0e440` 只有当时的恢复审计迁移，不能再把它当作新增迁移后的可回退版本；其原输入守卫和历史证据继续保留。Windows 的独立前驱／平台资格不随 POSIX 调整而取得。
 
 同轮对原三个历史 context 的锁输入追加封闭配对：新增 Markdown／PDF 依赖、Radix 清理 patch 和准确 PDF live 脚本；原当前 SHA 仍保留为历史合法配对。163项新增 resolved 条目逐一核对，原 resolved 条目仅有 `highlight.js@10.7.3` 从根移至 `cli-highlight/highlight.js`，其完整 URL／依赖／integrity 保持。当前独有 Radix patch 以独立 `additionalCurrentInputs` 核准确路径和完整 SHA，不伪造旧声明；旧11项输入及 SQL 拒绝边界不放宽。开发依赖镜像仅排除 renderer 所属准确 `.vite`／`.vite-desktop-dev` 真实生成目录，符号链接和其他非链接依赖仍走原守卫。
 
@@ -166,7 +179,7 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 - [安装负例](../../../tests/isolated/unified-agent/terminal-install.test.ts)、[归档负例](../../../tests/isolated/unified-agent/terminal-archive.test.ts)
 - [依赖闭包](../../../tests/isolated/unified-agent/terminal-dependencies.test.ts)、[完整选择器](../../../tests/isolated/unified-agent/terminal-artifact.test.ts)
 
-原 bundle 生命周期测试的同源码版本标记只证明指针机制。当前[跨代码版本整例](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)固定真实兼容前驱 `12628a616e7614cbd60666d71896b1db9f74b0f5`，由其原源码和原 builder 生成候选；12项 lock／workspace／patch 输入全部逐字相同，`0001`–`0006` 六份 SQL 另核双方原字节和各自固定 checksum。下文旧前驱的封闭配对继续用于其历史守卫及不兼容拒绝链，不代替当前往返的同字节要求。format major 1 不代表任意迁移版本互通，只有双方实际支持同一闭合 schema 才进入 A→B→A→B 兼容链。两者 productVersion 均为 `0.1.0`，实际 Agent 字节及候选 ID 必须不同；原 npm 闭包、干净旧源码、原 builder、源码删除、归档搬迁与输出删除守卫保持。不能修改旧 reader、恢复旧 DB 或删除审计 schema 来获得兼容。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+当前[跨代码版本整例](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)使用 Bun 前驱 `a45ca81cf778b6ab8177424376e48b4134f06255`。`0001-baseline.sql` 和 `0002-trajectory-facts.sql` 核当前、前驱源码和前驱制品的固定摘要。前驱按自己的 lock、workspace 与 patch 输入构建；双方候选 ID 和 Agent 字节必须不同。归档搬迁后沿 A→B→A→B 读取同一 Store。原六份迁移保留为 `12628a616` 的历史证明，旧 `a2b6441f` 独立核 Schema 拒绝和原数据保留。选用相同 Schema 的前驱依据见[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
 
 2026-10-18用户确认增加[精确原始输入守卫](../../../tests/fixtures/unified-agent/predecessor-reviewed-input.ts)：`compatible`、`terminal_legacy`、`windows_legacy` 分别绑定各自固定前驱，仅为 `bun.lock`、根 package、Agent／AI／UI／Service 六项准确路径登记双方完整 SHA-256。它只承认 `eeea65f5f` 的 Responses OpenAI 声明及两个完整 resolved 包、`9ff6904a0` 的构建／UI 声明、`bcf70ce84` 的 session-title 入口，以及本轮 `test:model:tools:live` 准确脚本行。OpenAI `4.0.19` 与其嵌套 provider-utils `5.0.12` 是实际依赖新增，不能称为声明投影或依赖未变。其余五项原输入保持逐字比较；两 SQL 不进入此例外。2026-10-19（UTC）真实模型测试新增 `test:model:collaboration:live` 后，根 package 的完整当前 SHA 更新为 `4c7e7320475e5c030c4221e30f408bb21b290de5a4c73fcd830f5efb4f0e4a14`，仅该路径的审查 scope 更新为当日，并在 provenance 登记第二条准确 live 脚本及增量；其余五项配对、原前驱字节和 SQL 校验保持。缺失、重复、改名、追加命令及未知字节仍拒绝，不能普遍忽略 scripts。
 
@@ -206,7 +219,7 @@ Linux 分支的[源码外公共 Store reader](../../../tests/fixtures/unified-ag
 
 `release:build` 默认生成 `dist/unified-terminal`，供独立 CLI/TUI 使用。`release:build --product native` 构建桌面候选，显式 `--terminal` 可组合交付，默认布局和平台范围见 [Native 发行说明](../../desktop/docs/native-release.md#构建与安装)。`release:verify --source-commit <40位提交> --clean-source true` 核实际源提交及 clean 事实，参数在任何制品或 Profile I/O 前验证。正式发布要求源码干净。
 
-Terminal manifest 的 `sqlite` 固定 driver、linkage、实际 version/sourceId 与 engine manifest SHA。macOS builder 从明确 `--sqlite-library` 或有限构建依赖位置复制已审查库，验证实际引擎和仅系统动态依赖；安装运行只选择包内库。Linux/Windows 固定 Bun 实际 builtin 引擎，未知 sourceId 或未证明 WAL 修复拒绝构建资格，不按版本大小或“最新”放行。当前本机包内库为 SQLite 3.51.3；Node/Electron 私有库单独绑定。selection 缺失、损坏、篡改和第一 Database 后迟设置均拒绝；不存在资产的开发模式只提供 unqualified 诊断。
+Terminal manifest 的 `sqlite` 固定 driver、linkage、实际 version/sourceId 与 engine manifest SHA。macOS builder 优先使用明确 `--sqlite-library` 或有限构建依赖位置的已审查库；上述本机候选使用 3.51.3。Linux/Windows 从固定摘要的 SQLite 3.53.4 源码构建随包动态库。安装运行只选择包内库；未知 sourceId、缺失、损坏、篡改和首个 Database 打开后迟设置均拒绝。Electron 的私有库单独绑定。
 
 标准安装前门可显式登记完整 Native 闭包。双方 prefix 的 nonce/active/managed marker 与完整 manifest 必须一致；坏登记直接拒绝。升级/回滚仅更新自己仍拥有的登记，卸载仅以原 nonce 撤销，不删除另一安装后写入的登记。已有进程保持原候选与使用锁。源码/显式 candidate 不参与自动登记选择。操作与恢复限制见[Native owner](../../desktop/docs/native-release.md)。
 

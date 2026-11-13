@@ -1,5 +1,6 @@
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { dlopen, ptr } from '../runtime-ffi';
 import { retainWindowsArtifactScope } from './windows-artifact-scope';
 import { defaultWindowsPathSecurity } from './windows-path-security';
 
@@ -24,7 +25,6 @@ export function retainWindowsPrivateFileRemoval(path: string): WindowsPrivateFil
   if (resolve(path) !== path || realpathSync(path) !== path || dirname(path) === path)
     throw Error('windows_private_file_removal_unknown');
   const security = defaultWindowsPathSecurity()!;
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },

@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { type BrowserView, ClientError, type SelectedContextPage } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { type DiagnosticPort, Diagnostics, readContext, readOutput } from '../src/diagnostics';
 import { installGlobals } from './globals.fixture';
 
@@ -396,7 +397,7 @@ test('DOM explicit Context/Job reads, same-target stale, local capabilities and 
     await f.click('Close diagnostic');
     expect(f.dom.window.document.body.textContent).not.toContain('Complete error output');
     await act(async () => {
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     });
     expect(calls).toBe(2);
   } finally {

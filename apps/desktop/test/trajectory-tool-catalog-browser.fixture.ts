@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import type { Page } from 'playwright';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 import { trajectoryToolCatalogData } from './trajectory-tool-catalog-data.fixture';
 
 /** A focused directory pass, intentionally separate from the workbench matrix. */
@@ -250,7 +251,7 @@ export async function verifyTrajectoryToolCatalog(input: {
     narrow,
     wide,
   };
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'tool-catalog-verification.json'),
     JSON.stringify(verification, null, 2),
   );

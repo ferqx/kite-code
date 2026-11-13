@@ -1,10 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { buildWindowsAccess } from '../../../../../apps/desktop/scripts/build-windows-access';
 import { initializeDesktopBuildEnvironment } from '../../../../../scripts/development/windows-desktop-environment';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -17,6 +19,7 @@ import {
 import { parseManifest } from '../../../src/maintenance/manifest';
 import { selectProfile } from '../../../src/platform/profile';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 import { nodeCallerAssets } from './desktop-callers-fixture';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -80,7 +83,7 @@ try {
     );
     expect(
       (
-        await Bun.build({
+        await buildBundle({
           entrypoints: [source],
           target: 'node',
           packages: 'bundle',
@@ -92,9 +95,9 @@ try {
     writeFileSync(join(directory, 'package.json'), '{"type":"module"}', { mode: 0o600 });
     const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
     async function node(action: string, id = storeId) {
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
-          realpathSync(Bun.which('node')!),
+          fixtureNodeExecutable(),
           join(directory, 'driver.js'),
           JSON.stringify({
             action,
@@ -103,8 +106,8 @@ try {
             access: {
               ...(windowsAsset ? { windowsAsset } : {}),
               profile,
-              bunExecutable: realpathSync(process.execPath),
-              bunSha256: sha(readFileSync(process.execPath)),
+              runtimeExecutable: fixtureNodeExecutable(),
+              runtimeSha256: sha(readFileSync(fixtureNodeExecutable())),
               helperPath: helper,
               helperSha256: sha(readFileSync(helper)),
             },

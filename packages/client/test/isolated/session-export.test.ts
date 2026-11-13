@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, type SessionExportFrame, type SessionExportManifest } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 
-function fixture() {
+async function fixture() {
   const profile = { dataRoot: '/selected', name: 'owned', accessKey: 'owned' },
     identity = 'a'.repeat(64),
     original = Buffer.from(`{ unknown ☃ 👋 ${'raw'.repeat(50000)} exact-tail }`),
@@ -41,7 +42,7 @@ function fixture() {
     reads = 0,
     posts = 0,
     verifies = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -170,13 +171,13 @@ function fixture() {
     close() {
       native.disposeNetwork();
       browser.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
 
 test('Native and Cookie raw export streams privately bind the frozen manifest, preserve unknown records and prove text EOF/hash before a references-only completion', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     expect(() => f.native.exportSession('s', { storeId: 'store' })).toThrow(
       'connection_not_admitted',
@@ -230,12 +231,12 @@ test('Native and Cookie raw export streams privately bind the frozen manifest, p
     ).toThrow('Invalid BeginSessionExportQuery');
     expect(f.counts().reads).toBe(before);
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('missing rows, foreign scope, bad raw text/hash/cursor and replaced final proof never publish a valid export completion; early close and network disposal do not verify or POST', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.connect();
     for (const read of [
@@ -279,6 +280,6 @@ test('missing rows, foreign scope, bad raw text/hash/cursor and replaced final p
     expect(f.counts().verifies).toBe(before);
     expect(f.counts().posts).toBe(0);
   } finally {
-    f.close();
+    await f.close();
   }
 });

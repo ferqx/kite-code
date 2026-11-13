@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { withCtrlC } from '../src';
 import { parseCLIArguments } from '../src/arguments';
 import { CLITraceError, runTrace } from '../src/trace';
@@ -92,7 +92,7 @@ export async function runCLIProcess(
           (() => {
             try {
               return parseCLIServiceArtifact(
-                JSON.parse(readFileSync(join(import.meta.dir, 'cli-assets.json'), 'utf8')),
+                JSON.parse(readFileSync(join(import.meta.dirname, 'cli-assets.json'), 'utf8')),
               );
             } catch {
               throw new CLIHostError('daemon_artifact_unavailable');
@@ -117,7 +117,7 @@ export async function runCLIProcess(
     (() => {
       try {
         return parseCLIServiceArtifact(
-          JSON.parse(readFileSync(join(import.meta.dir, 'cli-assets.json'), 'utf8')),
+          JSON.parse(readFileSync(join(import.meta.dirname, 'cli-assets.json'), 'utf8')),
         );
       } catch {
         throw new CLIHostError('cli_artifact_unavailable');
@@ -183,7 +183,11 @@ export async function runCLIProcess(
     process.removeListener('SIGTERM', stopHost);
   }
 }
-if (import.meta.main) {
+// Node-target bundles can inline both CLI hosts. Only the direct entry may run.
+if (
+  Reflect.get(import.meta, 'main') === true &&
+  /^main\.[jt]s$/u.test(basename(import.meta.filename))
+) {
   try {
     process.exitCode = await runCLIProcess();
   } catch (error) {

@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -15,6 +15,9 @@ import {
   decodeMcpToolsSnapshots,
   readMcpToolDescriptor,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -27,7 +30,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw new Error('default_mcp_source_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(
@@ -41,7 +44,7 @@ async function fixture(
   privateDirectory(profile.profilePath);
   const rpc: string[] = [];
   let effects = 0;
-  const remote = Bun.serve({
+  const remote = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -84,13 +87,13 @@ async function fixture(
   const stdioServer = join(root, 'owned-stdio.ts');
   const failedOnce = join(root, 'fail-initialize-once');
   const guardian = options.stoppedStdio
-    ? await Bun.build({
+    ? await buildBundle({
         entrypoints: [
-          join(import.meta.dir, '../../../../packages/agent/src/mcp/stdio-guardian.ts'),
+          join(import.meta.dirname, '../../../../packages/agent/src/mcp/stdio-guardian.ts'),
         ],
         outdir: root,
         naming: 'qualified-guardian.js',
-        target: 'bun',
+        target: 'node',
       })
     : undefined;
   if (guardian) {
@@ -133,7 +136,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
   let workId = 'connect';
   let useExisting = false;
   let modelCredentialReads = 0;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {
@@ -227,7 +230,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
     mcpSources: {
       http: { allowLoopbackForTests: true },
       ...(guardian
-        ? { stdio: { guardianPath: guardian.outputs[0]!.path, bunExecutable: process.execPath } }
+        ? {
+            stdio: { guardianPath: guardian.outputs[0]!.path, runtimeExecutable: process.execPath },
+          }
         : {}),
     },
     permissionPolicy: {

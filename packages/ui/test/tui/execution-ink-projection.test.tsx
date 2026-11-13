@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Execution, Message, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiChildSessionPanel } from '../../src/tui/child-session-panel';
 import type { TuiSnapshot } from '../../src/tui/controller';
 import {
@@ -712,7 +713,7 @@ test('verified child reader retains list/detail escape levels and three-line scr
   const app = render(
     <TuiChildSessionPanel child={child} onBack={() => backs++} onRefresh={() => refreshes++} />,
   );
-  const tick = () => Bun.sleep(25);
+  const tick = () => fixtureDelay(25);
   try {
     await tick();
     expect(app.lastFrame()).toContain('History fully read');
@@ -1625,7 +1626,7 @@ test('long child Markdown stays rendered through scrolling and width changes, in
   const app = render(
     <TuiChildSessionPanel child={child} onBack={() => {}} onRefresh={() => refreshes++} />,
   );
-  const tick = () => Bun.sleep(25);
+  const tick = () => fixtureDelay(25);
   try {
     Object.defineProperty(app.stdout, 'columns', { configurable: true, get: () => 60 });
     app.stdout.emit('resize');

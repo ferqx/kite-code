@@ -1,6 +1,6 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { expect, test } from '#kite-test';
+import { Database } from '../../../src/runtime-sqlite';
 import { readExecutionGroupSafetySnapshot } from '../../../src/storage/sqlite/execution-group-safety';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 

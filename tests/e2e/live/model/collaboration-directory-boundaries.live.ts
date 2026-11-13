@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,11 +10,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Json, ToolDefinition } from '@kite-ai/agent/extensions';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
@@ -103,7 +104,7 @@ export async function runLiveDirectoryBoundaries(options: Options): Promise<{ ca
         const v = await read();
         if (v !== undefined) return v;
         if (Date.now() > end) throw new Boundary('branch_not_reached', p);
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       }
     }
     try {

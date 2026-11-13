@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
@@ -12,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   CLI_REGISTRATION_FILE,
   OWNED_CLI_REGISTRATION_FILE,

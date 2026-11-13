@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
@@ -38,7 +39,7 @@ async function fixture(
   if (options.delayedEnsure) {
     const ensure = store.ensureAuthorizationCheck.bind(store);
     store.ensureAuthorizationCheck = async (input) => {
-      await Bun.sleep(80);
+      await sleepTimer(80);
       return ensure(input);
     };
   }
@@ -308,7 +309,7 @@ for (const mode of ['auto', 'accept_edits'] as const)
             state: 'pending',
           })
         ).interactions[0];
-        if (!card) await Bun.sleep(10);
+        if (!card) await sleepTimer(10);
       }
       expect(card).toBeDefined();
       expect(f.counts().effects).toBe(0);
@@ -363,7 +364,7 @@ test('user cancellation during fact preparation never becomes timeout continuati
     const work = f.run();
     void work.catch(() => {});
     const deadline = Date.now() + 3000;
-    while (!f.counts().preparations && Date.now() < deadline) await Bun.sleep(5);
+    while (!f.counts().preparations && Date.now() < deadline) await sleepTimer(5);
     expect(f.counts().preparations).toBe(1);
     await f.runtime.cancelCommand({
       expectedStoreId: f.expectedStoreId,

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type Permissions, type ToolDefinition } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { UnifiedExecution } from '../../../src/execution';
 import { ExecutionResources } from '../../../src/execution/resources';
 import { AgentError } from '../../../src/storage/types';

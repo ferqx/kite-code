@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
 
 const modulePath = (path: string) => fileURLToPath(new URL(`../../../${path}`, import.meta.url));
 function subprocess(scenario: string) {
@@ -30,7 +30,7 @@ test('Windows deregistration rejects a structural full-tree owner without genuin
 });
 function script(scenario: string) {
   return `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';

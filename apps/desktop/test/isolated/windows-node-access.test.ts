@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -17,8 +16,17 @@ import {
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
+import { dlopen, ptr } from '../../../../packages/agent/src/runtime-ffi';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  type Subprocess,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { loadWindowsAccess } from '../../electron/windows-access';
 import { buildWindowsAccess, verifyNodeApiHeaders } from '../../scripts/build-windows-access';
 
@@ -89,7 +97,7 @@ int wmain(int argc,wchar_t** argv) {
         privateDirectory(join(directory, 'empty'));
         security.writePrivateFile(join(directory, 'a.txt'), Buffer.from('a'));
         security.writePrivateFile(join(directory, 'nested/b.txt'), Buffer.from('b'));
-        const child = Bun.spawn([executable, directory], {
+        const child = spawnFixtureProcess([executable, directory], {
           cwd: root,
           stdin: 'pipe',
           stdout: 'pipe',
@@ -193,7 +201,7 @@ test.skipIf(process.platform !== 'win32')(
       expect(dataRoot.length).toBeGreaterThan(300);
       privateDirectory(dataRoot);
       privateDirectory(join(dataRoot, 'long'));
-      const electron = createRequire(join(import.meta.dir, '../../package.json'))(
+      const electron = createRequire(join(import.meta.dirname, '../../package.json'))(
         'electron',
       ) as string;
       const code = `const assert=require('node:assert/strict'),api=require(${JSON.stringify(join(nativeRoot, built.relativePath))});
@@ -229,8 +237,8 @@ test.skipIf(process.platform !== 'win32')(
       const nativeRoot = join(root, 'native');
       privateDirectory(nativeRoot);
       const built = await buildWindowsAccess(nativeRoot);
-      const fixture = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../profile-permissions-native.fixture.ts')],
+      const fixture = await buildFixture({
+        entrypoints: [join(import.meta.dirname, '../profile-permissions-native.fixture.ts')],
         target: 'node',
         format: 'cjs',
         outdir: root,
@@ -238,7 +246,7 @@ test.skipIf(process.platform !== 'win32')(
       });
       if (!fixture.success)
         throw new AggregateError(fixture.logs, 'permissions_fixture_build_failed');
-      const electron = createRequire(join(import.meta.dir, '../../package.json'))(
+      const electron = createRequire(join(import.meta.dirname, '../../package.json'))(
         'electron',
       ) as string;
       const result = spawnSync(
@@ -275,11 +283,11 @@ test.skipIf(process.platform !== 'win32')(
 
 async function nativeFixture() {
   const { acquireProfileAccess } = await import(
-    join(import.meta.dir, '../../../../packages/agent/src/platform/profile.ts')
+    join(import.meta.dirname, '../../../../packages/agent/src/platform/profile.ts')
   );
   const { buildOwnedDefaultArtifactConsumer } = (await import(
     join(
-      import.meta.dir,
+      import.meta.dirname,
       '../../../../tests/fixtures/unified-agent/windows-artifact-default/build.ts',
     )
   )) as {
@@ -316,16 +324,16 @@ async function nativeFixture() {
     workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const helperPath = join(root, 'profile-access.js');
-  const helper = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../electron/profile-access-helper.ts')],
-    target: 'bun',
+  const helper = await buildFixture({
+    entrypoints: [join(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+    target: 'node',
     packages: 'bundle',
     outdir: root,
     naming: 'profile-access.js',
   });
   if (!helper.success) throw Error('owned_helper_build_failed');
-  const driver = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../windows-node-access.fixture.ts')],
+  const driver = await buildFixture({
+    entrypoints: [join(import.meta.dirname, '../windows-node-access.fixture.ts')],
     target: 'node',
     format: 'esm',
     packages: 'bundle',
@@ -338,9 +346,9 @@ async function nativeFixture() {
     wrapperSource,
     `import {writeFileSync,appendFileSync,existsSync} from 'node:fs';import{acquireArtifactAccess}from '@kite-ai/agent/artifact-access';import{runServiceProcess}from '@kite-ai/service/main';const trace=${JSON.stringify(trace)};writeFileSync(trace,'wrapper-started\\n');process.on('exit',code=>appendFileSync(trace,'exit:'+code+'\\n'));const leases=${JSON.stringify(roots)}.map(root=>acquireArtifactAccess({root,mode:'shared'}));try{await runServiceProcess({beforeResourceClose:async()=>{appendFileSync(trace,'before-close\\n');writeFileSync(${JSON.stringify(closing)},'held');const deadline=Date.now()+10000;while(!existsSync(${JSON.stringify(gate)})){if(Date.now()>deadline)throw Error('owned_close_gate_deadline');await Bun.sleep(10);}}});appendFileSync(trace,'service-returned\\n');}finally{for(const lease of leases.reverse())lease.release();}`,
   );
-  const wrapper = await Bun.build({
+  const wrapper = await buildFixture({
     entrypoints: [wrapperSource],
-    target: 'bun',
+    target: 'node',
     packages: 'external',
     outdir: compiled.root,
     naming: 'service-holder.js',
@@ -357,18 +365,20 @@ async function nativeFixture() {
     profile: { dataRoot: join(root, 'private'), profile: 'owned' },
     service: join(compiled.root, 'service-holder.js'),
     access: {
-      bunExecutable,
-      bunSha256: sha(bunExecutable),
+      runtimeExecutable: bunExecutable,
+      runtimeSha256: sha(bunExecutable),
       helperPath,
       helperSha256: sha(helperPath),
     },
     instanceId: crypto.randomUUID(),
   };
   // Real Electron executable executes its own Node-API and private SQLite, not a Bun proxy.
-  const electron = createRequire(join(import.meta.dir, '../../package.json'))('electron') as string;
-  const children: ReturnType<typeof Bun.spawn>[] = [];
+  const electron = createRequire(join(import.meta.dirname, '../../package.json'))(
+    'electron',
+  ) as string;
+  const children: Subprocess[] = [];
   const spawn = (value = input) => {
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [electron, '--expose-gc', join(compiled.root, 'node-holder.mjs'), JSON.stringify(value)],
       {
         cwd: compiled.root,
@@ -449,7 +459,6 @@ async function nativeFixture() {
   };
 }
 function originalChildHandle(pid: number, executable: string) {
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const api = dlopen('kernel32.dll', {
     OpenProcess: { args: ['u32', 'bool', 'u32'], returns: 'u64' },
     QueryFullProcessImageNameW: { args: ['u64', 'u32', 'ptr', 'ptr'], returns: 'bool' },
@@ -495,7 +504,7 @@ function originalChildHandle(pid: number, executable: string) {
           const deadline = Date.now() + 5000;
           while (api.symbols.WaitForSingleObject(handle, 0) === 258) {
             if (Date.now() > deadline) throw Error('owned_process_stop_unconfirmed');
-            await Bun.sleep(10);
+            await fixtureDelay(10);
           }
         }
       } catch (error) {
@@ -638,9 +647,9 @@ test.skipIf(process.platform !== 'win32')(
     try {
       const holder = f.spawn();
       const held = await holder.next('paired-held');
-      original = originalChildHandle(held.childPid, f.input.access.bunExecutable);
+      original = originalChildHandle(held.childPid, f.input.access.runtimeExecutable);
       f.busy();
-      const electron = createRequire(join(import.meta.dir, '../../package.json'))(
+      const electron = createRequire(join(import.meta.dirname, '../../package.json'))(
         'electron',
       ) as string;
       parent = originalChildHandle(holder.child.pid, electron);
@@ -653,7 +662,7 @@ test.skipIf(process.platform !== 'win32')(
           throw Error(
             `owned_child_not_draining:${original.state()}:${original.exitCode()}:${readFileSync(f.trace, 'utf8')}`,
           );
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
       f.busy();
       writeFileSync(f.gate, 'release');
@@ -663,12 +672,12 @@ test.skipIf(process.platform !== 'win32')(
           break;
         } catch {
           if (Date.now() > deadline + 5000) throw Error('owned_child_locks_not_released');
-          await Bun.sleep(10);
+          await fixtureDelay(10);
         }
       }
       while (original.state() !== 'dead') {
         if (Date.now() > deadline + 5000) throw Error('owned_child_exit_unconfirmed');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
       expect(original.exitCode()).toBe(0);
       expect(readFileSync(f.trace, 'utf8')).toContain('before-close');
@@ -701,7 +710,7 @@ test.skipIf(process.platform !== 'win32')(
           break;
         } catch {
           if (Date.now() > deadline) throw Error('owned_gc_handles_not_released');
-          await Bun.sleep(10);
+          await fixtureDelay(10);
         }
       }
       holder.send('close');
@@ -719,7 +728,7 @@ test.skipIf(process.platform !== 'win32')(
     const f = await nativeFixture();
     try {
       const { openSqliteStore } = await import(
-        join(import.meta.dir, '../../../../packages/agent/src/sqlite.ts')
+        join(import.meta.dirname, '../../../../packages/agent/src/sqlite.ts')
       );
       const store = await openSqliteStore(f.input.profile);
       await store.close();
@@ -844,8 +853,8 @@ test('formal Windows candidate Main stops before native loading, factories or ch
   const root = mkdtempSync(join(tmpdir(), 'kite-formal-win-bootstrap-'));
   try {
     const main = join(root, 'main.cjs');
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../electron/main.ts')],
+    const built = await buildFixture({
+      entrypoints: [join(import.meta.dirname, '../../electron/main.ts')],
       target: 'node',
       format: 'cjs',
       packages: 'bundle',
@@ -870,9 +879,9 @@ test('formal Windows candidate Main stops before native loading, factories or ch
       driver,
       `const assert=require('node:assert/strict'),Module=require('node:module'),child=require('node:child_process');let nativeLoads=0,factories=0,children=0,appReads=0;const original=Module._load;Module._load=function(request,...args){if(request==='electron')return{app:{getAppPath(){appReads++;return ${JSON.stringify(join(root, 'untrusted-app'))};}}};if(request.endsWith('.node')){nativeLoads++;return{artifactShared(){factories++;throw Error('unqualified_factory');},profileShared(){factories++;throw Error('unqualified_factory');}};}if(request==='node:sqlite'){nativeLoads++;throw Error('unqualified_sqlite');}return original.call(this,request,...args);};for(const name of ['spawn','exec','execFile','fork'])child[name]=()=>{children++;throw Error('unqualified_child');};const actualPlatform=process.platform;if(actualPlatform!=='win32')Object.defineProperty(process,'platform',{value:'win32'});let failure;try{require(${JSON.stringify(main)});}catch(error){failure=error;}assert.equal(failure?.code,'native_windows_bootstrap_unqualified');assert.deepEqual({nativeLoads,factories,children,appReads},{nativeLoads:0,factories:0,children:0,appReads:0});console.log(JSON.stringify({actualPlatform,negative:'native_windows_bootstrap_unqualified',nativeLoads,factories,children,appReads}));`,
     );
-    const node = Bun.which('node');
+    const node = findFixtureExecutable('node');
     if (!node) throw Error('owned_node_unavailable');
-    const child = Bun.spawn([node, driver], { stdout: 'pipe', stderr: 'pipe' });
+    const child = spawnFixtureProcess([node, driver], { stdout: 'pipe', stderr: 'pipe' });
     const [exit, stdout, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),

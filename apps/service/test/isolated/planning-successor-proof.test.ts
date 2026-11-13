@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { AgentRuntime } from '@kite-ai/agent';
 import type { CommandRecord, RunRecord } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { readBoundPlanningSuccessor } from '../../src/planning-configuration';
 
 function fixture() {

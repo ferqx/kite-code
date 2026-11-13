@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient, type ServerInfo, type WorkspaceRemoval } from '../../src';
 
 test('Workspace receipt keeps the frozen original request through a delayed response and rejects forged outcome authority', async () => {
@@ -37,7 +38,7 @@ test('Workspace receipt keeps the frozen original request through a delayed resp
   });
   const posts: unknown[] = [];
   let answer: unknown = receipt;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

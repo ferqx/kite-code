@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -16,6 +15,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawnSync as spawnProcessSync } from '../../../../../scripts/tooling/process';
 import type { AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import {
   createFileTools,
@@ -429,12 +430,12 @@ test('the established outer read v5 bridge still returns a complete Full externa
 test('a native close fault preserves an already-unknown publication and its original diagnostic', () => {
   const entry = new URL('../../../src/files.ts', import.meta.url).href;
   const binding = fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url));
-  const child = Bun.spawnSync(
+  const child = spawnProcessSync(
     [
       process.execPath,
       '--eval',
       `
-    import {mock} from 'bun:test';
+    import {mock} from '#kite-test';
     import * as fs from 'node:fs';
     import {tmpdir} from 'node:os';
     import {join} from 'node:path';

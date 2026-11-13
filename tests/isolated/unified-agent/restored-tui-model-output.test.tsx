@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -23,6 +23,7 @@ import {
   TuiSession,
 } from '@kite-ai/ui/tui';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -36,7 +37,7 @@ async function settle(check: () => boolean) {
   const deadline = Date.now() + 5000;
   while (!check()) {
     if (Date.now() >= deadline) throw Error('restored_tui_model_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 async function messages(client: AgentClient, id: string, upperSeq: string, signal?: AbortSignal) {
@@ -305,7 +306,7 @@ test('restored shared TUI reads plain and sealed original Model bodies with real
           methods.push(init?.method ?? (url instanceof Request ? url.method : 'GET'));
           return originalFetch(url, init);
         },
-        { preconnect: originalFetch.preconnect },
+        {},
       );
       const admitted = await connect(currentRuntime);
       expect(admitted.serverInfo?.storeId).toBe(restored.storeId);
@@ -370,11 +371,11 @@ test('restored shared TUI reads plain and sealed original Model bodies with real
         controller = new TuiController(port);
         await controller.select(id);
         app = render(<TuiSession testDiagnostics controller={controller} />);
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       };
       const key = async (input: string) => {
         app!.stdin.write(input);
-        await Bun.sleep(20);
+        await fixtureDelay(20);
       };
       for (const id of ['source', 'sealed']) {
         await mount(id);
@@ -452,7 +453,7 @@ test('restored shared TUI reads plain and sealed original Model bodies with real
         release!();
         release = undefined;
         await settle(() => finished);
-        await Bun.sleep(5);
+        await fixtureDelay(5);
         expect(previous.state.loadedOutputBodies.size).toBe(0);
         expect(previous.state.fullOutputs.size).toBe(0);
         if (!dispose) {

@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { CompressionInput } from '@kite-ai/agent';
 import { estimateModelContext, projectModelContext } from '@kite-ai/agent/context-estimate';
 import type { ModelMessage, ModelTool } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createSummaryCompressor } from '../../src/compression-configuration';
 
 const tools: ModelTool[] = [];

@@ -5,9 +5,11 @@ import {
   verifiedOwnedProcessGroupId,
 } from '../tests/tui-system/harness/pty-process';
 import { nestedTuiDeadlineBudget, tuiWaitTimeout } from '../tests/tui-system/harness/timing';
+import { spawn } from './tooling/process';
+import { testFileCommand } from './tooling/test-command';
 
 const DEFAULT_FILE_TIMEOUT_MS = 240_000;
-const DEFAULT_BUN_TEST_TIMEOUT_MS = 170_000;
+const DEFAULT_TEST_TIMEOUT_MS = 170_000;
 const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
 const FILE_TEARDOWN_MARGIN_MS = 10_000;
 const TEST_TEARDOWN_MARGIN_MS = 5_000;
@@ -101,24 +103,22 @@ export function selectTuiSystemTestFiles(
 async function runFile(file: string, timeoutMs: number): Promise<number> {
   const startedAt = performance.now();
   console.log(`\n[tui-system] ${file}`);
-  const { bunTestTimeoutMs, journeyDeadlineMs } = nestedTuiDeadlineBudget({
+  const { testTimeoutMs, journeyDeadlineMs } = nestedTuiDeadlineBudget({
     fileTimeoutMs: timeoutMs,
-    requestedBunTestTimeoutMs: tuiWaitTimeout(DEFAULT_BUN_TEST_TIMEOUT_MS),
+    requestedTestTimeoutMs: tuiWaitTimeout(DEFAULT_TEST_TIMEOUT_MS),
     requestedJourneyDeadlineMs: tuiWaitTimeout(DEFAULT_JOURNEY_DEADLINE_MS),
     fileTeardownMarginMs: FILE_TEARDOWN_MARGIN_MS,
     testTeardownMarginMs: TEST_TEARDOWN_MARGIN_MS,
   });
   const inheritsFaultSoakProcessGroup = faultSoakProcessGroupId !== undefined;
-  const proc = Bun.spawn(
-    [
-      process.execPath,
-      'test',
+  const proc = spawn(
+    testFileCommand([
       '--parallel=1',
       '--max-concurrency=1',
       '--timeout',
-      String(bunTestTimeoutMs),
+      String(testTimeoutMs),
       file,
-    ],
+    ]),
     {
       cwd: process.cwd(),
       env: {

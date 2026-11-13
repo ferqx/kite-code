@@ -1,9 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { rewriteArtifact, temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
@@ -761,7 +762,7 @@ for (const drift of [false, true])
         card = (await f.runtime.listInteractions({ ...f.base, sessionId: 'f2', state: 'pending' }))
           .interactions[0];
         if (Date.now() > deadline) throw Error('approval_timeout');
-        if (!card) await Bun.sleep(5);
+        if (!card) await sleepTimer(5);
       }
       expect(f.counts().effects).toBe(0);
       expect(await code(f.projection().getExecution(f.toolId()))).toBe(

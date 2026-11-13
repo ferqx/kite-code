@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Execution, ExecutionOutputPage, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createTuiJobTailReader } from '../../host/tui-job-tails';
 
 const job: Execution = {

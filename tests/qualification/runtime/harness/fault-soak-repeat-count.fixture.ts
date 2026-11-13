@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 
 test('receives its file-specific fault-soak repeat count', () => {
   expect(process.env.KITE_FAULT_SOAK_REPEAT_COUNT).toBe(

@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -13,10 +12,15 @@ import {
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { JobDefinition, JobEvent } from '@kite-ai/agent/extensions';
+import { afterEach, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
 import { confinedProfile } from '../../../src/jobs/seatbelt';
 import { createMacosConfinedShellJob } from '../../../src/jobs/shell';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -53,7 +57,7 @@ macTest(
       source,
       `#include <unistd.h>\n#include <stdio.h>\n#include <stdlib.h>\nint main(){pid_t p=fork();if(p<0)return 3;if(p>0){usleep(200000);return 0;}if(setsid()<0)_exit(4);FILE *f=fopen(${JSON.stringify(pidFile)},"w");fprintf(f,"%d",getpid());fclose(f);close(0);close(1);close(2);sleep(15);_exit(0);}\n`,
     );
-    const compiler = Bun.spawn(['/usr/bin/clang', source, '-o', binary], {
+    const compiler = spawnProcess(['/usr/bin/clang', source, '-o', binary], {
       stdout: 'ignore',
       stderr: 'pipe',
     });
@@ -64,7 +68,7 @@ macTest(
       '(deny process-fork)',
       '(allow process-fork)',
     );
-    const guardian = Bun.spawn([process.execPath, f.options.supervisorPath], {
+    const guardian = spawnProcess([fixtureNodeExecutable(), f.options.supervisorPath], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -108,7 +112,7 @@ macTest(
       source,
       `#include <unistd.h>\n#include <fcntl.h>\n#include <sys/stat.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\nint main(int argc,char **argv){if(strstr(argv[0],"/copied")){FILE *f=fopen("copied-executed","w");fputs("bad",f);fclose(f);return 0;}char path[4096],b[4096];snprintf(path,sizeof(path),"%s/copied",getenv("TMPDIR"));int in=open(argv[0],O_RDONLY),out=open(path,O_WRONLY|O_CREAT,0700),n;while((n=read(in,b,sizeof(b)))>0)write(out,b,n);close(in);close(out);chmod(path,0700);char *args[]={path,NULL};execv(path,args);perror("temp-exec-denied");return 0;}\n`,
     );
-    const compiler = Bun.spawn(['/usr/bin/clang', source, '-o', binary], {
+    const compiler = spawnProcess(['/usr/bin/clang', source, '-o', binary], {
       stdout: 'ignore',
       stderr: 'pipe',
     });
@@ -134,7 +138,7 @@ macTest(
         renameSync(f.workspace, `${f.workspace}-old`);
         mkdirSync(f.workspace);
       }
-      const guardian = Bun.spawn([process.execPath, f.options.supervisorPath], {
+      const guardian = spawnProcess([fixtureNodeExecutable(), f.options.supervisorPath], {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -158,10 +162,10 @@ async function fixture() {
     readonly = join(root, 'readonly'),
     protectedRoot = join(workspace, 'profile');
   for (const path of [workspace, readonly, protectedRoot]) mkdirSync(path);
-  const built = await Bun.build({
-    entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
+  const built = await buildBundle({
+    entrypoints: [join(import.meta.dirname, '../../../src/platform/process/shell-supervisor.ts')],
     outdir: join(root, 'platform/process'),
-    target: 'bun',
+    ...fixtureRuntimeBuild(root, join(root, 'platform/process')),
     naming: 'shell-supervisor.js',
   });
   expect(built.success).toBe(true);
@@ -169,6 +173,7 @@ async function fixture() {
     cwd: workspace,
     env: { PATH: '/usr/bin:/bin' },
     supervisorPath: built.outputs[0]!.path,
+    runtimeExecutable: fixtureNodeExecutable(),
     protectedRoots: [protectedRoot],
     runtimeReadOnlyRoots: [readonly],
     temporaryRoot: root,
@@ -236,15 +241,15 @@ macTest(
   },
 );
 macTest(
-  'real pinned Bun runs readonly script with threads but cannot spawn a subprocess',
+  'real pinned Node runs readonly script with threads but cannot spawn a subprocess',
   async () => {
     const f = await fixture();
     const script = join(f.readonly, 'script.js');
     writeFileSync(
       script,
-      `await Bun.write('script-result','complete'); try { const p=Bun.spawn(['/bin/sleep','1']); await p.exited; console.log('spawn-created'); } catch { console.log('spawn-denied'); }`,
+      `import { writeFileSync } from 'node:fs'; import { spawn } from 'node:child_process'; writeFileSync('script-result','complete'); try { await new Promise((resolve,reject)=>spawn('/bin/sleep',['1']).once('spawn',resolve).once('error',reject)); console.log('spawn-created'); } catch { console.log('spawn-denied'); }`,
     );
-    const result = await run(f.job, `exec ${quote(process.execPath)} ${quote(script)}`);
+    const result = await run(f.job, `exec ${quote(fixtureNodeExecutable())} ${quote(script)}`);
     expect(result.terminal).toMatchObject({
       result: { outcome: 'succeeded' },
       supervision: 'ended',
@@ -285,9 +290,9 @@ macTest('actual OS denies TCP and Unix sockets before server acceptance', async 
     const script = join(f.readonly, 'network.js');
     writeFileSync(
       script,
-      `for(const target of [{hostname:'127.0.0.1',port:${port}},{unix:${JSON.stringify(socketPath)}}]){try{await Bun.connect({...target,socket:{data(){},open(s){s.end()},error(){}}}); console.log('connected');}catch{console.log('denied')}}`,
+      `import {createConnection} from 'node:net'; for(const target of [{host:'127.0.0.1',port:${port}},{path:${JSON.stringify(socketPath)}}]){try{await new Promise((resolve,reject)=>{const socket=createConnection(target,()=>{socket.end();resolve()});socket.once('error',reject)}); console.log('connected');}catch{console.log('denied')}}`,
     );
-    const result = await run(f.job, `exec ${quote(process.execPath)} ${quote(script)}`);
+    const result = await run(f.job, `exec ${quote(fixtureNodeExecutable())} ${quote(script)}`);
     expect(result.output.match(/denied/g)).toHaveLength(2);
     expect(result.output).not.toContain('connected');
     expect(result.terminal).toMatchObject({
@@ -306,7 +311,7 @@ macTest(
   'fixed native interpreter cannot fork/daemonize, setsid or signal an unrelated process',
   async () => {
     const f = await fixture();
-    const unrelated = Bun.spawn(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+    const unrelated = spawnProcess(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
     try {
       const source = join(f.readonly, 'probe.c'),
         binary = join(f.readonly, 'probe');
@@ -314,7 +319,7 @@ macTest(
         source,
         `#include <unistd.h>\n#include <signal.h>\n#include <stdio.h>\n#include <stdlib.h>\nint main(){int f=fork(); if(f==0)_exit(7); int d=daemon(1,1); printf("fork:%d daemon:%d setsid:%d signal:%d\\n",f,d,setsid(),kill(${unrelated.pid},SIGTERM));return 0;}\n`,
       );
-      const compiler = Bun.spawn(['/usr/bin/clang', source, '-o', binary], {
+      const compiler = spawnProcess(['/usr/bin/clang', source, '-o', binary], {
         stdout: 'ignore',
         stderr: 'pipe',
       });
@@ -344,7 +349,7 @@ macTest(
       source,
       '#include <unistd.h>\n#include <signal.h>\n#include <stdio.h>\n#include <stdlib.h>\nint main(){signal(SIGTERM,SIG_IGN);printf("%s",getenv("TMPDIR"));fflush(stdout);for(;;)pause();}\n',
     );
-    const compiler = Bun.spawn(['/usr/bin/clang', source, '-o', binary], {
+    const compiler = spawnProcess(['/usr/bin/clang', source, '-o', binary], {
       stdout: 'ignore',
       stderr: 'pipe',
     });
@@ -361,7 +366,7 @@ macTest(
     const end = Date.now() + 5000;
     while (!events.some((event) => event.type === 'output')) {
       if (Date.now() > end) throw Error('output_timeout');
-      await Bun.sleep(10);
+      await sleepTimer(10);
     }
     expect((await job.cancel(handle)).status).toBe('stopped');
     await observed;
@@ -406,7 +411,7 @@ async function until(check: () => boolean): Promise<void> {
   const end = Date.now() + 5000;
   while (!check()) {
     if (Date.now() > end) throw Error('fixture_timeout');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 for (const exit of ['eof', 'sigkill'] as const)
@@ -416,13 +421,13 @@ for (const exit of ['eof', 'sigkill'] as const)
       pidFile = join(f.workspace, 'process');
     writeFileSync(
       script,
-      `await Bun.write(${JSON.stringify(pidFile)},JSON.stringify({pid:process.pid,temp:process.env.TMPDIR}));setInterval(()=>{},1000);`,
+      `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(pidFile)},JSON.stringify({pid:process.pid,temp:process.env.TMPDIR}));setInterval(()=>{},1000);`,
     );
-    const leaf = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../../src/jobs/shell.ts')],
+    const leaf = await buildBundle({
+      entrypoints: [join(import.meta.dirname, '../../../src/jobs/shell.ts')],
       outdir: join(f.root, 'jobs'),
-      target: 'bun',
-      packages: 'external',
+      ...fixtureRuntimeBuild(f.root, join(f.root, 'jobs')),
+      packages: 'bundle',
       naming: 'shell.js',
     });
     expect(leaf.success).toBe(true);
@@ -431,17 +436,15 @@ for (const exit of ['eof', 'sigkill'] as const)
       parentPath,
       `import {createMacosConfinedShellJob} from ${JSON.stringify(leaf.outputs[0]!.path)};
 const job=createMacosConfinedShellJob(${JSON.stringify({ ...f.options, supervisorPath: undefined })});
-const h=await job.start({command:${JSON.stringify(`exec ${quote(process.execPath)} ${quote(script)}`)}},{sessionId:'s',executionId:'parent',signal:new AbortController().signal});console.log(JSON.stringify(h.reference));process.stdin.resume();process.stdin.on('end',()=>process.exit(0));`,
+const h=await job.start({command:${JSON.stringify(`exec ${quote(fixtureNodeExecutable())} ${quote(script)}`)}},{sessionId:'s',executionId:'parent',signal:new AbortController().signal});console.log(JSON.stringify(h.reference));process.stdin.resume();process.stdin.on('end',()=>process.exit(0));`,
     );
-    const parent = Bun.spawn([process.execPath, parentPath], {
-      // Keep the outer runner's orphan guard, but exercise this parent's guardian EOF cleanup.
-      // The inherited Bun flag otherwise SIGKILLs its guardian before temp cleanup can run.
-      env: { ...process.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' },
+    const parent = spawnProcess([fixtureNodeExecutable(), parentPath], {
+      env: {},
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
     });
-    const unrelated = Bun.spawn(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
+    const unrelated = spawnProcess(['/bin/sleep', '30'], { stdout: 'ignore', stderr: 'ignore' });
     let reference: { processGroupId: number; supervisorPid: number } | undefined;
     try {
       const reader = parent.stdout.getReader();
@@ -487,23 +490,23 @@ macTest(
   'full public manifest built outside source locates confined guardian and rejects missing packaged asset',
   async () => {
     const f = await fixture();
-    const packageRoot = join(import.meta.dir, '../../..');
+    const packageRoot = join(import.meta.dirname, '../../..');
     const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
       exports: Record<string, string>;
     };
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: Object.values(manifest.exports).map((path) => join(packageRoot, path)),
       root: join(packageRoot, 'src'),
       outdir: join(f.root, 'artifact'),
-      target: 'bun',
+      ...fixtureRuntimeBuild(join(f.root, 'artifact')),
       splitting: true,
       packages: 'external',
     });
     expect(built.success).toBe(true);
-    const asset = await Bun.build({
+    const asset = await buildBundle({
       entrypoints: [join(packageRoot, 'src/platform/process/shell-supervisor.ts')],
       outdir: join(f.root, 'artifact/platform/process'),
-      target: 'bun',
+      ...fixtureRuntimeBuild(join(f.root, 'artifact'), join(f.root, 'artifact/platform/process')),
       naming: 'shell-supervisor.js',
     });
     expect(asset.success).toBe(true);

@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/bun-build';
 import { plainInkOutput } from '../../scripts/ink-output';
 
 interface Output {
@@ -18,20 +20,27 @@ type Operation =
   | { kind: 'clip'; clip: Parameters<Output['clip']>[0] }
   | { kind: 'unclip' };
 
-const inkDirectory = dirname(Bun.resolveSync('ink', import.meta.dir));
+const inkDirectory = dirname(createRequire(import.meta.url).resolve('ink'));
 const outputPath = join(inkDirectory, 'output.js');
 const Original: Constructor = (await import(pathToFileURL(outputPath).href)).default;
-const bundle = await Bun.build({
+const bundle = await buildFixture({
   entrypoints: [outputPath],
-  target: 'bun',
+  target: 'node',
   packages: 'bundle',
   plugins: [plainInkOutput(inkDirectory)],
 });
 if (!bundle.success) throw new AggregateError(bundle.logs, 'ink_output_test_build_failed');
 const compiled = await bundle.outputs[0]!.text();
-const Compiled: Constructor = (
-  await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
-).default;
+const Compiled: Constructor = await (async () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-ink-output-import-'));
+  const entry = join(root, 'output.mjs');
+  try {
+    writeFileSync(entry, compiled);
+    return (await import(pathToFileURL(entry).href)).default;
+  } finally {
+    rmSync(root, { recursive: true });
+  }
+})();
 
 function output(Impl: Constructor, width: number, height: number, operations: Operation[]): Output {
   const result = new Impl({ width, height });
@@ -166,23 +175,25 @@ test('Ink output build rejects unreviewed versions or changed serialization and 
     writeFileSync(candidate, 'export default 1;');
     expect(() => plainInkOutput(build)).toThrow('tui_ink_build_version_unreviewed');
     writeFileSync(manifest, JSON.stringify({ name: 'ink', version: '7.1.1' }));
-    const rejected = await Bun.build({
-      throw: false,
+    const rejected = await buildFixture({
       entrypoints: [candidate],
       plugins: [plainInkOutput(build)],
     });
     expect(rejected.success).toBe(false);
-    expect(rejected.logs.map(String).join('\n')).toContain('tui_ink_output_contract_changed');
+    expect(rejected.logs.map((log) => log.text).join('\n')).toContain(
+      'tui_ink_output_contract_changed',
+    );
     writeFileSync(candidate, readFileSync(outputPath, 'utf8').repeat(2));
-    const duplicate = await Bun.build({
-      throw: false,
+    const duplicate = await buildFixture({
       entrypoints: [candidate],
       plugins: [plainInkOutput(build)],
     });
     expect(duplicate.success).toBe(false);
-    expect(duplicate.logs.map(String).join('\n')).toContain('tui_ink_output_contract_changed');
+    expect(duplicate.logs.map((log) => log.text).join('\n')).toContain(
+      'tui_ink_output_contract_changed',
+    );
     writeFileSync(candidate, 'export default 1;');
-    const other = await Bun.build({
+    const other = await buildFixture({
       entrypoints: [candidate],
       plugins: [plainInkOutput(inkDirectory)],
     });

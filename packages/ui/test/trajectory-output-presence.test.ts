@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   projectTrajectory,
   type TrajectoryEvent,
@@ -6,6 +5,7 @@ import {
 } from '@kite-ai/trajectory';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import { trajectoryFactAnchor } from '../src/desktop/trajectory/fact-anchor';
 import { loopPartLabel, loopPartSnippet } from '../src/desktop/trajectory/loop-materials';
 import { trajectoryOutputState } from '../src/desktop/trajectory/output-presence';

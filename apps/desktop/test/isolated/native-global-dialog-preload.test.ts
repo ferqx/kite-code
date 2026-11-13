@@ -1,14 +1,15 @@
-import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 import {
   nativeGlobalDialogEventChannel,
   nativeGlobalDialogStateChannel,
 } from '../../src/native-global-dialog-bridge';
 
 test('the isolated dialog preload exposes only its fixed decision bridge and rejects other payloads', async () => {
-  const result = await Bun.build({
+  const result = await buildFixture({
     entrypoints: [
       fileURLToPath(new URL('../../electron/global-dialog-preload.ts', import.meta.url)),
     ],

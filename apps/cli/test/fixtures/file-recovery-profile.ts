@@ -10,9 +10,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { serve as testServe } from '../../../../scripts/tooling/http';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -31,7 +34,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('file_fork_receipt_deadline');
-    await Bun.sleep(5);
+    await testSleep(5);
   }
 }
 export async function fileRecoveryProfile(input: { secondMutation?: boolean } = {}) {
@@ -50,7 +53,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
     mode: 0o600,
   });
   let requests = 0;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -208,14 +211,14 @@ export async function compileFileRecoveryTUI(root: string, runner: string) {
   mkdirSync(modules, { recursive: true });
   for (const name of ['ink', 'react'])
     symlinkSync(
-      realpathSync(join(resolve(import.meta.dir, '../../../..'), 'node_modules', name)),
+      realpathSync(join(resolve(import.meta.dirname, '../../../..'), 'node_modules', name)),
       join(modules, name),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-  return Bun.build({
+  return testBuild({
     entrypoints: [runner],
     outdir: root,
-    target: 'bun',
+    target: 'node',
     external: ['ink', 'react', 'react-devtools-core'],
     plugins: [
       {

@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -18,6 +17,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createAskUserExtension } from '@kite-ai/agent/ask-user';
 import type { ToolDefinition } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';

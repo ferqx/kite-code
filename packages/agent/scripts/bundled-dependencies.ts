@@ -4,9 +4,9 @@
 export const agentBundledDependencies: readonly string[] = Object.freeze([
   '@modelcontextprotocol/sdk',
   'ajv',
-  'drizzle-orm',
   'gpt-tokenizer',
   'ignore',
+  'minimatch',
   'yaml',
   '@mozilla/readability',
   'turndown',

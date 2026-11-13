@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, ContextQuery, SelectedContextPage } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { getCompleteContext } from '../src';
 
 const base: SelectedContextPage = {

@@ -1,10 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { JobEvent, JobHandle } from '@kite-ai/agent/extensions';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { createShellJob } from '../../../src/jobs/shell';
+import { fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const posixTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
 
@@ -13,10 +16,12 @@ posixTest.each(['stdout', 'stderr'] as const)(
   async (stream) => {
     const root = mkdtempSync(join(tmpdir(), 'kite-shell-drain-failure-'));
     try {
-      const built = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
+      const built = await buildBundle({
+        entrypoints: [
+          join(import.meta.dirname, '../../../src/platform/process/shell-supervisor.ts'),
+        ],
         outdir: root,
-        target: 'bun',
+        ...fixtureRuntimeBuild(root),
         naming: 'guardian.js',
       });
       expect(built.success).toBe(true);
@@ -36,7 +41,7 @@ Readable.prototype[Symbol.asyncIterator] = function () {
 };
 `,
       );
-      const child = Bun.spawn([process.execPath, '--preload', preload, built.outputs[0]!.path], {
+      const child = spawnProcess([process.execPath, '--preload', preload, built.outputs[0]!.path], {
         cwd: root,
         stdin: 'pipe',
         stdout: 'pipe',
@@ -92,10 +97,12 @@ posixTest(
     let handle: JobHandle | undefined;
     let job: ReturnType<typeof createShellJob> | undefined;
     try {
-      const built = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
+      const built = await buildBundle({
+        entrypoints: [
+          join(import.meta.dirname, '../../../src/platform/process/shell-supervisor.ts'),
+        ],
         outdir: root,
-        target: 'bun',
+        ...fixtureRuntimeBuild(root),
         naming: 'guardian.js',
       });
       expect(built.success).toBe(true);
@@ -170,10 +177,12 @@ posixTest(
   async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-shell-late-drain-'));
     try {
-      const built = await Bun.build({
-        entrypoints: [join(import.meta.dir, '../../../src/platform/process/shell-supervisor.ts')],
+      const built = await buildBundle({
+        entrypoints: [
+          join(import.meta.dirname, '../../../src/platform/process/shell-supervisor.ts'),
+        ],
         outdir: root,
-        target: 'bun',
+        ...fixtureRuntimeBuild(root),
         naming: 'guardian.js',
       });
       expect(built.success).toBe(true);
@@ -197,7 +206,7 @@ Readable.prototype[Symbol.asyncIterator] = function () {
 };
 `,
       );
-      const child = Bun.spawn([process.execPath, '--preload', preload, built.outputs[0]!.path], {
+      const child = spawnProcess([process.execPath, '--preload', preload, built.outputs[0]!.path], {
         cwd: root,
         stdin: 'pipe',
         stdout: 'pipe',

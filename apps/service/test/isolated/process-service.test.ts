@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,6 +6,8 @@ import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   assembleProcessService,
@@ -31,7 +32,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       windowsDesktop: true,
     };
     const code = `
-import { mock } from 'bun:test';
+import { mock } from '#kite-test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 const jobs = await import('@kite-ai/agent/jobs/shell');
@@ -53,12 +54,16 @@ assert.deepEqual(choices, ['auto']);
 assert.equal(existsSync(${JSON.stringify(profile.databasePath)}), false);
 `;
     try {
-      const child = spawnSync(process.execPath, ['--eval', code], {
-        cwd: import.meta.dir,
-        encoding: 'utf8',
-        timeout: 10000,
-        windowsHide: true,
-      });
+      const child = spawnSync(
+        process.execPath,
+        [...testRuntimeFlags, '--input-type=module-typescript', '--eval', code],
+        {
+          cwd: import.meta.dirname,
+          encoding: 'utf8',
+          timeout: 10000,
+          windowsHide: true,
+        },
+      );
       expect(child.error).toBeUndefined();
       expect(child.status, child.stderr).toBe(0);
     } finally {

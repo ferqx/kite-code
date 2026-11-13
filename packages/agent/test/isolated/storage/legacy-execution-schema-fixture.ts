@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Database } from '@kite-ai/agent/runtime-sqlite';
 import { supportedSchemas } from '../../../src/storage/sqlite/migrations';
 
 /** Restore actual historical DDL, including its runless-Model prohibition.

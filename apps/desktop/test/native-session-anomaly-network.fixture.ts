@@ -154,7 +154,7 @@ export async function installNativeAnomalyNetwork(app: ElectronApplication) {
         wire.end(body);
       });
     };
-    globalThis.fetch = Object.assign(wrapped, { preconnect: original.preconnect });
+    globalThis.fetch = Object.assign(wrapped, {});
   });
 }
 

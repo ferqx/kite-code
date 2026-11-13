@@ -1,14 +1,14 @@
-import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import ts from 'typescript';
+import { describe, expect, test } from '#kite-test';
 import {
   parseTuiSystemTestShard,
   selectTuiSystemTestFiles,
   TUI_LIFECYCLE_HARNESS_FLAG,
 } from '../../../scripts/run-tui-system-tests';
 
-const scenariosDirectory = join(import.meta.dir, '..', 'scenarios');
+const scenariosDirectory = join(import.meta.dirname, '..', 'scenarios');
 const OUTPUT_WAIT_HELPERS = new Set([
   'expectTextAbsentFor',
   'waitForAnyText',
@@ -340,7 +340,7 @@ export function findRawDeltaControlReadinessViolations(
   return violations;
 }
 
-interface BunTestBindings {
+interface TestBindings {
   beforeAll: Set<string>;
   describe: Set<string>;
   test: Set<string>;
@@ -362,8 +362,8 @@ function expressionRootName(expression: ts.Expression): string | undefined {
   return undefined;
 }
 
-function bunTestBindings(sourceFile: ts.SourceFile): BunTestBindings {
-  const bindings: BunTestBindings = {
+function testBindings(sourceFile: ts.SourceFile): TestBindings {
+  const bindings: TestBindings = {
     beforeAll: new Set(['beforeAll']),
     describe: new Set(['describe']),
     test: new Set(['it', 'test']),
@@ -372,7 +372,7 @@ function bunTestBindings(sourceFile: ts.SourceFile): BunTestBindings {
   for (const statement of sourceFile.statements) {
     if (
       !ts.isImportDeclaration(statement) ||
-      statement.moduleSpecifier.getText(sourceFile).replaceAll(/['"]/g, '') !== 'bun:test' ||
+      statement.moduleSpecifier.getText(sourceFile).replaceAll(/['"]/g, '') !== '#kite-test' ||
       !statement.importClause?.namedBindings ||
       !ts.isNamedImports(statement.importClause.namedBindings)
     ) {
@@ -443,7 +443,7 @@ export function findSharedFixtureTestViolations(source: string, file = 'fixture.
     true,
     ts.ScriptKind.TS,
   );
-  const bindings = bunTestBindings(sourceFile);
+  const bindings = testBindings(sourceFile);
   const violations: string[] = [];
 
   if (
@@ -857,7 +857,7 @@ describe('TUI system scenario contract', () => {
     ).not.toEqual([]);
     expect(
       findSharedFixtureTestViolations(
-        'import { test as scenario } from "bun:test"; describe("alias", () => { beforeAll(setup); const selected = scenario.skip; selected("a", first); scenario("b", second); });',
+        'import { test as scenario } from "#kite-test"; describe("alias", () => { beforeAll(setup); const selected = scenario.skip; selected("a", first); scenario("b", second); });',
       ),
     ).not.toEqual([]);
     expect(
@@ -958,7 +958,7 @@ describe('TUI system scenario contract', () => {
     expect(regexViolations(/test\([^\n]*journey\.run\(\)[^\n]*,\s*\d[\d_]*\s*\)/)).toEqual([]);
   });
 
-  test('every stateful scenario uses the shared Bun outer timeout', () => {
+  test('every stateful scenario uses the shared outer test timeout', () => {
     expect(
       scenarioSources().flatMap(({ file, source }) =>
         findJourneyTestTimeoutViolations(source, file),

@@ -1,10 +1,10 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { bodyReference } from '../../../src/model-body';
@@ -218,7 +218,7 @@ test('each actual SDK execution seals original settings, exact assembly/source a
       }
       return stream(first);
     },
-    { preconnect: fetch.preconnect },
+    {},
   );
   const preset = { temperature: 0.3, topP: 0.8, maxOutputTokens: 222 };
   const adapter = createSdkModelAdapter({

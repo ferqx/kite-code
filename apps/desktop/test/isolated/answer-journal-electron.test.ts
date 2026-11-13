@@ -1,10 +1,16 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -14,7 +20,7 @@ test.skipIf(process.platform !== 'darwin')(
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-answer-journal-'));
     const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const store = await openSqliteStore(profile);
@@ -36,20 +42,20 @@ test.skipIf(process.platform !== 'darwin')(
         });
       await store.close();
       directoryLink(
-        resolve(import.meta.dir, '../../../../node_modules'),
+        resolve(import.meta.dirname, '../../../../node_modules'),
         join(root, 'node_modules'),
       );
       const source = join(root, 'service.ts');
       writeFileSync(
         source,
         readFileSync(
-          resolve(import.meta.dir, '../answer-journal-child.fixture.ts'),
+          resolve(import.meta.dirname, '../answer-journal-child.fixture.ts'),
           'utf8',
         ).replace("'LEDGER_PATH'", JSON.stringify(join(root, 'ledger'))),
       );
-      const service = await Bun.build({
+      const service = await buildFixture({
         entrypoints: [source],
-        target: 'bun',
+        target: 'node',
         format: 'esm',
         packages: 'external',
         outdir: root,
@@ -64,9 +70,9 @@ test.skipIf(process.platform !== 'darwin')(
       await buildNativeDesktop(
         {
           serviceEntrypoint,
-          bunExecutable,
+          runtimeExecutable: bunExecutable,
           serviceSha256: hash(serviceEntrypoint),
-          bunSha256: hash(bunExecutable),
+          runtimeSha256: hash(bunExecutable),
           buildId: 'answer-journal-fixture',
           apiMajor: 1,
           requiredCapabilities: ['sessions', 'history', 'commands', 'interactions'],
@@ -78,17 +84,17 @@ test.skipIf(process.platform !== 'darwin')(
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
-        readFileSync(resolve(import.meta.dir, '../answer-journal-electron.fixture.ts'), 'utf8')
+        readFileSync(resolve(import.meta.dirname, '../answer-journal-electron.fixture.ts'), 'utf8')
           .replace(
             "'./native-model-selection.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
           )
           .replace(
             "import { _electron } from 'playwright';",
-            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
           ),
       );
-      const built = await Bun.build({
+      const built = await buildFixture({
         entrypoints: [fixture],
         target: 'node',
         format: 'esm',
@@ -98,9 +104,9 @@ test.skipIf(process.platform !== 'darwin')(
       });
       if (!built.success)
         throw new AggregateError(built.logs, 'answer_journal_driver_build_failed');
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           outdir,
           root,

@@ -248,7 +248,7 @@ try {
   });
   console.log(
     JSON.stringify({
-      actualNode: typeof Bun === 'undefined',
+      actualNode: process.release.name === 'node' && !('bun' in process.versions),
       pid,
       closePid,
       stdout,

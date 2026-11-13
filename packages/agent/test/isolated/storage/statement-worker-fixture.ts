@@ -1,10 +1,11 @@
-import type { Database, Statement } from 'bun:sqlite';
+import { parentPort } from 'node:worker_threads';
+import { nativeRuntime } from '../../../src/runtime-native';
+import type { Database, Statement } from '../../../src/runtime-sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import '../../../src/storage/worker/main';
 
-declare const self: Worker;
-type NativeStatement = Statement & { readonly isFinalized: boolean };
-const statements = new Set<NativeStatement>();
+const port = parentPort!;
+const statements = new Set<Statement>();
 const timedDatabase = Reflect.get(SqliteOperations.prototype, 'timedDatabase') as (
   this: SqliteOperations,
   database: Database,
@@ -23,11 +24,7 @@ Reflect.set(
           const value = Reflect.get(target, key, target) as unknown;
           if (key === 'query' || key === 'prepare')
             return (...args: unknown[]) => {
-              const statement = Reflect.apply(
-                value as CallableFunction,
-                target,
-                args,
-              ) as NativeStatement;
+              const statement = Reflect.apply(value as CallableFunction, target, args) as Statement;
               statements.add(statement);
               return statement;
             };
@@ -38,10 +35,20 @@ Reflect.set(
   },
 );
 
-const post = self.postMessage.bind(self);
-self.postMessage = (response: unknown) => {
+const post = port.postMessage.bind(port);
+port.postMessage = (response: unknown) => {
   const observed = statements.size;
-  const live = [...statements].filter((statement) => !statement.isFinalized).length;
+  const live = [...statements].filter((statement) => {
+    try {
+      // Only a native finalized handle may refuse a reset with this exact code.
+      nativeRuntime().sqliteReset(Reflect.get(statement, 'statement'));
+      return true;
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'native_sqlite_statement_finalized')
+        throw error;
+      return false;
+    }
+  }).length;
   statements.clear();
   post({
     ...(response as object),

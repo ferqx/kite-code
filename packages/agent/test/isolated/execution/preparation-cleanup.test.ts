@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import type { Json, ToolContext, ToolResult } from '@kite-ai/agent/extensions';
 import { createWorkspaceFiles } from '@kite-ai/agent/files';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { acquireProfileAccess } from '../../../src/platform/profile';
 
 async function fixture(failCleanup: boolean, childFailure = false) {

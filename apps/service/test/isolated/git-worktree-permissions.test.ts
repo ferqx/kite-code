@@ -1,4 +1,3 @@
-import { expect, spyOn, test } from 'bun:test';
 import {
   existsSync,
   lstatSync,
@@ -9,6 +8,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -16,8 +16,17 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import type { Json, ToolResult } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, spyOn, test } from '#kite-test';
 import { Git } from '../../../../packages/agent/src/tools/git-worktree/git';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import {
+  spawn as spawnProcess,
+  spawnSync as spawnProcessSync,
+} from '../../../../scripts/tooling/process';
+import { testFileCommand } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   closeWorktreeFixture,
@@ -40,16 +49,16 @@ function nativeWithDefaultHome(name: string, run: () => Promise<void>, timeoutMs
       const root = persistentWorktreeDirectory('kite-worktree-default-home-');
       const home = join(root, 'home');
       privateDirectory(join(home, '.kite-code'));
-      const child = Bun.spawn(
-        [
-          process.execPath,
-          'test',
+      const child = spawnProcess(
+        testFileCommand([
           '--parallel=1',
           '--max-concurrency=1',
-          import.meta.path,
+          '--timeout',
+          String(timeoutMs),
+          import.meta.filename,
           '--test-name-pattern',
           `^${name}$`,
-        ],
+        ]),
         {
           env: {
             ...process.env,
@@ -68,8 +77,8 @@ function nativeWithDefaultHome(name: string, run: () => Promise<void>, timeoutMs
         new Response(child.stderr).text(),
       ]);
       expect(code, `${stdout}\n${stderr}`).toBe(0);
-      expect(stderr).toMatch(/\b1 pass\b/);
-      expect(stderr).toMatch(/\b0 fail\b/);
+      expect(stdout).toMatch(/^ℹ pass 1$/m);
+      expect(stdout).toMatch(/^ℹ fail 0$/m);
     },
     timeoutMs,
   );
@@ -85,7 +94,7 @@ async function until<T>(
     const value = await read();
     if (value !== null) return value;
     if (Date.now() >= deadline) throw Error(`worktree_permission_fixture_timeout:${label}`);
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 async function fixture(requirePlan = false, defaultRootCase = false) {
@@ -133,7 +142,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
       )
     : { PATH: '/usr/bin:/bin' };
   const git = (...args: string[]) => {
-    const result = Bun.spawnSync([gitExecutable, ...args], {
+    const result = spawnProcessSync([gitExecutable, ...args], {
       cwd: source,
       env: {
         ...environment,
@@ -294,7 +303,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
       ];
     throw Error(`unknown_worktree_permission_case:${scenario}`);
   };
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -407,15 +416,15 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
         ...(requirePlan ? { planning: { requirePlan: true } } : {}),
       }),
     );
-    const built = await Bun.build({
+    const built = await buildBundle({
       entrypoints: [
         join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
       outdir: join(root, 'assets'),
-      target: 'bun',
+      ...fixtureRuntimeBuild(join(root, 'assets')),
       naming: 'shell-supervisor.js',
     });
     expect(built.success).toBe(true);
@@ -431,7 +440,7 @@ async function fixture(requirePlan = false, defaultRootCase = false) {
         configurationId: 'worktree-permission-fixture',
         env: { ...environment, HOME: defaultRootCase ? home : source },
         supervisorPath: windows?.runner ?? built.outputs[0]!.path,
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: windows?.shell ?? '/bin/sh',
         ...(windows
           ? {
@@ -708,7 +717,7 @@ test('default HOME mismatch refuses fixture setup before any repository or provi
 
 test('initialization and Runtime close failures stop the fixture server and retain the original error', async () => {
   for (const runtimeCloseFails of [false, true]) {
-    const server = Bun.serve({
+    const server = await fixtureServe({
       port: 0,
       hostname: '127.0.0.1',
       fetch: () => new Response('fixture'),

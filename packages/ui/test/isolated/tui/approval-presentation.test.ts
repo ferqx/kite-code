@@ -1,15 +1,17 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import type { Subprocess as FixtureProcess } from '../../../../../scripts/tooling/process';
 
 const { ptyDeadline, spawnTuiPTY } = (await import(
-  join(import.meta.dir, '../../../../../apps/cli/test/fixtures/tui-pty')
+  join(import.meta.dirname, '../../../../../apps/cli/test/fixtures/tui-pty')
 )) as {
   ptyDeadline<T>(work: Promise<T>, ms: number, message: string): Promise<T>;
   spawnTuiPTY(input: { cmd: string[]; cwd: string; env: NodeJS.ProcessEnv }): {
     readonly ended: boolean;
-    host: Pick<Bun.Subprocess, 'kill' | 'exited'>;
+    host: Pick<FixtureProcess, 'kill' | 'exited'>;
     drain(): Promise<void>;
     viewport(): string;
     text(): string;
@@ -24,7 +26,7 @@ test('actual 80x24 approval keeps options and private draft intact while paging 
     cmd: [
       process.execPath,
       '--no-install',
-      join(import.meta.dir, 'approval-presentation.fixture.tsx'),
+      join(import.meta.dirname, 'approval-presentation.fixture.tsx'),
       root,
     ],
     cwd: root,
@@ -42,12 +44,12 @@ test('actual 80x24 approval keeps options and private draft intact while paging 
       }
       if (owned.ended || Date.now() > end)
         throw Error(`approval_frame_missing:${text}\n${frame}\n${owned.text().slice(-2000)}`);
-      await Bun.sleep(30);
+      await fixtureDelay(30);
     }
   }
   async function key(value: string) {
     await owned.key(value);
-    await Bun.sleep(80);
+    await fixtureDelay(80);
   }
   try {
     await wait('❯');

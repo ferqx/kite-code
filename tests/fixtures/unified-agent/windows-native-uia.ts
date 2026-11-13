@@ -5,6 +5,7 @@ import {
   startWindowsOwnedChild,
   WindowsOwnedChildStartError,
 } from '../../../packages/agent/src/platform/process/windows-owned-child';
+import { dlopen, ptr } from '../../../packages/agent/src/runtime-ffi';
 
 export interface WindowsNativeUIAElement {
   runtimeId: number[];
@@ -45,7 +46,6 @@ export async function createWindowsNativeUIA(options: {
   const deadline = Math.min(options.deadline, Date.now() + 45000);
   if (!Number.isFinite(deadline) || deadline <= Date.now()) throw Error('uia_deadline');
   // Fixed system location, not PATH/COMSPEC or caller-provided executable/DLL selection.
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
   });

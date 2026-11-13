@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createCredentialVault, createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { createMcpCredentialBroker, type McpCredentialIdentity } from '@kite-ai/agent/mcp';
+import { expect, test } from '#kite-test';
 
 const identity: McpCredentialIdentity = {
   profileId: 'profile',

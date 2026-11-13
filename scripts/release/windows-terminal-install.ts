@@ -11,6 +11,7 @@ import {
   readWindowsTerminalInstallation,
   retainWindowsTerminalFrontdoor,
   type WindowsTerminalInstallationMarker,
+  windowsNodeTerminalFrontdoorNames,
   windowsTerminalFrontdoorNames,
 } from '../../apps/cli/host/windows-terminal-installation';
 import { createAssetFileHasher } from '../../apps/service/src/asset-file-hash';
@@ -178,7 +179,10 @@ function bootstrap(
       root,
       bootstrap: {
         candidateId: bundle.digest,
-        files: windowsTerminalFrontdoorNames.map((name) => {
+        files: (bundle.manifest.nodeVersion
+          ? windowsNodeTerminalFrontdoorNames
+          : windowsTerminalFrontdoorNames
+        ).map((name) => {
           const file = bundle.manifest.files.find(
             (file) => file.path === `windows-frontdoor/${name}`,
           );
@@ -249,6 +253,11 @@ export function installWindowsTerminalBundle(input: {
       publish(owner, join(root, markerName), Buffer.from(JSON.stringify(marker)));
     }
     const old = selection(root);
+    if (
+      bundle.manifest.nodeVersion &&
+      marker.bootstrap.files.length !== windowsNodeTerminalFrontdoorNames.length
+    )
+      denied('node_bootstrap_requires_new_prefix');
     privateDirectory(join(root, 'releases'), security);
     const ids = candidates(root);
     if (old) {
@@ -362,7 +371,10 @@ export function uninstallWindowsTerminalBundle(prefix: string): void {
     }
     if (
       readdirSync(join(root, 'bin')).sort().join(',') !==
-      [...windowsTerminalFrontdoorNames].sort().join(',')
+      marker.bootstrap.files
+        .map((file) => file.name)
+        .sort()
+        .join(',')
     )
       denied('install_unknown_entry');
     removal.verify();

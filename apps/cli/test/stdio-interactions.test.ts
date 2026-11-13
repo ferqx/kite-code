@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { nodeServiceFixture } from '../../service/test/fixtures/node-service-process';
 import { createStdioInteractionHandler, run } from '../src';
 import { largeInteractionFixture } from './fixtures/large-interaction';
 
@@ -13,7 +15,8 @@ async function paired() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-stdio-')));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const host = await launchPairedService({
-    entrypoint: join(import.meta.dir, 'fixtures/interaction-child.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, 'fixtures/interaction-child.ts'),
     profile,
     instanceId: crypto.randomUUID(),
     buildId: 'fixed',
@@ -272,7 +275,7 @@ async function coreFixture(child: boolean, delay: number | Promise<void> = 0) {
     : {
         async *stream(_request: unknown, { signal }: { signal: AbortSignal }) {
           entered();
-          await (typeof delay === 'number' ? Bun.sleep(delay) : delay);
+          await (typeof delay === 'number' ? testSleep(delay) : delay);
           signal.throwIfAborted();
           yield finish;
         },
@@ -461,7 +464,7 @@ test('explicit timeout releases CLI waiting without cancelling accepted Service 
     const deadline = Date.now() + 10_000;
     let observed = await f.client.getRun(runId);
     while (observed.isActive && Date.now() < deadline) {
-      await Bun.sleep(10);
+      await testSleep(10);
       observed = await f.client.getRun(runId);
     }
     expect(observed.status).toBe('completed');

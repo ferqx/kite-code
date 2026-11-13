@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import {
@@ -7,6 +6,7 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime, type RunConfiguration, type RuntimeOptions } from '../../../src';
 import type { ContextSources, SourceRequest } from '../../../src/context';

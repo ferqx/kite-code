@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { ModelRequest } from '@kite-ai/ai';
 import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import Ajv from 'ajv';
+import { expect, test } from '#kite-test';
 import { createPlanningValidation } from '../../../src/business/planning';
 import type { ToolDefinition } from '../../../src/extensions';
 import { createModelToolSurface, modelToolCall } from '../../../src/model-tools';

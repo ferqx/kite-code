@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
+import { expect, test } from '#kite-test';
 import { createClient, type ResumeJobReportRequest, validateRequest } from '../../src';
 
 test('Job report resume is a closed exact original intent; absent capability, malformed receipt and physical lost reply never retry', async () => {

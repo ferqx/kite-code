@@ -7,8 +7,8 @@
  * cross the Runtime Client/TUI seam in the failure order under test.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -23,11 +23,11 @@ import {
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 45_000;
-const raceFixture = resolve(import.meta.dir, '..', 'fixtures', 'presentation-race-tui.tsx');
+const raceFixture = resolve(import.meta.dirname, '..', 'fixtures', 'presentation-race-tui.tsx');
 
 describe('TUI PTY System — presentation closeout races', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   afterEach(async () => {
@@ -37,7 +37,7 @@ describe('TUI PTY System — presentation closeout races', () => {
   test(
     'terminal-before-receipt converges to one completed answer and one prompt',
     async () => {
-      server = createMockModelServer();
+      server = await createMockModelServer();
       workspace = createTestWorkspace({
         configOverrides: { language: 'en-US', sandbox: { enabled: false } },
         projectConfigOverrides: { language: 'en-US', sandbox: { enabled: false } },
@@ -71,7 +71,7 @@ describe('TUI PTY System — presentation closeout races', () => {
   test(
     'post-terminal text, reasoning, progress, and durable tool events cannot reopen the sealed output',
     async () => {
-      server = createMockModelServer();
+      server = await createMockModelServer();
       workspace = createTestWorkspace({
         configOverrides: {
           language: 'en-US',
@@ -158,11 +158,11 @@ describe('TUI PTY System — presentation closeout races', () => {
 
 describe('TUI PTY System — clearout physical ownership', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeEach(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: { language: 'en-US', sandbox: { enabled: false } },
     });

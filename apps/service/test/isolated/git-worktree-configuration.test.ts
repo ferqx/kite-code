@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type AgentRuntime, createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
@@ -8,6 +8,11 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ChangeEvent } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
+import { spawnSync as spawnProcessSync } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   closeWorktreeFixture,
@@ -22,7 +27,7 @@ import { initializeLivePermissionFixture } from '../fixtures/live-permission-fix
 
 const native = process.platform === 'darwin' ? test : test.skip;
 function git(cwd: string, ...args: string[]) {
-  const result = Bun.spawnSync(['/usr/bin/git', ...args], {
+  const result = spawnProcessSync(['/usr/bin/git', ...args], {
     cwd,
     env: {
       PATH: '/usr/bin:/bin',
@@ -80,7 +85,7 @@ native(
         filesystem: 'full_access',
       },
     };
-    const server = Bun.serve({
+    const server = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -140,16 +145,16 @@ native(
           tools: [{ id: 'git.worktree', definitionVersion: '1' }],
         }),
       );
-      const supervisor = await Bun.build({
+      const supervisor = await buildBundle({
         entrypoints: [
           join(
-            import.meta.dir,
+            import.meta.dirname,
             '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
           ),
         ],
         outdir: join(root, 'assets'),
         naming: 'shell-supervisor.js',
-        target: 'bun',
+        ...fixtureRuntimeBuild(join(root, 'assets')),
       });
       expect(supervisor.success).toBe(true);
       const host = createDefaultProcessConfiguration({
@@ -162,7 +167,7 @@ native(
           configurationId: 'worktree-service-fixture',
           env: { PATH: '/usr/bin:/bin', HOME: source },
           supervisorPath: supervisor.outputs[0]!.path,
-          bunExecutable: process.execPath,
+          runtimeExecutable: process.execPath,
           shellExecutable: '/bin/sh',
           host: {
             controlBase: join(root, 'control'),
@@ -240,7 +245,7 @@ native(
           timeline.push(...page.events);
           if (page.events.length) after = page.events.at(-1)!.cursor;
           if (settled && page.events.length === 0) break;
-          await Bun.sleep(5);
+          await sleepTimer(5);
         }
         const receipt = await waiting;
         expect(receipt, JSON.stringify(receipt)).toMatchObject({ status: 'applied' });
@@ -335,7 +340,7 @@ native(
             details: { mutation: 'not_started', cwdChanged: false },
           });
           expect(existsSync(target)).toBe(false);
-          const branch = Bun.spawnSync(
+          const branch = spawnProcessSync(
             ['/usr/bin/git', 'show-ref', '--verify', '--quiet', 'refs/heads/must-not-exist'],
             { cwd: source },
           );

@@ -1,4 +1,3 @@
-import { afterAll, afterEach, expect, test } from 'bun:test';
 import type { TrajectoryEvidenceSource } from '@kite-ai/client';
 import {
   type TrajectoryEvidenceDescriptor,
@@ -8,6 +7,7 @@ import {
 import type { TrajectoryMaterialTarget } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
+import { afterAll, afterEach, expect, test } from '#kite-test';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 const originals = new Map<string, PropertyDescriptor | undefined>();

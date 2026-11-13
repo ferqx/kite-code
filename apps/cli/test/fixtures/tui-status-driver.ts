@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { retainProcessObservation } from '@kite-ai/service/daemon';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -30,7 +32,7 @@ process.once('SIGINT', interrupt);
 process.once('SIGTERM', interrupt);
 process.on('message', message);
 const host = spawnTuiPTY({
-  cmd: [process.execPath, '--no-install', input.runner],
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
   cwd: process.cwd(),
 });
 let service: ReturnType<typeof retainProcessObservation> | undefined;
@@ -52,7 +54,7 @@ const wait = async (text: string) => {
     if (frame.fresh && frame.text.replace(/\s+/g, ' ').includes(text)) return;
     if (host.ended || Date.now() > end)
       throw Error(`expected ${text} tail=${frame.text.slice(-6000)}`);
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = (value: string) => host.key(value);
@@ -156,7 +158,7 @@ try {
       abort.signal.throwIfAborted();
       if (abruptFailure) throw Error(abruptFailure);
       if (Date.now() > end) throw Error('owned_status_daemon_exit_unconfirmed');
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     await wait('Connection: unknown');
     await key('r');
@@ -179,7 +181,7 @@ try {
   }
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!host.ended && Date.now() < end) await Bun.sleep(50);
+  while (!host.ended && Date.now() < end) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([host.host.exited, host.eof]),
     3000,
@@ -195,7 +197,7 @@ try {
     const end = Date.now() + 3000;
     while (service.inspect() !== 'dead') {
       if (Date.now() > end) throw Error('owned_status_service_remains');
-      await Bun.sleep(20);
+      await testSleep(20);
     }
   }
   normal = true;

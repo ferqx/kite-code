@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import {
   DIFF_LINE_UNITS,
   DIFF_PREVIEW_ROWS,

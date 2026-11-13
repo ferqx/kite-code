@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
@@ -225,7 +226,7 @@ export async function runC07HeaderCut(output: string) {
     while (runtime.getLifecycleState().busy) {
       if (Date.now() >= deadline)
         throw new Boundary('global_deadline_before_Runtime_true_terminal');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     const view = await store.getView('root');
     stages.terminal = {

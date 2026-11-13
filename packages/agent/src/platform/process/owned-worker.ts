@@ -1,5 +1,13 @@
+import { resolve } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
+import { Worker as NodeWorker } from 'node:worker_threads';
 import { AgentError } from '../../storage/types';
+import { nodeRuntimeFlags } from '../runtime-flags';
 import { retainWorkerThread } from './worker-thread.darwin';
+
+const NodeEvent = globalThis.Event;
+const NodeMessageEvent = globalThis.MessageEvent;
 
 /** Private adapter failure: business cancellation cannot turn uncertain cleanup into success. */
 export class WorkerCleanupError extends AgentError {
@@ -21,31 +29,81 @@ export function isWorkerCleanupFailure(error: unknown): boolean {
 export function ownedWorkerPreloadAsset(): URL {
   return new URL(
     import.meta.url.endsWith('.ts')
-      ? '../../storage/worker/observer-preload.ts'
+      ? '../../../dist/storage/worker/observer-preload.js'
       : './storage/worker/observer-preload.js',
     import.meta.url,
   );
 }
 
-/** Exact executed source leaves, or the built chunk and bundled preload. No directory grant. */
+/** Exact host module and bundled observer entrypoint. No directory grant. */
 export function ownedWorkerAssets() {
   return Object.freeze({
     preload: ownedWorkerPreloadAsset(),
-    modules: Object.freeze([
-      new URL(import.meta.url),
-      ...(import.meta.url.endsWith('.ts')
-        ? [new URL('./worker-thread.darwin.ts', import.meta.url)]
-        : []),
-    ]),
+    modules: Object.freeze([new URL(import.meta.url)]),
   });
+}
+
+class NodeWorkerEvents extends EventTarget {
+  private readonly worker: NodeWorker;
+  private message: ((event: MessageEvent) => void) | null = null;
+  private error: ((event: ErrorEvent) => void) | null = null;
+
+  constructor(script: string | URL, preload?: URL) {
+    super();
+    const url =
+      script instanceof URL
+        ? script
+        : script.startsWith('file:')
+          ? new URL(script)
+          : pathToFileURL(resolve(script));
+    if (url.protocol !== 'file:') throw Error('worker_entrypoint_invalid');
+    this.worker = new NodeWorker(preload ?? url, {
+      execArgv: [...nodeRuntimeFlags],
+      env: {},
+      workerData: preload ? url.href : undefined,
+    });
+    this.worker.on('message', (data: unknown) =>
+      this.dispatchEvent(new NodeMessageEvent('message', { data })),
+    );
+    this.worker.on('error', (error: Error) => this.report(error));
+    this.worker.on('exit', () => this.dispatchEvent(new NodeEvent('close')));
+  }
+
+  private report(error: Error): void {
+    const event = Object.assign(new NodeEvent('error'), { error, message: error.message });
+    this.dispatchEvent(event);
+  }
+
+  set onmessage(handler: ((event: MessageEvent) => void) | null) {
+    if (this.message) this.removeEventListener('message', this.message as EventListener);
+    this.message = handler;
+    if (handler) this.addEventListener('message', handler as EventListener);
+  }
+
+  set onerror(handler: ((event: ErrorEvent) => void) | null) {
+    if (this.error) this.removeEventListener('error', this.error as EventListener);
+    this.error = handler;
+    if (handler) this.addEventListener('error', handler as EventListener);
+  }
+
+  postMessage(value: unknown, options?: Transferable[] | StructuredSerializeOptions): void {
+    const transfers = Array.isArray(options) ? options : options?.transfer;
+    this.worker.postMessage(value, transfers as Parameters<NodeWorker['postMessage']>[1]);
+  }
+
+  terminate(): void {
+    void this.worker.terminate().catch((error: Error) => this.report(error));
+  }
+
+  async terminateAndWait(): Promise<void> {
+    await this.worker.terminate();
+  }
 }
 
 /** One original Worker and its own thread right; no global registry or execution authority. */
 export function createOwnedWorker(script: string | URL) {
   const native = process.platform === 'darwin';
-  const worker = native
-    ? new Worker(script, { preload: [ownedWorkerPreloadAsset().href] })
-    : new Worker(script);
+  const worker = new NodeWorkerEvents(script, native ? ownedWorkerPreloadAsset() : undefined);
   let termination: Promise<void> | undefined;
   let originalThread: unknown;
   let resolveOrigin!: (lease: ReturnType<typeof retainWorkerThread>) => void;
@@ -66,7 +124,7 @@ export function createOwnedWorker(script: string | URL) {
         return;
       }
       event.stopImmediatePropagation();
-      worker.removeEventListener('message', capture);
+      worker.removeEventListener('message', capture as EventListener);
       worker.removeEventListener('error', missingOrigin);
       worker.removeEventListener('close', missingOrigin);
       originalThread = event.data.thread;
@@ -87,7 +145,7 @@ export function createOwnedWorker(script: string | URL) {
         );
       }
     };
-    worker.addEventListener('message', capture);
+    worker.addEventListener('message', capture as EventListener);
     worker.addEventListener('error', missingOrigin, { once: true });
     worker.addEventListener('close', missingOrigin, { once: true });
   }
@@ -97,9 +155,8 @@ export function createOwnedWorker(script: string | URL) {
       if (termination) return termination;
       termination = (async () => {
         if (!native) {
-          // Deferred platform paths retain their existing behavior and unclosed gate.
-          // No Bun close/exit notification is promoted to native termination evidence.
-          worker.terminate();
+          // Await the runtime's thread join. macOS still requires its retained Mach right below.
+          await worker.terminateAndWait();
           return;
         }
         let lease: Awaited<typeof origin>;
@@ -126,7 +183,7 @@ export function createOwnedWorker(script: string | URL) {
         worker.terminate();
         while (lease.inspect() !== 'terminated') {
           if (Date.now() >= deadline) throw new AgentError('worker_exit_unconfirmed');
-          await Bun.sleep(1);
+          await sleep(1);
         }
         // Observation and accurate right release are separate necessary facts.
         lease.release();

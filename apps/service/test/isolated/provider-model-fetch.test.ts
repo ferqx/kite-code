@@ -1,17 +1,14 @@
-import { expect, test } from 'bun:test';
 import { createCompatibleModelBinding } from '@kite-ai/ai/sdk';
+import { expect, test } from '#kite-test';
 import { providerModelFetch } from '../../src/model-providers';
 
 test('OpenCode Go sends a stable opaque conversation header only to the exact inference endpoints', async () => {
   const baseURL = 'https://opencode.ai/inference/go/openai/v1';
   const requests: Request[] = [];
-  const transport = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      requests.push(new Request(input, init));
-      return new Response(null, { status: 307, headers: { location: 'https://other.invalid' } });
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const transport: typeof fetch = async (input, init) => {
+    requests.push(new Request(input, init));
+    return new Response(null, { status: 307, headers: { location: 'https://other.invalid' } });
+  };
   for (const [protocol, sessionId] of [
     ['chat-completions', 'private-conversation'],
     ['responses', 'private-conversation'],

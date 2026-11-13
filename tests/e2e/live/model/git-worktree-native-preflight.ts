@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { JobContext } from '@kite-ai/agent/extensions';
@@ -58,7 +59,7 @@ export async function runGitWorktreeNativePreflight(options: GitWorktreeNativePr
     status: 'running',
     platform: process.platform,
     arch: process.arch,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     startedAt: new Date().toISOString(),
     backend: 'macos-seatbelt-launchd-coalition',
     providerRequests: 0,
@@ -122,7 +123,7 @@ export async function runGitWorktreeNativePreflight(options: GitWorktreeNativePr
         configurationId: 'worktree-native-preflight',
         env: { PATH: '/usr/bin:/bin', HOME: options.fixtureHome },
         supervisorPath: options.supervisorPath,
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: '/bin/sh',
         host: {
           controlBase: options.control,
@@ -242,7 +243,7 @@ export async function runGitWorktreeNativePreflight(options: GitWorktreeNativePr
         assert.equal(run.status, 'completed', 'native-preflight-run-not-complete');
         break;
       }
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     }
     const captured = await capture(store);
     assert(captured);

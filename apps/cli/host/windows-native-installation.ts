@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
 import {
   windowsDesktopFrontdoorNames,
   windowsNativeFrontdoorNames,
+  windowsNodeDesktopFrontdoorNames,
+  windowsNodeNativeFrontdoorNames,
 } from '../../../packages/agent/src/platform/windows-native-frontdoors';
 
 export { windowsNativeFrontdoorNames };
@@ -43,13 +46,16 @@ export function parseWindowsNativeInstallationMarker(
     !/^[a-f0-9]{64}$/.test(value.bootstrap.candidateId) ||
     !Array.isArray(value.bootstrap.files) ||
     (value.bootstrap.files.length !== windowsDesktopFrontdoorNames.length &&
-      value.bootstrap.files.length !== windowsNativeFrontdoorNames.length)
+      value.bootstrap.files.length !== windowsNativeFrontdoorNames.length &&
+      value.bootstrap.files.length !== windowsNodeNativeFrontdoorNames.length)
   )
     denied();
   const names =
     value.bootstrap.files.length === windowsDesktopFrontdoorNames.length
-      ? windowsDesktopFrontdoorNames
-      : windowsNativeFrontdoorNames;
+      ? (value.bootstrap.files[1] as { name?: unknown } | null)?.name === 'native-verifier.mjs'
+        ? windowsNodeDesktopFrontdoorNames
+        : windowsDesktopFrontdoorNames
+      : windowsNodeNativeFrontdoorNames;
   const files = value.bootstrap.files.map((file, index) => {
     if (
       !closed(file, ['name', 'size', 'sha256']) ||
@@ -90,8 +96,6 @@ export function retainWindowsNativeFrontdoor(marker: WindowsNativeInstallationMa
   release(): void;
 } {
   if (process.platform !== 'win32') denied();
-  const { retainWindowsCandidateFiles } =
-    require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
   const bin = join(marker.root, 'bin');
   const names = marker.bootstrap.files.map((file) => file.name);
   const retained = retainWindowsCandidateFiles(bin, names);

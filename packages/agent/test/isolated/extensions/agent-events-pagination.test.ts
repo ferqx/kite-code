@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { ToolScope } from '../../../src/execution';
 import type { ToolContext } from '../../../src/extensions';
 import { ExtensionHost, type ExtensionHostOptions } from '../../../src/extensions/host';

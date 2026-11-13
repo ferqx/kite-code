@@ -1,8 +1,7 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   linkSync,
   mkdirSync,
@@ -15,17 +14,25 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   expectPrivateMode,
   fixturePermissions,
   recordReparseEntry,
 } from '../../../../../tests/fixtures/test-filesystem';
 import { acquireProfileAccess } from '../../../src/platform/profile';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
 } from '../../../src/platform/windows-path-security';
 import { openSqliteStore, preflightSqliteStore } from '../../../src/sqlite';
+import { defaultSqliteEngineAssets } from '../../../src/sqlite-engine';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -266,12 +273,15 @@ test('real second process shared coexistence, exclusive maintenance busy and unr
   const value = await current();
   const source = fileURLToPath(new URL('../../../src/platform/profile.ts', import.meta.url));
   for (const mode of ['shared', 'exclusive']) {
-    const script = `import {acquireProfileAccess} from ${JSON.stringify(source)};const access=acquireProfileAccess(${JSON.stringify(value.options)},${JSON.stringify(mode)});console.log('ready');for await(const chunk of Bun.stdin.stream())break;access.lock.release();`;
-    const child = Bun.spawn([process.execPath, '--eval', script], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const script = `import {acquireProfileAccess} from ${JSON.stringify(source)};const access=acquireProfileAccess(${JSON.stringify(value.options)},${JSON.stringify(mode)});console.log('ready');for await(const chunk of process.stdin)break;access.lock.release();`;
+    const child = spawnProcess(
+      [process.execPath, ...testRuntimeFlags, '--input-type=module-typescript', '--eval', script],
+      {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     try {
       const reader = child.stdout.getReader();
       expect(new TextDecoder().decode((await reader.read()).value)).toContain('ready');
@@ -300,13 +310,15 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
   const packageRoot = mkdtempSync(join(tmpdir(), 'kite-preflight-package-'));
   roots.push(packageRoot);
   const entry = fileURLToPath(new URL('../../../src/sqlite.ts', import.meta.url));
-  const result = await Bun.build({
+  const output = join(packageRoot, 'dist');
+  const result = await buildBundle({
     entrypoints: [entry],
-    target: 'bun',
+    ...fixtureRuntimeBuild(output),
     packages: 'external',
-    outdir: join(packageRoot, 'dist'),
+    outdir: output,
   });
   expect(result.success).toBe(true);
+  cpSync(defaultSqliteEngineAssets().root, join(output, 'storage/engine'), { recursive: true });
   const migration = join(packageRoot, 'dist/storage/migrations/0001-baseline.sql');
   mkdirSync(dirname(migration), { recursive: true });
   copyFileSync(
@@ -331,15 +343,19 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
       exports: { './sqlite': './dist/sqlite.js' },
     }),
   );
-  const script = join(packageRoot, 'consumer.ts');
+  const script = join(packageRoot, 'consumer.mjs');
   writeFileSync(
     script,
     `import {preflightSqliteStore} from '@kite-ai/agent/sqlite';console.log(JSON.stringify(await preflightSqliteStore(${JSON.stringify(value.options)})));`,
   );
   const run = () =>
-    Bun.spawn([process.execPath, script], { cwd: packageRoot, stdout: 'pipe', stderr: 'pipe' });
+    spawnProcess([fixtureNodeExecutable(), ...nodeRuntimeFlags, script], {
+      cwd: packageRoot,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
   const child = run();
-  expect(await child.exited).toBe(0);
+  expect(await child.exited, await new Response(child.stderr).text()).toBe(0);
   expect(JSON.parse(await new Response(child.stdout).text())).toEqual({
     status: 'compatible',
     storeId: value.storeId,

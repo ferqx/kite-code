@@ -1,7 +1,7 @@
-import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { createRuntime } from '@kite-ai/agent';
@@ -13,7 +13,10 @@ import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, spyOn, test } from '#kite-test';
 import * as windowsArtifacts from '../../../../packages/agent/src/platform/windows-artifact-files';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 import { NativeCaller } from '../../electron/native-caller';
@@ -27,7 +30,7 @@ async function until<T>(read: () => Promise<T | null>) {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() > deadline) throw Error('native_file_fixture_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 
@@ -38,7 +41,7 @@ test('built preload and Main file IPC retry failed Artifact writes and preserve 
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'fixture' });
   privateDirectory(profile.profilePath);
   let models = 0;
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -165,8 +168,8 @@ test('built preload and Main file IPC retry failed Artifact writes and preserve 
     rendererUrl: frame.url,
     caller: async () => caller,
   });
-  const built = await Bun.build({
-    entrypoints: [resolve(import.meta.dir, '../../electron/preload.ts')],
+  const built = await buildFixture({
+    entrypoints: [resolve(import.meta.dirname, '../../electron/preload.ts')],
     target: 'node',
     format: 'cjs',
     packages: 'bundle',
@@ -205,35 +208,32 @@ test('built preload and Main file IPC retry failed Artifact writes and preserve 
     loseCommand = true,
     loseLookup = false;
   const wire: { method: string; path: string; commandId?: string }[] = [];
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      const url = new URL(String(args[0])),
-        method = args[1]?.method ?? 'GET';
-      const tracked = url.origin === new URL(service.endpoint).origin;
-      if (tracked) {
-        let commandId: string | undefined;
-        if (method === 'POST' && url.pathname === '/v1/sessions/s/commands')
-          commandId = JSON.parse(String(args[1]?.body)).commandId;
-        wire.push({ method, path: url.pathname, commandId });
-      }
-      const response = await realFetch(...args);
-      if (
-        tracked &&
-        response.ok &&
-        ((loseUpload && method === 'POST' && url.pathname === '/v1/sessions/s/input-files') ||
-          (loseCommand && method === 'POST' && url.pathname === '/v1/sessions/s/commands') ||
-          (loseLookup && method === 'GET' && url.pathname === '/v1/commands/native-file-input'))
-      ) {
-        if (url.pathname.includes('input-files')) loseUpload = false;
-        else if (method === 'POST') loseCommand = false;
-        else loseLookup = false;
-        await response.arrayBuffer();
-        throw new TypeError('discarded_successful_response');
-      }
-      return response;
-    },
-    { preconnect: realFetch.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const url = new URL(String(args[0])),
+      method = args[1]?.method ?? 'GET';
+    const tracked = url.origin === new URL(service.endpoint).origin;
+    if (tracked) {
+      let commandId: string | undefined;
+      if (method === 'POST' && url.pathname === '/v1/sessions/s/commands')
+        commandId = JSON.parse(String(args[1]?.body)).commandId;
+      wire.push({ method, path: url.pathname, commandId });
+    }
+    const response = await realFetch(...args);
+    if (
+      tracked &&
+      response.ok &&
+      ((loseUpload && method === 'POST' && url.pathname === '/v1/sessions/s/input-files') ||
+        (loseCommand && method === 'POST' && url.pathname === '/v1/sessions/s/commands') ||
+        (loseLookup && method === 'GET' && url.pathname === '/v1/commands/native-file-input'))
+    ) {
+      if (url.pathname.includes('input-files')) loseUpload = false;
+      else if (method === 'POST') loseCommand = false;
+      else loseLookup = false;
+      await response.arrayBuffer();
+      throw new TypeError('discarded_successful_response');
+    }
+    return response;
+  }, {});
   const attach = async () => {
     const state = (await bridge.request({ method: 'attach' })) as NativeState;
     await until(async () => ((caller.state().environmentRevision ?? 0) > 0 ? true : null));

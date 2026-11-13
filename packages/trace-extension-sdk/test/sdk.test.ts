@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { type TraceEventBatch, validateDeliveryResult } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { buildTraceBundle } from '../src/bundle';
 
 test('public template builds one restricted IIFE and explicitly returns the exact batch lease ACK', async () => {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import type { Page } from 'playwright';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 
 /** One continuous, typed detail-reading pass using the existing exact semantic materials. */
 export async function verifyTrajectoryDetailLayout(input: {
@@ -628,7 +629,7 @@ export async function verifyTrajectoryDetailLayout(input: {
     partialCoverageDisclosureRetained: true,
     actualReadErrorAndRecoveryRetained: true,
   };
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'detail-layout-verification.json'),
     JSON.stringify(verification, null, 2),
   );

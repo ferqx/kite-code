@@ -6,11 +6,11 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
-import { qualifyWindowsNativeInstallation } from './windows-native-installation.qualification';
 import {
-  COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT,
-  materializeCompatibleWindowsPredecessor,
-} from './windows-predecessor';
+  CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
+  materializeCurrentSchemaTerminalPredecessor,
+} from './terminal-predecessor';
+import { qualifyWindowsNativeInstallation } from './windows-native-installation.qualification';
 import { qualifyWindowsTerminalCrossVersion } from './windows-terminal-cross-version.qualification';
 
 /** One old-source build feeds both installed families; no candidate is relabelled. */
@@ -33,31 +33,33 @@ export async function qualifyWindowsCrossVersion(input: { terminal: string; nati
   assert.equal(native.terminal.digest, terminal.digest);
   assert.equal(terminal.manifest.source.dirty, false);
   assert(/^[a-f0-9]{40}$/.test(terminal.manifest.source.commit));
-  assert.notEqual(terminal.manifest.source.commit, COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT);
+  assert.notEqual(terminal.manifest.source.commit, CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
   if (process.env.KITE_EXPECTED_CANDIDATE_COMMIT !== undefined)
     assert.equal(terminal.manifest.source.commit, process.env.KITE_EXPECTED_CANDIDATE_COMMIT);
   const root = join(realpathSync(tmpdir()), `kite-windows-cross-code-${randomUUID()}`);
   assert(!existsSync(root));
   privateDirectory(root);
   try {
-    const old = await materializeCompatibleWindowsPredecessor({
+    const predecessorDeadline = Date.now() + Math.min(180000, remaining());
+    const old = await materializeCurrentSchemaTerminalPredecessor({
       root,
-      repositoryRoot: resolve(import.meta.dir, '../../..'),
-      nativeElectronDist: join(native.root, 'electron'),
-      deadline: Date.now() + Math.min(180000, remaining()),
+      repositoryRoot: resolve(import.meta.dirname, '../../..'),
+      native: true,
     });
-    assert.equal(old.sourceCommit, COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT);
-    assert(!existsSync(join(root, 'predecessor-source')));
+    assert(Date.now() < predecessorDeadline, 'windows_predecessor_deadline');
+    assert.equal(old.provenance.commit, CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT);
+    assert(old.nativeCandidate);
+    remaining();
     const terminalResult = await qualifyWindowsTerminalCrossVersion({
       candidate: terminal.root,
-      predecessor: old.terminal,
-      predecessorCommit: old.sourceCommit,
+      predecessor: old.candidate.root,
+      predecessorCommit: old.provenance.commit,
       wholeDeadline,
     });
     remaining();
     const nativeResult = await qualifyWindowsNativeInstallation(
       native.root,
-      old.native,
+      old.nativeCandidate.root,
       wholeDeadline,
     );
     remaining();
@@ -66,12 +68,8 @@ export async function qualifyWindowsCrossVersion(input: { terminal: string; nati
     const result = {
       localUnpublishedComparison: true,
       sourceCommit: terminal.manifest.source.commit,
-      predecessorCommit: old.sourceCommit,
-      sourceRemoved: true,
-      lockedInputs: old.lockedInputs,
-      reviewedDeclarations: old.reviewedDeclarations,
-      schemaCapability: old.schemaCapability,
-      migrations: old.migrations,
+      predecessorCommit: old.provenance.commit,
+      historicalArtifact: old.provenance,
       terminal: terminalResult,
       native: nativeResult,
       wholeBudgetMs,

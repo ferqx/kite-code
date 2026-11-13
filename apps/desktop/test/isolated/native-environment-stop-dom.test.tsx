@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { BackgroundExecutionSummary } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeSelection } from '../../src/native-bridge';
 import { NativeDiagnosticsProvider } from '../../src/native-diagnostics';
 import { useNativeEnvironment } from '../../src/native-environment';

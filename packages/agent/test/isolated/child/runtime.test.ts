@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { type ChildAgentConfiguration, createRuntime } from '../../../src';
 import type { OperationRef, ToolDefinition } from '../../../src/extensions';
 import { isChildPreparationFailure } from '../../../src/extensions/task/preparation-failure';
@@ -39,7 +40,7 @@ async function eventually(check: () => Promise<boolean>, label: string) {
   const deadline = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() >= deadline) throw new Error(`Timed out: ${label}`);
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 function gatedModel(id = 'fixture.block') {

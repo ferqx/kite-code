@@ -1,8 +1,9 @@
+import { json } from 'node:stream/consumers';
 import type { CLIServiceArtifact } from '../../../apps/cli/host';
 import { runSelectedDaemon } from '../../../apps/cli/host/daemon';
 import { parseCLIArguments } from '../../../apps/cli/src/arguments';
 
-const input = (await Bun.stdin.json()) as {
+const input = (await json(process.stdin)) as {
   argv: string[];
   dataRoot: string;
   workspace: string;

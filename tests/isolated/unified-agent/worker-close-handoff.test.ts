@@ -1,8 +1,8 @@
-import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -17,20 +17,23 @@ import {
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, mock, test } from '#kite-test';
 import type { DarwinWorkerThreadRecord } from '../../../packages/agent/src/platform/process/worker-thread.darwin';
 import * as originalThreadLeaf from '../../../packages/agent/src/platform/process/worker-thread.darwin';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 async function until(read: () => Promise<boolean> | boolean) {
   const deadline = Date.now() + 5000;
   while (!(await read())) {
     if (Date.now() > deadline) throw Error('worker_close_observation_timeout');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 
 const originalThreadExports = { ...originalThreadLeaf };
 const threadLeafPath = resolve(
-  import.meta.dir,
+  import.meta.dirname,
   '../../../packages/agent/src/platform/process/worker-thread.darwin.ts',
 );
 const native = process.platform === 'darwin';
@@ -148,7 +151,7 @@ test('public web_fetch/cancellation retain original worker rights through Store/
   const probe = instrumentWorkers();
   const { records } = probe;
   const article = '完整原网页中🙂e\u0301\r\n原正文 '.repeat(100);
-  const remote = Bun.serve({
+  const remote = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -434,12 +437,21 @@ test('trusted custom parser preserves original main/import/one input, syntax err
 worker.onmessage = ({data}) => { console.log(JSON.stringify(data)); worker.terminate(); };
 worker.onerror = () => { console.error('original_worker_failed'); process.exitCode = 1; worker.terminate(); };
 worker.postMessage(${JSON.stringify(body)});`;
-    const baselineChild = Bun.spawn([process.execPath, '--no-install', '--eval', baselineProgram], {
-      cwd: root,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const baselineChild = spawnFixtureProcess(
+      [
+        process.execPath,
+        '--no-global-search-paths',
+        '--input-type=module',
+        '--eval',
+        baselineProgram,
+      ],
+      {
+        cwd: root,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     let baselineTimedOut = false;
     const baselineTimer = setTimeout(() => {
       baselineTimedOut = true;

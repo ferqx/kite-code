@@ -1,13 +1,14 @@
-import { expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import { createServer as createSecureServer } from 'node:https';
 import { connect, type Socket } from 'node:net';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { gzipSync } from 'node:zlib';
 import {
   createPinnedWebNetworkPort,
   type PinnedWebNetworkOptions,
   type WebHop,
 } from '@kite-ai/agent/web-fetch';
+import { expect, test } from '#kite-test';
 import { resolveWebDns } from '../../../src/tools/web-fetch/dns';
 import { selectedProxy } from '../../../src/tools/web-fetch/proxy';
 import { certificate, privateKey } from './tls.fixture';
@@ -488,14 +489,14 @@ test('proxy refusal has no direct retry and abort releases a stalled CONNECT wit
     f.setMode('stall');
     const abort = new AbortController();
     const pending = port.request(binding('http://fixture.test/wait'), { signal: abort.signal });
-    while (f.connects.length < 2) await Bun.sleep(5);
+    while (f.connects.length < 2) await sleepTimer(5);
     abort.abort(new Error('owned_cancel'));
     await expect(pending).rejects.toThrow('owned_cancel');
     f.setMode('normal');
     const sibling = await port.request(binding('http://fixture.test'), { signal: signal() });
     expect(await new Response(sibling.body).text()).toBe('verified socket');
     const deadline = Date.now() + 1000;
-    while (f.sockets.size && Date.now() < deadline) await Bun.sleep(5);
+    while (f.sockets.size && Date.now() < deadline) await sleepTimer(5);
     expect(f.sockets.size).toBe(0);
   } finally {
     await f.close();
@@ -543,7 +544,7 @@ test('cancelled decoded bodies settle through HTTP and HTTPS CONNECT without can
         }
       }
       const deadline = Date.now() + 1000;
-      while (f.sockets.size && Date.now() < deadline) await Bun.sleep(5);
+      while (f.sockets.size && Date.now() < deadline) await sleepTimer(5);
       expect(f.sockets.size).toBe(0);
     } finally {
       await f.close();

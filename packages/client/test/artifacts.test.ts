@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { createClient } from '../src/index';
 
 test('binary Artifact client checks full size/hash, bounds response bytes and keeps its cursor untouched', async () => {
@@ -15,7 +16,7 @@ test('binary Artifact client checks full size/hash, bounds response bytes and ke
   };
   let mode: 'valid' | 'hash' | 'size' | 'budget' = 'valid';
   const tokens: string[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

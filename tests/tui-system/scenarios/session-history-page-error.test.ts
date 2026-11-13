@@ -1,11 +1,12 @@
-/** Real current Service + PTY: invalid page-two metadata must remain an error. */
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+/** Real current Service + PTY: invalid page-two metadata must remain an error. */
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { buildOwnedDaemon } from '../../../apps/cli/test/fixtures/daemon-host-build';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
@@ -17,7 +18,7 @@ import { createTestWorkspace, translateOriginalTestConfig } from '../harness/tes
 
 test('a malformed record reached on page two shows a TUI history error without erasing valid sessions', async () => {
   const workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
-  const model = createMockModelServer();
+  const model = await createMockModelServer();
   model.setResponses([{ message: { content: 'A durable first answer' } }]);
   let tui: PtyProcess | undefined;
   let connection: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -85,7 +86,7 @@ test('a malformed record reached on page two shows a TUI history error without e
         completed = true;
         break;
       }
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     expect(completed).toBe(true);
     // Every business row is created through the actual public Service contract.

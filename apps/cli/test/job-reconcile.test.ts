@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
 import { createClient, type ReconcileJobRequest } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { parseCLIArguments } from '../src/arguments';
 import { lookupJobReconcile, reconcileJob } from '../src/job-reconcile';
 

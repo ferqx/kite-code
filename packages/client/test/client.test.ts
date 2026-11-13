@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import {
   type Change,
   type Command,
@@ -27,9 +28,9 @@ const expected = {
   requiredCapabilities: ['sessions'],
 };
 const token = 'secret-fixture-token';
-function fixture(handler: (request: Request) => Response | Promise<Response>) {
+async function fixture(handler: (request: Request) => Response | Promise<Response>) {
   const requests: { url: URL; method: string; body?: unknown }[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -51,7 +52,7 @@ function fixture(handler: (request: Request) => Response | Promise<Response>) {
     endpoint: server.url.href,
     stop: () => {
       client.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
@@ -82,7 +83,7 @@ test('durable message changes bind Store, Session, both cursors and pagination w
     removedIds: ['removed'],
   };
   let page: unknown = valid;
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json({ ...identity, capabilities: [...identity.capabilities, 'message_changes'] })
       : json(page),
@@ -117,7 +118,7 @@ test('durable message changes bind Store, Session, both cursors and pagination w
     }
     expect(f.client.lastAppliedCursor).toBeUndefined();
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 const problem = (code: string) => ({
@@ -143,7 +144,7 @@ const sse = (text: string) =>
   new Response(text, { headers: { 'content-type': 'text/event-stream' } });
 
 test('before admission every business operation is rejected with zero network requests', async () => {
-  const f = fixture(() => json(identity));
+  const f = await fixture(() => json(identity));
   try {
     expect(() => f.client.getView('s')).toThrow('connection_not_admitted');
     expect(() =>
@@ -162,7 +163,7 @@ test('before admission every business operation is rejected with zero network re
     });
     expect(f.requests).toHaveLength(0);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
@@ -182,7 +183,7 @@ test('read-only identity probes preserve concurrent history and the exact applie
     stream: ReadableStreamDefaultController<Uint8Array> | undefined,
     observationError: unknown,
     streamCancelled = false;
-  const f = fixture(async (request) => {
+  const f = await fixture(async (request) => {
     const path = new URL(request.url).pathname;
     if (path === '/v1/server') return json(current);
     if (path === '/v1/sessions') {
@@ -247,7 +248,7 @@ test('read-only identity probes preserve concurrent history and the exact applie
     expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
   } finally {
     release();
-    f.stop();
+    await f.stop();
     await observer;
   }
 });
@@ -260,7 +261,7 @@ for (const [name, replacement, code] of [
   ['required capability', { capabilities: [] }, 'required_capability_missing'],
 ] as const)
   test(`${name} mismatch triggers only server read; business/SSE remain blocked`, async () => {
-    const f = fixture(() => json({ ...identity, ...replacement }));
+    const f = await fixture(() => json({ ...identity, ...replacement }));
     try {
       await expect(f.client.connect()).rejects.toMatchObject({ code });
       expect(() => f.client.listSessions()).toThrow('connection_not_admitted');
@@ -278,12 +279,12 @@ for (const [name, replacement, code] of [
       });
       expect(f.requests.map((r) => r.url.pathname)).toEqual(['/v1/server']);
     } finally {
-      f.stop();
+      await f.stop();
     }
   });
 
 test('bootstrap must match the actual HTTP identity even when optional instance is not expected', async () => {
-  const f = fixture(() => json(identity));
+  const f = await fixture(() => json(identity));
   const client = createClient({
     endpoint: f.endpoint,
     token,
@@ -295,13 +296,13 @@ test('bootstrap must match the actual HTTP identity even when optional instance 
     expect(f.requests).toHaveLength(1);
   } finally {
     client.disposeNetwork();
-    f.stop();
+    await f.stop();
   }
 });
 
 test('unknown response fields survive decoding; absent optional capabilities and unavailable data are local', async () => {
   let info: unknown = { ...identity, capabilities: ['sessions'], futureField: { a: 1 } };
-  const f = fixture(() => json(info));
+  const f = await fixture(() => json(info));
   try {
     const result = await f.client.connect();
     expect((result as ServerInfo & { futureField: unknown }).futureField).toEqual({ a: 1 });
@@ -315,12 +316,12 @@ test('unknown response fields survive decoding; absent optional capabilities and
     expect(() => f.client.getView('s')).toThrow('data_unavailable');
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('mutations retain caller command and store IDs, do not retry, and reject unknown request fields', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : json(problem('store_identity_mismatch'), 409),
@@ -344,12 +345,12 @@ test('mutations retain caller command and store IDs, do not retry, and reject un
     );
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('only successfully applied explicit IDs advance; checkpoint supports filtered scope', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : sse(
@@ -382,12 +383,12 @@ test('only successfully applied explicit IDs advance; checkpoint supports filter
     ).rejects.toMatchObject({ code: 'scope_checkpoint_required' });
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('failed application never advances cursor or triggers mutation/network retry', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : sse(ready + event('change', change, change.cursor)),
@@ -404,14 +405,14 @@ test('failed application never advances cursor or triggers mutation/network retr
     expect(f.client.lastAppliedCursor?.sequence).toBe('0');
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('a reloaded snapshot start boundary only changes replay admission; failed callbacks retain the original applied checkpoint', async () => {
   const boundary = '9007199254740992';
   let fail = true;
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     const url = new URL(request.url);
     if (url.pathname === '/v1/server') return json(identity);
     if (url.searchParams.get('after') === '0') return sse(ready);
@@ -464,12 +465,12 @@ test('a reloaded snapshot start boundary only changes replay admission; failed c
     expect(f.requests).toHaveLength(requests);
     expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('ready-only snapshot start is never an applied acknowledgement; wrong Store or conflicting start inputs fail before an observation GET', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server' ? json(identity) : sse(ready),
   );
   try {
@@ -510,7 +511,7 @@ test('ready-only snapshot start is never an applied acknowledgement; wrong Store
     expect(f.requests).toHaveLength(requests);
     expect(f.client.lastAppliedCursor).toBeUndefined();
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
@@ -522,7 +523,7 @@ test('validated stream readiness awaits snapshot application before changes and 
     admission = new Promise<void>((resolve) => {
       admitted = resolve;
     });
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : sse(ready + event('change', change, change.cursor)),
@@ -555,13 +556,13 @@ test('validated stream readiness awaits snapshot application before changes and 
     expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
   } finally {
     release();
-    f.stop();
+    await f.stop();
   }
 });
 
 test('invalid readiness, failed readiness application and observation cancellation never deliver changes or advance an acknowledgement', async () => {
   let invalid = false;
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : sse(
@@ -626,12 +627,12 @@ test('invalid readiness, failed readiness application and observation cancellati
     expect(f.requests).toHaveLength(4);
     expect(f.requests.every((request) => request.method === 'GET')).toBe(true);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('ready and metadata reads never advance; malformed explicit cursor requires resync', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : sse(ready + event('change', change, '01')),
@@ -644,7 +645,7 @@ test('ready and metadata reads never advance; malformed explicit cursor requires
     expect(f.client.lastAppliedCursor?.sequence).toBe('0');
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
@@ -653,7 +654,7 @@ test('network disposal aborts the sole SSE stream and sends no cancel command', 
   const open = new Promise<void>((resolve) => {
     opened = resolve;
   });
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     if (new URL(request.url).pathname === '/v1/server') return json(identity);
     return new Response(
       new ReadableStream({
@@ -677,7 +678,7 @@ test('network disposal aborts the sole SSE stream and sends no cancel command', 
     expect(f.requests.map((r) => r.method)).toEqual(['GET', 'GET']);
     expect(() => f.client.getCommand('c')).toThrow('connection_not_admitted');
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
@@ -734,7 +735,7 @@ test('SDK routes decode generated resources, bounded history and snapshots leave
     role: 'assistant',
     content: 'done',
   };
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     const path = new URL(request.url).pathname;
     if (path === '/v1/server') return json(identity);
     if (path.endsWith('/view'))
@@ -795,13 +796,13 @@ test('SDK routes decode generated resources, bounded history and snapshots leave
     expect(await f.client.listWorkspaces()).toEqual([workspace]);
     expect(f.client.lastAppliedCursor).toBeUndefined();
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('SDK preserves explicit collected history availability and rejects malformed collection time', async () => {
   let collectedAt: number = 123;
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     if (new URL(request.url).pathname === '/v1/server') return json(identity);
     return json({
       session: {
@@ -831,14 +832,14 @@ test('SDK preserves explicit collected history availability and rejects malforme
     await expect(f.client.getView('s')).rejects.toBeDefined();
     expect(f.requests.every((r) => r.method === 'GET')).toBe(true);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('stream reconnect checks identity; Store change requests snapshot without rebinding or mutation', async () => {
   let serverReads = 0;
   let streamReads = 0;
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     if (new URL(request.url).pathname === '/v1/server')
       return json({ ...identity, storeId: ++serverReads === 1 ? 'store-a' : 'store-b' });
     streamReads++;
@@ -860,13 +861,13 @@ test('stream reconnect checks identity; Store change requests snapshot without r
     expect(f.client.lastAppliedCursor?.storeId).toBe('store-a');
     expect(f.requests.map((request) => request.method)).toEqual(['GET', 'GET', 'GET']);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('reconnect rejected target blocks subsequent business calls and preserves confirmed cursor', async () => {
   let serverReads = 0;
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json({
           ...identity,
@@ -883,12 +884,12 @@ test('reconnect rejected target blocks subsequent business calls and preserves c
     expect(f.client.lastAppliedCursor?.sequence).toBe('0');
     expect(f.requests).toHaveLength(3);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('expired SSE is a scoped reset and never an automatic mutation retry', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server'
       ? json(identity)
       : json(problem('cursor_expired'), 410),
@@ -906,7 +907,7 @@ test('expired SSE is a scoped reset and never an automatic mutation retry', asyn
     expect(f.client.lastAppliedCursor?.sequence).toBe('0');
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
@@ -929,7 +930,7 @@ test('generic extension routes retain public envelopes, use fixed intent and bou
     ],
     futureView: true,
   };
-  const f = fixture((request) => {
+  const f = await fixture((request) => {
     const path = new URL(request.url).pathname;
     if (path === '/v1/server')
       return json({
@@ -983,12 +984,12 @@ test('generic extension routes retain public envelopes, use fixed intent and bou
     ).toThrow('invalid_query_arguments');
     expect(f.requests).toHaveLength(count);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('optional extension capabilities fail locally without blocking supported history', async () => {
-  const f = fixture((request) =>
+  const f = await fixture((request) =>
     new URL(request.url).pathname === '/v1/server' ? json(identity) : json([]),
   );
   try {
@@ -1008,13 +1009,13 @@ test('optional extension capabilities fail locally without blocking supported hi
     expect(await f.client.listMessages('s')).toEqual([]);
     expect(f.requests).toHaveLength(2);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('missingStoreId HTTP available response fails admission and triggers zero business requests', async () => {
   const { storeId: _omitted, ...withoutStore } = identity;
-  const f = fixture(() => json(withoutStore));
+  const f = await fixture(() => json(withoutStore));
   try {
     await expect(f.client.connect()).rejects.toMatchObject({ code: 'invalid_response' });
     expect(() => f.client.getView('s')).toThrow('connection_not_admitted');
@@ -1032,13 +1033,13 @@ test('missingStoreId HTTP available response fails admission and triggers zero b
     });
     expect(f.requests.map((request) => request.url.pathname)).toEqual(['/v1/server']);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('missingStoreId bootstrap fails before HTTP and preserves the startup expectation', async () => {
   const { storeId: _omitted, ...withoutStore } = identity;
-  const f = fixture(() => json(identity));
+  const f = await fixture(() => json(identity));
   try {
     await expect(f.client.connect({ bootstrap: withoutStore as ServerInfo })).rejects.toMatchObject(
       { code: 'invalid_response' },
@@ -1050,14 +1051,14 @@ test('missingStoreId bootstrap fails before HTTP and preserves the startup expec
     });
     expect(f.requests).toHaveLength(0);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });
 
 test('failedReadmission clears business access without replacing previous confirmed identity or saved intent', async () => {
   let valid = true;
   const { storeId: _omitted, ...withoutStore } = identity;
-  const f = fixture(() => json(valid ? identity : withoutStore));
+  const f = await fixture(() => json(valid ? identity : withoutStore));
   const intent = {
     expectedStoreId: 'store-a',
     commandId: 'saved-intent',
@@ -1078,6 +1079,6 @@ test('failedReadmission clears business access without replacing previous confir
     });
     expect(f.requests.map((request) => request.url.pathname)).toEqual(['/v1/server', '/v1/server']);
   } finally {
-    f.stop();
+    await f.stop();
   }
 });

@@ -1,4 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createClient } from '../../src';
 import { decodeResponse } from '../../src/decode';
 import { verifyFileCheckpointRecoveryBoundary } from '../../src/file-checkpoints';
@@ -68,7 +70,7 @@ test('Native named file reads enforce capability, exact targets and optional que
     release = resolve;
   });
   const paths: string[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -157,7 +159,7 @@ test('Native named file reads enforce capability, exact targets and optional que
     expect(paths).toHaveLength(count);
     held = true;
     const pending = client.getFileCheckpointRecoveryBoundary('child', pointId);
-    for (let i = 0; paths.length === count && i < 100; i++) await Bun.sleep(5);
+    for (let i = 0; paths.length === count && i < 100; i++) await fixtureDelay(5);
     expect(paths.length).toBe(count + 1);
     client.disposeNetwork();
     release();

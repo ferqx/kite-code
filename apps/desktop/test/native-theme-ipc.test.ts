@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, test } from '#kite-test';
 import { registerNativeIpc, registerNativeThemeIpc } from '../electron/native-ipc';
 import {
   decodeNativeEvent,

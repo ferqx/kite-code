@@ -1,4 +1,5 @@
 import { publicAgentResponses } from '../harness/public-agent-responses';
+
 /**
  * PTY regression for two concurrent children issuing the same tool name.
  *
@@ -7,9 +8,9 @@ import { publicAgentResponses } from '../harness/public-agent-responses';
  * interleave while the parent still owns one aggregation group.
  */
 
-import { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterAll, beforeAll, describe, expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -39,11 +40,11 @@ function requestText(messages: readonly { content?: unknown }[]): string {
 
 describe('TUI PTY System — concurrent same-name Subagent steps', () => {
   let tui: PtyProcess;
-  let server: ReturnType<typeof createMockModelServer>;
+  let server: Awaited<ReturnType<typeof createMockModelServer>>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   beforeAll(async () => {
-    server = createMockModelServer();
+    server = await createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: { language: 'en-US', sandbox: { enabled: false } },
       files: {

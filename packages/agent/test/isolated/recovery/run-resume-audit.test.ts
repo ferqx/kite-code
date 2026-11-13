@@ -1,8 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { AuditRow } from '../../../src/storage/sqlite/recovery-audit-validation';
 import { auditFixture, trackedAudit } from './run-resume-audit-fixture';
@@ -16,9 +19,10 @@ for (const phase of ['before', 'after'])
       .query('SELECT covered_seq FROM recovery_audit WHERE run_id=?')
       .get(f.input.runId);
     beforeDb.close(true);
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./run-resume-audit-crash-child.ts', import.meta.url)),
         f.path,
         phase,
@@ -30,7 +34,7 @@ for (const phase of ['before', 'after'])
       const end = Date.now() + 5000;
       while (!existsSync(marker)) {
         if (Date.now() > end) throw Error('audit_crash_boundary_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       expect(readFileSync(marker, 'utf8')).toBe('audit-and-business-written');
       child.kill('SIGKILL');

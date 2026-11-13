@@ -4,17 +4,25 @@
 
 读取时机：修改新 Terminal/Native manifest、构建、安装注册、SQLite selection、三平台 workflow、rollback 或发布状态时。
 
-验证：`bun run check:runtime-packages`、`bun run check:unified-agent-boundary`、`bun test tests/integration/scripts/unified-ci.test.ts tests/isolated/unified-agent/release-tools.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`、`bun run check:docs-impact`。具体平台范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
+验证：`bun run check:runtime-packages`、`bun run check:unified-agent-boundary`、[CI 基线](../../tests/integration/scripts/ci-node-baseline.test.ts)、[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)及本文件各平台资格证据。
 
 2026-10-26 已按用户要求删除除 `apps/kite-cli` 外的旧架构模块。当前实现由[现行 workspace 边界](unified-agent-boundary.md)及各现行 owner 定义；本文指向删除前固定 revision 的源码、旧模块机制和旧测试仅供历史追溯，不再是可运行入口。仍适用的授权、未知结果、恢复、数据保护与发布资格约束继续生效，删除源码不表示这些门禁已经通过。
 
 ## 当前发行与源身份
 
-Required quality 与运行时／正式资格 workflow 当前均固定 Bun1.4.4，由[CI 基线守卫](../../tests/integration/scripts/ci-bun-baseline.test.ts)核对。聚合类型检查仍覆盖原根与八 workspace，`check:runtime-packages` 一次完成清单／正式消费／默认及额外入口边界检查；pre-commit 与 pre-release architecture 同样去除重复扫描。独立边界命令及原拒绝条件保留，CI 负例逐项确认输入确实变异后再核拒绝。本机 Windows1.4.3→1.4.4定向对照及既有失败归[测试体系](../../tests/README.md#运行时升级与模型连接池)；版本 pin 和源码回归不授予 hosted、三平台、installed 或发布资格，候选仍须实际核对所选 Bun、SQLite sourceId 和完整 inventory。
+2026-11-13，macOS arm64 在 pnpm 工具链阶段使用 Node 和冻结依赖构建 Terminal 归档和新版拖放 DMG。隔离环境的系统 PATH 中没有 Node 或 Bun；Terminal 通过 CLI、daemon、Web 及回收验证，完整安装测试覆盖实际 TUI、归档搬迁与保数据回滚。Finder 将旧 Bun 候选 `4fa874e1` 替换为 Node 候选 `2de0923f`、回滚、移到废纸篓并重装，核对同一 Store／会话／历史回复和配置；重装后的新窗口发起第二轮本地测试模型请求，确认回复在原会话准确显示一次并写入同一 Store。新候选另通过随包 Node 的钥匙串与模型输出 probe。两份制品都是本机样本，未取得 Developer ID 公证或正式三平台资格。DMG 证据见 [Native owner](../../apps/desktop/docs/native-release.md#macos-dmg)。
 
-quality 安装禁用 lifecycle scripts，并显式构建 Web 以准备公开资产导出；不运行 Files Rust 构建或全 workspace build，原全部质量检查及顺序保持在该准备之后。只缓存按平台、Bun和完整依赖输入隔离的下载目录，hit不跳过安装或门禁，不复用 workspace／原生构建产物。运行时／发布作业仍用原安装方式，Files 的固定编译、ABI／来源／binary hash 与许可证要求保持。冷安装步骤与守卫单次缓存边界归[本地开发](../development/local-development.md)，实际冷安装和负例证据归[测试体系](../../tests/README.md#质量作业冷安装与边界缓存)。
+正式矩阵先用[历史制品准备脚本](../../scripts/ci/prepare-release-predecessors.ts)在独立目录检出固定 Bun 提交，按各自的锁文件安装并调用原 builder。生产当前 Node 候选的依赖树单独安装。前驱产物与 manifest SHA-256 交给验收脚本，脚本复核源码身份、干净状态、目标平台、完整制品和历史 SQL。往返使用已采用合并 Schema 的 `a45ca81cf`，同时核对当前与历史的两份有效迁移。旧 Schema 负例继续使用 `a2b6441f` 验证拒绝和保数据。Windows 另验旧 managed prefix 拒绝 Node、独立前缀继续原 Profile 和切回原前门冷读。
 
-此前 Windows CI 固定 Bun1.4.3、Linux/macOS及formal基线保留1.4.2，Windows采用上游对 `--tsconfig-override` directory-mismatch 的修复。该旧Windows隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`；本轮同一ZIP已复核，1.4.3与1.4.4内嵌SQLite均实测为原已审查的3.53.4及同一sourceId，未扩展来源白名单。当前CI已按上述对照选择1.4.4；固定配置、零意外stderr、PE/System32/no-delay和SQLite精确来源门禁保持。旧构建/测试事实与固定1.4.2的实验resource-census补丁仍只代表其原历史范围，不授新基线的资源或跨平台资格。
+切回 Bun 冻结安装后，在同一台 macOS arm64 机器以隔离目录复验新 DMG 的 Finder 升级、回滚、重装及卸载。候选 `0235a800` 使用随包 Node，核对原会话、两次本地模型回复和配置。Terminal 候选 `7d8c53ea` 通过制品校验及 CLI、daemon、Web 启停，正式入口与安装器定向测试通过。完整 Terminal 测试的 Worktree 启动超时也在切换前制品复现。证据分别归 [Native](../../apps/desktop/docs/native-release.md#macos-dmg)和 [Terminal](../../apps/cli/docs/terminal-release.md#构建与操作)。
+
+新 Terminal、完整 Native 和桌面专用候选使用固定 Node 26.13.1。源码、发布脚本和正式测试使用 Node，开发和发行共用 Bun 1.4.4 冻结安装依赖与打包 JS／TS。构建按 `bun.lock` 和实际隔离安装图生成制品。旧候选可继续由其随包运行时回滚。Node 发行输入、SQLite 源码与原生资产均按目标核对。Linux/Windows 构建随包 SQLite 3.53.4，macOS 可继续采用已审查动态库。桌面 Main 仍用 Electron 自带的 Node；Service、安装维护和 Worker 从候选启动。实际范围见 [Terminal](../../apps/cli/docs/terminal-release.md)、[Native](../../apps/desktop/docs/native-release.md)和[随包 Node 决定](../../.agents/notes/implemented/architecture/2026-11-12-bundled-node-native-runtime.md)。
+
+Required quality 与运行时／正式资格 workflow 固定 Node 26.13.1 和 Bun 1.4.4。构建作业按 `bun.lock` 冻结安装，正式测试由 Node 执行。版本和执行范围由[CI 基线守卫](../../tests/integration/scripts/ci-node-baseline.test.ts)核对。聚合类型检查仍覆盖原根与十个 workspace，`check:runtime-packages` 一次完成清单／正式消费／默认及额外入口边界检查；pre-commit 与 pre-release architecture 同样去除重复扫描。独立边界命令及原拒绝条件保留，CI 负例逐项确认输入确实变异后再核拒绝。本机 Windows1.4.3→1.4.4定向对照及既有失败归[测试体系](../../tests/README.md#运行时升级与模型连接池)；版本 pin 和源码回归不授予 hosted、三平台、installed 或发布资格，候选仍须实际核对所选 Node、SQLite sourceId 和完整 inventory。
+
+quality 安装禁用 lifecycle scripts，并显式构建 Web 以准备公开资产导出；不运行 Files Rust 构建或全 workspace build，原全部质量检查及顺序保持在该准备之后。只缓存按平台、Node、Bun 和完整依赖输入隔离的下载目录，hit不跳过安装或门禁，不复用 workspace／原生构建产物。运行时／发布作业在消费源码测试前准备 Node 与 Agent Worker；Linux 使用 libffi 开发库。Files 的固定编译、ABI／来源／binary hash 与许可证要求保持。冷安装步骤与守卫单次缓存边界归[本地开发](../development/local-development.md)，实际冷安装和负例证据归[测试体系](../../tests/README.md#质量作业冷安装与边界缓存)。
+
+此前 Windows CI 固定 Bun1.4.3、Linux/macOS及formal基线保留1.4.2，Windows采用上游对 `--tsconfig-override` directory-mismatch 的修复。该旧Windows隔离输入的官方 ZIP SHA 为 `0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d`；本轮同一ZIP已复核，1.4.3与1.4.4内嵌SQLite均实测为原已审查的3.53.4及同一sourceId，未扩展来源白名单。当时 CI 按上述对照选择 1.4.4；固定配置、零意外stderr、PE/System32/no-delay和SQLite精确来源门禁保持。旧构建/测试事实与固定1.4.2的实验resource-census补丁仍只代表其原历史范围，不授新基线的资源或跨平台资格。
 
 Windows 的原 HANDLE 内容读取、同进程完整 pin 复用、安全描述符查询和私有批量复制减少重复开销；每次完整内容验证保全库存/全 SHA；Bun 借用继续用原句柄复验全部内容，Main 的独立准入后则以持续强 pin、重新枚举、原 identity/ACL 与双 SH 代替同进程重复哈希，子 Service 仍独立完整准入。分享模式、每文件 Flush、严格关闭与原超时保持。普通 JS 依赖按各 workspace 明确声明内联，生成物拒绝残余 bare import，保原 manifest 字节、声明与许可全文；React/React DOM、动态资源、原生资产和 optional/peer 仍按真实图处理。理由与已拒绝的降门限/过滤警告/cwd pivot 方案归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。完整安装 caller 使用当前用户模型配置，并单独保旧 Profile 原字节作维护证据；新的 B manifest 目录在复制前私有创建，不修既有 ACL。当前真实资格与未通过门禁只由对应 Terminal/Native owner 的实测记录认定。
 
@@ -48,15 +56,15 @@ Terminal 与内含它的 Native 候选按目标复制 `agent-browser` 和 `tree-
 
 Native非development renderer的React／JSX模式由[builder](../../apps/desktop/scripts/build-native.ts)固定为production，不继承测试调用进程环境；显式测试诊断常量独立封存，普通dev／prod关闭要求保持，Vite开发服务器仍走原开发分支。原child-stream真实资产守卫与窗口门禁核开发栈不混入正式renderer，具体范围归[Native发行owner](../../apps/desktop/docs/native-release.md)。此修正不改变候选身份、完整库存或平台发布资格。
 
-Windows 桌面专用安装包的配套服务通过同一制品内的模块启动。Bun 构建时解析拆分文件的外部模块导入和 `require`，成品由私有映射定位包内文件。完整安装启动验证覆盖仓库外的目录。生产候选继续使用固定的本地 renderer，开发控制连接只在开发构建中启用。具体边界见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+Windows 桌面专用安装包的配套服务通过同一制品内的模块启动。esbuild 在构建时解析拆分文件的外部模块导入和 `require`，成品由私有映射定位包内文件。完整安装启动验证覆盖仓库外的目录。生产候选继续使用固定的本地 renderer，开发控制连接只在开发构建中启用。具体边界见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
-`release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest 和文件哈希。macOS arm64 与 Windows x64 的 Native 默认构建桌面专用运行时，`--terminal` 显式选择完整组合候选，Linux 沿用完整 Terminal。桌面专用包内嵌通过相对路径链接的本地服务和一份 Bun，CLI/TUI 由独立 Terminal 交付。旧候选仍按原清单验证供覆盖升级，具体边界归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
+`release:build` / `verify` / `smoke` / `install` 使用[发布工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest 和文件哈希。macOS arm64 与 Windows x64 的 Native 默认构建桌面专用运行时，`--terminal` 选择完整组合候选，Linux 使用完整 Terminal。桌面专用包内嵌相对路径链接的本地服务和一份 Node，构建核验排除残留的 `node_modules`。CLI/TUI 由独立 Terminal 交付。旧候选按原清单核验，旧完整 Windows managed 前门切换到 Node 需要新前缀，桌面 Setup 使用整树替换。具体边界归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 只用于检查完整性。可信 Native MCP 测试候选仅由 builder 固定 `native-mcp-loopback` 写入专用 ProcessHost 和可选公开证书，字节全部纳入清单。该 loopback/TLS 测试的 `productionDefaultNetwork` 必须为 false，完整平台资格另行验收。
 
 `bun run release:windows-setup` 串联同一 Windows 桌面专用构建、归档校验和离线安装器生成。参数和产物见 [Native 发行 owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
-`bun run release:macos-dmg` 将 arm64 桌面专用 Native 候选放入可拖拽的 `Kite Desktop.app`，并在只读映像中提供指向 `/Applications` 的快捷方式。制品保留桌面服务和本平台运行资源，构建核验排除 `node_modules`、CLI/TUI 和独立 Terminal Web 入口。Finder 管理复制、替换和移到废纸篓，应用启动继续验证包内候选。指定 Developer ID 身份和公证 profile 时，从源码构建并在计算清单摘要前签署内部程序。外层 DMG 完成公证、附票和校验后生成最终摘要。Developer ID 实机证据及正式发布仍走原门禁。构建参数和实机证据归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#macos-dmg)。
+`bun run release:macos-dmg` 将 arm64 桌面专用 Node 候选放入可拖拽的 `Kite Desktop.app`，并在只读映像中提供指向 `/Applications` 的快捷方式。制品包含配套 Service、Node 和本平台运行资源，构建核验排除 Bun、`node_modules`、CLI/TUI 和独立 Terminal Web 入口。Finder 管理复制、替换和移到废纸篓，应用启动继续验证包内候选。指定 Developer ID 身份和公证 profile 时，从源码构建并在计算清单摘要前签署内部程序。外层 DMG 完成公证、附票和校验后生成最终摘要。Developer ID 实机证据及正式发布仍走原门禁。构建参数和实机证据归 [Native 发行 owner](../../apps/desktop/docs/native-release.md#macos-dmg)。
 
-候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.4。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。当前 fault-soak 与完整 blocked collection 同样要求1.4.4，原迭代、期限、source／receipt／资源拒绝门禁不变；历史1.4.2记录保留其原环境，不能替代新基线证据。
+候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Node 固定 26.13.1，Bun 固定 1.4.4。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。当前 fault-soak 与完整 blocked collection 同样使用固定 Node，原迭代、期限、source／receipt／资源拒绝门禁不变；历史1.4.2记录保留其原环境，不能替代新基线证据。
 
 release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试](../../tests/isolated/unified-agent/terminal-bundle.test.ts)，包含实际 CLI/TUI、升级/回滚、lease 与卸载保数据；Linux 分支继续核 selected 引擎、双 Worker WAL 和实际安装 maintenance。正式消费者守卫要求双方平台及准确完整命令，拒绝 Mac-only、echo 与过滤到零案例。workflow 接入不表示该原生平台已执行通过。
 
@@ -74,7 +82,7 @@ release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试
 | installed 前门真实代码升级／冷回退 | [双产品统一 caller](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts) | [Terminal](../../tests/isolated/unified-agent/terminal-cross-version.test.ts)、[Native](../../tests/isolated/unified-agent/native-cross-version.test.ts)／Xvfb | 原 builder 及真实不同候选、A→B→A→B、原 Store／完整历史、后续真实工作和零冷重放 |
 | 默认 MCP Source／公共 Client 连接与工具调用 | `test:runtime:stdio` 原 Windows Job 整例及 [sealed 默认 Source](../../apps/service/test/isolated/mcp-source-packaged-default.test.ts) | 同 alias 的原 Linux namespace／SDK 整例及同 sealed 文件 | 完整工具结果、准确停止／取消、原树／宿主关闭、正常 Service 退出与冷原对象零重放；缺后端直接失败 |
 | installed `maintenance` 备份／核验／恢复／状态 | 原 Terminal caller 和原 Native caller 的独立维护链 | 原 Terminal bundle 的完整安装维护分支 | backup／inspect／restore 新 Store／status、旧来源拒绝、原数据保全及恢复后读取；Native 平台专有整例仍保原适用范围 |
-| installed `uninstall` 保数据退出 | 上述原 Terminal／Native／TUI／真代码 caller 的最终卸载 | 上述原 Terminal／Native 完整文件的最终卸载 | busy 拒绝、全部原 owner 退出／候选 EX后唯一卸载，外部 Core／Native DB与配置按原断言保全 |
+| installed `uninstall` 保数据退出 | 上述 Terminal／Native／TUI／真代码 caller 的最终卸载 | 上述 Terminal／Native 完整文件的最终卸载 | busy 拒绝，全部原 owner 退出且候选可独占后卸载对应前缀，保全外部 Core、Native DB 和配置 |
 
 release／Required 的 Linux 消费者显式准备 `build-essential bubblewrap xvfb`；独立 stdio、platform probe 和 transport 准备 `build-essential bubblewrap`。Windows 的 release／stdio／platform probe 保原[MSVC 准备入口](../../scripts/release/prepare-windows-native-ci.ts)，缺项直接失败。它们不关闭 Chromium／namespace sandbox，不将 macOS-only 窗口或恢复中断 fixture 宣作 Win/Linux 已运行。
 
@@ -90,7 +98,7 @@ transport续接完整TUI Session／Fork／Context维护、paired／shared模型�
 
 transport另接[完整原生滚动](../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)，现22个完整独立caller进程；该无Shell依赖文件在权限前，同样不加平台条件。Python／POSIX transport与Windows skip退役为共享Bun PTY／ConPTY，真实resize、原始hex／31检查点／完整问答编辑和原断言／20秒预算保持。原TSX有限UI port不改，此文件不授Service／Provider或installed资格；实际所属正常退出与强退分开，方法及原生未验范围归[CLI owner](../../apps/cli/README.md#tui-原生滚动与清屏)。原Win/Linux后端、RSS、完整观测及阶段全回归门禁保持，接线不代执行。
 
-[日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义，20个 release 验证步骤及独立 stdio 的 shell／MCP 步骤各有准确 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在自己的 fresh Bun 测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
+[日志 shell](../../scripts/ci/logged-shell.ts)保原 run 正文和 native shell 退出语义。release 的历史制品准备、各验证步骤及独立 stdio 的 shell／MCP 步骤分别写入 `dist/unified-evidence/*.log`。stdout／stderr 原字节同时透传控制台；日志写入、外部命令、信号或关闭失败保持非零。日志采用排他创建，artifact 用 `always()`／`if-no-files-found:error` 保存；不上传临时 Profile 内容。stdio 的 sealed 文件在独立测试进程选择候选引擎，避免与 source 测试的进程全局 SQLite 冲突；全10文件与原断言／期限保持，详情归[测试入口](../../tests/README.md)。
 
 整个 release job 从30分钟调整为60分钟，为构建、原Windows19分钟真代码整链和其余原安装／维护／TUI调用者留聚合时间；没有取得 hosted 超时证据，也没有放宽任何 fixture 的原期限。原 `always()` formal platform verifier、soak8外层／60—168分钟、RSS 32MiB与出生后代／activeResources／handles门禁保持。静态接线或本机局部通过不构成 G1、P6／§35／P7 或整体 V1.3 退出。
 
@@ -112,6 +120,8 @@ Windows Native 构建与 transport 原生后端测试在消费编译器前调用
 
 ## 安装、登记与使用权
 
+macOS arm64 完整 Native 的 Node ZIP 沿用外层 Native 与内含 Terminal 的闭合文件清单。Node 官方发行归档固定版本与 SHA，安装、校验、回滚及卸载从包内 Node 执行，既有 Bun 清单继续用于旧版维护。Node SQLite 绑定使用候选内审核过的动态库和 source ID，配套 Service 原对象保护和清理规则继续适用。桌面专用 DMG 同样固定包内 Node 和 SQLite，保留 `terminal/code` 布局。DMG 的安装、版本替换和卸载由 Finder 完成，回滚时从旧 DMG 替换整个应用。构建和安装操作归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+
 Windows 同 job 另必须执行 [installed TUI 完整调用者](../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)，准确传入两个已 build／verify／smoke 的 Terminal／Native 路径。独立前门及登记 Native 选择各沿真实 ConPTY／所选候选 TUI／Service 完成提交、完整阅读／思考、导出、精确取消、草稿、正常退出与冷读零重放；guard 保两种选择的完整顺序及禁止忽略失败。原九份 TUI 私有文件已迁入 current-SID 原生记录端口，验证期和发布期 Close 未确认保原 Profile／数据锁，格式／codec／容量不变。源码、本机 POSIX／mock 与 CI 守卫不代原生资格；Windows/Linux 实际验证按用户最新安排后置，Windows 由用户后续独立验证；现有 Actions 接线保留，无本轮 dispatch。完整合同归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-installed-tui-正式调用者)，RSS／观测、Shell 原合同、跨代码和阶段门禁保持。
 
 Windows managed Terminal 新实现先以 [MSVC 准备](../../scripts/release/prepare-windows-native-ci.ts) 构建原生前门及独立 verifier，再固定候选 Bun 的新 PE 副本，原 Bun 不修改。release candidate 把准备放在 Terminal build 前，并接显式 [Windows qualification](../../tests/fixtures/unified-agent/windows-terminal-installation.qualification.ts) 的准确绝对候选参数；[守卫](../../scripts/check-unified-workspaces.ts)核顺序、Windows predicate、完整消费与禁止静默失败。该工具覆盖安装/实际 paired Run/指针切换/冷读/保数据卸载，另要求同一正式 `kite.exe` 在真实 Run 时维护 busy、退出后的 backup/inspect/status/restore/status/GC 和新 Store 完整原历史冷读零重放。GC只核引用/近期保留与旧 Store 拒绝，过宽限原对象删除另归维护 owner 的原生用例；标签 B 与 TUI help 不替代跨代码或 PTY。现有 common whole、Native 和 always formal verifier 保持，Windows 原 POSIX fixture 合同及 Native 未资格仍可能实际失败，不排除或削弱它们。原生执行按用户最新安排后置，Windows 由用户后续独立验证；现有 Actions 接线保留，未 dispatch；完整源码与待验范围归 [Terminal owner](../../apps/cli/docs/terminal-release.md#windows-managed-terminal-当前实现)。
@@ -124,13 +134,15 @@ Windows managed Terminal 新实现先以 [MSVC 准备](../../scripts/release/pre
 
 Native 卸载在安装 EX 内先核封闭结构和两层真实目录，再取得所有候选双 root EX；busy 在完整内容读取前拒绝。所有 EX 持有后完整核原候选 bytes/digest，删除前复核原 active/previous 和候选集合，漂移拒绝；空闲损坏仍拒绝，部分租约沿 finally 释放。该顺序只处理遵守安装锁及使用锁的合作进程，不增加对绕过锁的同用户写入保证。
 
-Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。双方闭合 nonce/active 与完整物理树复核，POSIX standard 前门实际 spawn Native 内 Bun/CLI/TUI/Service；Windows source 转交 Native C 前门，并以内部 expected candidate 拒绝登记读取与实际准入之间的版本漂移。升级/回滚只更新原持有者登记，卸载以原 nonce CAS 撤销。独立前门恢复 Terminal；已缓存且删除的 Native-bin 路径需要父 shell 的 hash刷新/新 shell。详见[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
+Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。双方闭合 nonce/active 与完整物理树复核，POSIX standard 前门实际启动 Native 内 Node、CLI/TUI 和 Service（旧候选按原运行时）；Windows source 转交 Native C 前门，并以内部 expected candidate 拒绝登记读取与实际准入之间的版本漂移。升级/回滚只更新原持有者登记，卸载以原 nonce CAS 撤销。独立前门恢复 Terminal；已缓存且删除的 Native-bin 路径需要父 shell 的 hash刷新/新 shell。详见[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
 
 Windows managed Native 安装／切换／撤销源码现已接入同一正式 release caller：closed v2 marker 绑定四个稳定 `bin/*.exe`，active 只选择完整不可变候选。C 前门在 Bun 初始化前清除五个注入键，compiled verifier 持原 C 创建证书、outer／inner 全部原文件与自身双 SH，再创建 Electron；Main 在窗口／Profile／SQLite／Service 之前独立核两跳实际创建证书、原进程 FILETIME／完整 bytes 与自身双 SH。PPID 和后置摘要均不单独授予加载权。完整归档采用私有原 HANDLE copy／Flush／write-through，卸载以全部 candidate 双 EX 与完整 original DELETE owner 删除管理树，Profile 留在外部；登记关闭未知保同次调用全部 prefix EX。真实 MSVC／Electron PE、实际窗口、维护恢复和 Win/Linux 完整资格仍待重构后验收，原严格 DLL import／delay-load 拒绝与缺 handoff 的 Main guard 保持，准确范围归[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
 Windows x64 Native 与内含 Terminal 共享一次编译的校验器制品。Windows 安装 marker 和已安装映像名继续沿原契约，资产来源与旧候选兼容见 [Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
-Windows x64 离线 EXE 消费桌面专用 Native 归档，装配一个 Bun、本地服务和桌面窗口。安装器支持选择目录及原目录更新，登记当前用户的 Windows 应用和卸载入口。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
+本轮未扩大真实前驱的依赖输入白名单。当前工作树的 manifest／lock 未通过固定历史输入核验；Windows 完整 managed Bun→Node 也不满足原 prefix 的稳定前门合同。macOS Finder 的 DMG 取样覆盖实际 Bun→Node→Bun，不能代替固定前驱或 Windows／Linux 的整套跨代码资格。
+
+Windows x64 离线 EXE 消费桌面专用 Native 归档，装配随包 Node、本地服务和桌面窗口。安装器支持选择目录及原目录更新，登记当前用户的 Windows 应用和卸载入口。新版准备和旧版移除沿 managed Native 的排他使用权及候选核验。卸载保留独立 Profile。构建与验证范围归 [Native owner](../../apps/desktop/docs/native-release.md#构建与安装)。
 
 正常卸载独立 Terminal 不阻止 Native 自带入口及后续升级。隐式历史登记目标已不存在时，升级仅锁 Native，并保留历史反向登记；不重建前门或自动重新登记。显式目标与仍存在的隐式目标保持原完整验证、双 prefix 锁和 nonce CAS。
 
@@ -150,7 +162,7 @@ macOS 完整 Native 的安装版离线维护已沿实际 Native 自带／登记�
 
 新基线前版样本遵循 V1.3 D08。2026-10-08 只读核对原仓库 Releases：四份记录中三份为 draft，唯一公开预发布为 [v0.1.0-alpha-2](https://github.com/ferqx/kite-code/releases/tag/v0.1.0-alpha-2)，发布于 2026-08-20；其远端 tag 与本地原对象一致，commit `20e83747c4c7d1f992dc96af0360266193498c7f` 仍是旧 `src/index.ts` 产品。当前没有已发布的新基线前版，T029 在首发前没有适用样本；不为满足该项迁移、读取或执行旧 Store/State。新基线发布后持续向后兼容的要求保持，本地真实代码候选仍不能冒充已发布样本。此前macOS沿当时源码与SQL基线的真实DB8原申请捕获、正式扩展唯一动作产生DB9和包内v18备份，切回不识别DB9的原DB7 a2b6441f候选：旧Native私有操作明确拒绝，兼容Core三条原历史仍完整只读，原DB9 bytes／inode／配置保留；切回当前候选才明确GET原移除与扩展Command、完整Execution／finding／reference，零新增POST或模型调用。此前DB8拒绝证据只保其原冻结范围。六个 Service 普通退出和最终卸载保数据已核，范围归[Native owner](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退)。它不提供任意版本的写入兼容或自动数据降级许可。
 
-Terminal 保存实际 `bun:sqlite` driver/linkage/version/sourceId/engine manifest SHA，Native 保存独立 `node:sqlite` 身份。构建测量复制后 runtime，正式启动在首次数据库前选择并核包内 metadata，Worker 核同一 process-global 引擎。完全无选定资产的开发模式 unqualified；损坏/不完整资产拒绝，不查系统库 fallback。
+新 Terminal 保存实际 `node-api:sqlite` 动态库版本、sourceId 和 engine manifest SHA，Native 保存独立 `node:sqlite` 身份。构建使用复制后的 Node 测量实际引擎；正式 Service 和 Worker 在首次开库前核对同一包内引擎。损坏或不完整的资产拒绝，不搜索系统库。旧 Bun 清单按历史引擎身份核验。
 
 WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多连接 WAL/备份恢复为依据，不以“最新”或永久 minimum 放行。当前已审查来源为 [SQLite3.51.3](https://www.sqlite.org/releaselog/3_51_3.html)、[SQLite3.53.2](https://sqlite.org/releaselog/3_53_2.html)与[SQLite3.53.4](https://www.sqlite.org/releaselog/3_53_4.html)；精确集合由[release identity](../../apps/service/src/sqlite-release-assets.ts)负责。macOS 构建复制已安装且审查的动态库，Linux/Windows 核 Bun builtin；任一实际引擎不符合集合即拒绝资格。
 
@@ -170,4 +182,4 @@ G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；
 
 ## Git Worktree 运行资产
 
-Terminal/Native沿原Agent manifest build携带Git Worktree独立worker、无preload配置、空hooks目录和SHA256清单；不升级既有工具、Job、Runtime或manifest版本。空目录只由已封存的准确三文件闭包派生，在解包和 Windows Native 的私有文件复制后重建，完整目录/文件/祖先检查保持；只复制 manifest 文件库存不能取得完整制品。macOS本次源码链路及安装后实际Job已核实，Linux/Windows新worker和完整发行资格仍需各自实机证据；细节与命令归[Terminal owner](../../apps/cli/docs/terminal-release.md)、[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)及[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。
+Terminal/Native沿原Agent manifest build携带Git Worktree 独立 Node worker、空 hooks 目录和 SHA256 清单；不升级既有工具、Job、Runtime或manifest版本。空目录从已封存的 worker 与 manifest 派生；旧 Bun 候选仍验证原三文件闭包，在解包和 Windows Native 的私有文件复制后重建，完整目录/文件/祖先检查保持；只复制 manifest 文件库存不能取得完整制品。macOS本次源码链路及安装后实际Job已核实，Linux/Windows新worker和完整发行资格仍需各自实机证据；细节与命令归[Terminal owner](../../apps/cli/docs/terminal-release.md)、[Native owner](../../apps/desktop/docs/native-release.md#windows-managed-native-当前实现)及[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)。

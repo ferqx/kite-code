@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../../packages/agent/src/json';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import {
   originalExternalShellScope,
   originalShellJobStopped,
@@ -478,10 +479,11 @@ test('live all-tools refuses missing opt-in and unsupported modes before creatin
       ['1', ['--mode=auto', '--unknown=1'], 'all_tools_requires_opt_in_and_new_absolute_output'],
     ] as const) {
       const output = join(root, 'report.json');
-      const child = Bun.spawn(
+      const child = spawnFixtureProcess(
         [
           process.execPath,
-          join(import.meta.dir, 'model-tools-all.live.ts'),
+          ...process.execArgv,
+          join(import.meta.dirname, 'model-tools-all.live.ts'),
           `--output=${output}`,
           ...args,
         ],
@@ -505,4 +507,4 @@ test('live all-tools refuses missing opt-in and unsupported modes before creatin
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 15000);

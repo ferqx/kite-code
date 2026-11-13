@@ -1,15 +1,12 @@
-import { describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { describe, expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  activateSessionSearch,
-  submitCommand,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { openSessionByTitle, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import {
   awaitPreInkTuiReady,
   type PtyProcess,
@@ -24,13 +21,13 @@ import {
 } from '../harness/terminal-screen';
 import { createTestWorkspace, observePersistedUserMessageSession } from '../harness/test-workspace';
 
-const holderFixture = join(import.meta.dir, '../fixtures/session-store-maintenance-holder.ts');
+const holderFixture = join(import.meta.dirname, '../fixtures/session-store-maintenance-holder.ts');
 const question = 'Question before maintenance wait';
 const answer = 'History survived maintenance wait.';
 
 async function existingHistory() {
   const workspace = createTestWorkspace();
-  const server = createMockModelServer();
+  const server = await createMockModelServer();
   const tuis: PtyProcess[] = [];
   server.setResponses([{ message: { content: answer } }]);
   try {
@@ -67,8 +64,15 @@ async function existingHistory() {
 }
 
 function holdStore(workspace: ReturnType<typeof createTestWorkspace>, readyPath: string) {
-  return Bun.spawn(
-    [process.execPath, holderFixture, workspace.dataRoot, workspace.profile, readyPath],
+  return testSpawn(
+    [
+      process.execPath,
+      ...testRuntimeFlags,
+      holderFixture,
+      workspace.dataRoot,
+      workspace.profile,
+      readyPath,
+    ],
     {
       stdin: 'pipe',
       stdout: 'ignore',
@@ -121,20 +125,11 @@ describe('TUI startup Store maintenance wait', () => {
         'original Session listed after automatic maintenance retry',
         15_000,
       );
-      await activateSessionSearch(waiting);
-      await typeText(waiting, question);
-      waiting.write('\x1b[B');
-      await waitForCondition(
-        () => screenHasSessionRow(waiting.viewport(), question, { selected: true, active: false }),
-        'original Session selected',
-        5_000,
-      );
-      waiting.write('\r');
-      await waitForCondition(
-        () =>
-          screenContains(waiting.viewport(), question) &&
-          screenContains(waiting.viewport(), answer),
-        'original conversation opened without a TUI restart',
+      const selectedTui = waiting;
+      await openSessionByTitle(
+        selectedTui,
+        question,
+        (viewport) => screenContains(viewport, question) && screenContains(viewport, answer),
         15_000,
       );
       const observed = observePersistedUserMessageSession(fixture.workspace, question);

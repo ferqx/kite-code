@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdtempSync,
@@ -11,6 +9,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -49,9 +51,10 @@ async function firstLine(stream: ReadableStream<Uint8Array>) {
 test('SIGKILL pending approval preserves cold observation and explicit recovery dispatches once under the current root mode revision', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-live-approval-kill-')));
   writeFileSync(join(root, 'ledger'), '');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./live-approval-crash-fixture.ts', import.meta.url)),
       root,
     ],

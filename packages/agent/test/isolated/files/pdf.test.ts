@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { expect, test } from '#kite-test';
 import {
   brokenEmbeddedFontPdf,
   chinesePagedPdf,
@@ -17,6 +18,7 @@ import { createFileTools, createWorkspaceFiles, withInputFileReads } from '../..
 import type { InputFileImport } from '../../../src/storage/input-file-imports';
 import type { Json } from '../../../src/storage/types';
 import { readCachedPdf, readPdf } from '../../../src/tools/documents/pdf';
+import { NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
 test('text reads omit PDF-only options and invalid combinations explain recovery without bypassing attachment scope', async () => {
   const root = temporaryDirectory('kite-pdf-text-contract-'),
@@ -317,35 +319,36 @@ test('PDF rejects a broken embedded font in text and image modes and permits sub
 }, 20000);
 
 test('PDF queued cancellation does not spawn a worker; cancelling a dispatched request frees capacity', async () => {
-  const OriginalWorker = globalThis.Worker;
   const controllers = [new AbortController(), new AbortController(), new AbortController()];
-  const workers: Worker[] = [];
-  const terminated: Worker[] = [];
+  const workers: NativeWorker[] = [];
+  const terminated: NativeWorker[] = [];
   let dispatched = 0;
   let ready!: () => void;
   const bothDispatched = new Promise<void>((resolve) => {
     ready = resolve;
   });
   // Observe real workers without replacing their parser, messages, or lifecycle operations.
-  globalThis.Worker = new Proxy(OriginalWorker, {
-    construct(target, args) {
-      const worker = Reflect.construct(target, args) as Worker;
-      workers.push(worker);
-      worker.postMessage = new Proxy(worker.postMessage, {
-        apply(target, _receiver, input) {
-          const result = Reflect.apply(target, worker, input);
-          if (++dispatched === 2) ready();
-          return result;
-        },
-      });
-      const terminate = worker.terminate.bind(worker);
-      worker.terminate = () => {
-        terminated.push(worker);
-        return terminate();
-      };
-      return worker;
-    },
-  });
+  useFixtureWorker(
+    new Proxy(NativeWorker, {
+      construct(target, args) {
+        const worker = Reflect.construct(target, args) as NativeWorker;
+        workers.push(worker);
+        worker.postMessage = new Proxy(worker.postMessage, {
+          apply(target, _receiver, input) {
+            const result = Reflect.apply(target, worker, input);
+            if (++dispatched === 2) ready();
+            return result;
+          },
+        });
+        const terminate = worker.terminate.bind(worker);
+        worker.terminate = () => {
+          terminated.push(worker);
+          return terminate();
+        };
+        return worker;
+      },
+    }),
+  );
   const results: Promise<unknown>[] = [];
   try {
     for (let index = 0; index < 2; index++)
@@ -354,7 +357,7 @@ test('PDF queued cancellation does not spawn a worker; cancelling a dispatched r
     const running = Promise.allSettled(results);
     await Promise.race([
       bothDispatched,
-      Bun.sleep(5000).then(() => {
+      sleepTimer(5000).then(() => {
         throw Error('pdf_dispatch_deadline');
       }),
     ]);
@@ -381,7 +384,7 @@ test('PDF queued cancellation does not spawn a worker; cancelling a dispatched r
   } finally {
     for (const controller of controllers) controller.abort();
     await Promise.allSettled(results);
-    globalThis.Worker = OriginalWorker;
+    useFixtureWorker();
   }
 }, 20000);
 

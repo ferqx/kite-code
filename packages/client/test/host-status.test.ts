@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { createClient, type HostStatus, type ServerInfo } from '../src';
 
 const info: ServerInfo = {
@@ -58,11 +59,11 @@ function status(identity = info): HostStatus {
     },
   };
 }
-function fixture(identity = info) {
+async function fixture(identity = info) {
   let facts = status(identity),
     streamClosed = false;
   const queries: URL[] = [];
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -115,13 +116,13 @@ function fixture(identity = info) {
     },
     close() {
       client.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
 
 test('host status freezes scope, omits undefined query and preserves an active observation/cursor', async () => {
-  const f = fixture();
+  const f = await fixture();
   let ready!: () => void;
   const observed = new Promise<void>((resolve) => {
     ready = resolve;
@@ -155,13 +156,13 @@ test('host status freezes scope, omits undefined query and preserves an active o
     });
     expect(f.queries).toHaveLength(2);
   } finally {
-    f.close();
+    await f.close();
     await observation?.catch(() => {});
   }
 });
 
 test('host status rejects wrong identity/Store/target and closed authority forgery without re-request', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.client.connect();
     for (const [changed, code] of [
@@ -187,13 +188,13 @@ test('host status rejects wrong identity/Store/target and closed authority forge
     expect(f.queries).toHaveLength(7);
     expect(f.client.lastAppliedCursor).toBeUndefined();
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('admitted diagnostic data unavailable can read host facts without Store access', async () => {
   const diagnostic: ServerInfo = { ...info, dataAvailability: 'unavailable', storeId: undefined };
-  const f = fixture(diagnostic);
+  const f = await fixture(diagnostic);
   try {
     await f.client.connect();
     const facts = await f.client.getHostStatus();
@@ -202,12 +203,12 @@ test('admitted diagnostic data unavailable can read host facts without Store acc
     expect(() => f.client.getView('s')).toThrow('data_unavailable');
     expect(f.queries).toHaveLength(1);
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('Linux namespace status preserves pending qualification and rejects a promoted sandbox claim', async () => {
-  const f = fixture();
+  const f = await fixture();
   const facts = status();
   facts.execution.sandbox = {
     backend: 'linux_bubblewrap',
@@ -236,12 +237,12 @@ test('Linux namespace status preserves pending qualification and rejects a promo
     await expect(f.client.getHostStatus()).rejects.toMatchObject({ code: 'invalid_response' });
     expect(f.queries).toHaveLength(2);
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('Windows status describes write restriction without promoting it to a read or network isolation claim', async () => {
-  const f = fixture();
+  const f = await fixture();
   const facts = status();
   facts.execution.sandbox = {
     backend: 'windows_restricted_token',
@@ -268,6 +269,6 @@ test('Windows status describes write restriction without promoting it to a read 
     } as unknown as HostStatus);
     await expect(f.client.getHostStatus()).rejects.toMatchObject({ code: 'invalid_response' });
   } finally {
-    f.close();
+    await f.close();
   }
 });

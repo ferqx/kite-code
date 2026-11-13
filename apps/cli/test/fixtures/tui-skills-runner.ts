@@ -12,27 +12,24 @@ const settings = JSON.parse(process.env.TUI_SKILLS_SETTINGS!) as {
 };
 const actual = globalThis.fetch;
 
-globalThis.fetch = Object.assign(
-  async (...args: Parameters<typeof fetch>) => {
-    const response = await actual(...args);
-    const url = new URL(String(args[0]));
-    if (url.pathname.includes('/skills')) {
-      const value = await response.clone().json();
-      appendFileSync(
-        join(settings.root, 'catalogue-reads'),
-        `${JSON.stringify({ url: url.pathname, query: url.search, value })}\n`,
-      );
-      const arm = join(settings.root, 'arm-owned-page');
-      if (!url.searchParams.has('afterId') && existsSync(arm)) {
-        unlinkSync(arm);
-        writeFileSync(join(settings.root, 'held-page'), 'held');
-        await actual(`${settings.control}held-page`);
-      }
+globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+  const response = await actual(...args);
+  const url = new URL(String(args[0]));
+  if (url.pathname.includes('/skills')) {
+    const value = await response.clone().json();
+    appendFileSync(
+      join(settings.root, 'catalogue-reads'),
+      `${JSON.stringify({ url: url.pathname, query: url.search, value })}\n`,
+    );
+    const arm = join(settings.root, 'arm-owned-page');
+    if (!url.searchParams.has('afterId') && existsSync(arm)) {
+      unlinkSync(arm);
+      writeFileSync(join(settings.root, 'held-page'), 'held');
+      await actual(`${settings.control}held-page`);
     }
-    return response;
-  },
-  { preconnect: actual.preconnect },
-);
+  }
+  return response;
+}, {});
 const exit = new AbortController();
 process.once('SIGTERM', () => exit.abort());
 await runTUIHost({

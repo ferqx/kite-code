@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ModelAdapter, ModelAttemptError } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { waitForModelRetry } from '../../../src/model-attempt';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';

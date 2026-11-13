@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { AgentClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeCaller } from '../electron/native-caller';
 import type { NativeJobOutputPage } from '../src/job-output-bridge';
 import { sessionChange } from './native-change.fixture';
@@ -166,7 +167,7 @@ test('fixed Job output survives same-selection metadata refresh while selection,
         await caller.invoke({ method: 'state', generation: 1 });
         await promptly(
           (async () => {
-            while (!signal.aborted) await Bun.sleep(1);
+            while (!signal.aborted) await fixtureDelay(1);
           })(),
         );
         expect(caller.state().selection?.permissionUnavailable).toBe(true);

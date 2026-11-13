@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Interaction } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { InteractionCard } from '../src';
 import { Button } from '../src/desktop/ui';
 

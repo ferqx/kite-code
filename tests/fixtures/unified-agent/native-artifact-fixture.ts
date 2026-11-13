@@ -50,7 +50,7 @@ export function finiteNativeFixture(
     version: 1,
     apiMajor: 1,
     target: { platform: process.platform, arch: process.arch },
-    bunVersion: Bun.version,
+    bunVersion: '1.4.4',
     sqlite,
     productVersion: '0.1.0',
     source: { commit: 'a'.repeat(40), dirty: true },

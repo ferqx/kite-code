@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +13,7 @@ import {
   type PublicView,
 } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { NativeCaller } from '../../electron/native-caller';
 import type {
@@ -28,7 +28,7 @@ import { memoryPrivateData } from '../private-data.fixture';
 test('Native formal extensions caller completes mini-review through real SQLite, HTTP and Client without replaying read or cold intents', async () => {
   const root = realpathSync(temporaryDirectory('kite-native-extensions-main-'));
   const fixture = (await import(
-    join(import.meta.dir, '../../../../tests/fixtures/extensions/mini-review/src/index.ts')
+    join(import.meta.dirname, '../../../../tests/fixtures/extensions/mini-review/src/index.ts')
   )) as {
     createMiniReview(): { extension: Extension; readonly analyses: number };
   };

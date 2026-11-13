@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { access, lstat, open, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   createLinuxHostShellJob,
   createMacosHostShellJob,
@@ -22,6 +23,8 @@ import type {
 import { JobStartError } from '../extensions';
 import { launchIdentityAsync, mapAssetVerification } from '../jobs/launch-identity';
 import type { WindowsShellBackend } from '../jobs/windows-shell';
+import { nodeRuntimeFlags } from '../platform/runtime-flags';
+import { runtimeNativeAsset } from '../runtime-native';
 import { parseShellCommandInput } from '../shell-input';
 import { AgentError } from '../storage/types';
 import type { GitWorktreeHost } from '../tools/git-worktree';
@@ -47,7 +50,7 @@ export interface ShellConfigurationOptions {
   readonly configurationId: string;
   readonly env: Readonly<Record<string, string>>;
   readonly supervisorPath: string;
-  readonly bunExecutable: string;
+  readonly runtimeExecutable: string;
   readonly shellExecutable: string;
   readonly graceMs?: number;
   readonly maxQueuedBytes?: number;
@@ -177,7 +180,7 @@ export async function inspectShellAssets(
   assertShellConfiguration(options);
   const paths: [string, boolean][] = [
     [options.supervisorPath, options.platform !== 'darwin'],
-    [options.bunExecutable, true],
+    [options.runtimeExecutable, true],
     [options.shellExecutable, true],
   ];
   if (options.linux) paths.push([options.linux.bubblewrapPath, true]);
@@ -210,11 +213,7 @@ function assertShellConfiguration(options: ShellConfigurationOptions) {
     (options.platform === 'linux' && (!options.host || !options.linux)) ||
     (options.platform === 'darwin' && (options.linux || options.windows)) ||
     (options.platform === 'win32' &&
-      (!options.host ||
-        !options.windows ||
-        options.linux ||
-        process.arch !== 'x64' ||
-        !process.versions.bun)) ||
+      (!options.host || !options.windows || options.linux || process.arch !== 'x64')) ||
     (options.platform !== 'win32' && options.windows)
   )
     throw new AgentError('shell_platform_unqualified');
@@ -248,7 +247,7 @@ async function asset(path: string, executable: boolean, signal?: AbortSignal) {
   return { path: selected, digest: fact.digest! };
 }
 /** Allowlist is applied before the guardian, shell, or worker interpreter can execute. */
-function workerEnvironment(options: ShellConfigurationOptions, git: string, bun: string) {
+function workerEnvironment(options: ShellConfigurationOptions, git: string, runtime: string) {
   const result: Record<string, string> = {};
   const allowed = new Set(
     options.platform === 'win32'
@@ -272,7 +271,7 @@ function workerEnvironment(options: ShellConfigurationOptions, git: string, bun:
     options.platform === 'win32'
       ? [
           dirname(git),
-          dirname(bun),
+          dirname(runtime),
           dirname(options.shellExecutable),
           join(result.SystemRoot ?? result.SYSTEMROOT ?? 'C:\\Windows', 'System32'),
         ].join(';')
@@ -351,7 +350,7 @@ async function macosGitCandidates(): Promise<string[]> {
 async function worktreeAssets(
   options: ShellConfigurationOptions,
   cwd: string,
-  bun: ShellAsset,
+  runtime: ShellAsset,
   signal?: AbortSignal,
 ) {
   const root = gitWorktreeAssetDirectory();
@@ -360,9 +359,8 @@ async function worktreeAssets(
       configurationId: options.configurationId,
       sourceCwd: cwd,
       defaultRoot: join(homedir(), '.kite-code', 'worktrees'),
-      bunPath: bun.path,
+      runtimePath: runtime.path,
       workerPath: join(root, 'worker.js'),
-      configPath: join(root, 'empty-bunfig.toml'),
       git: { path: '', sha256: '' },
       hooksPath: join(root, 'empty-hooks'),
       unavailable: code,
@@ -389,15 +387,12 @@ async function worktreeAssets(
       manifest.emptyHooks !== 'empty-hooks' ||
       Object.keys(manifest).sort().join(',') !== 'emptyHooks,files,schemaVersion' ||
       !manifest.files ||
-      Object.keys(manifest.files).sort().join(',') !== 'empty-bunfig.toml,worker.js'
+      Object.keys(manifest.files).join(',') !== 'worker.js'
     )
       throw new AgentError('worktree_asset_changed');
     const worker = await asset(join(root, 'worker.js'), false, signal);
-    const config = await asset(join(root, 'empty-bunfig.toml'), false, signal);
-    if (
-      manifest.files['worker.js'] !== worker.digest ||
-      manifest.files['empty-bunfig.toml'] !== config.digest
-    )
+    const addon = await asset(fileURLToPath(runtimeNativeAsset()), false, signal);
+    if (manifest.files['worker.js'] !== worker.digest)
       throw new AgentError('worktree_asset_changed');
     const hooks = join(root, 'empty-hooks');
     const hookIdentity = await launchIdentityAsync(hooks, false, signal);
@@ -431,29 +426,28 @@ async function worktreeAssets(
       configurationId: options.configurationId,
       defaultRoot: join(homedir(), '.kite-code', 'worktrees'),
       sourceCwd: cwd,
-      bunPath: bun.path,
+      runtimePath: runtime.path,
       workerPath: worker.path,
-      configPath: config.path,
       git: { path: git.path, sha256: git.digest },
       hooksPath: hookIdentity.canonical,
     };
     const profileBase = {
       version: 1 as const,
-      env: workerEnvironment(options, git.path, bun.path),
-      bunFlags: Object.freeze(['--no-env-file', `--config=${config.path}`]),
+      env: workerEnvironment(options, git.path, runtime.path),
+      runtimeFlags: nodeRuntimeFlags,
     };
     const profile: TrustedWorkerLaunch = Object.freeze({
       ...profileBase,
       digest: createHash('sha256')
-        .update(JSON.stringify({ ...profileBase, config, bun }))
+        .update(JSON.stringify({ ...profileBase, runtime, addon }))
         .digest('hex'),
     });
-    const captured = [worker, config, git, manifestAsset];
+    const captured = [worker, git, manifestAsset, addon];
     configuration.identity = createHash('sha256')
       .update(
         JSON.stringify({
           configuration,
-          assets: [...captured, bun],
+          assets: [...captured, runtime],
           hooks: hookIdentity,
           profile,
         }),
@@ -470,7 +464,7 @@ async function worktreeAssets(
       async verify(verificationSignal?: AbortSignal) {
         const actual = await mapAssetVerification(
           captured,
-          (item, readSignal, index) => asset(item.path, index === 2, readSignal),
+          (item, readSignal) => asset(item.path, item.path === git.path, readSignal),
           verificationSignal,
         );
         if (actual.some((item, index) => item.digest !== captured[index]!.digest))
@@ -524,9 +518,9 @@ export async function createShellConfiguration(input: {
     const cwd = await realpath(input.workspaceRoot);
     if (!(await lstat(cwd)).isDirectory()) throw new AgentError('shell_workspace_unavailable');
     const assets = await inspectShellAssets(options, input.signal);
-    const [supervisor, bun, shell, extra] = assets;
+    const [supervisor, runtime, shell, extra] = assets;
     const bubblewrap = options.platform === 'linux' ? extra : undefined;
-    if (!supervisor || !bun || !shell) throw new AgentError('shell_asset_unavailable');
+    if (!supervisor || !runtime || !shell) throw new AgentError('shell_asset_unavailable');
     const commandPolicy = await createShellCommandPolicy({
       cwd,
       shellExecutable: shell.path,
@@ -535,7 +529,7 @@ export async function createShellConfiguration(input: {
     });
     const searchAsset = await asset(ripgrepAsset(), true, input.signal);
     const worktree = selected.includes('git.worktree')
-      ? await worktreeAssets(options, cwd, bun, input.signal)
+      ? await worktreeAssets(options, cwd, runtime, input.signal)
       : undefined;
     const worktreeRequest = (request: AuthorizationRequest) => {
       if (request.definitionVersion !== '1') return undefined;
@@ -564,7 +558,7 @@ export async function createShellConfiguration(input: {
       cwd,
       env: options.env,
       rgPath: searchAsset.path,
-      interpreterPaths: [shell.path, bun.path],
+      interpreterPaths: [shell.path, runtime.path],
       protectedPaths: [],
       binding: {
         cwd,
@@ -684,7 +678,7 @@ export async function createShellConfiguration(input: {
       cwd,
       env: options.env,
       supervisorPath: supervisor.path,
-      bunExecutable: bun.path,
+      runtimeExecutable: runtime.path,
       shellExecutable: shell.path,
       trustedWorkerLaunch: (command: string) => {
         if (!worktree?.profile) return;
@@ -703,7 +697,7 @@ export async function createShellConfiguration(input: {
         ? { linux: { bubblewrapPath: bubblewrap.path, initExecutable: supervisor.path } }
         : {}),
     };
-    const makeJob = async (directory = cwd) =>
+    const makeJob = async (directory = cwd, scope = host) =>
       options.platform === 'win32' && options.windows && host
         ? await createWindowsShellJob(
             {
@@ -723,25 +717,33 @@ export async function createShellConfiguration(input: {
             },
             input.signal,
           )
-        : options.platform === 'linux' && bubblewrap && host
+        : options.platform === 'linux' && bubblewrap && scope
           ? createLinuxHostShellJob({
               ...jobOptions,
               cwd: directory,
-              ...host,
+              ...scope,
               bubblewrapPath: bubblewrap.path,
               filesystemScope: hostFilesystemScope,
               executionScope,
             })
-          : host
+          : scope
             ? createMacosHostShellJob({
                 ...jobOptions,
                 cwd: directory,
-                ...host,
+                ...scope,
                 filesystemScope: hostFilesystemScope,
                 executionScope,
               })
             : createShellJob({ ...jobOptions, cwd: directory });
     const job = await makeJob();
+    const worktreeJob =
+      host && worktree?.profile && options.platform !== 'win32'
+        ? await makeJob(cwd, {
+            ...host,
+            // Only the exact trusted worker gains access to its checked native companion.
+            readonlyAssets: [...host.readonlyAssets, ...worktree.assets.map(({ path }) => path)],
+          })
+        : job;
     const handleOwners = new WeakMap<JobHandle, JobDefinition>();
     const extension = createShellExtension({
       ...(host ? { permissionsSchema } : {}),
@@ -830,7 +832,13 @@ export async function createShellConfiguration(input: {
                 network: 'none',
               });
               try {
-                return await job.start({ command }, context);
+                const handle = await worktreeJob.start({ command }, context);
+                handleOwners.set(handle, worktreeJob);
+                return handle;
+              } catch (error) {
+                if (error instanceof JobStartError && error.handle)
+                  handleOwners.set(error.handle, worktreeJob);
+                throw error;
               } finally {
                 workerScopes.delete(context.executionId);
               }
@@ -963,7 +971,7 @@ export async function createShellConfiguration(input: {
         cwd,
         assets: {
           supervisor,
-          bun,
+          runtime,
           shell,
           ...(bubblewrap ? { bubblewrap } : {}),
           parser: [...commandPolicy.assets],
@@ -977,7 +985,7 @@ export async function createShellConfiguration(input: {
                     ? {
                         version: worktree.profile.version,
                         digest: worktree.profile.digest,
-                        bunFlags: worktree.profile.bunFlags,
+                        runtimeFlags: worktree.profile.runtimeFlags,
                         envKeys: Object.keys(worktree.profile.env).sort(),
                       }
                     : null,

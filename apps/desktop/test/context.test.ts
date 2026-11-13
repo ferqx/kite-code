@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, SelectedContextPage, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createDesktopController } from '../src';
 
 function view(id: string): SessionView {

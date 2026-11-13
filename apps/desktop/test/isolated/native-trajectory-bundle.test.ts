@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import {
   type TrajectoryEvent,
   type TrajectorySnapshot,
 } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   openNativeTrajectoryBundle,
@@ -86,12 +86,9 @@ test('single-file Native bundle reads exact sections offline without a Runtime o
     });
     const afterExport = sourceReads;
     const network = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async () => {
-        throw Error('unexpected_network');
-      },
-      { preconnect: network.preconnect },
-    );
+    globalThis.fetch = Object.assign(async () => {
+      throw Error('unexpected_network');
+    }, {});
     try {
       const opened = await openNativeTrajectoryBundle(path);
       try {

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { resolve } from 'node:path';
+import { expect, test } from '#kite-test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { spawnReadyTui } from '../harness/pty-process';
 import {
@@ -20,7 +20,7 @@ for (const mode of ['shell', 'thinking', 'tools', 'subagents', 'mixed', 'approve
         cols: 80,
         rows,
         workspace,
-        entryPath: resolve(import.meta.dir, '../fixtures/live-scroll-tui.tsx'),
+        entryPath: resolve(import.meta.dirname, '../fixtures/live-scroll-tui.tsx'),
         readiness: {
           description: 'live-scroll fixture to expose activity and native scrollback',
           waitForQuiescence: false,

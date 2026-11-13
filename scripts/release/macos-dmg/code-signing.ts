@@ -4,7 +4,7 @@ import { basename, join } from 'node:path';
 
 const codesign = '/usr/bin/codesign';
 const machOMagic = new Set([0xfeedface, 0xfeedfacf, 0xcafebabe, 0xcafebabf]);
-const jitEntitlements = join(import.meta.dir, 'jit.entitlements');
+const jitEntitlements = join(import.meta.dirname, 'jit.entitlements');
 
 function run(executable: string, args: string[]) {
   return execFileSync(executable, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
@@ -42,9 +42,10 @@ export function createMacosCodeSigner(identity: string, entitlements = jitEntitl
     identity,
     identity === '-' ? '--timestamp=none' : '--timestamp',
   ];
-  function sign(path: string, role: 'bun' | 'code' | 'electron') {
+  function sign(path: string, role: 'runtime' | 'code' | 'electron') {
     run(codesign, [
       ...signature,
+      ...(role === 'runtime' ? ['--identifier', 'com.kitecode.desktop.service-runtime'] : []),
       '--options',
       'runtime',
       ...(role === 'code' ? [] : ['--entitlements', entitlements]),

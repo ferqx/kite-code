@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import {
   Conversation,
@@ -10,6 +10,7 @@ import {
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { markdownMarkup } from '../../../../packages/ui/test/markdown-dom.fixture';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
@@ -472,6 +473,54 @@ test('model reconnection stays in its original Turn process across retries, reco
     ]) {
       const foreign = await draw([execution]);
       expect(foreign.messages.some((model) => model.systemKind === 'model_connection')).toBe(false);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  ['model_authentication_required', '无认证', '检查所选提供商的认证配置'],
+  ['model_credentials_locked', '本机凭据库拒绝读取', '重新保存连接后再试'],
+  ['model_credentials_backend_unavailable', '本机凭据库不可用', '恢复系统凭据服务'],
+  ['model_access_denied', '提供商拒绝访问模型', '检查账号的模型权限'],
+  ['credential_unavailable', '无法读取模型凭据', '无法读取所选提供商已配置的凭据'],
+  ['codex_auth_required', '无认证', '在 Codex 中登录对应账号'],
+  ['codex_auth_expired', 'Codex 登录已过期', '在 Codex 中重新登录'],
+  ['codex_auth_invalid', 'Codex 登录信息无效', '在 Codex 中重新登录'],
+  ['codex_auth_unavailable', '无法读取 Codex 登录信息', '检查本机 Codex 登录状态'],
+] as const)('persisted model failure %s reads once as an exception inside its original Turn', async (reason, summary, detail) => {
+  const f = fixture();
+  try {
+    const transcript = desktopTranscript({
+      messages: [message('input', 'user', '1', '原输入保留')],
+      runs: [{ ...run(), status: 'failed', reason }],
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    const notices = transcript.messages.filter((entry) => entry.systemKind === 'turn_failure');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.failure).toEqual({ summary, reasonCode: reason });
+    for (const cold of [false, true]) {
+      if (cold) await act(async () => f.root.render(null));
+      await act(async () =>
+        f.root.render(
+          <Conversation
+            {...transcript}
+            loading={false}
+            selected
+            connected
+            saveReading={() => {}}
+          />,
+        ),
+      );
+      const alert = f.host.querySelector('.turn-failure[role="alert"]');
+      expect(alert?.getAttribute('aria-label')).toBe(summary);
+      expect(alert?.textContent).toContain(detail);
+      expect(alert?.textContent).not.toContain(reason);
+      expect(f.host.querySelectorAll('.agent-turn .turn-failure')).toHaveLength(1);
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
     }
   } finally {
     await f.close();
@@ -2594,7 +2643,7 @@ test('real Core compression, later tool work and completion remain distinct thro
     const deadline = Date.now() + 5000;
     while (!read()) {
       if (Date.now() > deadline) throw Error('compression_native_timeout');
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     }
   };
   const read = async () => {

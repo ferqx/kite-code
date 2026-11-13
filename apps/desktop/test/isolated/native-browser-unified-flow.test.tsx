@@ -1,9 +1,11 @@
-import { expect, mock, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { runInNewContext } from 'node:vm';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, mock, test } from '#kite-test';
+import type { serveLoopbackWebSocket } from '../../../service/src/loopback-server';
 import { NativeBrowserPageHost } from '../../electron/browser-page-host';
 import {
   type NativeBrowserMenuAction,
@@ -282,6 +284,13 @@ const { closeNativeBrowserTab, nativeBrowserDisplayHint, restoreNativeBrowserTab
 const { NativeBrowserLeaseControls } = await import('../../src/native-browser-lease-controls');
 const { useSessionTabs } = await import('../../../../packages/ui/src/desktop/SessionTabs');
 const { registerNativeBrowserIpc } = await import('../../electron/native-browser');
+let serveFixture: typeof serveLoopbackWebSocket = async () => {
+  throw Error('test_websocket_fixture_missing');
+};
+mock.module('../../../service/src/loopback-server', () => ({
+  serveLoopbackWebSocket: (options: Parameters<typeof serveLoopbackWebSocket>[0]) =>
+    serveFixture(options),
+}));
 const { createDesktopBrowserTransport } = await import('../../../service/src/desktop-browser');
 const { createBrowserInputShield } = await import('../../electron/browser-input-shield');
 bootstrap.window.close();
@@ -363,7 +372,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     return reply.value;
   };
   const originalFetch = globalThis.fetch,
-    originalServe = Bun.serve;
+    originalServe = serveFixture;
   let leaseId = '';
   globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
     try {
@@ -377,7 +386,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
       });
     }
   }) as unknown as typeof fetch;
-  Bun.serve = ((options: unknown) => {
+  serveFixture = (async (options: unknown) => {
     serverOptions = options;
     return {
       port: 12345,
@@ -385,7 +394,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
         serverStopped++;
       },
     };
-  }) as unknown as typeof Bun.serve;
+  }) as unknown as typeof serveFixture;
   let transport: ReturnType<typeof createDesktopBrowserTransport> | undefined;
   const fixture = browserFixture({
     beforeAction: async (action) => {
@@ -458,7 +467,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
   const flush = async (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
   const until = async (check: () => boolean) => {
     const end = Date.now() + 2500;
@@ -508,7 +517,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     const id = model!.tabs[0]!.id;
     await act(async () => {
       await request({ action: 'navigate', id, input: 'http://localhost/fixture' });
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     const page = views[0]!;
     await until(() => page.visible);
@@ -523,7 +532,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     // Test setup grants control through Main; the ordinary page has no pre-arm UI.
     await act(async () => {
       await request({ action: 'grant', id });
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     const signal = new AbortController().signal;
     transport = createDesktopBrowserTransport(
@@ -541,7 +550,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
         { action: 'launch', headless: true, engine: 'chrome', webmcp: false },
         signal,
       );
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     await until(() => !!button('浏览器控制'));
     await readyMenu('handoff');
@@ -650,7 +659,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
       finishCommand();
       debuggerGate = undefined;
       await inFlight;
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     await until(() => host.state(id)?.phase === 'human');
     expect(host.state(id)?.phase).toBe('human');
@@ -686,7 +695,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
         { action: 'launch', headless: true, engine: 'chrome', webmcp: false },
         signal,
       );
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     expect(leaseId).not.toBe(oldLease);
     await expect(
@@ -720,7 +729,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     // Test setup grants control through Main; the ordinary page has no pre-arm UI.
     await act(async () => {
       await request({ action: 'grant', id });
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     transport = createDesktopBrowserTransport(
       { executable: '/trusted/mock', browserPath: '/unused' },
@@ -737,7 +746,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
         { action: 'launch', headless: true, engine: 'chrome', webmcp: false },
         signal,
       );
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
     await until(() => !!button('浏览器控制'));
     await readyMenu('close');
@@ -776,7 +785,7 @@ test('Native controls use Main and Service lease paths; native hit shield surviv
     expect(views.every((view) => view.webContents.destroyed)).toBe(true);
     owner.close();
     globalThis.fetch = originalFetch;
-    Bun.serve = originalServe;
+    serveFixture = originalServe;
     restore();
     dom.window.close();
   }

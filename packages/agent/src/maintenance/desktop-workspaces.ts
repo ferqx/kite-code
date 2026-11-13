@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Database } from '../runtime-sqlite';
 import { MaintenanceError } from './types';
 
 /** Closed DB8 caller metadata; restoration copies original identities and never executes them. */

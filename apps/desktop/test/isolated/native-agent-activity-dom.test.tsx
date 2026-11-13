@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import type { BackgroundExecutionItem, Message } from '@kite-ai/client';
 import { ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { nativeAgentActivityForTool } from '../../src/native-agent-activity';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { environmentDisplay, useNativeEnvironment } from '../../src/native-environment';

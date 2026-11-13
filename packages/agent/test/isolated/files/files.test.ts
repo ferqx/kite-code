@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   mkdirSync,
@@ -13,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import type { ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, type WorkspaceFiles } from '../../../src/files';
 

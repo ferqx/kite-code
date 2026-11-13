@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { assertContextSource, type ContextSource } from '../../../src/context';
 import {
   agentContractSource,

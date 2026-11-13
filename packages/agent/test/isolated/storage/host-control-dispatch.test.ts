@@ -1,9 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import type { PermissionControlRead } from '../../../src/extensions';
@@ -365,7 +366,7 @@ test('actual final authorization proof reaches SQL through trusted Store barrier
           card = (await runtime.listInteractions({ ...f.base, sessionId: 's', state: 'pending' }))
             .interactions[0];
           if (Date.now() > deadline) throw new Error('approval_fixture_timeout');
-          if (!card) await Bun.sleep(5);
+          if (!card) await sleepTimer(5);
         }
         await runtime.answerInteraction({
           ...f.base,

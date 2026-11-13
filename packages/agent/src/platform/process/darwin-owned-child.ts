@@ -1,6 +1,6 @@
-import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
 import { readSync } from 'node:fs';
 import { Readable } from 'node:stream';
+import { dlopen, ptr, toArrayBuffer } from '../../runtime-ffi';
 import {
   type OwnedProcessIdentity,
   observeOwnedProcessIdentity,

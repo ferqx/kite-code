@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -7,13 +7,20 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { buildNativeFilesFixture } from '../../../../../tests/fixtures/build-tool-environment';
+import { nodeRuntimeFlags } from '../../../src/platform/runtime-flags';
 import { privateDirectory } from '../../../src/platform/windows-path-security';
+import { defaultSqliteEngineAssets } from '../../../src/sqlite-engine';
 import { buildStorageAssets } from '../../../src/storage/worker/build-assets';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../fixtures/node-runtime';
 
 test('built sqlite entry opens with its bundled Worker and SQL asset', async () => {
   const output = realpathSync(mkdtempSync(join(tmpdir(), 'kite-store-build-')));
@@ -21,7 +28,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
   const dataRoot = join(profileRoot, 'data');
   privateDirectory(dataRoot);
   try {
-    const owner = resolve(import.meta.dir, '../../..');
+    const owner = resolve(import.meta.dirname, '../../..');
     const repository = resolve(owner, '../..');
     const manifest = JSON.parse(readFileSync(join(owner, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
@@ -45,7 +52,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
         process.platform === 'win32' ? 'junction' : 'dir',
       );
     }
-    const result = await Bun.build({
+    const result = await buildBundle({
       entrypoints: [
         fileURLToPath(new URL('../../../src/sqlite.ts', import.meta.url)),
         fileURLToPath(new URL('../../../src/profile.ts', import.meta.url)),
@@ -54,7 +61,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
         fileURLToPath(new URL('../../../src/artifacts.ts', import.meta.url)),
       ],
       outdir: output,
-      target: 'bun',
+      ...fixtureRuntimeBuild(output),
       packages: 'external',
     });
     expect(result.success).toBe(true);
@@ -66,6 +73,31 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
     expect(selected.databasePath).toBe(join(dataRoot, 'built', 'core.db'));
     expect((await import('node:fs')).existsSync(selected.coordinationPath)).toBe(false);
     await buildStorageAssets(output);
+    cpSync(defaultSqliteEngineAssets().root, join(output, 'storage/engine'), { recursive: true });
+    const preload = join(output, 'parent-only.mjs');
+    writeFileSync(
+      preload,
+      "import {isMainThread} from 'node:worker_threads'; if (!isMainThread) throw Error('ambient Worker preload');",
+    );
+    const cold = spawnProcess(
+      [
+        fixtureNodeExecutable(),
+        ...nodeRuntimeFlags,
+        '--input-type=module',
+        '--eval',
+        `import assert from 'node:assert/strict';
+const {openSqliteStore}=await import(${JSON.stringify(pathToFileURL(join(output, 'sqlite.js')).href)});
+const store=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'built'});
+try{assert.equal((await store.getMetadata()).formatMajor,1);}finally{await store.close();}`,
+      ],
+      {
+        cwd: output,
+        env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(preload).href}` },
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
+    );
+    expect(await cold.exited, await new Response(cold.stderr).text()).toBe(0);
     const runner = (await import(
       pathToFileURL(join(output, 'sqlite.js')).href
     )) as typeof import('../../../src/sqlite');
@@ -77,9 +109,11 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
       ).toEqual(['0001-baseline.sql', '0002-trajectory-facts.sql']);
       // A loaded Windows DLL remains mapped until process exit. Run the built file
       // capability in its own process so cleanup does not pretend it was unloaded.
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
-          process.execPath,
+          fixtureNodeExecutable(),
+          ...nodeRuntimeFlags,
+          '--input-type=module',
           '--eval',
           `import assert from 'node:assert/strict';
 const filesEntry=await import(${JSON.stringify(pathToFileURL(join(output, 'files.js')).href)});

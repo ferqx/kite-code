@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
@@ -9,6 +8,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 
 function deferred() {

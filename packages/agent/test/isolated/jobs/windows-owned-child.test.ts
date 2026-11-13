@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,
@@ -25,10 +26,10 @@ test('Windows original HANDLE/Job creation, stdio completion and unknown close c
     new URL('../../../src/platform/process/windows-owned-child.ts', import.meta.url),
   );
   const code = `
-import * as originalFFI from 'bun:ffi';
-import {mock} from 'bun:test';
+import * as originalFFI from '@kite-ai/agent/runtime-ffi';
+import {mock} from '#kite-test';
 import assert from 'node:assert/strict';
-assert.equal(typeof require('bun:ffi').dlopen,'function');
+assert.equal(typeof require('@kite-ai/agent/runtime-ffi').dlopen,'function');
 Object.defineProperty(process,'platform',{value:'win32'});
 Object.defineProperty(process,'arch',{value:'x64'});
 let error=0, next=1n, address=4096, loads=0, assigned=false, resumed=false;
@@ -91,7 +92,7 @@ const adv={
  ConvertSidToStringSidW(sid,out){bytes(out)[0]=BigInt(ptr(Buffer.from('S-1-5-21-1-2-3-4\\0','utf16le')));return true;},
  ConvertStringSecurityDescriptorToSecurityDescriptorW(text,version,out){assert.equal(bytes(text).toString('utf16le'),'O:S-1-5-21-1-2-3-4D:P(A;;FA;;;S-1-5-21-1-2-3-4)\\0');bytes(out)[0]=sd();return true;},
 };
-mock.module('bun:ffi',()=>({...originalFFI,ptr,toArrayBuffer(address,offset,length){return bytes(address).buffer.slice(bytes(address).byteOffset+offset,bytes(address).byteOffset+offset+length);},
+mock.module(${JSON.stringify(new URL('../../../src/runtime-ffi.ts', import.meta.url).href)},()=>({...originalFFI,ptr,toArrayBuffer(address,offset,length){return bytes(address).buffer.slice(bytes(address).byteOffset+offset,bytes(address).byteOffset+offset+length);},
  dlopen(name){loads++;assert.ok(['kernel32.dll','advapi32.dll'].includes(name));return{symbols:name==='kernel32.dll'?kernel:adv,close(){}};}}));
 const {startWindowsOwnedChild,retainWindowsOwnedProcessObservation,WindowsOwnedChildStartError}=await import(${JSON.stringify(module)});
 assert.equal(loads,0);
@@ -126,11 +127,15 @@ failAssign=true;const before=calls.filter(x=>x==='resume').length;
 let startError;try{startWindowsOwnedChild(input);}catch(error){startError=error;}assert.ok(startError instanceof WindowsOwnedChildStartError);assert.match(startError.cause.message,/assign/);await startError.cleanup;assert.equal(calls.filter(x=>x==='resume').length,before);assert.equal(handles.size,0);
 console.log('windows_owned_child_contract_passed');
 `;
-  const result = spawnSync(process.execPath, ['-e', code], {
-    encoding: 'utf8',
-    timeout: 5000,
-    env: { ...process.env, BUN_BE_BUN: undefined },
-  });
+  const result = spawnSync(
+    process.execPath,
+    [...testRuntimeFlags, '--input-type=module-typescript', '-e', code],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      env: { ...process.env, BUN_BE_BUN: undefined },
+    },
+  );
   expect(result.error).toBeUndefined();
   expect(result.status, result.stderr).toBe(0);
   expect(result.stderr).toBe('');
@@ -206,7 +211,8 @@ test.skipIf(process.platform !== 'win32')(
 test.skipIf(process.platform !== 'win32')(
   'Windows native original Job observes children and headless console hosts through full cleanup',
   async () => {
-    const script = `const c=Bun.spawn([process.execPath,'-e','await Bun.stdin.text()'],{stdin:'pipe',stdout:'ignore',stderr:'ignore',windowsHide:true});console.log(JSON.stringify({pid:c.pid}));await Bun.stdin.text();c.stdin.end();if(await c.exited!==0)process.exit(2);`;
+    const script = `import {spawn as spawnProcess} from ${JSON.stringify(new URL('../../../../../scripts/tooling/process.ts', import.meta.url).href)};
+const c=spawnProcess([process.execPath,'-e','for await (const _ of process.stdin) {}'],{stdin:'pipe',stdout:'ignore',stderr:'ignore',windowsHide:true});console.log(JSON.stringify({pid:c.pid}));for await (const _ of process.stdin) {}c.stdin.end();if(await c.exited!==0)process.exit(2);`;
     const child = startWindowsOwnedChild({
       executable: process.execPath,
       argv: ['-e', script],

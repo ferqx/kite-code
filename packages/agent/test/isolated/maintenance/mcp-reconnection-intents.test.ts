@@ -1,7 +1,7 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, linkSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { afterAll, beforeAll, expect, test } from '#kite-test';
 import {
   fixturePermissions,
   privateDirectory,

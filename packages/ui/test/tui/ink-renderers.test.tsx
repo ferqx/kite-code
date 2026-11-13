@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import ConcurrentSubAgentBlock from '../../src/tui/ink/ConcurrentSubAgentBlock';
 import MarkdownBlock, { updateMarkdownParseCache } from '../../src/tui/ink/MarkdownBlock';
 import { getToolPreview } from '../../src/tui/ink/render-utils';

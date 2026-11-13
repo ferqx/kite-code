@@ -10,6 +10,7 @@ export type NativeCredentialFactory = (
   service: string,
   account: string,
 ) => NativeCredentialEntry | Promise<NativeCredentialEntry>;
+type KeyringModule = typeof import('@napi-rs/keyring');
 /** Native dependency and entry creation are delayed until an explicit credential operation. */
 export function createOsCredentialBackend(options: {
   service: string;
@@ -22,7 +23,11 @@ export function createOsCredentialBackend(options: {
   const factory: NativeCredentialFactory =
     options.nativeFactory ??
     (async (service, account) => {
-      const { AsyncEntry } = await import('@napi-rs/keyring');
+      const keyring: KeyringModule & { default?: Pick<KeyringModule, 'AsyncEntry'> } = await import(
+        '@napi-rs/keyring'
+      );
+      const AsyncEntry = keyring.AsyncEntry ?? keyring.default?.AsyncEntry;
+      if (!AsyncEntry) throw new ConfigurationError('credential_unavailable');
       return new AsyncEntry(service, account);
     });
   const rawEntry = async (id: string) => {

@@ -903,7 +903,7 @@ export async function executeWorktreeRequest(request: WorktreeRequest): Promise<
     details: { ...details(), ...result },
   };
 }
-if (import.meta.main) {
+if (Reflect.get(import.meta, 'main') === true) {
   try {
     if (process.argv.length !== 3) throw new Error('worktree_protocol_error');
     const frame = await executeWorktreeRequest(decodeWorkerRequest(process.argv[2]!));

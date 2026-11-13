@@ -1,8 +1,9 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
@@ -575,7 +576,7 @@ test('active reuse of an automatic result retires the exact old approval before 
         })
       ).interactions[0];
       if (Date.now() > deadline) throw Error('explicit_reuse_approval_timeout');
-      if (!card) await Bun.sleep(5);
+      if (!card) await sleepTimer(5);
     }
     const receipt = (await f.store.getCommand('active-work'))!.receipt as { runId: string };
     const original = structuredClone(model.requests[0]!);

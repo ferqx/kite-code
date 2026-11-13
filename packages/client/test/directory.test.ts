@@ -1,4 +1,5 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { afterEach, expect, spyOn, test } from '#kite-test';
 import { createClient } from '../src';
 import { createBrowserClient } from '../src/browser';
 
@@ -140,9 +141,9 @@ for (const browser of [false, true])
     f.hold();
     const pending = f.client.listAllSessions();
     const result = failure(pending);
-    for (let i = 0; i < 20 && !f.queries.at(-1)?.includes('afterSeq'); i++) await Bun.sleep(1);
+    for (let i = 0; i < 20 && !f.queries.at(-1)?.includes('afterSeq'); i++) await fixtureDelay(1);
     // Wait until this invocation, rather than a previous query, has entered its held second page.
-    await Bun.sleep(5);
+    await fixtureDelay(5);
     f.client.disposeNetwork();
     f.release();
     expect(await result).not.toBeNull();

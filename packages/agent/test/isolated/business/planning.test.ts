@@ -1,11 +1,13 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { interactionAttachment } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
@@ -43,7 +45,7 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
     const found = await read();
     if (found !== null) return found;
     if (Date.now() > until) throw new Error('planning_test_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 type Script = (step: number, f: Awaited<ReturnType<typeof fixture>>) => Promise<ModelEvent[]>;
@@ -1565,9 +1567,7 @@ test('historical completed plan receipt retains original approval source while c
       return {
         ...actual,
         sources: decision.sources ?? [],
-        inputDigest: new Bun.CryptoHasher('sha256')
-          .update(JSON.stringify(actual.input))
-          .digest('hex'),
+        inputDigest: createHash('sha256').update(JSON.stringify(actual.input)).digest('hex'),
       };
     },
     getInteraction: (id: string) =>

@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { AgentRuntime } from '@kite-ai/agent';
 import type { MessageRecord } from '@kite-ai/agent/storage';
+import { expect, test } from '#kite-test';
 import { response_Message } from '../../../packages/client/src/generated/validators';
 import { messageResponses } from '../src/message-response';
 

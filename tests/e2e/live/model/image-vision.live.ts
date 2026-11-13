@@ -41,7 +41,7 @@ const deadline = AbortSignal.timeout(120000);
 const report: Record<string, unknown> = {
   date: new Date().toISOString(),
   platform: process.platform,
-  bunVersion: Bun.version,
+  nodeVersion: process.versions.node,
   requestLimit: 5,
   timeoutMs: 120000,
   imageCount,
@@ -149,29 +149,29 @@ try {
         (await vault.resolve(selected.credentialRef)))
       : undefined;
   const statuses: number[] = [];
-  const boundedFetch: typeof fetch = Object.assign(
-    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      if (statuses.length >= 5) throw Error('image_live_request_limit');
-      statuses.push(0);
-      const index = statuses.length - 1;
-      try {
-        const response = await fetch(input, {
-          ...init,
-          redirect: 'error',
-          signal: AbortSignal.any([
-            deadline,
-            AbortSignal.timeout(45000),
-            ...(init?.signal ? [init.signal] : []),
-          ]),
-        });
-        statuses[index] = response.status;
-        return response;
-      } catch {
-        throw Error('image_live_transport_failed');
-      }
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const boundedFetch: typeof fetch = async (
+    input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    if (statuses.length >= 5) throw Error('image_live_request_limit');
+    statuses.push(0);
+    const index = statuses.length - 1;
+    try {
+      const response = await fetch(input, {
+        ...init,
+        redirect: 'error',
+        signal: AbortSignal.any([
+          deadline,
+          AbortSignal.timeout(45000),
+          ...(init?.signal ? [init.signal] : []),
+        ]),
+      });
+      statuses[index] = response.status;
+      return response;
+    } catch {
+      throw Error('image_live_transport_failed');
+    }
+  };
   const sdk = createSdkModelAdapter({
     models: new Map([
       [

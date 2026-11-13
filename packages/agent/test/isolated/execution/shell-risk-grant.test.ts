@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import type {
@@ -246,7 +247,7 @@ async function fixture(
       while (Date.now() < deadline) {
         const card = (await interactions()).interactions[0];
         if (card) return card;
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       throw Error('expected_risk_grant_approval_card');
     },

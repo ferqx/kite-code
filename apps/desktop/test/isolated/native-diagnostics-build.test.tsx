@@ -1,14 +1,14 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { MessageChannel } from 'node:worker_threads';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
+import { expect, test } from '#kite-test';
 import { startDesktopRenderer } from '../../scripts/development-renderer';
 
-const root = resolve(import.meta.dir, '../../../..');
-const provider = resolve(import.meta.dir, '../../src/native-diagnostics.tsx');
+const root = resolve(import.meta.dirname, '../../../..');
+const provider = resolve(import.meta.dirname, '../../src/native-diagnostics.tsx');
 const sharedDiagnostics = resolve(root, 'packages/ui/src/desktop/diagnostics.tsx');
 const attempts = ['development', 'production', 'test'];
 

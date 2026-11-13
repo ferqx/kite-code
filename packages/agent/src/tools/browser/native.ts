@@ -24,6 +24,7 @@ import {
   LinuxOwnedProgramStartError,
   startLinuxOwnedProgram,
 } from '../../platform/process/linux-owned-program';
+import { nodeRuntimeFlags } from '../../platform/runtime-flags';
 import {
   type DarwinBrowserEvidence,
   type DarwinBrowserOwner,
@@ -42,7 +43,7 @@ export interface NativeBrowserTransportOptions {
   executable: string;
   browserPath: string;
   linux?: { bubblewrapPath: string; initExecutable: string };
-  darwin?: { guardianPath: string; bunExecutable: string };
+  darwin?: { guardianPath: string; runtimeExecutable: string };
   runtimeDirectory?: string;
   startupTimeoutMs?: number;
   requestTimeoutMs?: number;
@@ -168,11 +169,7 @@ function requireSandboxEligibleHost(): void {
 }
 /** Passive host preflight only; undefined is not evidence of successful native qualification. */
 export function nativeBrowserUnavailableReason(): string | undefined {
-  if (
-    !['linux', 'darwin'].includes(process.platform) ||
-    !['x64', 'arm64'].includes(process.arch) ||
-    !process.versions.bun
-  )
+  if (!['linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch))
     return 'browser_native_platform_unavailable';
   try {
     requireSandboxEligibleHost();
@@ -352,7 +349,7 @@ export function createNativeBrowserTransport(
     (!isAbsolute(guardianPath) || !guardianPath.endsWith('.js') || !statSync(guardianPath).isFile())
   )
     throw failure('browser_native_invalid_asset');
-  const bunExecutable = darwin ? executablePath(darwin.bunExecutable) : '';
+  const runtimeExecutable = darwin ? executablePath(darwin.runtimeExecutable) : '';
   const base = runtimeBase(options.runtimeDirectory);
   const directory = mkdtempSync(join(base, 'kite-ab-'));
   chmodSync(directory, 0o700);
@@ -398,13 +395,13 @@ export function createNativeBrowserTransport(
         !/^\/kite-native\/[a-f0-9-]{72}$/.test(endpoint.pathname)
       )
         throw failure('browser_attachment_invalid');
-      const providerSource = `const input=JSON.parse(await Bun.stdin.text());if(input.protocol!=='agent-browser.plugin.v1'||input.type!=='browser.launch'||input.capability!=='browser.provider'||input.request.provider!=='kite-native-page'||!process.env.KITE_PAGE_CDP_URL)process.exit(2);process.stdout.write(JSON.stringify({protocol:'agent-browser.plugin.v1',success:true,browser:{cdpUrl:process.env.KITE_PAGE_CDP_URL,directPage:true}}));`;
+      const providerSource = `const {readFileSync}=await import('node:fs');const input=JSON.parse(readFileSync(0,'utf8'));if(input.protocol!=='agent-browser.plugin.v1'||input.type!=='browser.launch'||input.capability!=='browser.provider'||input.request.provider!=='kite-native-page'||!process.env.KITE_PAGE_CDP_URL)process.exit(2);process.stdout.write(JSON.stringify({protocol:'agent-browser.plugin.v1',success:true,browser:{cdpUrl:process.env.KITE_PAGE_CDP_URL,directPage:true}}));`;
       env.AGENT_BROWSER_PROVIDER = 'kite-native-page';
       env.AGENT_BROWSER_PLUGINS = JSON.stringify([
         {
           name: 'kite-native-page',
-          command: darwin ? bunExecutable : process.execPath,
-          args: ['--eval', providerSource],
+          command: darwin ? runtimeExecutable : process.execPath,
+          args: [...nodeRuntimeFlags, '--input-type=module', '--eval', providerSource],
           capabilities: ['browser.provider'],
         },
       ]);
@@ -413,7 +410,7 @@ export function createNativeBrowserTransport(
     owner = darwin
       ? startDarwinBrowserOwner({
           guardianPath,
-          bunExecutable,
+          runtimeExecutable,
           executable,
           cwd: directory,
           env,

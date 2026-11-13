@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { saveStartupDiagnosticReport } from '../electron/startup-report';
 
 test('canceling the native save dialog does not write a diagnostic', async () => {

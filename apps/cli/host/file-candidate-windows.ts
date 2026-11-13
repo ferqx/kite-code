@@ -80,7 +80,8 @@ let native: ReturnType<typeof load> | undefined;
 function load() {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     fail('file_candidate_platform_unavailable');
-  const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
+  const { dlopen, ptr } =
+    require('@kite-ai/agent/runtime-ffi') as typeof import('@kite-ai/agent/runtime-ffi');
   const kernel = dlopen('kernel32.dll', {
     GetSystemDirectoryW: { args: ['ptr', 'u32'], returns: 'u32' },
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },

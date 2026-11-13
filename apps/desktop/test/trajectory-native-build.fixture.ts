@@ -6,12 +6,13 @@ import {
   type TrajectoryEvent,
   type TrajectorySnapshot,
 } from '@kite-ai/trajectory';
+import { build as buildFixture } from '../../../scripts/tooling/build';
 import { writeNativeTrajectoryBundle } from '../electron/trajectory-bundle';
 import { buildNativeDesktop } from '../scripts/build-native';
 
 // Explicit isolated artifact; ordinary clients receive no diagnostic controls or fixture inputs.
-const directory = mkdtempSync(resolve(import.meta.dir, '../../../.cache/trajectory-native-'));
-const service = resolve(import.meta.dir, '../../service/dist/main.js'),
+const directory = mkdtempSync(resolve(import.meta.dirname, '../../../.cache/trajectory-native-'));
+const service = resolve(import.meta.dirname, '../../service/dist/main.js'),
   runtime = realpathSync(process.execPath);
 const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const profile = { dataRoot: join(directory, 'unopened-profile'), profile: 'cold' };
@@ -88,8 +89,8 @@ await buildNativeDesktop(
     kind: 'development',
     serviceEntrypoint: service,
     serviceSha256: hash(service),
-    bunExecutable: runtime,
-    bunSha256: hash(runtime),
+    runtimeExecutable: runtime,
+    runtimeSha256: hash(runtime),
     buildId: 'trajectory-native-fixture',
     apiMajor: 1,
     requiredCapabilities: ['trajectory'],
@@ -98,8 +99,8 @@ await buildNativeDesktop(
   outdir,
 );
 mkdirSync(join(directory, 'driver'), { mode: 0o700 });
-const result = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'trajectory-native.fixture.ts')],
+const result = await buildFixture({
+  entrypoints: [resolve(import.meta.dirname, 'trajectory-native.fixture.ts')],
   target: 'node',
   packages: 'external',
   outdir: join(directory, 'driver'),

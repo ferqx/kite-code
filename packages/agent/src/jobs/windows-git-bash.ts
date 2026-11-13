@@ -9,6 +9,8 @@ import {
 } from 'node:fs';
 import { constants, copyFile, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { findHostExecutable } from '../platform/executable';
 import { acquireFileLock, type FileLock, LockBusyError } from '../platform/locks';
 import { privateDirectory } from '../platform/windows-path-security';
 import {
@@ -173,7 +175,7 @@ export class WindowsGitBashUnavailable extends Error {
 export async function stageWindowsGitBash(stateRoot: string, compatibility: string) {
   if (process.platform !== 'win32' || process.arch !== 'x64' || !isAbsolute(stateRoot))
     throw Error('windows_shell_unqualified');
-  const git = Bun.which('git');
+  const git = findHostExecutable('git.exe');
   if (!git) throw new WindowsGitBashUnavailable();
   const gitExecutable = realpathSync.native(git);
   const gitParent = dirname(gitExecutable);
@@ -291,7 +293,7 @@ export async function stageWindowsGitBash(stateRoot: string, compatibility: stri
       break;
     } catch (error) {
       if (!(error instanceof LockBusyError) || performance.now() >= deadline) throw error;
-      await Bun.sleep(10);
+      await sleep(10);
     }
   }
   try {

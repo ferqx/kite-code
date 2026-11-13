@@ -22,7 +22,8 @@ const options = {
   uninstall: ['prefix'],
 } as const;
 const help = `Terminal candidate tooling (native platform only)
-  build --directory <new-directory> [--sqlite-library <reviewed-macOS-library>]
+  build --directory <new-directory> [--node-distribution <pinned Node archive>]
+        [--sqlite-library <reviewed SQLite library>]
   pack --directory <bundle> --archive <new-archive>
   unpack --archive <archive> --sha256 <expected-sha256> --directory <new-directory>
   verify --directory <bundle>
@@ -45,7 +46,8 @@ export async function runTerminalRelease(args: string[]): Promise<unknown> {
       value = args[index + 1];
     if (
       !flag.startsWith('--') ||
-      (!required.includes(key) && !(command === 'build' && key === 'sqlite-library')) ||
+      (!required.includes(key) &&
+        !(command === 'build' && ['node-distribution', 'sqlite-library'].includes(key))) ||
       values.has(key) ||
       !value ||
       value.startsWith('--')
@@ -59,6 +61,9 @@ export async function runTerminalRelease(args: string[]): Promise<unknown> {
     case 'build': {
       const bundle = await buildTerminalBundle({
         destination: value('directory'),
+        ...(values.has('node-distribution')
+          ? { nodeDistribution: value('node-distribution') }
+          : {}),
         ...(values.has('sqlite-library') ? { sqliteLibrary: value('sqlite-library') } : {}),
       });
       return { root: bundle.root, candidateId: bundle.candidateId };

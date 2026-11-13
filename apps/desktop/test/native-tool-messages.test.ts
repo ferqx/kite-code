@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { nativeLiveShellInputFact, nativeToolMessageFact } from '../electron/tool-message-fact';
 import { NativeToolMessages } from '../electron/tool-messages';
@@ -1956,7 +1957,7 @@ test('context forecasts reject changed selections, departed reads, foreign recei
     },
   });
   const pending = read();
-  while (!release) await Bun.sleep(1);
+  while (!release) await fixtureDelay(1);
   f.manager.release();
   release();
   await expect(pending).rejects.toMatchObject({ code: 'native_selection_changed' });

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type AgentClient,
   type BackgroundExecutionItem,
@@ -7,6 +6,7 @@ import {
   type Execution,
   type SelectedContextPage,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeContext } from '../electron/context';
 import { decodeNativeRequest } from '../electron/native-ipc';
 

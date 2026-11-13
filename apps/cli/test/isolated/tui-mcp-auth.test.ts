@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient, Command, QueryResponse } from '@kite-ai/client';
 import type {
   TuiCallerIntent,
@@ -7,6 +6,7 @@ import type {
   TuiMcpSourceApprovalPort,
   TuiMcpSourceSnapshot,
 } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { callerDigest, callerRequestDigest, parseCallerIntent } from '../../host/caller-intents';
 import { mcpSha } from '../../host/mcp-selection-intents';
 import {

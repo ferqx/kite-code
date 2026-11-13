@@ -1,12 +1,14 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { TrajectoryEvent, TrajectoryScope } from '@kite-ai/trajectory';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
+import { Database } from '../../../src/runtime-sqlite';
 import { openSqliteStore } from '../../../src/sqlite';
 import { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import type { Json, OwnerRef } from '../../../src/storage/types';
@@ -1434,9 +1436,10 @@ for (const mode of ['committed', 'dispatching'] as const)
   test(`SIGKILL after original ${mode} commit survives readonly reopen before delivery and preserves recovery history`, async () => {
     const dataRoot = temporaryDirectory('kite-trajectory-crash-');
     chmodSync(dataRoot, 0o700);
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./trajectory-flow-writer-fixture.ts', import.meta.url)),
         dataRoot,
         mode,

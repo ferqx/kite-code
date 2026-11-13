@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import { crashReportOptions } from './job-report-crash-child';
@@ -40,9 +42,10 @@ async function line(stream: ReadableStream<Uint8Array>) {
 test('owned SIGKILL after accepted report preserves cold reads and explicit report resume without child replay', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-job-report-crash-'))),
     ledger = join(root, 'outside-profile-model-ledger.jsonl');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./job-report-crash-child.ts', import.meta.url)),
       root,
       ledger,

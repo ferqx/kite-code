@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { spawn as spawnProcess } from '../tooling/process';
 import type { MacosTerminalSigning } from './macos-dmg/terminal-signing';
 import {
   assertReleaseSource,
@@ -11,9 +12,9 @@ import {
   validateReleaseSourceArguments,
 } from './release-arguments';
 
-const repositoryRoot = resolve(import.meta.dir, '../..');
+const repositoryRoot = resolve(import.meta.dirname, '../..');
 const options = {
-  build: ['directory', 'terminal', 'electron', 'desktop-only'],
+  build: ['directory', 'terminal', 'electron', 'desktop-only', 'node-distribution'],
   pack: ['directory', 'archive'],
   unpack: ['archive', 'sha256', 'directory'],
   verify: ['directory', 'source-commit', 'clean-source'],
@@ -26,7 +27,8 @@ const options = {
   'unregister-cli': ['prefix'],
 } as const;
 const help = `Native candidate tooling (native platform only)
-  build [--directory <new-directory>] [--terminal <verified-terminal>] [--electron <installed-dist>] [--desktop-only true]
+  build [--directory <new-directory>] [--terminal <verified-terminal>] [--electron <installed-dist>]
+        [--desktop-only true] [--node-distribution <pinned Node archive for desktop builds>]
   pack [--directory <candidate>] --archive <new-archive>
   unpack --archive <archive> --sha256 <SHA256> --directory <new-directory>
   verify|smoke|launch [--directory <candidate>]
@@ -37,7 +39,7 @@ const help = `Native candidate tooling (native platform only)
 Default output: dist/unified-native. macOS arm64 and Windows x64 build the desktop runtime by default.
 Use --terminal to embed a complete Terminal. Other targets retain dist/unified-terminal as the default input.
 The default Electron input is the installed Electron dist.
-Archive compression: .tar.zst for Zstandard or .tar.gz for gzip.
+Archive compression: .tar.zst for Zstandard or .tar.gz for gzip. For the macOS Node installer, use .zip.
 Verify additionally accepts --source-commit <40-hex-commit> and --clean-source true.
 Checksums establish integrity, not publisher authenticity. Installation preserves profile data.
 `;
@@ -72,12 +74,12 @@ export async function runNativeRelease(
       const macosArm64 = process.platform === 'darwin' && process.arch === 'arm64';
       const windowsX64 = process.platform === 'win32' && process.arch === 'x64';
       const desktopSupported = macosArm64 || windowsX64;
+      const desktop = desktopSupported && values.terminal === undefined;
       if (
-        values['desktop-only'] !== undefined &&
-        (values['desktop-only'] !== 'true' || !desktopSupported || values.terminal !== undefined)
+        (values['desktop-only'] !== undefined && (values['desktop-only'] !== 'true' || !desktop)) ||
+        (values['node-distribution'] !== undefined && !desktop)
       )
         throw Error('native_desktop_release_arguments_invalid');
-      const desktop = desktopSupported && values.terminal === undefined;
       const { buildNativeCandidate } = await import('../../apps/desktop/scripts/build-native');
       const electron =
         values.electron ??
@@ -118,6 +120,9 @@ export async function runNativeRelease(
             destination: join(work, 'runtime'),
             repositoryRoot: root,
             desktopOnly: true,
+            ...(values['node-distribution']
+              ? { nodeDistribution: resolve(values['node-distribution']) }
+              : {}),
             ...(buildOptions.macosTerminalSigning
               ? { macosSigning: buildOptions.macosTerminalSigning }
               : {}),
@@ -139,6 +144,9 @@ export async function runNativeRelease(
       const terminal = await buildTerminalBundle({
         destination: join(work, 'runtime'),
         desktopOnly: true,
+        ...(values['node-distribution']
+          ? { nodeDistribution: resolve(values['node-distribution']) }
+          : {}),
       });
       const result = await build(terminal.root);
       const security = defaultWindowsPathSecurity()!;
@@ -168,7 +176,7 @@ export async function runNativeRelease(
           leases.push(acquireArtifactAccess({ root: selected, mode: 'shared' }));
         const bundle = verifyNativeRuntimeBundle(directory);
         home = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-smoke-')));
-        const child = Bun.spawn(
+        const child = spawnProcess(
           [join(bundle.root, bundle.manifest.entries.electron), '--version'],
           {
             env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
@@ -241,7 +249,7 @@ export async function runNativeRelease(
         const env = { ...process.env };
         for (const key of ['NODE_PATH', 'NODE_OPTIONS', 'BUN_OPTIONS', 'ELECTRON_RUN_AS_NODE'])
           delete env[key];
-        const child = Bun.spawn(
+        const child = spawnProcess(
           [join(bundle.root, bundle.manifest.entries.electron), join(bundle.root, 'app')],
           { env, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' },
         );

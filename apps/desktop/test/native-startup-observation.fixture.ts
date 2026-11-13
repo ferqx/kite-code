@@ -118,54 +118,54 @@ childProcess.spawn = function (this: unknown, ...args: Parameters<typeof origina
 } as typeof originalSpawn;
 
 const originalFetch = globalThis.fetch;
-globalThis.fetch = Object.assign(
-  function (this: unknown, ...args: Parameters<typeof originalFetch>) {
-    const [input, init] = args;
-    let phase: string | undefined;
-    try {
-      const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
-      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
-      if (method === 'GET')
-        phase =
-          path === '/v1/server'
-            ? 'admission'
-            : path === '/v1/workspace-directory'
-              ? 'workspaces'
-              : path === '/v1/session-directory'
-                ? 'sessions'
-                : path === '/v1/events'
-                  ? 'observation'
-                  : undefined;
-    } catch {
-      // Only classify known GETs; fetch retains validation and the original result.
-    }
-    const current = ++sequence,
-      start = performance.now();
-    if (phase) record(phase, 'begin', { sequence: current });
-    const pending = originalFetch.apply(this, args);
-    if (phase) {
-      const observed = phase;
-      void pending
-        .then(
-          (response) =>
-            record(observed, 'headers', {
-              sequence: current,
-              durationMs: performance.now() - start,
-              status: response.status,
-            }),
-          (error: unknown) =>
-            record(observed, 'error', {
-              sequence: current,
-              durationMs: performance.now() - start,
-              code:
-                error instanceof Error && error.name === 'AbortError'
-                  ? 'aborted'
-                  : 'transport_failure',
-            }),
-        )
-        .catch(() => {});
-    }
-    return pending;
-  },
-  { preconnect: originalFetch.preconnect },
-);
+globalThis.fetch = Object.assign(function (
+  this: unknown,
+  ...args: Parameters<typeof originalFetch>
+) {
+  const [input, init] = args;
+  let phase: string | undefined;
+  try {
+    const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+    const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+    if (method === 'GET')
+      phase =
+        path === '/v1/server'
+          ? 'admission'
+          : path === '/v1/workspace-directory'
+            ? 'workspaces'
+            : path === '/v1/session-directory'
+              ? 'sessions'
+              : path === '/v1/events'
+                ? 'observation'
+                : undefined;
+  } catch {
+    // Only classify known GETs; fetch retains validation and the original result.
+  }
+  const current = ++sequence,
+    start = performance.now();
+  if (phase) record(phase, 'begin', { sequence: current });
+  const pending = originalFetch.apply(this, args);
+  if (phase) {
+    const observed = phase;
+    void pending
+      .then(
+        (response) =>
+          record(observed, 'headers', {
+            sequence: current,
+            durationMs: performance.now() - start,
+            status: response.status,
+          }),
+        (error: unknown) =>
+          record(observed, 'error', {
+            sequence: current,
+            durationMs: performance.now() - start,
+            code:
+              error instanceof Error && error.name === 'AbortError'
+                ? 'aborted'
+                : 'transport_failure',
+          }),
+      )
+      .catch(() => {});
+  }
+  return pending;
+}, {});

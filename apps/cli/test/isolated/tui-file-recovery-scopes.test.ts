@@ -1,13 +1,13 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { compileFileRecoveryTUI, fileRecoveryProfile } from '../fixtures/file-recovery-profile';
 import { runFileRecoveryPTY } from '../fixtures/file-recovery-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 for (const scope of ['session', 'code'] as const)
   test(`compiled actual TUI ${scope}-only preserves the other recovery scope`, async () => {
     const f = await fileRecoveryProfile();
@@ -15,7 +15,7 @@ for (const scope of ['session', 'code'] as const)
       const runner = join(f.root, 'tui.ts');
       writeFileSync(
         runner,
-        `import {appendFileSync,writeFileSync} from 'node:fs';const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const opts=args[1];appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({method:opts?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');const start=Date.now();try{const response=await actual(...args);appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({done:true,status:response.status,path:new URL(String(args[0])).pathname,ms:Date.now()-start})+'\\n');return response;}catch(error){appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({failed:String(error),path:new URL(String(args[0])).pathname})+'\\n');throw error;}},{preconnect:actual.preconnect});import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'service.pid'))},String(pid),{mode:0o600})});`,
+        `import {appendFileSync,writeFileSync} from 'node:fs';const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const opts=args[1];appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({method:opts?.method??'GET',path:new URL(String(args[0])).pathname})+'\\n');const start=Date.now();try{const response=await actual(...args);appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({done:true,status:response.status,path:new URL(String(args[0])).pathname,ms:Date.now()-start})+'\\n');return response;}catch(error){appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({failed:String(error),path:new URL(String(args[0])).pathname})+'\\n');throw error;}});import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(join(f.root, 'service.pid'))},String(pid),{mode:0o600})});`,
       );
       expect((await compileFileRecoveryTUI(f.root, runner)).success).toBe(true);
       const transcript = join(tmpdir(), `kite-file-recovery-scopes-${randomUUID()}.pty.log`);

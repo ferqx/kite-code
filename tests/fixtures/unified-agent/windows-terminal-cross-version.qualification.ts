@@ -6,7 +6,10 @@ import { isAbsolute, join, win32 } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
-import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
+import {
+  verifyTerminalRuntimeBundle,
+  windowsTerminalRuntimeArguments,
+} from '@kite-ai/service/runtime-assets';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import {
   startWindowsOwnedChild,
@@ -22,6 +25,7 @@ import {
   rollbackTerminalBundle,
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const samePath = (a: string, b: string) =>
@@ -93,6 +97,7 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
   const current = verifyTerminalRuntimeBundle(currentInput),
     previous = verifyTerminalRuntimeBundle(previousInput);
   assert.equal(previous.manifest.source.commit, input.predecessorCommit);
+  const separatePrefixes = !previous.manifest.nodeVersion && !!current.manifest.nodeVersion;
   assert.equal(previous.manifest.source.dirty, false);
   assert.equal(current.manifest.source.dirty, false);
   assert(/^[a-f0-9]{40}$/.test(current.manifest.source.commit));
@@ -123,8 +128,10 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
     profile: 'default',
   });
   privateDirectory(profile.profilePath);
-  const cli = join(prefix, 'bin', 'kite.exe'),
-    sessionId = 'windows-terminal-real-code';
+  const currentPrefix = separatePrefixes ? join(root, 'installed-node') : prefix;
+  const cliA = join(prefix, 'bin', 'kite.exe');
+  const cliB = join(currentPrefix, 'bin', 'kite.exe');
+  const sessionId = 'windows-terminal-real-code';
   const tasks = [
     'Windows original A task',
     'Windows current B continuation',
@@ -329,7 +336,7 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
       : Array.isArray(value)
         ? value.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('')
         : '';
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -436,9 +443,10 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
         phase,
         runtime,
         [
-          '--no-env-file',
-          `--config=${join(win32.dirname(runtime), 'windows-bunfig.toml')}`,
-          `--tsconfig-override=${join(win32.dirname(runtime), 'windows-tsconfig.json')}`,
+          ...windowsTerminalRuntimeArguments(
+            releaseRoot,
+            candidate.manifest.nodeVersion ? 'node' : 'bun',
+          ),
           reader,
           releaseRoot,
           profile.dataRoot,
@@ -562,7 +570,7 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
       commandIds.push(parsed.commandId);
       executionIds.push(answer.executionId);
     };
-    const runA = await begin('original_A_held_task', cli, argv(0));
+    const runA = await begin('original_A_held_task', cliA, argv(0));
     let admissionTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
@@ -609,9 +617,18 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
       assert.equal(member.inspect(), 'alive');
     leases([installedA.releaseRoot], true);
     assert.throws(() => uninstallTerminalBundle(prefix), /busy|in.use/i);
-    const installedB = installTerminalBundle({ bundleRoot: b.root, prefix });
-    assert.equal(installedB.previousCandidateId, a.candidateId);
-    assert.equal(readFileSync(join(prefix, 'active'), 'utf8').split('\n')[0], b.candidateId);
+    const selectionA = readFileSync(join(prefix, 'active'));
+    if (separatePrefixes) {
+      assert.throws(
+        () => installTerminalBundle({ bundleRoot: b.root, prefix }),
+        /terminal_windows_node_bootstrap_requires_new_prefix/u,
+      );
+      assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
+    }
+    const installedB = installTerminalBundle({ bundleRoot: b.root, prefix: currentPrefix });
+    assert.equal(installedB.previousCandidateId, separatePrefixes ? null : a.candidateId);
+    assert.equal(readFileSync(join(currentPrefix, 'active'), 'utf8').split('\n')[0], b.candidateId);
+    if (separatePrefixes) assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
     for (const member of [...cliMembers, ...services]) assert.equal(member.inspect(), 'alive');
     leases([installedA.releaseRoot], true);
     leases([installedB.releaseRoot], false);
@@ -630,7 +647,7 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
     snapshots.push(await read('B_cold_original_A', installedB.releaseRoot, b));
     const cold = async (phase: string, releaseRoot: string, candidate: typeof a) => {
       const before = await read(`${phase}_before`, releaseRoot, candidate);
-      const result = await execute(phase, cli, [
+      const result = await execute(phase, candidate === a ? cliA : cliB, [
         'context',
         'read',
         sessionId,
@@ -655,17 +672,20 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
       return after;
     };
     await cold('B_formal_cold_before_new_task', installedB.releaseRoot, b);
-    accept(1, (await execute('B_actual_continuation', cli, argv(1))).stdout);
+    accept(1, (await execute('B_actual_continuation', cliB, argv(1))).stdout);
     snapshots.push(await read('B_complete_history', installedB.releaseRoot, b));
-    const beforeRollback = readFileSync(profile.databasePath),
-      rollback = rollbackTerminalBundle(prefix);
-    assert.equal(rollback.candidateId, a.candidateId);
-    assert.equal(rollback.previousCandidateId, b.candidateId);
+    const beforeRollback = readFileSync(profile.databasePath);
+    if (separatePrefixes) assert.deepEqual(readFileSync(join(prefix, 'active')), selectionA);
+    else {
+      const rollback = rollbackTerminalBundle(prefix);
+      assert.equal(rollback.candidateId, a.candidateId);
+      assert.equal(rollback.previousCandidateId, b.candidateId);
+    }
     assert.deepEqual(readFileSync(profile.databasePath), beforeRollback);
     await cold('rollback_A_formal_cold_B_full_body', installedA.releaseRoot, a);
-    accept(2, (await execute('rollback_A_actual_continuation', cli, argv(2))).stdout);
+    accept(2, (await execute('rollback_A_actual_continuation', cliA, argv(2))).stdout);
     snapshots.push(await read('rollback_A_complete_history', installedA.releaseRoot, a));
-    assert.equal(rollbackTerminalBundle(prefix).candidateId, b.candidateId);
+    if (!separatePrefixes) assert.equal(rollbackTerminalBundle(prefix).candidateId, b.candidateId);
     const final = await cold('final_B_formal_cold_all_history', installedB.releaseRoot, b);
     assert.equal(requestFacts.length, 3);
     assert.equal(new Set(final.runs.map((run) => run.id)).size, 3);
@@ -673,15 +693,18 @@ export async function qualifyWindowsTerminalCrossVersion(input: {
     const database = readFileSync(profile.databasePath);
     assert.deepEqual(readFileSync(configPath), configBytes);
     assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
-    uninstallTerminalBundle(prefix);
-    assert(!existsSync(prefix));
-    assert.deepEqual(readFileSync(profile.databasePath), database);
-    assert.deepEqual(readFileSync(configPath), configBytes);
-    assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
+    for (const installed of new Set([currentPrefix, prefix])) {
+      uninstallTerminalBundle(installed);
+      assert(!existsSync(installed));
+      assert.deepEqual(readFileSync(profile.databasePath), database);
+      assert.deepEqual(readFileSync(configPath), configBytes);
+      assert.deepEqual(readFileSync(userConfiguration.path), configBytes);
+    }
     assert.equal(verifyTerminalRuntimeBundle(currentInput).digest, current.digest);
     assert.equal(verifyTerminalRuntimeBundle(previousInput).digest, previous.digest);
     const evidence = {
       crossCodeQualified: true,
+      separatePrefixes,
       localUnpublishedComparison: true,
       previousSource: previous.manifest.source,
       currentSource: current.manifest.source,

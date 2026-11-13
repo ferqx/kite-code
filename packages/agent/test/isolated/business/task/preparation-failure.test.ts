@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { ConfigurationPreparationCleanupError, createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';

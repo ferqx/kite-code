@@ -4,14 +4,17 @@ import { join, resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 // Explicit standalone fixture; never imported by development or production frontdoors.
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 const cache = join(repository, '.cache');
 mkdirSync(cache, { recursive: true });
 const root = mkdtempSync(join(cache, 'attachment-browser-'));
-const preload = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, '../electron/preload.ts')],
+const preload = await buildFixture({
+  entrypoints: [resolve(import.meta.dirname, '../electron/preload.ts')],
   outdir: root,
   target: 'node',
   format: 'cjs',
@@ -20,7 +23,7 @@ const preload = await Bun.build({
 });
 if (!preload.success) throw new AggregateError(preload.logs, 'fixture_preload_build_failed');
 await build({
-  root: resolve(import.meta.dir, '..'),
+  root: resolve(import.meta.dirname, '..'),
   configFile: false,
   envFile: false,
   plugins: [react(), tailwindcss()],
@@ -34,18 +37,18 @@ await build({
     outDir: join(root, 'dist'),
     emptyOutDir: false,
     lib: {
-      entry: join(import.meta.dir, 'input-attachments-browser.fixture.tsx'),
+      entry: join(import.meta.dirname, 'input-attachments-browser.fixture.tsx'),
       formats: ['es'],
       fileName: 'fixture',
       cssFileName: 'fixture',
     },
   },
 });
-await Bun.write(
+await writeFixtureFile(
   join(root, 'dist/index.html'),
   '<html><head><title>Attachment regression fixture</title><link rel="stylesheet" href="./fixture.css"></head><body style="margin:0"><div id="root"></div><script type="module" src="./fixture.js"></script></body></html>',
 );
-await Bun.write(
+await writeFixtureFile(
   join(root, 'main.cjs'),
   `const {app,BrowserWindow}=require('electron');
 app.whenReady().then(()=>{
@@ -59,7 +62,7 @@ const require = createRequire(import.meta.url);
 const env = { ...process.env };
 for (const name of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH', 'BUN_OPTIONS'])
   delete env[name];
-const child = Bun.spawn(
+const child = spawnFixtureProcess(
   [require('electron'), join(root, 'main.cjs'), `--user-data-dir=${join(root, 'electron-data')}`],
   { env, cwd: repository, stdout: 'inherit', stderr: 'inherit' },
 );

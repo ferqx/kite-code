@@ -1,8 +1,11 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -12,21 +15,22 @@ async function until(check: () => Promise<boolean>) {
   const deadline = Date.now() + 8000;
   while (!(await check())) {
     if (Date.now() > deadline) throw new Error('repeated_resume_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 test('two genuine SIGKILLs during automatic compression retain original Run and effects and retry a fresh summary', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-repeated-resume-')));
-  const processes: ReturnType<typeof Bun.spawn>[] = [];
+  const processes: ReturnType<typeof spawnProcess>[] = [];
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const mode = 'compression_running';
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   let runtime: ReturnType<typeof createRuntime> | undefined;
   try {
     for (const phase of ['', '2']) {
-      const child = Bun.spawn(
+      const child = spawnProcess(
         [
           process.execPath,
+          ...testRuntimeFlags,
           fileURLToPath(new URL('./run-resume-crash-child.ts', import.meta.url)),
           directory,
           mode,

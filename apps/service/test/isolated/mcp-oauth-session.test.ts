@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createConnection, type Socket } from 'node:net';
@@ -7,6 +6,8 @@ import {
   createCredentialVault,
   createTemporaryCredentialBackend,
 } from '@kite-ai/agent/config';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { createMcpOAuthBrowser } from '../../src/mcp-oauth-browser';
 import { decodeMcpOAuthLauncherObservation } from '../../src/mcp-oauth-launcher-evidence';
 import { createMcpOAuthSession, type McpOAuthSessionOptions } from '../../src/mcp-oauth-session';
@@ -162,7 +163,7 @@ function sessionOptions(
       callback.searchParams.set('code', 'owned-code');
       if (ownedLauncher) {
         const browser = createMcpOAuthBrowser((_argv, spawnOptions) =>
-          Bun.spawn(
+          spawnProcess(
             [
               process.execPath,
               '-e',
@@ -307,14 +308,14 @@ test('actual SDK DCR/PKCE accepts only exact callback; cold vault resumes and pr
     // A real launcher remains alive after the callback publishes tokens. A failed
     // cleanup signal must not be swallowed as an ordinary browser error.
     const cleanup = sessionOptions(f);
-    let ownedChild: ReturnType<typeof Bun.spawn> | undefined;
+    let ownedChild: ReturnType<typeof spawnProcess> | undefined;
     cleanup.options.openBrowser = async (url, signal, observe) => {
       const redirect = new URL(url.searchParams.get('redirect_uri')!);
       f.challenge(url.searchParams.get('code_challenge')!);
       redirect.searchParams.set('state', url.searchParams.get('state')!);
       redirect.searchParams.set('code', 'owned-code');
       const browser = createMcpOAuthBrowser((_argv, options) => {
-        const child = Bun.spawn(
+        const child = spawnProcess(
           [
             process.execPath,
             '-e',

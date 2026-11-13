@@ -79,7 +79,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 准确 `builtin.browser@1` 的 `browser.close`／`browser.request_human` Tool 只关闭或交还既有准确目标，`browser.human_wait` Job只编排原请求的有限结果收据，三者分类为没有新增外部效果，缩权不再叠加Auto审核。原已选能力、hardAllowed、Session／页面generation和原请求来源检查保持，legacy也不能借缩权操作控制其他页面。真正的人工Continue／resume恢复控制和后续网页业务操作仍独立鉴权；该分类不适用于同名外部定义、其他版本或普通process操作。
 
-启动、配置准备和 `browser.view` Query 不启动或安装浏览器。默认只定位固定版本包内程序与系统标准位置的 Chrome／Chromium；旧后端的 Linux 边界要求原生 init 与 bubblewrap，macOS 要求 stdio guardian 与固定 Bun，使用独立 Browser launchd coalition。共用被动宿主检查继续拒绝会使上游关闭 Chrome sandbox 的 root／container／CI 环境及不可核实的系统信息。后端不可用时不默认选择依赖它的工具；已显式选择仍由实际 host capability 给出准确原因，不能使整个 Service 启动失败。统一解释器的 `executionAvailable` 另核 macOS、同包已构建 worker 和 guardian；缺资产或平台不支持时，已选统一入口准确 `browser_executor_unavailable`，不自动改选原子工具，内置技能的依赖也不可用。源码宿主定位已构建 worker，不能把未构建 TypeScript 文件当成已具备解释器。
+启动、配置准备和 `browser.view` Query 不启动或安装浏览器。默认只定位固定版本包内程序与系统标准位置的 Chrome／Chromium；Linux 边界要求原生 init 与 bubblewrap，macOS 要求 stdio guardian 与 Service 所选 Node，使用独立 Browser launchd coalition。共用被动宿主检查继续拒绝会使上游关闭 Chrome sandbox 的 root／container／CI 环境及不可核实的系统信息。后端不可用时不默认选择依赖它的工具；已显式选择仍由实际 host capability 给出准确原因，不能使整个 Service 启动失败。统一解释器的 `executionAvailable` 另核 macOS、同包已构建 worker 和 guardian；缺资产或平台不支持时，已选统一入口准确 `browser_executor_unavailable`，不自动改选原子工具，内置技能的依赖也不可用。源码宿主定位已构建 worker，不能把未构建 TypeScript 文件当成已具备解释器。
 
 一个 Service 共享原 controller；普通页面与自动化 daemon 仍由 `browser.session` Job、取消和 Runtime 关闭管理，不随客户端面板卸载销毁。统一代码环境另由 `browser.code_session` Job 及原绑定 disposer 收束，退出时沿原controller关闭自己持有的自动化，不销毁用户已有普通页面；它要求所属 Runtime 的总 process 容量至少为2，活跃代码环境以 `floor(totalProcess / 2)` 张票据准入，超出时沿可取消队列等待，为同一环境的解释器与页面 Job 留出容量。票据不借用或释放 Core 的真实 process permit；实际 Job 仍独立申请原资源，代码环境只有确认关闭才归还票据，网页 Job 的原业务 unknown 不因此改写。全局 Extension Query／Action 直接使用现有入口供 Native 面板观察与控制，不新增 SQL、Core 循环或 HTTP 协议。程序资产与私有目录继续进入原 Files 保护集合，普通 Shell 不再自动追加这些路径；Browser 自身不读取用户日常 Profile／Cookie。底层执行、隔离、动作来源、图像及资源证明归 [Agent Browser](../../packages/agent/src/tools/browser/README.md)。
 
@@ -236,7 +236,7 @@ Cookie 建立、续期、删除及 gateway close 只改变本浏览器的访问�
 
 诊断 GET 开放 `/browser/v1/sessions/{id}/context`、`/browser/v1/sessions/{id}/executions/{executionId}/output`、`/browser/v1/sessions/{id}/model-inputs` 与 `/browser/v1/sessions/{id}/executions/{executionId}/model-input`。Context query 不接收 Store，绑定原准入后核对准确 Session/selection；output 先核原 Execution 属于该 Session，再按固定高水位分页，发布前复核原 Service 身份。Model input 目录与完整正文使用上文的原请求读取边界，不是当前 Context 或完整 Runtime logs。纯读取不消费结果、重放 Job 或启动 Model。诊断响应可包含其实际允许的正文，有限 view 的省略字段不限制这些具名端口。页面 CSP 禁止动态代码生成，Client 校验规则由唯一 HTTP schema 在构建时静态生成。
 
-`startService` 在 `127.0.0.1` 随机端口监听，返回包含 endpoint、token 和 Service/profile/API 身份的私有 bootstrap。Native 调用者在 Authorization header 传 token，Host 与 Origin 分别核对。写入要求原 `expectedStoreId` 与稳定 `commandId`，主体身份由宿主提供。请求限制在本地生效，HTTP/SSE 取消不取消已接纳工作。
+`startService` 通过 [Node loopback listener](src/loopback-server.ts) 在 `127.0.0.1` 随机端口监听，返回包含 endpoint、token 和 Service/profile/API 身份的私有 bootstrap。Native 调用者在 Authorization header 传 token，Host 与 Origin 分别核对。写入要求原 `expectedStoreId` 与稳定 `commandId`，主体身份由宿主提供。HTTP/SSE 断开只释放对应读取，已接纳工作继续由原 Runtime 管理。关停封存后取消尚未读完的请求体，等原业务资源收束再关闭连接。通过身份校验的关停请求可在最终关闭期间完成有限的 HTTP 回执，超时则关闭该连接；其他未读响应不能阻塞进程退出。开发 Web 入口同样等待 Node listener 实际绑定。
 
 SSE 从单一扫描游标读取持久变更。未来、过期或格式错误的游标在 ready 前拒绝；ready 和 heartbeat 无 ID。过滤后的 checkpoint 只有在其一致页面中此前所有可见变更都已发送后才推进。`Change.objectId` 是有限不透明通知标识，可以是普通对象 ID、带点号的扩展 namespace 与带斜线或 Unicode 的 record key；上界385字符来自 Store 的128字符 namespace、一个分隔符及256字符 key，不作为路径或执行权使用。Store、Session、Command 等普通 ID 保持原约束。唯一 [schema](src/http/schema/index.ts) 与生成 Client 校验器/OpenAPI 同步；[真实扩展事件回归](test/isolated/extension-changes.test.ts)核原 SQLite 事件逐条通过 HTTP/Client、无 reset、完整原 ACK 和零额外执行。订阅缓存有界，超限只关闭该订阅，不改变执行。关闭先结束 stream，再 drain Runtime 和 Store，最后停止 HTTP。
 
@@ -293,43 +293,45 @@ heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判
 
 `@kite-ai/service/paired` 提供 `launchPairedService`。调用者启动前通过只读 `@kite-ai/agent/profile` API 选定 profile，并传入选定 entrypoint、instance/build 身份、API major 和必要 capabilities。launcher 发送一行私有 startup JSON（最多 64 KiB），保持 stdin 作为独立父进程存活通道，并读取一行 bootstrap JSON（最多 16 KiB）。凭据和 token 不进入 argv、URL 或继承的模型凭据环境变量。Client 准入将 bootstrap 与认证 HTTP 身份和启动前选择逐项比较，不从响应推导预期 profile；启动失败只清理本次建立的 child。装配失败且资源已收束时，子进程取消并等待原 stdin 读取关闭，使仍在等待 bootstrap 的父进程及时收到失败。[配对回归](test/isolated/paired.test.ts)在父端管道保持打开时验证失败退出。
 
-[启动计时](src/startup-timing.ts)由 Desktop 开发 builder 的构建常量开启，在 Service stderr 记录 Shell 运行时、配置、Store、Runtime 与 HTTP 五个阶段的开始、完成／失败和单调时钟耗时。普通源码／正式 Service 不产生该日志，不提供环境变量或请求开关。可信 paired 调用者可传 `onStartupTiming` 读取严格闭合的阶段／状态／整数毫秒；每行最多256字符，拒绝额外字段、未知阶段和非法数值，超长行丢弃后继续读取。原始 stderr 仍只按原16KiB上限保留，不透传到开发终端；观察回调失败不改变准入、超时或所属子进程关闭。默认 bootstrap／连接等待仍各10秒，Desktop 开发宿主的有限期限归 [Desktop owner](../desktop/README.md#开发热更新与服务重载)。[真实配对与分片回归](test/isolated/paired-startup-timing.test.ts)核阶段顺序、私密字段拒绝、日志回调失败隔离及超时清理。
+[启动计时](src/startup-timing.ts)由 Desktop 开发 builder 的构建常量开启，在 Service stderr 记录 Shell 运行时、配置、Store、Runtime 与 HTTP 五个阶段的开始、完成／失败和单调时钟耗时。普通源码／正式 Service 不产生该日志，不提供环境变量或请求开关。可信 paired 调用者可传 `onStartupTiming` 读取严格闭合的阶段／状态／整数毫秒；每行最多256字符，拒绝额外字段、未知阶段和非法数值，超长行丢弃后继续读取。原始 stderr 仍只按原16KiB上限保留，不透传到开发终端；观察回调失败不改变准入、超时或所属子进程关闭。Desktop 开发宿主的有限期限归 [Desktop owner](../desktop/README.md#开发热更新与服务重载)。[真实配对与分片回归](test/isolated/paired-startup-timing.test.ts)核阶段顺序、私密字段拒绝、日志回调失败隔离及超时清理。
 
 2026-11-05 Windows x64／Bun1.4.4：计时完整文件2项14断言通过，包含真实开发 builder 的冷启动和普通源码保持零阶段日志／空 stderr；原 paired 完整文件6项68断言通过。扩展执行的 [preparation cleanup](test/isolated/preparation-cleanup-ownership.test.ts)在数据不可用后提前退出并于父清理报 EPIPE，同一用例在 Git HEAD 原 Service 装配实现中复现；保留为既有 Windows 夹具失败，不计为本轮通过或完整恢复资格。
 
-paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只继承可信父进程的大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `CODEX_HOME`，保留原值、空值和大小写，由 Bun 解释代理优先级、Codex owner 校验路径。模型 key／token、任意秘密和 NODE_OPTIONS／BUN_OPTIONS 等运行注入仍不继承，代理凭据不进入 bootstrap、serverInfo 或诊断。[实际代理回归](test/isolated/paired-proxy.test.ts)分别经默认 child 与显式 spawn port 验证 HTTP、HTTPS CONNECT、NO_PROXY 绕过、含空格的 Codex 路径与秘密过滤；只使用 loopback 和合成凭据。
+paired 环境在原 PATH／LANG／HOME（Windows 另含 USERPROFILE）之外，只继承可信父进程的大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `CODEX_HOME`，Linux 另传用户 Secret Service 所需的 `DBUS_SESSION_BUS_ADDRESS` 和 `XDG_RUNTIME_DIR`。模型传输解释代理优先级，Codex owner 校验路径。模型 key／token、任意秘密与运行时注入变量不继承，代理凭据不进入 bootstrap、serverInfo 或诊断。[实际代理回归](test/isolated/paired-proxy.test.ts)使用 loopback 和合成凭据，检查 HTTP、HTTPS CONNECT、NO_PROXY 绕过、含空格的 Codex 路径与秘密过滤。
 
-模型连接由 [model-transport.ts](src/model-transport.ts)补齐系统代理自动发现：有显式代理环境时继续由 Bun 解释原值、认证和 NO_PROXY；无环境代理时复用 [系统设置读取](src/web-fetch-proxy.ts)，选择 Windows HKCU／macOS 手动 HTTP(S) 代理及绕过名单，支持主机通配符、端口、IPv6 与 `<local>`。每个绑定复制系统设置并显式传给 fetch，不改写进程环境、不探测常用端口、不执行 PAC/WPAD、不在失败后直连重发。普通 Chat Completions／Responses、Codex 认证包装和显式提供商目录查询均消费该传输；`webFetch` 用户配置仍仅属于网页工具，MCP 的网络准入保持原边界。
+[模型传输](src/model-transport.ts)封存显式代理环境与绕过名单，无环境代理时复用[系统设置读取](src/web-fetch-proxy.ts)取得 Windows HKCU／macOS 手动 HTTP(S) 代理。环境代理支持认证与 `NO_PROXY` CIDR，绕过规则支持主机通配符、端口、IPv6 与 `<local>`。传输不改写进程环境，不执行 PAC/WPAD 或扫描端口，代理拒绝作为传输失败，保持原出口。Chat Completions、Responses、Codex 和显式提供商目录查询共用此传输。`webFetch` 用户配置属于网页工具，MCP 使用自己的网络准入。
 
 [OpenCode Go](https://opencode.ai/docs/console/harnesses) 的现行 `https://opencode.ai/inference/go/openai/v1` 由 [providerModelFetch](src/model-providers.ts)在模型绑定时补齐真实 `Kite-Code` User-Agent 和由当前会话 ID 派生的稳定 `x-opencode-session`。普通执行和标题使用各自绑定的会话；只允许发往该地址的 Chat Completions 或 Responses 路径并拒绝重定向。其他 URL（包括旧 `/zen/go/v1`）沿原传输。[SDK 请求回归](test/isolated/provider-model-fetch.test.ts)核两种协议的实际 URL、原授权头、会话隔离和拒绝转发；不替代公网订阅验证。
 
 ## 模型连接池与原取消恢复边界
 
-当前 Bun1.4.4 模型传输在绑定的首次真实请求时懒创建独立 `Bun.FetchSession`，配置 `idleTimeout:30` 与每类 `maxIdleSockets:8`。同一绑定的请求可复用连接，不与其他绑定或全局 fetch 共用；显式代理环境仍由 Bun 解释，系统代理和绕过名单仍按原绑定选择，失败不自动改出口。SDK 原 `fetch.preconnect` 兼容字段保留，实际 session 请求不消费全局预连接池，不增加主动预热请求。
+官方 OpenAI／DeepSeek 连接缺少凭据时，[模型绑定](src/configuration.ts)在请求前拒绝，回执原因是 `model_authentication_required`。已配置的凭据读取失败以 `model_credentials_locked`、`model_credentials_backend_unavailable` 或 `credential_unavailable` 报告。支持匿名访问的自定义端点保持可用。已派发的模型请求收到 401 或 403 时，[执行层](../../packages/agent/src/execution/index.ts)将认证或访问错误写入原 Execution 和 Run，不自动重连。[配对 Service 回归](test/isolated/configuration.test.ts)核对请求次数、原失败原因及提供商错误正文和认证头不会暴露。
+
+模型绑定首次请求时按选定出口懒创建独立的 Undici dispatcher，配置 30 秒 keep-alive 和每 origin 最多 8 条连接。同一绑定复用自己的连接。重定向按原绑定重新计算目的地址的绕过规则；传输不会借用全局连接池或主动预热。
 
 普通 Run、标题的 model-only 绑定及只读模型目录查询在原结算／失败／取消收尾中关闭自己的空闲池；`close` 同步封住该绑定的新 fetch 并复用同一清理 Promise。它不替代原 AbortSignal，不把连接关闭当作模型取消、效果成功或进程退出证明。准备失败继续保留原错误和必要清理 authority，关闭一个绑定不影响其他绑定。真实连接复用／隔离、取消原因与零重试归[代理整文件](test/isolated/model-transport.test.ts)，普通与标题绑定的实际清理归[标题整文件](test/isolated/session-title.test.ts)，目录拒绝／取消／陈旧读取集与池关闭归[提供商整文件](test/isolated/provider-settings.test.ts)。
 
-新绑定仅在原 Run snapshot 增加非秘密 `modelTransport.digest`，不保存代理凭据或原始环境，不升级工具、协议、存储或 SDK 转换版本。冷恢复在读取凭据／模型派发前核对摘要，变化拒绝 `recovery_configuration_changed`；没有该字段的旧记录不追补历史。[代理完整回归](test/isolated/model-transport.test.ts)核实际 SDK 两协议经过本地代理、绕过、取消、代理拒绝无回退、默认 Service 完成及原 SQLite Run 的恢复／变化拒绝；[Codex 回归](test/isolated/codex-auth.test.ts)核选定 transport 后仍保持原认证、请求与 Signal。取舍见[模型系统代理决定](../../.agents/notes/implemented/bug-fix/2026-11-03-model-system-proxy.md)。
+新绑定仅在原 Run snapshot 增加非秘密 `modelTransport.digest`，不保存代理凭据或原始环境，不升级工具、协议、存储或 SDK 转换版本。冷恢复在读取凭据／模型派发前核对摘要，变化拒绝 `recovery_configuration_changed`；没有该字段的旧记录不追补历史。[代理回归](test/isolated/model-transport.test.ts)核实际 SDK 两协议经过本地代理、绕过、取消及代理拒绝无回退。[隔离 Service 回归](test/isolated/model-transport-service.test.ts)核默认装配完成及原 SQLite Run 的恢复与变化拒绝。[Codex 回归](test/isolated/codex-auth.test.ts)核选定 transport 后仍保持原认证、请求与 Signal。取舍见[模型系统代理决定](../../.agents/notes/implemented/bug-fix/2026-11-03-model-system-proxy.md)。
 
 2026-11-03，Windows x64／Bun1.4.3／Electron44.3.0：上述代理、Codex、原模型选择、configuration、provider-settings、web-fetch-configuration、default-web-fetch 七个完整文件合计68项通过、1项原平台跳过，902断言；Service typecheck／build、定向 Biome、边界、测试归属及文档结构／影响核对通过。普通 `desktop:dev` 窗口未手动设置代理环境，新会话用真实 `gpt-6-luna`／Responses完成“连接正常”，原11:49失败会话的独立续轮也完成；逐步观察提交占位、消息保存接管、草稿清空、正在回复和终态，旧失败保持、无重复用户消息或工具执行。SQLite两新 Run 分别8856／6710毫秒 completed，各一次 succeeded Model且代理摘要相同；未自动重发原GitHub任务。这是当前开发窗口与本机Provider范围，不代表安装版或macOS/Linux实测。
 
 追加运行未改动的 paired-proxy 完整文件为1通过／1失败：upper用例的父客户端首次GET `/v1/server`走向测试自设 `fixture-unused-lower-all-proxy.invalid`，报ENOTFOUND；lower用例通过。该父调用路径不消费本轮模型传输，失败及前述七文件结果分别保留，不记为完整默认测试通过。
 
-可信 Native main 可显式提供中立 `spawnChild` port，用 Node 的进程/stream 能力启动已选定的 Bun 制品；省略时保留 Bun 宿主实现。port 不改变 bootstrap、准入、父存活或所属关闭协议，也不增加默认 PATH/源码回退。Electron main 只持有自己启动的 PID 和 handle；[paired 测试](test/isolated/paired.test.ts)及 Native 实际窗口证据分别证明 launcher 与 Node 调用者的边界。
+默认 [paired launcher](src/paired.ts)通过 [Node 进程适配器](src/node-process.ts)启动已选定的可执行文件和 Service 入口。可信 Native Main 可显式提供 `spawnChild`，保持同一 bootstrap、准入、父存活与关闭协议。Windows 使用 `windowsHide` 和独立进程组，父端仍持有原 stdin 和实际退出回执。生产启动参数来自已验证制品，开发加载器仅由可信开发宿主选择。
 
-[配套启动器](src/paired.ts)在向子进程发送私有启动帧后开始等待首条 bootstrap。Windows 的 Native 与 Terminal 制品启动使用 60 秒，涵盖子进程独立校验和首次 Git Bash 运行时准备。收到 bootstrap 后独立核对 HTTP 连接，默认期限为 10 秒。超时沿所属子进程的原清理路径收尾。用户行为见[服务生命周期](../../docs/handbook/server/lifecycle.md#默认客户端与源码入口)。
+[配套启动器](src/paired.ts)在向子进程发送私有启动帧后等待首条 bootstrap，默认 10 秒。Windows 的 Native 与 Terminal 制品有运行时保护时，默认使用 60 秒，涵盖子进程独立校验和首次 Git Bash 运行时准备。收到 bootstrap 后独立核对 HTTP 连接，默认期限为 10 秒。超时沿所属子进程的原清理路径收尾。用户行为见[服务生命周期](../../docs/handbook/server/lifecycle.md#默认客户端与源码入口)。
 
-默认 Bun launcher 在 Windows 用 `windowsHide:true` 启动所属 Service，使其不继承 TUI 的控制台 Ctrl+C／ConPTY 关闭事件；不使用 detached，stdin 父存活通道、所属 child 与真实 exited 等待保持。2026-10-23 Windows x64／Bun1.4.3 的 [实际 TUI Host](../cli/test/isolated/tui-host.test.ts)完整4项54断言通过，核大文件完整读写、取消、冷重开零重放以及真实 ConPTY 关闭后 waiting Run／Service 仍保所属，随后显式正常停止并确认准确进程退出。PTY EOF 不冒充业务取消，独立安装资格不由开发 Host 测试推定。 同版 `paired.test.ts` 与 `paired-shutdown.test.ts` 合计7项88断言通过；两份 Service 的网络断开、所属 stdin EOF、真实退出和另一 Service 继续存活保持。原4项 POSIX 信号用例在 Windows 继续跳过，不以模拟信号补造通过。
+2026-10-23 Windows x64／Bun1.4.3 的 [实际 TUI Host](../cli/test/isolated/tui-host.test.ts)完整4项54断言通过，核大文件完整读写、取消、冷重开零重放以及真实 ConPTY 关闭后 waiting Run／Service 仍保所属，随后显式正常停止并确认准确进程退出。PTY EOF 不冒充业务取消，独立安装资格不由开发 Host 测试推定。同版 `paired.test.ts` 与 `paired-shutdown.test.ts` 合计7项88断言通过；两份 Service 的网络断开、所属 stdin EOF、真实退出和另一 Service 继续存活保持。原4项 POSIX 信号用例在 Windows 继续跳过，不以模拟信号补造通过。
 
 显式 Desktop 开发宿主监听 Service 源码，构建新的独立开发 bundle，并沿同一 paired 关闭／实际退出与新 SHA／build 准入替换进程。第三方依赖随版本打包，workspace 保外部 source 解析及原运行资产；开发版本不成为正式完整制品证明。UI 整页重新 attach 原 Store，不自动重发工作；编译失败保持旧服务，未知关闭和回执阻止继续替换。此行为归[Desktop 开发 owner](../desktop/README.md#开发热更新与服务重载)，Service 公共 API、Core 生命周期和正式 caller 合同保持。
 
-Windows 且明确传入 `runtimeProtection` 时，Bun默认 [paired parent admission](src/windows-paired-artifact.ts)在spawn前取得所有proof roots的SH、manifest与全文件原HANDLE pin，再执行原 `verifyRuntimeProtection`。Native proof包含outer/Terminal inner及outer空目录。Electron Node由可信 `retainWindowsArtifact` 装配端口借用同Main已独立取得的原生owner；不导入Bun FFI，不从startup JSON/配置接收端口，借用未归还阻止Main关闭，原child退出兑现后才归还。实际 [Service 装配](src/process-service.ts)始终另取自己的SH/全文件pin并完整核验，父不能代持子进程。启动只加候选固定 `--no-env-file`、`--no-install`、`--config=<路径>`、`--tsconfig-override=<路径>`；可选config值必须等号绑定，防止Bun误把TOML当入口而返回0。完整内容验证的dev/ino用BigInt保NTFS精确64位身份，Windows canonical逐项用原生realpath，single-link、完整SHA/库存和原对象检查保持。Main借用与Windows实际Node EOF清理取舍归[原对象决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-original-object-sharing.md)，平台资格仍归[Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
+Windows 且明确传入 `runtimeProtection` 时，[paired parent admission](src/windows-paired-artifact.ts)在启动前取得所有 proof roots 的共享锁、manifest 和全文件原 HANDLE pin，再执行 `verifyRuntimeProtection`。Native proof 包含 outer、Terminal inner 和 outer 空目录。Electron Main 可通过可信端口借出已持有的原生 owner，原 child 退出后归还。[Service 装配](src/process-service.ts)另取自己的共享锁和全文件 pin，再独立完整核验。Node 制品使用固定 `--no-global-search-paths`。读取旧 Bun 制品时，配对适配器按旧 manifest 验证原固定参数。NTFS 设备及 inode 保留 BigInt，canonical 路径逐项用原生 realpath 核对。
 
 2026-10-17实际Windows的[完整paired回归](test/isolated/paired.test.ts)6项/53断言通过，核默认Bun路径的API/能力拒绝、真实Store失败的有界诊断与显式修复后重试、双child网络断连/父EOF区分及原资源释放。损坏Store夹具先新建真实private profile，不用POSIX mode代证Windows ACL；不会修复既有对象权限。这组默认宿主结果与Native装配端口、实际整包及完整平台资格分别核对。
 
 parent pin 与 SH 保持至原 `child.exited` 实际结算；spawn 没有产生 child 时才独立清理。返回的 `exited` 同时反映原退出事实与严格父资源关闭，关闭失败以 `PairedServiceError.code = 'paired_artifact_close_unknown'` 保留错误和未闭 owner，不将 terminate、stdout EOF 或关闭请求当退出／释放证明。文件 pin 先于 lease 关闭，Windows lease 在附件完整关闭后才由原 CloseHandle 释放 region；详细权限与失败重试边界归[平台 owner](../../packages/agent/src/platform/README.md#制品使用权)。POSIX／无 proof 的原配对命令与准入保持；普通关闭的等待和明确强制回收边界见下文。
 
-[Terminal runtime metadata](src/runtime-assets.ts)仅在明确 Windows pin／删除端口调用时加载 artifact-access；paired Windows helper 也在该分支动态加载，纯 Node／Electron POSIX 的 metadata 读取不 eager 导入 `bun:ffi`。这不提供 Windows Node/Electron native 使用权，也不宣称 Windows Native、Daemon、GC、PTY、跨代码切换或全资源退出已完成；源码与 mock 邻接仍须由原生 Windows 完整用户链验收。
+[Terminal runtime metadata](src/runtime-assets.ts)与 [Native runtime metadata](src/native-runtime-assets.ts)的内容读取不加载原生 FFI。Windows 显式 pin 和删除操作使用固定的原生 addon。只读内容核验与取得原生使用权分别记录，Windows Native、Daemon、GC 和 PTY 资格由各自的平台验证取得。
 
 `readTerminalRuntimeBundleContent`／`readNativeRuntimeBundleContent` 在 Node/Electron 完整核内容、target、摘要及闭合库存，不授 Windows 使用权；正式 default verifier 保原 native pin／权限及 genuine removal 合同。Main 在父 verifier 已持完整原文件的范围内加载固定 addon，再取得自己的独立权限并完整复核，Service 继续使用 default verifier。`@kite-ai/service/windows-native-bootstrap` 的[私有交接 leaf](src/windows-native-bootstrap.ts)只提供固定 C→Bun／Bun→Main 证书，核原过程 HANDLE、FILETIME、kernel pipe PID；不新增业务 HTTP、第二执行 Loop或授权来源。5秒操作与取消后5秒内原 OVERLAPPED 终止确认分别计，timeout/Cancel不作关闭证明，未知强持原 owner。
 
@@ -349,13 +351,15 @@ HTTP/SSE 断连和网络释放不会关闭父进程存活 pipe。父 EOF、配�
 
 [诊断 codec](test/startup-diagnostic.test.ts)核未知字段／正文／秘密拒绝与固定报告；原[配对测试](test/isolated/paired.test.ts)增真实默认坏 Store、正式 Native 的 `file_recovery` 准入失败、诊断交接、原文件保持及外部修复后的显式新启动，保原配对／双进程／过大帧／安全 unavailable 断言；原[启动帧](test/isolated/startup-frame.test.ts)与[共用装配](test/isolated/process-service.test.ts)仍分别核帧拒绝与清理所有权。新基线不执行旧数据迁移，不以泛化 Store 错误补造损坏或权限细分类；实际本机结果见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动诊断保存与明确重试)。
 
-验证入口：`bun test apps/service/test/isolated/`、`bun run --cwd apps/service typecheck`。测试绑定真实 loopback listener，通过实际 Worker 打开临时 SQLite profile。HTTP schema 是生成 Client 类型与 OpenAPI 的唯一来源；修改 schema owner 后重新生成，不手改生成文件。
+验证入口：`bun --cwd=apps/service run test`、`bun --cwd=apps/service run typecheck`。测试绑定真实 loopback listener，通过实际 Worker 打开临时 SQLite profile。HTTP schema 是生成 Client 类型与 OpenAPI 的唯一来源；修改 schema owner 后重新生成，不手改生成文件。
 
 双 Service 测试共享同一 profile 和 Session。受控 Model 或权限 barrier 保持 live owner，另一 Service 接纳工作或取消；外部效果 ledger 核对每个 Tool Execution 只执行一次。切换订阅和延迟消费 replay 将断连与执行分开验证。跨宿主取消必须到达原 live AbortSignal；owner Service 关闭后，已接纳工作应在存活 Service 上推进。
 
 这些测试输出实测 HTTP 接纳往返、Worker/SQL 合并读取往返、gate 释放到观察终态，以及 SSE ready 消费/断连耗时，没有分别测量 Worker 排队、SQL 执行或 commit 延迟。barrier 场景证明等待中的 owner，不证明进程冻结、SIGKILL 恢复、长期吞吐或 T113 性能资格。
 
-paired 测试使用真实 Bun child、固定 Model、显式外部效果 ledger 和文件 barrier，验证兼容拒绝时启动写入与业务写入的区别、HTTP 身份、本地 stdout 边界/日志过滤、断连后的执行、一个 child EOF 时另一个 child 继续自身工作、Session owner 交接及重开零重放。POSIX profile-use 锁释放直接通过原生 flock 探测，不代表 Windows 锁资格。合作 fixture 在效果前报告已知取消；意外 adapter 异常仍遵循 Agent `outcome_unknown` 恢复边界，本生命周期测试不声明任意被中断的外部效果都可安全重跑。
+[paired 测试](test/isolated/paired.test.ts)通过可信开发加载器启动真实 Node child，使用固定 Model、显式外部效果 ledger 和文件 barrier。断言覆盖兼容拒绝时启动写入与业务写入的区别、HTTP 身份、stdout 边界和日志过滤、网络断连后的执行、一个 child EOF 时另一个 child 继续自身工作、Session owner 交接及重开零重放。POSIX profile-use 锁释放通过原生 flock 探测。合作 fixture 在效果前报告已知取消，意外 adapter 异常由 Agent 的 `outcome_unknown` 边界处理。
+
+macOS arm64、Node 26.13.1 的本机回归覆盖配对进程、HTTP 生命周期、模型配置和代理、MCP OAuth，共 48 项及 544 条断言。用例包含真实父 EOF、诊断模式关停回执、慢请求体取消、未读响应、两协议代理、真实 Responses 工具延续与本机 OAuth 回调。独立 QuickJS 和 OpenTelemetry 进程另有 16 项及 118 条断言通过。测试使用临时 Profile 和回环合成端点。[HTTP 生命周期](test/isolated/lifecycle.test.ts) · [模型配置](test/isolated/configuration.test.ts) · [模型代理](test/isolated/model-transport.test.ts) · [OAuth](test/isolated/mcp-oauth-session.test.ts)
 
 执行输出使用 `GET /v1/executions/:id/output`，只调用公开 Runtime 读取 API。`afterSeq` 缺省 `0`，可选 `upperSeq` 固定快照上界；`limit` 为最多 200 的规范正十进制数。序号参数为规范无符号十进制字符串，受 SQLite 有符号 64-bit 范围约束。未来游标拒绝；保留输出和显式丢失区间保留原序号范围。clipped/coalesced 丢失区间无法取得准确字节数时返回 `droppedBytes: null`。读取不派发工作、不追加变更。
 
@@ -374,9 +378,15 @@ paired 测试使用真实 Bun child、固定 Model、显式外部效果 ledger �
 
 用户配置源将现有 `provider.<alias>.models/type/protocol/baseURL/apiKey`、`model`（紧凑或嵌套 default route）、`disabledModels` 投影成 `{id,provider,providerName,protocol?,model,baseURL,credentialRef?,enabled?,options?}`。route ID 由原 alias/name 稳定生成，展示沿用 alias，协议 family 由显式 type 或已知 family 确定；自定义 alias 缺少 type 时使用 compatible。缺文件无内置模型目录；正式宿主另以本机 Codex 的实际登录与模型元数据补充只读来源。受支持的 provider effort、modelKwargs 的 temperature/topP/maxTokens/maxOutputTokens 与模型 metadata 参与 options；模型设置修改按准确字节 ETag 和完整 read-set CAS 转回原文件格式，保留注释、原模型 metadata、其他字段和未改 key。显式 `protocol` 支持 `chat-completions`／`responses`，缺省沿用 Chat Completions，Responses 允许 openai／compatible 及固定协议的 codex；模型名称和 URL 不选择协议，失败不跨协议回退。提供商设置读取返回有效协议，保存意图保留协议并通过原 CAS 写回 alias；连接身份区分 Responses 与 Chat Completions，既有 Chat Completions 连接 ID 保持。同一文件也支持可信宿主使用中立 models/modelId 形状，不引入另一配置路径。支持的运行 options 为 temperature（0–2）、topP（0–1）、maxOutputTokens（整数 1–1,000,000）和支持该 wire 的 reasoningEffort 闭集；配置可编码不表示远端模型可用。活动 Run 冻结已选路由与 options，后续 Run 重读。
 
-模型凭据使用惰性 OS 后端 `service:kite-agent/accountNamespace:user-models`，与用户配置同为跨 Profile 用户级。已有 inline apiKey 仅由该私有源解析成瞬时 key，公开 DTO 与 Run snapshot 只含 opaque reference；读取列表不解析 key 或访问 vault。替换 key 时才保存 OS 引用并移除该 provider 的旧明文，不自动重写其他凭据。MCP 保持原 `profile-<profileAccessKey>` namespace。临时后端只可由可信宿主显式注入，不成为生产缺省；真实 OS 后端及平台资格单独验证。
+[模型凭据后端](src/model-credential-backend.ts)按用户配置父目录共享，Desktop、CLI、TUI 和定时任务都经 Service 访问。[加密记录](src/encrypted-model-credentials.ts)写入同一目录下的 `model-credentials`，使用随机 32 字节密钥、每项独立随机 nonce 和 AES-256-GCM，验证引用与记录版本。系统的 `kite-agent/model-vault` 命名空间只存解密密钥。读取目录和设置只用引用。既有手工 inline key 仍按用户文件实际值私下解析，修改凭据后改存加密记录及引用。MCP、Trace 与 Codex 凭据各由原 owner 管理。临时后端只由可信宿主显式注入。
 
-5 项配置集成测试启动真实 paired Bun Service 和本机 fake compatible stream 端点，验证真实 route/options 优先级、跨文件变更的旧 stream 绑定与不可变持久 SQLite 快照、坏/禁用/未知/不支持配置零 fallback、显式临时凭据的隐私与丢失、下一配置无效时取消原 stream，以及真实注册的同名 Tool 按 kind 拒绝。没有调用付费 Provider 或读取旧用户数据。
+同一私有文件锁串行化密钥创建和记录发布。设置保存先确保持久密钥，再进入凭据记录发布。密钥准备失败时，原设置保留，用户可以重新提交。仅当原密钥标记仍为 `pending` 且没有密文记录时，同一标识的缺失密钥可重试创建。已初始化后密钥丢失或密文校验失败均停止绑定。旧 `kite-agent/user-models` 条目按准确引用惰性导入，保留原条目供旧版读取。撤销先写持久标记再清理原系统条目，迁移失败和并发撤销均不能恢复已撤销引用。POSIX 核属主、mode 与单链接，Windows 复用受核验 DACL 和同卷替换。保护范围及回滚见[决定](../../.agents/notes/implemented/architecture/2026-11-13-encrypted-model-credentials.md)。
+
+[macOS Keychain](src/macos-model-keychain.ts) 和 [Linux Secret Service](src/linux-model-keyring.ts) 由限时私有子进程调用，普通读取禁用系统交互。macOS 只在显式保存连接并遇到拒绝时允许一次旧条目或解密密钥确认。Linux paired 和共享 daemon 仅额外传递 `DBUS_SESSION_BUS_ADDRESS` 与 `XDG_RUNTIME_DIR`，依赖系统 `libsecret` 和持久用户集合。Windows 使用当前用户 Credential Manager。已有 `/v1/credentials` 回执继续以 `os` 表示由系统保护的持久凭据。验证由[加密记录测试](test/isolated/encrypted-model-credentials.test.ts)和[制品回归](../../tests/isolated/unified-agent/native-credential-platform.test.ts)覆盖。
+
+2026-11-13 本机 macOS arm64 的 [真实钥匙串用例](test/isolated/macos-model-keychain.test.ts)使用隔离用户钥匙串和需要确认的合成旧条目，普通读取返回 `model_credentials_locked`。[包内 Node 回归](../../tests/isolated/unified-agent/native-credential-platform.test.ts)在独立 Service 进程之间验证保存、解密调用及持久撤销，回环模型只接到一次经认证的请求。Linux 和 Windows 原生凭据验证沿 [现有工作流](../../.github/workflows/mcp-native-keyring-smoke.yml)。
+
+[配置集成测试](test/isolated/configuration.test.ts)启动真实 paired Node Service，通过本机合成模型端点覆盖 route/options 优先级、跨文件变更的旧 stream 绑定、不可变 SQLite 快照、坏配置拒绝、临时凭据和认证失败、原流取消以及同名 Tool 的 kind 隔离。夹具使用自有 HOME 和 SQLite Profile。
 
 
 配置管理与 Run 解析共用上述用户源和模型 vault。认证 `GET /v1/config/user?storeId=...` 与 workspace 通用配置读取返回准确文件 ETag、脱敏归一化 raw/effective、支持配置 snapshot 与有限错误；项目 raw 可保留历史模型字段，但它们不进入 effective 模型。未知字段与不支持 options 显示占位符，坏 JSONC 保留原字节和 invalid_jsonc。Workspace 路径只来自持久 file URI，请求不能提供路径。
@@ -433,7 +443,7 @@ resolver 返回每 Run 的 `extensions`、`sources` 与 `dispose`。项目来源
 
 没有完整候选 proof 的标准开发 `main`／`daemon-main`，只在两入口与当前 Service module 同位置且实际为 canonical 普通文件时共同纳入保护资产；缺少伴随或非标准 host 仍绑定原实际入口，不猜完整候选。Agent 将保护根按集合规范化后冻结，合法同制品 paired→shared 冷恢复继续经原严格配置校验。正式 `runtimeProtection` 仍在持锁后验证整个闭包，不使用开发入口发现替代它。实际双入口保护、原审批、一次效果及冷恢复证据归 [CLI Recovery 原整文件](../cli/test/isolated/recovery-host.test.ts)。
 
-完整 Native 的 `native.candidate` proof 由 [Native verifier](src/native-runtime-assets.ts)独立核两层完整资产；只接受已核 inner 清单里的 `service` 或 `daemon`，均固定包内 Bun、Native build 与 outer digest。共享 Daemon 沿同一 assembler 独立持两 root SH，启动 CLI 退出不释放其使用权，实际资源确认关闭后才释放。[校验正反例](test/isolated/native-runtime-assets.test.ts)核两种服务入口及 CLI/错误 runtime/build/proof 拒绝；[实际安装 stdin](../../tests/isolated/unified-agent/native-stdin.test.ts)核 source-free Native Daemon、真实 pipe 问题及 stop/status absent 后卸载。当前证据限本机 macOS arm64，不覆盖 Daemon 冷重启、其他平台或正式发布者身份。
+Native 的 `native.candidate` proof 由 [Native verifier](src/native-runtime-assets.ts) 独立核两层完整资产，按内层清单固定 `service` 或 `daemon` 入口、随包运行时、Native build 与外层摘要。macOS 桌面专用 Node 制品只有 `code/@kite-ai/service/main.js` 与 `runtime/node` 这对入口；旧 Bun 版仍按各自清单校验。共享 Daemon 沿同一 assembler 独立持两 root SH，启动 CLI 退出不释放其使用权，实际资源确认关闭后才释放。[校验正反例](test/isolated/native-runtime-assets.test.ts)核两种服务入口及 CLI/错误 runtime/build/proof 拒绝；[实际安装 stdin](../../tests/isolated/unified-agent/native-stdin.test.ts)核 source-free Native Daemon、真实 pipe 问题及 stop/status absent 后卸载。该 Daemon 证据限本机 macOS arm64，不覆盖 Daemon 冷重启、其他平台或正式发布者身份。
 
 6 项定向测试包含真实独立 discovery 文件及 4 项 paired Service/SQLite/本机 compatible 端点场景：权限 barrier 中指令变化阻止旧文件写入并触发新的实际 Model 决策；Skill 正文/资源按需进入来源且不执行脚本；依赖与未知 Tool 选择局部失败；禁用 File Tool 只影响下一 Run，已准入等待 Run 保持原 binding 和快照。既有配置/vault 测试仍属于 owner 验证。
 
@@ -645,7 +655,7 @@ Windows x64 桌面的自动选项在 Service 启动时校验 Runner V7 与包内
 
 Linux 正式装配已接 `createLinuxHostShellJob`：同一 ProcessService 定位已构建包内 native init及实际 Bubblewrap，固定解释器／env／原 runtimeAssets与保护根；四份可执行资产及独立解析资产分别封存摘要，在普通派发前重核，最终根／Task父子AND策略按同一真实Job定义求交。缺 Bubblewrap、init或明确 host配置局部拒绝，无旧 group降级；其原 namespace所有权、完整输出和unknown fencing归[Linux Job owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。[纯正式调用者测试](test/isolated/linux-shell-configuration.test.ts)实际核配置、摘要和scope接线，工厂start由spy接收，FFI0，不计Linux运行资格。Windows 受限与 Full 已接原 Job/HANDLE 后端；Linux实机、installed维护／版本链及全部资源门禁继续pending。
 
-可信 programmatic 宿主仍可显式传入 `shell:{platform:'darwin',configurationId,env,supervisorPath,bunExecutable,shellExecutable,graceMs?,maxQueuedBytes?,host?}`；省略 host 的原 options 保留 POSIX group 语义，不取得全树或 Seatbelt 资格。绑定封存 canonical cwd、资产 bytes hash、宿主身份和非秘密 env key 名，完整 env 只留可信 binding。factory/import 不启动进程；Job.start 重核资产、路径及最终范围。
+可信 programmatic 宿主仍可显式传入 `shell:{platform:'darwin',configurationId,env,supervisorPath,runtimeExecutable,shellExecutable,graceMs?,maxQueuedBytes?,host?}`；省略 host 的原 options 保留 POSIX group 语义，不取得全树或 Seatbelt 资格。绑定封存 canonical cwd、资产 bytes hash、宿主身份和非秘密 env key 名，完整 env 只留可信 binding。factory/import 不启动进程；Job.start 重核资产、路径及最终范围。
 
 host Job.start 失败仅将固定非秘密适配器码交给原 Core outcome_unknown 合同；私有路径、native 错误正文和 guardian stderr 不进入业务输出。launchd 早期失败诊断留在受保护 control base，读取正文最多8192bytes，不据诊断宣称业务子树已停止。
 
@@ -944,6 +954,8 @@ Remove在准确原scope预检availability/presence、声明发表后local clear�
 
 ## 正式制品、SQLite 与配置路径策略
 
+macOS arm64 Node 候选用随包 Node 执行配套和 daemon 入口。两者保持原私有握手、HTTP/SSE、独立 Service 生命周期和候选使用权。Node 宿主用原生绑定接入所选 SQLite 动态库，Electron 的私有数据库使用 Electron 自带 SQLite。构建选择与本机安装链归 [Native 发行说明](../desktop/docs/native-release.md#构建与安装)。
+
 根八 workspace 的默认 build/typecheck/test 已使用新公开闭包，CLI/TUI/Native 与 Service 以私有 bootstrap 固定配套实例，业务只经 Client HTTP/SSE。旧 carrier、Host/Kernel/State writer 不参与正式/default/CI 调度，历史测试不提供新平台资格。
 
 [Terminal manifest](src/runtime-assets.ts) 与 [Native manifest](src/native-runtime-assets.ts) 分别保存实际 Bun/Node SQLite driver、linkage、version/sourceId；Terminal 另保存 engine manifest SHA。首次公共 Store、readonly/preflight 和 maintenance 打开数据库前选择固定包内引擎，Worker 只复核同一引擎，不重复设置 process-global loader。资产存在但缺少或损坏 selection 时拒绝，完全无资产的开发源码明确 unqualified。已审查来源见 [SQLite release identity](src/sqlite-release-assets.ts)及[Agent 引擎 owner](../../packages/agent/src/sqlite-engine.README.md)。
@@ -1113,7 +1125,7 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 
 同work换key／URL不能覆盖旧明确拒绝或待核实的原页面意图。授权适配在原grant首次写入确认后，先CAS保存work的pending屏障，再允许Main prepare；pending只代表原许可／证明待定，不是用户拒绝。旧refused记录继续核原Interaction、accepted receipt和第一条answer_saved Command.seq完整证明；证明不全或ACK丢失继续保留pending／原unknown，不以新路径复活。marker自身未落盘时只读本work前缀下的原grant兜底，出前缀即停止，不扫描无关Session历史。resolved仅表示准确允许或已确认非拒绝失败结束该待定，不提供新页面授权。真实新root work或经原applied业务输入完整链证明的新人工steer才可重新进入原权限链，进度、clarify、result.include与重复answer不行。旧grant字节和unknown不重写；legacy key只沿原已知父链／指针精确只读兼容。[原来源反例](test/isolated/desktop-browser-authorization.test.ts)核旧拒绝、损坏证明、新steer、pending写失败及1000条无关旧grant；实际Native／真实模型修后验收归Desktop owner。
 
-旧 Run 未包含 Browser snapshot 字段时，恢复绑定保留字段缺失，不补入 `browser: null`；新 Run 明确保存的 null 或 Browser 指纹仍精确保留并核对。该差异由[模型绑定回归](test/isolated/model-transport.test.ts)验证，避免完整 Runtime 配置匹配因升级新增字段误拒。
+旧 Run 未包含 Browser snapshot 字段时，恢复绑定保留字段缺失，不补入 `browser: null`；新 Run 明确保存的 null 或 Browser 指纹仍精确保留并核对。该差异由[模型绑定回归](test/isolated/model-transport-service.test.ts)验证，避免完整 Runtime 配置匹配因升级新增字段误拒。
 
 浏览器新授权的私有请求标识由 Service 生成并持久化一次，携带固定时间范围；冷恢复沿原记录 inspect，不因超时、Main重启或记录丢失重新 prepare。旧格式申请仍按原记录只读恢复，未知结果不能重放。此调整不改变公开工具或协议版本。
 

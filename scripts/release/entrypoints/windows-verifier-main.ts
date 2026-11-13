@@ -2,7 +2,7 @@ import { basename } from 'node:path';
 import { runWindowsNativeVerifierMain } from './windows-native-verifier';
 import { runWindowsTerminalVerifierMain } from './windows-terminal-verifier';
 
-// Standalone Bun reports import.meta.main=false. The installed image name selects the entry.
+// The same standalone verifier image serves both installed frontdoors by exact filename.
 const name = basename(process.execPath);
 if (name === 'terminal-verifier.exe') await runWindowsTerminalVerifierMain();
 else if (name === 'native-verifier.exe') await runWindowsNativeVerifierMain();

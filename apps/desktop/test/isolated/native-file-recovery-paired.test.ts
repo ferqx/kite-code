@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -12,12 +11,20 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { nativeFileReadBaseline } from '../native-file-result.fixture';
@@ -29,7 +36,7 @@ async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean, 
     const value = await read();
     if (matches(value)) return value;
     if (Date.now() > deadline) throw Error('default_file_checkpoint_deadline');
-    await Bun.sleep(5);
+    await fixtureDelay(5);
   }
 }
 function stamp(path: string) {
@@ -62,7 +69,7 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
   privateDirectory(profile.profilePath);
   const requests: ProviderBody[] = [],
     steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {
@@ -153,7 +160,7 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
   );
   const launch = (id: string) =>
     launchPairedService({
-      entrypoint: resolve(import.meta.dir, '../../../service/src/main.ts'),
+      entrypoint: resolve(import.meta.dirname, '../../../service/src/main.ts'),
       spawnChild: userConfiguration.spawnChild,
       profile,
       instanceId: id,
@@ -264,16 +271,16 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
     )!.checkpoint;
     const preimage = join(root, 'preimage.bin');
     writeFileSync(preimage, original);
-    const helper = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-      target: 'bun',
+    const helper = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'bundle',
       outdir: root,
       naming: 'helper.js',
     });
-    const driver = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../native-file-recovery-node.fixture.ts')],
+    const driver = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../native-file-recovery-node.fixture.ts')],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
@@ -295,8 +302,8 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
         preimage,
         access: {
           profile: { dataRoot: profile.dataRoot, profile: profile.profile },
-          bunExecutable: bun,
-          bunSha256: hash(readFileSync(bun)),
+          runtimeExecutable: bun,
+          runtimeSha256: hash(readFileSync(bun)),
           helperPath,
           helperSha256: hash(readFileSync(helperPath)),
         },
@@ -309,8 +316,8 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
       writeFileSync(inputPath, JSON.stringify({ ...raw, killWindow: 'before_post', barrier }), {
         mode: 0o600,
       });
-      const native = Bun.spawn(
-        [realpathSync(Bun.which('node')!), join(root, 'driver.js'), inputPath],
+      const native = spawnFixtureProcess(
+        [realpathSync(findFixtureExecutable('node')!), join(root, 'driver.js'), inputPath],
         {
           stdout: 'pipe',
           stderr: 'pipe',
@@ -338,8 +345,8 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
       writeFileSync(inputPath, JSON.stringify({ ...raw, killWindow: 'cold_lookup', barrier }), {
         mode: 0o600,
       });
-      const cold = Bun.spawn(
-          [realpathSync(Bun.which('node')!), join(root, 'driver.js'), inputPath],
+      const cold = spawnFixtureProcess(
+          [realpathSync(findFixtureExecutable('node')!), join(root, 'driver.js'), inputPath],
           {
             stdout: 'pipe',
             stderr: 'pipe',
@@ -364,8 +371,8 @@ async function qualify(scenario: 'normal' | 'drift' | 'kill') {
         await cold.exited;
       }
     } else {
-      const native = Bun.spawn(
-          [realpathSync(Bun.which('node')!), join(root, 'driver.js'), inputPath],
+      const native = spawnFixtureProcess(
+          [realpathSync(findFixtureExecutable('node')!), join(root, 'driver.js'), inputPath],
           {
             stdout: 'pipe',
             stderr: 'pipe',

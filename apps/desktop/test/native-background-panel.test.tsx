@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   type BackgroundExecutionItem,
@@ -10,6 +9,7 @@ import {
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import { NativeBackgroundPanel } from '../src/native-background-panel';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../src/native-bridge';
 import { NativeDiagnosticsProvider } from '../src/native-diagnostics';

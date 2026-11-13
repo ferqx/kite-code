@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, Suspense, startTransition, useLayoutEffect, useState } from 'react';
+import { expect, test } from '#kite-test';
 import type { ComposerProps } from '../../../../packages/ui/src/desktop/Composer';
 import { useNativePermissionChange } from '../../src/use-native-permission-change';
 import { prepareDesktopDom } from '../native-page-dom.fixture';

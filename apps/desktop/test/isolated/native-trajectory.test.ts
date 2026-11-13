@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +10,7 @@ import type {
   TrajectorySnapshot,
 } from '@kite-ai/trajectory';
 import { createTrajectoryEventId } from '@kite-ai/trajectory';
+import { afterEach, expect, test } from '#kite-test';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import { NativeTrajectory } from '../../electron/trajectory';
 import { openNativeTrajectoryBundle } from '../../electron/trajectory-bundle';

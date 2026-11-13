@@ -1,9 +1,16 @@
-import { expect, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
+import {
+  spawn as spawnProcess,
+  spawnSync as spawnProcessSync,
+} from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { createRuntime } from '../../../src/runtime';
@@ -16,7 +23,7 @@ async function until(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() > deadline) throw Error('history_followup_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 for (const mode of [
@@ -51,7 +58,7 @@ for (const mode of [
       }[];
     }[] = [];
     const original = mode.endsWith('sealed') ? '原始大正文'.repeat(16000) : 'original';
-    const server = Bun.serve({
+    const server = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -84,9 +91,10 @@ for (const mode of [
       },
     });
     const baseURL = `${server.url.href}v1`;
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./history-followup-crash-child.ts', import.meta.url)),
         directory,
         baseURL,
@@ -97,7 +105,7 @@ for (const mode of [
       assert.equal(child.exitCode, null, 'original held child must be alive');
       process.kill(child.pid, 0);
       if (process.platform === 'win32') {
-        const dispatched = Bun.spawnSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
+        const dispatched = spawnProcessSync(['taskkill.exe', '/pid', String(child.pid), '/f'], {
           stdout: 'pipe',
           stderr: 'pipe',
         });

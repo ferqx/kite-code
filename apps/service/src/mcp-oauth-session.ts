@@ -13,6 +13,7 @@ import {
   startAuthorization,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientInformationMixed } from '@modelcontextprotocol/sdk/shared/auth.js';
+import { type LoopbackServer, serveLoopback } from './loopback-server';
 import type { McpOAuthLauncherObserver } from './mcp-oauth-browser';
 import {
   decodeMcpOAuthLauncherObservation,
@@ -157,7 +158,7 @@ export function createMcpOAuthSession(options: McpOAuthSessionOptions) {
       assertFresh: flowFresh,
     });
     let provider: ReturnType<typeof makeProvider> | undefined;
-    let listener: ReturnType<typeof Bun.serve> | undefined;
+    let listener: LoopbackServer | undefined;
     let browser: Promise<void> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let accept!: (code: string) => void;
@@ -177,49 +178,45 @@ export function createMcpOAuthSession(options: McpOAuthSessionOptions) {
         reject(new McpOAuthSessionError('mcp_oauth_timeout'));
         local.abort();
       }, timeout);
-      listener = Bun.serve({
-        hostname: '127.0.0.1',
-        port: 0,
-        fetch(request) {
-          const url = new URL(request.url);
-          const values = [...url.searchParams.keys()];
-          const code = url.searchParams.get('code');
-          const state = url.searchParams.get('state');
-          if (
-            claimed ||
-            flowSignal.aborted ||
-            request.method !== 'GET' ||
-            request.headers.get('host') !== `127.0.0.1:${listener?.port}` ||
-            url.pathname !== '/oauth/callback' ||
-            url.hash ||
-            values.length !== 2 ||
-            new Set(values).size !== 2 ||
-            !values.includes('code') ||
-            !values.includes('state') ||
-            !code ||
-            code.length > 8192 ||
-            [...code].some((character) => {
-              const value = character.charCodeAt(0);
-              return value < 32 || value === 127;
-            }) ||
-            !state ||
-            state.length > 256
-          )
+      listener = await serveLoopback((request) => {
+        const url = new URL(request.url);
+        const values = [...url.searchParams.keys()];
+        const code = url.searchParams.get('code');
+        const state = url.searchParams.get('state');
+        if (
+          claimed ||
+          flowSignal.aborted ||
+          request.method !== 'GET' ||
+          request.headers.get('host') !== `127.0.0.1:${listener?.port}` ||
+          url.pathname !== '/oauth/callback' ||
+          url.hash ||
+          values.length !== 2 ||
+          new Set(values).size !== 2 ||
+          !values.includes('code') ||
+          !values.includes('state') ||
+          !code ||
+          code.length > 8192 ||
+          [...code].some((character) => {
+            const value = character.charCodeAt(0);
+            return value < 32 || value === 127;
+          }) ||
+          !state ||
+          state.length > 256
+        )
+          return new Response('Invalid authorization callback.', { status: 400 });
+        try {
+          if (!provider?.verifyState(state))
             return new Response('Invalid authorization callback.', { status: 400 });
-          try {
-            if (!provider?.verifyState(state))
-              return new Response('Invalid authorization callback.', { status: 400 });
-            flowFresh();
-          } catch {
-            reject(new McpOAuthSessionError('mcp_oauth_scope_changed'));
-            return new Response('Authorization is no longer available.', { status: 409 });
-          }
-          claimed = true;
-          accept(code);
-          return new Response('Authorization received. You may close this page.', {
-            headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-          });
-        },
+          flowFresh();
+        } catch {
+          reject(new McpOAuthSessionError('mcp_oauth_scope_changed'));
+          return new Response('Authorization is no longer available.', { status: 409 });
+        }
+        claimed = true;
+        accept(code);
+        return new Response('Authorization received. You may close this page.', {
+          headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+        });
       });
       provider = makeProvider(
         new URL(`http://127.0.0.1:${listener.port}/oauth/callback`),

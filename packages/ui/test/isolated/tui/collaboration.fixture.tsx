@@ -1,3 +1,4 @@
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import './terminal-viewport.fixture';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -324,7 +325,7 @@ const timer = setInterval(() => {
 }, 50);
 await new Promise<void>((resolve) => process.once('SIGTERM', resolve));
 clearInterval(timer);
-while (updating) await Bun.sleep(5);
+while (updating) await fixtureDelay(5);
 controller.dispose();
 terminal.unmount();
 client.disposeNetwork();

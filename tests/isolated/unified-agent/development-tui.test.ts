@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { selectDevelopmentTUI } from '../../../scripts/development/unified-tui';
 
 test('development terminal selects exact built Service bytes after pure argv and never creates a profile during selection', () => {

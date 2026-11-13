@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -6,6 +7,7 @@ import {
   fsyncSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -13,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join, posix, resolve } from 'node:path';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
@@ -127,6 +130,22 @@ const text = (bytes: Uint8Array) => new TextDecoder('utf-8', { fatal: true }).de
 function fail(): never {
   throw Error('native_archive_invalid');
 }
+function macosInstallerZip(root: string): Uint8Array {
+  const scratch = mkdtempSync(join(tmpdir(), 'kite-native-zip-'));
+  try {
+    const destination = join(scratch, 'installer.zip');
+    const result = spawnSync(
+      '/usr/bin/ditto',
+      ['-c', '-k', '--keepParent', '--norsrc', '--noextattr', '--noacl', root, destination],
+      { env: { PATH: '/usr/bin:/bin', LANG: 'C' } },
+    );
+    if (result.error || result.status !== 0)
+      throw Error('native_installer_zip_failed', { cause: result.error });
+    return readFileSync(destination);
+  } finally {
+    rmSync(scratch, { recursive: true });
+  }
+}
 /** Regular bytes only: links and exact empty Electron dirs remain closed manifest declarations. */
 export async function packNativeBundle(input: { bundleRoot: string; archivePath: string }) {
   const root = resolve(input.bundleRoot),
@@ -153,34 +172,40 @@ export async function packNativeBundle(input: { bundleRoot: string; archivePath:
       rejectBundleOutput(root, path);
       if (lstatSync(path, { throwIfNoEntry: false })) throw Error('native_destination_exists');
     }
-    const files: Record<string, Uint8Array> = Object.create(null);
-    for (const [path, digest] of [
-      ['native-manifest.json', bundle.digest],
-      ['terminal/terminal-manifest.json', bundle.terminal.digest],
-    ] as const) {
-      const bytes =
-        retainedFiles && path === 'terminal/terminal-manifest.json'
-          ? readWindowsTerminalRuntimeFile(retainedFiles.terminal, 'terminal-manifest.json')
-          : readFileSync(join(root, path));
-      if (hash(bytes) !== digest) fail();
-      files[path] = bytes;
-    }
-    for (const file of [
-      ...bundle.manifest.files,
-      ...bundle.terminal.manifest.files.map((f) => ({ ...f, path: `terminal/${f.path}` })),
-    ]) {
-      const bytes =
-        retainedFiles && file.path.startsWith('terminal/')
-          ? readWindowsTerminalRuntimeFile(
-              retainedFiles.terminal,
-              file.path.slice('terminal/'.length),
-            )
-          : readFileSync(join(root, file.path));
-      if (bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
-      files[file.path] = bytes;
-    }
-    if (readBundle().digest !== bundle.digest) fail();
-    const bytes = await releaseArchiveBytes(files, archivePath),
+    const zip = archivePath.toLowerCase().endsWith('.zip');
+    if (zip && (process.platform !== 'darwin' || !bundle.terminal.manifest.nodeVersion))
+      throw Error('native_installer_zip_target_unsupported');
+    const tarBytes = async () => {
+      const files: Record<string, Uint8Array> = Object.create(null);
+      for (const [path, digest] of [
+        ['native-manifest.json', bundle.digest],
+        ['terminal/terminal-manifest.json', bundle.terminal.digest],
+      ] as const) {
+        const bytes =
+          retainedFiles && path === 'terminal/terminal-manifest.json'
+            ? readWindowsTerminalRuntimeFile(retainedFiles.terminal, 'terminal-manifest.json')
+            : readFileSync(join(root, path));
+        if (hash(bytes) !== digest) fail();
+        files[path] = bytes;
+      }
+      for (const file of [
+        ...bundle.manifest.files,
+        ...bundle.terminal.manifest.files.map((f) => ({ ...f, path: `terminal/${f.path}` })),
+      ]) {
+        const bytes =
+          retainedFiles && file.path.startsWith('terminal/')
+            ? readWindowsTerminalRuntimeFile(
+                retainedFiles.terminal,
+                file.path.slice('terminal/'.length),
+              )
+            : readFileSync(join(root, file.path));
+        if (bytes.length !== file.size || hash(bytes) !== file.sha256) fail();
+        files[file.path] = bytes;
+      }
+      if (readBundle().digest !== bundle.digest) fail();
+      return releaseArchiveBytes(files, archivePath);
+    };
+    const bytes = zip ? macosInstallerZip(bundle.root) : await tarBytes(),
       sha256 = hash(bytes);
     // Awaiting compression cannot silently change which source closure was selected.
     if (readBundle().digest !== bundle.digest) fail();

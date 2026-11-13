@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
-import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { afterEach, expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';

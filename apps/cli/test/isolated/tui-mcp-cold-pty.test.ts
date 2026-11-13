@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,16 +10,25 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient, requiresInteractionAttachment } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { managementActionWire } from '../fixtures/tui-activation-wire';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   const deadline = performance.now() + 10000;
@@ -28,7 +36,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (performance.now() > deadline) throw Error('owned_cold_mcp_pty_deadline');
-    await Bun.sleep(20);
+    await testSleep(20);
   }
 }
 type HttpRow = {
@@ -46,7 +54,7 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
   privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let rpc = 0;
-  const remote = Bun.serve({
+  const remote = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -55,8 +63,8 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
     },
   });
   let observer: ReturnType<typeof createClient> | undefined;
-  let control: ReturnType<typeof Bun.serve> | undefined;
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let control: FixtureServer | undefined;
+  let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let artifact: CLIServiceArtifact | undefined;
   let storeId = '';
   let subjectId: string | undefined;
@@ -80,9 +88,10 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
   const projectPath = join(workspace, 'kite-agent.jsonc');
   const journalPath = join(profile.profilePath, 'ui/mcp-selection-intents.json');
   try {
-    const build = Bun.spawn(
+    const build = testSpawn(
       [
         process.execPath,
+        ...testRuntimeFlags,
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
@@ -103,9 +112,9 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
       join(root, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [join(repo, 'apps/cli/test/fixtures/tui-mcp-cold-pty.ts')],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir: root,
     });
@@ -204,7 +213,7 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
       return observer;
     }
     let coldBaseline = 0;
-    control = Bun.serve({
+    control = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
@@ -338,11 +347,11 @@ test('80x24 cold TUI selects the second real original MCP intent from an empty c
         }
       },
     });
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
-        join(import.meta.dir, '../fixtures/tui-mcp-cold-driver.ts'),
+        ...testRuntimeFlags,
+        join(import.meta.dirname, '../fixtures/tui-mcp-cold-driver.ts'),
         control.url.href,
         artifact.executable,
         entrypoint,

@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -12,17 +10,26 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
 import { automaticTitleIdentity } from '../../../../packages/agent/src/business/session-title/state';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and menus, completes one real Run and exits its owned Service', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-ink-parity-'))),
     workspace = join(root, 'workspace'),
@@ -43,7 +50,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
   const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
   const titleRequests: (typeof requests)[number][] = [];
   let closing = false;
-  const provider = Bun.serve({
+  const provider = await testServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -79,7 +86,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
                 `${frame({ content: response }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
               ],
             ] as const) {
-              while (!closing && !existsSync(join(root, gate))) await Bun.sleep(5);
+              while (!closing && !existsSync(join(root, gate))) await testSleep(5);
               if (closing) return;
               stream.enqueue(encoder.encode(text));
             }
@@ -90,7 +97,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
       );
     },
   });
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const transcript = `${root}.pty.log`,
     servicePid = join(root, 'owned-service.pid');
   try {
@@ -130,24 +137,24 @@ const fetchOriginal = globalThis.fetch;
 globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
   const path = new URL(String(args[0])).pathname;
   if (args[1]?.method === 'POST' && typeof args[1].body === 'string' && JSON.parse(args[1].body).kind === 'run.start') {
-    while (!existsSync(${JSON.stringify(join(root, 'release-post'))})) await Bun.sleep(5);
+    while (!existsSync(${JSON.stringify(join(root, 'release-post'))})) await testSleep(5);
   }
   if (path.endsWith('/model-output') && existsSync(${JSON.stringify(join(root, 'release-response'))})) {
-    while (!existsSync(${JSON.stringify(join(root, 'release-output-read'))})) await Bun.sleep(5);
+    while (!existsSync(${JSON.stringify(join(root, 'release-output-read'))})) await testSleep(5);
   }
   if (path === '/v1/sessions' && args[1]?.method === 'POST' && existsSync(${JSON.stringify(join(root, 'hold-new-session'))})) {
-    while (!existsSync(${JSON.stringify(join(root, 'release-new-session'))})) await Bun.sleep(5);
+    while (!existsSync(${JSON.stringify(join(root, 'release-new-session'))})) await testSleep(5);
   }
   return fetchOriginal(...args);
-}, { preconnect: fetchOriginal.preconnect });
+}, {});
 process.exitCode = await runTUIProcess({argv:process.argv[2] ? ['--thread',process.argv[2]] : ['--workspace',${JSON.stringify(workspace)}],artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'owned',cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(servicePid)},String(pid))});`,
     );
     const built = await compileFileRecoveryTUI(root, runner);
     if (!built.success) throw new AggregateError(built.logs, 'ordinary_tui_compile_failed');
-    driver = Bun.spawn(
+    driver = testSpawn(
       [
         process.execPath,
-        '--no-install',
+        ...testRuntimeFlags,
         fileURLToPath(new URL('../fixtures/tui-ink-parity-driver.ts', import.meta.url)),
         JSON.stringify({
           root,

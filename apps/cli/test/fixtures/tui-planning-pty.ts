@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -26,7 +28,7 @@ const shutdown = (message: unknown) => {
 // enters the same abort path, which owns termination of its ConPTY subtree.
 if (process.platform === 'win32') process.on('message', shutdown);
 const pty = spawnTuiPTY({
-  cmd: [process.execPath, '--no-install', input.runner],
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
   cwd: input.root,
   conptyCellWidths: process.platform === 'win32',
   scrollback: 20000,
@@ -42,7 +44,7 @@ const wait = async (text: string) => {
     if (frame.fresh && frame.text.replace(/\s+/g, ' ').includes(text)) return;
     if (Date.now() > end) throw Error(`expected ${text} tail=${frame.text.slice(-5000)}`);
     if (pty.ended) throw Error('original Planning host ended');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const waitOriginalAttachment = async () => {
@@ -59,7 +61,7 @@ const waitOriginalAttachment = async () => {
     if (frame.fresh && emitted.includes(expectedBody)) return;
     if (Date.now() > end) throw Error('original complete Plan attachment was not emitted');
     if (pty.ended) throw Error('original Planning host ended');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const waitViewport = async (text: string) => {
@@ -70,13 +72,13 @@ const waitViewport = async (text: string) => {
     if (frame.fresh && viewport.includes(text)) return;
     if (Date.now() > end) throw Error(`expected current ${text} viewport=${viewport}`);
     if (pty.ended) throw Error('original Planning host ended');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string) => {
   await pty.key(value);
   // Preserve the original key's 100ms pump window while native PTY callbacks drain.
-  await Bun.sleep(100);
+  await testSleep(100);
   await pty.drain();
 };
 const choose = async (id: string, title: string) => {
@@ -106,7 +108,7 @@ const choose = async (id: string, title: string) => {
     }
     if (Date.now() > end) throw Error(`original Session target not selected ${id}: ${viewport}`);
     if (pty.ended) throw Error('original Planning host ended');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const planningTask =
@@ -218,7 +220,7 @@ try {
     abort.signal.throwIfAborted();
     if (pty.ended || Date.now() > firstReadDeadline)
       throw Error('automatic original answer receipt read did not occur');
-    await Bun.sleep(50);
+    await testSleep(50);
     await pty.drain();
   }
   // The controller retries only the original GET after its first lost response.
@@ -239,7 +241,7 @@ try {
     if (run.status === (input.entrance === 'deny' ? 'cancelled' : 'completed')) break;
     if (Date.now() > end) throw Error(`actual original Run not completed ${JSON.stringify(run)}`);
     await pty.drain();
-    await Bun.sleep(50);
+    await testSleep(50);
   }
   if (input.entrance === 'deny') {
     await waitViewport('New Run >');
@@ -280,7 +282,7 @@ try {
     const quietDeadline = Date.now() + 8000;
     let before = requests();
     for (;;) {
-      await Bun.sleep(150);
+      await testSleep(150);
       const after = requests();
       if (JSON.stringify(after) === JSON.stringify(before)) break;
       if (Date.now() > quietDeadline) throw Error('original Idle observer did not settle');
@@ -289,7 +291,7 @@ try {
     const displayed = (await current()).text;
     const viewport = pty.viewport();
     await key('\x0c');
-    await Bun.sleep(150);
+    await testSleep(150);
     const frame = await current();
     assert.deepEqual(requests(), before, 'Ctrl+L must not query or submit original requests');
     assert.equal(pty.viewport(), viewport, 'Ctrl+L must not refresh the current display');
@@ -302,7 +304,7 @@ try {
   }
   await key('\x11');
   const deadline = Date.now() + 6000;
-  while (!pty.ended && Date.now() < deadline) await Bun.sleep(50);
+  while (!pty.ended && Date.now() < deadline) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([pty.host.exited, pty.eof]),
     3000,

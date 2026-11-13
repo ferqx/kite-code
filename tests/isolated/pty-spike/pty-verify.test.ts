@@ -1,18 +1,9 @@
-/**
- * PTY Capability Verification Spike
- *
- * Tests whether the pinned Bun runtime can create a real PTY and launch a subprocess with
- * Bun.spawn({ terminal }) for TUI E2E testing. This is the newer API (not the
- * older `pty: true` option which failed in prior investigation — see
- * apps/kite-cli/docs/tui-system-testing.md).
- *
- * Run: bun test tests/isolated/pty-spike/pty-verify.test.ts
- */
-
-import { describe, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { describe, test } from '#kite-test';
+import { type OwnedPtyProcess, spawnOwnedPty } from '../../tui-system/harness/pty-node';
 
 // ============================================================================
 // Helpers
@@ -80,67 +71,46 @@ async function spawnWithTerminal(
   opts?: {
     rows?: number;
     cols?: number;
-    onReady?: (terminal: Bun.Terminal) => void | Promise<void>;
+    onReady?: (terminal: OwnedPtyProcess) => void | Promise<void>;
   },
 ): Promise<{ output: string }> {
   const dir = makeTempDir();
-  const scriptPath = join(dir, 'child.ts');
+  const scriptPath = join(dir, 'child.mjs');
   writeFileSync(scriptPath, script, 'utf-8');
-
   const chunks: Uint8Array[] = [];
-
-  let proc: ReturnType<typeof Bun.spawn>;
+  let child: OwnedPtyProcess | undefined;
   try {
-    proc = Bun.spawn({
-      cmd: [process.execPath, 'run', scriptPath],
-      terminal: {
-        rows: opts?.rows ?? 24,
-        cols: opts?.cols ?? 80,
-        data(_terminal: unknown, chunk: Uint8Array) {
-          chunks.push(chunk);
-        },
+    child = spawnOwnedPty({
+      command: [process.execPath, scriptPath],
+      cwd: dir,
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        ),
+      ),
+      rows: opts?.rows ?? 24,
+      cols: opts?.cols ?? 80,
+      detach: true,
+      onData(chunk) {
+        chunks.push(chunk);
       },
-      env: { ...process.env },
     });
-  } catch (err: unknown) {
+    await child.ready;
+    if (opts?.onReady) {
+      await sleep(SETTLE_MS);
+      await opts.onReady(child);
+    }
+    if (!(await exitsWithin(child.exited, SPAWN_TIMEOUT_MS)))
+      throw new Error(`PTY child did not exit within ${SPAWN_TIMEOUT_MS}ms.`);
+    return { output: concatChunks(chunks) };
+  } finally {
     try {
+      if (child && child.exitCode === null) await terminatePtyChild(child);
+    } finally {
+      child?.close();
       rmSync(dir, { recursive: true, force: true });
-    } catch {}
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `Bun.spawn() with 'terminal' option threw: ${message}\n` +
-        `The 'terminal' option may not be supported in this Bun version.`,
-    );
-  }
-
-  await new Promise((r) => setTimeout(r, SETTLE_MS));
-
-  if (opts?.onReady) {
-    try {
-      await opts.onReady(proc.terminal as Bun.Terminal);
-    } catch (err: unknown) {
-      await terminatePtyChild(proc);
-      const message = err instanceof Error ? err.message : String(err);
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {}
-      throw new Error(`onReady callback failed: ${message}`);
     }
   }
-
-  if (!(await exitsWithin(proc.exited, SPAWN_TIMEOUT_MS))) {
-    await terminatePtyChild(proc);
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {}
-    throw new Error(`PTY child did not exit within ${SPAWN_TIMEOUT_MS}ms.`);
-  }
-
-  try {
-    rmSync(dir, { recursive: true, force: true });
-  } catch {}
-
-  return { output: concatChunks(chunks) };
 }
 
 async function exitsWithin(exited: Promise<number>, timeoutMs: number): Promise<boolean> {
@@ -157,7 +127,7 @@ async function exitsWithin(exited: Promise<number>, timeoutMs: number): Promise<
   }
 }
 
-async function terminatePtyChild(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+async function terminatePtyChild(proc: OwnedPtyProcess): Promise<void> {
   proc.kill();
   if (await exitsWithin(proc.exited, TERMINATION_GRACE_MS)) return;
   proc.kill('SIGKILL');
@@ -173,7 +143,7 @@ function fail(reason: string): never {
 // Tests
 // ============================================================================
 
-describe('PTY Capability Verification (Bun.spawn terminal)', () => {
+describe('Node test harness PTY capabilities', () => {
   // ------------------------------------------------------------------
   // Test 1: isTTY
   // ------------------------------------------------------------------
@@ -245,9 +215,7 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
       `;
 
       const { output } = await spawnWithTerminal(script, {
-        onReady: (t) => {
-          t.write(`${MSG}\r\n`);
-        },
+        onReady: (terminal) => terminal.write(`${MSG}\r\n`),
       });
 
       const echoVal = extractFirstPrefixed(output, 'ECHO:');
@@ -316,11 +284,9 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
       `;
 
       const { output } = await spawnWithTerminal(script, {
-        onReady: async (t) => {
-          // Wait for child to compile TS and record initial dimensions
-          // before resize. 700ms total (200 settle + 500 here).
-          await new Promise((r) => setTimeout(r, 500));
-          t.resize(100, 30);
+        onReady: async (terminal) => {
+          await sleep(500);
+          await terminal.resize(100, 30);
         },
       });
 
@@ -339,7 +305,7 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
         const finalRows = finalDims?.rows ?? before.rows;
 
         if (process.platform === 'win32') {
-          // Known ConPTY limitation — not a Bun bug
+          // ConPTY can leave the child without a resize notification.
           console.log(
             `  SKIP: resize not supported on Windows ConPTY.\n` +
               `    Initial: ${before.cols}x${before.rows}  Final: ${finalCols}x${finalRows}\n` +
@@ -410,9 +376,7 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
       `;
 
       const { output } = await spawnWithTerminal(script, {
-        onReady: (t) => {
-          t.write(payload);
-        },
+        onReady: (terminal) => terminal.write(payload),
       });
 
       const binVal = extractFirstPrefixed(output, 'BIN:');

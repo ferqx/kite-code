@@ -5,7 +5,7 @@ import type { CLIServiceArtifact } from '../../host';
 
 // Both roles run from the same owned, source-free directory. Paired startup deliberately
 // strips environment variables; Service configuration is derived from its own directory.
-const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'), 'utf8')) as {
+const settings = JSON.parse(readFileSync(join(import.meta.dirname, 'settings.json'), 'utf8')) as {
   root: string;
   workspace: string;
   dataRoot: string;
@@ -75,32 +75,29 @@ if (!process.stdin.isTTY) {
 } else {
   const { runTUIHost } = await import('@kite-ai/cli/tui-host');
   const actual = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    async (...args: Parameters<typeof fetch>) => {
-      const response = await actual(...args);
-      const url = new URL(String(args[0]));
-      const options = args[1];
-      appendFileSync(
-        join(settings.root, 'http-ledger.jsonl'),
-        `${JSON.stringify({
-          method: options?.method ?? 'GET',
-          path: url.pathname,
-          ...(typeof options?.body === 'string' ? { body: JSON.parse(options.body) } : {}),
-        })}\n`,
-      );
-      if (url.pathname === '/v1/server' && response.ok) {
-        const token = new Headers(options?.headers).get('authorization');
-        if (token?.startsWith('Bearer '))
-          writeFileSync(
-            join(settings.root, 'observer-private.json'),
-            JSON.stringify({ endpoint: url.origin, token: token.slice(7) }),
-            { mode: 0o600 },
-          );
-      }
-      return response;
-    },
-    { preconnect: actual.preconnect },
-  );
+  globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+    const response = await actual(...args);
+    const url = new URL(String(args[0]));
+    const options = args[1];
+    appendFileSync(
+      join(settings.root, 'http-ledger.jsonl'),
+      `${JSON.stringify({
+        method: options?.method ?? 'GET',
+        path: url.pathname,
+        ...(typeof options?.body === 'string' ? { body: JSON.parse(options.body) } : {}),
+      })}\n`,
+    );
+    if (url.pathname === '/v1/server' && response.ok) {
+      const token = new Headers(options?.headers).get('authorization');
+      if (token?.startsWith('Bearer '))
+        writeFileSync(
+          join(settings.root, 'observer-private.json'),
+          JSON.stringify({ endpoint: url.origin, token: token.slice(7) }),
+          { mode: 0o600 },
+        );
+    }
+    return response;
+  }, {});
   const exit = new AbortController();
   process.once('SIGTERM', () => exit.abort());
   process.exitCode = await runTUIHost({

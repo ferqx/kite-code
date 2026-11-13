@@ -2,10 +2,11 @@ import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 
 const output = resolve(process.argv[2] ?? 'dist/acceptance/foreground-guidance/site');
 await build({
-  root: resolve(import.meta.dir, '..'),
+  root: resolve(import.meta.dirname, '..'),
   configFile: false,
   envFile: false,
   plugins: [react(), tailwindcss()],
@@ -15,7 +16,7 @@ await build({
     outDir: output,
     emptyOutDir: false,
     lib: {
-      entry: resolve(import.meta.dir, 'foreground-guidance-browser.fixture.tsx'),
+      entry: resolve(import.meta.dirname, 'foreground-guidance-browser.fixture.tsx'),
       formats: ['es'],
       fileName: 'fixture',
       cssFileName: 'fixture',
@@ -23,7 +24,7 @@ await build({
     target: 'esnext',
   },
 });
-await Bun.write(
+await writeFixtureFile(
   resolve(output, 'index.html'),
   '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"></head><body style="margin:0"><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>',
 );

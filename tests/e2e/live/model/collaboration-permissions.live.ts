@@ -8,7 +8,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -24,6 +25,8 @@ import {
   createDefaultProcessConfiguration,
   createUserConfiguration,
 } from '../../../../apps/service/src/configuration';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 
 export interface LivePermissionResult {
   id: string;
@@ -101,14 +104,17 @@ export async function createLivePermissionHost(input: {
     const control = join(input.root, 'control');
     const home = join(input.root, 'shell-home');
     for (const directory of [control, home]) mkdirSync(directory, { mode: 0o700 });
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [
         join(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
         ),
       ],
-      target: 'bun',
+      ...runtimeBuildOptions(
+        assets,
+        resolve(import.meta.dirname, '../../../../packages/agent/dist'),
+      ),
       outdir: assets,
       naming: 'shell-supervisor.js',
     });
@@ -119,7 +125,7 @@ export async function createLivePermissionHost(input: {
       configurationId: 'owned-live-permission-shell',
       env: { PATH: '/usr/bin:/bin', HOME: home },
       supervisorPath: built.outputs[0]!.path,
-      bunExecutable: process.execPath,
+      runtimeExecutable: process.execPath,
       shellExecutable: '/bin/sh',
       host: {
         controlBase: control,
@@ -441,7 +447,7 @@ export async function runLiveCollaborationPermissions(
         )
           break;
         if (Date.now() >= end) break;
-        await Bun.sleep(25);
+        await fixtureDelay(25);
       }
       const view = await client.getView('s');
       const writes = view.executions.filter(
@@ -876,7 +882,7 @@ export async function runLiveDefaultFilePermissionCase(
           ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status),
         );
       if (settled || Date.now() >= end) break;
-      await Bun.sleep(25);
+      await fixtureDelay(25);
     }
     const executions = (
       await Promise.all([...sessions.keys()].map((id) => store!.listExecutions(id)))

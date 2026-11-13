@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createFixedModel } from '@kite-ai/ai';
 import Ajv from 'ajv';
+import { expect, test } from '#kite-test';
 import type { Extension } from '../../../src/extensions';
 import { createShellJob } from '../../../src/jobs/shell';
 import { createRuntime } from '../../../src/runtime';

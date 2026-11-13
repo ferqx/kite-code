@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import type { JobDefinition, ToolContext } from '@kite-ai/agent/extensions';
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { createModelToolSurface } from '../../../../packages/agent/src/model-tools';
 import { NativeToolMessages } from '../../electron/tool-messages';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';

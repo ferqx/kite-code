@@ -1,10 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import type { Json } from '../../../src/extensions';
 import { createMcpLifecycle } from '../../../src/mcp';
 import { createRuntime } from '../../../src/runtime';
@@ -23,7 +25,7 @@ async function fixture() {
   const stopGate = new Promise<void>((resolve) => {
     releaseStop = resolve;
   });
-  const peer = Bun.serve({
+  const peer = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -149,7 +151,7 @@ async function fixture() {
       );
       if (e && ['succeeded', 'failed', 'outcome_unknown'].includes(e.status)) return e;
       if (Date.now() > deadline) throw Error('connection_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   }
   async function query(executionId: string, key: string, subjectId = 'owner', serverId = 'local') {
@@ -183,7 +185,7 @@ async function fixture() {
       const deadline = Date.now() + 5000;
       while (!stopEntered) {
         if (Date.now() > deadline) throw Error('stop_barrier_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       return {
         async release() {

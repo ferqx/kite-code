@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   mkdtempSync,
   readFileSync,
@@ -10,8 +9,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createArtifactStore } from '../../../../src/artifacts';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createFileTools, createWorkspaceFiles } from '../../../../src/files';
@@ -42,7 +43,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() >= end) throw Error('collaboration_files_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 for (const scenario of ['unselected-content', 'same-content-new-inode'] as const)

@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeBridge } from '../../src/native-bridge';
 import type {
   NativeBrowserBridge,
@@ -209,7 +210,7 @@ test('real NativeDesktop keeps manual draft pages separate and restores the same
   const flush = (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
   const until = async (check: () => boolean) => {
     const end = Date.now() + 2500;
@@ -396,7 +397,7 @@ test('real NativeDesktop never restores A into the immediately presented B tree 
   const flush = async (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
   const until = async (check: () => boolean) => {
     const end = Date.now() + 3500;
@@ -668,7 +669,7 @@ test('a fresh Root rebuilds the selected conversation and retained page from the
   const flush = async (action: () => void = () => {}) =>
     act(async () => {
       action();
-      await Bun.sleep(35);
+      await fixtureDelay(35);
     });
   const until = async (check: () => boolean) => {
     const deadline = Date.now() + 3500;

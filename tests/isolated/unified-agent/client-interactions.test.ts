@@ -1,14 +1,15 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { NativeInteractionHistoryReads } from '../../../apps/desktop/electron/interaction-history-reads';
 import { startService } from '../../../apps/service/src';
 import { createClient, interactionAttachment } from '../../../packages/client/src';
@@ -882,7 +883,7 @@ test('actual Core approval and Tool question wait for HTTP answers before the or
         if (card) return card;
         if (Date.now() > deadline)
           throw new Error(`No pending ${kind}; ${JSON.stringify(await client.getView('s'))}`);
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
     };
     const approval = await pending('approval');

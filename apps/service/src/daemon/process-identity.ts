@@ -1,5 +1,5 @@
-import { dlopen, ptr } from 'bun:ffi';
 import { readFileSync } from 'node:fs';
+import { dlopen, ptr } from '@kite-ai/agent/runtime-ffi';
 import {
   inspectWindowsProcess,
   readWindowsProcessStartIdentity,

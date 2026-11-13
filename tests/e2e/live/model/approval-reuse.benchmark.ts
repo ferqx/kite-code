@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createUserConfiguration, parseModelPreset } from '@kite-ai/service/configuration';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
 import { createRuntime } from '../../../../packages/agent/src';
 import { createArtifactStore } from '../../../../packages/agent/src/artifacts';
 import type { JobDefinition, Json } from '../../../../packages/agent/src/extensions';
@@ -16,6 +18,7 @@ import {
 import { createShellConfiguration } from '../../../../packages/agent/src/permissions/shell';
 import { openSqliteStore } from '../../../../packages/agent/src/sqlite';
 import { createShellToolBehaviors } from '../../../../packages/agent/src/tools/shell-approval';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 import { createLiveModelFixture } from './live-model-fixture';
 
 if (process.env.KITE_RUN_LIVE_APPROVAL_REUSE !== '1')
@@ -173,7 +176,7 @@ const report: Record<string, unknown> = {
   pilot,
   scoped,
   repeats,
-  environment: { platform: process.platform, arch: process.arch, bun: Bun.version },
+  environment: { platform: process.platform, arch: process.arch, node: process.versions.node },
   codeBefore,
   deterministicFailures,
   samples,
@@ -189,9 +192,9 @@ let code = 0;
 try {
   const assets = join(output, 'assets');
   mkdirSync(assets, { mode: 0o700 });
-  const built = await Bun.build({
+  const built = await buildFixture({
     entrypoints: [resolve('packages/agent/src/platform/process/shell-supervisor.ts')],
-    target: 'bun',
+    ...runtimeBuildOptions(assets, resolve(import.meta.dirname, '../../../../packages/agent/dist')),
     outdir: assets,
     naming: 'shell-supervisor.js',
   });
@@ -233,7 +236,7 @@ try {
             configurationId: 'recording-approval-benchmark',
             env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
             supervisorPath: built.outputs[0]!.path,
-            bunExecutable: process.execPath,
+            runtimeExecutable: process.execPath,
             shellExecutable: '/bin/sh',
             ...(scoped
               ? {
@@ -448,7 +451,7 @@ try {
             const run = typeof runId === 'string' ? await store.getRun(runId) : null;
             if (run && !run.isActive) break;
             if (Date.now() >= deadline) throw Error('recording_case_deadline');
-            await Bun.sleep(10);
+            await fixtureDelay(10);
           }
           const executions = await store.listExecutions('s');
           const checks = executions.filter(

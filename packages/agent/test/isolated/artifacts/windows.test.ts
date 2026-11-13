@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -18,6 +16,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { createWindowsArtifactTemporary } from '../../../src/platform/windows-artifact-files';
@@ -87,7 +90,7 @@ test.skipIf(process.platform === 'win32')(
     const root = mkdtempSync(join(tmpdir(), 'kite-media-lazy-'));
     try {
       expect(() => createWindowsArtifactTemporary(root)).toThrow('artifact_platform_unsupported');
-      const built = await Bun.build({
+      const built = await buildBundle({
         entrypoints: [
           fileURLToPath(
             new URL('../../../src/platform/windows-artifact-files.ts', import.meta.url),
@@ -304,7 +307,7 @@ async function external(root: string) {
   const packageRoot = join(root, 'external', 'node_modules', '@kite-ai', 'agent');
   const dist = join(packageRoot, 'dist');
   mkdirSync(dist, { recursive: true });
-  const built = await Bun.build({
+  const built = await buildBundle({
     entrypoints: [
       fileURLToPath(new URL('../../../src/artifacts.ts', import.meta.url)),
       fileURLToPath(new URL('../../../src/sqlite.ts', import.meta.url)),
@@ -312,7 +315,7 @@ async function external(root: string) {
     ],
     root: fileURLToPath(new URL('../../../', import.meta.url)),
     outdir: dist,
-    target: 'bun',
+    target: 'node',
     packages: 'bundle',
     external: ['@kite-ai/agent/artifacts', '@kite-ai/agent/sqlite'],
     splitting: true,
@@ -330,7 +333,7 @@ async function external(root: string) {
   return join(dist, 'test', 'isolated', 'artifacts', 'windows-child.js');
 }
 async function runChild(script: string, root: string, mode: string, id: string) {
-  const child = Bun.spawn([process.execPath, script, root, mode, id], {
+  const child = spawnProcess([process.execPath, ...testRuntimeFlags, script, root, mode, id], {
     cwd: tmpdir(),
     env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },
     stdout: 'pipe',
@@ -380,12 +383,15 @@ test.skipIf(process.platform !== 'win32')(
     try {
       const script = await external(f.root);
       for (const mode of ['before_publish', 'before_sql']) {
-        const child = Bun.spawn([process.execPath, script, f.profile.dataRoot, mode, mode], {
-          cwd: tmpdir(),
-          env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
+        const child = spawnProcess(
+          [process.execPath, ...testRuntimeFlags, script, f.profile.dataRoot, mode, mode],
+          {
+            cwd: tmpdir(),
+            env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
         const timer = setTimeout(() => child.kill('SIGKILL'), 10000);
         try {
           const reader = child.stdout.getReader();

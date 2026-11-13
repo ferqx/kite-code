@@ -1,8 +1,8 @@
-import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { mock } from '#kite-test';
 import type { McpStdioLinuxEvidence } from '../../../src/mcp/stdio-process-evidence';
 import type {
   LinuxOwnedProgram,
@@ -191,7 +191,7 @@ const controller = new AbortController();
 const port = createMcpStdioTransportPort({
   servers: [{ id: 'server', configuration }],
   guardianPath: guardian,
-  bunExecutable: process.execPath,
+  runtimeExecutable: process.execPath,
   linux: { initExecutable, bubblewrapPath },
   allowedEnvNames: ['ONLY_ORIGINAL'],
   async admit(value) {

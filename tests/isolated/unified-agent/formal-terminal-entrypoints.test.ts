@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -12,16 +10,22 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
 import { userConfigurationPath } from '../../../apps/service/src/user-configuration-path';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { sourceServerArguments } from '../../../scripts/development/ensure-web';
 import { sourceTerminalRoot } from '../../../scripts/release/source-terminal';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 function childEnvironment(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -36,8 +40,6 @@ function childEnvironment(home: string): NodeJS.ProcessEnv {
     LANG: 'C.UTF-8',
     TERM: 'xterm-256color',
   };
-  // Keep the test runner's orphan policy out of the deliberately detached daemon.
-  delete env.BUN_FEATURE_FLAG_NO_ORPHANS;
   return env;
 }
 function ownedSocket(root: string, name: string) {
@@ -110,7 +112,7 @@ async function execute(
 ) {
   const origin = performance.now();
   observe('begin');
-  const child = Bun.spawn(command, {
+  const child = spawnFixtureProcess([command[0]!, ...testRuntimeFlags, ...command.slice(1)], {
     cwd,
     env: childEnvironment(home),
     stdin: 'ignore',
@@ -247,7 +249,7 @@ test('formal source wrappers pure argv and server finite projection never inspec
     );
     expect(missing.code).toBe(1);
     expect(missing.stderr).toContain('terminal_bundle_unavailable\n');
-    expect(missing.stderr).toContain('npm run release:build');
+    expect(missing.stderr).toContain('bun run release:build');
     expect(missing.stderr).not.toContain(root);
     const missingTUI = await execute([process.execPath, driver(root, 'TUI', true)], root, home);
     expect(missingTUI.code).toBe(1);
@@ -283,7 +285,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     stopped = false,
     databasePath = '';
   const directoryObservations: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -343,7 +345,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
       calls++;
       if (user === 'New task: formal TUI task') {
         writeFileSync(join(root, 'tui-model-started'), 'original model waiting');
-        while (!stopped && !existsSync(join(root, 'release-tui-model'))) await Bun.sleep(5);
+        while (!stopped && !existsSync(join(root, 'release-tui-model'))) await fixtureDelay(5);
       }
       const frame = (delta: unknown, finish_reason: string | null) =>
         `data: ${JSON.stringify({ id: 'formal', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -367,7 +369,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     const built = await buildTerminalBundle({
       destination: candidate,
       repositoryRoot,
-      bunExecutable: process.execPath,
+      nodeExecutable: process.execPath,
     });
     timing.phase('candidate_build', 'end', {
       durationMs: Math.round(performance.now() - buildOrigin),
@@ -555,9 +557,10 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     writeFileSync(
       ptyDriver,
       `import assert from 'node:assert/strict';
+import {setTimeout as sleep} from 'node:timers/promises';
 import {existsSync,writeFileSync} from 'node:fs';
 import {ptyDeadline,spawnTuiPTY,terminateTuiTree} from ${JSON.stringify(pathToFileURL(join(repositoryRoot, 'apps/cli/test/fixtures/tui-pty.ts')).href)};
-const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
+const owned=spawnTuiPTY({cmd:[${JSON.stringify(process.execPath)},...${JSON.stringify(testRuntimeFlags)},${JSON.stringify(tui)},'--thread','formal-session','--workspace',${JSON.stringify(workspace)},'--server',${JSON.stringify(socket)}],cwd:${JSON.stringify(workspace)}});
 const cancelled=new AbortController();
 process.once('SIGTERM',()=>cancelled.abort(Error('owned PTY cancelled')));
 const cancellation=new Promise((_,reject)=>cancelled.signal.addEventListener('abort',()=>reject(cancelled.signal.reason),{once:true}));
@@ -577,7 +580,7 @@ async function readUntil(text,seconds){
   cancelled.signal.throwIfAborted();
   assert.ok(Date.now()<end,'formal PTY deadline '+owned.text().slice(-4000));
   await owned.drain();
-  await Bun.sleep(20);
+  await sleep(20);
  }
 }
 async function key(value,text){action=true;await owned.key(value);await readUntil(text,10);}
@@ -595,7 +598,7 @@ async function selectDeleteTarget(){
   if(!frame.includes('Loading session history')&&target>=0&&selected>=0){
    action=true;await owned.key(target<selected?'\\x1b[A':'\\x1b[B');
   }
-  await Bun.sleep(20);
+  await sleep(20);
  }
 }
 try{
@@ -609,7 +612,7 @@ try{
  while(!existsSync(${JSON.stringify(join(root, 'tui-model-started'))})){
   cancelled.signal.throwIfAborted();
   assert.ok(Date.now()<end,'original model did not start');
-  await owned.drain();await Bun.sleep(20);
+  await owned.drain();await sleep(20);
  }
  await key('\\x12','Select Session (arrows/Enter, Esc)');
  await readUntil('Directory delete target',10);
@@ -629,13 +632,13 @@ try{
   const frame=owned.viewport();
   if(frame.includes('Working')&&!frame.includes('Select Session (arrows/Enter, Esc)')&&!frame.includes('Delete Session?'))break;
   assert.ok(Date.now()<closedDeadline,'confirmed directory deletion did not return to original main '+frame);
-  await Bun.sleep(20);
+  await sleep(20);
  }
  writeFileSync(${JSON.stringify(join(root, 'release-tui-model'))},'explicit fixture release');
  await readUntil('FORMAL TUI COMPLETE',10);
  await owned.key('\\x11');
  const exitDeadline=Date.now()+5000;
- while(!owned.ended&&Date.now()<exitDeadline){cancelled.signal.throwIfAborted();await cancellable(owned.drain());await cancellable(Bun.sleep(20));}
+ while(!owned.ended&&Date.now()<exitDeadline){cancelled.signal.throwIfAborted();await cancellable(owned.drain());await cancellable(sleep(20));}
  const code=await ptyDeadline(cancellable(Promise.all([owned.host.exited,owned.eof]).then(([code])=>code)),3000,'host exit timeout');
  assert.equal(code,0);
  await owned.drain();

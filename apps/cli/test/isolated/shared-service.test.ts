@@ -1,13 +1,15 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { startService } from '@kite-ai/service';
 import { readDaemonReservation, selectDaemonEndpoint } from '@kite-ai/service/daemon';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { assertSharedWorkspace, connectSharedService } from '../../host/shared-service';
 
@@ -15,15 +17,15 @@ const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.
 test('Node import outside the checkout does not load the native daemon entry', async () => {
   const root = realpathSync(temporaryDirectory('kite-shared-import-'));
   try {
-    const build = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../../host/shared-service.ts')],
+    const build = await testBuild({
+      entrypoints: [join(import.meta.dirname, '../../host/shared-service.ts')],
       target: 'node',
       external: ['@kite-ai/service/daemon'],
       outdir: root,
     });
     expect(build.success).toBe(true);
     const url = pathToFileURL(join(root, 'shared-service.js')).href;
-    const child = Bun.spawn(
+    const child = testSpawn(
       [
         'node',
         '--input-type=module',
@@ -172,10 +174,10 @@ async function remoteFixture(drift = false) {
   const workspace = join(root, 'workspace');
   privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
-  const child = Bun.spawn(
+  const child = testSpawn(
     [
       'bun',
-      join(import.meta.dir, '../fixtures/shared-service-child.ts'),
+      join(import.meta.dirname, '../fixtures/shared-service-child.ts'),
       root,
       drift ? 'drift' : 'original',
     ],

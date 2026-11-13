@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { estimateModelContext, projectModelContext } from '../../src/context-estimate';
 import { recordedTokenUsage } from '../../src/token-usage';
 

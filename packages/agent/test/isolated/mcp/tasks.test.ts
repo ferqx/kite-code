@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { expect, test } from '#kite-test';
 import type {
   JobContext,
   JobDefinition,

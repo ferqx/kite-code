@@ -1,7 +1,9 @@
-import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -22,7 +24,7 @@ process.once('SIGTERM', interrupted);
 if (process.platform === 'win32') process.on('message', stop);
 const output: Uint8Array[] = [];
 const owned = spawnTuiPTY({
-  cmd: [process.execPath, '--no-install', input.runner],
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
   cwd: input.root,
   env: {
     HOME: input.root,
@@ -61,16 +63,16 @@ const wait = async (text: string) => {
       throw Error(`expected ${text} tail=${frame.text.slice(-3000)}`);
     }
     if (owned.ended) throw Error(`permission host exited before ${text}`);
-    await Bun.sleep(100);
+    await testSleep(100);
   }
 };
 const key = async (value: string) => {
   abort.signal.throwIfAborted();
   await owned.key(value);
-  await Bun.sleep(200);
+  await testSleep(200);
 };
 const pump = async () => {
-  await Bun.sleep(400);
+  await testSleep(400);
   await owned.drain();
 };
 const send = async (text: string) => {
@@ -199,7 +201,7 @@ try {
   );
   await key('\x11');
   const exitEnd = Date.now() + 6000;
-  while (!owned.ended && Date.now() < exitEnd) await Bun.sleep(100);
+  while (!owned.ended && Date.now() < exitEnd) await testSleep(100);
   const [exitCode] = await ptyDeadline(
     Promise.all([owned.host.exited, owned.eof]),
     3000,

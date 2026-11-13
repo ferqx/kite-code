@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Command, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 
 test('ordinary Ink keeps the original conversation layout and complete result; diagnostics require an explicit option', async () => {
@@ -110,7 +111,7 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
   const controller = new TuiController(port);
   await controller.select('private-session');
   const app = render(<TuiSession controller={controller} />);
-  const tick = () => Bun.sleep(30);
+  const tick = () => fixtureDelay(30);
   try {
     await tick();
     expect(app.lastFrame()).toContain('Kite Code');
@@ -183,7 +184,7 @@ for (const observationFailed of [false, true]) {
     const ui = render(<TuiSession controller={controller} />);
     try {
       await controller.exportLoadedText();
-      await Bun.sleep(30);
+      await fixtureDelay(30);
       expect(controller.state.error).toBe('Export failed');
       expect(ui.lastFrame()).toContain('Export failed');
       expect(ui.lastFrame()).not.toContain('observation_unavailable');
@@ -200,7 +201,7 @@ for (const failure of ['tui_identity_mismatch', 'temporary_history_read_failure'
     await controller.select('a');
     const ui = render(<TuiSession controller={controller} />);
     try {
-      await Bun.sleep(30);
+      await fixtureDelay(30);
       expect(controller.state.error).toBe(failure);
       expect(controller.state.snapshotStale).toBe(true);
       if (failure.includes('identity')) expect(ui.lastFrame()).toContain(failure);
@@ -264,7 +265,7 @@ test('ordinary Ink reports observation identity refusal and clears successful sn
   controller.observationUnavailable('store_changed');
   const ui = render(<TuiSession controller={controller} />);
   try {
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(ui.lastFrame()).toContain('observation_unavailable:store_changed');
   } finally {
     ui.unmount();
@@ -280,18 +281,18 @@ test('ordinary Ink hides reconciliation errors but shows a later action failure 
   await controller.select('a');
   const ui = render(<TuiSession controller={controller} />);
   try {
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(controller.state.errorSource).toBe('snapshot');
     expect(ui.lastFrame()).not.toContain('temporary_reconciliation_failure');
     controller.port.readSession = async () => {
       throw Error('Export failed');
     };
     await controller.select('a', { reconcile: false });
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(controller.state.error).toBe('Export failed');
     expect(ui.lastFrame()).not.toContain('Export failed');
     await controller.exportLoadedText();
-    await Bun.sleep(30);
+    await fixtureDelay(30);
     expect(controller.state.errorSource).toBeUndefined();
     expect(ui.lastFrame()).toContain('Export failed');
   } finally {

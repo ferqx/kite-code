@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
@@ -15,6 +14,8 @@ import {
   createDefaultProcessConfiguration,
   createSummaryCompressor,
 } from '@kite-ai/service/configuration';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { startService } from '../../src';
 
 for (const { guardedReset, rejectedSummary } of [
@@ -29,7 +30,7 @@ for (const { guardedReset, rejectedSummary } of [
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
     const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
     const requests: Record<string, unknown>[] = [];
-    const provider = Bun.serve({
+    const provider = await fixtureServe({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {

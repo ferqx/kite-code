@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Message, Run } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { completeRunReplies } from '../src/run-reply-copy';
 
 const run: Run = {

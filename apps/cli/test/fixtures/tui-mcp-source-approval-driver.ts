@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { closeSync, constants, fsyncSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 const [controlUrl, executable, hostPath, root, evidence, storeId] = process.argv.slice(2) as [
@@ -99,7 +100,7 @@ const wait = async (text: string, compact = false, end = Date.now() + 10000) => 
     }
     if (Date.now() > end) throw Error(`owned_frame_deadline:${text}`);
     if (active!.ended) throw Error('owned_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const waitNewOriginal = async (previous: string[]) => {
@@ -117,7 +118,7 @@ const waitNewOriginal = async (previous: string[]) => {
     }
     if (Date.now() > end) throw Error('owned_new_original_deadline');
     if (active!.ended) throw Error('owned_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const sourceQuestionReady = async (questionId: string, decision: string) => {
@@ -135,7 +136,7 @@ const sourceQuestionReady = async (questionId: string, decision: string) => {
     }
     if (Date.now() > end) throw Error(`owned_source_question_ready_deadline:${questionId}`);
     if (active!.ended) throw Error('owned_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string, preserveSelectedFrame = false) => {
@@ -165,7 +166,7 @@ const chooseSource = async (label: string) => {
       // Require the real selected row within the original navigation deadline;
       // an incomplete paint consumes no key and grants no retained observation.
       if (Date.now() > end) throw Error('owned_source_selection_absent');
-      await Bun.sleep(50);
+      await testSleep(50);
       step--;
       continue;
     }
@@ -183,7 +184,7 @@ const start = async (phase: string) => {
   decodeFailure = undefined;
   retained = undefined;
   active = spawnTuiPTY({
-    cmd: [executable, '--no-install', hostPath],
+    cmd: [executable, '--no-global-search-paths', hostPath],
     cwd: root,
     env: {
       HOME: root,
@@ -221,7 +222,7 @@ const start = async (phase: string) => {
     }
     if (Date.now() > end) throw Error('owned_frame_deadline:workspace-trust-or-main');
     if (active!.ended) throw Error('owned_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const sources = async () => {
@@ -235,7 +236,7 @@ const sources = async () => {
 const close = async (phase: string) => {
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!active!.ended && Date.now() < end) await Bun.sleep(50);
+  while (!active!.ended && Date.now() < end) await testSleep(50);
   const [code] = await ptyDeadline(
     Promise.all([active!.host.exited, active!.eof]),
     3000,
@@ -287,7 +288,7 @@ try {
         break;
       if (Date.now() > navigationDeadline)
         throw Error(`owned_source_management_close_deadline:${viewport}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     // The existing observer must publish a fresh, exact original card after
     // submission. No approval or Source answer is sent to obtain this read.
@@ -315,7 +316,7 @@ try {
       if (completion) break;
       if (Date.now() > navigationDeadline)
         throw Error('owned_source_original_refresh_completion_deadline');
-      await Bun.sleep(5);
+      await testSleep(5);
     }
     await wait(`approval[${ordinary.id}]originalSessiona`, true, navigationDeadline);
     if ((await current()).text.includes('Ctrl+A: read required attachment.')) {
@@ -325,7 +326,7 @@ try {
         const frame = await current();
         if (frame.fresh && !frame.text.includes('Ctrl+A: read required attachment.')) break;
         if (Date.now() > deadline) throw Error('owned_source_attachment_read_deadline');
-        await Bun.sleep(5);
+        await testSleep(5);
       }
     }
     // The ordinary production approval panel uses an explicit selected action.
@@ -345,7 +346,7 @@ try {
         break;
       if (Date.now() > approvalDeadline)
         throw Error(`owned_source_approval_focus_deadline:${viewport}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
     await wait('仅此次');
     await key('\r');

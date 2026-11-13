@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -20,6 +20,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -81,7 +82,7 @@ native(
           ),
         ).env,
         supervisorPath: assets.runner,
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: assets.shell,
         windows: {
           fullShellExecutable: assets.fullShell,
@@ -208,7 +209,7 @@ native(
       const deadline = Date.now() + timeoutMs;
       while (!(await predicate())) {
         if (Date.now() > deadline) throw Error('shell_search_deadline');
-        await Bun.sleep(10);
+        await sleepTimer(10);
       }
     };
     try {
@@ -278,7 +279,7 @@ native(
           await until(async () =>
             (await store.getView(sessionId)).runs.some((run) => !run.isActive),
           );
-          expect(await Bun.file(join(root, 'approved.txt')).text()).toBe('approved-external');
+          expect(readFileSync(join(root, 'approved.txt'), 'utf8')).toBe('approved-external');
           const native = (await store.listExecutions(sessionId)).find(
             (item) => item.definitionId === 'shell.command',
           )!;
@@ -294,7 +295,7 @@ native(
             request: { kind: 'run.start', content: 'Search the source' },
           });
           expect(externalStep).toBe(before);
-          expect(await Bun.file(join(root, 'approved.txt')).text()).toBe('approved-external');
+          expect(readFileSync(join(root, 'approved.txt'), 'utf8')).toBe('approved-external');
         } else if (sessionId === 'child-root') {
           await until(
             async () => (await store.getView(sessionId)).runs.some((run) => !run.isActive),
@@ -349,7 +350,7 @@ native(
         expect(execution?.status).toBe('succeeded');
         expect((await cold.getMetadata()).lastChangeCursor).toBe(before);
         expect([rootStep, childStep, planningStep, externalStep]).toEqual(counts);
-        expect(await Bun.file(join(root, 'approved.txt')).text()).toBe('approved-external');
+        expect(readFileSync(join(root, 'approved.txt'), 'utf8')).toBe('approved-external');
       } finally {
         await cold.close();
       }

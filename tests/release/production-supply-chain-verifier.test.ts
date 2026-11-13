@@ -1,9 +1,9 @@
-import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { describe, expect, test } from '#kite-test';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
 import { buildReleaseEvidenceBundle } from '../../scripts/release/evidence-bundle';
 import {

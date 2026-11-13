@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import type { Json } from '../../extensions';
 import { canonicalJson } from '../../json';
+import { nodeRuntimeFlags } from '../../platform/runtime-flags';
 import { AgentError } from '../../storage/types';
 import { validWorktreeFailure } from './errors';
 
@@ -41,9 +42,10 @@ export interface GitWorktreeConfiguration {
   configurationId: string;
   identity?: string;
   sourceCwd: string;
-  bunPath: string;
+  runtimePath: string;
   workerPath: string;
-  configPath: string;
+  /** Historical configuration used to recognize a saved command. */
+  configPath?: string;
   git: { path: string; sha256: string };
   hooksPath: string;
   /** Trusted host location; never supplied by a model. Older explicit-path configurations omit it. */
@@ -555,7 +557,11 @@ export function buildPowerShellWorkerCommand(
   return `& ${args.map((value) => `'${value.replaceAll("'", "''")}'`).join(' ')}`;
 }
 
-function workerArguments(configuration: GitWorktreeConfiguration, request: WorktreeRequest) {
+function workerArguments(
+  configuration: GitWorktreeConfiguration,
+  request: WorktreeRequest,
+  flags: readonly string[] = nodeRuntimeFlags,
+) {
   if (
     !validateRequest(request) ||
     request.configurationId !== configuration.configurationId ||
@@ -571,9 +577,8 @@ function workerArguments(configuration: GitWorktreeConfiguration, request: Workt
   const body = canonicalJson(request as unknown as Json);
   if (Buffer.byteLength(body) > limits.payloadBytes) throw new AgentError('inspection_limit');
   return [
-    configuration.bunPath,
-    '--no-env-file',
-    `--config=${configuration.configPath}`,
+    configuration.runtimePath,
+    ...flags,
     configuration.workerPath,
     Buffer.from(body).toString('base64url'),
   ];
@@ -582,21 +587,19 @@ export function parseWorkerCommand(
   command: string,
   configuration: GitWorktreeConfiguration,
 ): WorktreeRequest | null {
+  const flags = configuration.configPath
+    ? ['--no-env-file', `--config=${configuration.configPath}`]
+    : nodeRuntimeFlags;
   const prefix =
-    [
-      configuration.bunPath,
-      '--no-env-file',
-      `--config=${configuration.configPath}`,
-      configuration.workerPath,
-    ]
-      .map(shellQuote)
-      .join(' ') + ' ';
+    [configuration.runtimePath, ...flags, configuration.workerPath].map(shellQuote).join(' ') + ' ';
   if (!command.startsWith(prefix)) return null;
   const encoded = command.slice(prefix.length);
   if (!/^'[A-Za-z0-9_-]+'$/.test(encoded)) return null;
   try {
     const request = decodeWorkerRequest(encoded.slice(1, -1));
-    return buildWorkerCommand(configuration, request) === command ? request : null;
+    return workerArguments(configuration, request, flags).map(shellQuote).join(' ') === command
+      ? request
+      : null;
   } catch {
     return null;
   }

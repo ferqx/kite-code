@@ -8,6 +8,7 @@ import {
   removeRuntimeTemp,
   verifyLaunchIdentities,
 } from '../../../jobs/launch-identity';
+import { nodeRuntimeFlags } from '../../../platform/runtime-flags';
 import { startDarwinBrowserOwner } from '../darwin-owner';
 import type { BrowserCodeExecutor, BrowserCodeResult } from '../execute';
 import { BrowserExecutorFailure } from '../executor-failure';
@@ -32,7 +33,7 @@ const MAX_CODE = 16384,
 const quote = (path: string) => `"${path.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 /** No Workspace, Profile, network, subprocess or arbitrary executable grant. */
 export function browserExecutorProfile(
-  bun: string,
+  runtime: string,
   worker: string,
   cwd: string = dirname(worker),
 ): string {
@@ -40,7 +41,7 @@ export function browserExecutorProfile(
     .filter(existsSync)
     .map((path) => realpathSync.native(path));
   const ancestors = new Set<string>();
-  for (const root of [bun, worker, join(cwd, 'placeholder'), ...systems]) {
+  for (const root of [runtime, worker, join(cwd, 'placeholder'), ...systems]) {
     for (let current = dirname(root); ; current = dirname(current)) {
       ancestors.add(current);
       if (dirname(current) === current) break;
@@ -51,12 +52,12 @@ export function browserExecutorProfile(
 (deny default)
 (deny network*)
 (deny process-fork)
-(allow process-exec (literal ${quote(bun)}))
+(allow process-exec (literal ${quote(runtime)}))
 (allow signal (target same-sandbox))
-(allow file-read* ${systems.map((path) => `(subpath ${quote(path)})`).join(' ')} (literal ${quote(bun)}) (literal ${quote(worker)}))
+(allow file-read* ${systems.map((path) => `(subpath ${quote(path)})`).join(' ')} (literal ${quote(runtime)}) (literal ${quote(worker)}))
 (allow file-read* (literal ${quote(cwd)}) (literal ${quote(dirname(worker))}))
 (allow file-read-metadata ${[...ancestors].map((path) => `(literal ${quote(path)})`).join(' ')})
-(allow file-map-executable ${systems.map((path) => `(subpath ${quote(path)})`).join(' ')} (literal ${quote(bun)}))
+(allow file-map-executable ${systems.map((path) => `(subpath ${quote(path)})`).join(' ')} (literal ${quote(runtime)}))
 (allow file-read* file-write* (literal "/dev/null"))
 (allow file-read* (literal "/dev/random") (literal "/dev/urandom"))
 (allow sysctl-read (sysctl-name "hw.*") (sysctl-name "kern.*") (sysctl-name "machdep.cpu.*") (sysctl-name "sysctl.proc_translated"))
@@ -78,21 +79,21 @@ export async function createBrowserExecutor(options: {
   scope: string;
   workerPath: string;
   guardianPath: string;
-  bunExecutable?: string;
+  runtimeExecutable?: string;
 }): Promise<BrowserExecutor> {
   if (process.platform !== 'darwin')
     throw new BrowserExecutorStartupError('browser_executor_unavailable', true);
   if (
     !options.scope ||
     options.scope.length > 1024 ||
-    !options.workerPath.endsWith('.js') ||
+    !options.workerPath.endsWith('.mjs') ||
     !options.guardianPath.endsWith('.js')
   )
     throw new BrowserExecutorStartupError('browser_executor_configuration', true);
   let facts: ReturnType<typeof launchIdentity>[];
   try {
     facts = [
-      launchIdentity(options.bunExecutable ?? process.execPath, true),
+      launchIdentity(options.runtimeExecutable ?? process.execPath, true),
       launchIdentity(options.workerPath, true),
       launchIdentity(options.guardianPath, true),
       launchIdentity('/usr/bin/sandbox-exec', true),
@@ -101,20 +102,19 @@ export async function createBrowserExecutor(options: {
   } catch {
     throw new BrowserExecutorStartupError('browser_executor_unavailable', true);
   }
-  const [bun, worker, guardian, sandbox] = facts;
+  const [runtime, worker, guardian, sandbox] = facts;
   const root = launchIdentity(
     realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-browser-executor-'))),
   );
   const owner = startDarwinBrowserOwner({
     guardianPath: guardian!.canonical,
-    bunExecutable: bun!.canonical,
+    runtimeExecutable: runtime!.canonical,
     executable: sandbox!.canonical,
     argv: [
       '-p',
-      browserExecutorProfile(bun!.canonical, worker!.canonical, root.canonical),
-      bun!.canonical,
-      '--no-env-file',
-      '--no-install',
+      browserExecutorProfile(runtime!.canonical, worker!.canonical, root.canonical),
+      runtime!.canonical,
+      ...nodeRuntimeFlags,
       worker!.canonical,
     ],
     cwd: root.canonical,

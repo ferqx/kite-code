@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../../scripts/tooling/process';
 
 test('actual 80x24 original Job stop, complete paged output and completed-parent child logs stay independent', async () => {
   const program = `import os,pty,subprocess,select,time,signal,json,re,tempfile,fcntl,termios,struct,shutil
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-job-reader-');root=os.path.join(temporary.name,'runtime');os.mkdir(root,0o700);statefile=os.path.join(temporary.name,'state.json');facts=os.path.join(temporary.name,'facts.json');wire=os.path.join(temporary.name,'wire.jsonl');env=dict(os.environ);env.update(KITE_TUI_VIEWPORT=os.path.join(temporary.name,'viewport.txt'),KITE_TUI_ROOT=root,KITE_TUI_STATE=statefile,KITE_TUI_FACTS=facts,KITE_TUI_WIRE=wire)
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dir, 'executions.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
+p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dirname, 'executions.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
 def pump():
  global buffer,full
  if select.select([master],[],[],.05)[0]:
@@ -107,7 +108,10 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master);temporary.cleanup()
 `;
-  const processChild = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+  const processChild = spawnFixtureProcess(['python3', '-c', program], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   const [out, err, exit] = await Promise.all([
     new Response(processChild.stdout).text(),
     new Response(processChild.stderr).text(),

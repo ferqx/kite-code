@@ -1,7 +1,9 @@
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { persistentWorktreeDirectory } from '../../fixtures/worktree-filesystem';
 
 const helper = new URL('../../e2e/live/model/git-worktree-native-preflight.ts', import.meta.url)
@@ -29,7 +31,7 @@ ${body}
 `,
     { mode: 0o600 },
   );
-  const child = Bun.spawn([process.execPath, driver], {
+  const child = spawnFixtureProcess([process.execPath, driver], {
     env: { ...process.env, HOME: fixtureHome, USERPROFILE: fixtureHome },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -55,7 +57,7 @@ for (const reasonKind of ['error', 'null'] as const)
     `native worktree preflight preserves ${reasonKind} cancellation after original stop through capture and close`,
     async () => {
       const root = persistentWorktreeDirectory(`kite-native-preflight-cancel-${reasonKind}-`);
-      const built = await Bun.build({
+      const built = await buildFixture({
         entrypoints: [
           fileURLToPath(
             new URL(
@@ -66,7 +68,7 @@ for (const reasonKind of ['error', 'null'] as const)
         ],
         outdir: join(root, 'assets'),
         naming: 'shell-supervisor.js',
-        target: 'bun',
+        target: 'node',
       });
       expect(built.success).toBe(true);
       const report = await probe(

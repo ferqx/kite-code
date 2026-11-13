@@ -49,14 +49,11 @@ async function launch() {
     const t = globalThis as Globals,
       original = globalThis.fetch;
     t.mcpBrowserPhysical = [];
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        t.mcpBrowserPhysical.push({ path: url.pathname, method: args[1]?.method ?? 'GET' });
-        return original(...args);
-      },
-      { preconnect: original.preconnect },
-    );
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const url = new URL(String(args[0]));
+      t.mcpBrowserPhysical.push({ path: url.pathname, method: args[1]?.method ?? 'GET' });
+      return original(...args);
+    }, {});
   });
   return page;
 }

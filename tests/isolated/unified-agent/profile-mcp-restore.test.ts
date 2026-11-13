@@ -1,16 +1,17 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import type { McpStdioProcessEvidence } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import type { createClient, ExtensionCommandRequest, Json } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import {
   retainWindowsOwnedProcessObservation,
   type WindowsOwnedProcessObservation,
@@ -21,9 +22,12 @@ import {
   uninstallTerminalBundle,
 } from '../../../scripts/release/terminal-bundle';
 import { observeNativeProcess } from '../../../scripts/runtime/unified-soak-native';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 const files = [
   ['mcpConfiguration', 'mcp.json'],
   ['mcpApprovals', 'mcp-approvals.json'],
@@ -48,7 +52,7 @@ async function until<T>(label: string, read: () => Promise<T | undefined>) {
     const value = await read();
     if (value !== undefined) return value;
     if (performance.now() > end) throw Error(`mcp_restore_deadline:${label}`);
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 function questions(path: string, ids: string[]) {
@@ -68,7 +72,7 @@ function alive(pid: number) {
   }
 }
 async function execute(argv: string[], cwd: string, home: string) {
-  const child = Bun.spawn(argv, {
+  const child = spawnFixtureProcess(argv, {
     cwd,
     env: { PATH: '/usr/bin:/bin', HOME: home, LANG: 'C.UTF-8' },
     stdin: 'ignore',
@@ -202,19 +206,16 @@ test(
     const windowsPeers: WindowsOwnedProcessObservation[] = [];
     const wire: { method: string; path: string }[] = [],
       parentFetch = globalThis.fetch;
-    globalThis.fetch = Object.assign(
-      async (...args: Parameters<typeof fetch>) => {
-        const value = args[0],
-          url = new URL(value instanceof Request ? value.url : String(value));
-        wire.push({
-          method: args[1]?.method ?? (value instanceof Request ? value.method : 'GET'),
-          path: url.pathname,
-        });
-        return parentFetch(...args);
-      },
-      { preconnect: parentFetch.preconnect },
-    );
-    const provider = Bun.serve({
+    globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+      const value = args[0],
+        url = new URL(value instanceof Request ? value.url : String(value));
+      wire.push({
+        method: args[1]?.method ?? (value instanceof Request ? value.method : 'GET'),
+        path: url.pathname,
+      });
+      return parentFetch(...args);
+    }, {});
+    const provider = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       fetch() {
@@ -226,7 +227,7 @@ test(
       const built = await buildTerminalBundle({
         destination: join(root, 'candidate'),
         repositoryRoot,
-        bunExecutable: process.execPath,
+        nodeExecutable: process.execPath,
       });
       const installed = installTerminalBundle({
         bundleRoot: built.root,
@@ -242,11 +243,11 @@ test(
         root: join(installed.releaseRoot, 'node_modules/@kite-ai/agent/storage/engine'),
         manifestSha256: built.manifest.sqlite.manifestSha256,
       });
-      const compiled = await Bun.build({
+      const compiled = await buildFixture({
         entrypoints: [
           join(repositoryRoot, 'apps/service/test/fixtures/mcp-source-packaged-server.ts'),
         ],
-        target: 'bun',
+        target: 'node',
         packages: 'external',
         outdir: join(root, 'fixture'),
         naming: 'peer.js',
@@ -321,7 +322,7 @@ test(
             'extensions_actions',
           ],
           spawnChild: (argv, options) =>
-            Bun.spawn([...argv], {
+            spawnFixtureProcess([...argv], {
               cwd: workspace,
               env: { ...options.env, HOME: home },
               stdin: 'pipe',

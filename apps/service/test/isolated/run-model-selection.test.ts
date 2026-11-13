@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -14,6 +14,8 @@ import {
   type FollowUpCommandRequest,
   type StartCommandRequest,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { createPermissionManagement } from '../../src/permission-management';
@@ -26,7 +28,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): P
     const result = await read();
     if (ready(result)) return result;
     if (Date.now() >= deadline) throw new Error('run_model_selection_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function rejectsCode(work: Promise<unknown>, code: string) {
@@ -53,7 +55,7 @@ async function fixture(
   const requests: { path: string; body: Record<string, unknown>; authorization: string | null }[] =
     [];
   let queuedFollowUp: string | undefined;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

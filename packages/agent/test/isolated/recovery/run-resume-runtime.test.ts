@@ -1,9 +1,12 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -15,7 +18,7 @@ async function until(check: () => Promise<boolean>) {
   const deadline = Date.now() + 5000;
   while (!(await check())) {
     if (Date.now() > deadline) throw Error('resume_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 for (const mode of [
@@ -66,9 +69,10 @@ for (const mode of [
             ].includes(mode)
           ? 'completion'
           : mode;
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./run-resume-crash-child.ts', import.meta.url)),
         directory,
         seedMode,
@@ -547,9 +551,10 @@ for (const mode of [
   test(`genuine SIGKILL reconstructs trusted Tool failure streak at ${mode}`, async () => {
     const { streakBinding } = await import('./run-resume-streak-fixture');
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-streak-resume-')));
-    const child = Bun.spawn(
+    const child = spawnProcess(
       [
         process.execPath,
+        ...testRuntimeFlags,
         fileURLToPath(new URL('./run-resume-streak-crash-child.ts', import.meta.url)),
         directory,
         mode,

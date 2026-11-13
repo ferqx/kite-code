@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -11,6 +11,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
 import {
   compressContext,
   deleteSession,
@@ -120,7 +121,7 @@ test('CLI public management commits once after physical lost response; original 
         const application = await readOrdinaryCommandApplication(client, fact);
         if (application?.run && !application.run.isActive) return fact;
       }
-      await Bun.sleep(2);
+      await testSleep(2);
     }
     throw Error('fixture_wait');
   }
@@ -179,7 +180,7 @@ test('CLI public management commits once after physical lost response; original 
     const finishDeadline = Date.now() + 5000;
     while ((await client.getView('s')).runs.some((run) => run.isActive)) {
       if (Date.now() > finishDeadline) throw Error('original_model_not_terminal');
-      await Bun.sleep(2);
+      await testSleep(2);
     }
     const view = await client.getView('s'),
       selection = view.session.contextSelectionId;

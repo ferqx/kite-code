@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
 import { useNativeInputImages } from '../../src/native-input-images';
 import { installImagePreviewWorker } from '../image-preview-worker.fixture';

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +10,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { spawnSync as spawnProcessSync } from '../../../../../scripts/tooling/process';
 import type { AuthorizationRequest, ToolContext, ToolResult } from '../../../src/extensions';
 import {
   createFileTools,
@@ -240,12 +241,12 @@ test('only actual parent-creation attempts report possible residue, and close un
   const binding = fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url));
   const entry = new URL('../../../src/files.ts', import.meta.url).href;
   const types = new URL('../../../src/storage/types.ts', import.meta.url).href;
-  const child = Bun.spawnSync(
+  const child = spawnProcessSync(
     [
       process.execPath,
       '--eval',
       `
-      import {mock} from 'bun:test';
+      import {mock} from '#kite-test';
       import * as fs from 'node:fs';
       import {join} from 'node:path';
       import {tmpdir} from 'node:os';

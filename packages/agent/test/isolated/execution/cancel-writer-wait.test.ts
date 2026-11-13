@@ -1,10 +1,11 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { OperationRef } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -187,7 +188,7 @@ async function fixture(mode: 'model' | 'tool') {
       return runtime.cancelSession({ ...input, includeBackground: false });
     },
     async waitAbort(ms: number) {
-      return Promise.race([aborted.promise.then(() => true), Bun.sleep(ms).then(() => false)]);
+      return Promise.race([aborted.promise.then(() => true), sleepTimer(ms).then(() => false)]);
     },
     async close() {
       if (held) {
@@ -231,7 +232,7 @@ for (const kind of ['command', 'run', 'execution', 'session'] as const) {
         expect(await f.store.getCommand('cancel')).toBeNull();
         expect((await f.store.getCommand('run'))?.cancelRequestedAt).toBeNull();
         if (kind === 'command' && mode === 'model') {
-          await Bun.sleep(1150);
+          await sleepTimer(1150);
           expect(settled).toBe(false);
         }
         f.unlock();
@@ -537,7 +538,7 @@ for (const readFault of [false, true]) {
         });
       if (readFault) await readFailed.promise;
       const deadline = Date.now() + 1000;
-      while (!cancelWrites && Date.now() < deadline) await Bun.sleep(1);
+      while (!cancelWrites && Date.now() < deadline) await sleepTimer(1);
       expect(cancelWrites).toBe(1);
       expect(settled).toBe(false);
       expect(await store.getCommand('cancel-subtree')).toBeNull();

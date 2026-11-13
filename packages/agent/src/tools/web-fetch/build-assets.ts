@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { build as bundle } from '../../../../../scripts/tooling/bun-build';
 import { desktopModulePlugin } from '../../../scripts/desktop-bundling';
+import { runtimeBuildOptions } from '../../../scripts/runtime-build-options';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'tools/web-fetch');
 mkdirSync(destination, { recursive: true });
-const build = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'extractor-worker.ts')],
+const build = await bundle({
+  entrypoints: [resolve(import.meta.dirname, 'extractor-worker.ts')],
   outdir: destination,
-  target: 'bun',
+  ...runtimeBuildOptions(destination),
   packages: 'bundle',
   // jsdom owns runtime CSS/DOM assets. Readability and Turndown/Domino are pure JS.
   external: ['jsdom'],

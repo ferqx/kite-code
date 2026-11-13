@@ -1,9 +1,9 @@
-import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { deflateSync, inflateSync } from 'node:zlib';
@@ -16,6 +16,8 @@ import type { AgentClient, ExtensionCommandRequest } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, mock, test } from '#kite-test';
+import type { serveLoopbackWebSocket } from '../../../service/src/loopback-server';
 import { NativeBrowserPageHost } from '../../electron/browser-page-host';
 import { callerMetadata, NativeCallerJournal } from '../../electron/caller-journal';
 import { NativeExtensions } from '../../electron/extensions';
@@ -427,6 +429,13 @@ Object.assign(globalThis, {
 const { createRoot } = await import('react-dom/client');
 const { NativeDesktop } = await import('../../src/native');
 const { registerNativeBrowserIpc } = await import('../../electron/native-browser');
+let serveFixture: typeof serveLoopbackWebSocket = async () => {
+  throw Error('test_websocket_fixture_missing');
+};
+mock.module('../../../service/src/loopback-server', () => ({
+  serveLoopbackWebSocket: (options: Parameters<typeof serveLoopbackWebSocket>[0]) =>
+    serveFixture(options),
+}));
 const { createDesktopBrowserTransport } = await import('../../../service/src/desktop-browser');
 bootstrap.window.close();
 
@@ -601,7 +610,7 @@ for (const mode of [
       return reply.value;
     };
     const originalFetch = globalThis.fetch,
-      originalServe = Bun.serve;
+      originalServe = serveFixture;
     const captureProofs: {
       sha256: string;
       width: number;
@@ -629,7 +638,7 @@ for (const mode of [
         });
       }
     }) as typeof fetch;
-    Bun.serve = ((options: unknown) => {
+    serveFixture = (async (options: unknown) => {
       serverOptions = options;
       return {
         port: 12345,
@@ -637,7 +646,7 @@ for (const mode of [
           serverStopped++;
         },
       };
-    }) as unknown as typeof Bun.serve;
+    }) as unknown as typeof serveFixture;
     let runtime!: AgentRuntime;
     const controller = actualBrowser.createBrowserController({
       sharedPage: true,
@@ -703,12 +712,18 @@ for (const mode of [
         let name = '',
           args: Json = {};
         const view = () => controller.view('a')!;
+        const pageRef = async () =>
+          actualBrowser.browserPageReference(
+            {
+              storeId,
+              sessionId: 'a',
+              runId: (await store.getExecution(request.requestId))!.runId!,
+            },
+            view(),
+          );
         if (turn === 1) {
           name = 'browser_open';
-          args = {
-            key: modelPhase === 0 ? 'same-page' : 'new-run-page',
-            url: 'http://localhost/fixture',
-          };
+          args = { url: 'http://localhost/fixture' };
         }
         if (modelPhase === 0 && turn === 2) {
           await askGate;
@@ -717,33 +732,22 @@ for (const mode of [
         }
         if (modelPhase === 0 && turn === 3) {
           name = 'browser_close';
-          args = {
-            key: 'release-before-final',
-            browser_id: view().browserId,
-            generation: view().generation,
-          };
+          args = { page_ref: await pageRef() };
         }
         if (modelPhase === 1 && turn === 2) {
           name = 'browser_snapshot';
-          args = { key: 'fresh-in-new-run', browser_id: view().browserId };
+          args = { page_ref: await pageRef() };
         }
         if (modelPhase === 1 && turn === 3) {
           name = 'browser_click';
-          args = {
-            key: 'one-click-new-run',
-            browser_id: view().browserId,
-            generation: view().generation,
-            seq: view().seq,
-            ref: '@e1',
-          };
+          const response = JSON.parse(
+            request.messages.filter((row) => row.role === 'tool').at(-1)!.content,
+          );
+          args = { element_ref: (response.details ?? response).element_refs[0].element_ref };
         }
         if (modelPhase === 1 && turn === 4) {
           name = 'browser_close';
-          args = {
-            key: 'release-new-run',
-            browser_id: view().browserId,
-            generation: view().generation,
-          };
+          args = { page_ref: await pageRef() };
         }
         yield* createFixedModel([
           name
@@ -971,7 +975,7 @@ for (const mode of [
     const flush = async (action: () => void = () => {}, ms = 25) =>
       act(async () => {
         action();
-        await Bun.sleep(ms);
+        await fixtureDelay(ms);
       });
     const button = (text: string) =>
       [...dom.window.document.querySelectorAll<HTMLButtonElement>('button')].find(
@@ -987,7 +991,7 @@ for (const mode of [
       while (!ready) {
         await act(async () => {
           ready = await check();
-          if (!ready) await Bun.sleep(25);
+          if (!ready) await fixtureDelay(25);
         });
         if (Date.now() > end)
           throw Error(`root_async_timeout:${dom.window.document.body.textContent?.slice(-3000)}`);
@@ -1053,7 +1057,7 @@ for (const mode of [
       // Test setup grants control through Main; production asks the persistent Question.
       await act(async () => {
         await browserRequest({ action: 'grant', id: pageId });
-        await Bun.sleep(35);
+        await fixtureDelay(35);
       });
       await until(() => host.state(pageId)?.phase === 'armed');
       const originalPageId = pageId,
@@ -1091,7 +1095,7 @@ for (const mode of [
       });
       await flush(() => button('返回网页')!.click());
       expect(calls.filter((call) => call.method === 'extensions.open')).toHaveLength(beforeNotes);
-      expect(posted.map((request) => request.actionId)).toEqual(['browser.capture']);
+      expect(posted).toHaveLength(0);
       const originalBrowser = controller.view('a')!;
       allowAsk();
       await until(() => unrelated && requests.length === 2);
@@ -1261,6 +1265,7 @@ for (const mode of [
       expect(fetches).toBeGreaterThan(0);
     } catch (error) {
       console.error('root_async_primary_failure', error);
+      const failedView = await runtime.getView('a').catch(() => undefined);
       console.error(
         'root_async_fixture_scope',
         JSON.stringify({
@@ -1272,6 +1277,14 @@ for (const mode of [
             commandId: request.commandId,
           })),
           humanControl: controller.view('a')?.state,
+          modelTurns: requests.length,
+          fetches,
+          daemonCreated,
+          executions: failedView?.executions.map(({ definitionId, status, result }) => ({
+            definitionId,
+            status,
+            result,
+          })),
           calls: calls.map((call) => call.method),
           last: control.requests.slice(-4).map((call) => call.method),
           views: views.map((view) => ({ url: view.webContents.url, visible: view.visible })),
@@ -1290,7 +1303,7 @@ for (const mode of [
       await runtime.close();
       disposeMain();
       globalThis.fetch = originalFetch;
-      Bun.serve = originalServe;
+      serveFixture = originalServe;
       restore();
       dom.window.close();
       owner.close();

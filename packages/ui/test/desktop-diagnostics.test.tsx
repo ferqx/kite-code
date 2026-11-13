@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import { DesktopDiagnosticsProvider } from '../src/desktop/diagnostics';
 import { TurnFailure } from '../src/desktop/TurnFailure';
 import type { Message } from '../src/desktop/types';

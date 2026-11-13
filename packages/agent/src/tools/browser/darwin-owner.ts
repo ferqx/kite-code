@@ -7,6 +7,7 @@ import {
   observeOwnedProcessIdentity,
   ownedProcessKernelState,
 } from '../../platform/process/owned-process-observation';
+import { nodeRuntimeFlags } from '../../platform/runtime-flags';
 
 export interface DarwinBrowserEvidence {
   ownerPid: number;
@@ -43,7 +44,7 @@ const same = (a: OwnedProcessIdentity | null, b: OwnedProcessIdentity | null) =>
 /** Reuse the sealed stdio guardian as a raw program owner. No MCP client or RPC session is created. */
 export function startDarwinBrowserOwner(input: {
   guardianPath: string;
-  bunExecutable: string;
+  runtimeExecutable: string;
   executable: string;
   /** Trusted fixed program arguments; never exposed as a browser operation. */
   argv?: readonly string[];
@@ -53,12 +54,16 @@ export function startDarwinBrowserOwner(input: {
   graceMs: number;
   startupTimeoutMs: number;
 }): DarwinBrowserOwner {
-  const child = spawn(input.bunExecutable, [input.guardianPath, '--browser-owner'], {
-    cwd: input.cwd,
-    env: {},
-    detached: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const child = spawn(
+    input.runtimeExecutable,
+    [...nodeRuntimeFlags, input.guardianPath, '--browser-owner'],
+    {
+      cwd: input.cwd,
+      env: {},
+      detached: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
   const stdout = new PassThrough(),
     stderr = new PassThrough();
   const evidence: DarwinBrowserEvidence = {

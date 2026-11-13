@@ -6,14 +6,16 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile, writeFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './image-previews-browser.fixture';
 
-const cache = path.resolve(import.meta.dir, '../../../.cache');
+const cache = path.resolve(import.meta.dirname, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'image-previews-browser-'));
 const output = path.join(artifact, 'dist');
 await build({
-  root: path.resolve(import.meta.dir, '..'),
+  root: path.resolve(import.meta.dirname, '..'),
   configFile: false,
   envFile: false,
   plugins: [react(), tailwindcss()],
@@ -24,7 +26,7 @@ await build({
     outDir: output,
     emptyOutDir: false,
     lib: {
-      entry: path.join(import.meta.dir, 'image-previews-browser.fixture.tsx'),
+      entry: path.join(import.meta.dirname, 'image-previews-browser.fixture.tsx'),
       formats: ['es'],
       fileName: 'fixture',
       cssFileName: 'fixture',
@@ -32,10 +34,10 @@ await build({
     target: 'esnext',
   },
 });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
     if (pathname === '/')
@@ -45,7 +47,7 @@ const server = Bun.serve({
       );
     const file = path.resolve(output, `.${pathname}`);
     if (!file.startsWith(output + path.sep)) return new Response(null, { status: 404 });
-    return new Response(Bun.file(file));
+    return new Response(await openFixtureFile(file));
   },
 });
 const browser = await chromium.launch({
@@ -213,7 +215,7 @@ try {
         assert.equal(ready.attachments.height, reopened.attachments.height);
         assert.deepEqual(errors, []);
         report.cases.push({ theme, width, stages, errors });
-        await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+        await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
         await page.close();
       }
   } else {
@@ -324,7 +326,7 @@ try {
         formats,
         errors,
       });
-      await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
+      await writeFixtureFile(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));
       console.log(
         JSON.stringify({
           throttle,

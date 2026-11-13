@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -159,7 +160,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
       }
       if (terminal?.ended) throw new WindowBoundary('branch_not_reached', `${stage}_host_exited`);
       if (Date.now() >= deadline) throw new WindowBoundary('branch_not_reached', stage);
-      await Bun.sleep(30);
+      await fixtureDelay(30);
     }
   };
   const screen = async (stage: string, match: (text: string) => boolean, ms = 30_000) => {
@@ -180,7 +181,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     options.signal.throwIfAborted();
     keys.push(kind);
     await terminal!.key(value);
-    await Bun.sleep(150);
+    await fixtureDelay(150);
   };
   const send = async (text: string, stage: string) => {
     await key(text, stage.includes('business_input') ? 'synthetic_business_text' : 'slash_command');
@@ -400,7 +401,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     );
     const launch = () =>
       spawnTuiPTY({
-        cmd: [process.execPath, '--no-install', runner],
+        cmd: [process.execPath, ...process.execArgv, runner],
         cwd: workspace,
         env: {
           HOME: root,
@@ -1090,7 +1091,7 @@ if (import.meta.main) {
     caseId: 'U02-TUI-two-round-history-controls-subset',
     date: new Date().toISOString(),
     platform: process.platform,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     requestLimit: 40,
     timeoutMs: 600_000,
     code: liveCodeEvidence(),

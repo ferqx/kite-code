@@ -1,6 +1,8 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY } from './tui-pty';
 
 const [root, executable, fixture, repository] = process.argv.slice(2) as [
@@ -37,7 +39,7 @@ let failure: unknown;
 const cleanupErrors: unknown[] = [];
 const pump = async (ms = 50) => {
   abort.signal.throwIfAborted();
-  await Bun.sleep(ms);
+  await testSleep(ms);
   await active!.drain();
   abort.signal.throwIfAborted();
 };
@@ -68,19 +70,20 @@ const control = async (action: string) => {
   return waitAck(token);
 };
 const mark = (name: string, ack: Ack | null = null) => events.push({ kind: 'mark', name, ack });
-const key = (value: string) => {
+const key = async (value: string) => {
   abort.signal.throwIfAborted();
-  active!.host.terminal!.write(value);
+  await active!.host.write(value);
 };
 const line = (prefix: string, number: number) => `${prefix}_${String(number).padStart(2, '0')}`;
 
 try {
   active = spawnTuiPTY({
-    cmd: [executable, fixture, root],
+    cmd: [executable, ...testRuntimeFlags, fixture, root],
     cwd: repository,
     env: { TERM: 'xterm-256color', FORCE_COLOR: '3' },
     onData: (bytes) => events.push({ kind: 'data', hex: Buffer.from(bytes).toString('hex') }),
   });
+  await active.host.ready;
   start = readProcessStartIdentity(active.host.pid);
   if (!start) throw Error('scrollback_fixture_birth_unknown');
   const identity = { kind: 'scrollback-fixture', pid: active.host.pid, start };
@@ -90,17 +93,17 @@ try {
   mark('round2', await control('round2'));
   mark('round3', await control('round3'));
   mark('status', await control('status'));
-  key('editing-safe');
+  await key('editing-safe');
   await pump(400);
   mark('edited');
-  key('\x7f'.repeat('editing-safe'.length));
+  await key('\x7f'.repeat('editing-safe'.length));
   await pump(200);
   for (const [cols, name] of [
     [40, 'narrow'],
     [80, 'restored'],
   ] as const) {
     events.push({ kind: 'resize', cols, rows: 24 });
-    active.host.terminal!.resize(cols, 24);
+    await active.host.resize(cols, 24);
     await pump(400);
     mark(name);
   }
@@ -246,7 +249,7 @@ try {
       failure: failure ? String(failure) : null,
       cleanupErrors: cleanupErrors.map(String),
       elapsedSeconds: (performance.now() - started) / 1000,
-      transport: process.platform === 'win32' ? 'Bun ConPTY' : 'Bun POSIX PTY',
+      transport: process.platform === 'win32' ? 'ConPTY' : 'POSIX PTY',
       events,
     }),
   );

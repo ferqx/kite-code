@@ -44,7 +44,7 @@ Source 审批 Host、完整安全分页和跨 Session 原申请 journal 已接�
 
 Ctrl+C 保存中断意图，并用原 `expectedStoreId`/commandId 精确提交一次 cancel；即使尚无 runId，也不取消别的当前 Run。执行终态与 cancel 受理分开输出。`CommandOutcome.cancellationAttempted` 只在实际尝试提交原取消请求后为 true（丢失回执也保留）；宿主跨观察轮次依据该事实停止再次提交，不能以 signal 已 aborted 推断取消已经发送。信号在异步读取 Interaction 期间到达而本轮先返回 waiting 时，下一次观察仍须处理该取消意图。配套进程真实退出由 launcher 独立拥有，网络断开不停止 Service。
 
-验证：`bun run --cwd apps/cli typecheck`、`build`、`test` 和根 [thin-clients](../../tests/isolated/unified-agent/thin-clients.test.ts) 真实 Service 测试。P2 非交互调用者不替代 P5 完整终端交互或三平台发行验收。
+验证：`bun --cwd=apps/cli run typecheck`、`build`、`test` 和根 [thin-clients](../../tests/isolated/unified-agent/thin-clients.test.ts) 真实 Service 测试。P2 非交互调用者不替代 P5 完整终端交互或三平台发行验收。
 
 P3 `CLIOptions.answerInteraction` 是宿主显式注入的异步回答接口，参数为当前真实 Interaction 与网络截止 signal；CLI 不自行打开 stdin。运行期间读取原根 Session 的 pending 页，处理一次 ID/revision（包括实际 child 来源的根投影），回答固定原 presentationSessionId/Store/ID/revision 与稳定 answer commandId。输出 `answer saved`、`answer accepted; execution pending` 与最终实际 Run/Execution 分开；丢失回答响应只查询保存的 answer command，不重新提交。
 
@@ -104,7 +104,7 @@ Workflow 执行及 `--activate-skill` 已退役；CLI `--skill` 仍选择普通�
 
 CLI/TUI 开发入口默认使用当前用户的 `~/.kite-code` 数据根和 `development` profile，数据库直接位于 `~/.kite-code/development/core.db`；`runTUIProcess` 未传数据根时也使用同一用户路径，不以 `cwd` 推导。显式 `--data-root` 优先于宿主提供值和默认根。完整目录结构与旧 checkout 数据的读取方式见[本地开发](../../docs/development/local-development.md)。
 
-制品的普通文件、非软链和准确 SHA 校验在各平台保留；POSIX 另要求执行位，Windows 按原生进程启动语义接纳选定的 Bun `.exe`，不以缺失 Unix 执行位拒绝。此检查不替代发行制品的原生保护与 lease。[制品测试](test/artifact.test.ts)核当前真实 Bun、错误摘要、非文件与改写字节；模型 PTY 使用同一宿主校验。
+制品的普通文件、非软链和准确 SHA 校验在各平台保留；POSIX 另要求执行位，Windows 按原生进程启动语义接纳选定的 Node `.exe` 或旧候选明确绑定的 Bun `.exe`，不以缺失 Unix 执行位拒绝。此检查不替代发行制品的原生保护与 lease。[制品测试](test/artifact.test.ts)核实际 Node、错误摘要、非文件与改写字节；模型 PTY 使用同一宿主校验。
 
 当前正式与开发 TUI 已迁入原 Ink 的纯展示组件、菜单、首次配置和主屏消费，业务仍通过公共 Server port：Header 使用实际 Workspace URI、公开模型配置和当前权限读取，局部不可用不造成功事实。主输入、选择面板、完整结果与帮助沿[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)。[onboarding host](host/tui-onboarding.ts)用原 Trust、Provider、enabled/default CAS 与 GET 原 mutation 接首次配置；已有模型没有默认时可在原界面恢复，秘密不进入冷 intent。原刷新同时调用 [live output](host/tui-live-output.ts)、[Shell tails](host/tui-job-tails.ts) 和 [progress](host/tui-progress.ts)，验证原身份并接完整 Model、有限五行／16KiB tail、准确 child views、批准计划和实际压缩阶段；每次 tail 最多两页且沿原 cursor 前进，清理释放所属缓存，没有新轮询器。[MCP tool labels](host/tui-tool-labels.ts)只读既有完整 metadata、核 definition/version／name hash 后显示原工具名称，缓存只保当前目标且结束 clear，零连接／RPC。会话目录使用实际公共 activity 时间／路径／状态，不制造旧 UI 日期。普通启动不常驻开发横幅、原回执和机器 ID；开发和正式启动都拒绝 `--test-ui-diagnostics`；仅测试 fixture 或可信 host 的 `testDiagnostics:true` 可启用诊断展示，不改变业务链。原 caller、审批、取消、草稿、观察与生命周期门禁不变，纯参数测试见[test/tui-arguments.test.ts](test/tui-arguments.test.ts)。
 
@@ -268,6 +268,8 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 
 ## 开发 TUI 模型设置
 
+CLI 和 TUI 的模型凭据由同一用户级加密存储提供。发送和定时运行采用无交互读取。Linux 的共享 daemon 和配套 Service 通过用户 D-Bus 访问系统凭据服务。[模型凭据](../../docs/handbook/features/models-and-configuration.md#配置范围)
+
 `host/tui.tsx` 将公共 `listAllSkills(workspaceId,{storeId,signal})` 接入 `/skills`。全部页使用原准入 Store 与当前 Workspace，在固定目录 revision 下完整收集；宿主不扫描 Skill 文件、读取正文或制造执行请求。目录仅展示普通知识 metadata；R 刷新，Esc/Ctrl+C 释放所属读取。配对/共享使用同一方法，退出按已有所属生命周期处理。
 
 [模型 controller 测试](../../packages/ui/test/tui/models.test.tsx) 核对 stale、原观察、迟到与原查询；[实际 PTY 测试](test/isolated/tui-models-host.test.ts) 使用自有临时 profile、固定本机 compatible Provider 和标准 80×24 终端验证真实按键。最终资格与失败过程记录于[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。此接入不扩展 Native 的有限设置 IPC，也不代表远端模型发现或正式旧 TUI 切换完成。
@@ -318,7 +320,7 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 ## 通用终端候选安装
 
-新 `release:terminal` 的构建、完整 npm/固定 Bun 闭包、归档、安装、升级、回滚和使用锁卸载见[终端制品 owner](docs/terminal-release.md)。安装入口使用完整候选身份与独立 `default` profile；真实 macOS 搬迁与生命周期已验证，根正式入口已切换，完整跨平台资格仍待取得。
+新 `release:terminal` 的构建、完整 npm／固定 Node 闭包、归档、安装、升级、回滚和使用锁卸载见[终端制品 owner](docs/terminal-release.md)。安装入口使用完整候选身份与独立 `default` profile；真实 macOS 搬迁与生命周期已验证，根正式入口已切换，完整跨平台资格仍待取得。
 
 ## 问题与嵌套审批
 
@@ -435,7 +437,7 @@ Host 的 `readCompletion` 只读重核原成功 Code/Fork 的完整证明，按�
 
 ## 正式前门与 Native 登记
 
-`bun run agent` / `tui` 固定使用 `dist/unified-terminal` 的完整候选；先构建依赖和该候选。显式 source/candidate 选择不读取安装登记。独立安装的 `bin/kite` / `kite-tui` 前门可由 Native 安装器显式登记：它持原 Terminal 使用锁，复核双方 nonce、Native active 与完整 outer/inner 闭包；POSIX 执行 Native 包内 Bun 和固定 CLI/TUI。Windows 源码则转交 Native 稳定 C 前门，以内部 expected candidate 复核原选择，漂移在子进程／Profile 之前明确拒绝。Native 自身完整准入成功后才允许后续指针切换，其配套 Service 独立持同一完整闭包。Windows 原生资格仍待验，具体边界归[Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
+`bun run agent` / `tui` 固定使用 `dist/unified-terminal` 的完整候选；先构建依赖和该候选。显式 source/candidate 选择不读取安装登记。独立安装的 `bin/kite` / `kite-tui` 前门可由 Native 安装器显式登记：它持原 Terminal 使用锁，复核双方 nonce、Native active 与完整 outer/inner 闭包；POSIX 使用所选 Native 的包内运行时执行固定 CLI/TUI，新候选为 Node，旧候选继续使用自己的 Bun。Windows 源码则转交 Native 稳定 C 前门，以内部 expected candidate 复核原选择，漂移在子进程／Profile 之前明确拒绝。Native 自身完整准入成功后才允许后续指针切换，其配套 Service 独立持同一完整闭包。Windows 原生资格仍待验，具体边界归[Native owner](../desktop/docs/native-release.md#windows-managed-native-当前实现)。
 
 登记更新、撤销和原子指针的负责边界见[终端制品](docs/terminal-release.md)与[Native 制品](../desktop/docs/native-release.md)。纯帮助、版本、trace 及非 TTY 拒绝保持在业务准入之前。三条真实 CLI/TUI Work 已通过公共 Store 原 Command→Run 终态核对；本机证据限 macOS，不代表完整 §35 或其他平台。
 

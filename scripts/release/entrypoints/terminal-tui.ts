@@ -8,7 +8,7 @@ import {
 } from '../../../apps/cli/host/terminal-artifact';
 import { releaseErrorCode } from '../release-arguments';
 
-const bundleRoot = resolve(import.meta.dir, '..');
+const bundleRoot = resolve(import.meta.dirname, '..');
 export async function runInstalledTerminalTUI(
   argv: readonly string[] = process.argv.slice(2),
   candidateRoot: string = bundleRoot,
@@ -34,7 +34,7 @@ export async function runInstalledTerminalTUI(
     access?.release();
   }
 }
-if (import.meta.main) {
+if (Reflect.get(import.meta, 'main') === true) {
   try {
     process.exitCode = await runInstalledTerminalTUI();
   } catch (error) {

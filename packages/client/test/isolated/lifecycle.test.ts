@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test';
 import { createServer } from 'node:http';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import { createServiceLifecycleClient, type ServiceLifecycle } from '../../src';
 
 const profile = { dataRoot: '/private-fixture', name: 'new', accessKey: 'fixed' };
@@ -21,7 +22,7 @@ function status(): ServiceLifecycle {
 test('lifecycle status and one shutdown use original identity independently of business compatibility', async () => {
   const methods: string[] = [];
   let observed: unknown;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -68,7 +69,7 @@ test('lifecycle status and one shutdown use original identity independently of b
 test('identity, lifecycle version and invalid status reject before POST; busy remains an explicit failed request', async () => {
   let value: unknown = status();
   let posts = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -173,7 +174,7 @@ test('network release while lifecycle admission waits cannot issue shutdown; ove
   });
   let large = false;
   let posts = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -218,7 +219,7 @@ test('invalid accepted shutdown receipt stays unknown and never triggers an auto
   ]) {
     let posts = 0;
     let reads = 0;
-    const server = Bun.serve({
+    const server = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       fetch(request) {

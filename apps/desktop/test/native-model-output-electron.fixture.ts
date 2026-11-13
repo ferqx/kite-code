@@ -11,7 +11,7 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-const [outdir, root, dataRoot, storeId, endpoint, electronExecutable, control, bunExecutable] =
+const [outdir, root, dataRoot, storeId, endpoint, electronExecutable, control, runtimeExecutable] =
   process.argv.slice(2) as [string, string, string, string, string, string, string, string];
 function expect(value: unknown) {
   return {
@@ -82,9 +82,13 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await page.waitForFunction(() => {
-    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    const input = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="当前会话私有草稿"]',
+    );
     return (
-      input?.getAttribute('contenteditable') === 'true' &&
+      input &&
+      !input.readOnly &&
+      !input.disabled &&
       !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
     );
   });
@@ -105,9 +109,13 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await page.waitForFunction(() => {
-    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    const input = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="当前会话私有草稿"]',
+    );
     return (
-      input?.getAttribute('contenteditable') === 'true' &&
+      input &&
+      !input.readOnly &&
+      !input.disabled &&
       !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
     );
   });
@@ -259,7 +267,7 @@ try {
   const ps = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']));
   const line = ps.split('\n').find((line) => {
     const parts = line.trim().split(/\s+/);
-    return Number(parts[1]) === electronPid && parts.slice(2).join(' ') === bunExecutable;
+    return Number(parts[1]) === electronPid && parts.slice(2).join(' ') === runtimeExecutable;
   });
   servicePid = line ? Number(line.trim().split(/\s+/)[0]) : 0;
   expect(servicePid).toBeGreaterThan(0);
@@ -273,15 +281,19 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await page.waitForFunction(() => {
-    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    const input = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="当前会话私有草稿"]',
+    );
     return (
-      input?.getAttribute('contenteditable') === 'true' &&
+      input &&
+      !input.readOnly &&
+      !input.disabled &&
       !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
     );
   });
   await openSessionTools(page);
   phase('live_reload_ready');
-  expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText()).toBe(
+  expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue()).toBe(
     'PRIVATE NATIVE DRAFT',
   );
   // A second real BrowserWindow with the same preload/document is still not the admitted sender.
@@ -419,9 +431,13 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await page.waitForFunction(() => {
-    const input = document.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]');
+    const input = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="当前会话私有草稿"]',
+    );
     return (
-      input?.getAttribute('contenteditable') === 'true' &&
+      input &&
+      !input.readOnly &&
+      !input.disabled &&
       !document.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled
     );
   });
@@ -476,7 +492,20 @@ try {
     'native_attach',
     await (await nativeRootPage(application, 10000)).evaluate(async () => {
       try {
-        return await window.kiteNative!.request({ method: 'attach' });
+        const state = (await window.kiteNative!.request({ method: 'attach' })) as NativeState;
+        return {
+          generation: state.generation,
+          runs: state.selection?.runs.map(({ id, status, reason }) => ({ id, status, reason })),
+          executions: state.selection?.executions.map(({ id, kind, status, result }) => ({
+            id,
+            kind,
+            status,
+            code:
+              typeof result === 'object' && result !== null && !Array.isArray(result)
+                ? result.code
+                : undefined,
+          })),
+        };
       } catch (error) {
         return String(error);
       }

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { afterNativePresentation } from '../src/native-presentation-frame';
 
 function fixture({ hidden = false, frames = true } = {}) {

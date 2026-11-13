@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeCallerMetadata, NativeState } from './native-bridge';
+import { readNativeCallerBody } from './native-caller-body';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { NativeExecutionResult } from './native-result';
 /** Public metadata and finite original body reads; no profile or execution authority. */
@@ -57,45 +58,16 @@ export function NativeCallerView({
     active.current = readId;
     setReading(true);
     setError('');
-    let text = '',
-      offset = 0;
     try {
-      for (;;) {
-        const page = await bridge.request({
-          method: 'caller.body',
-          generation: state.generation,
-          commandId: row.request.commandId,
-          readId,
-          offset,
-          limit: 65536,
-        });
-        if (nonce !== epoch.current) return;
-        if (
-          !page ||
-          !('readId' in page) ||
-          !('kind' in page) ||
-          page.kind !== 'caller.body' ||
-          page.readId !== readId ||
-          page.commandId !== row.request.commandId ||
-          page.offset !== offset ||
-          page.bodyDigest !== row.bodyDigest
-        )
-          throw Error('caller_body_identity');
-        text += page.data;
-        if (page.eof) {
-          const bytes = new TextEncoder().encode(text);
-          const digest = Array.from(
-            new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
-            (b) => b.toString(16).padStart(2, '0'),
-          ).join('');
-          if (digest !== row.bodyDigest || bytes.length !== page.bodyBytes)
-            throw Error('caller_body_hash');
-          if (nonce === epoch.current) setBody(text);
-          return;
-        }
-        if (page.nextOffset <= offset) throw Error('caller_body_gap');
-        offset = page.nextOffset;
-      }
+      const text = await readNativeCallerBody({
+        bridge,
+        generation: state.generation,
+        commandId: row.request.commandId,
+        bodyDigest: row.bodyDigest,
+        readId,
+        owned: () => nonce === epoch.current,
+      });
+      if (text !== undefined && nonce === epoch.current) setBody(text);
     } catch (e) {
       if (nonce === epoch.current)
         setError(e instanceof Error ? e.message : 'caller_body_unavailable');

@@ -1,4 +1,8 @@
+import { workerData } from 'node:worker_threads';
+import { workerEndpoint } from '../../platform/process/worker-endpoint';
 import { captureCurrentWorkerThread } from '../../platform/process/worker-thread.darwin';
+
+const endpoint = workerEndpoint();
 
 // Runs synchronously before the unchanged main module, including main syntax errors.
 // The parent consumes exactly this private frame before the original business handler.
@@ -26,4 +30,10 @@ try {
       error instanceof Error && 'retainedResources' in error ? error.retainedResources : null,
   };
 }
-self.postMessage({ protocol: 'kite_worker_thread@1', thread, failure });
+endpoint.postMessage({ protocol: 'kite_worker_thread@1', thread, failure });
+if (thread) {
+  if (typeof workerData !== 'string') throw Error('worker_entrypoint_invalid');
+  const entrypoint = new URL(workerData);
+  if (entrypoint.protocol !== 'file:') throw Error('worker_entrypoint_invalid');
+  await import(entrypoint.href);
+}

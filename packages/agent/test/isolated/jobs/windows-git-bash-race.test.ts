@@ -1,9 +1,19 @@
-import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 
 const fixture = fileURLToPath(new URL('./windows-git-bash-race.fixture.ts', import.meta.url));
 function installation() {
@@ -28,6 +38,7 @@ function installation() {
   pe.writeUInt32LE(0x1100, 524);
   pe.write('ntdll.dll\0', 768);
   write('git/cmd/git.exe', 'git');
+  chmodSync(join(root, 'git/cmd/git.exe'), 0o755);
   write('git/usr/bin/bash.exe', 'bash');
   write('git/usr/bin/ls.exe', 'ls');
   write('git/usr/bin/msys-2.0.dll', pe);
@@ -35,9 +46,21 @@ function installation() {
   return root;
 }
 function start(root: string, role: string, target = '', failure = '') {
-  const child = spawn(process.execPath, [fixture, root, role, target, failure], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  const child = spawn(
+    process.execPath,
+    [
+      ...testRuntimeFlags,
+      '--disable-warning=ExperimentalWarning',
+      fixture,
+      root,
+      role,
+      target,
+      failure,
+    ],
+    {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
   let output = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => {
@@ -55,7 +78,7 @@ function start(root: string, role: string, target = '', failure = '') {
     while (!output.includes(`${line}\n`)) {
       if (child.exitCode !== null || Date.now() >= deadline)
         throw Error(`Waiting for ${line}: ${output} ${stderr}`);
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   };
   return { child, exited, wait, output: () => output, stderr: () => stderr };

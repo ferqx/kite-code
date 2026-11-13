@@ -1,4 +1,4 @@
-import type { Pointer } from 'bun:ffi';
+import type { Pointer } from '../runtime-ffi';
 
 /** These functions query the original HANDLE, never a name or inherited parent ACL. */
 export const windowsSecurityDescriptorSymbols = {

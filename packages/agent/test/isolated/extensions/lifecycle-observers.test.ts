@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,6 +7,7 @@ import {
   ModelAttemptError,
   type ModelEvent,
 } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime, type RuntimeOptions } from '../../../src';
 import type {

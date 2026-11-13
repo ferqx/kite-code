@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type {
   Execution,
   Interaction,
@@ -9,10 +9,11 @@ import type {
 } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
 import stringWidth from 'string-width';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 import type { TuiMcpReadDirectory, TuiMcpSnapshot } from '../../src/tui/mcp';
 
-const tick = () => Bun.sleep(40);
+const tick = () => fixtureDelay(40);
 const view = (executions: Execution[] = []): SessionView => ({
   storeId: 'store',
   snapshotCursor: '1',

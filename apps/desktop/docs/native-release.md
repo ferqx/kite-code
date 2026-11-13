@@ -1,6 +1,6 @@
 # Native 候选、安装与独立 CLI 注册
 
-本页负责 Native 物化、归档、使用锁和安装注册。候选包含实际 Electron、main/preload/renderer 与包内 Bun、Service 和运行资源。macOS arm64 和 Windows x64 默认生成桌面专用候选，`--terminal` 可显式嵌入已验证的完整 Terminal。Linux 继续使用完整 Terminal。整体 V1.3、签名与三平台发布仍未完成。
+本页负责 Native 候选、归档、使用锁和安装注册。候选包含实际 Electron、main/preload/renderer、配套 Service 和固定的包内 Node。macOS arm64 和 Windows x64 默认生成桌面专用候选，`--terminal` 可显式嵌入已验证的完整 Terminal。Linux 继续使用完整 Terminal。整体 V1.3、签名与三平台发布仍未完成。
 
 本轮会话 PDF 能力的 parser／Canvas／字体／CMap／WASM 由内含 Terminal 的同次依赖闭包交付，准确版本与剩余资格见[Terminal 构建说明](../../cli/docs/terminal-release.md#构建与操作)。隔离浏览器里的 Native 页面和 Main reader 通过不等于完整 Electron 制品或各平台的原生解析资产通过；旧窗口／安装证据不自动覆盖新增闭包。
 
@@ -22,9 +22,33 @@ Windows Main 保初始完整内容／语义验证，再由 [Node-API owner](../n
 
 ## 构建与安装
 
-macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 可独立构建桌面候选。Windows 使用已准备的 x64 MSVC 和满足现有 ACL 准入的 Bun、Electron 与输出目录，离线安装包构建见下文。macOS 用 `bun run desktop` 启动默认候选，Windows 使用已安装的桌面前门。Linux 先执行 `bun run release:build` 准备 `dist/unified-terminal`，再构建 Native 并启动。启动核对两层完整性和使用权。日常开发使用 `bun run build` 后 `bun run desktop:dev`，并使用独立 development profile。
+准备 Node 构建输入后，macOS arm64 和 Windows x64 执行 `bun run release:build --product native` 即可独立构建桌面候选。Windows 使用已准备的 x64 MSVC 和满足现有 ACL 准入的 Node、Bun、Electron 与输出目录。macOS 用 `bun run desktop` 启动默认候选，Windows 使用已安装的桌面前门。Linux 先执行 `bun run release:build` 准备 `dist/unified-terminal`，再构建 Native 并启动。启动核对两层完整性和使用权。日常开发使用 `bun run build` 后 `bun run desktop:dev`，由独立 development profile 承载源码调整。
 
 CLI/TUI 由 `bun run release:build` 构建的独立 Terminal 提供。下面的组合包示例用 `--terminal` 显式选择完整 Terminal，供组合安装和 `register-cli` 使用。
+
+macOS arm64 完整 Native 的 Node ZIP 路径使用 [官方 Node 26.13.1 darwin-arm64 归档](https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.xz)。构建器核固定 SHA-256，取 Node 可执行文件和许可证进入内含 Terminal，头文件只用于构建。Service、Terminal、安装校验和维护执行使用同候选的 Node，Electron Main 使用 Electron 自带 Node。Service 的 SQLite 由 Node-API 加载原已审核的动态库，清单记录实测引擎身份和完整文件。配套 stdin EOF、Profile／制品锁和 Terminal 登记的原对象契约沿用。取舍和本机验收见 [随包 Node 决定](../../../.agents/notes/implemented/architecture/2026-11-12-bundled-node-native-runtime.md)。
+
+```sh
+bun run prepare:node-inputs
+bun run release:build --directory /absolute/output/terminal --node-distribution /absolute/input/node-v26.13.1-darwin-arm64.tar.xz
+bun run release:build --product native --terminal /absolute/output/terminal --directory /absolute/output/Kite-Native --archive /absolute/output/Kite-Native.zip
+```
+
+核对 ZIP 的 `.sha256` 后用 macOS 解压，完整保留包内链接和权限。在解压目录执行 `terminal/entrypoints/kite-install.command verify` 校验候选，再执行安装。用户端使用随包运行时。
+
+```sh
+./terminal/entrypoints/kite-install.command install --prefix /absolute/install/kite
+/absolute/install/kite/bin/kite-desktop
+/absolute/install/kite/bin/kite-maintenance verify
+/absolute/install/kite/bin/kite-maintenance rollback
+/absolute/install/kite/bin/kite-maintenance uninstall
+```
+
+安装同一前缀的新版会保留前一个完整候选。回滚后的旧 Bun 候选使用旧版自己的运行时，Node 维护入口可由前一份 Node 候选提供。若已登记独立 Terminal，先更新其候选至支持 Node 清单的版本，Native 安装在发布选择前验证该条件。Windows／Linux 的构建和安装入口见下文。
+
+2026-11-13 本机 [完整 Native 安装回归](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)使用实际 Electron 与包内 Node，归档搬迁后完成安装、运行中升级、正常退出和冷启动。首次模型回复只发出一次，第二窗口读回原回复。随后验证 Main 被杀而 Service 存活时双使用锁继续阻止卸载，原 Service 退出后才允许回滚和卸载。会话及设置保留；这是同源码候选切换，旧 Bun→Node 的实测范围见下方 DMG。
+
+缺外层路径或内嵌运行时会返回 `native_bundle_unavailable` 和准备命令，已取得的锁沿原顺序释放。
 
 macOS arm64 的 Electron 仍固定44.3.0；[构建准备](../scripts/macos-electron-runtime.ts)只接受完整原始Framework SHA与封闭分发，在新候选的独立 `electron` 副本内应用[resize补丁](../patches/electron-44.3.0-macos-resize.patch)，重新进行 ad-hoc 签名及校验，再执行SQLite探针、Main构建和完整manifest。两处指令及签名以外的payload、源分发与副本独立性均复核；重新签名产生的CodeResources与最终Framework字节进入原清单，不跳过任何文件。开发入口也准备每次专属副本；不修改 `node_modules` 或已存在的不可变候选。
 
@@ -47,35 +71,64 @@ bun run release:native uninstall --prefix /absolute/install/native
 
 ### macOS DMG
 
-在 Apple Silicon Mac 上用 Bun 和 Xcode 工具链执行 `bun run release:macos-dmg`。命令构建桌面专用 Native 候选，再生成 `dist/macos-dmg/` 下带时间戳的 `KiteDesktop-arm64.dmg` 及 SHA-256 文件。用 `--directory <新目录>` 选择输出位置。也可用 `bun run release:build --product native --desktop-only true --directory <候选目录>` 单独构建，再用 `--native <候选目录>` 封装。DMG 构建入口仅接受桌面专用候选。从源码构建时可用 `--electron <原始 Electron 分发目录>` 指定固定 Electron 输入。
+在 Apple Silicon Mac 上按[本地开发](../../../docs/development/local-development.md)准备 Node、Bun、Electron 与 Xcode 工具链，先运行 `bun run prepare:node-inputs`，再执行 `bun run release:macos-dmg`。构建读取 [Node 26.13.1 官方 macOS arm64 归档](https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.xz)，默认放在 `.cache/release-node-v26.13.1/node-v26.13.1-darwin-arm64.tar.xz`，也可用 `--node-distribution <归档>` 指定。构建先核对固定 SHA-256，再从归档取 Node、许可证和编译头文件。默认在 `dist/macos-dmg/` 下创建带时间戳的目录，输出 `KiteDesktop-arm64.dmg` 及 SHA-256 文件，也可指定 `--directory <新目录>`。从源码构建时可用 `--electron <原始 Electron 分发目录>` 固定输入。要分开构建和封装，先运行 `bun run release:build --product native --desktop-only true --node-distribution <归档> --directory <候选目录>`，再传 `--native <候选目录>`；封装只接受 macOS 桌面专用 Node 候选。
 
-Mac App Store 之外的分发可以使用钥匙串中的 Developer ID Application 证书及私钥和已有 `notarytool` profile。给同一构建命令传入 `--signing-identity <证书 SHA-1>` 和 `--notary-profile <钥匙串 profile 名称>`。签名制品从源码构建，Terminal 先签署暂存 Mach-O 再生成各级清单，Electron 在应用 resize 修正后签署并重新核对 Framework 摘要。构建最后签署 `.app` 和 DMG，取得 Apple 的 `Accepted` 后附加公证票据，校验票据和 Gatekeeper，再生成最终文件摘要。最终签名制品仍需实测 Finder 生命周期。公开发行门禁见[发布边界](../../../docs/active/release-control.md)。
+Mac App Store 之外的分发可以使用钥匙串中的 Developer ID Application 证书及私钥和已有 `notarytool` profile。给同一构建命令传入 `--signing-identity <证书 SHA-1>` 和 `--notary-profile <钥匙串 profile 名称>`。签名制品从源码构建。Node-API 绑定先签名，再写入依赖该绑定的 Worker；其余暂存 Mach-O 在生成各级清单前签名。Electron 在应用 resize 修正后签署并重新核对 Framework 摘要。构建最后签署 `.app` 和 DMG，取得 Apple 的 `Accepted` 后附加公证票据，校验票据和 Gatekeeper，再生成最终文件摘要。最终签名制品仍需实测 Finder 生命周期。公开发行门禁见[发布边界](../../../docs/active/release-control.md)。
 
-映像的 Finder 窗口并排显示 `Kite Desktop.app` 和指向 `/Applications` 的快捷方式。应用包包含桌面 Main、renderer、Electron、配套服务和一份 Bun。服务的工作区代码和第三方 JS 通过 `terminal/code` 下的私有模块映射加载，macOS arm64 原生绑定、SQLite、辅助程序、字体、CMap 和 WASM 随各自的消费方打包。制品不含 `node_modules`、CLI/TUI 或独立 Terminal Web 入口。构建从包内 Mach-O 的 arm64 部署目标计算 `LSMinimumSystemVersion`。启动器从 `Contents/Resources/native` 启动包内 Electron，Native 启动继续核对候选完整性和使用锁。由同一 macOS 用户安装和运行，运行时复用包内预先创建的使用锁文件。
+映像的 Finder 窗口并排显示 `Kite Desktop.app` 和指向 `/Applications` 的快捷方式。桌面 Main 由 Electron 启动，配套 Service 由应用内的 `terminal/runtime/node` 启动。工作区代码和第三方 JS 通过 `terminal/code` 的私有模块映射加载。Node-API 绑定、审核过的 SQLite 动态库、辅助程序、字体、CMap 和 WASM 随各自的消费方打包。制品不含 Bun、`node_modules`、CLI/TUI 或独立 Terminal Web 入口。构建从包内 Mach-O 的 arm64 部署目标计算 `LSMinimumSystemVersion`。启动器从 `Contents/Resources/native` 启动包内 Electron，Native 启动继续核对候选完整性和使用锁。由同一 macOS 用户安装和运行，运行时复用包内预先创建的使用锁文件。
 
-退出 Kite Desktop 后通过 Finder 替换旧应用或将应用移到废纸篓。Profile `~/.kite-code/unified-agent`、Electron 用户数据及工作区路径位于应用包外。Finder 负责文件操作，应用使用锁仍由运行时管理。曾安装独立安装器预览版的用户可通过原 DMG 卸载后再拖入新应用。用户操作见 [桌面手册](../../../docs/handbook/clients/desktop/README.md#在-macos-上安装更新和卸载)。
+退出 Kite Desktop 后通过 Finder 替换旧应用或将应用移到废纸篓。回滚时从原 DMG 复制旧应用，旧应用使用自己随包带的运行时。Profile `~/.kite-code/unified-agent`、Electron 用户数据及工作区路径位于应用包外。Finder 负责文件操作，应用使用锁仍由运行时管理。曾安装独立安装器预览版的用户可通过原 DMG 卸载后再拖入新应用。用户操作见 [桌面手册](../../../docs/handbook/clients/desktop/README.md#在-macos-上安装更新和卸载)。
 
-2026-11-12 在 Apple Silicon、macOS 27.2.1 上，打开桌面专用 DMG 后 Finder 自动显示图标视图。[DMG 实机验收](../../../tests/fixtures/unified-agent/macos-dmg.qualification.ts)通过 Finder Apple Events 将旧完整 DMG 的应用复制到 `/Applications`，在隔离 Profile 保存一条会话和模型回复。退出后用桌面专用 DMG 替换应用，冷启动时会话、消息及回复各显示一次，模型请求总计一次。Finder 将应用移到废纸篓并确认目标位置已移除，再用桌面专用 DMG 独立安装、冷启动并卸载。新映像与安装包核对了桌面服务入口及无 `node_modules`、CLI/TUI、独立 Terminal Web 入口的制品布局。更新及两次卸载前后，Core、桌面数据库、Profile 元数据、用户配置、Electron 模型偏好和外部工作区文件的 SHA-256 与文件身份一致。复验制品声明最低 macOS 15.0，由随包的 SQLite 决定。本机证据在 `dist/macos-desktop-only/evidence/macos-dmg-n6jq48/report.json`。
+2026-11-12，前一代 Bun 桌面专用 DMG 在 Apple Silicon、macOS 27.2.1 验证了从旧完整 DMG 替换、冷读原会话无重放、独立安装和保数据卸载。该次使用系统 `/Applications` 和隔离 Profile，记录在 `dist/macos-desktop-only/evidence/macos-dmg-n6jq48/report.json`，属于前一代制品。
 
-当前制品为 macOS arm64 本地候选。桌面专用布局已通过临时 ad-hoc 构建、应用签名深度校验及 DMG 签名校验。首版完整候选的 ad-hoc 演练还验证了 Finder 生命周期。该演练为无 Team ID 的测试库临时关闭库校验，Developer ID 路径保留库校验。Developer ID、公证、最终签名制品复验和公开发行资格沿 [发布边界](../../../docs/active/release-control.md) 单独核验。安装边界取舍见 [Agent Note](../../../.agents/notes/implemented/feature/2026-11-12-macos-drag-dmg.md)。
+同日的 Node 候选 `4feb1e3ef49034b8cde0d659d880c2e27bdd11402765a4351b790237ecb68e95` 通过 [Finder 实机验收](../../../tests/fixtures/unified-agent/macos-dmg.qualification.ts)：在私有 Applications 目录安装 Bun 版、替换为 Node 版、回滚至同一 Bun 候选、移到废纸篓，再装回 Node 版并卸载。四次启动均观察加载至就绪、同一会话和回复仅显示一次、应用和对应的包内 Service 正常退出；模型请求共一次。替换与卸载前后，数据库、配置及工作区见证文件的摘要和文件身份一致。另用空白 HOME 启动 Node 版并打开项目选择器。窗口验证使用仅含系统目录的 PATH，保留 Chromium 沙箱并核对 Service 可执行文件路径；独立 Service 探测还禁止执行宿主 Node/Bun 和读取构建目录，核实包内 SQLite 3.51.3、网页解析依赖及 stdin EOF 收尾。最低系统版本为 macOS 15.0。本机证据在 `dist/macos-node-dmg-node26.DExaYd/evidence/`。
 
-Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档。构建包含桌面 Main、renderer 和本地服务。服务的工作区构建产物与第三方 JS bundle 位于 `terminal/code`，通过相对路径加载。Windows x64 原生绑定、辅助程序和 PDF 字体、WASM 等运行资源单独保留。安装包的生产入口拒绝含 `node_modules` 的归档。旧桌面包的清单仍可核验，以便升级和卸载。归档和安装后的程序树各含一份 `bun.exe`。小型 C 前门核对包内 Bun 和校验脚本的固定摘要，再用该 Bun 启动两跳证书校验。配套服务使用同一个可执行文件。
+后续真实 OpenAI Responses 请求在该候选中收到完整输出后，SQLite 制品登记因 Node 适配器缺少 `Database.filename` 而失败。修复保留构造时传入的数据库路径，[离线回归](../../../tests/fixtures/unified-agent/macos-dmg-model-output.fixture.mjs)用随包 Node 验证输出分段、私有续接状态和只读重开。
 
-桌面服务在 Bun 解析依赖时把保留的模块导入和 `require` 指向 `code/package.json` 的私有包内映射。映射目标都是制品中的相对路径，拆分文件可共享同一个模块。制品检查验证输出引用和文件存在性。[搬迁回归](../../../tests/isolated/unified-agent/windows-desktop-runtime.test.ts)核编译后从仓库外加载共享模块，完整安装验证从仓库外的正式入口观察 Service 握手和首屏。
+重建的候选 `3cba7169fdc08219a31d237effd1ba55ea19f8a240a1323a55b401a2538ed64a` 在同一本机通过 Finder 生命周期。通过本机回环转发复用钥匙串里的现有 OpenAI 凭据，隔离桌面会话用 `gpt-6-luna`、`high` 完成一次真实 Responses 请求。窗口显示最终回复，数据库保存的用量与 OpenAI 返回一致。冷启动与回滚后的 Bun 版读取同一会话和回复，保留暗色主题和高档设置。回滚和移到废纸篓前后，数据库、设置及工作区文件的摘要一致。本机证据在 `dist/macos-node-dmg-luna.FuZIqw/evidence/`。
+
+包内 Node 通过私有模块映射动态载入钥匙串的 CommonJS 包。[凭据后端](../../../packages/agent/src/config/os-credentials.ts)同时接纳命名导出和默认导出中的 `AsyncEntry`。[随包探测](../../../tests/fixtures/unified-agent/macos-dmg-model-output.fixture.mjs)用随机、未登记的账户执行只读查询，核实不存在的凭据返回空结果。
+
+候选 `bdc43fd82976c1d4a7f855ca276e2207f9cdfab0ee5cee47b7adc6bc09efb803` 在本机通过 Finder 生命周期及随包只读查询。本机用 Finder 从 Bun 应用换到 Node 版后，安装该候选，在实际 `/Applications` 安装及原用户配置上，经现有系统钥匙串凭据向配置的 OpenAI endpoint 发送一次 `gpt-6-luna` Responses 请求，思考档位为 `high`。窗口显示原输入和完整回复各一次，SQLite 核实一个成功模型执行并保存实际用量。替换时 Profile 和设置摘要一致，验收后恢复原模型启用状态。证据在 `dist/macos-node-dmg-auth.Wei8d5/evidence/`。
+
+2026-11-13，包含[模型选择器布局修复](../src/native-model-picker.tsx)的候选 `8dbbd85021ecabfad7c6079d9d64f97a401d2618610b8989b923d872ebd1750e` 在 macOS arm64 通过镜像校验。沿[隔离 Finder 夹具](../../../tests/fixtures/unified-agent/macos-dmg.qualification.ts)实测旧 Bun 版升级、回滚、首次安装、窗口启动与保数据卸载；全程用独立 HOME 和 Profile、固定本地模型，未替换 `/Applications` 中的应用。证据在 `dist/model-picker-dmg.1bJxul/evidence/macos-dmg-N99PWY/`；选模的逐帧证据见 [Desktop owner](../README.md)。
+
+同日，使用 Bun 1.4.4 打包的候选 `41a0c775e18e3b7778a9ca2ca71461975e333b75df33a9f647a2c8cf9fc379af` 在本机通过同一 Finder 夹具和镜像校验。系统 PATH 中没有 Node 或 Bun，更新后 Service 由包内 Node 26.13.1 启动。旧版升级、回滚、移到废纸篓、安装新版和再次卸载均保留原会话及设置。两次本地测试模型请求各保存一份回复，冷读不重发。证据在 `.cache/bun-build-dmg-final.WDoeTs/finder-evidence/macos-dmg-tsAdwL/report.json`。
+
+切回 Bun 1.4.4 冻结安装后，同一 Finder 夹具和镜像校验在候选 `0235a8007f24bb2ef1c418e68384963cd03dd9f96c6786b4e55d5dc5dc5e4cd5` 上通过。隔离安装目录覆盖首次安装、旧 Bun 版升级、回滚和卸载。核对包内 Node、原会话与设置、两次本地模型执行及各自的持久回复。证据在 `.cache/bun-pm-dmg-final.10Oif7/finder-evidence/macos-dmg-WdJv1F/report.json`。
+
+回复位置修复后的本机候选 `5beb3e54641745633414c23e96ab1832dc12270f9afdfd1135f0644e62637b0a` 再次通过 Finder 替换。冷重开上一轮真实模型会话时只显示一份原输入和回复，没有旧拒绝提示或新的模型执行；隔离窗口验证“无认证”在对应输入下方，重开保持位置且没有 Provider 请求。安装与实际窗口证据在 `dist/macos-node-dmg-final.IgRkpW/evidence/`。
+
+2026-11-13，在独立 HOME 和 Finder 安装目录，用候选 `8596852f6d20f9224e2c8dab1d3a2712dc272bad9479a202b85006718a767d39` 验证旧 Bun DMG 升级到 Node DMG、回滚、移到废纸篓，以及 Node 版首次安装、启动和卸载。核对了实际 Electron 与随包 Service 进程、回环模型响应、冷读和 Profile、设置、模型偏好及工作区文件摘要。记录在 `dist/node-service-agent-dmg-final.qtXUM7/evidence/macos-dmg-Umh7c9/report.json`。
+
+同日，统一 Node 工具链且不再携带旧 Trace 启动配置的候选 `2de0923f996199a8960a16c421a2d3fa3864e97f30eddbc15fba774ec550cc24` 通过相同 Finder 流程。新版窗口在原 Store／会话中发起第二轮本地测试模型请求，原两轮各有唯一持久记录，最终卸载保留记录、配置和工作区文件。独立 Applications 目录与 Profile 未触及日常安装或配置。本机证据为 `.cache/node-only-final.wE8Cla/finder-evidence/macos-dmg-3wxEh2/report.json`。
+
+本机 ad-hoc 演练为无 Team ID 的测试库临时关闭库校验，Developer ID 路径保留库校验。Developer ID、公证、最终签名制品复验和公开发行资格沿 [发布边界](../../../docs/active/release-control.md) 单独核验。取舍见 [Finder 安装](../../../.agents/notes/implemented/feature/2026-11-12-macos-drag-dmg.md)和 [DMG 随包 Node](../../../.agents/notes/implemented/architecture/2026-11-12-macos-desktop-dmg-node.md)。
+
+Developer ID 路径给配套 Service 的 Node 使用固定签名标识 `com.kitecode.desktop.service-runtime`。同一签名身份升级时保留钥匙串对该运行时的识别。旧读取程序的权限由用户在连接设置中显式确认，常规模型调用只做无交互读取。[模型凭据决定](../../../.agents/notes/implemented/architecture/2026-11-13-encrypted-model-credentials.md)
+
+2026-11-13，含统一模型凭据的候选 `b7513ab31b93055577b67d894d71d529ed6d4a6a3cc674c3af89f7bf8849874d` 在隔离 macOS HOME 下通过相同 Finder 流程。Native 构建选用 JSONC 解析器的 ESM 入口，将编辑和扫描模块打入应用。系统 PATH 无 Node 和 Bun，窗口验证两次本地模型请求、冷读与保数据卸载。证据在 `.cache/model-vault-dmg-verified.B7PfuD/finder-evidence/macos-dmg-yCjYfc/report.json`。
+
+同日，评审修复后的候选 `44e6c5dc` 用 Bun 构建，Finder 夹具以仅含 `/usr/bin:/bin` 的 PATH 实测旧 Bun 版安装、升级至包内 Node 26.13.1、回滚、移到废纸篓、重新安装及卸载。夹具等待系统实际显示主窗口，核对两轮回环模型回复各持久化一次、原 Store／会话和设置保留。镜像 SHA-256 为 `81ff4182984a9bcbebceae58e76e7627081e12f75b030a5a0338189ea326e735`。本次使用私有 Applications 目录和 Profile。
+
+Windows x64 离线 `.exe` 接受 `--desktop-only true` 生成的 Native 归档。构建包含桌面 Main、renderer 和本地服务。服务的工作区产物与第三方 JS 位于 `terminal/code`，通过相对路径加载。原生绑定、辅助程序、PDF 字体和 WASM 等资源单独保留。安装包的生产入口拒绝含 `node_modules` 的归档。旧桌面包的清单仍可核验，以便升级和卸载。新归档和安装后的程序树各含一份 `node.exe`。C 前门核对并持有包内 Node、原生插件与 ESM 校验脚本，再启动两跳证书校验。配套服务使用同一 Node。
+
+构建器把保留的模块导入和 `require` 改写为 Node 使用的 `code/package.json` 私有映射。映射目标是制品中的相对路径，拆分文件可共享同一个模块。[搬迁回归](../../../tests/isolated/unified-agent/windows-desktop-runtime.test.ts)验证从仓库外加载共享模块；新 Node 版尚无 Windows 实机安装证据。
 
 Windows x64 桌面制品由同次构建封装 Service 和 Runner V7。包内 Shell 清单固定原生 Runner 及 Git Bash 所需辅助文件。Git Bash 使用本机完整安装，回退使用 Windows 自带的 PowerShell 5.1。两条路径的进程边界、权限和证据见 [Windows Shell 沙箱](../../../docs/active/windows-shell-sandbox.md)。
 
-安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。[Win32 安装窗口](../../../scripts/release/windows-setup/location-dialog.cc)用准备、校验、写入、移除和收尾对应的进度区间显示总进度。区间内由实际计数推进，字节、文件或条目数单独显示。等待或重试保留已达到的进度。应用登记、快捷方式及清理处理完毕后，直接切换到结果页，隐藏百分比和进度条。构建需要 MSVC x64 Build Tools、Git for Windows、Bun 和 [Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
+安装时，候选在目标盘的私有暂存目录解包和验证，通过同卷移动发布。已有相同候选时复核并复用。[Win32 安装窗口](../../../scripts/release/windows-setup/location-dialog.cc)用准备、校验、写入、移除和收尾对应的进度区间显示总进度。区间内由实际计数推进，字节、文件或条目数单独显示。等待或重试保留已达到的进度。应用登记、快捷方式及清理处理完毕后，直接切换到结果页，隐藏百分比和进度条。构建需要 MSVC x64 Build Tools、Git for Windows、Node、Bun 和 [Zstandard 1.5.7 发布源归档](https://github.com/facebook/zstd/releases/tag/v1.5.7)。构建脚本核对解码器源归档摘要。
 
 在仓库根目录运行以下命令，构建桌面专用制品，核对清单并生成 Windows x64 离线安装包。
 
 ```powershell
+bun run prepare:node-inputs
 bun run release:windows-setup
 ```
 
 命令从已安装的 MSVC x64 Build Tools 准备编译环境，从 `.cache/desktop-win-x64-setup/zstd-1.5.7.tar.gz` 读取 Zstandard 源归档，并在 `dist/windows-setup/` 下自动创建带时间戳的新目录，输出 `KiteDesktopSetup.exe`、SHA-256 文件和 Native 归档。
 
-Bun 和 Electron 优先使用 `.cache/desktop-win-x64-setup/inputs/` 下的私有构建输入。Bun 路径为 `bun-<当前 Bun 版本>/bin/bun.exe`，Electron 路径为 `electron-<仓库固定的 Electron 版本>/dist`。缺少对应缓存时使用当前 Bun 和项目安装的 Electron。选中的输入仍须通过原制品权限和完整性校验。
+封装器使用运行命令的 Node，也可用 `--node <私有 node.exe>` 明确指定。包内 Node 来自 `prepare:node-inputs` 准备的官方归档。Electron 优先读取 `.cache/desktop-win-x64-setup/inputs/electron-<固定版本>/dist`，缺少时使用项目安装的 Electron。选中的输入仍须通过原制品权限和完整性校验。
 
 需要分别运行构建和安装器步骤时，使用以下命令。
 
@@ -86,7 +139,7 @@ bun run release:build --product native --desktop-only true --directory <native-d
 
 安装窗口通过当前用户的安装登记和旧开始菜单快捷方式识别已安装位置。发现已有安装时沿用所选目录。带 `client` 子目录的旧安装和桌面专用安装在核实旧程序树后准备新版，确认新版发布后移除旧树。更早直接安装在所选目录的版本先验证新归档，再清理旧文件并创建新版目录。新安装支持编辑路径或浏览磁盘。目录选择沿[原目录决定](../../../.agents/notes/implemented/feature/2026-11-11-windows-setup-location.md)，当前布局归[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
 
-安装和更新完成后，安装器为当前用户登记 Kite Desktop。小型 GUI 启动器位于所选目录的 `Kite Desktop.exe`，开始菜单和可选的桌面快捷方式都指向它。启动器以无窗口方式调用已安装的前门，Electron 启动时清理继承的 Crashpad 和日志环境。卸载按摘要短期暂存已安装的 Bun，以同一批原文件句柄检查摘要和移除程序文件。候选使用锁或 Windows 文件共享冲突使卸载短暂等待。占用持续时，界面提供退出应用提示和重试／取消。进程只向安装器交付固定阶段、成功回执和错误码，界面无需读取 Bun 异常详情。仅卸载所有者可以清理旧版已识别的 Crashpad 注册日志。卸载移除快捷方式和 Windows 登记，Profile 保留在安装目录外。持久取舍见[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
+安装和更新完成后，安装器为当前用户登记 Kite Desktop。小型 GUI 启动器位于所选目录的 `Kite Desktop.exe`，开始菜单和可选的桌面快捷方式都指向它。启动器以无窗口方式调用已安装的前门，Electron 启动时清理继承的 Crashpad 和日志环境。卸载按摘要短期暂存已安装的 Node 和原生插件；旧版仍识别随包 Bun。以同一批原文件句柄检查摘要和移除程序文件。占用持续时，界面提供退出应用提示和重试／取消。进程只向安装器交付固定阶段、成功回执和错误码。仅卸载所有者可清理旧版已识别的 Crashpad 注册日志。卸载移除快捷方式和 Windows 登记，Profile 保留在安装目录外。持久取舍见[桌面专用包决定](../../../.agents/notes/implemented/feature/2026-11-12-windows-desktop-only-installer.md)。
 
 显示卸载完成前，卸载器将原启动器移到同卷私有目录并启动清理进程。清理进程在卸载窗口关闭、原进程退出后移除该文件。原路径可用于下一次安装。
 
@@ -111,6 +164,8 @@ bun run release:build --product native --desktop-only true --directory <native-d
 2026-11-12 集成终端 Shell 的本地未签名候选 `0ca18542297ec2b3d344d8ed9d96afabe9dcd292140bd8904bab8000bb44627e` 通过正式制品校验器。Windows x64 安装 EXE 为 220,323,328 字节，SHA-256 为 `585f3e1d4044bb12338f747bfb8f1801ff0558b7b974ff5b8f95418990e14bf8`。同一归档的验证安装器使用独立安装登记与 Profile。设置行为与窗口验证归 [Desktop owner](../README.md#windows-集成终端-shell)。
 
 ## Windows managed Native 当前实现
+
+新完整 Native 首次安装复用同一 Terminal 的 Node SEA verifier 和固定 Node-API 插件。旧 Bun 完整安装的稳定前门不能直接切换到 Node 候选；安装发布前返回 `native_windows_node_bootstrap_requires_new_prefix`。此限制属于有固定四文件前门的完整 managed Native，桌面专用 Setup 沿独立整树替换合同。新 Windows 制品未取得实机安装资格。以下 Bun 制品记录保留原范围。
 
 正式 Main 的数据权限异常与用户明确发起的备份／定点修复归 [Desktop 权限恢复 owner](../README.md#windows-数据权限预检与恢复)。它位于原可信候选准入之后、Service／SQLite 之前，保留正常私有 ACL、独立使用权与原数据完整性拒绝；不更改安装包 ACL 或创建链。后端和隔离 Main 回归不替代本节完整 installed 窗口／维护资格。
 
@@ -154,9 +209,9 @@ rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Ter
 
 Windows 注册 CLI/TUI 另由 [完整 installed TUI caller](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费准确 Terminal／Native 候选：同一个独立稳定 `kite-tui.exe` 先用 Terminal，再用登记后的 Native 双层闭包；实际键盘任务、全文／思考、导出、准确取消、草稿及冷读零重放，正常退出须原 Job 未 Terminate／完整 EOF／Job0／双 EX，撤登记和最终卸载保原数据。此调用者已接 release job，但 Windows 实际运行尚未取得，按用户安排交后续 Actions；它不把窗口、真正跨代码切换、Shell／RSS 或阶段资格记为通过。完整合同及预算归 [Terminal owner](../../cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。
 
-同一安装调用者支持显式 `--predecessor=<absolute-original-native>` 真代码分支，由[统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)调用固定 `4a4c0e440b2098e5b4ec58c5831452773b39228f` 原源码自己的两类 builder。11项锁输入沿[Terminal 输入守卫](../../cli/docs/terminal-release.md#验证边界)核原字节相同或已审查的完整 raw 配对；两份迁移 SQL 仍逐字相同，另核固定 checksum；原两版 `0.1.0`、clean source、不同 commit／candidate／实际 Agent SHA 均独立核对。这是 Windows 独立调用者仍使用的旧基线，只覆盖其0001／0002迁移与DB9；当前完整 Core 0001–0006 迁移的往返兼容资格尚未取得，不能沿用 POSIX 当前固定前驱的结论。原837输入与历史SHA仍保独立legacy守卫，不计DB9旧writer拒绝或已发布predecessor资格。
+同一安装调用者支持显式 `--predecessor=<absolute-original-native>` 真代码分支。[统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)消费从 `a45ca81cf` 原源码和锁文件构建的 Terminal 与 Native。两版 `0.1.0`、源提交与干净状态、候选及实际 Agent SHA 差异、当前合并 Schema 和前驱 SQL 完整摘要均独立核对。旧 `4a4c0e440` 的11项锁输入、原837输入和历史迁移由 [Terminal 输入守卫](../../cli/docs/terminal-release.md#验证边界)保留原证据范围。
 
-真分支从零参数稳定 `kite-desktop.exe` 完成 A任务／A原Main与Service alive、双SH时选B／B冷读并明确新任务／回退A冷读B并明确第三任务／最终B冷读全部原历史四窗口，后继真实Provider请求必须含此前完整正文，冷读游标／Provider保持。普通完整短结果与sealed描述符按实际存储分别核原身份／正文／bytes／hash，不要求短正文必须有sealed引用；三任务为完整固定短正文，不授350KiB或17MiB窗口展示资格。四窗原owner自然退出／未Terminate和双EX后，B installed CLI按原backup／inspect／restore新Store／status链执行，再从B第五冷窗口核全部原Command／Run／Execution及结果／出处，Provider恰3；最终只卸载一次并保Core／Native DB／config原字节。显式基础420秒、各独立UIA driver45秒／launch与页面及退出10秒、维护180秒／CLI30秒，取统一绝对期限的更小值，默认120秒／180秒及原95条断言保持。原生Windows整链尚未执行，资格保留；与Terminal共享物化、mandatory CI及真实输入边界归[Terminal owner](../../cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，准确本机修正与证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
+真代码分支通过零参数稳定 `kite-desktop.exe` 验证四个窗口。A完成原任务并持有双SH时，旧前缀拒绝安装 Node B，原选择字节保持，B 安装到独立前缀。B 冷读并明确开始新任务，再用 A 冷读 B 的结果并开始第三个任务，最后用 B 冷读完整历史。验收按实际存储核普通正文或 sealed 描述符的原身份、字节和摘要，每次明确请求都包含此前正文，冷读期间 Provider 次数和业务游标保持。四窗须自然退出并取得双EX。原门禁还要求用 B 的 CLI 执行 backup／inspect／restore／status，再从第五个窗口冷读新 Store，核原 Command／Run／Execution 和 Provider 总计3次。Bun→Node 两个前缀分别卸载并保原数据库和配置字节。基础420秒、独立UIA driver45秒、启动／页面／退出10秒、维护180秒和单个CLI命令30秒均受统一绝对期限约束。Windows 原生整链待实测，原离线 CLI 仍只接纳 DB1–10，而普通 Native 的已读回执可写到 DB12。具体边界见 [维护 owner](../../../packages/agent/src/maintenance/README.md#会话工作文件与-manifest-v20)和 [Terminal owner](../../cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)。
 
 ## 完整身份与生命周期
 
@@ -164,19 +219,21 @@ Windows 注册 CLI/TUI 另由 [完整 installed TUI caller](../../../tests/fixtu
 
 普通文件的 SHA 沿[Service 只读 leaf](../../service/src/asset-file-hash.ts)核完整内容。通过原大小检查且不超过 64 KiB 的文件保留 `readFileSync`；较大文件逐块读至 EOF，每次完整核验按需分配并复用一个 1 MiB buffer。Main 的同步 `noAsar` 范围继续核物理 archive；初次核验、原双 SH 后复核与 Service 自有准入全部保持。分块内容及两层末字节拒绝由[原 Node-safe 完整测试](../../service/test/isolated/native-runtime-assets.test.ts)核对，实际首屏失败、读取对照与窗口／完整默认资格归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通启动完整回归与制品读取)。
 
-Node main 持 outer/inner 两个 SH，继承 Bun helper 只关闭副本，不对 shared description UNLOCK。Service 与共享 Daemon 独立保两 root 使用权。Native proof 只接受已完整核验 inner Terminal 清单中的 `service` 或 `daemon`，两种入口均固定同一包内 Bun、`native-<digest>` 与 outer manifest；CLI/Electron 入口不获得 Service 身份。verify 与 private startup proof 的原 build/entry/runtime/manifest 必须准确相等，默认 Files 保护两个实际完整 root。关窗口、关闭 Client 或父进程退出不等于全部 lease 已释放；原运行/资源确认关闭后才释放。卸载先取得所有候选的双 root EX，busy 立即拒绝，不猜 PID 或强杀服务。
+Node Main 持 outer/inner 两个 SH，继承锁的 helper 只关闭副本，不对 shared description UNLOCK。Service 与共享 daemon 独立保两 root 使用权。Native proof 只接受已完整核验 inner Terminal 清单中的 `service` 或 `daemon`，两种入口均固定同一候选的随包运行时、`native-<digest>` 与 outer manifest；CLI/Electron 入口不获得 Service 身份。verify 与 private startup proof 的原 build/entry/runtime/manifest 必须准确相等，默认 Files 保护两个实际完整 root。关窗口、关闭 Client 或父进程退出不等于全部 lease 已释放；原运行/资源确认关闭后才释放。卸载先取得所有候选的双 root EX，busy 立即拒绝，不猜 PID 或强杀服务。
 
 卸载在原安装 EX 内先核封闭管理结构、准确候选 ID 和 outer/inner 真实目录，再按稳定顺序取得所有候选双 root EX。busy 在内容读取前拒绝；候选同时损坏且使用中时先返回 busy，释放使用权后仍完整核 manifest、文件字节和 digest，损坏不能卸载。全部 EX 持有后完整核每个原候选，删除前再次核管理结构、active/previous 与候选 ID 集合；漂移拒绝，部分取得的租约沿原 finally 释放。原登记 nonce CAS、rename/fsync、数据保留和真实卸载保持，完整验证不靠缓存。
 
-不可变 releases、两行 active 与 previous 只控制后续启动；旧进程继续使用原候选。升级与回滚不替换数据、不恢复旧备份。Native 私有 `node:sqlite` 引擎在选 Profile/打开 UI 数据库前实测并核 manifest；Bun Worker 引擎另行选择，两者不互相冒充。
+不可变 releases、两行 active 与 previous 只控制后续启动；旧进程继续使用原候选。升级与回滚不替换数据、不恢复旧备份。Native 私有 `node:sqlite` 引擎在选 Profile/打开 UI 数据库前实测并核 manifest；Service 的 SQLite Worker 引擎另行选择，两者不互相冒充。
 
 ## 标准命令登记与卸载恢复
 
-双 prefix 以固定顺序持安装 EX，0600 封闭 metadata 保存 terminalPrefix/nativePrefix/candidateId/nonce。标准独立前门在持有 Terminal SH 后复核双方原 nonce、Native active 与双 root SH，再执行 Native 内 Bun 和固定 CLI/TUI，配套 Service 同属该闭包。读取不授予其他 Profile 或任意可执行入口。坏登记、nonce 漂移或 active 漂移拒绝，不自动回退。
+双 prefix 以固定顺序持安装 EX，0600 封闭 metadata 保存 terminalPrefix/nativePrefix/candidateId/nonce。标准独立前门在持有 Terminal SH 后复核双方原 nonce、Native active 与双 root SH，再执行 Native 的随包运行时和固定 CLI/TUI，配套 Service 同属该闭包。读取不授予其他 Profile 或任意可执行入口。坏登记、nonce 漂移或 active 漂移拒绝，不自动回退。
 
 组合 Native 提供 `kite`、`kite-tui` 和 `kite-desktop`，桌面专用 Native 提供桌面前门。安装更新只更新自己仍拥有的登记，卸载沿原 nonce 撤销。已有登记的组合安装切到桌面专用包时，macOS managed 安装先撤销其原登记，再切换 `active` 并移除 Native 的终端前门。Windows 使用桌面离线安装器的替换路径，旧安装清理时撤销原登记。独立 Terminal 前门继续提供 `kite`、`kite-tui` 和 `kite maintenance`。如果 shell 缓存了已移除的 Native 路径，执行 `hash -r` 或打开新 shell，并通过独立 Terminal 的 `bin` 使用这些命令。macOS managed 安装回退到组合候选时恢复 Native 的终端前门，重新登记需显式执行 `register-cli`。
 
-[登记迁移验证](../../../tests/fixtures/unified-agent/native-terminal-split.qualification.ts)消费独立 Terminal、组合 Native 和默认桌面 Native 三份真实制品。Windows x64 本机以 Bun 1.4.4 验证从已有登记的组合安装切换到桌面专用包，升级前后的 `kite` 均完成任务，独立 `kite-tui` 在 ConPTY 中读取原会话、输入并完成新任务、正常退出和冷重开。三个请求各执行一次。`kite maintenance backup` 和 `inspect` 核同一 Store，Profile 数据库字节保持一致。发布 CI 在 macOS arm64 和 Windows x64 执行该验证，macOS 的切换及双向回退仍待运行。
+macOS managed 安装中，当前或上一个候选包含维护脚本时，`kite-maintenance` 使用该候选的包内 Node。这使从组合包切换到桌面专用包后仍可校验和回滚。全新桌面专用 managed 安装只创建桌面前门。
+
+[登记迁移验证](../../../tests/fixtures/unified-agent/native-terminal-split.qualification.ts)消费独立 Terminal、组合 Native 和默认桌面 Native 三份真实制品。升级前后的 `kite` 均完成任务，独立 `kite-tui` 通过真实 PTY 读取原会话、完成新任务、正常退出和冷重开。三个请求各执行一次。`kite maintenance backup` 和 `inspect` 核同一 Store，Profile 数据库字节保持一致。当前包内 Node 的合并制品已在 macOS arm64 验证切换和双向回退。旧 Bun 候选的 Windows x64 ConPTY 记录保留其历史范围，当前 Windows 原生链仍需实测。发布 CI 在 macOS arm64 和 Windows x64 执行此验证。
 
 独立 Terminal 正常卸载后，Native 的反向登记只保留历史归属。省略 `--cli-prefix` 的升级在旧目标已不存在时仅持 Native 安装 EX，继续完整核候选和发布 active；不会锁定或重建旧 Terminal，也不会自动登记后来重建的目录。仍存在的隐式目标以及所有显式目标继续完整验证、固定顺序持锁和 nonce CAS；无效目标拒绝，不能据目录缺失放宽明确登记。Native 回退和卸载保留同一可选前门边界。
 
@@ -194,9 +251,11 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 
 ## 真实代码升级与冷回退
 
-[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前 POSIX 完整往返使用 `materializeCurrentSchemaTerminalPredecessor` 固定真实提交 `12628a616e7614cbd60666d71896b1db9f74b0f5`，由其自己的 Terminal／Native builder 构建。12项 manifest／lock／patch 输入逐字节相同，Core format 1 的0001–0006六份迁移同时核原字节和固定 checksum；不把仅同 format major 当成反向读写兼容。旧 `4a4c0e440`、a2b 与837输入守卫及负例保持，不修改旧 reader 或历史候选；Windows 的独立前驱资格不随 POSIX 调整而取得。原源码前后干净、闭包、实际Agent／候选不同、Mac Main／renderer字节差异、源码删除、归档搬迁和原输出删除守卫保持。原a2b的DB7及旧Core schema不被修改，另供安全拒绝反例；3140／Linux1b796只保历史证据。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)使用 [Terminal 同 Schema 前驱](../../cli/docs/terminal-release.md#验证边界)的 Bun 提交 `a45ca81cf`。旧源码按原锁和 builder 生成干净候选，夹具核原始制品、Core Schema 摘要、Agent 和窗口代码差异，并验证归档搬迁。旧 `12628a616` 及更早样本的输入保留原历史范围。`a2b6441f` 继续独立验证旧程序遇到当前 Core Schema 或 DB9 私有库的安全拒绝。
 
 当前兼容冷窗口仅沿原申请 GET 核对回执；`unknown` 收到准确 `applied` 回执后可前进，原请求 body、scope、摘要和业务身份保持。状态校准不增加业务 POST 或 Provider，也不修改下方历史日期记录的当时结论。
+
+Windows 的完整 Native [跨版本验收](../../../tests/fixtures/unified-agent/windows-native-installation.qualification.ts)验证同前缀拒绝、旧选择保留、新前缀启动和原 Profile 的窗口冷读。回到原 Bun 前门继续同一会话，再用 Node 前门读取全部历史，卸载两个 managed 前缀后核原数据。桌面专用 Setup EXE 使用本页“构建与安装”的整树替换入口。
 
 2026-10-21合并输入继续沿[Terminal精确原始输入守卫](../../cli/docs/terminal-release.md#验证边界)追加登记：仅 `bun.lock`、UI清单和Agent清单三个当前完整SHA更新至当日审查scope，分别记录Lexical完整resolved闭包、编辑器生产依赖和Workflow Worker资产构建。原三个固定前驱、previous字节、context、11项路径与两份SQL／checksum不变，旧源码仍用自己的lock与builder。Lexical实际依赖增加与Agent仅追加构建分别说明，不借本地短测或Terminal通过宣称Native新整链、Windows原生或完整默认资格。
 
@@ -207,6 +266,8 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 当前 macOS 第四个 B 窗口先沿原侧栏产生实际 DB8 的 unknown 移除申请并保存完整私有字节／inode／配置，再沿正式“会话工具→扩展能力”调用 Analyze。唯一成功 POST 的回复丢失后原申请保持 unknown，实际 Node owner 升为 DB9；完整七字段 request／原 body、scope与摘要保持，实际 Core Job完成。首个 finding精确绑定此前独立读取的原 B Model Execution完整result和已核全文的sealed reference，不能把Model preview冒充全文。普通退出后实际包内 `bin/kite maintenance backup/inspect` 核 manifest v18／DB9／原Store，inspect使用backup返回的唯一目录；备份不修改原私有bytes／inode或配置。原两次独立冷窗口随后只交换代码指针：兼容A可读取原DB9草稿与unknown申请，Core三条历史完整GET，原DB9字节保持；切回B保原两类unknown申请，明确原GET查回移除回执与完整扩展Command／Execution／finding／reference。查回不增加POST或Provider，业务事实和读游标保持；六个所属Service普通退出、双EX及最终唯一卸载保数据。此前实际DB8拒绝链只保其[原冻结范围](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-db8-真实代码回退)。
 
 2026-10-11历史macOS在Service精确来源入口匹配修复后，原整文件1pass／643条Bun断言／actual0／221.20秒及实际driver断言；原420秒整例／120秒四窗口driver／60秒冷段／15秒窗口保持，同一安装候选最终只卸载一次。准确当前输入、两个原版本完整文件与集成门禁归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，此前234.736秒及四次真实失败只保[原输入范围](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10db9-版本切换与安装版维护恢复)。该历史结果证明当时两个真实代码候选的限定链；已发布predecessor／T029、任意旧writer、远端Provider和Linux／Windows资格仍各按适用契约核对。生产安装与回退逻辑本片未改，Windows限制保持。
+
+2026-11-13，macOS arm64 用固定 `a45ca81cf` 和 `a2b6441f` 前驱运行整个跨代码文件，两项通过。DB8→DB9 场景沿实际移除确认和历史结果查询入口。隔离窗口 driver 模拟已读回执写入失败，让旧格式的备份链保持在 DB9，并核实确有已读请求经过。DB11／DB12 离线维护的支持范围见 [维护 owner](../../../packages/agent/src/maintenance/README.md#会话工作文件与-manifest-v20)。
 
 原文件另有独立300秒legacy安全拒绝整例，实际构建a2b Native，两个独立owned Profile分别核当前公共Store生成的0002拒绝，以及原a2b Core0001配当前production PrivateData合法生成DB9后的私有拒绝。前者观察旧Main诊断缺能力，后者实际触达 `draft.read` 的 `draft_storage_unavailable`／callerUnavailable；两者均Provider零、普通退出、准确PID死亡／双EX，并在退出与卸载后核Core／private／Profile和user配置的完整bytes／inode。前者不冒称已执行私有拒绝，后者不复制、恢复或降级Core。当前source owner生成数据的负例不替代首个test的完整当前Native安装资格。
 

@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -17,6 +16,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../scripts/tooling/build';
 import { fixturePermissions } from '../../../../../tests/fixtures/test-filesystem';
 import { readConfigurationFile, updateConfigurationFile } from '../../../src/config/files';
 import { readMcpSources } from '../../../src/config/mcp-sources';
@@ -39,7 +40,7 @@ test.skipIf(process.platform === 'win32')(
     expect(defaultWindowsPathSecurity()).toBeUndefined();
     const root = mkdtempSync(join(tmpdir(), 'kite-windows-lazy-'));
     try {
-      const result = await Bun.build({
+      const result = await buildBundle({
         entrypoints: [
           fileURLToPath(new URL('../../../src/platform/windows-path-security.ts', import.meta.url)),
         ],

@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { type AssetManifest, type TrustedAsset, validateTrustedAssets } from '../../src/assets';
 
 test('actual browser build produces only fixed verified assets and source-independent manifest/module', async () => {
-  const build = Bun.spawn([process.execPath, 'run', 'build'], {
-    cwd: join(import.meta.dir, '../..'),
+  const build = spawnFixtureProcess([process.execPath, '--run', 'build'], {
+    cwd: join(import.meta.dirname, '../..'),
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -19,7 +20,7 @@ test('actual browser build produces only fixed verified assets and source-indepe
   expect(status).toBe(0);
   const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'kite-web-assets-')));
   try {
-    const dist = join(import.meta.dir, '../../dist');
+    const dist = join(import.meta.dirname, '../../dist');
     writeFileSync(join(temporary, 'assets.mjs'), readFileSync(join(dist, 'assets.js')));
     const module = (await import(join(temporary, 'assets.mjs'))) as {
       getTrustedAssets(): ReadonlyMap<string, TrustedAsset>;

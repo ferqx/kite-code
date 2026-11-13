@@ -1,3 +1,4 @@
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { reserveDaemonEndpoint, selectDaemonEndpoint } from '../../src/daemon/endpoint';
 
@@ -13,7 +14,8 @@ if (id === 'held-record-publication' || id === 'held-record-publication-slow') {
     readFileSync,
     writeSync,
   } = await import('node:fs');
-  const { dlopen } = require('bun:ffi') as typeof import('bun:ffi');
+  const { dlopen } =
+    require('@kite-ai/agent/runtime-ffi') as typeof import('@kite-ai/agent/runtime-ffi');
   const native = dlopen(
     process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6',
     {
@@ -36,9 +38,9 @@ if (id === 'held-record-publication' || id === 'held-record-publication-slow') {
         ino: String(stat.ino),
       }),
     );
-    await Bun.stdin.stream().getReader().read();
+    for await (const _ of process.stdin.iterator({ destroyOnReturn: false })) break;
     // The parent starts its synchronous reader while this separate process still owns EX.
-    await Bun.sleep(id === 'held-record-publication-slow' ? 750 : 150);
+    await sleepTimer(id === 'held-record-publication-slow' ? 750 : 150);
     writeSync(fd, original, 0, original.length, 0);
     ftruncateSync(fd, original.length);
     fsyncSync(fd);
@@ -66,7 +68,7 @@ try {
     webOrigin: 'http://127.0.0.1:12346',
   });
   console.log(JSON.stringify(owner.reservation));
-  await Bun.stdin.stream().getReader().read();
+  for await (const _ of process.stdin.iterator({ destroyOnReturn: false })) break;
   await owner.close();
 } catch (error) {
   console.log(

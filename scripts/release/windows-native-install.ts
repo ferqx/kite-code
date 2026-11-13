@@ -30,7 +30,11 @@ import {
   WindowsInstallationRemovalAcquireUnknownError,
   windowsInstallationRemovalReader,
 } from '../../packages/agent/src/platform/windows-installation-removal';
-import { windowsDesktopFrontdoorNames } from '../../packages/agent/src/platform/windows-native-frontdoors';
+import {
+  windowsDesktopFrontdoorNames,
+  windowsNodeDesktopFrontdoorNames,
+  windowsNodeNativeFrontdoorNames,
+} from '../../packages/agent/src/platform/windows-native-frontdoors';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
@@ -207,10 +211,16 @@ function nativeFrontdoorFile(
   name: string,
 ) {
   const outer = bundle.manifest.files.find((file) => file.path === `app/${name}`);
-  if (outer?.mode === (name === 'native-verifier.js' ? 420 : 493)) return outer;
+  if (outer?.mode === (name.endsWith('.js') || name.endsWith('.mjs') ? 420 : 493)) return outer;
   if (!outer && name === 'native-verifier.exe') {
     const shared = sharedWindowsNativeVerifier(bundle.terminal.manifest);
     if (shared) return { ...shared, path: `terminal/${shared.path}` };
+  }
+  if (!outer && name === 'runtime-native.node') {
+    const addon = bundle.terminal.manifest.files.find(
+      (file) => file.path === 'windows-frontdoor/runtime-native.node',
+    );
+    if (addon?.mode === 493) return { ...addon, path: `terminal/${addon.path}` };
   }
   denied('frontdoor_unavailable');
 }
@@ -225,8 +235,12 @@ function bootstrap(
       bootstrap: {
         candidateId: bundle.digest,
         files: ('cli' in bundle.terminal.manifest.entries
-          ? windowsNativeFrontdoorNames
-          : windowsDesktopFrontdoorNames
+          ? bundle.terminal.manifest.nodeVersion
+            ? windowsNodeNativeFrontdoorNames
+            : windowsNativeFrontdoorNames
+          : bundle.terminal.manifest.nodeVersion
+            ? windowsNodeDesktopFrontdoorNames
+            : windowsDesktopFrontdoorNames
         ).map((name) => {
           const file = nativeFrontdoorFile(bundle, name);
           return { name, size: file.size, sha256: file.sha256 };
@@ -389,6 +403,12 @@ export function installWindowsNativeBundle(
       publish(owner, join(root, markerName), Buffer.from(JSON.stringify(marker)));
     }
     const old = selection(root);
+    if (
+      !desktop &&
+      bundle.terminal.manifest.nodeVersion &&
+      marker.bootstrap.files.length === windowsNativeFrontdoorNames.length
+    )
+      denied('node_bootstrap_requires_new_prefix');
     privateDirectory(join(root, 'releases'), security);
     const ids = candidates(root);
     if (

@@ -72,13 +72,13 @@ export function releaseErrorCode(error: unknown, fallback = 'release_failed'): s
 /** Trusted source-tool instructions; never include filesystem paths or raw error details. */
 export function sourceCandidateBuildHint(code: string): string {
   if (code === 'terminal_bundle_unavailable')
-    return 'Build the local Terminal candidate first: npm run release:build\nFor CLI/TUI development: npm run build, then npm run cli:dev or npm run tui:dev\n';
+    return 'Build the local Terminal candidate first: bun run release:build\nFor CLI/TUI development: bun run build, then bun run cli:dev or bun run tui:dev\n';
   if (code === 'native_bundle_unavailable') {
     const standalone =
       (process.platform === 'darwin' && process.arch === 'arm64') ||
       (process.platform === 'win32' && process.arch === 'x64');
-    const prerequisite = standalone ? '' : 'npm run release:build, then ';
-    return `Build the local Native candidate first: ${prerequisite}npm run release:build -- --product native\nFor Desktop development: npm run build, then npm run desktop:dev\n`;
+    const prerequisite = standalone ? '' : 'bun run release:build, then ';
+    return `Build the local Native candidate first: ${prerequisite}bun run release:build --product native\nFor Desktop development: bun run build, then bun run desktop:dev\n`;
   }
   return '';
 }

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { nativeAgentActivities, nativeAgentActivityForTool } from '../src/native-agent-activity';
 import type { NativeToolMessageFact } from '../src/tool-messages-bridge';
 import { backgroundItem } from './background-item.fixture';

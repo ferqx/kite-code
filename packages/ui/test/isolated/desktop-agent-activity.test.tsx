@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { expect, test } from '#kite-test';
 import { ApprovalHeader } from '../../src/desktop/ApprovalHeader';
 import { BackgroundExecutions } from '../../src/desktop/BackgroundExecutions';
 import { Conversation } from '../../src/desktop/Conversation';

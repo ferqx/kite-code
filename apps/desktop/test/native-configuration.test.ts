@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   type AgentClient,
   ClientError,
@@ -6,6 +5,7 @@ import {
   type ModelSettingsRequest,
   type ModelSettingsView,
 } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { NativeConfiguration } from '../electron/configuration';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { NativeModelToggleQueue } from '../src/native-model-toggle-queue';

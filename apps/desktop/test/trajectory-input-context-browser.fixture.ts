@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash as fixtureHash } from 'node:crypto';
 import path from 'node:path';
 import type { Page } from 'playwright';
+import { writeFixtureFile } from '../../../scripts/tooling/files';
 import { trajectoryInputContextData } from './trajectory-input-context-data.fixture';
 
 /** Targeted public-input presentation; intentionally not another workbench matrix. */
@@ -192,7 +194,7 @@ export async function verifyTrajectoryInputContext(input: {
     ] as const)
       assert.equal(
         saved.metadata.context.sources.find((source) => source.id === id)?.digest,
-        new Bun.CryptoHasher('sha256').update(content).digest('hex'),
+        fixtureHash('sha256').update(content).digest('hex'),
       );
     assert.equal(original.serializedBodies, bodiesBefore);
     assert.equal(saved.request.messages[2]!.sourceIds, undefined);
@@ -236,7 +238,7 @@ export async function verifyTrajectoryInputContext(input: {
     });
   }
   verification.inputContext = { controlledFixture: true, narrowDrawer: true, cases };
-  await Bun.write(
+  await writeFixtureFile(
     path.join(artifact, 'input-context-verification.json'),
     JSON.stringify(verification, null, 2),
   );

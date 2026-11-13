@@ -1,11 +1,16 @@
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+
 interface ResourceSettleHooks {
   collectGarbage: () => void;
   yieldTurn: () => Promise<void>;
 }
 
 const DEFAULT_SETTLE_HOOKS: ResourceSettleHooks = {
-  collectGarbage: () => Bun.gc(true),
-  yieldTurn: () => Bun.sleep(0),
+  collectGarbage: () => {
+    if (!globalThis.gc) throw Error('soak_gc_unavailable');
+    globalThis.gc();
+  },
+  yieldTurn: () => fixtureDelay(0),
 };
 
 /**

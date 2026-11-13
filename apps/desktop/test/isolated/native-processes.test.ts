@@ -1,8 +1,14 @@
-import { expect, test } from 'bun:test';
 import { ChildProcess } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { NativeProcessOwner } from '../../electron/native-processes';
 
 class GatedChild extends ChildProcess {
@@ -81,19 +87,19 @@ test('launch error and timeout keep the first failure pending until actual close
 
 test('actual Node Main owner closes its original child and both output streams', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-process-owner-')));
-  let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
   try {
-    const built = await Bun.build({
-      entrypoints: [join(import.meta.dir, '../native-processes-node.fixture.ts')],
+    const built = await buildFixture({
+      entrypoints: [join(import.meta.dirname, '../native-processes-node.fixture.ts')],
       target: 'node',
       format: 'esm',
       outdir: root,
       naming: 'driver.js',
     });
     if (!built.success) throw new AggregateError(built.logs, 'native_process_fixture_build');
-    const node = Bun.which('node');
+    const node = findFixtureExecutable('node');
     if (!node) throw Error('native_process_fixture_node_missing');
-    driver = Bun.spawn([node, built.outputs[0]!.path, root], {
+    driver = spawnFixtureProcess([node, built.outputs[0]!.path, root], {
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

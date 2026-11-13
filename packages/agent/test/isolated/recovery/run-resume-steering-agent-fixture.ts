@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync } from 'node:fs';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { ModelAdapter } from '@kite-ai/ai';
 import type { Extension } from '../../../src/extensions';
 import type { RuntimeOptions } from '../../../src/runtime';
@@ -41,7 +42,7 @@ export function steeringAgentOptions(
           const end = Date.now() + 5000;
           while (!existsSync(`${directory}/child-planned`)) {
             if (Date.now() > end) throw Error('child_plan_timeout');
-            await Bun.sleep(5);
+            await sleepTimer(5);
           }
           const child = await ctx.operations.readAgent(ref);
           await ctx.operations.sendAgentInput(ref, {

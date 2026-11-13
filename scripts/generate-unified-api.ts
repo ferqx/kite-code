@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import Ajv2020 from 'ajv/dist/2020';
-import standalone from 'ajv/dist/standalone';
+import Ajv2020 from 'ajv/dist/2020.js';
+import standalone from 'ajv/dist/standalone/index.js';
 import { z } from 'zod';
 import { apiRoutes, apiSchemas } from '../apps/service/src/http/schema';
 import { traceExtensionRoutes } from '../apps/service/src/trace-extensions/schemas';
+import { build as buildArtifact } from './tooling/bun-build';
+import { spawnSync as spawnProcessSync } from './tooling/process';
 
 interface Schema {
   $ref?: string;
@@ -307,7 +309,7 @@ try {
     `export const requestValidators = {${requestNames.map((name) => `${name}:request_${name}`).join(',')}};`,
   ].join('\n');
   writeFileSync(entry, `${standalone(validatorCompiler, validatorRefs)}\n${tables}\n`);
-  const bundle = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'esm' });
+  const bundle = await buildArtifact({ entrypoints: [entry], target: 'browser', format: 'esm' });
   if (!bundle.success || bundle.outputs.length !== 1) throw new Error('Validator bundle failed');
   validatorSource = (await bundle.outputs[0]!.text()).replaceAll(
     basename(validatorTemp),
@@ -330,12 +332,6 @@ for (const [name, schema] of Object.entries(schemas)) {
     declarations += `type ${name}_${definition.replaceAll(/[^A-Za-z0-9_]/g, '_')} = ${type(value, name)};\n`;
   declarations += `export type ${name} = ${type(schema, name)};\n`;
 }
-const formatted = Bun.spawnSync(
-  ['./node_modules/.bin/biome', 'format', '--stdin-file-path=api.ts'],
-  { stdin: new TextEncoder().encode(declarations), stdout: 'pipe', stderr: 'pipe' },
-);
-if (formatted.exitCode !== 0) throw new Error(formatted.stderr.toString());
-declarations = formatted.stdout.toString();
 function openApiReferences(value: unknown, name: string): unknown {
   if (Array.isArray(value)) return value.map((item) => openApiReferences(item, name));
   if (value !== null && typeof value === 'object')
@@ -431,9 +427,10 @@ for (const [path, source] of Object.entries(outputs)) {
   // The generated validator exceeds normal scan limits; format its stdin under the same JS rules.
   const formatPath =
     path === 'packages/client/src/generated/validators.js' ? 'http-schema-validators.js' : path;
-  const formatted = Bun.spawnSync(
+  const formatted = spawnProcessSync(
     [
-      './node_modules/.bin/biome',
+      process.execPath,
+      resolve('node_modules/@biomejs/biome/bin/biome'),
       'format',
       `--files-max-size=${Math.max(1048576, Buffer.byteLength(source) + 1)}`,
       `--stdin-file-path=${formatPath}`,

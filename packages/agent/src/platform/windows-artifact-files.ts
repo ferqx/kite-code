@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { CString, dlopen, ptr, toArrayBuffer } from '../runtime-ffi';
 import { AgentError } from '../storage/types';
 import { defaultWindowsPathSecurity, privateDirectory } from './windows-path-security';
 import {
@@ -73,7 +74,6 @@ export function* readWindowsArtifactChunks(
 function native() {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw new AgentError('artifact_platform_unsupported');
-  const { dlopen, ptr, toArrayBuffer, CString } = require('bun:ffi') as typeof import('bun:ffi');
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetLastError: { args: [], returns: 'u32' },
@@ -113,10 +113,10 @@ function native() {
       GetAce: { args: ['ptr', 'u32', 'ptr'], returns: 'bool' },
     },
   );
-  const pointer = (value: bigint): import('bun:ffi').Pointer => {
+  const pointer = (value: bigint): import('../runtime-ffi').Pointer => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number <= 0) return fail();
-    return number as import('bun:ffi').Pointer;
+    return number as import('../runtime-ffi').Pointer;
   };
   const out = () => new BigUint64Array(1);
   const wide = (path: string) => {
@@ -141,7 +141,7 @@ function native() {
   if (!adv.symbols.OpenProcessToken(kernel.symbols.GetCurrentProcess(), 8, ptr(token))) fail();
   // Keep the original TOKEN_USER bytes alive for the SID pointer's complete lifetime.
   let user: Uint8Array;
-  let sid: import('bun:ffi').Pointer;
+  let sid: import('../runtime-ffi').Pointer;
   let sidText: string;
   try {
     const size = new Uint32Array(1);
@@ -194,7 +194,7 @@ function native() {
     access: number,
     share: number,
     create = false,
-    sd?: import('bun:ffi').Pointer,
+    sd?: import('../runtime-ffi').Pointer,
   ) => {
     const sa = new Uint8Array(24);
     if (sd) {

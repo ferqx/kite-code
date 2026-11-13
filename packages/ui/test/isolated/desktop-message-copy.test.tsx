@@ -1,7 +1,7 @@
-import { expect, spyOn, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, spyOn, test } from '#kite-test';
 import { Conversation } from '../../src/desktop/Conversation';
 import { ConversationCache } from '../../src/desktop/ConversationCache';
 import { MessageCopyButton } from '../../src/desktop/MessageCopyButton';

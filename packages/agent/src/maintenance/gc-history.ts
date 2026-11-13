@@ -1,5 +1,5 @@
-import type { Database } from 'bun:sqlite';
 import { canonicalJson } from '../json';
+import type { Database } from '../runtime-sqlite';
 import {
   sessionHistoryCollections,
   workspaceHistoryCollectedAt,

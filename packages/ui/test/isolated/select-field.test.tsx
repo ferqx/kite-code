@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useState } from 'react';
+import { expect, test } from '#kite-test';
 
 async function fixture() {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://localhost' });

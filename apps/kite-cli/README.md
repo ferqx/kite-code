@@ -1,6 +1,6 @@
 # 保留的旧 CLI/TUI 源码
 
-2026-10-26 用户确认：新架构模块全部保留，旧架构只保留本目录，其余旧模块删除。本目录不在根八 workspace 中；其 Runtime/Service/contract 依赖已经删除，因此不再提供可运行的历史 library、build 或启动闭包。
+2026-10-26 用户确认：新架构模块全部保留，旧架构只保留本目录，其余旧模块删除。本目录不在当前根 workspace 中；其 Runtime/Service/contract 依赖已经删除，因此不再提供可运行的历史 library、build 或启动闭包。直接调用旧 build 或 test 时，Node 在加载旧依赖前报告入口已退役。
 
 当前终端 owner 为 [apps/cli](../cli/README.md)，正式命令为根 `agent`／`tui`，开发命令为 `cli:dev`／`tui:dev`，准确参数与 Profile 见[本地开发](../../docs/development/local-development.md)。本目录保留实现供阅读与对照，不得把源码存在或旧测试当作当前产品资格。
 

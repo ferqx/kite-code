@@ -1,7 +1,11 @@
 /** Protocol/server JS shares the Service's chunks; workspace owners remain external. */
 export const serviceBundledDependencies: readonly string[] = Object.freeze([
   '@modelcontextprotocol/sdk',
+  '@hono/node-server',
+  '@iarna/toml',
   'hono',
+  'undici',
+  'ws',
   'zod',
   'quickjs-emscripten-core',
   '@jitl/quickjs-wasmfile-release-sync',

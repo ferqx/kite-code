@@ -1,12 +1,12 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BunPlugin } from 'bun';
+import type { BunBuildPlugin } from '../../../scripts/tooling/bun-build';
 
 const originalSerialization = `const lineWithoutEmptyItems = line.filter(item => item !== undefined);
             return styledCharsToString(lineWithoutEmptyItems).trimEnd();`;
 
 /** Preserve Ink's cells and styling; avoid ANSI diffs only for entirely unstyled rows. */
-export function plainInkOutput(inkDirectory: string): BunPlugin {
+export function plainInkOutput(inkDirectory: string): BunBuildPlugin {
   const manifest = JSON.parse(readFileSync(join(inkDirectory, '../package.json'), 'utf8'));
   if (manifest.name !== 'ink' || manifest.version !== '7.1.1')
     throw Error('tui_ink_build_version_unreviewed');

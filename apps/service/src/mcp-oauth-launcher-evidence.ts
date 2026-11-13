@@ -67,7 +67,7 @@ export function decodeMcpOAuthLauncherObservation(
     )
       return undefined;
     if (row.exit !== null) {
-      // Bun reports an actual numeric exit status even when signalCode is present.
+      // The launcher records a bounded exit status even if the process was signaled.
       if (
         !exact(row.exit, 'code,reaped,signal') ||
         row.exit.reaped !== true ||

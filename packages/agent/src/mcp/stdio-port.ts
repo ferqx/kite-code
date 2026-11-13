@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { type JSONRPCMessage, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
+import { findHostExecutable } from '../platform/executable';
+import { nodeRuntimeFlags } from '../platform/runtime-flags';
 import { createMcpAdapter, type McpLifecycleTransportPort } from './index';
 import {
   isUserMcpTransportBinding,
@@ -45,10 +47,10 @@ export function mcpStdioLinuxAssets(): { initExecutable: string; bubblewrapPath:
   if (process.platform !== 'linux' || !import.meta.url.endsWith('.js'))
     throw new McpStdioPortError('mcp_stdio_asset_unavailable');
   const initExecutable = fileURLToPath(new URL('./linux-stdio-init', import.meta.url));
-  const bubblewrap = Bun.which('bwrap');
+  const bubblewrap = findHostExecutable('bwrap');
   if (!existsSync(initExecutable) || !bubblewrap)
     throw new McpStdioPortError('mcp_stdio_asset_unavailable');
-  return { initExecutable, bubblewrapPath: realpathSync.native(bubblewrap) };
+  return { initExecutable, bubblewrapPath: bubblewrap };
 }
 type Binding = McpHostTransportBinding;
 type Configuration = {
@@ -71,7 +73,7 @@ export interface McpStdioPortOptions<B extends Binding = McpSessionTransportBind
     };
   }[];
   guardianPath: string;
-  bunExecutable: string;
+  runtimeExecutable: string;
   /** Original host permissions and network; the PID namespace owns connection descendants. */
   linux?: { initExecutable: string; bubblewrapPath: string };
   /** Trusted private host base; the broker creates and removes its own 0700 directory. */
@@ -98,7 +100,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
   owner: 'session' | 'user',
 ): McpHostTransportPort<B> {
   const guardianPath = options.guardianPath,
-    bun = options.bunExecutable,
+    runtime = options.runtimeExecutable,
     maximum = options.limits?.frameBytes ?? 1024 * 1024,
     stderrMaximum = options.limits?.stderrBytes ?? 1024 * 1024,
     timeout = options.limits?.timeoutMs ?? 10000,
@@ -106,7 +108,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
     admit = options.admit;
   const assertFresh = options.assertFresh;
   if (
-    ![guardianPath, bun, options.controlBase ?? tmpdir()].every(isAbsolute) ||
+    ![guardianPath, runtime, options.controlBase ?? tmpdir()].every(isAbsolute) ||
     !guardianPath.endsWith('.js') ||
     (options.linux !== undefined &&
       ![options.linux.initExecutable, options.linux.bubblewrapPath].every(isAbsolute)) ||
@@ -232,7 +234,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
         if (Buffer.byteLength(JSON.stringify(configuration)) > 256 * 1024)
           throw new McpStdioPortError('mcp_stdio_environment_denied');
       }
-      if (![guardianPath, bun, configuration.command, configuration.cwd].every(existsSync))
+      if (![guardianPath, runtime, configuration.command, configuration.cwd].every(existsSync))
         throw new McpStdioPortError('mcp_stdio_asset_unavailable');
       if (process.platform === 'linux') {
         if (
@@ -259,7 +261,7 @@ function createHostMcpStdioTransportPort<B extends Binding>(
           grace,
         });
       }
-      const broker = spawn(bun, [guardianPath], {
+      const broker = spawn(runtime, [...nodeRuntimeFlags, guardianPath], {
         cwd: dirname(guardianPath),
         env: {},
         detached: true,
@@ -587,9 +589,10 @@ async function openWindowsStdio<B extends Binding>(
   options: McpStdioPortOptions<B>,
   limits: { maximum: number; stderrMaximum: number; timeout: number; grace: number },
 ): Promise<Awaited<ReturnType<McpLifecycleTransportPort['open']>>> {
-  const { retainWindowsOwnedProcessObservation } =
-    require('../platform/process/windows-owned-child') as typeof import('../platform/process/windows-owned-child');
-  const child = spawn(options.bunExecutable, [options.guardianPath], {
+  const { retainWindowsOwnedProcessObservation } = await import(
+    '../platform/process/windows-owned-child'
+  );
+  const child = spawn(options.runtimeExecutable, [...nodeRuntimeFlags, options.guardianPath], {
     cwd: dirname(options.guardianPath),
     env: {},
     stdio: ['pipe', 'pipe', 'pipe'],

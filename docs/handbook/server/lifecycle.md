@@ -8,7 +8,7 @@
 
 Windows 安装版 Kite Desktop、`kite` 任务和 `kite-tui` 启动本地配套服务时，最多等待 60 秒接收服务的启动就绪消息。
 
-源码 `bun run tui` 启动 TUI 和配套服务；`bun run server` 构建 Web、显式启动 daemon 并打印地址。构建或启动失败即停止，返回该步骤退出码。Vite 只是资源开发入口。
+源码先按本地开发说明准备 Terminal 候选。`bun run tui` 启动 TUI 和配套服务。`bun run server` 使用同一候选启动 daemon 并打印地址。候选缺失或启动失败时返回错误。Vite 用于资源开发。见[本地开发](../../development/local-development.md#制品与启动验证)。
 
 ## 共享 daemon
 
@@ -51,7 +51,7 @@ restart 先校验资源和可检查的存储格式，再请求停止旧实例。
 
 私有端口只交付原身份与 HTTP 连接信息，业务和关闭使用公共 Client。父启动客户端退出不会停止 daemon。正常 stop 等待原 PID/启动身份实际退出；关闭后身份暂不可读时继续核对原进程，不能据此宣称已经退出。持续无法确认会返回身份不明错误，清理失败保留原资源；不会重复关闭、强杀或启动替代实例。当前真实完整验证限 macOS；Linux/Windows 尚未取得完整平台资格。
 
-Windows x64 正式安装入口的Daemon源码现已接本机当前用户私有 named pipe。默认地址按真实SID和原profile固定，status JSON的endpoint可直接用于共享CLI/TUI的 `--server`；显式地址只接受 `\\.\pipe\kite-daemon-<小写字母、数字或连字符>`，不接受远端pipe、HTTP URL或自动改投。相同默认/显式地址指向同一记录，absent状态不建目录。正式启动及restart预检使用所选候选的固定Bun配置和独立使用权；未具备候选证明的Windows开发制品明确返回 `daemon_artifact_unqualified`。运行中的旧候选继续固定原实例，安装指针切换只影响后续启动；stop以原kernel进程HANDLE确认退出。源码和有限mock不证明实际Windows安全、detach或完整用户链，原生资格按[发布边界](../../active/release-control.md)保留。
+Windows x64 正式安装入口的Daemon源码现已接本机当前用户私有 named pipe。默认地址按真实SID和原profile固定，status JSON的endpoint可直接用于共享CLI/TUI的 `--server`；显式地址只接受 `\\.\pipe\kite-daemon-<小写字母、数字或连字符>`，不接受远端pipe、HTTP URL或自动改投。相同默认/显式地址指向同一记录，absent状态不建目录。正式启动及 restart 预检使用所选候选随包的运行时和独立使用权；未具备候选证明的Windows开发制品明确返回 `daemon_artifact_unqualified`。运行中的旧候选继续固定原实例，安装指针切换只影响后续启动；stop以原kernel进程HANDLE确认退出。源码和有限mock不证明实际Windows安全、detach或完整用户链，原生资格按[发布边界](../../active/release-control.md)保留。
 
 空闲关闭在服务内重新检查：运行、审批等待、后台工作、写入准备或清理中都会返回 busy，保留原服务。明确取消关闭只处理该实例拥有的工作；同 profile 的另一服务及其已接管命令不会因本实例退出被取消。普通历史读取不等于忙碌任务，但关闭会等待已有读取结束再释放数据库。
 
@@ -63,4 +63,4 @@ Windows x64 正式安装入口的Daemon源码现已接本机当前用户私有 n
 
 实现、隔离进程验证与当前平台范围见[Service owner](../../../apps/service/README.md)和[V1.3 实施进度](../../plans/unified-agent-refactor-v1-progress.md)。
 
-通用 Terminal 或完整 Native 安装后，可用明确 `<prefix>/bin/kite server start|status|stop` 操作新 profile 的服务；Native 使用自身候选内的 Daemon 和 Bun，并保持完整候选的使用锁。参数仍按本节通用入口规定。升级/回滚只影响后续启动，原 daemon 保持原实例和制品，其使用锁会阻止卸载；停止须使用公开生命周期命令，不强杀无关进程。安装与平台限制见[终端制品说明](../../../apps/cli/docs/terminal-release.md)。
+通用 Terminal 或完整 Native 安装后，可用明确 `<prefix>/bin/kite server start|status|stop` 操作新 profile 的服务。新 Terminal 和完整 Native 都用候选内的 Node 启动 Daemon，安装后无需另装 Node 或 Bun。macOS arm64 制品的安装、校验和维护命令见[桌面安装说明](../../../apps/desktop/docs/native-release.md#构建与安装)。参数仍按本节通用入口规定。升级／回滚只影响后续启动，原 daemon 保持原实例和制品，其使用锁会阻止卸载。停止须使用公开生命周期命令。安装与平台限制见[终端制品说明](../../../apps/cli/docs/terminal-release.md)。

@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { describe, expect, test } from '#kite-test';
+import { spawn as testSpawn } from '../../../scripts/tooling/process';
 import { runWithTuiSystemStepSignal } from './cancellation';
 import {
   createPtyOutputBuffer,
@@ -22,7 +23,7 @@ test('keeps ordinary TUI groups detached but joins the fault-soak owned group', 
 });
 
 describe('exact PTY input transport', () => {
-  test('writes one transaction when Bun reports the complete synchronous flush count', async () => {
+  test('writes one transaction when the PTY reports the complete synchronous flush count', async () => {
     const writes: string[] = [];
 
     await writeExactPtyInput('Ask a question', {
@@ -35,7 +36,7 @@ describe('exact PTY input transport', () => {
     expect(writes).toEqual(['Ask a question']);
   });
 
-  test('does not replay when Bun reports zero synchronously flushed bytes', async () => {
+  test('does not replay when the PTY reports zero synchronously flushed bytes', async () => {
     let writes = 0;
 
     await writeExactPtyInput('Ask a question', {
@@ -48,7 +49,7 @@ describe('exact PTY input transport', () => {
     expect(writes).toBe(1);
   });
 
-  test('does not replay a Bun partial synchronous flush count', async () => {
+  test('does not replay a partial synchronous flush count', async () => {
     let writes = 0;
 
     await writeExactPtyInput('Ask a question', {
@@ -104,7 +105,7 @@ const posixTest = process.platform === 'win32' ? test.skip : test;
 posixTest(
   'terminates a verified detached child process group including its grandchild',
   async () => {
-    const proc = Bun.spawn(['/bin/sh', '-c', 'sleep 30 & child=$!; echo $child; wait'], {
+    const proc = testSpawn(['/bin/sh', '-c', 'sleep 30 & child=$!; echo $child; wait'], {
       detached: true,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -147,7 +148,7 @@ describe('resolveTuiLaunchPaths', () => {
     });
   });
 
-  test('uses an installed standalone executable without the Bun source launcher', () => {
+  test('uses an installed standalone executable without the source launcher', () => {
     const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
 
     expect(

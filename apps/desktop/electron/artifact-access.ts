@@ -1,18 +1,19 @@
 import { spawn } from 'node:child_process';
 import { closeSync, constants, fstatSync, lstatSync, openSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { verifyNativeAsset } from './native-assets';
+import { type NativeAssets, verifyNativeAsset } from './native-assets';
 import { loadWindowsAccess } from './windows-access';
 /** Main retains its own access lease until the paired Service has closed. */
-export async function acquireNodeArtifactAccess(input: {
-  root: string;
-  bunExecutable: string;
-  bunSha256: string;
-  helperPath: string;
-  helperSha256: string;
-  windowsAsset?: { path: string; sha256: string };
-}): Promise<{ close(): void }> {
-  verifyNativeAsset(input.bunExecutable, input.bunSha256);
+export async function acquireNodeArtifactAccess(
+  input: Pick<NativeAssets, 'runtimeExecutable' | 'runtimeSha256'> & {
+    root: string;
+    helperPath: string;
+    helperSha256: string;
+    windowsAsset?: { path: string; sha256: string };
+  },
+): Promise<{ close(): void }> {
+  const { runtimeExecutable, runtimeSha256 } = input;
+  verifyNativeAsset(runtimeExecutable, runtimeSha256);
   verifyNativeAsset(input.helperPath, input.helperSha256);
   if (!isAbsolute(input.root) || realpathSync(input.root) !== input.root)
     throw Error('artifact_access_unavailable');
@@ -57,7 +58,7 @@ export async function acquireNodeArtifactAccess(input: {
     check();
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
-        input.bunExecutable,
+        runtimeExecutable,
         [input.helperPath, JSON.stringify({ root: input.root })],
         { stdio: ['ignore', 'pipe', 'pipe', fd], env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } },
       );

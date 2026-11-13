@@ -1,6 +1,6 @@
-import { expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, spyOn, test } from '#kite-test';
 import {
   removeTemporaryDirectory,
   temporaryDirectory,

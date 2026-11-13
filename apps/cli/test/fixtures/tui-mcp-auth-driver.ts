@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { closeSync, constants, fsyncSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { ptyDeadline, spawnTuiPTY, type TuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -82,7 +83,7 @@ const wait = async (
     }
     if (Date.now() > end) throw Error(`owned_auth_frame_deadline:${text}`);
     if (active!.ended) throw Error('owned_auth_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const waitAbsent = async (text: string) => {
@@ -95,7 +96,7 @@ const waitAbsent = async (text: string) => {
     }
     if (Date.now() > end) throw Error(`owned_auth_absent_deadline:${text}`);
     if (active!.ended) throw Error('owned_auth_pty_eof');
-    await Bun.sleep(50);
+    await testSleep(50);
   }
 };
 const key = async (value: string, retain = false) => {
@@ -133,7 +134,7 @@ const choose = async (label: string) => {
       targetAt = frame.indexOf(target);
     if (selectedAt < 0) {
       if (Date.now() > end) throw Error('owned_auth_selection_absent');
-      await Bun.sleep(50);
+      await testSleep(50);
       step--;
       continue;
     }
@@ -150,7 +151,7 @@ const choose = async (label: string) => {
       const next = await current();
       if (next.fresh && next.text) break;
       if (Date.now() > end) throw Error(`owned_auth_navigation_frame_deadline:${label}`);
-      await Bun.sleep(50);
+      await testSleep(50);
     }
   }
   throw Error(`owned_auth_choice_unavailable:${label}`);
@@ -161,7 +162,7 @@ const start = async (phase: string) => {
   chosenOriginalId = undefined;
   retainedDetail = undefined;
   active = spawnTuiPTY({
-    cmd: [input.executable, '--no-install', input.host],
+    cmd: [input.executable, '--no-global-search-paths', input.host],
     cwd: input.root,
     env: {
       HOME: input.root,
@@ -216,7 +217,7 @@ const leave = async (pending = false) => {
 const close = async (phase: string) => {
   await key('\x11');
   const end = Date.now() + 6000;
-  while (!active!.ended && Date.now() < end) await Bun.sleep(50);
+  while (!active!.ended && Date.now() < end) await testSleep(50);
   const [exitCode] = await ptyDeadline(
     Promise.all([active!.host.exited, active!.eof]),
     3000,

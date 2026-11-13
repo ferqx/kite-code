@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -17,9 +15,18 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -52,8 +59,8 @@ test.skipIf(process.platform !== 'darwin')(
       profile: 'default',
     });
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
-    let provider: ReturnType<typeof Bun.serve> | undefined;
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let provider: FixtureServer | undefined;
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     let completed = false;
     let calls = 0;
     let reviews = 0;
@@ -62,7 +69,7 @@ test.skipIf(process.platform !== 'darwin')(
     try {
       if (!reuseCandidate) {
         const { buildTerminalBundle } = await import(
-          resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+          resolve(import.meta.dirname, '../../../../scripts/release/terminal-bundle.ts')
         );
         const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
         const built = await buildNativeCandidate({
@@ -140,7 +147,7 @@ test.skipIf(process.platform !== 'darwin')(
             ? 'child'
             : undefined;
       }
-      provider = Bun.serve({
+      provider = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         idleTimeout: 0,
@@ -355,27 +362,30 @@ test.skipIf(process.platform !== 'darwin')(
       writeFileSync(
         fixture,
         readFileSync(
-          resolve(import.meta.dir, '../native-live-permissions-electron.fixture.ts'),
+          resolve(import.meta.dirname, '../native-live-permissions-electron.fixture.ts'),
           'utf8',
         )
           .replace(
             "'../../../tests/fixtures/loopback-model-environment'",
             JSON.stringify(
-              resolve(import.meta.dir, '../../../../tests/fixtures/loopback-model-environment.ts'),
+              resolve(
+                import.meta.dirname,
+                '../../../../tests/fixtures/loopback-model-environment.ts',
+              ),
             ),
           )
           .replace(
             "'./native-model-selection.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
           )
           .replace(
             "import { _electron, type Page } from 'playwright';",
-            `import type {Page} from 'playwright';import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+            `import type {Page} from 'playwright';import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
           ),
       );
       expect(
         (
-          await Bun.build({
+          await buildFixture({
             entrypoints: [fixture],
             target: 'node',
             format: 'esm',
@@ -385,9 +395,9 @@ test.skipIf(process.platform !== 'darwin')(
           })
         ).success,
       ).toBe(true);
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           moved,
           home,

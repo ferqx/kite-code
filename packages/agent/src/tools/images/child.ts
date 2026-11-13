@@ -9,6 +9,12 @@ import {
   imageOutputDimension,
 } from './format';
 
+async function write(stream: NodeJS.WritableStream, value: string | Uint8Array): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.write(value, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
 // This fixed one-shot program accepts only bytes. No user path, URL, code, or provider state.
 sharp.cache(false);
 sharp.concurrency(1);
@@ -77,7 +83,7 @@ async function main() {
     );
     const length = Buffer.alloc(4);
     length.writeUInt32BE(header.length);
-    await Bun.write(Bun.stdout, Buffer.concat([length, header, data]));
+    await write(process.stdout, Buffer.concat([length, header, data]));
     return;
   }
   throw new AgentError('image_output_too_large');
@@ -87,6 +93,6 @@ try {
 } catch (error) {
   // Native diagnostics can contain internal details; only a closed public code leaves the child.
   const code = error instanceof AgentError ? error.code : 'image_decode_failed';
-  await Bun.write(Bun.stderr, code);
+  await write(process.stderr, code);
   process.exitCode = 1;
 }

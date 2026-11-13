@@ -251,7 +251,19 @@ export function checkUnifiedAgentBoundary(
           (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
       )
         specifier = node.arguments[0];
-      if (specifier && !ts.isStringLiteralLike(specifier))
+      // The exact Agent observer imports the local business URL supplied by its private
+      // worker_threads constructor, after publishing the original Darwin thread identity.
+      const ownedWorkerEntrypoint =
+        path === 'packages/agent/src/storage/worker/observer-preload.ts' &&
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments.length === 1 &&
+        specifier &&
+        ts.isPropertyAccessExpression(specifier) &&
+        ts.isIdentifier(specifier.expression) &&
+        specifier.expression.text === 'entrypoint' &&
+        specifier.name.text === 'href';
+      if (specifier && !ts.isStringLiteralLike(specifier) && !ownedWorkerEntrypoint)
         refs.push({
           specifier: '<computed module>',
           line: lineOf(node),

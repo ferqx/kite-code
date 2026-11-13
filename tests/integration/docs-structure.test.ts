@@ -1,8 +1,8 @@
-import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe, expect, test } from '#kite-test';
 
-const root = join(import.meta.dir, '../..');
+const root = join(import.meta.dirname, '../..');
 
 describe('current documentation navigation', () => {
   test('provides a README for every real workspace', () => {

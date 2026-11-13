@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -9,7 +9,9 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { windowsShellFixture } from '../../../../packages/agent/test/fixtures/windows-shell-runtime';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import {
   privateDirectory,
   removeTemporaryDirectory,
@@ -35,7 +37,7 @@ async function until<T>(read: () => Promise<T | undefined>) {
     const result = await read();
     if (result !== undefined) return result;
     if (Date.now() > deadline) throw Error('explore_control_deadline');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 
@@ -76,7 +78,7 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
   const webRequests: string[] = [];
   // This owned loopback server is the Web destination, never a Model provider.
   // Keep the real URL, DNS-pinning, admission and ordinary Tool permission path.
-  const web = Bun.serve({
+  const web = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -111,7 +113,7 @@ async function scenario(options: { networkOff?: boolean; shell?: boolean } = {})
                 ),
               ),
               supervisorPath: assets.runner,
-              bunExecutable: process.execPath,
+              runtimeExecutable: process.execPath,
               shellExecutable: assets.shell,
               windows: {
                 fullShellExecutable: assets.fullShell,

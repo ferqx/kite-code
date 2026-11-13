@@ -1,19 +1,20 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { openSqliteStore } from '../../../src/sqlite';
+import { fixtureWorkerEntry, NativeWorker, useFixtureWorker } from '../../fixtures/owned-worker';
 
-test('real Worker finalizes native query and Drizzle statements before success/error ACK and remains usable', async () => {
+test('real Worker finalizes native SQLite statements before success/error ACK and remains usable', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-statement-lifecycle-')));
   const dataRoot = join(directory, 'data');
-  const NativeWorker = globalThis.Worker;
+
   const audits: { observed: number; finalized: boolean; failed: boolean }[] = [];
   class AuditedWorker extends NativeWorker {
     constructor(...args: ConstructorParameters<typeof NativeWorker>) {
-      super(new URL('./statement-worker-fixture.ts', import.meta.url).href, args[1]);
-      this.addEventListener('message', (event: MessageEvent) => {
-        const response = event.data as {
+      super(...fixtureWorkerEntry(args, new URL('./statement-worker-fixture.ts', import.meta.url)));
+      this.on('message', (data) => {
+        const response = data as {
           error?: unknown;
           statementScope?: { observed: number; finalized: boolean };
         };
@@ -22,7 +23,7 @@ test('real Worker finalizes native query and Drizzle statements before success/e
       });
     }
   }
-  globalThis.Worker = AuditedWorker;
+  useFixtureWorker(AuditedWorker);
   let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
     store = await openSqliteStore({ dataRoot, profile: 'owned' });
@@ -60,7 +61,7 @@ test('real Worker finalizes native query and Drizzle statements before success/e
     expect(audits.filter((audit) => audit.observed > 0).length).toBeGreaterThan(64);
     expect(audits.some((audit) => audit.failed && audit.observed > 0)).toBe(true);
   } finally {
-    globalThis.Worker = NativeWorker;
+    useFixtureWorker();
     await store?.close();
     rmSync(directory, { recursive: true, force: true });
   }

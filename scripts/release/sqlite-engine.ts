@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync,
   copyFileSync,
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -22,6 +21,8 @@ import {
   type SqliteReleaseIdentity,
   terminalSqliteEngineRoot,
 } from '@kite-ai/service/sqlite-release-assets';
+import { spawn as spawnProcess } from '../tooling/process';
+import { sqliteLibraryBasename } from './compile-sqlite';
 import type { MacosTerminalSigning } from './macos-dmg/terminal-signing';
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -30,7 +31,7 @@ async function probe(executable: string, args: string[], cwd: string) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let forced = false;
   try {
-    const child = Bun.spawn([executable, ...args], {
+    const child = spawnProcess([executable, ...args], {
       cwd,
       env: {
         HOME: scratch,
@@ -60,19 +61,11 @@ async function probe(executable: string, args: string[], cwd: string) {
   }
 }
 
-const memoryProbe = `
-const {Database}=require('bun:sqlite');
-if(process.argv.length>1 && !Database.setCustomSQLite(process.argv[1]))throw Error('sqlite_release_load_failed');
-const db=new Database(':memory:');
-try{process.stdout.write(JSON.stringify(db.query('SELECT sqlite_version() AS version, sqlite_source_id() AS sourceId').get())+'\\n');}
-finally{db.close(true);}
-`;
-
-/** Build input is a trusted host dependency. The installed runtime never searches Homebrew/system libraries. */
+/** The installed runtime uses the selected, measured library in its own artifact. */
 export async function buildTerminalSqliteEngine(input: {
   root: string;
   executable: string;
-  library?: string;
+  library: string;
   desktopOnly?: true;
   macosSigning?: MacosTerminalSigning;
 }): Promise<TerminalBundleManifest['sqlite']> {
@@ -81,20 +74,12 @@ export async function buildTerminalSqliteEngine(input: {
     input.desktopOnly ? desktopSqliteEngineRoot : terminalSqliteEngineRoot,
   );
   mkdirSync(engineRoot, { recursive: true, mode: 0o700 });
-  let manifest: SqliteEngineManifest;
-  let identity: SqliteReleaseIdentity;
+  const driver = 'node-api:sqlite';
+  const source = realpathSync.native(input.library);
+  const stat = lstatSync(source);
+  if (!stat.isFile() || stat.size < 1 || stat.size > 64 * 1024 * 1024)
+    throw Error('sqlite_release_library_invalid');
   if (process.platform === 'darwin') {
-    const selected =
-      input.library ??
-      [
-        '/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib',
-        '/usr/local/opt/sqlite/lib/libsqlite3.dylib',
-      ].find((path) => existsSync(path));
-    if (!selected) throw Error('sqlite_release_library_required');
-    const source = realpathSync(selected),
-      stat = lstatSync(source);
-    if (!stat.isFile() || stat.size < 1 || stat.size > 64 * 1024 * 1024)
-      throw Error('sqlite_release_library_invalid');
     const dependencyLines = (await probe('/usr/bin/otool', ['-L', source], input.root)).split('\n');
     // The first dependency is the dylib's own install name. Additional libraries must be OS assets.
     if (
@@ -104,40 +89,47 @@ export async function buildTerminalSqliteEngine(input: {
       })
     )
       throw Error('sqlite_release_library_dependency_unsupported');
-    const library = join(engineRoot, 'libsqlite3.dylib');
-    copyFileSync(source, library);
-    chmodSync(library, 0o644);
-    let bytes = readFileSync(library);
-    if (sha(bytes) !== sha(readFileSync(source))) throw Error('sqlite_release_library_changed');
-    if (input.macosSigning) {
-      input.macosSigning.sign(library, 'code');
-      bytes = readFileSync(library);
-    }
-    const actual = JSON.parse(
-      await probe(input.executable, ['-e', memoryProbe, '--', library], input.root),
-    );
-    identity = parseSqliteReleaseIdentity({ driver: 'bun:sqlite', linkage: 'dynamic', ...actual });
-    manifest = {
-      version: 1,
-      driver: 'bun:sqlite',
-      target: { platform: process.platform, arch: process.arch },
-      library: 'libsqlite3.dylib',
-      size: bytes.length,
-      sha256: sha(bytes),
-      sqlite: { version: identity.version, sourceId: identity.sourceId },
-    };
-  } else {
-    if (input.library) throw Error('sqlite_release_library_platform_unsupported');
-    const actual = JSON.parse(await probe(input.executable, ['-e', memoryProbe], input.root));
-    identity = parseSqliteReleaseIdentity({ driver: 'bun:sqlite', linkage: 'builtin', ...actual });
-    manifest = {
-      version: 1,
-      driver: 'bun:sqlite',
-      target: { platform: process.platform, arch: process.arch },
-      linkage: 'builtin',
-      sqlite: { version: identity.version, sourceId: identity.sourceId },
-    };
   }
+  const name = sqliteLibraryBasename(process.platform);
+  const library = join(engineRoot, name);
+  copyFileSync(source, library);
+  chmodSync(library, 0o644);
+  if (sha(readFileSync(library)) !== sha(readFileSync(source)))
+    throw Error('sqlite_release_library_changed');
+  input.macosSigning?.sign(library, 'code');
+  const engineBytes = readFileSync(library);
+  const selectedProbe = `
+    import { Database } from ${JSON.stringify(
+      input.desktopOnly
+        ? pathToFileURL(join(input.root, 'code/@kite-ai/agent/runtime-sqlite.js')).href
+        : '@kite-ai/agent/runtime-sqlite',
+    )};
+    if (!Database.setCustomSQLite(process.argv[1])) throw Error('sqlite_release_load_failed');
+    const db = new Database(':memory:');
+    try { process.stdout.write(JSON.stringify(db.query('SELECT sqlite_version() AS version, sqlite_source_id() AS sourceId').get())); }
+    finally { db.close(true); }
+  `;
+  const actual = JSON.parse(
+    await probe(
+      input.executable,
+      ['--input-type=module', '--eval', selectedProbe, '--', library],
+      input.root,
+    ),
+  );
+  const identity: SqliteReleaseIdentity = parseSqliteReleaseIdentity({
+    driver,
+    linkage: 'dynamic',
+    ...actual,
+  });
+  const manifest: SqliteEngineManifest = {
+    version: 1,
+    driver,
+    target: { platform: process.platform, arch: process.arch },
+    library: name,
+    size: engineBytes.length,
+    sha256: sha(engineBytes),
+    sqlite: { version: identity.version, sourceId: identity.sourceId },
+  };
   const bytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`),
     manifestSha256 = sha(bytes);
   writeFileSync(join(engineRoot, 'engine-manifest.json'), bytes, { mode: 0o644, flag: 'wx' });
@@ -150,6 +142,7 @@ export async function buildTerminalSqliteEngine(input: {
     await probe(
       input.executable,
       [
+        '--input-type=module',
         '-e',
         `import {initializeDefaultSqliteEngine} from ${JSON.stringify(
           input.desktopOnly
@@ -169,5 +162,5 @@ export async function buildTerminalSqliteEngine(input: {
     initialized.selection?.root !== engineRoot
   )
     throw Error('sqlite_release_initializer_mismatch');
-  return Object.freeze({ ...identity, driver: 'bun:sqlite', manifestSha256 });
+  return Object.freeze({ ...identity, driver, manifestSha256 });
 }

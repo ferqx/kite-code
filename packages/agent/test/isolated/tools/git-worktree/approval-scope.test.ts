@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -10,6 +9,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { which as findExecutable } from '../../../../../../scripts/tooling/process';
 import { persistentWorktreeDirectory } from '../../../../../../tests/fixtures/worktree-filesystem';
 import type { AuthorizationRequest, Json, ToolDefinition } from '../../../../src/extensions';
 import { createWorktreeToolBehavior } from '../../../../src/tools/git-worktree/approval';
@@ -28,7 +29,7 @@ test('worktree owner freezes commit and direct parent before approval; later HEA
     parent = join(root, 'destinations'),
     hooks = join(root, 'hooks');
   for (const path of [source, parent, hooks]) mkdirSync(path);
-  const gitPath = realpathSync(Bun.which('git')!);
+  const gitPath = realpathSync(findExecutable('git')!);
   const run = (args: string[]) =>
     execFileSync(gitPath, args, {
       cwd: source,
@@ -50,7 +51,7 @@ test('worktree owner freezes commit and direct parent before approval; later HEA
   const configuration: GitWorktreeConfiguration = {
     configurationId: 'scope-fixture',
     sourceCwd: source,
-    bunPath: process.execPath,
+    runtimePath: process.execPath,
     workerPath: 'unused',
     configPath: 'unused',
     git: { path: gitPath, sha256: sha256(readFileSync(gitPath)) },

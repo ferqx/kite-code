@@ -45,11 +45,11 @@ export {
 export { stageWindowsGitBash } from './windows-git-bash';
 export { createWindowsShellJob, windowsShellAssets } from './windows-shell';
 
-/** Host-only launch profile. Command payloads cannot provide environment or Bun flags. */
+/** Host-only launch profile. Command payloads cannot provide environment or interpreter flags. */
 export interface TrustedWorkerLaunch {
   readonly version: 1;
   readonly env: Readonly<Record<string, string>>;
-  readonly bunFlags: readonly string[];
+  readonly runtimeFlags: readonly string[];
   readonly digest: string;
 }
 export type TrustedWorkerLaunchResolver = (
@@ -61,7 +61,7 @@ export interface ShellJobOptions {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly supervisorPath?: string;
-  readonly bunExecutable?: string;
+  readonly runtimeExecutable?: string;
   readonly shellExecutable?: string;
   readonly maxQueuedBytes?: number;
   readonly graceMs?: number;
@@ -136,9 +136,9 @@ export function createMacosConfinedShellJob(
   options: ShellJobOptions & ConfinedPaths,
 ): JobDefinition {
   const supervisor = options.supervisorPath ?? shellSupervisorAsset();
-  const bun = options.bunExecutable ?? process.execPath;
+  const runtime = options.runtimeExecutable ?? process.execPath;
   const shell = options.shellExecutable ?? '/bin/sh';
-  const prepare = captureConfinedLaunch(options, [supervisor, bun, shell]);
+  const prepare = captureConfinedLaunch(options, [supervisor, runtime, shell]);
   return shellJob(options, prepare);
 }
 
@@ -147,7 +147,7 @@ export function createMacosHostShellJob(options: ShellJobOptions & MacosHostPath
   const supervisor = options.supervisorPath ?? shellSupervisorAsset();
   const prepare = captureMacosHostLaunch(options, [
     supervisor,
-    options.bunExecutable ?? process.execPath,
+    options.runtimeExecutable ?? process.execPath,
     options.shellExecutable ?? '/bin/sh',
   ]);
   return shellJob(
@@ -312,7 +312,7 @@ function shellJob(
     },
     resources: { slot: 'process' },
     async start(input: Json, context: JobContext): Promise<JobHandle> {
-      const { command, supervisor, bun, shell, workdir } = (() => {
+      const { command, supervisor, runtime, shell, workdir } = (() => {
         try {
           if (process.platform !== 'darwin' && process.platform !== 'linux')
             throw new Error('shell_platform_unsupported');
@@ -331,9 +331,9 @@ function shellJob(
           )
             throw new Error('invalid_shell_input');
           const supervisor = configuration.supervisorPath ?? shellSupervisorAsset();
-          const bun = configuration.bunExecutable ?? process.execPath;
+          const runtime = configuration.runtimeExecutable ?? process.execPath;
           const shell = configuration.shellExecutable ?? '/bin/sh';
-          if (![supervisor, bun, shell].every((path) => isAbsolute(path) && existsSync(path)))
+          if (![supervisor, runtime, shell].every((path) => isAbsolute(path) && existsSync(path)))
             throw new Error('shell_supervisor_asset_unavailable');
           const workdir =
             value.workdir === undefined
@@ -341,7 +341,7 @@ function shellJob(
               : realpathSync(resolve(configuration.cwd, String(value.workdir)));
           if (!lstatSync(workdir).isDirectory() || (prepare && workdir !== configuration.cwd))
             throw new Error('invalid_shell_input');
-          return { command: value.command, supervisor, bun, shell, workdir };
+          return { command: value.command, supervisor, runtime, shell, workdir };
         } catch (error) {
           // This boundary has not prepared a temp, called a host resolver, or spawned a broker.
           const code = context.signal.aborted
@@ -382,9 +382,13 @@ function shellJob(
             TEMP: confined.temp,
           }
         : env;
-      const proc = spawn(bun, [...(trusted?.bunFlags ?? []), supervisor], {
+      const proc = spawn(runtime, [...(trusted?.runtimeFlags ?? []), supervisor], {
         cwd: workdir,
-        env: launchEnv,
+        // Keep the shell's environment in its start frame. Node must not consume
+        // interpreter settings from it before the checked supervisor starts.
+        env: Object.fromEntries(
+          Object.entries(launchEnv).filter(([key]) => !key.startsWith('NODE_')),
+        ),
         detached: true,
         stdio: ['pipe', 'pipe', 'pipe'],
       });

@@ -8,9 +8,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target browser --packages external",
-    "typecheck": "bun check -p tsconfig.json",
-    "test": "bun run ../../scripts/run-owned-tests.ts ."
+    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts --outdir ./dist --target browser --packages external",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "zod": "4.3.6"

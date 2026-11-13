@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -8,6 +8,8 @@ import { createConfigurationSnapshot, type JsonObject } from '@kite-ai/agent/con
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
@@ -20,7 +22,7 @@ async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean) {
     const value = await read();
     if (ready(value)) return value;
     if (Date.now() >= deadline) throw Error('session_protocol_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -32,7 +34,7 @@ async function fixture(existingRoot?: string) {
   const file = join(home, 'kite-code.jsonc');
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   let rejectNext = false;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

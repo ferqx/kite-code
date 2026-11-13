@@ -1,15 +1,18 @@
-import { Database } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { createMcpAdapter } from '@kite-ai/agent/mcp';
+import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ModelAttemptError, type ModelEvent } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import type {
   CaseEvidence,
   UnifiedSoakCaseId,
 } from '../../../../scripts/runtime/unified-soak-cases';
-import { privateDirectory } from '../../test-filesystem';
+import { startLoopbackHttpServer } from '../../loopback-http-server';
 import { check, fixture, until } from './common';
 import { type McpSoakStdioAssets, runOwnedMcpStdio } from './mcp-owned-stdio';
 
@@ -161,7 +164,7 @@ async function replayPolicy(root: string, e: CaseEvidence) {
         if (JSON.stringify(request.messages).includes('hold-slot')) {
           held = true;
           yield { type: 'text_delta', text: 'original partial' };
-          while (!signal.aborted) await Bun.sleep(5);
+          while (!signal.aborted) await sleep(5);
           throw Error('cancelled');
         }
         yield { type: 'text_delta', text: output };
@@ -238,7 +241,7 @@ async function replayPolicy(root: string, e: CaseEvidence) {
       (v) => v,
     );
     const queued = await f.start(nextS, 'queued-slot');
-    await Bun.sleep(50);
+    await sleep(50);
     check(e.assertions, 'explicit_slot_wait', calls, 14);
     await f.client.cancelCommand(holdS, {
       kind: 'command.cancel',
@@ -359,7 +362,7 @@ async function childCancel(root: string, e: CaseEvidence) {
           async *stream(_request, { signal }) {
             childEntered = true;
             yield { type: 'text_delta', text: 'child partial' };
-            while (!signal.aborted) await Bun.sleep(5);
+            while (!signal.aborted) await sleep(5);
             childCancelled = true;
             throw Error('child_cancelled');
           },
@@ -428,60 +431,56 @@ async function modelFault(root: string, e: CaseEvidence) {
   let activeAttempt: Attempt | undefined;
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'owned', object: 'chat.completion.chunk', created: 1, model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    async fetch(request) {
-      calls++;
-      if (!activeAttempt) throw new Error('provider_request_without_model_attempt');
-      activeAttempt.http.push(calls);
-      const input = JSON.stringify(await request.json());
-      const fault = ['partial-drop', 'actual-429', 'actual-503'].find((marker) =>
-        input.includes(marker),
-      );
-      if (fault) {
-        const attempt = (faultRequests.get(fault) ?? 0) + 1;
-        faultRequests.set(fault, attempt);
-        if (fault === 'partial-drop' && attempt <= partialFailures)
-          return new Response(chunk({ content: `actual partial provider-${calls}` }, null), {
-            headers: { 'content-type': 'text/event-stream' },
-          });
-        if (fault !== 'partial-drop' && attempt === 1)
-          return Response.json(
-            {
-              error: { message: fault === 'actual-429' ? 'owned rate limit' : 'owned unavailable' },
-            },
-            { status: fault === 'actual-429' ? 429 : 503 },
-          );
-        return new Response(
-          chunk({ content: `actual recovered provider-${calls}` }, null) +
-            chunk({}, 'stop') +
-            'data: [DONE]\n\n',
+  const server = await startLoopbackHttpServer(async (request) => {
+    calls++;
+    if (!activeAttempt) throw new Error('provider_request_without_model_attempt');
+    activeAttempt.http.push(calls);
+    const input = JSON.stringify(await request.json());
+    const fault = ['partial-drop', 'actual-429', 'actual-503'].find((marker) =>
+      input.includes(marker),
+    );
+    if (fault) {
+      const attempt = (faultRequests.get(fault) ?? 0) + 1;
+      faultRequests.set(fault, attempt);
+      if (fault === 'partial-drop' && attempt <= partialFailures)
+        return new Response(chunk({ content: `actual partial provider-${calls}` }, null), {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      if (fault !== 'partial-drop' && attempt === 1)
+        return Response.json(
           {
-            headers: { 'content-type': 'text/event-stream' },
+            error: { message: fault === 'actual-429' ? 'owned rate limit' : 'owned unavailable' },
           },
+          { status: fault === 'actual-429' ? 429 : 503 },
         );
-      }
       return new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(new TextEncoder().encode(chunk({ content: 'held partial' }, null)));
-            request.signal.addEventListener(
-              'abort',
-              () => {
-                transportAborted = true;
-                controller.close();
-              },
-              { once: true },
-            );
-          },
-        }),
-        { headers: { 'content-type': 'text/event-stream' } },
+        chunk({ content: `actual recovered provider-${calls}` }, null) +
+          chunk({}, 'stop') +
+          'data: [DONE]\n\n',
+        {
+          headers: { 'content-type': 'text/event-stream' },
+        },
       );
-    },
+    }
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(chunk({ content: 'held partial' }, null)));
+          request.signal.addEventListener(
+            'abort',
+            () => {
+              transportAborted = true;
+              controller.close();
+            },
+            { once: true },
+          );
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
   });
   const binding = createCompatibleModelBinding({
-    baseURL: `http://127.0.0.1:${server.port}/v1`,
+    baseURL: `${server.url.href}v1`,
     modelId: 'fixed',
     apiKey: 'owned-local',
   });
@@ -639,7 +638,7 @@ async function modelFault(root: string, e: CaseEvidence) {
     }
   } finally {
     await f.close();
-    server.stop(true);
+    await server.close();
     e.cleanupConfirmed = true;
   }
 }
@@ -647,36 +646,32 @@ async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdi
   let changed = false,
     calls = 0,
     ownedMcpCompleted = false;
-  const server = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    async fetch(request) {
-      if (request.method !== 'POST') return new Response(null, { status: 405 });
-      const rpc = (await request.json()) as { id?: number; method: string };
-      if (rpc.id === undefined) return new Response(null, { status: 202 });
-      let result: unknown;
-      if (rpc.method === 'initialize')
-        result = {
-          protocolVersion: '2024-11-05',
-          serverInfo: { name: 'owned', version: '1' },
-          capabilities: { tools: {} },
-        };
-      else if (rpc.method === 'tools/list')
-        result = {
-          tools: [
-            {
-              name: changed ? 'changed' : 'read',
-              description: 'owned local read',
-              inputSchema: { type: 'object' },
-            },
-          ],
-        };
-      else {
-        calls++;
-        result = { content: [{ type: 'text', text: '完整 local MCP result' }] };
-      }
-      return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
-    },
+  const server = await startLoopbackHttpServer(async (request) => {
+    if (request.method !== 'POST') return new Response(null, { status: 405 });
+    const rpc = (await request.json()) as { id?: number; method: string };
+    if (rpc.id === undefined) return new Response(null, { status: 202 });
+    let result: unknown;
+    if (rpc.method === 'initialize')
+      result = {
+        protocolVersion: '2024-11-05',
+        serverInfo: { name: 'owned', version: '1' },
+        capabilities: { tools: {} },
+      };
+    else if (rpc.method === 'tools/list')
+      result = {
+        tools: [
+          {
+            name: changed ? 'changed' : 'read',
+            description: 'owned local read',
+            inputSchema: { type: 'object' },
+          },
+        ],
+      };
+    else {
+      calls++;
+      result = { content: [{ type: 'text', text: '完整 local MCP result' }] };
+    }
+    return Response.json({ jsonrpc: '2.0', id: rpc.id, result });
   });
   const adapter = createMcpAdapter({
     id: 'owned',
@@ -744,7 +739,7 @@ async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdi
   } finally {
     await f.close();
     await adapter.close();
-    server.stop(true);
+    await server.close();
     e.cleanupConfirmed = ownedMcpCompleted;
   }
 }
@@ -758,7 +753,8 @@ async function storageFault(root: string, e: CaseEvidence) {
       },
     },
   });
-  const db = new Database(join(root, 'data', 'soak', 'core.db'));
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'soak' });
+  const db = new Database(profile.databasePath, { readwrite: true });
   try {
     const s = await f.session('storage');
     e.identities = [
@@ -778,14 +774,20 @@ async function storageFault(root: string, e: CaseEvidence) {
       .finally(() => {
         settled = true;
       });
-    await Bun.sleep(100);
+    await sleep(100);
     check(e.assertions, 'actual_writer_lock', settled, false);
     db.exec('ROLLBACK');
     await write;
-    const full = new Database(join(root, 'full.db'));
+    const full = new Database(join(profile.dataRoot, 'full.db'));
     try {
       full.exec('CREATE TABLE owned(value BLOB)');
-      const pages = (full.query('PRAGMA page_count').get() as { page_count: number }).page_count;
+      const pageCount = full.query<{ page_count: number }>('PRAGMA page_count');
+      let pages: number;
+      try {
+        pages = pageCount.get()!.page_count;
+      } finally {
+        pageCount.finalize();
+      }
       full.exec(`PRAGMA max_page_count=${pages}`);
       let code = '';
       try {

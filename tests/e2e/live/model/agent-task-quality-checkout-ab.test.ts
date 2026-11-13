@@ -1,14 +1,15 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension, defaultTaskRoles } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createChildConfiguration } from '../../../../apps/service/src/child-configuration';
 import { formatFileReadResult } from '../../../../packages/agent/src/tools/files/model-result';
 import {
@@ -114,6 +115,7 @@ test.skipIf(!baselineRoot || !existsSync(baselineRoot))(
       content,
       executionId: 'read-original',
       runId: 'run-original',
+      base_ref: 'file-ref-fixture',
       baseline: {
         hash: createHash('sha256').update(content).digest('hex'),
         size: Buffer.byteLength(content),
@@ -240,7 +242,7 @@ test('real SQLite sealed Model inputs exactly match dispatched requests and reje
       const view = await store.getView('root');
       if (view.runs.length && view.runs.every((run) => !run.isActive)) break;
       if (Date.now() > deadline) throw Error('finite_fixture_budget');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     expect(model.requests).toHaveLength(2);
     const save = async (name: string, requests: readonly ModelRequest[]) => {
@@ -312,7 +314,7 @@ test('real SQLite sealed Model inputs exactly match dispatched requests and reje
   }
 }, 10000);
 
-test('actual Files and Task assembly exposes exactly the production study catalog and rejects accidental extra tools', async () => {
+test('actual current Files and Task assembly cannot impersonate the historical study catalog', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'quality-tool-catalog-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const files = createWorkspaceFiles({ root });
@@ -328,8 +330,8 @@ test('actual Files and Task assembly exposes exactly the production study catalo
       configurationId: role.id,
       description: role.description!,
     })),
-    defaultRole: 'worker',
-    presets: defaultTaskRoles.filter((role) => role.id !== 'worker').map((role) => role.id),
+    defaultRole: defaultTaskRoles[0]!.id,
+    presets: defaultTaskRoles.slice(1).map((role) => role.id),
   });
   const child = createChildConfiguration({
     roles: defaultTaskRoles,
@@ -382,14 +384,33 @@ test('actual Files and Task assembly exposes exactly the production study catalo
       const view = await store.getView('root');
       if (view.runs.length && view.runs.every((run) => !run.isActive)) break;
       if (Date.now() > deadline) throw Error('finite_catalog_fixture_budget');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     expect(model.requests).toHaveLength(1);
     const tools = model.requests[0]!.tools;
-    expect(() => assertCheckoutToolCatalog(tools)).not.toThrow();
+    expect(tools.map(({ id }) => id).sort()).toEqual([
+      'follow_up_agent',
+      'interrupt_agent',
+      'list_agents',
+      'read_file',
+      'send_agent_message',
+      'spawn_agent',
+      'wait_agent_events',
+      'write_file',
+    ]);
+    expect(() => assertCheckoutToolCatalog(tools)).toThrow('unexpected_production_tool_catalog');
+    const historical = [
+      ...tools,
+      ...['glob_files', 'list_directory', 'search_content'].map((id) => ({
+        id,
+        definitionVersion: '1',
+        inputSchema: { type: 'object' },
+      })),
+    ];
+    expect(() => assertCheckoutToolCatalog(historical)).not.toThrow();
     expect(() =>
       assertCheckoutToolCatalog([
-        ...tools,
+        ...historical,
         { id: 'accidental_tool', definitionVersion: '1', inputSchema: { type: 'object' } },
       ]),
     ).toThrow('unexpected_production_tool_catalog');

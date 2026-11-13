@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import {
   ModelOutputMessage,
   type ModelOutputMessageProps,
@@ -825,13 +826,13 @@ test('single-flight close, identity replacement and suspension abort view reads;
     await f.click('收起完整回复');
     expect(signal.aborted).toBe(true);
     release(data.snapshot);
-    await act(async () => await Bun.sleep(1));
+    await act(async () => await fixtureDelay(1));
     expect(f.host.textContent).not.toContain('Full answer tail');
     await f.click('查看完整回复');
     await f.render({ message: { ...data.message, id: 'new' }, storeId: 'store', onRead });
     expect(signal.aborted).toBe(true);
     release(data.snapshot);
-    await act(async () => await Bun.sleep(1));
+    await act(async () => await fixtureDelay(1));
     expect(f.host.textContent).not.toContain('Full answer tail');
     await f.click('查看完整回复');
     await f.render({

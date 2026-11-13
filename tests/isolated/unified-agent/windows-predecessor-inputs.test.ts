@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawnSync as runFixtureProcess } from '../../../scripts/tooling/process';
 import {
   assertCompatiblePredecessorLockedInput,
   COMPATIBLE_PREDECESSOR_INPUT_PATHS,
@@ -21,13 +21,21 @@ import {
   windowsPredecessorLockedInputPaths,
 } from '../../fixtures/unified-agent/windows-predecessor';
 
-const root = resolve(import.meta.dir, '../../..');
+const root = resolve(import.meta.dirname, '../../..');
 function historicalInput(path: string) {
-  const result = Bun.spawnSync(
+  const result = runFixtureProcess(
     ['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:${path}`],
     { cwd: root },
   );
   if (result.exitCode !== 0) throw Error(`historical_windows_input_missing:${path}`);
+  return result.stdout;
+}
+function reviewedInput(path: string) {
+  const result = runFixtureProcess(
+    ['git', 'show', `942082d4b40fd19d62c5e44ab2a892bd646ddc25:${path}`],
+    { cwd: root },
+  );
+  if (result.exitCode !== 0) throw Error(`historical_windows_reviewed_input_missing:${path}`);
   return result.stdout;
 }
 // Read-only audit of actual commit 837a2b8c; these are dependency inputs, not fabricated old source.
@@ -50,7 +58,7 @@ test('real Windows predecessor retains exactly its original eleven locked input 
   expect(WINDOWS_PREDECESSOR_COMMIT).toBe('837a2b8cde946d70d00920941a1a3e5e7c684f5d');
   const paths = windowsPredecessorLockedInputPaths(
     JSON.parse(
-      Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:package.json`], {
+      runFixtureProcess(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:package.json`], {
         cwd: root,
       }).stdout.toString(),
     ),
@@ -58,7 +66,7 @@ test('real Windows predecessor retains exactly its original eleven locked input 
   expect(paths).toEqual(Object.keys(previousInputs));
   expect(paths).toHaveLength(11);
   for (const [path, expected] of Object.entries(previousInputs)) {
-    const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
+    const original = runFixtureProcess(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
       cwd: root,
     });
     expect(original.exitCode).toBe(0);
@@ -75,7 +83,7 @@ test('real Windows predecessor retains exactly its original eleven locked input 
 
 test('historical Windows inputs retain all original bytes except the exact reviewed scripts, parser and UI declarations', () => {
   for (const [path, expected] of Object.entries(previousInputs)) {
-    const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
+    const original = runFixtureProcess(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
       cwd: root,
     });
     expect(original.exitCode).toBe(0);
@@ -203,7 +211,7 @@ test('historical Windows inputs retain all original bytes except the exact revie
 });
 test('locked inputs reject every changed byte and patch traversal without source exceptions', () => {
   for (const path of Object.keys(previousInputs)) {
-    const original = readFileSync(resolve(root, path));
+    const original = reviewedInput(path);
     expect(() =>
       assertWindowsPredecessorLockedInput(
         path,
@@ -223,7 +231,6 @@ test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
       materializeWindowsPredecessor({
         root: '/definitely-not-owned',
         repositoryRoot: '/missing',
-        nativeElectronDist: '/missing',
         deadline: Date.now() + 1000,
       }),
     ).rejects.toThrow('windows_predecessor_platform_required');
@@ -234,14 +241,14 @@ test('Windows compatible predecessor retains original identical raw inputs and p
   expect(COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT).toBe('4a4c0e440b2098e5b4ec58c5831452773b39228f');
   const paths = windowsPredecessorLockedInputPaths(
     JSON.parse(
-      Bun.spawnSync(['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:package.json`], {
+      runFixtureProcess(['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:package.json`], {
         cwd: root,
       }).stdout.toString(),
     ),
   );
   expect(paths).toEqual([...COMPATIBLE_PREDECESSOR_INPUT_PATHS]);
   for (const path of [...paths, ...COMPATIBLE_PREDECESSOR_MIGRATIONS.map((item) => item.path)]) {
-    const original = Bun.spawnSync(
+    const original = runFixtureProcess(
       ['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:${path}`],
       { cwd: root },
     );
@@ -262,7 +269,7 @@ test('Windows compatible predecessor retains original identical raw inputs and p
     ).toThrow(`compatible_predecessor_input_changed:${path}`);
   }
   const path = 'packages/agent/package.json',
-    current = readFileSync(resolve(root, path));
+    current = reviewedInput(path);
   for (const changed of [
     current
       .toString()
@@ -284,7 +291,6 @@ test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
       materializeCompatibleWindowsPredecessor({
         root: '/definitely-not-owned',
         repositoryRoot: '/missing',
-        nativeElectronDist: '/missing',
         deadline: Date.now() + 1000,
       }),
     ).rejects.toThrow('windows_predecessor_platform_required');
@@ -301,13 +307,13 @@ test('actual Windows inputs preserve raw proofs and use context-bound reviewed p
     'apps/service/package.json',
   ]);
   for (const path of COMPATIBLE_PREDECESSOR_INPUT_PATHS) {
-    const actual = readFileSync(resolve(root, path));
+    const actual = reviewedInput(path);
     const expectedMatch = reviewedPaths.has(path) ? 'reviewed_locked_input_increment' : 'identical';
     for (const [commit, guard] of [
       [WINDOWS_PREDECESSOR_COMMIT, assertWindowsPredecessorLockedInput],
       [COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT, assertCompatiblePredecessorLockedInput],
     ] as const) {
-      const old = Bun.spawnSync(['git', 'show', `${commit}:${path}`], { cwd: root });
+      const old = runFixtureProcess(['git', 'show', `${commit}:${path}`], { cwd: root });
       expect(old.exitCode).toBe(0);
       expect(guard(path, old.stdout, actual)).toEqual({
         path,
@@ -321,7 +327,7 @@ test('actual Windows inputs preserve raw proofs and use context-bound reviewed p
   expect(() =>
     assertWindowsPredecessorLockedInput('unreviewed', Buffer.from('same'), Buffer.from('same')),
   ).toThrow('windows_predecessor_dependency_input_changed:unreviewed');
-  const posixAgent = Bun.spawnSync(
+  const posixAgent = runFixtureProcess(
     ['git', 'show', `a2b6441fde28d9c0f895a26e6a9d2471d2b1b242:packages/agent/package.json`],
     { cwd: root },
   );
@@ -337,7 +343,7 @@ test('actual Windows inputs preserve raw proofs and use context-bound reviewed p
 
 test('current Bun namespace patch names are accepted as literal file names, never decoded paths', () => {
   const current = windowsPredecessorLockedInputPaths(
-    JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
+    JSON.parse(reviewedInput('package.json').toString()),
   );
   expect(current).toEqual([
     ...COMPATIBLE_PREDECESSOR_INPUT_PATHS,

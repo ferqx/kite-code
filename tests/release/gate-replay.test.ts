@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { buildSyntheticFoundationGateRecord } from '../../scripts/release/foundation-gate';
 import { replayReleaseGate } from '../../scripts/release/gate-replay';
 

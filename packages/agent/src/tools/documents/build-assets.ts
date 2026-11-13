@@ -1,18 +1,21 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { build as bundle } from '../../../../../scripts/tooling/bun-build';
 import { desktopModulePlugin } from '../../../scripts/desktop-bundling';
+import { runtimeBuildOptions } from '../../../scripts/runtime-build-options';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'tools/documents');
 const desktop = process.argv[3] === '--desktop';
+const runtime = runtimeBuildOptions(destination);
 mkdirSync(destination, { recursive: true });
-const result = await Bun.build({
-  entrypoints: [resolve(import.meta.dir, 'pdf-worker.ts')],
+const result = await bundle({
+  entrypoints: [resolve(import.meta.dirname, 'pdf-worker.ts')],
   outdir: destination,
-  target: 'bun',
+  ...runtime,
   packages: 'bundle',
   external: ['pdfjs-dist'],
-  define: desktop ? { __KITE_DESKTOP_ASSETS__: 'true' } : {},
+  ...(desktop ? { define: { ...runtime.define, __KITE_DESKTOP_ASSETS__: 'true' } } : {}),
   plugins: desktop ? [desktopModulePlugin(['pdfjs-dist/legacy/build/pdf.mjs'])] : [],
   naming: 'pdf-worker.js',
 });

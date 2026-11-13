@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import {
   createClient,
   type ServerInfo,
@@ -26,14 +27,14 @@ const entries = Array.from({ length: 301 }, (_, i) => ({
   requiredCapabilities: [],
   missingCapabilities: [],
 }));
-function fixture() {
+async function fixture() {
   const requests: URL[] = [];
   let identity = {
     ...info,
     capabilities: [...info.capabilities],
   };
   let transform = (page: SkillCataloguePage): unknown => page;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -81,12 +82,12 @@ function fixture() {
     },
     close() {
       client.disposeNetwork();
-      server.stop(true);
+      return server.stop(true);
     },
   };
 }
 test('full Skill metadata reads every fixed-revision page beyond 256 without mutating or advancing observations', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.client.connect();
     const result = await f.client.listAllSkills('w', { storeId: 'store' });
@@ -104,11 +105,11 @@ test('full Skill metadata reads every fixed-revision page beyond 256 without mut
     expect((await read).storeId).toBe('store');
     expect(f.requests.at(-1)!.search).toBe('?storeId=store');
   } finally {
-    f.close();
+    await f.close();
   }
 });
 test('catalogue rejects private additive fields, forged scope, unstable pages and invalid bounds with no retries', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.client.connect();
     for (const change of [
@@ -153,12 +154,12 @@ test('catalogue rejects private additive fields, forged scope, unstable pages an
     ).rejects.toBeDefined();
     expect(f.requests).toHaveLength(prior);
   } finally {
-    f.close();
+    await f.close();
   }
 });
 
 test('same Store replacement host cannot supply another catalogue under the original connection identity', async () => {
-  const f = fixture();
+  const f = await fixture();
   try {
     await f.client.connect();
     f.identity({ ...info, instanceId: 'replacement' });
@@ -166,7 +167,7 @@ test('same Store replacement host cannot supply another catalogue under the orig
     expect(f.requests).toHaveLength(0);
     expect(f.client.lastAppliedCursor).toBeUndefined();
   } finally {
-    f.close();
+    await f.close();
   }
 });
 

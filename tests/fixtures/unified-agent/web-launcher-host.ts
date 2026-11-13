@@ -7,7 +7,7 @@ if (!root) throw new Error('missing_fixture_root');
 await runDevelopmentWeb({
   selection: {
     profile: selectProfile({ dataRoot: join(root, 'data'), profile: 'development' }),
-    entrypoint: join(import.meta.dir, 'web-launcher-service.ts'),
+    entrypoint: join(import.meta.dirname, 'web-launcher-service.ts'),
     buildId: 'fixed-launcher-fixture',
     instanceId: crypto.randomUUID(),
     apiMajor: 1,

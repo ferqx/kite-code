@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { browserToolIds } from '@kite-ai/agent/browser';
@@ -22,12 +22,15 @@ import {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import {
   defaultConfiguration,
   ordinaryHostConfigurationDefaults,
 } from '../../src/configuration-defaults';
 import { launchPairedService } from '../../src/paired';
+import { spawnNodeServiceFixture } from '../fixtures/node-service-process';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 function readToolBaseRef(content: unknown): string {
@@ -54,16 +57,16 @@ async function until<T>(
     const value = await read();
     if (condition(value)) return value;
     if (Date.now() >= deadline) throw new Error('configuration_test_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
-function fakeEndpoint(gated = false, emitToolCall = false) {
+async function fakeEndpoint(gated = false, emitToolCall = false) {
   const entered = gate();
   const release = gate();
   const requests: { body: Record<string, unknown>; authorization: string | null }[] = [];
   const chunk = (model: string, delta: unknown, reason: string | null = null) =>
     `data: ${JSON.stringify({ id: 'response', object: 'chat.completion.chunk', created: 1, model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -132,7 +135,10 @@ function fixture() {
     workspace,
     profile,
     file: userConfiguration.path,
-    spawnChild: userConfiguration.spawnChild,
+    spawnChild: ((command, { env }) =>
+      spawnNodeServiceFixture(command, {
+        env: { ...env, ...userConfiguration.homeEnvironment },
+      })) satisfies typeof userConfiguration.spawnChild,
     projectFile: join(workspace, 'kite-agent.jsonc'),
     close() {
       rmSync(root, { recursive: true, force: true });
@@ -147,7 +153,7 @@ test('paired host streams saved attachments through scoped read_file and rejects
   const requests: Record<string, unknown>[] = [];
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'saved-file', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -337,7 +343,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
   writeFileSync(join(f.workspace, 'source.txt'), marker);
   const requests: Record<string, unknown>[] = [];
   const reviews: Record<string, unknown>[] = [];
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -617,7 +623,7 @@ async function launch(
 ) {
   const handle = await launchPairedService({
     entrypoint: join(
-      import.meta.dir,
+      import.meta.dirname,
       injected ? '../fixtures/configured-child.ts' : '../../src/main.ts',
     ),
     profile: f.profile,
@@ -691,7 +697,7 @@ async function launch(
 
 test('actual paired production Service binds per-Run route/options and immutable persisted snapshots while an old stream continues', async () => {
   const f = fixture();
-  const endpoint = fakeEndpoint(true);
+  const endpoint = await fakeEndpoint(true);
   let child: Awaited<ReturnType<typeof launch>> | undefined;
   let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
@@ -803,7 +809,7 @@ test('actual paired production Service binds per-Run route/options and immutable
 
 test('per-Run trusted explicit options override user models while project models are ignored in actual Provider input', async () => {
   const f = fixture();
-  const endpoint = fakeEndpoint();
+  const endpoint = await fakeEndpoint();
   let child: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     writeFileSync(
@@ -842,7 +848,7 @@ test('per-Run trusted explicit options override user models while project models
 
 test('missing/bad/disabled/unknown/unsupported model configuration rejects only that Run without bootstrap/history/cancel fallback', async () => {
   const f = fixture();
-  const endpoint = fakeEndpoint();
+  const endpoint = await fakeEndpoint();
   let child: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     child = await launch(f);
@@ -918,7 +924,7 @@ test('missing/bad/disabled/unknown/unsupported model configuration rejects only 
 
 test('explicit temporary credentials remain private and a lost reference refuses a new Run while history and cancellation stay available', async () => {
   const f = fixture();
-  const endpoint = fakeEndpoint(true);
+  const endpoint = await fakeEndpoint(true);
   let child: Awaited<ReturnType<typeof launch>> | undefined;
   try {
     const ref = 'credential:11111111-1111-4111-8111-111111111111';
@@ -974,9 +980,88 @@ test('explicit temporary credentials remain private and a lost reference refuses
   }
 }, 20000);
 
+test('paired model authentication failures retain the exact reason without retrying or exposing provider material', async () => {
+  const f = fixture();
+  const anonymous = await fakeEndpoint();
+  const privateMaterial = 'fixture-provider-auth-material';
+  let requests = 0;
+  let httpStatus = 401;
+  const provider = await fixtureServe({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch() {
+      requests++;
+      return Response.json(
+        { error: { message: privateMaterial } },
+        { status: httpStatus, headers: { 'www-authenticate': privateMaterial } },
+      );
+    },
+  });
+  const spawnChild = f.spawnChild;
+  f.spawnChild = (command, { env }) =>
+    spawnChild(command, {
+      env: {
+        ...env,
+        // Even if a preflight regresses, the fixture never contacts a real Provider.
+        http_proxy: provider.url.origin,
+        https_proxy: provider.url.origin,
+        no_proxy: '127.0.0.1',
+      },
+    });
+  let child: Awaited<ReturnType<typeof launch>> | undefined;
+  const configure = (entry: ReturnType<typeof model>) =>
+    writeFileSync(f.file, JSON.stringify({ modelId: entry.id, models: [entry] }));
+  try {
+    configure(model('a', 'https://api.openai.com/v1', { provider: 'openai' }));
+    child = await launch(f);
+    for (const [providerName, baseURL] of [
+      ['openai', 'https://api.openai.com/v1'],
+      ['deepseek', 'https://api.deepseek.com/v1'],
+    ] as const) {
+      configure(model('a', baseURL, { provider: providerName }));
+      expect(await child.run(`missing-${providerName}`)).toMatchObject({
+        status: 'rejected',
+        receipt: { reason: 'model_authentication_required' },
+      });
+    }
+    expect((await child.handle.client.getView('session')).runs).toHaveLength(0);
+    expect(requests).toBe(0);
+
+    configure(model('a', `${provider.url.origin}/v1`));
+    for (const [status, code] of [
+      [401, 'model_authentication_required'],
+      [403, 'model_access_denied'],
+    ] as const) {
+      httpStatus = status;
+      expect(await child.run(`http-${status}`)).toMatchObject({ status: 'applied' });
+      const { commandRun, executions } = await child.finished(`http-${status}`);
+      expect(commandRun).toMatchObject({ status: 'failed', reason: code });
+      expect(executions.filter((execution) => execution.runId === commandRun.id)).toEqual([
+        expect.objectContaining({
+          kind: 'model',
+          status: 'failed',
+          result: { code, incomplete: true, content: '', reasoning: '' },
+        }),
+      ]);
+      expect(JSON.stringify({ commandRun, executions })).not.toContain(privateMaterial);
+    }
+    expect(requests).toBe(2);
+
+    configure(model('a', anonymous.baseURL, { provider: 'openai' }));
+    expect(await child.run('legacy-anonymous')).toMatchObject({ status: 'applied' });
+    expect((await child.finished('legacy-anonymous')).commandRun.status).toBe('completed');
+    expect(anonymous.requests.map((request) => request.authorization)).toEqual([null]);
+  } finally {
+    await child?.handle.close();
+    provider.stop(true);
+    anonymous.close();
+    f.close();
+  }
+}, 20000);
+
 test('default permissions admit Model kind and deny an actual registered Tool with the same model id spelling', async () => {
   const f = fixture();
-  const endpoint = fakeEndpoint(false, true);
+  const endpoint = await fakeEndpoint(false, true);
   let child: Awaited<ReturnType<typeof launch>> | undefined;
   let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
@@ -1015,7 +1100,7 @@ test('default permissions admit Model kind and deny an actual registered Tool wi
 
 test('explicit recovery resolver preserves the persisted model selection and refuses changed configuration before credentials or Provider', async () => {
   const f = fixture();
-  const endpoint = fakeEndpoint();
+  const endpoint = await fakeEndpoint();
   const allProxyKeys = ['ALL_PROXY', 'all_proxy'] as const;
   const originalAllProxy = allProxyKeys.map((key) => [key, process.env[key]] as const);
   let child: Awaited<ReturnType<typeof launch>> | undefined;
@@ -1152,7 +1237,7 @@ test('user provider Responses protocol reaches the real runtime endpoint and nev
   writeFileSync(join(f.workspace, 'responses-source.txt'), 'Responses tool result marker');
   const event = (type: string, value: Record<string, unknown>) =>
     `event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -1317,7 +1402,7 @@ test('ordinary paired host reads an external user-file reference through the uni
   const requests: Record<string, unknown>[] = [];
   const chunk = (delta: unknown, reason: string | null) =>
     `data: ${JSON.stringify({ id: 'external-read', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

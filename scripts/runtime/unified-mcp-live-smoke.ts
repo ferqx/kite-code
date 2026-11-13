@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { defineExtension } from '@kite-ai/agent/extensions';
@@ -43,14 +44,14 @@ export async function runUnifiedMcpLiveSmoke(enabled: boolean): Promise<Record<s
     expectedTool,
     platform: process.platform,
     arch: process.arch,
-    bunVersion: Bun.version,
+    nodeVersion: process.versions.node,
     runtimeSha256: enabled
       ? createHash('sha256').update(readFileSync(process.execPath)).digest('hex')
       : null,
     cleanupScope: 'owned_local_resources',
     remoteStopConfirmed: null,
     scriptSha256: createHash('sha256')
-      .update(readFileSync(import.meta.path))
+      .update(readFileSync(import.meta.filename))
       .digest('hex'),
     binding: {
       repository: process.env.GITHUB_REPOSITORY ?? null,
@@ -206,7 +207,7 @@ export async function runUnifiedMcpLiveSmoke(enabled: boolean): Promise<Record<s
         break;
       }
       if (Date.now() > deadline) throw Error('unified_mcp_actual_read_timeout');
-      await Bun.sleep(10);
+      await delay(10);
     }
   } catch (error) {
     result = {

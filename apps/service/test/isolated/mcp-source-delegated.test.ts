@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { deriveMcpSourceReadSet, mcpCanonical, readMcpSources } from '@kite-ai/agent/config';
@@ -11,6 +11,8 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   createMcpSourceConfiguration,
@@ -42,7 +44,7 @@ async function fixture(
   let effects = 0,
     opens = 0;
   const wire: string[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -449,7 +451,7 @@ test(
             })
           ).interactions[0];
           if (Date.now() > deadline) throw Error('child_approval_deadline');
-          if (!card) await Bun.sleep(10);
+          if (!card) await sleepTimer(10);
         }
         expect(card.sessionId).not.toBe('parent');
         expect(f.opens).toBe(1);

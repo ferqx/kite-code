@@ -10,6 +10,7 @@ import {
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ModelRequest } from '@kite-ai/ai';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { runAgentTaskQualityTrial } from './agent-task-quality.live';
 import { createTaskQualityResearchFixture } from './agent-task-quality-fixture';
 import {
@@ -89,6 +90,7 @@ export function checkoutProvenance(root: string) {
   for (const path of ['packages/agent/src', 'packages/ai/src', 'apps/service/src']) visit(path);
   for (const path of [
     'bun.lock',
+    'bunfig.toml',
     'package.json',
     'packages/agent/package.json',
     'packages/ai/package.json',
@@ -287,9 +289,12 @@ export async function runCheckoutComparison(options: {
     >
   > = {};
   for (const arm of ['baseline', 'candidate'] as const) {
-    const probe = Bun.spawn(
+    const probe = spawnFixtureProcess(
       [
         process.execPath,
+        '--no-global-search-paths',
+        '--import',
+        join(checkouts[arm], 'scripts/tooling/register.mjs'),
         join(checkouts[arm], entry),
         `--probe=${[...pairs.values()][0]!.workspace}`,
       ],
@@ -375,8 +380,15 @@ export async function runCheckoutComparison(options: {
       };
       writeFileSync(specPath, JSON.stringify(spec), { mode: 0o600 });
       console.log(JSON.stringify({ event: 'checkout_trial_start', id }));
-      const child = Bun.spawn(
-        [process.execPath, join(spec.checkout, entry), `--child-spec=${specPath}`],
+      const child = spawnFixtureProcess(
+        [
+          process.execPath,
+          '--no-global-search-paths',
+          '--import',
+          join(spec.checkout, 'scripts/tooling/register.mjs'),
+          join(spec.checkout, entry),
+          `--child-spec=${specPath}`,
+        ],
         { cwd: spec.checkout, stdout: 'inherit', stderr: 'inherit', env: process.env },
       );
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -456,8 +468,8 @@ if (import.meta.main) {
           configurationId: role.id,
           description: role.description!,
         })),
-        defaultRole: 'worker',
-        presets: defaultTaskRoles.filter((role) => role.id !== 'worker').map((role) => role.id),
+        defaultRole: defaultTaskRoles[0]!.id,
+        presets: defaultTaskRoles.slice(1).map((role) => role.id),
       });
       console.log(
         JSON.stringify({

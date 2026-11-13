@@ -7,7 +7,6 @@ import type {
   NativeRecommendedModel,
   NativeSelection,
 } from './native-bridge';
-import { useNativeDiagnostics } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
 import {
   readNativeRecommendedModel,
@@ -262,7 +261,6 @@ export function NativeModelPicker({
   prepared?: NativePreparedModels;
   preview?: NativeModelDisplay;
 }) {
-  const diagnostics = useNativeDiagnostics();
   const localSnapshots = useRef(new NativeModelSnapshots());
   const snapshots = sharedSnapshots ?? localSnapshots.current;
   const scope = nativeModelScope(generation, selection, preparing, revision);
@@ -298,8 +296,7 @@ export function NativeModelPicker({
     ) ?? [];
   const recommendation = preparing ? facts?.recommendedModel : undefined;
   const recommended = models.find((model) => model.id === recommendation?.modelId);
-  const requestedId = value.modelId ?? (preparing ? undefined : facts?.selectedModelId);
-  const selectedId = requestedId ?? recommended?.id;
+  const selectedId = value.modelId ?? (preparing ? recommended?.id : facts?.selectedModelId);
   const selected = models.find((model) => model.id === selectedId);
   const supported = selected?.reasoningEffortChoices ?? [];
   const previousEffort = preparing ? undefined : previousSessionEffort(selection, selected?.id);
@@ -321,10 +318,23 @@ export function NativeModelPicker({
   const observed = !!selected && allowedEffort && !protocol.unavailable && !error;
   const ready = observed && !reading && !disabled;
   const readyId = observed ? selected?.id : undefined;
+  const pickerDisabled = protocol.unavailable || !!error || (!reading && !models.length);
+  const triggerDescription = reading
+    ? undefined
+    : error
+      ? '暂时无法读取模型目录。'
+      : protocol.unavailable
+        ? '无法确认此会话首次运行的模型协议，暂时无法发送。'
+        : !models.length
+          ? '没有可选模型，可在「提供商与模型」中检查设置。'
+          : selected && !allowedEffort
+            ? '所选思考档位当前不可用，请重新选择档位。'
+            : saveError === readKey
+              ? '本次选择已生效，未能记住为新对话的推荐。'
+              : undefined;
   const display = useMemo<NativeModelDisplay | undefined>(() => {
-    if (reading || error || protocol.unavailable || (requestedId && (!selected || !allowedEffort)))
-      return;
-    // An explicitly unselected model is a complete display, without send eligibility.
+    if (reading || error || protocol.unavailable || (selected && !allowedEffort)) return;
+    // A confirmed empty picker can be retained without qualifying the next send.
     return {
       model: selected
         ? {
@@ -334,9 +344,9 @@ export function NativeModelPicker({
             reasoningEffortChoices: selected.reasoningEffortChoices ?? [],
           }
         : undefined,
-      reasoningEffort: effort ?? undefined,
+      reasoningEffort: selected ? effort : undefined,
     };
-  }, [reading, error, protocol.unavailable, requestedId, selected, allowedEffort, effort]);
+  }, [reading, error, protocol.unavailable, selected, allowedEffort, effort]);
   useLayoutEffect(() => {
     if (current.current !== readKey) return;
     readyCallback.current(
@@ -440,6 +450,7 @@ export function NativeModelPicker({
       data-model-picker
       aria-label="下一轮模型选择"
       aria-busy={reading || disabled || undefined}
+      title={pickerDisabled ? triggerDescription : undefined}
     >
       <ReadGate blocked={reading || disabled}>
         <ModelEffortSelector
@@ -468,30 +479,15 @@ export function NativeModelPicker({
                   reasoningEffortChoices: model.reasoningEffortChoices ?? [],
                 }))
           }
-          disabled={!preview && protocol.unavailable}
+          disabled={!preview && pickerDisabled}
           reasoningEffort={preview ? preview.reasoningEffort : (effort ?? undefined)}
           onModelChange={(_provider, _name, id) => {
             if (id !== undefined) choose(id);
           }}
           onReasoningEffortChange={(effort) => setEffort(effort)}
-          modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
+          triggerDescription={triggerDescription}
         />
       </ReadGate>
-      {!preview && protocol.unavailable && (
-        <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>
-      )}
-      {error && <p role="alert">模型目录不可用：{error}</p>}
-      {!preview && saveError === readKey && (
-        <p role="alert">未能记住推荐模型与思考程度，请重新选择。</p>
-      )}
-      {!reading && !error && !selected && (requestedId || diagnostics) && (
-        <p role="alert">
-          {requestedId ? `所选模型 ${requestedId} 当前不可用，请重新选择。` : '请选择模型。'}
-        </p>
-      )}
-      {!preview && selected && !allowedEffort && (
-        <p role="alert">原临时思考档位当前不可用，请重新选择。</p>
-      )}
     </section>
   );
 }

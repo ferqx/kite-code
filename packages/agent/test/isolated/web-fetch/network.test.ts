@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createServer, type RequestListener } from 'node:http';
 import { brotliCompressSync, deflateSync, gzipSync } from 'node:zlib';
 import type { ToolContext } from '@kite-ai/agent/extensions';
@@ -7,6 +6,7 @@ import {
   createWebFetchExtension,
   type WebHop,
 } from '@kite-ai/agent/web-fetch';
+import { expect, test } from '#kite-test';
 
 const binding = (url: string): WebHop => ({
   url,

@@ -1,9 +1,10 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent, type ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { Extension, JobDefinition, JobEvent, Json } from '../../../src/extensions';
 import { modelExecutionId } from '../../../src/model-identifier';
@@ -239,7 +240,7 @@ test('actual original-command human denial reaches the next model without execut
         })
       ).interactions[0];
       if (Date.now() > deadline) throw Error('original_command_approval_missing');
-      if (!card) await Bun.sleep(5);
+      if (!card) await sleepTimer(5);
     }
     expect(card.definitionId).toBe('shell.command');
     expect(f.counts().starts).toBe(0);
@@ -310,7 +311,7 @@ test('background admission, later original completion and shell_read retain one 
     const deadline = Date.now() + 5000;
     while ((await f.store.getExecution(original.id))?.status !== 'succeeded') {
       if (Date.now() > deadline) throw Error('original_command_completion_missing');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(f.model.requests).toHaveLength(2);
     await f.submit('later');

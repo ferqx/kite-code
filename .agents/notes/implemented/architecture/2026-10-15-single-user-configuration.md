@@ -14,6 +14,8 @@ Service 的私有 [user-configuration](../../../../apps/service/src/user-configu
 
 现有 inline API key 只在私有宿主实际运行/显式发现时解析，列表和 snapshot 只保 opaque reference。更换 key 后才保存用户级 OS vault 引用并去除该 provider 的旧明文，不自动迁移其他 key。模型 vault 使用 `kite-agent/user-models` namespace，保证各 Profile 对同一配置的引用一致；MCP 保留原 Profile namespace。paired child 有限环境携带宿主 HOME，Windows 同时携带 USERPROFILE，避免子进程回到另一用户目录，仍不继承模型 key 环境变量。
 
+后续[加密模型凭据决定](2026-11-13-encrypted-model-credentials.md)替换模型凭据的新写入位置。`user-models` 只用于兼容旧凭据。用户配置路径、路由身份、内联兼容及 MCP 的 Profile 命名空间沿用本决定。
+
 桌面模型分类挂载自动加载，沿用原分组列表、启用开关和默认菜单；Main、输入区、准备页、常规卡及 TUI/onboarding 都固定 user scope。原 Store/会话读取代次和原 mutation 身份继续核实；用户级未知写入阻止跨会话竞争写。历史 workspace mutation 仅保留原结果查询能力。
 
 ## Alternatives considered

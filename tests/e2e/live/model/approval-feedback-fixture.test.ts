@@ -1,12 +1,15 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { resolveModelTransport } from '../../../../apps/service/src/model-transport';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
 import {
   createDefaultApprovalObservation,
   hasMinimalShellRiskInput,
   liveModelSelection,
   liveReasoningEffort,
+  liveServiceFetchPort,
   originalToolFeedbackReceived,
   partialChildFailureFeedbackReceived,
   partialChildFailurePrerequisites,
@@ -192,29 +195,29 @@ test('transparent wire tap forwards exact init and complete bytes with original 
     'data: {"choices":[{"delta":{"content":"雪🙂"}}]}\n\ndata: [DONE]\n\n',
   );
   let calls = 0;
-  const original = Object.assign(
-    async (input: Parameters<typeof fetch>[0], actual?: Parameters<typeof fetch>[1]) => {
-      calls++;
-      expect(input).toBe('https://owned.invalid/model');
-      expect(actual).toBe(init);
-      let part = 0;
-      return new Response(
-        new ReadableStream<Uint8Array>(
-          {
-            pull(controller) {
-              if (part === 0) controller.enqueue(bytes.slice(0, 41));
-              else if (part === 1) controller.enqueue(bytes.slice(41));
-              else controller.close();
-              part++;
-            },
+  const original = async (
+    input: Parameters<typeof fetch>[0],
+    actual?: Parameters<typeof fetch>[1],
+  ) => {
+    calls++;
+    expect(input).toBe('https://owned.invalid/model');
+    expect(actual).toBe(init);
+    let part = 0;
+    return new Response(
+      new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (part === 0) controller.enqueue(bytes.slice(0, 41));
+            else if (part === 1) controller.enqueue(bytes.slice(41));
+            else controller.close();
+            part++;
           },
-          { highWaterMark: 0 },
-        ),
-        { headers: { 'content-type': 'text/event-stream', 'x-owned': 'preserved' } },
-      );
-    },
-    { preconnect: fetch.preconnect },
-  );
+        },
+        { highWaterMark: 0 },
+      ),
+      { headers: { 'content-type': 'text/event-stream', 'x-owned': 'preserved' } },
+    );
+  };
   const observed = tap.observeFetch(original);
   const model: ModelAdapter = {
     async *stream() {
@@ -253,24 +256,21 @@ test('transparent wire tap preserves reader cancellation and does not drain unre
   const reason = new Error('original-reader-cancel');
   let reads = 0,
     cancelled: unknown;
-  const original = Object.assign(
-    async () =>
-      new Response(
-        new ReadableStream<Uint8Array>(
-          {
-            pull(controller) {
-              reads++;
-              controller.enqueue(new TextEncoder().encode('original chunk'));
-            },
-            cancel(input) {
-              cancelled = input;
-            },
+  const original = async () =>
+    new Response(
+      new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            reads++;
+            controller.enqueue(new TextEncoder().encode('original chunk'));
           },
-          { highWaterMark: 0 },
-        ),
+          cancel(input) {
+            cancelled = input;
+          },
+        },
+        { highWaterMark: 0 },
       ),
-    { preconnect: fetch.preconnect },
-  );
+    );
   const observed = tap.observeFetch(original);
   const model: ModelAdapter = {
     async *stream() {
@@ -304,15 +304,15 @@ test('transparent observation propagates original abort and transport errors wit
   const controller = new AbortController();
   const error = new TypeError('original-private-error');
   let calls = 0;
-  const original = Object.assign(
-    async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      calls++;
-      expect(init?.signal).toBe(controller.signal);
-      controller.abort(error);
-      throw error;
-    },
-    { preconnect: fetch.preconnect },
-  );
+  const original = async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    calls++;
+    expect(init?.signal).toBe(controller.signal);
+    controller.abort(error);
+    throw error;
+  };
   const observed = tap.observeFetch(original);
   const model: ModelAdapter = {
     async *stream(_request, input) {
@@ -374,12 +374,12 @@ test('logical observation leaves EOF alone and preserves the original failure if
   expect(returns).toBe(1);
 });
 
-test('installed observer covers real Bun FetchSession transport and restores the original surfaces', async () => {
+test('installed observer covers the real Service transport and restores the original Fetch ports', async () => {
   const tap = observation();
   const originalFetch = globalThis.fetch,
-    originalSession = Bun.FetchSession;
+    originalServiceFetch = liveServiceFetchPort().fetch;
   let received = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -388,7 +388,7 @@ test('installed observer covers real Bun FetchSession transport and restores the
     },
   });
   const restore = tap.install();
-  const session = new Bun.FetchSession();
+  const session = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
   try {
     const model: ModelAdapter = {
       async *stream(_request, input) {
@@ -396,7 +396,6 @@ test('installed observer covers real Bun FetchSession transport and restores the
           method: 'POST',
           body: '{}',
           signal: input.signal,
-          proxy: false,
         });
         yield { type: 'text_delta', text: await response.text() };
       },
@@ -410,11 +409,11 @@ test('installed observer covers real Bun FetchSession transport and restores the
     expect(tap.physical.attempts[0]).toMatchObject({ requestId: 'session-original', eof: true });
   } finally {
     restore();
-    session.close();
+    await session.close();
     await server.stop(true);
   }
   expect(globalThis.fetch).toBe(originalFetch);
-  expect(Bun.FetchSession).toBe(originalSession);
+  expect(liveServiceFetchPort().fetch).toBe(originalServiceFetch);
 });
 
 function partialFixture() {

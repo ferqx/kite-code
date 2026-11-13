@@ -1,8 +1,8 @@
-import { constants, Database } from 'bun:sqlite';
 import {
   defaultWindowsPathSecurity,
   type WindowsPrivateRead,
 } from '../platform/windows-path-security';
+import { constants, Database } from '../runtime-sqlite';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
 import { matchingSchema } from '../storage/sqlite/migrations';
 import {

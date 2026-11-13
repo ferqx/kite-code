@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../src';
 import { defineExtension, type Permissions, type ToolDefinition } from '../src/extensions';
 import type { Store } from '../src/storage';

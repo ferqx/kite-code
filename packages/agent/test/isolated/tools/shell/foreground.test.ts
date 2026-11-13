@@ -1,16 +1,19 @@
-import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { OperationRef, PublicExecution, ToolContext } from '@kite-ai/agent/extensions';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, spyOn, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../../scripts/tooling/build';
 import { createRuntime } from '../../../../src';
 import { createShellJob } from '../../../../src/jobs/shell';
 import { openSqliteStore } from '../../../../src/sqlite';
 import { AgentError } from '../../../../src/storage/types';
 import { createShellExtension } from '../../../../src/tools/shell';
 import { completeForegroundShell } from '../../../../src/tools/shell-foreground';
+import { fixtureRuntimeBuild } from '../../../fixtures/node-runtime';
 
 const ref: OperationRef = {
   originStoreId: 'store',
@@ -272,13 +275,13 @@ for (const slow of [false, true])
       const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'fixture' });
       let runtime: ReturnType<typeof createRuntime> | undefined;
       try {
-        const built = await Bun.build({
+        const built = await buildBundle({
           entrypoints: [
-            join(import.meta.dir, '../../../../src/platform/process/shell-supervisor.ts'),
+            join(import.meta.dirname, '../../../../src/platform/process/shell-supervisor.ts'),
           ],
           outdir: join(root, 'supervisor'),
           naming: 'supervisor.js',
-          target: 'bun',
+          ...fixtureRuntimeBuild(join(root, 'supervisor')),
         });
         expect(built.success).toBe(true);
         const marker = join(root, 'effects');
@@ -371,10 +374,10 @@ for (const slow of [false, true])
             await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
           ).interactions[0];
           if (Date.now() > until) throw Error('approval_not_created');
-          if (!card) await Bun.sleep(10);
+          if (!card) await sleepTimer(10);
         }
         expect(card.definitionId).toBe('shell.command');
-        await Bun.sleep(deadlineMs * 2 + 100);
+        await sleepTimer(deadlineMs * 2 + 100);
         expect(starts).toBe(0);
         expect(existsSync(marker)).toBe(false);
         expect(

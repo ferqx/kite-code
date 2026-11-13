@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { type AgentClient, ClientError } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { includeHistoricalResult, lookupContextOutcome } from '../src/context';
 
 test('invalid POST response only reads saved original include; accepted is queued, lookup applied', async () => {

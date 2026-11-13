@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -9,6 +8,14 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { type FixtureServer, serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
@@ -32,13 +39,13 @@ test.skipIf(process.platform !== 'darwin')(
       messages: { role: string; content?: unknown }[];
     }[] = [];
     const questionsReady = new Map<number, () => void>();
-    let provider: ReturnType<typeof Bun.serve> | undefined;
-    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let provider: FixtureServer | undefined;
+    let driver: FixtureProcess<'ignore', 'pipe', 'pipe'> | undefined;
     const fixtureLeases: ReturnType<typeof acquireArtifactAccess>[] = [];
     let complete = false;
     try {
       const releaseModule = resolve(
-        import.meta.dir,
+        import.meta.dirname,
         '../../../../scripts/release/terminal-bundle.ts',
       );
       const { buildTerminalBundle } = await import(releaseModule);
@@ -85,7 +92,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         await seed.close();
       }
-      provider = Bun.serve({
+      provider = await serveFixture({
         hostname: '127.0.0.1',
         port: 0,
         async fetch(request) {
@@ -181,25 +188,25 @@ test.skipIf(process.platform !== 'darwin')(
       );
       writeFileSync(
         join(root, 'prompt-editor-text.fixture.ts'),
-        readFileSync(resolve(import.meta.dir, '../prompt-editor-text.fixture.ts')),
+        readFileSync(resolve(import.meta.dirname, '../prompt-editor-text.fixture.ts')),
       );
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,
         readFileSync(
-          resolve(import.meta.dir, '../native-questionnaire-electron.fixture.ts'),
+          resolve(import.meta.dirname, '../native-questionnaire-electron.fixture.ts'),
           'utf8',
         )
           .replace(
             "'./native-model-selection.fixture'",
-            JSON.stringify(resolve(import.meta.dir, '../native-model-selection.fixture.ts')),
+            JSON.stringify(resolve(import.meta.dirname, '../native-model-selection.fixture.ts')),
           )
           .replace(
             "import { _electron } from 'playwright';",
-            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
+            `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dirname, '../../package.json'))})('playwright');`,
           ),
       );
-      const result = await Bun.build({
+      const result = await buildFixture({
         entrypoints: [fixture],
         target: 'node',
         format: 'esm',
@@ -209,8 +216,8 @@ test.skipIf(process.platform !== 'darwin')(
       });
       expect(result.success).toBe(true);
       const observer = join(root, 'observer.cjs');
-      const observationBuild = await Bun.build({
-        entrypoints: [resolve(import.meta.dir, '../native-startup-observation.fixture.ts')],
+      const observationBuild = await buildFixture({
+        entrypoints: [resolve(import.meta.dirname, '../native-startup-observation.fixture.ts')],
         target: 'node',
         format: 'cjs',
         packages: 'external',
@@ -218,9 +225,9 @@ test.skipIf(process.platform !== 'darwin')(
         naming: 'observer.cjs',
       });
       if (!observationBuild.success) throw Error('startup_observation_build_failed');
-      driver = Bun.spawn(
+      driver = spawnFixtureProcess(
         [
-          realpathSync(Bun.which('node')!),
+          realpathSync(findFixtureExecutable('node')!),
           join(root, 'driver.js'),
           moved,
           home,

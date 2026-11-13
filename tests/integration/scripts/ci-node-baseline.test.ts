@@ -1,14 +1,12 @@
-import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
+import { describe, expect, test } from '#kite-test';
 
-const repositoryRoot = join(import.meta.dir, '..', '..', '..');
+const repositoryRoot = join(import.meta.dirname, '..', '..', '..');
 const workflowRoot = join(repositoryRoot, '.github', 'workflows');
-const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.4';
-const TYPECHECK_BUN_VERSION = '1.4.4';
 
-describe('CI Bun baseline', () => {
+describe('CI Bun install and Node runtime baseline', () => {
   test('pins every third-party workflow action to an immutable current-runtime commit', () => {
     const workflows = readdirSync(workflowRoot)
       .filter((name) => name.endsWith('.yml'))
@@ -16,8 +14,9 @@ describe('CI Bun baseline', () => {
     const allowed = new Set([
       'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
       'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a',
-      'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6',
+      'actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903',
       'actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830',
+      'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6',
     ]);
 
     for (const { name, source } of workflows) {
@@ -31,39 +30,80 @@ describe('CI Bun baseline', () => {
     }
   });
 
-  test('pins quality and runtime qualification to the compared Bun 1.4.4 baseline', () => {
-    expect(FORMAL_QUALIFICATION_BUN_VERSION).toBe('1.4.4');
-    expect(TYPECHECK_BUN_VERSION).toBe('1.4.4');
-
-    const setupWorkflows = readdirSync(workflowRoot)
-      .filter((name) => name.endsWith('.yml'))
-      .map((name) => ({ name, source: readFileSync(join(workflowRoot, name), 'utf8') }))
-      .filter(({ source }) => source.includes('oven-sh/setup-bun'));
-
-    expect(setupWorkflows.length).toBeGreaterThan(0);
-    for (const { name, source } of setupWorkflows) {
-      const jobs = parse(source).jobs as Record<
+  test('pins Node and Bun before every frozen CI install', () => {
+    const manifest = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8'));
+    expect(manifest.engines.node).toBe('26.13.1');
+    expect(manifest.packageManager).toBe('bun@1.4.4');
+    let installs = 0;
+    for (const name of readdirSync(workflowRoot).filter((name) => name.endsWith('.yml'))) {
+      const workflow = parse(readFileSync(join(workflowRoot, name), 'utf8'));
+      for (const [job, value] of Object.entries(workflow.jobs) as [
         string,
         {
-          'runs-on': unknown;
-          strategy?: unknown;
-          steps?: { uses?: string; with?: Record<string, string> }[];
+          steps?: {
+            uses?: string;
+            run?: string;
+            with?: Record<string, string>;
+          }[];
+        },
+      ][]) {
+        const label = `${name}:${job}`;
+        const steps = value.steps ?? [];
+        const install = steps.findIndex((step) => step.run?.startsWith('bun install'));
+        const bun = steps.findIndex((step) => step.uses?.startsWith('oven-sh/setup-bun@'));
+        if (install < 0 && bun < 0) continue;
+        const node = steps.findIndex((step) => step.uses?.startsWith('actions/setup-node@'));
+        expect(node, label).toBeGreaterThanOrEqual(0);
+        expect(bun, label).toBeGreaterThan(node);
+        expect(install, label).toBeGreaterThan(bun);
+        expect(steps[node]?.with?.['node-version'], label).toBe(manifest.engines.node);
+        expect(steps[bun]?.with?.['bun-version'], label).toBe(manifest.packageManager.slice(4));
+        expect(steps[install]?.run, label).toMatch(
+          /^bun install --frozen-lockfile(?: --ignore-scripts)?$/u,
+        );
+        installs++;
+      }
+    }
+    expect(installs).toBeGreaterThan(10);
+  });
+
+  test('build jobs install dependencies before bundling and keep formal tests on Node', () => {
+    const { scripts } = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const buildCommand =
+      /\bbun (?:--cwd=\S+ )?run (?:build|release:(?:build|macos-dmg|windows-setup))(?=\s|$)/u;
+    // The keyring qualification also builds its candidate inside the test.
+    const keyringQualification = 'tests/isolated/unified-agent/native-credential-platform.test.ts';
+    let builds = 0;
+    for (const name of readdirSync(workflowRoot).filter((name) => name.endsWith('.yml'))) {
+      const workflow = parse(readFileSync(join(workflowRoot, name), 'utf8'));
+      for (const [job, value] of Object.entries(workflow.jobs) as [
+        string,
+        { steps: { uses?: string; run?: string; with?: Record<string, string> }[] },
+      ][]) {
+        const label = `${name}:${job}`;
+        const steps = value.steps;
+        const build = steps.findIndex(
+          ({ run = '' }) => buildCommand.test(run) || run.includes(keyringQualification),
+        );
+        if (build >= 0) {
+          builds++;
+          const install = steps.findIndex((step) => step.run?.startsWith('bun install'));
+          expect(install, label).toBeGreaterThanOrEqual(0);
+          expect(install, label).toBeLessThan(build);
         }
-      >;
-      let setupCount = 0;
-      for (const [jobName, job] of Object.entries(jobs)) {
-        const expected =
-          name === 'required.yml' && jobName === 'quality'
-            ? TYPECHECK_BUN_VERSION
-            : FORMAL_QUALIFICATION_BUN_VERSION;
-        for (const step of job.steps ?? []) {
-          if (!step.uses?.startsWith('oven-sh/setup-bun@')) continue;
-          setupCount++;
-          expect(step.with?.['bun-version'], name).toBe(expected);
+        for (const step of steps) {
+          const run = step.run ?? '';
+          expect(run, label).not.toMatch(/\bbun\s+(?:test|--bun)\b|\bbun\s+run\s+--bun\b/u);
+          for (const [, alias] of run.matchAll(/\bbun run (test(?:[:\w-]*))(?=\s|$)/gu)) {
+            expect(alias, label).not.toBe('test:fast');
+            expect(scripts[alias!], `${label}:${alias}`).toMatch(/^node --import\s/u);
+          }
         }
       }
-      expect(setupCount, name).toBeGreaterThan(0);
     }
+    expect(builds).toBeGreaterThan(0);
   });
 
   test('cancels stale ordinary checks without cancelling formal evidence workflows', () => {
@@ -94,6 +134,14 @@ describe('CI Bun baseline', () => {
 
   test('keeps the native keyring workflow on the qualification-owned test path', () => {
     const workflow = readFileSync(join(workflowRoot, 'mcp-native-keyring-smoke.yml'), 'utf8');
+    const steps = parse(workflow).jobs['native-keyring'].steps as { run?: string; if?: string }[];
+    const install = steps.findIndex(({ run }) => run === 'bun install --frozen-lockfile');
+    const prepare = steps.findIndex(({ run }) => run === 'bun run prepare:node-inputs');
+    expect(prepare).toBeGreaterThan(install);
+    expect(steps[prepare]?.if).toBeUndefined();
+    for (const [index, { run }] of steps.entries())
+      if (run?.includes('tests/isolated/unified-agent/native-credential-platform.test.ts'))
+        expect(index).toBeGreaterThan(prepare);
     expect(workflow).toMatch(/push:\n\s+branches: \[main\]/u);
     expect(workflow).toContain('tests/isolated/unified-agent/native-credential-platform.test.ts');
     expect(workflow).not.toContain('tests/qualification/mcp-keyring-platform-smoke.test.ts');

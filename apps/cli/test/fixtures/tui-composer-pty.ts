@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -22,10 +24,13 @@ const stop = (message: unknown) => {
 process.once('SIGINT', interrupted);
 process.once('SIGTERM', interrupted);
 if (process.platform === 'win32') process.on('message', stop);
-const pty = spawnTuiPTY({ cmd: [process.execPath, '--no-install', input.runner], cwd: input.root });
+const pty = spawnTuiPTY({
+  cmd: [process.execPath, ...testRuntimeFlags, input.runner],
+  cwd: input.root,
+});
 const pump = async () => {
   abort.signal.throwIfAborted();
-  await Bun.sleep(100);
+  await testSleep(100);
   await pty.drain();
 };
 const key = async (value: string) => {

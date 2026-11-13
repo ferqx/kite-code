@@ -1,4 +1,3 @@
-import { afterEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -13,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, expect, test } from '#kite-test';
 import type { SourceRequest } from '../../../src/context';
 import { createProjectSources } from '../../../src/sources';
 

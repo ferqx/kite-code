@@ -1,4 +1,6 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { createBrowserClient } from '../src/browser';
 
 const identity = 'a'.repeat(64);
@@ -27,14 +29,14 @@ const expired = () =>
     },
     401,
   );
-function gateway(
+async function gateway(
   read: (request: Request) => Response | Promise<Response> = () => response([]),
   maximum?: number,
 ) {
   const requests: Request[] = [];
   const options: RequestInit[] = [];
   let serverInfo = info;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -80,7 +82,7 @@ test('generated message readers preserve recorded time and accept older history 
     createdAt: 1234567890000,
   };
   const unknown = { ...known, id: 'unknown', seq: '2', createdAt: undefined };
-  const g = gateway(() => response([known, unknown]));
+  const g = await gateway(() => response([known, unknown]));
   try {
     await g.client.connect();
     expect((await g.client.listMessages('s')).map((message) => message.createdAt)).toEqual([
@@ -93,7 +95,7 @@ test('generated message readers preserve recorded time and accept older history 
 });
 
 test('Browser admission gates every business read and sends cookie credentials without Native authority', async () => {
-  const g = gateway();
+  const g = await gateway();
   try {
     expect(() => g.client.listWorkspaces()).toThrow('connection_not_admitted');
     expect(() => g.client.listMessages('s')).toThrow('connection_not_admitted');
@@ -120,7 +122,7 @@ test('Browser admission gates every business read and sends cookie credentials w
 });
 
 test('wrong page identity fails before renewal and changed Store cannot rebind an admitted browser', async () => {
-  const g = gateway(() => response({}, 401, 'b'.repeat(64)));
+  const g = await gateway(() => response({}, 401, 'b'.repeat(64)));
   try {
     await g.client.connect();
     await expect(g.client.listWorkspaces()).rejects.toThrow('browser_identity_mismatch');
@@ -135,7 +137,7 @@ test('wrong page identity fails before renewal and changed Store cannot rebind a
 
 test('available Store is mandatory, unavailable data stays local, and optional missing history blocks only that read', async () => {
   for (const mode of ['missing-store', 'unavailable', 'no-history'] as const) {
-    const g = gateway();
+    const g = await gateway();
     try {
       g.setInfo({
         ...info,
@@ -171,7 +173,7 @@ test('overlapping expired reads share one renewal and each retries at most once'
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const g = gateway(async (request) => {
+  const g = await gateway(async (request) => {
     if (request.method === 'POST') {
       renews++;
       await held;
@@ -185,7 +187,7 @@ test('overlapping expired reads share one renewal and each retries at most once'
     await g.client.connect();
     const one = g.client.listWorkspaces(),
       two = g.client.listSessions();
-    while (reads < 2 || renews < 1) await Bun.sleep(1);
+    while (reads < 2 || renews < 1) await fixtureDelay(1);
     release();
     await Promise.all([one, two]);
     expect(renews).toBe(1);
@@ -194,7 +196,9 @@ test('overlapping expired reads share one renewal and each retries at most once'
     release();
     await g.close();
   }
-  const permanent = gateway((request) => (request.method === 'POST' ? response(null) : expired()));
+  const permanent = await gateway((request) =>
+    request.method === 'POST' ? response(null) : expired(),
+  );
   try {
     await permanent.client.connect();
     await expect(permanent.client.listWorkspaces()).rejects.toThrow('expired');
@@ -215,7 +219,7 @@ test('a late 401 from the same expired generation retries after the existing ren
   const oldResponse = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const g = gateway(async (request) => {
+  const g = await gateway(async (request) => {
     if (request.method === 'POST') {
       renews++;
       return response(null);
@@ -243,7 +247,7 @@ test('a late 401 from the same expired generation retries after the existing ren
 });
 
 test('invalid pagination is rejected locally and precise Decimal64 values are never rounded', async () => {
-  const g = gateway();
+  const g = await gateway();
   try {
     await g.client.connect();
     const before = g.requests.length;
@@ -270,7 +274,7 @@ test('invalid pagination is rejected locally and precise Decimal64 values are ne
 
 test('bad JSON, incompatible DTO and oversized responses are localized without renewing or cancelling', async () => {
   for (const mode of ['json', 'schema', 'budget'] as const) {
-    const g = gateway(
+    const g = await gateway(
       () =>
         mode === 'json'
           ? new Response('{', { headers: { 'x-kite-web-identity': identity } })
@@ -294,7 +298,7 @@ test('network disposal aborts a held read without DELETE, renewal or Runtime can
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const g = gateway(async () => {
+  const g = await gateway(async () => {
     started = true;
     await gate;
     return response([]);
@@ -302,7 +306,7 @@ test('network disposal aborts a held read without DELETE, renewal or Runtime can
   try {
     await g.client.connect();
     const pending = g.client.listWorkspaces();
-    while (!started) await Bun.sleep(1);
+    while (!started) await fixtureDelay(1);
     g.client.disposeNetwork();
     await expect(pending).rejects.toThrow();
     expect(g.requests.every((request) => request.method === 'GET')).toBe(true);
@@ -318,7 +322,7 @@ test('network disposal aborts a held cookie renewal and prevents the original re
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const g = gateway(async (request) => {
+  const g = await gateway(async (request) => {
     if (request.method === 'POST') {
       renewing = true;
       await gate;
@@ -329,7 +333,7 @@ test('network disposal aborts a held cookie renewal and prevents the original re
   try {
     await g.client.connect();
     const pending = g.client.listWorkspaces();
-    while (!renewing) await Bun.sleep(1);
+    while (!renewing) await fixtureDelay(1);
     g.client.disposeNetwork();
     expect(g.options.find((value) => value.method === 'POST')?.signal?.aborted).toBe(true);
     await expect(pending).rejects.toThrow();
@@ -352,7 +356,7 @@ test('explicit browser close settles the old renewal before DELETE and prevents 
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const g = gateway(async (request) => {
+  const g = await gateway(async (request) => {
     if (request.method === 'POST') {
       renewing = true;
       await held;
@@ -368,7 +372,7 @@ test('explicit browser close settles the old renewal before DELETE and prevents 
       () => null,
       (error: unknown) => error,
     );
-    while (!renewing) await Bun.sleep(1);
+    while (!renewing) await fixtureDelay(1);
     const closing = g.client.closeBrowserSession();
     expect(g.options.find((value) => value.method === 'POST')?.signal?.aborted).toBe(true);
     release();
@@ -416,7 +420,7 @@ test('read-only diagnostics keep fixed cursor and selection identity; authority 
       },
     ],
   };
-  const g = gateway((request) =>
+  const g = await gateway((request) =>
     response(new URL(request.url).pathname.endsWith('/context') ? context : output),
   );
   try {
@@ -465,7 +469,7 @@ test('read-only diagnostics keep fixed cursor and selection identity; authority 
 
 test('diagnostics reject foreign selection or output receipt and never substitute another target', async () => {
   let wrong = 'context';
-  const g = gateway(() =>
+  const g = await gateway(() =>
     response(
       wrong === 'context'
         ? {
@@ -538,7 +542,7 @@ test('Browser historical Run reader is capability-gated, accurate in current Sto
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const g = gateway(async () => {
+  const g = await gateway(async () => {
     if (held) {
       started = true;
       await gate;
@@ -592,7 +596,7 @@ test('Browser historical Run reader is capability-gated, accurate in current Sto
     const deadline = Date.now() + 2000;
     while (!started) {
       if (Date.now() >= deadline) throw Error('browser_run_read_not_started');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     g.client.disposeNetwork();
     expect(g.options.at(-1)?.signal?.aborted).toBe(true);

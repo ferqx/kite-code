@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { WindowsInstallationFilesInUseError } from '../../../packages/agent/src/platform/windows-installation-removal';
 import {
   uninstallWindowsNativeBundle,
@@ -34,7 +35,7 @@ try {
         throw error;
       if (!waiting) progress.phase('wait');
       waiting = true;
-      await Bun.sleep(350);
+      await sleep(350);
     }
   }
   console.log('KITE_DESKTOP_UNINSTALL_OK');

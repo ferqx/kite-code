@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -12,6 +11,8 @@ import {
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { which as findExecutable } from '../../../../../scripts/tooling/process';
 import type { AuthorizationRequest } from '../../../src/extensions';
 import { ripgrepAsset } from '../../../src/jobs/ripgrep';
 import { createShellConfiguration } from '../../../src/permissions/shell';
@@ -29,7 +30,7 @@ const texts = ['#!/bin/sh\ncat -- "$1"\n', '#!/bin/sh\nrm -rf -- /home/user\n'];
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-risk-facts-')));
   const rg = ripgrepAsset();
-  const shell = windows ? Bun.which('bash')! : '/bin/sh';
+  const shell = windows ? findExecutable('bash')! : '/bin/sh';
   return { root, rg, shell, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 async function preparer(
@@ -243,7 +244,7 @@ test.skipIf(process.platform !== 'darwin')(
           configurationId: 'risk-review-test',
           env: { PATH: dirname(f.rg) },
           supervisorPath: supervisor,
-          bunExecutable: process.execPath,
+          runtimeExecutable: process.execPath,
           shellExecutable: '/bin/sh',
         },
       });

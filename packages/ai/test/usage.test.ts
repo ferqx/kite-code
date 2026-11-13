@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { compatibleModelUsage } from '../src/usage';
 
 test('reported zero takes precedence over a legacy cache alias and absent measurements stay unknown', () => {

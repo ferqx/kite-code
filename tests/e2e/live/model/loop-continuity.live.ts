@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
@@ -17,6 +18,9 @@ import { startService } from '../../../../apps/service/src';
 import { createSummaryCompressor } from '../../../../apps/service/src/compression-configuration';
 import { createDefaultProcessConfiguration } from '../../../../apps/service/src/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
+import { runtimeBuildOptions } from '../../../../packages/agent/scripts/runtime-build-options';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { which as findFixtureExecutable } from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../fixtures/test-filesystem';
 import { readLiveExecutionDirectory, readLiveSessionLogPages } from './approval-execution-fixture';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
@@ -500,13 +504,19 @@ try {
     }),
     { mode: 0o600 },
   );
-  const rg = Bun.which('rg');
+  const rg = findFixtureExecutable('rg');
   assert.ok(rg, 'rg_asset_required');
-  const built = await Bun.build({
+  const built = await buildFixture({
     entrypoints: [
-      join(import.meta.dir, '../../../../packages/agent/src/platform/process/shell-supervisor.ts'),
+      join(
+        import.meta.dirname,
+        '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
+      ),
     ],
-    target: 'bun',
+    ...runtimeBuildOptions(
+      join(output, 'assets'),
+      resolve(import.meta.dirname, '../../../../packages/agent/dist'),
+    ),
     outdir: join(output, 'assets'),
     naming: 'shell-supervisor.js',
   });
@@ -527,7 +537,7 @@ try {
         KITE_CONTINUITY_NONCE: nonce,
       },
       supervisorPath: built.outputs[0]!.path,
-      bunExecutable: process.execPath,
+      runtimeExecutable: process.execPath,
       shellExecutable: '/bin/sh',
       host: {
         controlBase: control,
@@ -650,7 +660,7 @@ try {
       result.run = run;
       break;
     }
-    await Bun.sleep(30);
+    await fixtureDelay(30);
   }
   const { executions } = await readLiveExecutionDirectory(store, {
     expectedStoreId,

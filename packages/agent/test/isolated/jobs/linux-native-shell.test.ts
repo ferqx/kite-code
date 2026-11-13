@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
@@ -16,16 +15,75 @@ import {
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import type { JobDefinition, JobEvent, JobHandle } from '@kite-ai/agent/extensions';
 import {
   createLinuxConfinedShellJob,
   createLinuxHostShellJob,
   decodeLinuxShellProcessEvidence,
 } from '@kite-ai/agent/jobs/shell';
+import { expect, test } from '#kite-test';
+import { which as findExecutable } from '../../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { fixtureNodeExecutable } from '../../fixtures/node-runtime';
 
 const linuxTest = process.platform === 'linux' ? test : test.skip;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+const confinedProbe = `#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+  if (argc != 3 || strcmp(argv[1], "-c")) return 90;
+  alarm(5);
+  char *state;
+  char *sealed = strtok_r(argv[2], "\\n", &state);
+  char *outside = strtok_r(NULL, "\\n", &state);
+  char *source = strtok_r(NULL, "\\n", &state);
+  char *port = strtok_r(NULL, "\\n", &state);
+  if (!sealed || !outside || !source || !port || strtok_r(NULL, "\\n", &state)) return 91;
+  char buffer[16384];
+  FILE *input = fopen(sealed, "rb");
+  if (!input || fread(buffer, 1, 6, input) != 6 || memcmp(buffer, "SEALED", 6) || fclose(input)) return 92;
+  FILE *output = fopen("compensated", "wb");
+  if (!output || fputs("WORKSPACE_WRITE", output) < 0 || fclose(output)) return 93;
+  int outside_fd = open(outside, O_RDONLY);
+  if (outside_fd >= 0) { close(outside_fd); return 94; }
+  pid_t child = fork();
+  if (child == 0) _exit(95);
+  if (child != -1 || errno != EPERM) return 96;
+  char target[4096];
+  const char *temp = getenv("TMPDIR");
+  if (!temp) return 97;
+  int target_length = snprintf(target, sizeof(target), "%s/native", temp);
+  if (target_length <= 0 || target_length >= (int)sizeof(target)) return 97;
+  input = fopen(source, "rb");
+  output = fopen(target, "wb");
+  if (!input || !output) return 98;
+  size_t bytes;
+  while ((bytes = fread(buffer, 1, sizeof(buffer), input)))
+    if (fwrite(buffer, 1, bytes, output) != bytes) return 98;
+  if (ferror(input) || fclose(input) || fclose(output) || chmod(target, 0700)) return 98;
+  char *const args[] = { target, NULL };
+  char *const env[] = { NULL };
+  if (execve(target, args, env) != -1 || errno != EACCES) return 99;
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd >= 0) {
+    struct sockaddr_in address = { .sin_family = AF_INET, .sin_port = htons(atoi(port)),
+      .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+    int connected = connect(fd, (struct sockaddr *)&address, sizeof(address));
+    close(fd);
+    if (connected == 0) return 100;
+  }
+  puts("STRICT_COMPLETE");
+  return 0;
+}
+`;
 const treeSource = `#include <unistd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -68,8 +126,8 @@ async function fixture(run: (f: ReturnType<typeof setup>) => Promise<void>) {
   }
 }
 function setup() {
-  const cc = Bun.which('cc'),
-    bwrap = Bun.which('bwrap');
+  const cc = findExecutable('cc'),
+    bwrap = findExecutable('bwrap');
   if (!cc || !bwrap) throw Error('linux_native_shell_required_tools_missing');
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-linux-native-shell-')));
   const workspace = join(root, 'workspace'),
@@ -89,7 +147,7 @@ function setup() {
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
   };
-  compile(join(import.meta.dir, '../../../native/linux-shell-init.c'), init);
+  compile(join(import.meta.dirname, '../../../native/linux-shell-init.c'), init);
   const source = join(workspace, 'tree.c');
   writeFileSync(source, treeSource);
   compile(source, tree);
@@ -105,6 +163,7 @@ function setup() {
     control,
     temporaryRoot,
     tree,
+    compile,
     outside,
     options: {
       cwd: workspace,
@@ -112,10 +171,10 @@ function setup() {
       bubblewrapPath: realpathSync.native(bwrap),
       linux: { bubblewrapPath: realpathSync.native(bwrap), initExecutable: init },
       shellExecutable: '/bin/sh',
-      bunExecutable: realpathSync.native(process.execPath),
+      runtimeExecutable: fixtureNodeExecutable(),
       protectedRoots: [profile, control],
       readonlyAssets: [assets],
-      runtimeReadOnlyRoots: [dirname(realpathSync.native(process.execPath))],
+      runtimeReadOnlyRoots: [dirname(fixtureNodeExecutable())],
       temporaryRoot,
       graceMs: 100,
     },
@@ -234,13 +293,13 @@ linuxTest(
             expect(lstatSync(home).mode & 0o777).toBe(existed ? 0o750 : 0o700);
             expect(existsSync(auth)).toBe(existed);
             const deadline = Date.now() + 5000;
-            while (!existsSync(ready) && Date.now() < deadline) await Bun.sleep(10);
+            while (!existsSync(ready) && Date.now() < deadline) await sleepTimer(10);
             expect(existsSync(ready)).toBe(true);
             for (let rotation = 0; rotation < 4; rotation++) {
               const next = join(home, 'next-auth');
               writeFileSync(next, `SYNTHETIC_AUTH_ROTATION_${rotation}`, { mode: 0o600 });
               renameSync(next, auth);
-              await Bun.sleep(25);
+              await sleepTimer(25);
             }
             writeFileSync(release, 'continue');
             for await (const event of job.observe(handle)) events.push(event);
@@ -373,24 +432,18 @@ linuxTest(
       const address = server.address();
       if (!address || typeof address === 'string') throw Error('linux_probe_listener');
       try {
-        const script = join(f.assets, 'probe.js');
-        writeFileSync(
-          script,
-          `import {readFileSync,writeFileSync,chmodSync} from 'node:fs';import {connect} from 'node:net';import {dlopen,FFIType,ptr,toArrayBuffer} from 'bun:ffi';
-const libc=dlopen('libc.so.6',{fork:{args:[],returns:FFIType.i32},_exit:{args:[FFIType.i32],returns:FFIType.void},execve:{args:[FFIType.ptr,FFIType.ptr,FFIType.ptr],returns:FFIType.i32},__errno_location:{args:[],returns:FFIType.ptr}});
-if(readFileSync(${JSON.stringify(join(f.assets, 'sealed'))},'utf8')!=='SEALED')throw Error('sealed_read');writeFileSync(${JSON.stringify(join(f.workspace, 'compensated'))},'WORKSPACE_WRITE');
-let denied=false;try{readFileSync(${JSON.stringify(f.outside)});}catch{denied=true;}if(!denied)throw Error('foreign_read');
-const child=libc.symbols.fork();if(child===0)libc.symbols._exit(81);if(child!==-1)throw Error('fork_allowed');
-const bytes=readFileSync(${JSON.stringify(f.tree)});const target=process.env.TMPDIR+'/native';writeFileSync(target,bytes);chmodSync(target,0o700);const name=Buffer.from(target+'\\0');const args=new BigUint64Array([BigInt(ptr(name)),0n]);const env=new BigUint64Array([0n]);if(libc.symbols.execve(ptr(name),ptr(args),ptr(env))!==-1||new DataView(toArrayBuffer(libc.symbols.__errno_location(),0,4)).getInt32(0,true)!==13)throw Error('temp_exec_not_denied');
-await new Promise((resolve,reject)=>{const s=connect({host:'127.0.0.1',port:${address.port}});s.setTimeout(200,()=>{s.destroy();resolve();});s.once('error',()=>resolve());s.once('connect',()=>{s.destroy();reject(Error('network_allowed'));});});console.log('STRICT_COMPLETE');libc.close();`,
-        );
+        const probeSource = join(f.assets, 'strict-probe.c');
+        const probe = join(f.assets, 'strict-probe');
+        writeFileSync(probeSource, confinedProbe);
+        f.compile(probeSource, probe);
         writeFileSync(join(f.assets, 'sealed'), 'SEALED');
         const result = await run(
           createLinuxConfinedShellJob({
             ...f.options,
-            runtimeReadOnlyRoots: [f.assets, dirname(realpathSync.native(process.execPath))],
+            shellExecutable: probe,
+            runtimeReadOnlyRoots: [f.assets, dirname(fixtureNodeExecutable())],
           }),
-          `exec ${quote(realpathSync.native(process.execPath))} ${quote(script)}`,
+          [join(f.assets, 'sealed'), f.outside, f.tree, address.port].join('\n'),
         );
         ended(result.events, result.handle, 'succeeded');
         expect(content(result.events)).toContain('STRICT_COMPLETE');
@@ -437,7 +490,7 @@ linuxTest(
                 filesystemScope: 'workspace_write',
                 executionScope: { filesystem, network },
               }),
-              `printf workspace > ${quote(`explicit-${marker}`)}; if printf external > ${quote(external)}; then printf EXTERNAL_ALLOWED; else printf EXTERNAL_DENIED; fi; ${quote(realpathSync.native(process.execPath))} -e ${quote(script)}`,
+              `printf workspace > ${quote(`explicit-${marker}`)}; if printf external > ${quote(external)}; then printf EXTERNAL_ALLOWED; else printf EXTERNAL_DENIED; fi; ${quote(fixtureNodeExecutable())} -e ${quote(script)}`,
             );
             ended(result.events, result.handle, 'succeeded');
             const output = content(result.events);

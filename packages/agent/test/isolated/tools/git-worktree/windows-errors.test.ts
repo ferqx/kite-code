@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../../../scripts/tooling/build';
 import { persistentWorktreeDirectory } from '../../../../../../tests/fixtures/worktree-filesystem';
 import { createRuntime } from '../../../../src';
 import type {
@@ -15,6 +16,7 @@ import type {
 } from '../../../../src/extensions';
 import { createWindowsShellJob } from '../../../../src/jobs/windows-shell';
 import { hostExecutionScope } from '../../../../src/permissions/shell';
+import { nodeRuntimeFlags } from '../../../../src/platform/runtime-flags';
 import { openSqliteStore } from '../../../../src/sqlite';
 import {
   digest,
@@ -24,6 +26,7 @@ import {
 } from '../../../../src/tools/git-worktree/protocol';
 import { readWorktreeOutput } from '../../../../src/tools/git-worktree/read-output';
 import { createShellExtension } from '../../../../src/tools/shell';
+import { fixtureNodeExecutable, fixtureRuntimeBuild } from '../../../fixtures/node-runtime';
 import { windowsShellFixture } from '../../../fixtures/windows-shell-runtime';
 
 const windows = process.platform === 'win32' ? test : test.skip;
@@ -101,15 +104,13 @@ for (const mode of [
       setupGit('add', 'tracked.txt');
       setupGit('commit', '-qm', 'base');
       const head = setupGit('rev-parse', 'HEAD');
-      const configPath = join(root, 'empty.toml');
-      writeFileSync(configPath, '# isolated worker\n');
       const source = join(root, 'worker.ts');
       const workerModule = resolve(
-        import.meta.dir,
+        import.meta.dirname,
         '../../../../src/tools/git-worktree/worker.ts',
       ).replaceAll('\\', '/');
       const protocolModule = resolve(
-        import.meta.dir,
+        import.meta.dirname,
         '../../../../src/tools/git-worktree/protocol.ts',
       ).replaceAll('\\', '/');
       // Never modify the caller's Git installation or deny OS access globally.
@@ -117,7 +118,7 @@ for (const mode of [
       writeFileSync(
         source,
         `
-import {spyOn} from 'bun:test';
+import {spyOn} from '#kite-test';
 import * as processes from 'node:child_process';
 import * as filesystem from 'node:fs';
 import {writeSync} from 'node:fs';
@@ -159,19 +160,18 @@ const frame=await executeWorktreeRequest(request);
 process.stdout.write(JSON.stringify(frame)+'\\n');
 `,
       );
-      const built = await Bun.build({
+      const built = await buildBundle({
         entrypoints: [source],
         outdir: join(root, 'assets'),
-        target: 'bun',
+        ...fixtureRuntimeBuild(root, join(root, 'assets')),
         naming: 'worker.js',
       });
       expect(built.success).toBe(true);
       const configuration: GitWorktreeConfiguration = {
         configurationId: `windows-errors-${mode}`,
         sourceCwd: workspace,
-        bunPath: process.execPath,
+        runtimePath: fixtureNodeExecutable(),
         workerPath: built.outputs[0]!.path,
-        configPath,
         git: { path: git, sha256: createHash('sha256').update(readFileSync(git)).digest('hex') },
         hooksPath: hooks,
       };
@@ -195,7 +195,7 @@ process.stdout.write(JSON.stringify(frame)+'\\n');
             ? {
                 version: 1,
                 env,
-                bunFlags: ['--no-env-file', `--config=${configPath}`],
+                runtimeFlags: nodeRuntimeFlags,
                 digest: digest(configuration),
               }
             : undefined;
@@ -472,7 +472,7 @@ process.stdout.write(JSON.stringify(frame)+'\\n');
         expect(setupGit('status', '--porcelain')).toBe('');
         expect(readdirSync(control)).toEqual([]);
         const output = resolve(
-          import.meta.dir,
+          import.meta.dirname,
           '../../../../../../.cache/worktree-error-classification-20261106',
         );
         mkdirSync(output, { recursive: true });

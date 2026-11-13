@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { CLIHostError, type CLIServiceArtifact, parseCLIServiceArtifact } from './index';
 import { parseTUIArguments } from './tui-arguments';
 
@@ -33,7 +33,7 @@ export async function runTUIProcess(
   if (!artifact && !args.server) {
     try {
       artifact = parseCLIServiceArtifact(
-        JSON.parse(readFileSync(join(import.meta.dir, 'cli-assets.json'), 'utf8')),
+        JSON.parse(readFileSync(join(import.meta.dirname, 'cli-assets.json'), 'utf8')),
       );
     } catch {
       throw new CLIHostError('cli_artifact_unavailable');
@@ -62,7 +62,10 @@ export async function runTUIProcess(
     process.removeListener('SIGINT', stop);
   }
 }
-if (import.meta.main) {
+if (
+  Reflect.get(import.meta, 'main') === true &&
+  /^tui-main\.[jt]s$/u.test(basename(import.meta.filename))
+) {
   try {
     process.exitCode = await runTUIProcess();
   } catch (error) {

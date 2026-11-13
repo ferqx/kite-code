@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -12,6 +11,7 @@ import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -20,6 +20,10 @@ import { createShellConfiguration } from '@kite-ai/agent/permissions/shell';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { fixtureScopeOption } from '../../../../tests/fixtures/permission-grant';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { parseShellModelFeedback } from '../../../../tests/fixtures/unified-agent/shell-model-feedback';
@@ -35,7 +39,7 @@ async function until<T>(read: () => Promise<T | undefined>) {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > end) throw new Error('shell_configuration_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 function permissionSnapshot(raw: unknown): unknown {
@@ -63,7 +67,7 @@ type RequestedScope = {
   filesystem: 'workspace_write' | 'full_access';
   network: 'none' | 'internet';
 };
-function endpoint(
+async function endpoint(
   command: string,
   stop = false,
   background = false,
@@ -82,7 +86,7 @@ function endpoint(
   const reviews: Record<string, unknown>[] = [];
   let beforeStop: ((shellId: string) => Promise<void>) | undefined;
   const requests: Record<string, unknown>[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -101,7 +105,7 @@ function endpoint(
           }
         } catch {}
       }
-      if (reviewPayload && reviewDelayMs) await Bun.sleep(reviewDelayMs);
+      if (reviewPayload && reviewDelayMs) await sleepTimer(reviewDelayMs);
       const last = messages.reduce(
         (v, m, i) =>
           m.role === 'user' &&
@@ -239,11 +243,14 @@ async function fixture(
   mkdirSync(workspace);
   const control = join(root, 'control');
   if (options.hostBoundary) privateDirectory(control);
-  const built = await Bun.build({
+  const built = await buildBundle({
     entrypoints: [
-      join(import.meta.dir, '../../../../packages/agent/src/platform/process/shell-supervisor.ts'),
+      join(
+        import.meta.dirname,
+        '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
+      ),
     ],
-    target: 'bun',
+    ...fixtureRuntimeBuild(join(root, 'assets')),
     outdir: join(root, 'assets'),
     naming: 'shell-supervisor.js',
   });
@@ -255,7 +262,7 @@ async function fixture(
     options.command ??
     // biome-ignore lint/suspicious/noTemplateCurlyInString: actual POSIX parameter expansion, not JavaScript
     'printf \'%s|%s|%s\' "$PWD" "$FIXED_VALUE" "${HOME-unset}"; printf once >> effect';
-  const a = endpoint(
+  const a = await endpoint(
       command,
       options.stop,
       options.background,
@@ -264,7 +271,7 @@ async function fixture(
       options.childPreset,
       options.reviewDelayMs,
     ),
-    b = endpoint('printf next >> effect');
+    b = await endpoint('printf next >> effect');
   const configuration = {
     ...(options.reviewTimeoutMs ? { autoApproval: { timeoutMs: options.reviewTimeoutMs } } : {}),
     modelId: 'model',
@@ -307,7 +314,7 @@ async function fixture(
             supervisorPath: options.badAsset
               ? join(root, 'absent-guardian.js')
               : built.outputs[0]!.path,
-            bunExecutable: process.execPath,
+            runtimeExecutable: process.execPath,
             shellExecutable: '/bin/sh',
             graceMs: 20,
             ...(options.hostBoundary
@@ -504,7 +511,7 @@ for (const mode of ['full', 'accept_edits', 'auto'] as const)
               answer: { kind: 'approval', decision: 'approve', optionId: 'once' },
             });
           }
-          if (!done) await Bun.sleep(5);
+          if (!done) await sleepTimer(5);
         }
         await terminal;
         const rows = await f.store.listExecutions('s');
@@ -811,7 +818,7 @@ nativeTest(
           configurationId: 'nested-scope-test',
           env: { PATH: '/usr/bin:/bin' },
           supervisorPath: join(f.root, 'assets/shell-supervisor.js'),
-          bunExecutable: process.execPath,
+          runtimeExecutable: process.execPath,
           shellExecutable: '/bin/sh',
           graceMs: 20,
           host: {
@@ -1184,7 +1191,7 @@ nativeTest(
         configurationId: 'digest-fixture',
         env: { FIXED: 'original', PATH: '/usr/bin:/bin' },
         supervisorPath: join(f.root, 'assets/shell-supervisor.js'),
-        bunExecutable: process.execPath,
+        runtimeExecutable: process.execPath,
         shellExecutable: '/bin/sh',
       };
       const configuration = { workspaceRoot: f.workspace, toolIds: ['shell.launch'], options };
@@ -2048,7 +2055,7 @@ for (const expanded of [false, true])
     `Auto reviewer timeout defaults to allow within normal tool scope (expanded request: ${expanded})`,
     async () => {
       let connections = 0;
-      const remote = Bun.serve({
+      const remote = await fixtureServe({
         hostname: '127.0.0.1',
         port: 0,
         fetch() {

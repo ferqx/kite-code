@@ -1,32 +1,38 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { build as testBuild } from '../../../../scripts/tooling/build';
+import { spawn as testSpawn } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { fileRecoveryProfile } from '../fixtures/file-recovery-profile';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 test('compiled CLI physical POST and first GET lost replies retain both exact original identities and cold only GET', async () => {
   const f = await fileRecoveryProfile();
   try {
     const runner = join(f.root, 'argv.ts');
     writeFileSync(
       runner,
-      `import {appendFileSync} from 'node:fs';const actual=globalThis.fetch;let saved:string|undefined,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const opts=args[1],path=new URL(String(args[0])).pathname,body=opts?.body?JSON.parse(String(opts.body)):null;appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({method:opts?.method??'GET',path,body})+'\\n');const response=await actual(...args);if(opts?.method==='POST'&&(body?.kind==='extension.invoke'||(path.endsWith('/fork')&&body?.newSessionId))){saved=body.commandId;await response.arrayBuffer();throw Error('committed POST response physically lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;const text=await response.text();return new Response(text.slice(0,Math.max(1,Math.floor(text.length/2))),{status:response.status,headers:response.headers});}return response;},{preconnect:actual.preconnect});import {runCLIProcess} from ${JSON.stringify(join(repo, 'apps/cli/host/main.ts'))};process.exitCode=await runCLIProcess({argv:process.argv.slice(2),artifact:${JSON.stringify(f.artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned'});`,
+      `import {appendFileSync} from 'node:fs';const actual=globalThis.fetch;let saved:string|undefined,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const opts=args[1],path=new URL(String(args[0])).pathname,body=opts?.body?JSON.parse(String(opts.body)):null;appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({method:opts?.method??'GET',path,body})+'\\n');const response=await actual(...args);if(opts?.method==='POST'&&(body?.kind==='extension.invoke'||(path.endsWith('/fork')&&body?.newSessionId))){saved=body.commandId;await response.arrayBuffer();throw Error('committed POST response physically lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;const text=await response.text();return new Response(text.slice(0,Math.max(1,Math.floor(text.length/2))),{status:response.status,headers:response.headers});}return response;});import {runCLIProcess} from ${JSON.stringify(join(repo, 'apps/cli/host/main.ts'))};process.exitCode=await runCLIProcess({argv:process.argv.slice(2),artifact:${JSON.stringify(f.artifact)},dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned'});`,
     );
-    const built = await Bun.build({
+    const built = await testBuild({
       entrypoints: [runner],
       outdir: f.root,
-      target: 'bun',
+      target: 'node',
       external: ['react-devtools-core'],
     });
     expect(built.success).toBe(true);
     async function run(args: string[], answer = '') {
-      const child = Bun.spawn([process.execPath, join(f.root, 'argv.js'), ...args], {
-        stdin: 'pipe',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        cwd: f.workspace,
-        env: { ...process.env, HOME: f.home },
-      });
+      const child = testSpawn(
+        [process.execPath, ...testRuntimeFlags, join(f.root, 'argv.js'), ...args],
+        {
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          cwd: f.workspace,
+          env: { ...process.env, HOME: f.home },
+        },
+      );
       if (!answer) child.stdin.end();
       const [code, out, err] = await Promise.all([
         child.exited,

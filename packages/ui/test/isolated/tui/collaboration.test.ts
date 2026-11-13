@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../../scripts/tooling/process';
 
 test('actual 80x24 six-tool children keep parent input, exact approvals, stable follow-up and exact stop', async () => {
   const program = `import os,pty,subprocess,select,time,signal,json,re,tempfile,fcntl,termios,struct
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
 temporary=tempfile.TemporaryDirectory(prefix='kite-tui-collaboration-');root=os.path.join(temporary.name,'runtime');os.mkdir(root,0o700);statefile=os.path.join(temporary.name,'state.json')
 env=dict(os.environ);env.update(KITE_TUI_ROOT=root,KITE_TUI_STATE=statefile,KITE_TUI_VIEWPORT=os.path.join(temporary.name,'viewport.txt'))
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dir, 'collaboration.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';frames=[]
+p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dirname, 'collaboration.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';frames=[]
 def pump():
  global buffer
  if select.select([master],[],[],.02)[0]:
@@ -74,7 +75,7 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master);temporary.cleanup()
 `;
-  const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
+  const child = spawnFixtureProcess(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
   const [out, err, code] = await Promise.all([
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),

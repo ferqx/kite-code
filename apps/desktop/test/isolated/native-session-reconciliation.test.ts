@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +5,8 @@ import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDesktopController, type DesktopSnapshot } from '../../src/controller';
 
@@ -27,7 +28,7 @@ async function readyLine(stream: ReadableStream<Uint8Array>) {
 test('ordinary Native session selection reconciles actual model SIGKILL into public and cold durable facts without replay', async () => {
   const root = realpathSync(temporaryDirectory('kite-native-session-reconciliation-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
-  const producer = Bun.spawn(
+  const producer = spawnFixtureProcess(
     [
       process.execPath,
       fileURLToPath(

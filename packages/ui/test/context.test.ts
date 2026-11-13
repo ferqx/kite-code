@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Execution, SelectedContextPage } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { ContextPanel } from '../src';
 import { Button } from '../src/desktop/ui';
 

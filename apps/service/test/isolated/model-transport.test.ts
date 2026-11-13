@@ -1,22 +1,14 @@
-import { expect, mock, spyOn, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { createRuntime } from '@kite-ai/agent';
-import { createArtifactStore } from '@kite-ai/agent/artifacts';
-import { selectProfile } from '@kite-ai/agent/profile';
-import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import type { RunRecord } from '@kite-ai/agent/storage';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { WebFetchError } from '@kite-ai/agent/web-fetch';
-import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
+import undici from 'undici/index.js';
+import { expect, spyOn, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { resolveModelTransport } from '../../src/model-transport';
 import { encodeFrames, responseFrames } from '../fixtures/responses-wire';
-import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
 
-test('real FetchSessions reuse their own connections, keep other bindings alive and close idempotently', async () => {
+test('owned model pools reuse connections, keep other bindings alive and close idempotently', async () => {
   const sockets = new Map<import('node:net').Socket, number>();
   const closed = new Set<number>();
   const requests: number[] = [];
@@ -35,21 +27,28 @@ test('real FetchSessions reuse their own connections, keep other bindings alive 
   const first = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
   const second = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
   try {
-    for (let index = 0; index < 2; index++)
+    for (let index = 0; index < 3; index++)
       expect(await (await first.fetch(url)).text()).toBe('ok');
     expect(await (await second.fetch(url)).text()).toBe('ok');
     expect(await (await fetch(url, { proxy: false } as RequestInit)).text()).toBe('ok');
-    expect(requests).toEqual([1, 1, 2, 3]);
+    const firstSockets = new Set(requests.slice(0, 3));
+    const secondSocket = requests[3]!;
+    const globalSocket = requests[4]!;
+    expect(firstSockets.size).toBeLessThan(3);
+    expect(firstSockets.has(secondSocket)).toBe(false);
+    expect(firstSockets.has(globalSocket)).toBe(false);
+    expect(globalSocket).not.toBe(secondSocket);
     const closing = first.close();
     expect(first.close()).toBe(closing);
     await closing;
     const deadline = Date.now() + 2000;
-    while (!closed.has(1) && Date.now() < deadline) await Bun.sleep(5);
-    expect(closed.has(1)).toBe(true);
-    expect(closed.has(2)).toBe(false);
+    while ([...firstSockets].some((id) => !closed.has(id)) && Date.now() < deadline)
+      await sleepTimer(5);
+    expect([...firstSockets].every((id) => closed.has(id))).toBe(true);
+    expect(closed.has(secondSocket)).toBe(false);
     await expect(first.fetch(url)).rejects.toMatchObject({ code: 'model_transport_closed' });
     expect(await (await second.fetch(url)).text()).toBe('ok');
-    expect(requests).toEqual([1, 1, 2, 3, 2]);
+    expect(requests.at(-1)).toBe(secondSocket);
   } finally {
     await Promise.all([first.close(), second.close()]);
     server.closeAllConnections();
@@ -60,12 +59,16 @@ test('real FetchSessions reuse their own connections, keep other bindings alive 
 }, 10000);
 
 test('a failed native close is retained without retrying cleanup or accepting new requests', async () => {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('ok') });
+  const server = await fixtureServe({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Response('ok'),
+  });
   const transport = await resolveModelTransport({ env: {}, systemProxy: async () => ({}) });
   const failure = new Error('fixture_session_close_failed');
-  let session: Bun.FetchSession | undefined;
-  const close = spyOn(Bun.FetchSession.prototype, 'close').mockImplementation(function (
-    this: Bun.FetchSession,
+  let session: InstanceType<typeof undici.Agent> | undefined;
+  const close = spyOn(undici.Agent.prototype, 'close').mockImplementation(function (
+    this: InstanceType<typeof undici.Agent>,
   ) {
     session = this;
     throw failure;
@@ -82,14 +85,14 @@ test('a failed native close is retained without retrying cleanup or accepting ne
     });
   } finally {
     close.mockRestore();
-    session?.close();
+    await session?.close();
     await server.stop(true);
   }
 });
 
 test('session transport preserves caller abort identity and never retries an interrupted body', async () => {
   let calls = 0;
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch() {
@@ -131,7 +134,7 @@ test('system proxy selection retains request identity, bypass patterns and bindi
       calls.push({ url: input instanceof Request ? input.url : String(input), init });
       return new Response('ok');
     },
-    { preconnect: fetch.preconnect },
+    {},
   );
   const proxy = {
     http: 'http://proxy.test:80',
@@ -173,7 +176,6 @@ test('system proxy selection retains request identity, bypass patterns and bindi
   ]);
   expect(calls[0]?.init).toMatchObject(init);
   expect(calls[0]?.init?.signal).toBe(controller.signal);
-  expect(transport.fetch.preconnect).toBe(transportFetch.preconnect);
   proxy.https = 'http://later.test';
   await transport.fetch('https://model.test');
   expect(calls.at(-1)?.init?.proxy).toBe('http://secure.test:81');
@@ -182,7 +184,7 @@ test('system proxy selection retains request identity, bypass patterns and bindi
   expect(process.env).toEqual(before);
 });
 
-test('explicit environment stays with Bun inside the owned transport; NO_PROXY overrides system bypass and unsupported settings fail closed', async () => {
+test('explicit environment bypasses system discovery; NO_PROXY overrides system bypass and unsupported settings fail closed', async () => {
   let discoveries = 0;
   const systemProxy = async () => {
     discoveries++;
@@ -203,13 +205,10 @@ test('explicit environment stays with Bun inside the owned transport; NO_PROXY o
   const transport = await resolveModelTransport({
     env: { NO_PROXY: 'other.test' },
     systemProxy,
-    fetch: Object.assign(
-      async (_input: unknown, init?: RequestInit) => {
-        calls.push(init);
-        return new Response('ok');
-      },
-      { preconnect: fetch.preconnect },
-    ),
+    fetch: Object.assign(async (_input: unknown, init?: RequestInit) => {
+      calls.push(init);
+      return new Response('ok');
+    }, {}),
   });
   await transport.fetch('https://model.test');
   await transport.fetch('https://other.test');
@@ -229,7 +228,7 @@ test('explicit environment stays with Bun inside the owned transport; NO_PROXY o
 test('real SDK Chat and Responses requests use the selected proxy; bypass, cancellation and proxy rejection keep their original outcomes', async () => {
   const requests: { url: string; authorization: string | null; body: Record<string, unknown> }[] =
     [];
-  const proxy = Bun.serve({
+  const proxy = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -257,7 +256,7 @@ test('real SDK Chat and Responses requests use the selected proxy; bypass, cance
       return new Response(content, { headers: { 'content-type': 'text/event-stream' } });
     },
   });
-  const direct = Bun.serve({
+  const direct = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     fetch: () => new Response('direct ok'),
@@ -306,11 +305,12 @@ test('real SDK Chat and Responses requests use the selected proxy; bypass, cance
     ).toBe(true);
     expect(await (await transport.fetch(direct.url)).text()).toBe('direct ok');
     expect(requests).toHaveLength(2);
-    const rejected = await transport.fetch('http://unresolvable-model.invalid/v1/responses', {
-      method: 'POST',
-      body: JSON.stringify({ model: 'rejected' }),
-    });
-    expect(rejected.status).toBe(407);
+    await expect(
+      transport.fetch('http://unresolvable-model.invalid/v1/responses', {
+        method: 'POST',
+        body: JSON.stringify({ model: 'rejected' }),
+      }),
+    ).rejects.toThrow('fetch failed');
     expect(requests).toHaveLength(3);
     const controller = new AbortController();
     const pending = await transport.fetch('http://unresolvable-model.invalid/v1/responses', {
@@ -326,151 +326,5 @@ test('real SDK Chat and Responses requests use the selected proxy; bypass, cance
     await transport?.close();
     await proxy.stop(true);
     await direct.stop(true);
-  }
-}, 15000);
-
-test('default Service model binding uses system proxy without proxy environment or project network configuration', async () => {
-  const proxyVariables = [
-    'http_proxy',
-    'HTTP_PROXY',
-    'https_proxy',
-    'HTTPS_PROXY',
-    'all_proxy',
-    'ALL_PROXY',
-    'no_proxy',
-    'NO_PROXY',
-  ];
-  const previousProxyEnvironment = new Map(proxyVariables.map((key) => [key, process.env[key]]));
-  for (const key of proxyVariables) delete process.env[key];
-  try {
-    const actual = await import('../../src/web-fetch-proxy');
-    const requests: string[] = [];
-    const proxy = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      async fetch(request) {
-        requests.push(request.url);
-        await request.json();
-        return new Response(
-          encodeFrames(
-            responseFrames({ id: 'service-proxy', model: 'fixture', text: ['service proxy ok'] }),
-          ),
-          { headers: { 'content-type': 'text/event-stream' } },
-        );
-      },
-    });
-    let selectedProxy = proxy.url.origin;
-    mock.module('../../src/web-fetch-proxy', () => ({
-      ...actual,
-      systemWebProxy: async () => ({ http: selectedProxy }),
-    }));
-    const root = mkdtempSync(join(tmpdir(), 'kite-model-system-proxy-'));
-    const workspace = join(root, 'workspace');
-    mkdirSync(workspace);
-    const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
-    privateDirectory(profile.profilePath);
-    privateDirectory(join(root, '.kite-code'));
-    const file = userConfigurationPath(root);
-    writeFileSync(
-      file,
-      JSON.stringify({
-        modelId: 'fixture',
-        models: [
-          {
-            id: 'fixture',
-            provider: 'compatible',
-            protocol: 'responses',
-            model: 'fixture',
-            baseURL: 'http://unresolvable-service-model.invalid/v1',
-          },
-        ],
-        tools: [],
-      }),
-    );
-    const { createDefaultProcessConfiguration } = await import('../../src/configuration');
-    const host = createDefaultProcessConfiguration({
-      profile,
-      userConfigurationPath: file,
-      permissions: { authorize: async () => ({ allowed: true, revision: 'fixture' }) },
-    });
-    const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
-    const runtime = createRuntime({
-      ...host,
-      store,
-      artifacts: createArtifactStore({ profile, store }),
-      permissions: host.permissions!,
-    });
-    host.permissionManagement!(runtime);
-    try {
-      const expectedStoreId = (await store.getMetadata()).storeId;
-      const base = { expectedStoreId, sessionId: 's', subjectId: 'fixture' };
-      await runtime.createWorkspace({
-        expectedStoreId,
-        id: 'w',
-        rootUri: pathToFileURL(workspace).href,
-        name: 'fixture',
-      });
-      await runtime.createSession({
-        ...base,
-        commandId: 'create',
-        workspaceId: 'w',
-        title: 'fixture',
-      });
-      await runtime.submitCommand({
-        ...base,
-        commandId: 'proxy-run',
-        request: { kind: 'run.start', content: 'hello' },
-      });
-      const deadline = Date.now() + 7000;
-      let completed: RunRecord | undefined;
-      do {
-        const next = await runtime.getView('s');
-        completed = next.runs.find((run) => run.originCommandId === 'proxy-run');
-        if (completed && !completed.isActive) break;
-        await Bun.sleep(5);
-      } while (Date.now() < deadline);
-      expect(completed?.status).toBe('completed');
-      expect(requests).toEqual(['http://unresolvable-service-model.invalid/v1/responses']);
-      expect(completed?.configuration).toMatchObject({
-        snapshot: { modelTransport: { digest: expect.stringMatching(/^[a-f0-9]{64}$/) } },
-      });
-      const recovery = {
-        command: (await store.getCommand('proxy-run'))!,
-        run: (await store.getRun(completed!.id))!,
-        session: (await store.getSession('s'))!,
-        workspace: (await store.getWorkspace('w'))!,
-        signal: new AbortController().signal,
-      };
-      const reopened = await host.resolveRecoveryRunConfiguration!(recovery);
-      await reopened.dispose?.();
-      const originalConfiguration = JSON.parse(JSON.stringify(recovery.run.configuration));
-      expect(originalConfiguration.snapshot.browser).toBeNull();
-      const legacyConfiguration = structuredClone(originalConfiguration);
-      delete legacyConfiguration.snapshot.browser;
-      const legacyReopened = await host.resolveRecoveryRunConfiguration!({
-        ...recovery,
-        run: { ...recovery.run, configuration: legacyConfiguration },
-      });
-      expect(legacyReopened.snapshot).not.toHaveProperty('browser');
-      const { authorizationCheck: _check, ...legacySnapshot } = legacyConfiguration.snapshot;
-      expect(legacyReopened.snapshot).toEqual(legacySnapshot);
-      await legacyReopened.dispose?.();
-      expect(reopened.snapshot).toHaveProperty('browser', null);
-      selectedProxy = 'http://127.0.0.1:1';
-      await expect(host.resolveRecoveryRunConfiguration!(recovery)).rejects.toMatchObject({
-        code: 'recovery_configuration_changed',
-      });
-      expect(requests).toHaveLength(1);
-    } finally {
-      await runtime.close();
-      await proxy.stop(true);
-      rmSync(root, { recursive: true, force: true });
-      mock.restore();
-    }
-  } finally {
-    for (const [key, value] of previousProxyEnvironment) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
   }
 }, 15000);

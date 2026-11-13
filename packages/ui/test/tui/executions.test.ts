@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Execution } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import {
   jobStopReceipt,
   readJobOutput,

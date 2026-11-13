@@ -1,12 +1,14 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { desktopAsset } from '../../platform/desktop-assets';
 
 export const agentBrowserVersion = '0.39.4';
 const require = createRequire(import.meta.url);
 const unavailable = () =>
   Object.assign(Error('browser_runtime_unavailable'), { code: 'browser_runtime_unavailable' });
+const developmentRoot = new URL('../../../dist/assets/agent-browser/', import.meta.url);
 
 /** The native dependency and the release copier select the same host executable. */
 export function agentBrowserExecutableName(): string | undefined {
@@ -36,9 +38,15 @@ export function agentBrowserExecutableName(): string | undefined {
 /** Installed native dependency only. Never execute a PATH entry, project script or npx fallback. */
 function installedAssets() {
   try {
+    const localManifest = import.meta.url.endsWith('.ts')
+      ? fileURLToPath(new URL('package.json', developmentRoot))
+      : fileURLToPath(new URL('./assets/agent-browser/package.json', import.meta.url));
     const manifest = realpathSync(
       desktopAsset('assets/agent-browser/package.json') ??
-        require.resolve('agent-browser/package.json'),
+        (process.platform !== 'win32' &&
+        (import.meta.url.endsWith('.ts') || existsSync(localManifest))
+          ? localManifest
+          : require.resolve('agent-browser/package.json')),
     );
     if (statSync(manifest).size > 65536) throw unavailable();
     const metadata = JSON.parse(readFileSync(manifest, 'utf8'));
@@ -50,6 +58,7 @@ function installedAssets() {
     const executable = realpathSync(join(root, 'bin', executableName));
     if (!executable.startsWith(`${root}${sep}`) || !statSync(executable).isFile())
       throw unavailable();
+    if (process.platform !== 'win32') accessSync(executable, constants.X_OK);
     const license = realpathSync(join(root, 'LICENSE'));
     return { executable, files: [manifest, executable, license] as readonly string[] };
   } catch {

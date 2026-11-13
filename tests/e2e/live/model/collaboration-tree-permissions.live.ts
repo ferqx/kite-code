@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -517,7 +518,7 @@ export async function runLiveTreePermissions(
           );
         if (controlled && settled && carriersSettled) break;
         if (Date.now() >= end) break;
-        await Bun.sleep(30);
+        await fixtureDelay(30);
       }
       const sessions = await treeSessions();
       const executions = (

@@ -24,11 +24,12 @@ Kite Code 使用多种模型帮助你理解代码、修改文件、运行命令�
 
 ## 快速开始
 
-使用 Bun 1.4.2，安装锁定依赖并构建新 workspace 与 Terminal 候选：
+源码开发用 Bun 1.4.4 安装依赖和打包，源码入口及默认测试用 Node.js 26.13.1。用户安装的制品自带 Node。
 
 ```bash
 bun install --frozen-lockfile
 bun run build
+bun run prepare:node-inputs
 bun run release:build
 bun run tui
 ```

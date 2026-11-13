@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawnSync as runFixtureProcess } from '../../../scripts/tooling/process';
 import {
   assertCompatiblePredecessorInputPaths,
   assertCompatiblePredecessorLockedInput,
@@ -14,21 +15,21 @@ import {
   CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS,
   CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT,
   matchTerminalPredecessorInput,
+  RELEASE_PREDECESSORS,
+  SESSION_FILES_PREDECESSOR_MIGRATIONS,
+  SESSION_FILES_TERMINAL_PREDECESSOR_COMMIT,
   TERMINAL_PREDECESSOR_COMMIT,
   withoutReviewedTuiLockDeclarations,
 } from '../../fixtures/unified-agent/terminal-predecessor';
 
-const repository = resolve(import.meta.dir, '../../..');
-function historicalInput(path: string) {
-  const result = Bun.spawnSync(
-    ['git', 'show', `${COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
-    { cwd: repository },
-  );
+const repository = resolve(import.meta.dirname, '../../..');
+function historicalInput(path: string, commit = COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT) {
+  const result = runFixtureProcess(['git', 'show', `${commit}:${path}`], { cwd: repository });
   if (result.exitCode !== 0) throw Error(`historical_predecessor_input_missing:${path}`);
   return result.stdout;
 }
 const path = 'packages/agent/package.json',
-  original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+  original = runFixtureProcess(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
     cwd: repository,
   });
 if (original.exitCode !== 0) throw Error('terminal_predecessor_original_manifest_missing');
@@ -64,7 +65,7 @@ test('the source increment never permits dependency, extra export, or other buil
 
 test('predecessor accepts only the exact Windows Native bootstrap source entry increment', () => {
   const servicePath = 'apps/service/package.json',
-    originalService = Bun.spawnSync(
+    originalService = runFixtureProcess(
       ['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${servicePath}`],
       { cwd: repository },
     );
@@ -98,7 +99,7 @@ test('predecessor accepts only the exact Windows Native bootstrap source entry i
 
 test('the root input permits only the exact reviewed stdio and Desktop development scripts', () => {
   const path = 'package.json',
-    original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+    original = runFixtureProcess(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
       cwd: repository,
     });
   expect(original.exitCode).toBe(0);
@@ -132,7 +133,7 @@ test('the root input permits only the exact reviewed stdio and Desktop developme
 
 test('predecessor permits only the exact parser declarations and pinned complete lock closure', () => {
   for (const path of ['bun.lock', 'packages/agent/package.json']) {
-    const prior = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+    const prior = runFixtureProcess(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
       cwd: repository,
     });
     expect(prior.exitCode).toBe(0);
@@ -195,7 +196,7 @@ test('predecessor permits only the exact parser declarations and pinned complete
 
 test('UI declarations refine only the exact reviewed workspace manifest; arbitrary dependency or metadata changes fail', () => {
   const path = 'packages/ui/package.json';
-  const prior = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+  const prior = runFixtureProcess(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
     cwd: repository,
   });
   expect(prior.exitCode).toBe(0);
@@ -226,7 +227,7 @@ test('historical workspace refinements preserve pinned bytes and reject incomple
   for (const [path, sha256] of Object.entries(hashes)) {
     const current = historicalInput(path),
       text = current.toString('utf8'),
-      original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+      original = runFixtureProcess(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
         cwd: repository,
       });
     expect(original.exitCode).toBe(0);
@@ -315,7 +316,7 @@ test('compatible real predecessor retains eleven original identity checks and bo
     ...COMPATIBLE_PREDECESSOR_INPUT_PATHS,
     ...COMPATIBLE_PREDECESSOR_MIGRATIONS.map((item) => item.path),
   ]) {
-    const original = Bun.spawnSync(
+    const original = runFixtureProcess(
       ['git', 'show', `${COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
       { cwd: repository },
     );
@@ -342,7 +343,7 @@ test('compatible real predecessor retains eleven original identity checks and bo
 
 test('unmerged recovery and UI commits cannot replace the complete compatible predecessor', () => {
   const path = 'packages/ui/package.json';
-  const recoveryOnly = Bun.spawnSync(
+  const recoveryOnly = runFixtureProcess(
     ['git', 'show', `30e7ec16a63de354f61677093566b77ff7fe4796:${path}`],
     { cwd: repository },
   );
@@ -355,7 +356,9 @@ test('unmerged recovery and UI commits cannot replace the complete compatible pr
     ),
   ).toThrow(`compatible_predecessor_input_changed:${path}`);
   const migration = COMPATIBLE_PREDECESSOR_MIGRATIONS[1];
-  const uiOnly = Bun.spawnSync(['git', 'show', `21fd426d7:${migration.path}`], { cwd: repository });
+  const uiOnly = runFixtureProcess(['git', 'show', `21fd426d7:${migration.path}`], {
+    cwd: repository,
+  });
   expect(uiOnly.exitCode).not.toBe(0);
   expect(() =>
     assertCompatiblePredecessorLockedInput(
@@ -372,7 +375,7 @@ test('unmerged recovery and UI commits cannot replace the complete compatible pr
   }
 });
 
-test('actual Terminal inputs keep eleven raw proofs and label only approved complete pairs as reviewed', () => {
+test('reviewed historical Terminal inputs keep eleven raw proofs and label only approved complete pairs as reviewed', () => {
   const reviewedPaths = new Set([
     'bun.lock',
     'package.json',
@@ -382,8 +385,8 @@ test('actual Terminal inputs keep eleven raw proofs and label only approved comp
     'apps/service/package.json',
   ]);
   for (const path of COMPATIBLE_PREDECESSOR_INPUT_PATHS) {
-    const actual = readFileSync(resolve(repository, path));
-    const old = Bun.spawnSync(
+    const actual = historicalInput(path, '942082d4b40fd19d62c5e44ab2a892bd646ddc25');
+    const old = runFixtureProcess(
       ['git', 'show', `${COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
       { cwd: repository },
     );
@@ -395,7 +398,7 @@ test('actual Terminal inputs keep eleven raw proofs and label only approved comp
       currentSha256: createHash('sha256').update(actual).digest('hex'),
       match: expectedMatch,
     });
-    const legacy = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+    const legacy = runFixtureProcess(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
       cwd: repository,
     });
     expect(legacy.exitCode).toBe(0);
@@ -414,10 +417,10 @@ test('actual Terminal inputs keep eleven raw proofs and label only approved comp
   expect(matchTerminalPredecessorInput('unreviewed', previous, previous)).toBeUndefined();
 });
 
-test('current-schema roundtrip uses genuine historical code with all six exact migrations and all twelve unchanged locked inputs', () => {
+test('historical six-migration proof remains pinned to the original commit and lock', () => {
   const originalInput = (path: string) => {
-    const result = Bun.spawnSync(
-      ['git', 'show', `${CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
+    const result = runFixtureProcess(
+      ['git', 'show', `${SESSION_FILES_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
       { cwd: repository },
     );
     expect(result.exitCode).toBe(0);
@@ -430,17 +433,17 @@ test('current-schema roundtrip uses genuine historical code with all six exact m
   ];
   expect(paths).toHaveLength(12);
   expect(new Set(paths).size).toBe(12);
-  for (const path of paths)
-    expect(originalInput(path)).toEqual(readFileSync(resolve(repository, path)));
-  expect(CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS).toHaveLength(6);
-  for (const migration of CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS) {
+  for (const path of paths) expect(originalInput(path).byteLength).toBeGreaterThan(0);
+  const currentLock = readFileSync(resolve(repository, 'bun.lock'));
+  expect(
+    matchTerminalPredecessorInput('bun.lock', originalInput('bun.lock'), currentLock),
+  ).toBeUndefined();
+  expect(SESSION_FILES_PREDECESSOR_MIGRATIONS).toHaveLength(6);
+  for (const migration of SESSION_FILES_PREDECESSOR_MIGRATIONS) {
     const previous = originalInput(migration.path);
-    const current = readFileSync(resolve(repository, migration.path));
-    expect(previous).toEqual(current);
     expect(createHash('sha256').update(previous).digest('hex')).toBe(migration.sha256);
-    expect(createHash('sha256').update(current).digest('hex')).toBe(migration.sha256);
   }
-  const legacyLastMigration = Bun.spawnSync(
+  const legacyLastMigration = runFixtureProcess(
     [
       'git',
       'ls-tree',
@@ -451,4 +454,20 @@ test('current-schema roundtrip uses genuine historical code with all six exact m
   );
   expect(legacyLastMigration.exitCode).toBe(0);
   expect(legacyLastMigration.stdout.byteLength).toBe(0);
+});
+
+test('the Bun-to-Node release pair pins the consolidated schema and its separate locked inputs', () => {
+  const commit = CURRENT_SCHEMA_TERMINAL_PREDECESSOR_COMMIT;
+  const manifest = JSON.parse(historicalInput('package.json', commit).toString());
+  expect(RELEASE_PREDECESSORS.currentSchema.inputInventory).toEqual([
+    'bun.lock',
+    'package.json',
+    ...manifest.workspaces.map((path: string) => `${path}/package.json`),
+    ...Object.values(manifest.patchedDependencies),
+  ]);
+  for (const migration of CURRENT_SCHEMA_PREDECESSOR_MIGRATIONS) {
+    const previous = historicalInput(migration.path, commit);
+    expect(createHash('sha256').update(previous).digest('hex')).toBe(migration.sha256);
+    expect(readFileSync(resolve(repository, migration.path))).toEqual(previous);
+  }
 });

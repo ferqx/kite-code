@@ -4,10 +4,10 @@ import { stageWindowsGitBash } from '../../src/jobs/windows-git-bash';
 /** Isolated native-test profile. Tests never create OS accounts implicitly. */
 export async function windowsShellFixture() {
   const stateRoot = resolve(
-    import.meta.dir,
+    import.meta.dirname,
     '../../../../.cache/windows-shell-tests/git-bash-runtime',
   );
-  const built = resolve(import.meta.dir, '../../dist/platform/process/windows-shell');
+  const built = resolve(import.meta.dirname, '../../dist/platform/process/windows-shell');
   return {
     built,
     runner: join(built, 'kite-windows-runner.exe'),

@@ -1,5 +1,5 @@
-import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
 import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+import { dlopen, ptr, toArrayBuffer } from '@kite-ai/agent/runtime-ffi';
 import type { CandidateDirectory, CandidateIgnoreFile } from './file-candidate-filesystem';
 
 const flags = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;

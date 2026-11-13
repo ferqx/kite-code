@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -15,13 +14,21 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { serve as testServe } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+  spawnSync as testSpawnSync,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
-const repo = resolve(import.meta.dir, '../../../..');
+const repo = resolve(import.meta.dirname, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const retainedStatusOwners = new Set<unknown>();
 function processGone(pid: number) {
@@ -49,7 +56,7 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
       mode: 0o600,
     });
     let calls = 0;
-    const provider = Bun.serve({
+    const provider = await testServe({
       hostname: '127.0.0.1',
       port: 0,
       fetch() {
@@ -82,8 +89,8 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
       buildId: 'owned-status',
       apiMajor: 1,
     };
-    let daemon: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined,
-      driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let daemon: TestSubprocess<'pipe', 'pipe', 'pipe'> | undefined,
+      driver: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let client: ReturnType<typeof createClient> | undefined;
     let lifecycle: ReturnType<typeof createServiceLifecycleClient> | undefined;
     let daemonExit: number | undefined;
@@ -190,9 +197,10 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
         const manifest = JSON.stringify(assets);
         writeFileSync(join(web, 'manifest.json'), manifest);
         const instanceId = randomUUID();
-        daemon = Bun.spawn(
+        daemon = testSpawn(
           [
             process.execPath,
+            ...testRuntimeFlags,
             join(root, 'service-artifact/node_modules/@kite-ai/service/daemon-main.js'),
           ],
           {
@@ -274,12 +282,12 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
       const runner = join(root, 'runner.ts');
       writeFileSync(
         runner,
-        `import {appendFileSync,readFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};const actualSpawn=Bun.spawn.bind(Bun);Bun.spawn=(...args)=>{const actualChild=actualSpawn(...args),command=Array.isArray(args[0])?args[0]:args[0]?.cmd;if(command?.includes(${JSON.stringify(entrypoint)})){const record={pid:actualChild.pid,start:readProcessStartIdentity(actualChild.pid)};writeFileSync(${JSON.stringify(ownedPid)},JSON.stringify(record));void actualChild.exited.then(code=>writeFileSync(${JSON.stringify(`${ownedPid}.exit`)},JSON.stringify({...record,code})));}return actualChild;};const actual=globalThis.fetch;let gets=0;globalThis.fetch=async(...args)=>{const response=await actual(...args);if(String(args[0]).includes('/diagnostics/host-status')){const value=await response.clone().json();appendFileSync(${JSON.stringify(ledger)},JSON.stringify(value)+'\\n');if(++gets===2)throw Error('SECRET endpoint token')}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({testDiagnostics:true,exitSignal:exit.signal,onLaunched:({pid})=>{const record=JSON.parse(readFileSync(${JSON.stringify(ownedPid)},'utf8'));if(record.pid!==pid)throw Error('status_service_spawn_identity_mismatch')},${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
+        `import {appendFileSync,readFileSync,writeFileSync} from 'node:fs';import {runTUIHost} from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};import{readProcessStartIdentity}from${JSON.stringify(pathToFileURL(join(repo, 'apps/service/src/daemon/process-identity.ts')).href)};process.env.KITE_MANAGEMENT_SERVICE_ENTRY=${JSON.stringify(entrypoint)};process.env.KITE_MANAGEMENT_OBSERVATION=${JSON.stringify(`${ownedPid}`)};await import(${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/test/fixtures/tui-management-observation.ts')).href)});const actual=globalThis.fetch;let gets=0;globalThis.fetch=async(...args)=>{const response=await actual(...args);if(String(args[0]).includes('/diagnostics/host-status')){const value=await response.clone().json();appendFileSync(${JSON.stringify(ledger)},JSON.stringify(value)+'\\n');if(++gets===2)throw Error('SECRET endpoint token')}return response};const exit=new AbortController();process.once('SIGTERM',()=>exit.abort());await runTUIHost({testDiagnostics:true,exitSignal:exit.signal,onLaunched:({pid})=>{const record=JSON.parse(readFileSync(${JSON.stringify(ownedPid)},'utf8'));if(record.pid!==pid)throw Error('status_service_spawn_identity_mismatch')},${mode === 'paired' ? `artifact:${JSON.stringify(artifact)}` : `server:${JSON.stringify(socket)}`},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'development',thread:'a',cwd:${JSON.stringify(workspace)}});`,
       );
-      driver = Bun.spawn(
+      driver = testSpawn(
         [
           process.execPath,
-          '--no-install',
+          ...testRuntimeFlags,
           join(repo, 'apps/cli/test/fixtures/tui-status-driver.ts'),
           JSON.stringify({
             runner,
@@ -313,7 +321,7 @@ for (const mode of ['paired', 'shared', 'shared-loss'] as const)
                 process.kill(daemon.pid, 0);
                 let dispatchExitCode: number | null = null;
                 if (process.platform === 'win32') {
-                  const dispatch = Bun.spawnSync(
+                  const dispatch = testSpawnSync(
                     ['taskkill.exe', '/pid', String(daemon.pid), '/f'],
                     {
                       env: { ...process.env, ...userConfiguration.homeEnvironment },

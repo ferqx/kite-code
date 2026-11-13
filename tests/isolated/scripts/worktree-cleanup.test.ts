@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -15,6 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { expect, test } from '#kite-test';
 import { checkWorktreeCleanup, inspectCleanupTree } from '../../../scripts/check-worktree-cleanup';
 
 function cleanup(root: string, links: string[] = []) {

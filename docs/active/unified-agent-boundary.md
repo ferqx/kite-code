@@ -2,7 +2,7 @@
 
 Native 的只读执行观察沿原 bounded View／snapshotCursor 独立发布，完整权限／交互／活动目标准入仍由原完整 Snapshot 提供。两者不能混合成新的操作证明；Run／Execution 或相关控制变化必须撤销旧准确目标。投影按连接 generation、Store、Session、Workspace、viewSelection 和 historyEpoch 隔离，更高 cursor 可表达同 Run 的明确恢复；终态不等待辅助读取，活动动画仍需准确热 owner 资格。实现候选及当前有限验证归 [Desktop owner](../../apps/desktop/README.md#执行观察与操作准入)，不新增公开协议版本或业务 writer。
 
-本地图片读取由[Files owner](../../packages/agent/src/tools/files/README.md#图片读取)的 `files.view_images@1` 承担：原权限／路径／附件选择先约束全字节读取，固定严格解码程序只收字节，不收用户路径或 Provider 状态；明确空 Bun/tsconfig 防止目录 preload／别名改变入口。Windows 原 Job owner 提供512MiB和单进程限制，取消后核原 wait／tree；退出无法确认时结算 unknown、保 owner／图片名额并拒绝后续读取，不无限等待缺失证明。监督进程隔离崩溃与资源，不把它称为文件／网络 OS 沙箱。Service 保护实际处理资产及 native 依赖根；其他平台资格独立核实。
+本地图片读取由[Files owner](../../packages/agent/src/tools/files/README.md#图片读取)的 `files.view_images@1` 承担：原权限／路径／附件选择先约束全字节读取，固定严格解码程序只收字节，不收用户路径或 Provider 状态；固定 Node 入口与启动参数，清除继承的运行时配置。Windows 原 Job owner 提供512MiB和单进程限制，取消后核原 wait／tree；退出无法确认时结算 unknown、保 owner／图片名额并拒绝后续读取，不无限等待缺失证明。监督进程隔离崩溃与资源，不把它称为文件／网络 OS 沙箱。Service 保护实际处理资产及 native 依赖根；其他平台资格独立核实。
 
 图片结果保存原 Execution 的不可变 Artifact，沿既有 `modelImages` 与两协议交接，当前运行、历史、Fork和冷读保原出处；单次批次只对该准确版本接纳最多10张／每张8MiB／整批16MiB，其他工具仍为4张；批次先约束完整有序路径及输入原件revision，串行读取并在全部解码成功后才交付视觉结果，容量继续只对该准确新工具版本累计32MiB，并在越界图片展开前失败，不修改其他图片入口。Native 的计数、缩略图和折叠从准确原成功回执派生，窗口预览缓存不承担历史保存或授权。上传原件与实际视觉结果均沿原 Blob／引用／显式无引用 GC，不新增会过期的历史图片缓存；原协议和既有工具版本保持。
 
@@ -14,7 +14,7 @@ Native 会话完成提醒的已读记录由[桌面私有 SQLite](../../apps/desk
 
 Web 初始 DNS 复用只在一个 Tool Execution 内将已验证候选从同源 robots 交给正文初始请求，二者各自核准入、取消和 socket 前持久审计。重定向重新解析；Service 通过原 Web 快照核对新运行语义和冷恢复。
 
-模型绑定在首次请求时创建独立 `Bun.FetchSession`，普通 Run、标题 model-only 绑定和模型目录查询沿原 owner 收尾关闭空闲池；关闭封住该绑定的新请求并复用原清理结果。原 AbortSignal 继续负责活跃请求取消，连接池关闭不冒充业务取消、成功或完整进程退出。代理选择、摘要字节和恢复拒绝仍用原规则；不共享其他绑定的连接，不因连接失败改出口或重放。具体接线与真实本地网络回归归[Service owner](../../apps/service/README.md#模型连接池与原取消恢复边界)。
+模型绑定在首次请求时创建独立的 Undici Dispatcher，普通 Run、标题 model-only 绑定和模型目录查询沿原 owner 收尾关闭空闲池；关闭封住该绑定的新请求并复用原清理结果。原 AbortSignal 继续负责活跃请求取消，连接池关闭不冒充业务取消、成功或完整进程退出。代理选择、摘要字节和恢复拒绝仍用原规则；不共享其他绑定的连接，不因连接失败改出口或重放。具体接线与真实本地网络回归归[Service owner](../../apps/service/README.md#模型连接池与原取消恢复边界)。
 
 默认SDK模型请求与传输失败由[AI边界](../../packages/ai/README.md)提供重连分类，明确HTTP401／403认证或权限拒绝除外；未知网络错误不因缺少系统code而退出重连路径。Runtime仍必须核原Model Execution失败、关闭及来源资格，并限制同串故障最多5次重连；此分类不赋予客户端重发权，不把取消、本地历史校验、未知效果或未确认关闭转换为可重试证明，协议与持久格式保持。
 
@@ -214,7 +214,7 @@ MCP 的完整 schema 编译及参数／结果校验继续由所属 Worker 负责
 
 受管 Agent Browser 沿 [Service 默认装配](../../apps/service/README.md#受管-browser-默认装配) → [Agent Browser Extension／Controller](../../packages/agent/src/tools/browser/README.md) → 原 `browser.session` Job 与进程监督，Native 沿既有 Extension Query／Action 和 Main 已核实 scope 观察／操作。兼容独立浏览器由原进程 owner 管理；Native 普通页候选由 Main 持有同一 WebContentsView，只有经准确许可取得的租约才能自动化。两条路径不新增模型 Loop、Core 业务表或 renderer 控制旁路。`browser.view` 只读且不启动资源；网页、renderer、工具参数不能提供 Session authority、原生路径、CDP 或登录状态文件。宿主禁用是权限硬上限，Full 模式和 JSONC 不能解除。
 
-新 Native 默认浏览器候选经全局内置 `computer-use` → `browser.execute` → `browser.code_session` 与原工具 Operations 派发；旧冻结与显式原子配置保持。生成代码只在 macOS Seatbelt 限制的独立 Bun 进程运行，宿主 API 等待时由准确进程身份暂停，恢复前核原目标及逐项权限；缺资产或隔离能力返回 unavailable。代码Job只终止VM与当前子调用，Browser Job独立监督原Run并收口准确租约；新Run在VM准入前等待旧终态Job真实stop／dispose，unknown不被替换。首次Native导航unknown仅在Main准确release回执、原transport完整关闭及原Run终态均证实后，允许下一Run按actualURL／原pageId／incarnation重新绑定，先取得新snapshot；旧unknown及业务效果不改写，其它URL／旧引用／输入在新观察前拒绝。业务操作unknown或真实cleanupunknown无此资格。共享页确认释放后的lastKnown元数据没有旧控制权或存在证明，本Run新候选id只允许首次snapshot经原open重新绑定；Service将原acquire获得的私有pageId／incarnation随同URL已释放目标耐久收紧为requireExisting，Main精确重核原页，缺失／身份替换／变址不能创建、导航或刷新；普通新URL新建页，不导航覆盖原页，UI scope清理仅撤下呈现，Main页面寿命独立于Run／租约；onRunEnd通知不承担清理保证。正式 PNG 由原 Tool Artifact／modelImages 核身份后进入现有两种 wire，Main 的私有 capture proof 不作为公开调试入口。模型观察、控制装饰和显式冻结注释分别调度。原子操作已派发后的 unknown、取消与页面效果保持原事实，不由代码批次失败抹除；具体边界和实机剩余范围见 [Browser owner](../../packages/agent/src/tools/browser/README.md)及 [Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
+新 Native 默认浏览器候选经全局内置 `computer-use` → `browser.execute` → `browser.code_session` 与原工具 Operations 派发；旧冻结与显式原子配置保持。生成代码只在 macOS Seatbelt 限制的独立 Node 进程运行，宿主 API 等待时由准确进程身份暂停，恢复前核原目标及逐项权限；缺资产或隔离能力返回 unavailable。代码Job只终止VM与当前子调用，Browser Job独立监督原Run并收口准确租约；新Run在VM准入前等待旧终态Job真实stop／dispose，unknown不被替换。首次Native导航unknown仅在Main准确release回执、原transport完整关闭及原Run终态均证实后，允许下一Run按actualURL／原pageId／incarnation重新绑定，先取得新snapshot；旧unknown及业务效果不改写，其它URL／旧引用／输入在新观察前拒绝。业务操作unknown或真实cleanupunknown无此资格。共享页确认释放后的lastKnown元数据没有旧控制权或存在证明，本Run新候选id只允许首次snapshot经原open重新绑定；Service将原acquire获得的私有pageId／incarnation随同URL已释放目标耐久收紧为requireExisting，Main精确重核原页，缺失／身份替换／变址不能创建、导航或刷新；普通新URL新建页，不导航覆盖原页，UI scope清理仅撤下呈现，Main页面寿命独立于Run／租约；onRunEnd通知不承担清理保证。正式 PNG 由原 Tool Artifact／modelImages 核身份后进入现有两种 wire，Main 的私有 capture proof 不作为公开调试入口。模型观察、控制装饰和显式冻结注释分别调度。原子操作已派发后的 unknown、取消与页面效果保持原事实，不由代码批次失败抹除；具体边界和实机剩余范围见 [Browser owner](../../packages/agent/src/tools/browser/README.md)及 [Desktop owner](../../apps/desktop/README.md#统一浏览器入口候选2026-10-28)。
 
 Native浏览器的navigate／url／title沿原transport改由Main-owned driver处理：真实WebContents是页面状态与导航权威，Service用原nativeResult互斥／inflight／取消和闭合六字段回执核对原lease、pageId、incarnation及navigation。Main只派发一次原始Page.navigate并等本次主框架真实就绪；原观察门禁仍拒跨文档，派发前拒绝与派发后unknown分别保存。Native capture metadata也共用Main事实，回调留在可信Host。现有Rust语义读取、独立浏览器、统一Browser API、Agent Loop和审批豁免保持；没有添加新的公开工具或提升协议版本。源合同、理由与实际资格归上述Browser／Service／Desktop owner。
 
@@ -333,7 +333,7 @@ Native 的 `configuration_management` 通过公共 Client 固定原 Store/genera
 
 显式恢复生成新 Store，旧origin与已完成receipt保留，备份中的未完成工作不得自动执行。切换全程持同一外部排他锁，先保存原目录再发布候选；未完成journal阻止普通入口建库。核实完成/回退必须匹配观察restoreId/digest及准确目录内容/Store，不能靠路径存在猜测。已交付publication和七个强杀窗口；新 Store 准入和封存原来源现分别校验，原 Model/Artifact/压缩/child/Fork/导出完整读取及新明确 Run 已经真实恢复复验；旧来源执行和新引用发布守卫保持。离线 CLI 直接调用维护 leaf，准确 Store 和明确数据回退确认不可省略，journal 核实另需原 ID/digest/decision；不启动 Service/Provider。配置/Desktop UI采集已由真实owner及携资产的强杀窗口验证；Node独立使用锁的真实窗口已核Service强杀后仍busy、所属UI退出/Node强杀后释放、其他profile不受影响；TUI原文资产及七个强杀窗口已纳入验证；显式GC持同一外置排他锁，核原Store与私有数据库副本；副本源证明结束后，单个SQL事务清理过宽限且无未结束／未知／待核对工作的已移除Workspace正文，保留原删除边界、Command去重／receipt与执行终态。空间外关系依赖拒绝，原通知正文删除同时提高replay floor；独立 `historyCollection@1` 经可选Session DTO说明清理，不改变原Workspace receipt。当前Core页与WAL收尾后，再清全量hash／实体核实的无引用过期附件；未结束和其他空间引用保留，私有草稿与项目文件不修改。DB8 原 Workspace 申请仅由 closed manifest v17 采集／恢复，不扩大旧 grammar。单会话root组也按相同宽限与终态规则清理，来源依赖保留向祖先传播，全部符合条件的删除链可同批清理；独立 `sessionHistoryCollection@1` 映射root清理时间，经既有DTO说明结果。当前namespace未删除，原历史祖先tombstone仍允许sealed只读，已清理来源拒绝；不继承执行权。安装版维护、引擎和平台资格继续闭合，不能据目录切换成功宣称完整恢复。[维护owner](../../packages/agent/src/maintenance/README.md)维护准确范围。
 
-[私有UI使用锁](../../.agents/notes/implemented/architecture/2026-10-02-private-ui-profile-use-lock.md)由Node原fd持有，私有产物中的一次性Bun helper仅对继承fd取得shared flock并关闭自己的副本，不UNLOCK；不依赖Service生命周期。SQLiteclose成功后才释放，失败留锁；维护/journal拒绝不建空UI。当前macOS实际Node/Electron已验证，Linux未资格、Windows inherited-fd明确拒绝。
+[私有UI使用锁](../../.agents/notes/implemented/architecture/2026-10-02-private-ui-profile-use-lock.md)由Node原fd持有，私有产物中的一次性 Node helper仅对继承fd取得shared flock并关闭自己的副本，不UNLOCK；不依赖Service生命周期。SQLiteclose成功后才释放，失败留锁；维护/journal拒绝不建空UI。当前macOS实际Node/Electron已验证，Linux未资格、Windows inherited-fd明确拒绝。
 
 
 正式Terminal与开发daemon通过Service私有有限socket／Windows pipe交换bootstrap，业务与关闭仍用公共HTTP Client；不把native发现协议暴露为公共业务carrier。paired/daemon共用一次Store/Runtime装配，父EOF策略分别保持；目标子进程只读SQLite预检在旧实例停止前执行。Windows父launcher和实际Daemon各持自身完整candidate使用权，原native关闭未知保原owner／诊断并保活；实际边界与各平台待验范围归[Service owner](../../apps/service/README.md)，CLI惰性资产与原实例一次关闭归[CLI owner](../../apps/cli/README.md)。CLI run/resume与TUI的显式`--server`经私有宿主发现后固定原实例、profile与Workspace，连接失败不启动替代；共享close仅disposeNetwork，TUI独立草稿lease保持至UI退出。公共Client/UI不引入native发现依赖，Windows实际安装整链与完整平台／全部调用者迁移资格仍未完成；设计依据见[私有bootstrap Note](../../.agents/notes/implemented/architecture/2026-10-02-daemon-private-bootstrap.md)。
@@ -386,6 +386,8 @@ Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，�
 
 2026-10-26 已删除其余旧架构 workspace；仅保留 `apps/kite-cli` 的历史源码，且其运行依赖闭包已移除。当前构建、测试与正式入口仍只选择上述十 workspace，删除决定见[取舍](../../.agents/notes/implemented/architecture/2026-10-26-remove-legacy-modules-retain-kite-cli.md)。旧源码删除不代替现有平台、资源、恢复或发布门禁。
 
+
+工作区依赖使用 `bun.lock` 和 `bunfig.toml` 冻结安装。工作区守卫核对正式 Node 入口、精确作用域的 Bun 脚本与跨包边界。已留存的旧项目不进入当前工作区安装或默认测试发现。
 ## 授权观察与执行资格
 
 Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；明确 `origin=all` 只读该 Store 实际保存的恢复记录，默认当前查询与旧 origin 写入守卫保持；当前准入和原卡／附件出处分别核对，不补 Fork／Include 祖先后来的记录。它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。
@@ -406,7 +408,7 @@ TUI 用户模型/effort 设置按准确 Store+user scope 保存和查询原意�
 
 ## 新终端候选边界
 
-`release:terminal` 将八个新 workspace、实际 npm 图、固定 Bun 和全部宿主资产封存在独立候选，完整 manifest 身份交给 CLIServiceArtifact 与客户端准入。安装发布 current/previous 指针，已经运行的 CLI/TUI/Service 固定原 candidate；独立 daemon 的 artifact lease 不依赖启动 CLI 存活。归档、目录持久化、卸载白名单与平台限制由[终端 owner](../../apps/cli/docs/terminal-release.md)完整维护。制品锁不取得 Profile 或业务权限；unsigned SHA 只证明完整性，真实沙箱、发布者身份及旧正式入口退役仍须原有资格。
+`release:terminal` 将八个新 workspace、实际 npm 图、固定 Node 和全部宿主资产封存在独立候选，完整 manifest 身份交给 CLIServiceArtifact 与客户端准入。安装发布 current/previous 指针，已经运行的 CLI/TUI/Service 固定原 candidate；独立 daemon 的 artifact lease 不依赖启动 CLI 存活。归档、目录持久化、卸载白名单与平台限制由[终端 owner](../../apps/cli/docs/terminal-release.md)完整维护。制品锁不取得 Profile 或业务权限；unsigned SHA 只证明完整性，真实沙箱、发布者身份及旧正式入口退役仍须原有资格。
 
 Service 与 CLI 现在共用 [runtime-assets](../../apps/service/src/runtime-assets.ts) 的唯一完整 tree verifier。trusted launcher 的私有 pipe 只传闭合 candidate root/manifest SHA/kind；实际 Service 独立取得 shared lease、核 build/entrypoint/executable 后才将全 closure 作为默认 Files 的保护范围，Model/JSONC/HTTP 不能提供该证明。Runtime、Workspace FD、readers/stream 全部确认关闭才释放，失败保持原资源与 listener。实际 public builder→default native paired/daemon、CLI 父退出后 live busy/stop 后 free 的 1/23 资格归 [Service owner](../../apps/service/README.md)；不能只从 parent wrapper 正常存活推定 child 已保护完整资产。
 
@@ -458,7 +460,7 @@ UI只持可选connection port和原读取代次；Host用公开完整Workspace�
 
 根 `agent/tui/prod:tui` 固定完整新 Terminal，`desktop` 固定完整 Native，`server` 显式复用新默认 daemon/Web。十 workspace 的 build/typecheck 与统一默认计划共用同一发现源；root 仅有限脚本安全测试及新公开制品场景。静态守卫检查 root/workspace scripts、递归 aliases、CI run 与实际 import 闭包，包含四个标准/Native CLI/TUI entry；计算模块的 fixture 仍记 pending，不把静态检查当运行资格。
 
-Terminal 与 Native 分别固定真实 Bun/Node SQLite，包内 selection 在 Store/maintenance/Worker 开库前生效；损坏选定资产不回退开发库。Windows ordinary Workspace 配置与 private Profile/协调/数据库角色分开，既有 ACL 不自动修复；实际 native Windows 仍待 CI 证据。三平台 workflow 保原检查名称、固定 Bun/action、源 head 与 clean-source 约束。平台诊断、bounded soak 和源码外制品通过均不等于完整 Shell/confinement、正式 soak 或发布者认证；formal verifier 保持拒绝缺资格。当前边界见[release control](release-control.md)、[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
+Terminal 的 Service 固定 Node-API SQLite，引入它的 Native 另核 Electron 内置 SQLite，包内 selection 在 Store/maintenance/Worker 开库前生效；损坏选定资产不回退开发库。Windows ordinary Workspace 配置与 private Profile/协调/数据库角色分开，既有 ACL 不自动修复；实际 native Windows 仍待 CI 证据。三平台 workflow 保原检查名称、固定 Bun/action、源 head 与 clean-source 约束。平台诊断、bounded soak 和源码外制品通过均不等于完整 Shell/confinement、正式 soak 或发布者认证；formal verifier 保持拒绝缺资格。当前边界见[release control](release-control.md)、[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
 
 
 Native Provider/Model 的完整设置消费者由 Main 冻结原观察，热秘密只传一次公共 Provider POST；原非秘密申请先落 Desktop DB6，再允许本次提交，冷记录只显式原 GET。Service/Core composite marker 固定原 readSet/operation/身份，vault保存与JSONC发布分别保留已知/未知结果；stored-unpublished 的原 revoke handle 只向认证SDK开放，renderer不获该authority。新模型disabled，其他连接保留，完整目录不按512项裁切。输入区每Session的下一次model/页面临时effort经真实HTTP原命令进入冻结root快照和实际wire，active steer保持文本语义、child自选preset。Profile无三项raw MCP文件时DB6离线资产用专属manifest14，旧版本grammar不扩大，详见[Service owner](../../apps/service/README.md#native-provider-与下一次模型绑定)、[维护 owner](../../packages/agent/src/maintenance/README.md#desktop-db6-与-manifest-v14)。macOS默认OSvault/受控loopback真实Native窗口已验，尚不外推生产远端、MCP窗口或其他平台。

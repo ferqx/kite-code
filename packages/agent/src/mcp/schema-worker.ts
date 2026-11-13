@@ -1,15 +1,13 @@
 import Ajv from 'ajv';
+import { workerEndpoint } from '../platform/process/worker-endpoint';
 
 type SchemaPair = { input: object; output?: object };
 type Request =
   | { id: number; kind: 'compile'; schemas: SchemaPair[] }
   | { id: number; kind: 'input' | 'output'; index: number; value: unknown };
-declare const self: {
-  onmessage: ((event: MessageEvent<Request>) => void) | null;
-  postMessage(value: { id: number; valid?: boolean; error?: string }): void;
-};
+const endpoint = workerEndpoint<Request, { id: number; valid?: boolean; error?: string }>();
 let validators: { input: ReturnType<Ajv['compile']>; output?: ReturnType<Ajv['compile']> }[] = [];
-self.onmessage = async ({ data }) => {
+endpoint.onmessage = async ({ data }) => {
   try {
     if (data.kind === 'compile') {
       const ajv = new Ajv({ strict: false, allErrors: false, validateFormats: false });
@@ -18,19 +16,19 @@ self.onmessage = async ({ data }) => {
         const input = ajv.compile(schema.input);
         return { input, output };
       });
-      self.postMessage({ id: data.id, valid: true });
+      endpoint.postMessage({ id: data.id, valid: true });
     } else {
       const pair = validators[data.index];
       if (!pair) throw new Error('schema_identity_invalid');
       const validate = data.kind === 'input' ? pair.input : pair.output;
-      if (!validate) self.postMessage({ id: data.id, valid: true });
+      if (!validate) endpoint.postMessage({ id: data.id, valid: true });
       else if ('$async' in validate && validate.$async) {
         await validate(data.value);
-        self.postMessage({ id: data.id, valid: true });
-      } else self.postMessage({ id: data.id, valid: !!validate(data.value) });
+        endpoint.postMessage({ id: data.id, valid: true });
+      } else endpoint.postMessage({ id: data.id, valid: !!validate(data.value) });
     }
   } catch {
-    self.postMessage(
+    endpoint.postMessage(
       data.kind === 'compile'
         ? { id: data.id, error: 'mcp_arguments_invalid' }
         : { id: data.id, valid: false },

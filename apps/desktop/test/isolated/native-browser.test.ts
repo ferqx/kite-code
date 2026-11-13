@@ -1,17 +1,22 @@
-import { expect, test } from 'bun:test';
 import { realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import tailwind from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
+import { expect, test } from '#kite-test';
 import { ensureWindowsElectronPermissions } from '../../../../scripts/development/windows-electron-permissions';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { prepareMacosElectronRuntime } from '../../scripts/macos-electron-runtime';
 
 test('real sandboxed manual browser owners preserve exact pages across scope changes without exposing app authority', async () => {
   const directory = realpathSync(temporaryDirectory('kite-sidebar-browser-'));
-  const desktop = resolve(import.meta.dir, '../..');
+  const desktop = resolve(import.meta.dirname, '../..');
   const require = createRequire(join(desktop, 'package.json'));
   const installed = realpathSync(require('electron') as string);
   ensureWindowsElectronPermissions({
@@ -63,7 +68,7 @@ test('real sandboxed manual browser owners preserve exact pages across scope cha
     [mainEntry, 'main.cjs', 'cjs'],
     [join(desktop, 'test/native-browser-driver.fixture.ts'), 'driver.mjs', 'esm'],
   ] as const) {
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [input],
       outdir: directory,
       naming: output,
@@ -73,9 +78,9 @@ test('real sandboxed manual browser owners preserve exact pages across scope cha
     });
     if (!built.success) throw new AggregateError(built.logs, 'browser_fixture_build_failed');
   }
-  const child = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
-      realpathSync(Bun.which('node')!),
+      realpathSync(findFixtureExecutable('node')!),
       join(directory, 'driver.mjs'),
       join(desktop, 'package.json'),
       directory,

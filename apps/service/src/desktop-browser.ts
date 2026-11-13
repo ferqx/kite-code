@@ -1,4 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   type BrowserReleasedPage,
   type BrowserSharedPageIdentity,
@@ -8,6 +9,11 @@ import {
   type NativeBrowserTransportOptions,
 } from '@kite-ai/agent/browser';
 import type { JobContext } from '@kite-ai/agent/extensions';
+import {
+  type LoopbackServer,
+  type LoopbackWebSocket,
+  serveLoopbackWebSocket,
+} from './loopback-server';
 
 export interface DesktopBrowserEndpoint {
   readonly endpoint: string;
@@ -224,10 +230,10 @@ export function createDesktopBrowserTransport(
 ): NativeBrowserTransport {
   const call = createDesktopBrowserClient(remote);
   let lease: Lease | undefined, inner: NativeBrowserTransport | undefined;
-  let server: ReturnType<typeof Bun.serve> | undefined;
-  let socket: Bun.ServerWebSocket<unknown> | undefined;
+  let server: LoopbackServer | undefined;
+  let socket: LoopbackWebSocket | undefined;
   let socketReceipt:
-    | { socket: Bun.ServerWebSocket<unknown>; closed: Promise<void>; finish(): void }
+    | { socket: LoopbackWebSocket; closed: Promise<void>; finish(): void }
     | undefined;
   let pollStop: AbortController | undefined, poll: Promise<void> | undefined;
   let closingDestroyedPage: Lease | undefined;
@@ -371,26 +377,19 @@ export function createDesktopBrowserTransport(
     const signal = pollStop.signal;
     let cdpTail: Promise<unknown> = Promise.resolve(),
       queued = 0;
-    server = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch(request, instance) {
-        const url = new URL(request.url),
-          supplied = url.pathname.slice('/kite-native/'.length);
-        if (
-          stopping ||
-          signal.aborted ||
-          socket ||
-          request.headers.has('origin') ||
-          url.search ||
-          !url.pathname.startsWith('/kite-native/') ||
-          supplied.length !== token.length ||
-          !timingSafeEqual(Buffer.from(supplied), Buffer.from(token))
-        )
-          return new Response('denied', { status: 403 });
-        return instance.upgrade(request, { data: null })
-          ? undefined
-          : new Response('denied', { status: 400 });
+    server = await serveLoopbackWebSocket({
+      admit(url, hasOrigin) {
+        const supplied = url.pathname.slice('/kite-native/'.length);
+        return (
+          !stopping &&
+          !signal.aborted &&
+          !socket &&
+          !hasOrigin &&
+          !url.search &&
+          url.pathname.startsWith('/kite-native/') &&
+          supplied.length === token.length &&
+          timingSafeEqual(Buffer.from(supplied), Buffer.from(token))
+        );
       },
       websocket: {
         maxPayloadLength: 256 * 1024,
@@ -502,7 +501,7 @@ export function createDesktopBrowserTransport(
       let after = 0;
       while (!signal.aborted) {
         if (!socket) {
-          await Bun.sleep(50);
+          await delay(50);
           continue;
         }
         const result = await call({ op: 'events', leaseId: current.leaseId, after }, signal);
@@ -523,7 +522,7 @@ export function createDesktopBrowserTransport(
             );
         }
         after = result.cursor;
-        await Bun.sleep(50);
+        await delay(50);
       }
     })().catch((error: unknown) => {
       if (!signal.aborted) {

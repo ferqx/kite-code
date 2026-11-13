@@ -1,6 +1,7 @@
-import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { NativeBrowserTransport } from '@kite-ai/agent/browser';
+import { expect, mock, test } from '#kite-test';
+import type { serveLoopbackWebSocket } from '../../../service/src/loopback-server';
 import { NativeBrowserPageHost } from '../../electron/browser-page-host';
 
 const natives: any[] = [];
@@ -65,12 +66,19 @@ mock.module('@kite-ai/agent/browser', () => ({
     return row;
   },
 }));
+let serveFixture: typeof serveLoopbackWebSocket = async () => {
+  throw Error('test_websocket_fixture_missing');
+};
+mock.module('../../../service/src/loopback-server', () => ({
+  serveLoopbackWebSocket: (options: Parameters<typeof serveLoopbackWebSocket>[0]) =>
+    serveFixture(options),
+}));
 const { createDesktopBrowserTransport } = await import('../../../service/src/desktop-browser');
 
 for (const timing of ['before-reply', 'after-reply'] as const)
   test(`compatibility CDP reader waits for its empty-session DOM content event: ${timing}`, async () => {
     const originalFetch = globalThis.fetch,
-      originalServe = Bun.serve;
+      originalServe = serveFixture;
     const host = new NativeBrowserPageHost(),
       scope = { storeId: 'store', sessionId: 'session' };
     let onEvent!: (method: string, params: unknown, sessionId?: string) => void;
@@ -147,10 +155,10 @@ for (const timing of ['before-reply', 'after-reply'] as const)
         });
       }
     }) as typeof fetch;
-    Bun.serve = ((options: any) => {
+    serveFixture = (async (options: any) => {
       server = options;
       return { port: 12345, stop: async () => {} };
-    }) as typeof Bun.serve;
+    }) as unknown as typeof serveFixture;
     try {
       const signal = new AbortController().signal;
       transport = createDesktopBrowserTransport(
@@ -215,7 +223,7 @@ for (const timing of ['before-reply', 'after-reply'] as const)
       clearTimeout(timer);
       await transport?.close();
       globalThis.fetch = originalFetch;
-      Bun.serve = originalServe;
+      serveFixture = originalServe;
     }
   });
 
@@ -254,7 +262,7 @@ test('ordinary page/Job adapter confirms control, pauses with daemon cleanup, an
   });
   host.arm('same-page', scope);
   const originalFetch = globalThis.fetch,
-    originalServe = Bun.serve;
+    originalServe = serveFixture;
   let stops = 0;
   const requests: any[] = [];
   globalThis.fetch = (async (_url: any, init: any) => {
@@ -268,12 +276,12 @@ test('ordinary page/Job adapter confirms control, pauses with daemon cleanup, an
       });
     }
   }) as typeof fetch;
-  Bun.serve = ((_options: any) => ({
+  serveFixture = (async (_options: any) => ({
     port: 12345,
     stop: async () => {
       stops++;
     },
-  })) as typeof Bun.serve;
+  })) as unknown as typeof serveFixture;
   let transport: NativeBrowserTransport | undefined;
   const signal = new AbortController();
   try {
@@ -320,13 +328,13 @@ test('ordinary page/Job adapter confirms control, pauses with daemon cleanup, an
     expect(requests.filter((row) => row.op === 'acquire')).toHaveLength(1);
   } finally {
     await transport?.close();
-    Bun.serve = originalServe;
+    serveFixture = originalServe;
     globalThis.fetch = originalFetch;
   }
 });
 test('known missing grant ends without a phantom daemon; lost acquisition response stays unknown', async () => {
   const originalFetch = globalThis.fetch,
-    originalServe = Bun.serve;
+    originalServe = serveFixture;
   const before = natives.length;
   try {
     let cancelled = 0;
@@ -353,9 +361,9 @@ test('known missing grant ends without a phantom daemon; lost acquisition respon
           { status: 400 },
         );
       }) as unknown as typeof fetch;
-      Bun.serve = (() => {
+      serveFixture = (async () => {
         throw Error('unexpected_server');
-      }) as typeof Bun.serve;
+      }) as unknown as typeof serveFixture;
       const transport = createDesktopBrowserTransport(
         { executable: '/trusted/native', browserPath: '/unused' },
         {
@@ -372,7 +380,7 @@ test('known missing grant ends without a phantom daemon; lost acquisition respon
     expect(natives).toHaveLength(before);
   } finally {
     globalThis.fetch = originalFetch;
-    Bun.serve = originalServe;
+    serveFixture = originalServe;
   }
 });
 
@@ -380,7 +388,7 @@ for (const boundary of ['reply', 'lost-reply', 'native-ready'] as const)
   for (const mode of ['close', 'cancel', 'deadline'] as const)
     test(`late resume is drained before final cleanup: ${mode}/${boundary}`, async () => {
       const originalFetch = globalThis.fetch,
-        originalServe = Bun.serve,
+        originalServe = serveFixture,
         originalTimer = globalThis.setTimeout;
       try {
         const host = new NativeBrowserPageHost(),
@@ -428,7 +436,7 @@ for (const boundary of ['reply', 'lost-reply', 'native-ready'] as const)
         let servers = 0,
           stops = 0,
           deadline: (() => void) | undefined;
-        Bun.serve = (() => {
+        serveFixture = (async () => {
           servers++;
           return {
             port: 12345,
@@ -436,7 +444,7 @@ for (const boundary of ['reply', 'lost-reply', 'native-ready'] as const)
               stops++;
             },
           };
-        }) as unknown as typeof Bun.serve;
+        }) as unknown as typeof serveFixture;
         globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
           const [handler, timeout] = args;
           if (timeout === 600000 && typeof handler === 'function') deadline = handler as () => void;
@@ -510,14 +518,14 @@ for (const boundary of ['reply', 'lost-reply', 'native-ready'] as const)
         }
       } finally {
         globalThis.fetch = originalFetch;
-        Bun.serve = originalServe;
+        serveFixture = originalServe;
         globalThis.setTimeout = originalTimer;
       }
     });
 
 test('a paused capture response delayed past close cannot publish its pixels', async () => {
   const originalFetch = globalThis.fetch,
-    originalServe = Bun.serve;
+    originalServe = serveFixture;
   let unblock!: () => void, entered!: () => void;
   const gate = new Promise<void>((resolve) => {
     unblock = resolve;
@@ -546,7 +554,10 @@ test('a paused capture response delayed past close cannot publish its pixels', a
         }),
       );
     }) as unknown as typeof fetch;
-    Bun.serve = (() => ({ port: 12345, stop: async () => {} })) as unknown as typeof Bun.serve;
+    serveFixture = (async () => ({
+      port: 12345,
+      stop: async () => {},
+    })) as unknown as typeof serveFixture;
     const signal = new AbortController().signal;
     transport = createDesktopBrowserTransport(
       { executable: '/trusted/native', browserPath: '/unused' },
@@ -577,6 +588,6 @@ test('a paused capture response delayed past close cannot publish its pixels', a
     unblock();
     await transport?.close();
     globalThis.fetch = originalFetch;
-    Bun.serve = originalServe;
+    serveFixture = originalServe;
   }
 });

@@ -1,9 +1,11 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { AgentRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { assembleProcessService } from '../../src/process-service';
@@ -56,7 +58,7 @@ globalThis.Worker = class extends NativeWorker {
 } as typeof Worker;
 const profile = selectProfile({ dataRoot: process.argv[2]!, profile: 'test' });
 const body = 'Original retained resource 中🙂e\u0301\r\n'.repeat(100) + 'ORIGINAL_ARTICLE_TAIL';
-const page = Bun.serve({
+const page = await fixtureServe({
   hostname: '127.0.0.1',
   port: 0,
   fetch(request) {
@@ -69,7 +71,7 @@ const page = Bun.serve({
   },
 });
 const target = `http://fixture.test:${page.port}/article`;
-const provider = Bun.serve({
+const provider = await fixtureServe({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -214,7 +216,7 @@ try {
     const view = await client.getView('s');
     if (view.runs.length && view.runs.every((run) => !run.isActive)) break;
     if (Date.now() >= deadline) throw Error('original web fixture deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   if (!runtime) throw Error('original runtime missing');
   const storedView = await runtime.getView('s');

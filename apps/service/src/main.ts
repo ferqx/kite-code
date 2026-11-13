@@ -2,7 +2,9 @@ import {
   bootstrapLimitBytes,
   type PrivateStartup,
   privateStartupSchema,
+  reserveProcessStdout,
   startupLimitBytes,
+  startupStdin,
 } from './bootstrap';
 import { retainFailedProcess } from './process-failure';
 import {
@@ -18,7 +20,7 @@ async function startupChannel(signal: AbortSignal): Promise<{
   stopParentWatch: () => Promise<void>;
 }> {
   signal.throwIfAborted();
-  const reader = Bun.stdin.stream().getReader();
+  const reader = startupStdin().getReader();
   const stop = () => {
     void reader.cancel(signal.reason).catch(() => {});
   };
@@ -75,6 +77,7 @@ async function startupChannel(signal: AbortSignal): Promise<{
 
 /** Default model assembly is per Run; startup remains usable without model/config/credentials. */
 export async function runServiceProcess(options: ProcessServiceOptions = {}): Promise<void> {
+  reserveProcessStdout();
   let service: Awaited<ReturnType<typeof assembleProcessService>> | undefined;
   let parentWatch: Awaited<ReturnType<typeof startupChannel>> | undefined;
   const stop = new AbortController();
@@ -126,4 +129,7 @@ export async function runServiceProcess(options: ProcessServiceOptions = {}): Pr
   }
 }
 
-if (import.meta.main) await runServiceProcess();
+const direct =
+  Reflect.get(import.meta, 'main') === true &&
+  /(?:^|[\\/])main\.(?:[cm]?js|ts)$/.test(process.argv[1] ?? '');
+if (direct) await runServiceProcess();

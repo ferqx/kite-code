@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { TuiMcpConnectionIntent } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import {
   fixturePermissions,
   privateDirectory,

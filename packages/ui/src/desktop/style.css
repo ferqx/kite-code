@@ -5627,26 +5627,12 @@ body {
     transition: transform 150ms ease-out;
   }
 }
-.model-effort-unavailable {
-  margin: 8px 0 0;
-  color: var(--muted-foreground);
-  text-align: center;
-  font-size: inherit;
-}
 .model-effort-columns {
   display: grid;
   height: min(288px, calc(var(--radix-popover-content-available-height, 290px) - 2px));
   grid-template-columns: 128px 1px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
-}
-.model-selection-hint {
-  grid-column: 1 / -1;
-  margin: 0;
-  padding: 6px 12px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 18px;
 }
 .model-effort-columns [data-radix-scroll-area-viewport] > div {
   width: 100%;

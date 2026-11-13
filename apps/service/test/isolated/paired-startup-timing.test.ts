@@ -1,14 +1,15 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { expect, test } from '#kite-test';
 import { buildDevelopmentService } from '../../../../scripts/development/desktop-reload';
 import { launchPairedService, type ServiceStartupTiming } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 test('real Service startup reports ordered stages without exposing private configuration; observer failure does not affect admission', async () => {
-  const repository = realpathSync(join(import.meta.dir, '../../../..'));
+  const repository = realpathSync(join(import.meta.dirname, '../../../..'));
   const cache = join(repository, '.cache');
   mkdirSync(cache, { recursive: true });
   const root = realpathSync(mkdtempSync(join(cache, 'kite-startup-timing-')));
@@ -36,7 +37,7 @@ test('real Service startup reports ordered stages without exposing private confi
       const deadline = Date.now() + 1000;
       while (timings.at(-1)?.stage !== 'http' || timings.at(-1)?.status !== 'completed') {
         if (Date.now() > deadline) throw Error('timing_observation_timeout');
-        await Bun.sleep(5);
+        await sleepTimer(5);
       }
       expect(timings.map(({ stage, status }) => `${stage}:${status}`)).toEqual(
         ['shell_runtime', 'configuration', 'store', 'runtime', 'http'].flatMap((stage) => [

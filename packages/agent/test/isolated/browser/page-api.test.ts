@@ -1,5 +1,6 @@
-import { afterEach, expect, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import Ajv from 'ajv';
+import { afterEach, expect, test } from '#kite-test';
 import type { Json } from '../../../src/extensions';
 import { createBrowserController } from '../../../src/tools/browser/controller';
 import {
@@ -131,7 +132,7 @@ test('on-demand Jobs observe semantic refs with no startup, post-action or perio
     ).outcome,
   ).toBe('succeeded');
   expect(f.requests.at(-1)).toEqual({ action: 'select', selector: '@e1', values: ['blue'] });
-  await Bun.sleep(350);
+  await sleepTimer(350);
   expect(f.captures).toBe(0);
   expect((await f.controller.captureNote!('session', f.target, f.signal)).outcome).toBe(
     'succeeded',

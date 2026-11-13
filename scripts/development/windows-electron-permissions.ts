@@ -52,7 +52,10 @@ export function ensureWindowsElectronPermissions(input: {
   } catch {
     throw Error(scopeFailure);
   }
-  const program = readFileSync(join(import.meta.dir, 'windows-electron-permissions.ps1'), 'utf8');
+  const program = readFileSync(
+    join(import.meta.dirname, 'windows-electron-permissions.ps1'),
+    'utf8',
+  );
   const powershell = win32.join(
     process.env.SystemRoot ?? 'C:\\Windows',
     'System32/WindowsPowerShell/v1.0/powershell.exe',

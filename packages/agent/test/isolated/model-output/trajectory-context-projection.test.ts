@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import type { CompressionRecord, Json } from '../../../src/storage/types';
 import { contextEvidence } from '../../../src/trajectory/evidence-projection';
 

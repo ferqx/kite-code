@@ -1,12 +1,16 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 
 // Each child owns its HOME/config and an unauthenticated loopback provider. The
 // real shared fixture and SDK run without consulting user settings or credentials.
 const probe = String.raw`
-import { expect } from 'bun:test';
+import { expect } from '#kite-test';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { serve } from ${JSON.stringify(new URL('../../../scripts/tooling/http.ts', import.meta.url).href)};
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLiveModelFixture } from ${JSON.stringify(new URL('../../e2e/live/model/live-model-fixture.ts', import.meta.url).href)};
@@ -17,12 +21,12 @@ AbortSignal.timeout = (ms) => { timers.push(ms); return originalTimeout(ms); };
 let delay = 0, hits = 0, abortedFetches = 0;
 let entered;
 let providerEntered = new Promise(resolve => { entered = resolve; });
-const provider = Bun.serve({ hostname:'127.0.0.1', port:0, async fetch(request) {
+const provider = await serve({ hostname:'127.0.0.1', port:0, async fetch(request) {
   hits++;
   expect(request.headers.get('authorization')).toBeNull();
   expect((await request.json()).model).toBe('fixture-model');
   entered();
-  if (delay) await Bun.sleep(delay);
+  if (delay) await sleep(delay);
   const chunk = (delta, finish_reason) => 'data: '+JSON.stringify({id:'budget-response',object:'chat.completion.chunk',model:'fixture-model',choices:[{index:0,delta,finish_reason}]})+'\n\n';
   return new Response(chunk({content:'fixture result'},null)+chunk({},'stop')+'data: [DONE]\n\n', {headers:{'content-type':'text/event-stream'}});
 }});
@@ -34,7 +38,7 @@ globalThis.fetch = Object.assign(async (input, init) => {
   if (!String(input instanceof Request ? input.url : input).startsWith(provider.url.href)) throw Error('nonlocal_provider_forbidden');
   init?.signal?.addEventListener('abort',()=>{abortedFetches++;},{once:true});
   return actualFetch(input,init);
-}, {preconnect:actualFetch.preconnect});
+}, {});
 const consume = async (fixture, signal = new AbortController().signal) => {
   let text = '', finished = false;
   for await (const event of fixture.model.stream({modelId:fixture.modelId,requestId:'request-'+fixture.requests.length,messages:[{role:'user',content:'Return fixture result.'}],tools:[]},{signal})) {
@@ -65,7 +69,7 @@ try {
     expect(timers).toContain(2000);
   } else if (scenario==='whole-timeout') {
     const fixture = await createLiveModelFixture({timeoutMs:20,requestTimeoutMs:null});
-    await Bun.sleep(60);
+    await sleep(60);
     expect(fixture.signal.aborted).toBe(true);
     await expect(consume(fixture)).rejects.toBeInstanceOf(Error);
     expect(hits).toBe(0);
@@ -139,7 +143,7 @@ for (const scenario of [
 ])
   test(`shared live fixture preserves real SDK budget and cancellation behavior: ${scenario}`, async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-live-budget-'));
-    const child = Bun.spawn([process.execPath, '--eval', probe], {
+    const child = spawnFixtureProcess(testNodeCommand('--input-type=module', ['--eval', probe]), {
       cwd: process.cwd(),
       env: {
         HOME: root,

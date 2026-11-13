@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../src/json';
 import type { SqliteOperations } from '../../../src/storage/sqlite/operations';
 import { trajectoryOutputPresence } from '../../../src/storage/sqlite/trajectory-output-presence';

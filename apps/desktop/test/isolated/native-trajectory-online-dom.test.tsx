@@ -1,4 +1,3 @@
-import { afterAll, expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   type TrajectoryEvent,
@@ -8,6 +7,7 @@ import {
 import type { TrajectoryViewState } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { afterAll, expect, mock, test } from '#kite-test';
 import type {
   NativeBridge,
   NativeEvent,

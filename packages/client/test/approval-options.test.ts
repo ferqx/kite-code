@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { readApprovalOptions } from '../src';
 
 test('approval presentation preserves opaque frozen IDs and full details, rejecting malformed or ambiguous options', () => {

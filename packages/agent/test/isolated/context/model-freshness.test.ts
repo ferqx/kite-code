@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   appendFileSync,
   existsSync,
@@ -14,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { defineExtension, type Json } from '../../../src/extensions';
 import { createProjectSources } from '../../../src/sources';

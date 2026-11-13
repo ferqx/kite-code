@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -12,12 +11,14 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { startService } from '@kite-ai/service';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
 import { openRecoveryJournal } from '../../../apps/cli/host/recovery-journal';
 import {
   reserveDaemonEndpoint,
@@ -26,10 +27,13 @@ import {
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { runDevelopmentCLI, selectDevelopmentCLI } from '../../../scripts/development/unified-cli';
+import { build as buildFixture } from '../../../scripts/tooling/build';
+import { type FixtureServer, serve as serveFixture } from '../../../scripts/tooling/http';
+import { type Subprocess, spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { loopbackModelEnvironment } from '../../fixtures/loopback-model-environment';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
-const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
+const repositoryRoot = realpathSync(join(import.meta.dirname, '../../..'));
 test('CLI development selection binds only the exact built entry and executable; read-only argv needs no asset or profile', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-selection-')));
   const dataRoot = join(homedir(), '.kite-code');
@@ -234,7 +238,7 @@ test('actual CLI development argv stores complete history in the owned user home
   let requests = 0;
   let titleRequests = 0;
   const complete = 'development answer α\u0000tail';
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -277,7 +281,7 @@ test('actual CLI development argv stores complete history in the owned user home
       );
     },
   });
-  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let child: Subprocess | undefined;
   try {
     writeFileSync(
       userConfiguration.path,
@@ -303,9 +307,9 @@ test('actual CLI development argv stores complete history in the owned user home
       join(root, 'apps/service/node_modules'),
       'dir',
     );
-    const build = await Bun.build({
+    const build = await buildFixture({
       entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir,
       naming: 'main.js',
@@ -322,7 +326,7 @@ test('actual CLI development argv stores complete history in the owned user home
         dataRoot: explicit ? join(root, 'selected-data') : defaultDataRoot,
         profile: 'development',
       });
-      const processChild = Bun.spawn(
+      const processChild = spawnFixtureProcess(
         [
           process.execPath,
           driver,
@@ -520,7 +524,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
   writeFileSync(join(workspace, 'original.txt'), '原始完整字节😀\r\n');
   let requests = 0,
     seedStep = 0;
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -579,7 +583,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
   });
   let seed: Awaited<ReturnType<typeof launchPairedService>> | undefined;
   let sharedOwner: Awaited<ReturnType<typeof reserveDaemonEndpoint>> | undefined;
-  let running: ReturnType<typeof Bun.spawn> | undefined;
+  let running: Subprocess | undefined;
   try {
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     privateDirectory(profile.profilePath);
@@ -610,9 +614,9 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       join(root, 'apps/service/node_modules'),
       'dir',
     );
-    const build = await Bun.build({
+    const build = await buildFixture({
       entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
-      target: 'bun',
+      target: 'node',
       packages: 'external',
       outdir,
       naming: 'main.js',
@@ -686,7 +690,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
             run: lastRun ?? null,
           })}`,
         );
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     expect(requests).toBe(3);
     const page = await client.listFileCheckpoints('s');
@@ -718,7 +722,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       `import { runDevelopmentCLI } from ${JSON.stringify(join(repositoryRoot, 'scripts/development/unified-cli.ts'))};\ntry { process.exitCode=await runDevelopmentCLI({root:${JSON.stringify(root)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n'); process.exitCode=1; }\n`,
     );
     const argv = async (words: string[]) => {
-      const processChild = Bun.spawn(
+      const processChild = spawnFixtureProcess(
         [process.execPath, driver, ...words, '--data-root', profile.dataRoot],
         {
           cwd: workspace,
@@ -882,7 +886,7 @@ test('actual development JSON Work completes ordinary input and cold same-intent
   mkdirSync(workspace);
   const clarification = '请明确这条输入要补充哪项工作😀？\n第二行完整保留 e\u0301 与引号“原文”。';
   let requests = 0;
-  const provider = Bun.serve({
+  const provider = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -908,8 +912,8 @@ test('actual development JSON Work completes ordinary input and cold same-intent
   });
   let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
   let endpoint: Awaited<ReturnType<typeof reserveDaemonEndpoint>> | undefined;
-  let proxy: ReturnType<typeof Bun.serve> | undefined;
-  let running: ReturnType<typeof Bun.spawn> | undefined;
+  let proxy: FixtureServer | undefined;
+  let running: Subprocess | undefined;
   let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
@@ -940,9 +944,9 @@ test('actual development JSON Work completes ordinary input and cold same-intent
     );
     expect(
       (
-        await Bun.build({
+        await buildFixture({
           entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
-          target: 'bun',
+          target: 'node',
           packages: 'external',
           outdir,
           naming: 'main.js',
@@ -989,7 +993,7 @@ test('actual development JSON Work completes ordinary input and cold same-intent
         break;
       }
       if (Date.now() > deadline) throw Error('clarification_original_A_deadline');
-      await Bun.sleep(10);
+      await fixtureDelay(10);
     }
     expect(requests).toBe(1);
     await service.close();
@@ -1006,7 +1010,7 @@ test('actual development JSON Work completes ordinary input and cold same-intent
       content: '先处理一下',
     };
     const argv = async (shared?: string) => {
-      const child = Bun.spawn(
+      const child = spawnFixtureProcess(
         [
           process.execPath,
           driver,
@@ -1114,7 +1118,7 @@ test('actual development JSON Work completes ordinary input and cold same-intent
     reader = undefined;
     service = await launch();
     const wire: { method: string; path: string }[] = [];
-    proxy = Bun.serve({
+    proxy = await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
       fetch(request) {

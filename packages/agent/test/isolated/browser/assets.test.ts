@@ -1,5 +1,7 @@
-import { expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { basename, dirname, join } from 'node:path';
+import { expect, test } from '#kite-test';
 import { builtinCapability } from '../../../src/permissions/capabilities';
 import {
   agentBrowserExecutableAsset,
@@ -14,6 +16,15 @@ test('installed browser assets resolve exact pinned package without executing a 
   expect(agentBrowserExecutableAsset()).toBe(assets[1]!);
   expect(JSON.parse(readFileSync(assets[0]!, 'utf8')).version).toBe(agentBrowserVersion);
   expect(agentBrowserVersion).toBe('0.39.4');
+  if (process.platform !== 'win32') {
+    const installed = dirname(createRequire(import.meta.url).resolve('agent-browser/package.json'));
+    const original = join(installed, 'bin', basename(assets[1]!));
+    const prepared = assets[1]!;
+    accessSync(prepared, constants.X_OK);
+    expect(statSync(prepared).nlink).toBe(1);
+    expect(statSync(prepared).ino).not.toBe(statSync(original).ino);
+    expect(readFileSync(prepared).equals(readFileSync(original))).toBe(true);
+  }
 });
 
 test('exact builtin browser capabilities bypass approval while preserving real effects and hard identity checks', () => {

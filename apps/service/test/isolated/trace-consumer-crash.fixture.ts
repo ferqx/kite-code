@@ -1,11 +1,11 @@
-import type { Database } from 'bun:sqlite';
 import { readFileSync, writeSync } from 'node:fs';
+import type { Database, SQLQueryBindings } from '@kite-ai/agent/runtime-sqlite';
 import type { TrajectoryPage } from '@kite-ai/trajectory';
 import { TraceConsumerStore } from '../../src/trace-extensions/consumer-store';
 import type { TraceEngineAssets } from '../../src/trace-extensions/engine';
 import { TraceHost } from '../../src/trace-extensions/host';
 
-// 仅由隔离测试启动；同步 SQLite function 把实际事务停在 commit 之前，不向产品加入开关。
+// The fixture stops the original transaction just after the target SQLite update.
 const input = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as {
   path: string;
   installationId: string;
@@ -36,15 +36,29 @@ const gate = () => {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
   throw Error('fixture_gate_must_be_killed');
 };
-db.function('fixture_crash_gate', gate);
-if (input.mode === 'enqueue_before')
-  db.exec(
-    'CREATE TEMP TRIGGER fixture_gate AFTER UPDATE OF scan_cursor ON subscription BEGIN SELECT fixture_crash_gate(); END',
-  );
-if (input.mode === 'ack_before')
-  db.exec(
-    "CREATE TEMP TRIGGER fixture_gate AFTER UPDATE OF state ON pending WHEN NEW.state='acknowledged' BEGIN SELECT fixture_crash_gate(); END",
-  );
+const boundary =
+  input.mode === 'enqueue_before'
+    ? 'UPDATE subscription SET scan_cursor=?,integrity_json=? WHERE id=?'
+    : input.mode === 'ack_before'
+      ? "UPDATE pending SET state='acknowledged',event_json=NULL,bytes=0 WHERE id=?"
+      : undefined;
+if (boundary) {
+  const prepare = db.prepare.bind(db);
+  db.prepare = <Row, Params extends SQLQueryBindings[]>(sql: string) => {
+    const statement = prepare<Row, Params>(sql);
+    if (sql === boundary) {
+      const run = statement.run.bind(statement);
+      statement.run = (...args) => {
+        const result = run(...args);
+        if (!db.inTransaction || result.changes !== 1)
+          throw Error('fixture_gate_update_unconfirmed');
+        gate();
+        return result;
+      };
+    }
+    return statement;
+  };
+}
 if (input.mode.startsWith('enqueue')) {
   if (!input.page || !store.enqueuePage(input.partitionId, input.page).accepted)
     throw Error('fixture_enqueue_rejected');

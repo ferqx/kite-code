@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { CString, dlopen, ptr, toArrayBuffer } from '../runtime-ffi';
 import type { WindowsPathSecurity } from './locks';
 import { readWindowsArtifactObject } from './windows-artifact-scope';
 import {
@@ -78,8 +79,7 @@ interface Implementation extends NativeWindowsPathSecurity {
 function createNativeWindowsPathSecurity(): Implementation {
   if (process.platform !== 'win32' || process.arch !== 'x64')
     throw Error('windows_path_security_platform_unsupported');
-  // Deliberately lazy: importing this module in Node/POSIX never imports bun:ffi or loads a DLL.
-  const { dlopen, ptr, toArrayBuffer, CString } = require('bun:ffi') as typeof import('bun:ffi');
+  // Deliberately lazy: importing this module on POSIX never loads a Windows DLL.
   const kernel = dlopen('kernel32.dll', {
     GetCurrentProcess: { args: [], returns: 'u64' },
     GetLastError: { args: [], returns: 'u32' },
@@ -141,10 +141,10 @@ function createNativeWindowsPathSecurity(): Implementation {
     return result;
   };
   const out = () => new BigUint64Array(1);
-  const pointer = (value: bigint): import('bun:ffi').Pointer => {
+  const pointer = (value: bigint): import('../runtime-ffi').Pointer => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number <= 0) return fail();
-    return number as import('bun:ffi').Pointer;
+    return number as import('../runtime-ffi').Pointer;
   };
   const wide = (path: string) => {
     if (!path || path.includes('\0') || path.length > 32760) return fail();
@@ -153,7 +153,7 @@ function createNativeWindowsPathSecurity(): Implementation {
   const token = out();
   if (!adv.symbols.OpenProcessToken(kernel.symbols.GetCurrentProcess(), 8, ptr(token))) fail();
   let user: Uint8Array;
-  let sid: import('bun:ffi').Pointer;
+  let sid: import('../runtime-ffi').Pointer;
   let sidText: string;
   try {
     const size = new Uint32Array(1);
@@ -192,7 +192,7 @@ function createNativeWindowsPathSecurity(): Implementation {
   const open = (
     path: string,
     create: boolean,
-    sd?: import('bun:ffi').Pointer,
+    sd?: import('../runtime-ffi').Pointer,
     access = 0x20000,
     reuse = true,
     share = 7,
@@ -323,7 +323,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     const close = () => closeHeld(held);
     try {
       retainParents([path], held);
-      // Deny new write and delete opens while a Node/Bun descriptor reads the pinned file.
+      // Deny new write and delete opens while a Node descriptor reads the pinned file.
       // Parent handles deny rename; no caller receives or supplies a native HANDLE.
       const handle = open(path, false, undefined, 0x80020000, false, 1);
       held.push({ path, handle, directory: false });

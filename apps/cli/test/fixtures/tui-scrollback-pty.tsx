@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import type { SessionView } from '@kite-ai/client';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '@kite-ai/ui/tui';
 import { render } from 'ink';
@@ -243,7 +244,7 @@ timer = setInterval(async () => {
     } else {
       throw new Error('unknown owned fixture control');
     }
-    await Bun.sleep(150);
+    await testSleep(150);
     ack(control.token);
   } catch (error) {
     finish(1, false, error instanceof Error ? error.message : String(error));

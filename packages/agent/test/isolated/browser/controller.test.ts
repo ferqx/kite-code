@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { afterEach, expect, test } from '#kite-test';
 import type { JobContext, Json, ToolContext } from '../../../src/extensions';
 import {
   type BrowserController,
@@ -1074,7 +1075,7 @@ test('changing frame pixels do not invalidate stable refs, but observation failu
   const view = fixture.controller.view('session-one')!,
     target = current(fixture.controller);
   await fixture.controller.select('session-one', target, view.seq, '@e1');
-  await Bun.sleep(160);
+  await sleepTimer(160);
   expect(fixture.controller.view('session-one')!.seq).toBe(view.seq);
   expect(fixture.controller.view('session-one')!.frame!.seq).not.toBe(view.frame!.seq);
   expect(fixture.controller.view('session-one')!.selectedAnnotation?.ref).toBe('@e1');
@@ -1093,7 +1094,7 @@ test('changing frame pixels do not invalidate stable refs, but observation failu
   fixture.fake.native.capture = async () => {
     throw Error('capture_unavailable');
   };
-  await Bun.sleep(160);
+  await sleepTimer(160);
   const failed = fixture.controller.view('session-one')!;
   expect(failed.frame).toBeNull();
   expect(failed.annotations).toEqual([]);
@@ -1452,7 +1453,7 @@ test('shared open binds its lease and URL without requiring title or semantic ob
   );
   cleanups.push(() => controller.job.cancel(handle));
   await queried.promise;
-  await Bun.sleep(0);
+  await sleepTimer(0);
   expect(controller.view('session')?.state).toBe('agent');
   expect(fake.requests.map((r) => r.action)).toEqual(['launch', 'url']);
   expect(fake.captures).toBe(0);
@@ -1650,7 +1651,7 @@ test('handoff during startup revokes the pending navigation without waiting for 
   await navigating.promise;
   const target = controller.view('session')!,
     handoff = controller.handoff('session', target, new AbortController().signal);
-  await Bun.sleep(0);
+  await sleepTimer(0);
   expect(handoffs).toBe(1);
   expect(controller.view('session')?.state).toBe('pausing');
   expect(fake.closes).toBe(0);
@@ -1823,14 +1824,14 @@ for (const end of ['completed', 'cancelled', 'unverifiable'] as const)
       ).outcome,
     ).toBe('succeeded');
     owner.run.status = 'waiting_execution';
-    await Bun.sleep(125);
+    await sleepTimer(125);
     expect(controller.view('session')?.state).toBe('human');
     expect(fake.closes).toBe(0);
     expect(fake.captures).toBe(0);
     if (end === 'unverifiable') owner.unavailable();
     else if (end === 'completed') owner.run.isActive = false;
     else owner.cancel();
-    for (let n = 0; n < 30 && fake.closes === 0; n++) await Bun.sleep(10);
+    for (let n = 0; n < 30 && fake.closes === 0; n++) await sleepTimer(10);
     expect(fake.closes).toBe(1);
     expect(controller.view('session')?.state).toBe('closed');
   });
@@ -1908,14 +1909,14 @@ test('Run ownership is supervised without accelerating a sixty-second preview in
     { sessionId: 'session', executionId: 'job', signal: new AbortController().signal },
   );
   cleanups.push(() => controller.job.cancel(handle));
-  await Bun.sleep(0);
+  await sleepTimer(0);
   expect(controller.view('session')?.state).toBe('agent');
   expect(fake.captures).toBe(1);
-  await Bun.sleep(650);
+  await sleepTimer(650);
   expect(fake.captures).toBe(1);
   expect(fake.closes).toBe(0);
   owner.run.isActive = false;
-  for (let n = 0; n < 50 && fake.closes === 0; n++) await Bun.sleep(10);
+  for (let n = 0; n < 50 && fake.closes === 0; n++) await sleepTimer(10);
   expect(fake.closes).toBe(1);
   expect(fake.captures).toBe(1);
 });

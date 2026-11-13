@@ -1,5 +1,6 @@
 import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { defineExtension, type Json } from '@kite-ai/agent/extensions';
 
 export function factory(
@@ -124,7 +125,7 @@ export function factory(
           const deadline = Date.now() + 20000;
           while (!existsSync(join(root, `release-${scope}`))) {
             if (Date.now() > deadline) throw Error('owned_upgrade_barrier_expired');
-            await Bun.sleep(5);
+            await fixtureDelay(5);
           }
           const result = {
             version,

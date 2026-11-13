@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import type { Command, Interaction, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { expect, test } from '#kite-test';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../../src/native-bridge';
 import {
   nextDesktopPresentation,

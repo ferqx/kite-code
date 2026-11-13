@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { inputFileReference } from '../src/input-file-reference';
 
 test('selected disk paths preserve Windows, UNC and POSIX names without interpreting percent, query or fragment characters', () => {

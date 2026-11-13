@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, test } from '#kite-test';
 import {
   observeNativeProcess,
   observeNativeProcessResources,
@@ -12,6 +12,7 @@ import {
   parseLinuxResidentBytes,
   sameNativeProcess,
 } from '../../../scripts/runtime/unified-soak-native';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 test('Linux native start ticks stay decimal and comm parentheses do not shift stat fields', () => {
   const fields = [
@@ -95,7 +96,7 @@ test('native owned child start identity is observed while alive and never replac
     expect(resources.unavailable).toContain('native_process_rss_unavailable');
     return;
   }
-  const child = Bun.spawn(
+  const child = spawnFixtureProcess(
     [
       process.execPath,
       '-e',
@@ -188,7 +189,7 @@ test('Linux resource sampling brackets RSS and FD reads in one original proc dir
     .pathname;
   const source = `
 import assert from 'node:assert/strict';
-import {mock} from 'bun:test';
+import {mock} from '#kite-test';
 import * as fs from 'node:fs';
 Object.defineProperty(process,'platform',{value:'linux'});
 let closeUnknown=false, changed=false, next=10, statReads=0;

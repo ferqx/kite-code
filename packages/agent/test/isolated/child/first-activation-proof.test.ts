@@ -1,8 +1,9 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
@@ -638,7 +639,7 @@ test('cold Runtime resumes only the queued first-activation carrier and executes
       (await f.store.getRun(f.run.id))!.isActive
     ) {
       if (Date.now() > deadline) throw new Error('first_activation_runtime_recovery_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     expect(childCalls).toBe(1);
     expect(parentCalls).toBe(1);

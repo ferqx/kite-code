@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path';
-import type { WindowsInstallationRemoval } from '@kite-ai/agent/artifact-access';
+import {
+  retainWindowsCandidateFiles,
+  type WindowsInstallationRemoval,
+  windowsInstallationRemovalReader,
+} from '@kite-ai/agent/artifact-access';
 import { createAssetFileHasher } from './asset-file-hash';
 import {
   type EmbeddedRuntimeManifest,
@@ -313,8 +317,6 @@ function nativeRuntimeBundleContent(
       removal &&
       (() => {
         if (process.platform !== 'win32') fail('native_target_mismatch');
-        const { windowsInstallationRemovalReader } =
-          require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
         return windowsInstallationRemovalReader(removal, root);
       })();
     if (!removal && !contentOnly && process.platform === 'win32')
@@ -340,6 +342,16 @@ function nativeRuntimeBundleContent(
       terminal.digest !== manifest.terminalManifestSha256 ||
       terminal.manifest.target.platform !== manifest.target.platform ||
       terminal.manifest.target.arch !== manifest.target.arch
+    )
+      fail('native_terminal_identity_mismatch');
+    if (
+      manifest.target.platform === 'win32' &&
+      !('cli' in terminal.manifest.entries) &&
+      terminal.manifest.nodeVersion !== undefined &&
+      (!manifest.files.some(
+        (file) => file.path === 'app/native-verifier.mjs' && file.mode === 420 && file.size > 0,
+      ) ||
+        manifest.files.some((file) => file.path === 'app/native-verifier.js'))
     )
       fail('native_terminal_identity_mismatch');
     const fileHash = createAssetFileHasher(),
@@ -469,11 +481,15 @@ function nativeRuntimeBundleContent(
     if (readFileSync(join(root, 'electron/version'), 'utf8').trim() !== manifest.electronVersion)
       fail('native_electron_identity_mismatch');
     const pkg = JSON.parse(readFileSync(join(root, manifest.entries.package), 'utf8'));
+    const appPackageKeys = terminal.manifest.nodeVersion
+      ? ['name', 'version', 'main', 'type']
+      : ['name', 'version', 'main'];
     if (
-      !closed(pkg, ['name', 'version', 'main']) ||
+      !closed(pkg, appPackageKeys) ||
       pkg.name !== 'kite-native' ||
       pkg.version !== '0.1.0' ||
-      pkg.main !== 'main.cjs'
+      pkg.main !== 'main.cjs' ||
+      (terminal.manifest.nodeVersion !== undefined && pkg.type !== 'module')
     )
       fail('native_app_identity_mismatch');
     windowsFiles?.verify();
@@ -522,11 +538,9 @@ export function verifyNativeRuntimeProtection(
 // Failed native closes keep the original manifest/file/directory owners reachable.
 const windowsNativeOwners = new Set<{ release(): void }>();
 const windowsNativeFileRoots = new WeakMap<object, string>();
-/** Explicit Windows admission only; importing metadata/verifiers never loads Bun FFI. */
+/** Explicit Windows admission only; importing metadata/verifiers does not load the native addon. */
 export function retainWindowsNativeRuntimeFiles(root: string): { verify(): void; release(): void } {
   if (process.platform !== 'win32') fail('native_target_mismatch');
-  const { retainWindowsCandidateFiles } =
-    require('@kite-ai/agent/artifact-access') as typeof import('@kite-ai/agent/artifact-access');
   const pins: ReturnType<typeof retainWindowsCandidateFiles>[] = [];
   let access: { verify(): void; release(): void } | undefined;
   const owner = {

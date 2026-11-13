@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { closeSync, constants, fstatSync, lstatSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { verifyNativeAsset } from './native-assets';
+import { type NativeAssets, verifyNativeAsset } from './native-assets';
 import { loadWindowsAccess, type WindowsAccessLease } from './windows-access';
 
 export type DesktopProfileAccess = Readonly<{ close(): void }>;
@@ -25,16 +25,17 @@ export function verifyWindowsPrivateUi(lease: DesktopProfileAccess): void {
   if (!state?.native || state.closed || !state.attached) throw Error('profile_access_unavailable');
   state.native.verifyPrivateUi();
 }
-/** A one-shot trusted Bun helper obtains flock on Node's original open file description. */
-export async function acquireDesktopProfileAccess(input: {
-  profile: { dataRoot: string; profile: string };
-  bunExecutable: string;
-  bunSha256: string;
-  helperPath: string;
-  helperSha256: string;
-  windowsAsset?: { path: string; sha256: string };
-}): Promise<DesktopProfileAccess> {
-  verifyNativeAsset(input.bunExecutable, input.bunSha256);
+/** A one-shot verified helper obtains flock on Main's original open file description. */
+export async function acquireDesktopProfileAccess(
+  input: Pick<NativeAssets, 'runtimeExecutable' | 'runtimeSha256'> & {
+    profile: { dataRoot: string; profile: string };
+    helperPath: string;
+    helperSha256: string;
+    windowsAsset?: { path: string; sha256: string };
+  },
+): Promise<DesktopProfileAccess> {
+  const { runtimeExecutable, runtimeSha256 } = input;
+  verifyNativeAsset(runtimeExecutable, runtimeSha256);
   verifyNativeAsset(input.helperPath, input.helperSha256);
   const profile = selectProfile(input.profile),
     path = join(profile.coordinationPath, 'profile-use.lock');
@@ -85,7 +86,7 @@ export async function acquireDesktopProfileAccess(input: {
       throw Error('profile_access_unavailable');
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
-        input.bunExecutable,
+        runtimeExecutable,
         [
           input.helperPath,
           JSON.stringify({ dataRoot: profile.dataRoot, profile: profile.profile }),

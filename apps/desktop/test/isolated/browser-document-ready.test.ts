@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createBrowserDocumentReady } from '../../electron/browser-document-ready';
 
 test('document readiness waits for the started epoch to commit and reach its first DOM-ready', async () => {

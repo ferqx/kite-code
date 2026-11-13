@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { estimateNativeSnapshotBytes, NativeHistoryCache } from '../src/native-history-cache';
 
 const messages = (content = 'cached') => [{ id: 'm', content }] as Message[];

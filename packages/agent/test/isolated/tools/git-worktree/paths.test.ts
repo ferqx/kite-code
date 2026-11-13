@@ -1,7 +1,8 @@
-import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { expect, spyOn, test } from '#kite-test';
+import * as ffi from '../../../../src/runtime-ffi';
 import {
   mountTargets,
   scanTrackedTree,
@@ -13,11 +14,10 @@ function root() {
 }
 function mockMounts(paths: string[], changed = false) {
   if (process.platform === 'darwin') {
-    const ffi = require('bun:ffi') as typeof import('bun:ffi');
     let calls = 0;
     return spyOn(ffi, 'dlopen').mockImplementation((() => ({
       symbols: {
-        getfsstat64(pointer: import('bun:ffi').Pointer | null, _size: number, _flags: number) {
+        getfsstat64(pointer: ffi.Pointer | null, _size: number, _flags: number) {
           if (pointer === null) return paths.length;
           const bytes = new Uint8Array(ffi.toArrayBuffer(pointer, 0, (paths.length + 16) * 2168));
           bytes.fill(0);
@@ -82,7 +82,6 @@ test('mount identity changes fail closed even when mount paths are unchanged', (
 test('unavailable native mount table never falls back to st_dev', () => {
   if (process.platform === 'win32') return;
   if (process.platform === 'darwin') {
-    const ffi = require('bun:ffi') as typeof import('bun:ffi');
     const mocked = spyOn(ffi, 'dlopen').mockImplementation(() => {
       throw Error('injected mount denial');
     });

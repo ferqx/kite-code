@@ -1,9 +1,9 @@
-import { expect, test } from 'bun:test';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { seedLegacyProcessing } from '../../../../packages/agent/test/isolated/recovery/human-input-processing-crash-fixture';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';

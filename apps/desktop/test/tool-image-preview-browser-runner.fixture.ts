@@ -6,14 +6,16 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { chromium } from 'playwright';
 import { build } from 'vite';
+import { openFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import type {} from './tool-image-preview-browser.fixture';
 
-const cache = resolve(import.meta.dir, '../../../.cache');
+const cache = resolve(import.meta.dirname, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(join(cache, 'tool-image-preview-')),
   output = join(artifact, 'dist');
 await build({
-  root: resolve(import.meta.dir, '..'),
+  root: resolve(import.meta.dirname, '..'),
   configFile: false,
   envFile: false,
   plugins: [react(), tailwindcss()],
@@ -24,7 +26,7 @@ await build({
     outDir: output,
     emptyOutDir: false,
     lib: {
-      entry: join(import.meta.dir, 'tool-image-preview-browser.fixture.tsx'),
+      entry: join(import.meta.dirname, 'tool-image-preview-browser.fixture.tsx'),
       formats: ['es'],
       fileName: 'fixture',
       cssFileName: 'fixture',
@@ -32,10 +34,10 @@ await build({
     target: 'esnext',
   },
 });
-const server = Bun.serve({
+const server = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const name = new URL(request.url).pathname;
     if (name === '/')
       return new Response(
@@ -45,7 +47,7 @@ const server = Bun.serve({
     if (name === '/favicon.ico') return new Response(null, { status: 204 });
     const path = resolve(output, `.${name}`);
     return path.startsWith(output + sep)
-      ? new Response(Bun.file(path))
+      ? new Response(await openFixtureFile(path))
       : new Response(null, { status: 404 });
   },
 });

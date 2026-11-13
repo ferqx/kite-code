@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { type ContextCompressor, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -13,6 +13,7 @@ import { canonicalModelBody, createClient, type ModelInputSnapshot } from '@kite
 import { startService } from '@kite-ai/service';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { NativeCaller } from '../../electron/native-caller';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import type {
@@ -45,7 +46,7 @@ async function settle(check: () => boolean) {
   while (!check()) {
     if (Date.now() >= deadline) throw Error('restored_compression_input_dom_deadline');
     await act(async () => {
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     });
   }
 }
@@ -132,7 +133,7 @@ test('restored compression opens the exact sensitive original input through the 
     // Radix focus restoration runs on its next timer; finish it before releasing browser globals.
     if (dom)
       await act(async () => {
-        await Bun.sleep(5);
+        await fixtureDelay(5);
       });
     await caller?.close();
     caller = undefined;
@@ -363,7 +364,7 @@ test('restored compression opens the exact sensitive original input through the 
           });
         return response;
       },
-      { preconnect: originalFetch.preconnect },
+      {},
     );
     const verifyRead = async (page: Awaited<ReturnType<typeof mount>>, snapshotCursor: string) => {
       expect(page.host.textContent).toContain(`原存储 ${originalStoreId}`);

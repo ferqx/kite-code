@@ -11,7 +11,7 @@ import { createMcpSelectionRecord } from '../../host/mcp-selection-intents';
 import { openMcpSelectionJournal } from '../../host/mcp-selection-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
 
-const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'), 'utf8')) as {
+const settings = JSON.parse(readFileSync(join(import.meta.dirname, 'settings.json'), 'utf8')) as {
   root: string;
   dataRoot: string;
   mcpUrl: string;

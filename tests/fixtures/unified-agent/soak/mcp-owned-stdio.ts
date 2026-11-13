@@ -6,20 +6,21 @@ import { createRuntime } from '@kite-ai/agent';
 import { decodeMcpStdioProcessEvidence } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { type AgentClient, createClient, ExecutionOutputPages } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
 import type { CaseEvidence } from '../../../../scripts/runtime/unified-soak-cases';
 import { verifyMcpStdioJobHandoff } from '../../../../scripts/runtime/unified-soak-mcp-handoff';
+import { startLoopbackHttpServer } from '../../loopback-http-server';
 import { loopbackModelEnvironment } from '../../loopback-model-environment';
-import { privateDirectory } from '../../test-filesystem';
 import { check, until } from './common';
 
 /** Trusted original artifact assets; there is deliberately no source/build fallback. */
 export interface McpSoakStdioAssets {
   guardianPath: string;
-  bunExecutable: string;
+  runtimeExecutable: string;
   linux?: { initExecutable: string; bubblewrapPath: string };
 }
 async function output(client: AgentClient, executionId: string) {
@@ -44,7 +45,7 @@ const object = (value: unknown): Record<string, unknown> =>
     : {};
 
 export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: McpSoakStdioAssets) {
-  if (![assets.guardianPath, assets.bunExecutable].every(isAbsolute))
+  if (![assets.guardianPath, assets.runtimeExecutable].every(isAbsolute))
     throw Error('mcp_stdio_owned_assets_invalid');
   const expectedVersion =
     process.platform === 'darwin'
@@ -61,7 +62,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
   const directory = join(root, 'stdio');
   privateDirectory(directory);
   const marker = join(directory, 'wire');
-  const script = join(directory, 'server.js');
+  const script = join(directory, 'server.mjs');
   writeFileSync(
     script,
     `import {writeFileSync} from 'node:fs';let buffer='';process.stdin.on('data',data=>{buffer+=data;for(;;){const at=buffer.indexOf('\\n');if(at<0)break;const line=buffer.slice(0,at);buffer=buffer.slice(at+1);const rpc=JSON.parse(line);if(rpc.id===undefined)continue;let result;if(rpc.method==='initialize')result={protocolVersion:'2024-11-05',serverInfo:{name:'owned',version:'1'},capabilities:{tools:{}}};else if(rpc.method==='tools/list')result={tools:[{name:'exit',description:'owned crash before reply',inputSchema:{type:'object'}}]};else{writeFileSync(${JSON.stringify(marker)},'one actual call',{mode:0o600});process.exit(7);}process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}});`,
@@ -75,7 +76,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       mcpServers: {
         owned: {
           type: 'stdio',
-          command: assets.bunExecutable,
+          command: assets.runtimeExecutable,
           args: [script],
           cwd: directory,
           env: {},
@@ -90,50 +91,46 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
   const callGate = new Promise<void>((resolve) => {
     releaseCall = resolve;
   });
-  const provider = Bun.serve({
-    hostname: '127.0.0.1',
-    port: 0,
-    async fetch(request) {
-      const body = (await request.json()) as Record<string, unknown>;
-      const step = providerCalls++;
-      let call: { name: string; input: unknown } | undefined;
-      if (step === 0) call = { name: 'list_mcp_sources', input: {} };
-      else if (step === 1) {
-        const serverId = JSON.stringify(body.messages).match(/mcp-[a-f0-9]{64}/)?.[0];
-        if (!serverId) throw Error('mcp_stdio_source_missing');
-        call = { name: 'connect_mcp_server', input: { server_id: serverId, key: 'owned-stdio' } };
-      } else if (step === 2) {
-        await callGate;
-        const tools = body.tools as { function: { name: string; description?: string } }[];
-        const tool = tools.find(
-          (row) => row.function.description === 'External MCP tool: owned crash before reply',
-        );
-        if (!tool) throw Error('mcp_stdio_remote_tool_missing');
-        call = { name: tool.function.name, input: {} };
-      }
-      const frame = (delta: unknown, finishReason: string | null) =>
-        `data: ${JSON.stringify({ id: `stdio-${step}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
-      return new Response(
-        frame(
-          call
-            ? {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `stdio-call-${step}`,
-                    type: 'function',
-                    function: { name: call.name, arguments: JSON.stringify(call.input) },
-                  },
-                ],
-              }
-            : { content: 'owned stdio complete' },
-          null,
-        ) +
-          frame({}, call ? 'tool_calls' : 'stop') +
-          'data: [DONE]\n\n',
-        { headers: { 'content-type': 'text/event-stream' } },
+  const provider = await startLoopbackHttpServer(async (request) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const step = providerCalls++;
+    let call: { name: string; input: unknown } | undefined;
+    if (step === 0) call = { name: 'list_mcp_sources', input: {} };
+    else if (step === 1) {
+      const serverId = JSON.stringify(body.messages).match(/mcp-[a-f0-9]{64}/)?.[0];
+      if (!serverId) throw Error('mcp_stdio_source_missing');
+      call = { name: 'connect_mcp_server', input: { server_id: serverId } };
+    } else if (step === 2) {
+      await callGate;
+      const tools = body.tools as { function: { name: string; description?: string } }[];
+      const tool = tools.find(
+        (row) => row.function.description === 'External MCP tool: owned crash before reply',
       );
-    },
+      if (!tool) throw Error('mcp_stdio_remote_tool_missing');
+      call = { name: tool.function.name, input: {} };
+    }
+    const frame = (delta: unknown, finishReason: string | null) =>
+      `data: ${JSON.stringify({ id: `stdio-${step}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`;
+    return new Response(
+      frame(
+        call
+          ? {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: `stdio-call-${step}`,
+                  type: 'function',
+                  function: { name: call.name, arguments: JSON.stringify(call.input) },
+                },
+              ],
+            }
+          : { content: 'owned stdio complete' },
+        null,
+      ) +
+        frame({}, call ? 'tool_calls' : 'stop') +
+        'data: [DONE]\n\n',
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
   });
   // This owned Provider is local; do not discover the developer's OS proxy in a fixture.
   const environment = loopbackModelEnvironment(provider.url);
@@ -171,7 +168,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       { mode: 0o600 },
     );
     const host = createDefaultProcessConfiguration({
-      userConfigurationPath: profile.profilePath + '/config.jsonc',
+      userConfigurationPath: join(profile.profilePath, 'config.jsonc'),
       profile,
       mcpSources: { stdio: { ...assets, limits: { timeoutMs: 3000 } } },
       permissionPolicy: {
@@ -271,9 +268,17 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       const runId = String(object(command.receipt).runId);
       const view = await until(
         () => client.getView(sessionId),
-        (value) =>
-          providerCalls === 3 &&
-          value.executions.some((row) => row.definitionId === 'mcp.source.connection'),
+        (value) => {
+          const connect = value.executions.find(
+            (row) => row.runId === runId && row.definitionId === 'mcp.connect',
+          );
+          if (connect && ['failed', 'cancelled', 'outcome_unknown'].includes(connect.status))
+            throw Error(`mcp_stdio_connect_failed:${String(object(connect.result).content)}`);
+          return (
+            providerCalls === 3 &&
+            value.executions.some((row) => row.definitionId === 'mcp.source.connection')
+          );
+        },
       );
       const jobId = view.executions.find((row) => row.definitionId === 'mcp.source.connection')!.id;
       const job = await client.getExecution(jobId);
@@ -499,7 +504,7 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       await closeHot();
     } finally {
       try {
-        provider.stop(true);
+        await provider.close();
       } finally {
         for (const [key, value] of originalEnvironment) {
           if (value === undefined) delete process.env[key];

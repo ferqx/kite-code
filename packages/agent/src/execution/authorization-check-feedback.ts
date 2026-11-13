@@ -42,6 +42,8 @@ const failureDescriptions: Readonly<Record<string, string>> = {
   authorization_check_preparation_failed: 'preparing the trusted review materials failed',
   authorization_check_timeout: 'the approval check exceeded its time budget',
   model_failed: 'the approval model call failed',
+  model_authentication_required: 'the approval model provider requires accepted authentication',
+  model_access_denied: 'the approval model provider denied access',
   'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable':
     'the approval model provider was unavailable',
   'MODEL_ATTEMPT_RETRYABLE_FAILURE:connection_failed': 'the approval model connection failed',

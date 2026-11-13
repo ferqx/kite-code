@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -27,7 +28,7 @@ export async function until<T>(read: () => Promise<T | undefined>, label: string
   while (Date.now() < deadline) {
     const value = await read();
     if (value !== undefined) return value;
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
   throw Error(`steering_boundary_timeout:${label}`);
 }

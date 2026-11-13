@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -15,6 +16,8 @@ import { createDefaultProcessConfiguration } from '@kite-ai/service/configuratio
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
+import { openFixtureFile } from '../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { simplePdf } from '../../../tests/fixtures/pdf';
 import { privateDirectory } from '../../../tests/fixtures/test-filesystem';
 import { initializeLivePermissionFixture } from '../../service/test/fixtures/live-permission-fixture';
@@ -65,7 +68,7 @@ const outputPath = join(
 );
 const steps = new Map<string, number>();
 let runtime: ReturnType<typeof createRuntime>;
-const provider = Bun.serve({
+const provider = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
@@ -233,7 +236,7 @@ const provider = Bun.serve({
         answer = '方案文件已保存为修订版。';
       }
     }
-    await Bun.sleep(500);
+    await fixtureDelay(500);
     const delta = call
       ? {
           tool_calls: [
@@ -325,7 +328,7 @@ runtime = createRuntime({
                             }),
                           );
                           // Only this standalone artifact delays its original operation for observation.
-                          await Bun.sleep(1200);
+                          await fixtureDelay(1200);
                           context.signal.throwIfAborted();
                         }
                         return tool.execute(input, context);
@@ -410,7 +413,7 @@ const caller = new NativeCaller(
 );
 const output = join(root, 'dist');
 await build({
-  root: resolve(import.meta.dir, '..'),
+  root: resolve(import.meta.dirname, '..'),
   configFile: false,
   envFile: false,
   plugins: [react(), tailwindcss()],
@@ -421,7 +424,7 @@ await build({
     outDir: output,
     emptyOutDir: false,
     lib: {
-      entry: join(import.meta.dir, 'session-files-browser.fixture.tsx'),
+      entry: join(import.meta.dirname, 'session-files-browser.fixture.tsx'),
       formats: ['es'],
       fileName: 'fixture',
       cssFileName: 'fixture',
@@ -430,7 +433,7 @@ await build({
   },
 });
 const key = randomUUID();
-const web = Bun.serve({
+const web = await serveFixture({
   hostname: '127.0.0.1',
   port: 0,
   idleTimeout: 0,
@@ -471,7 +474,7 @@ const web = Bun.serve({
           const deadline = Date.now() + 60000;
           while (existsSync(held)) {
             if (Date.now() > deadline) throw Error('fixture_hold_deadline');
-            await Bun.sleep(25);
+            await fixtureDelay(25);
           }
         }
         return Response.json({ ok: true, value: await caller.invoke(decodeNativeRequest(input)) });
@@ -491,7 +494,7 @@ const web = Bun.serve({
     const path = resolve(output, `.${url.pathname}`);
     if (!path.startsWith(output + '\\') && !path.startsWith(output + '/'))
       return new Response(null, { status: 404 });
-    return new Response(Bun.file(path));
+    return new Response(await openFixtureFile(path));
   },
 });
 console.log(JSON.stringify({ url: web.url.href, root, source, outputPath, storeId }));

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import type { AuthorizationRequest } from '../../../src/extensions';
 import { createPermissionCheckContextReader } from '../../../src/permissions/check-context';
 import type { AgentRuntime } from '../../../src/runtime';

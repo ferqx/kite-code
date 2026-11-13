@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -15,6 +14,14 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  type Subprocess as FixtureProcess,
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { NativeCaller } from '../../electron/native-caller';
 
@@ -104,7 +111,7 @@ test('actual active Model remains dispatched while persistent notifications and 
   let journalViews = 0;
   let views = 0,
     gateEnabled = false;
-  const relay = Bun.serve({
+  const relay = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -153,7 +160,7 @@ test('actual active Model remains dispatched while persistent notifications and 
   await client.connect();
   await control.connect();
   let caller: Pick<NativeCaller, 'invoke' | 'close'> | undefined;
-  let native: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+  let native: FixtureProcess<'pipe', 'pipe', 'pipe'> | undefined;
   let nativeOutput: Promise<void> | undefined, nativeErrors: Promise<string> | undefined;
   let sequence = 0;
   let closeFact: unknown, heldFact: unknown, cleanupFailure: unknown;
@@ -177,9 +184,9 @@ test('actual active Model remains dispatched while persistent notifications and 
   };
   try {
     const helperPath = join(root, 'profile-access.js');
-    const helper = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
-      target: 'bun',
+    const helper = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../../electron/profile-access-helper.ts')],
+      target: 'node',
       format: 'esm',
       packages: 'bundle',
       outdir: root,
@@ -187,7 +194,7 @@ test('actual active Model remains dispatched while persistent notifications and 
     });
     if (!helper.success) throw Error('owned_profile_helper_build_failed');
     symlinkSync(
-      resolve(import.meta.dir, '../../../..', 'node_modules'),
+      resolve(import.meta.dirname, '../../../..', 'node_modules'),
       join(root, 'node_modules'),
     );
     const entry = join(root, 'native-refresh.ts');
@@ -198,10 +205,10 @@ import {createInterface} from 'node:readline';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {selectProfile} from '@kite-ai/agent/profile';
 import {createClient} from '@kite-ai/client';
-import {NativeCallerJournal} from ${JSON.stringify(resolve(import.meta.dir, '../../electron/caller-journal.ts'))};
-import {NativeCaller} from ${JSON.stringify(resolve(import.meta.dir, '../../electron/native-caller.ts'))};
-import {openPrivateData} from ${JSON.stringify(resolve(import.meta.dir, '../../electron/private-data.ts'))};
-import {acquireDesktopProfileAccess} from ${JSON.stringify(resolve(import.meta.dir, '../../electron/profile-access.ts'))};
+import {NativeCallerJournal} from ${JSON.stringify(resolve(import.meta.dirname, '../../electron/caller-journal.ts'))};
+import {NativeCaller} from ${JSON.stringify(resolve(import.meta.dirname, '../../electron/native-caller.ts'))};
+import {openPrivateData} from ${JSON.stringify(resolve(import.meta.dirname, '../../electron/private-data.ts'))};
+import {acquireDesktopProfileAccess} from ${JSON.stringify(resolve(import.meta.dirname, '../../electron/profile-access.ts'))};
 const lines=createInterface({input:process.stdin});
 const iterator=lines[Symbol.asyncIterator]();
 const setup=JSON.parse((await iterator.next()).value);
@@ -235,7 +242,7 @@ try {
 `,
       { mode: 0o600 },
     );
-    const built = await Bun.build({
+    const built = await buildFixture({
       entrypoints: [entry],
       target: 'node',
       format: 'esm',
@@ -244,11 +251,14 @@ try {
       naming: 'native-refresh.js',
     });
     if (!built.success) throw Error('owned_native_build_failed');
-    native = Bun.spawn([realpathSync(Bun.which('node')!), join(root, 'native-refresh.js')], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    native = spawnFixtureProcess(
+      [realpathSync(findFixtureExecutable('node')!), join(root, 'native-refresh.js')],
+      {
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     nativeErrors = new Response(native.stderr).text();
     nativeOutput = (async () => {
       const reader = native!.stdout.getReader();
@@ -292,8 +302,8 @@ try {
         },
         access: {
           profile: { dataRoot: root, profile: 'new' },
-          bunExecutable: realpathSync(process.execPath),
-          bunSha256: hash(process.execPath),
+          runtimeExecutable: realpathSync(process.execPath),
+          runtimeSha256: hash(process.execPath),
           helperPath,
           helperSha256: hash(helperPath),
         },

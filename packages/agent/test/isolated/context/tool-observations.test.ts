@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { ModelMessage } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { shellOperationKey } from '../../../src/shell-input';
 import type { ExecutionRecord, Json } from '../../../src/storage/types';
 import {

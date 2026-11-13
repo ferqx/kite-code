@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   cpSync,
@@ -13,9 +12,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 import { hostBuildEnvironment } from '../../fixtures/build-tool-environment';
 
-const repository = resolve(import.meta.dir, '../../..');
+const repository = resolve(import.meta.dirname, '../../..');
 type Manifest = {
   name: string;
   version: string;
@@ -30,7 +31,7 @@ async function child(
   deadlineMs = 20000,
   env: NodeJS.ProcessEnv = { PATH: globalThis.process.env.PATH ?? '' },
 ) {
-  const process = Bun.spawn(command, {
+  const process = spawnFixtureProcess(command, {
     cwd,
     env,
     stdout: 'pipe',

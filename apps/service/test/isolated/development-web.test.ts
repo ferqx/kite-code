@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Extension, JobDefinition } from '@kite-ai/agent/extensions';
@@ -10,6 +10,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ModelAdapter } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
+import { expect, test } from '#kite-test';
 import { WebController, type WebUpdate } from '../../../web/src';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { startService } from '../../src/index';
@@ -190,7 +191,7 @@ async function fixture(partialBytes = 32768, toolOutput = false) {
       title: sessionId,
     });
   let now = Date.now();
-  const web = startDevelopmentWeb({ admittedClient: client, now: () => now });
+  const web = await startDevelopmentWeb({ admittedClient: client, now: () => now });
   let cookie = '';
   const shell = await fetch(web.endpoint);
   cookie = shell.headers.get('set-cookie')!.split(';')[0]!;
@@ -337,7 +338,7 @@ test('Web selection/poll/expiry and document close read exact actual history whi
       !(await f.client.getView('s')).messages.some((message) => message.content === f.partial)
     ) {
       if (Date.now() > deadline) throw new Error('actual_model_barrier_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
     const snapshot = await controller.selectSession('s');
     expect(snapshot?.messages.map((message) => message.content)).toContain(
@@ -465,8 +466,8 @@ test('Gateway seals trusted assets and binds their exact content identity withou
       },
     ],
   ]);
-  const first = startDevelopmentWeb({ admittedClient: f.client, assets });
-  let second: ReturnType<typeof startDevelopmentWeb> | undefined;
+  const first = await startDevelopmentWeb({ admittedClient: f.client, assets });
+  let second: Awaited<ReturnType<typeof startDevelopmentWeb>> | undefined;
   try {
     assets.set('/index.html', {
       content: '<!doctype html><html><head></head><body>changed assets</body></html>',
@@ -477,14 +478,14 @@ test('Gateway seals trusted assets and binds their exact content identity withou
     expect(html).toContain('original assets');
     expect(html).not.toContain('changed assets');
     expect(html).toContain(first.pageIdentity);
-    second = startDevelopmentWeb({ admittedClient: f.client, assets });
+    second = await startDevelopmentWeb({ admittedClient: f.client, assets });
     expect(second.pageIdentity).not.toBe(first.pageIdentity);
-    expect(() =>
+    await expect(
       startDevelopmentWeb({
         admittedClient: f.client,
         assets: new Map([['/private-file', { content: 'private', mediaType: 'text/plain' }]]),
       }),
-    ).toThrow('invalid_browser_assets');
+    ).rejects.toThrow('invalid_browser_assets');
     const absent = await fetch(`${first.endpoint}/private-file`);
     expect(absent.status).toBe(404);
     await absent.body?.cancel();

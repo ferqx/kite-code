@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { schemas } from '../../src/http/schema';
 import { HostStatusSchema } from '../../src/http/schema/host-status';
 

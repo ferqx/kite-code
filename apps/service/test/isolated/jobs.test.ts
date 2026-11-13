@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,8 @@ import { createRuntime } from '@kite-ai/agent';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { build as buildBundle } from '../../../../scripts/tooling/build';
 import type { createJobWork } from '../../../../tests/fixtures/extensions/job-work/src';
 import { startService } from '../../src';
 
@@ -27,12 +28,12 @@ async function setup(
   options: { model?: boolean; serial?: boolean; locks?: boolean; slots?: number } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-http-jobs-'));
-  const built = await Bun.build({
+  const built = await buildBundle({
     entrypoints: [
-      join(import.meta.dir, '../../../../tests/fixtures/extensions/job-work/src/index.ts'),
+      join(import.meta.dirname, '../../../../tests/fixtures/extensions/job-work/src/index.ts'),
     ],
     outdir: join(root, 'extension'),
-    target: 'bun',
+    target: 'node',
   });
   expect(built.success).toBe(true);
   const factory = (await import(built.outputs[0]!.path)) as { createJobWork: typeof createJobWork };

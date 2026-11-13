@@ -1,13 +1,15 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../../scripts/tooling/http';
 import {
   removeTemporaryDirectory,
   rewriteArtifact,
@@ -55,7 +57,7 @@ async function fixture(
     annotations: { readOnlyHint: true },
     _meta: { original: 'retained' },
   }));
-  const network = Bun.serve({
+  const network = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(req) {
@@ -239,7 +241,7 @@ async function fixture(
       if (own && ['succeeded', 'failed', 'outcome_unknown', 'cancelled'].includes(own.status))
         return { command, own };
       if (Date.now() > deadline) throw new Error('owned_action_deadline');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   }
   async function query(queryId: string, input: Json = {}) {

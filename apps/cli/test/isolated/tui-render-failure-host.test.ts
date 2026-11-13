@@ -1,16 +1,18 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from '../fixtures/tui-pty';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 test('ordinary render failure waits for explicit exit and closes the actual owned Service with nonzero status', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-render-failure-'))),
     workspace = join(root, 'workspace'),
@@ -37,16 +39,16 @@ test('ordinary render failure waits for explicit exit and closes the actual owne
     // Service process, Store and shutdown path all remain production instances.
     writeFileSync(
       runner,
-      `import{mock}from'bun:test';import{writeFileSync}from'node:fs';const actual=await import(${JSON.stringify(pathToFileURL(join(repository, 'packages/ui/src/tui/index.tsx')).href)});function Broken(){throw new Error('OWNED_RENDER_FAILURE\\x1b[31m unsafe');}mock.module(${JSON.stringify(join(repository, 'packages/ui/src/tui/index.tsx'))},()=>({...actual,TuiSession:Broken}));const{runTUIHost}=await import(${JSON.stringify(pathToFileURL(join(repository, 'apps/cli/host/tui.tsx')).href)});process.exitCode=await runTUIHost({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'owned',workspace:${JSON.stringify(workspace)},cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidFile)},String(pid))});`,
+      `import{mock}from'#kite-test';import{writeFileSync}from'node:fs';const actual=await import(${JSON.stringify(pathToFileURL(join(repository, 'packages/ui/src/tui/index.tsx')).href)});function Broken(){throw new Error('OWNED_RENDER_FAILURE\\x1b[31m unsafe');}mock.module(${JSON.stringify(join(repository, 'packages/ui/src/tui/index.tsx'))},()=>({...actual,TuiSession:Broken}));const{runTUIHost}=await import(${JSON.stringify(pathToFileURL(join(repository, 'apps/cli/host/tui.tsx')).href)});process.exitCode=await runTUIHost({artifact:${JSON.stringify(artifact)},dataRoot:${JSON.stringify(profile.dataRoot)},profile:'owned',workspace:${JSON.stringify(workspace)},cwd:${JSON.stringify(workspace)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidFile)},String(pid))});`,
     );
-    pty = spawnTuiPTY({ cmd: [process.execPath, '--no-install', runner], cwd: repository });
+    pty = spawnTuiPTY({ cmd: [process.execPath, ...testRuntimeFlags, runner], cwd: repository });
     const deadline = Date.now() + 15000;
     for (;;) {
       const frame = await pty.projection();
       if (frame.fresh && frame.text.includes('Press Enter or Esc to exit')) break;
       if (pty.ended || Date.now() > deadline)
         throw Error(`error page unavailable: ${pty.text().slice(-2500)}`);
-      await Bun.sleep(25);
+      await testSleep(25);
     }
     servicePid = Number(readFileSync(pidFile, 'utf8'));
     expect(Number.isSafeInteger(servicePid)).toBe(true);

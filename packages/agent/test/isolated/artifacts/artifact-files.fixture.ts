@@ -1,9 +1,9 @@
-import { mock } from 'bun:test';
 import { constants as bufferConstants } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { mock } from '#kite-test';
 
 const mode = process.argv[2]!;
 const consume = process.argv[3] ?? 'full';

@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { ExtensionCommandRequest } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import type { BrowserNoteInput } from '../../src/browser-annotation-drafts';
 import type { NativeExtensionScope } from '../../src/extensions-bridge';
 import { browserFixture, browserScope, browserView } from '../agent-browser.fixture';
@@ -60,7 +61,7 @@ async function setup(
   const flush = async (action: () => void = () => {}, ms = 30) => {
     await act(async () => {
       action();
-      await Bun.sleep(ms);
+      await fixtureDelay(ms);
     });
   };
   const until = async (check: () => boolean) => {
@@ -117,7 +118,7 @@ async function setup(
   const cleanup = async () => {
     await act(async () => root.unmount());
     await act(async () => {
-      await Bun.sleep(30);
+      await fixtureDelay(30);
     });
     dom.window.close();
     restore();

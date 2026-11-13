@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import {
   nextDesktopPresentation,
   prepareDesktopDom,
@@ -843,15 +843,15 @@ test('scheduled returns prepare cold frames and restore coherent cached frames i
     await f.until(() => !!f.query('.scheduled-page'));
   };
   const reads = () => f.requests.filter((input) => input.method === 'input.models.read').length;
-  const alerts: string[] = [];
+  const catalogueFailures: string[] = [];
   const observer = new window.MutationObserver(() => {
-    for (const element of f.host.querySelectorAll('[role="alert"]'))
-      if (element.textContent?.includes('模型目录不可用')) alerts.push(element.textContent);
+    const description = f.query('[data-model-trigger]')?.getAttribute('aria-description');
+    if (description === '暂时无法读取模型目录。') catalogueFailures.push(description);
   });
   try {
     await f.render();
     await f.edit('Preserved session A draft');
-    observer.observe(f.host, { childList: true, subtree: true, characterData: true });
+    observer.observe(f.host, { childList: true, subtree: true, attributes: true });
     for (const id of ['b', 'a']) {
       await openTasks();
       const before = reads();
@@ -895,7 +895,7 @@ test('scheduled returns prepare cold frames and restore coherent cached frames i
     await f.ready('a');
     expect(promptValue(f.query('.composer [role="textbox"]'))).toBe('Preserved session A draft');
     expect(f.host.textContent).not.toContain('Reply b');
-    expect(alerts).toEqual([]);
+    expect(catalogueFailures).toEqual([]);
     expect(f.requests.filter((input) => businessMethods.has(input.method))).toEqual([]);
   } finally {
     observer.disconnect();
@@ -1178,15 +1178,19 @@ test('late cold model preparation cannot publish a departed page or start its hi
   }
 });
 
-test('a cold model read failure opens the target history with an explicit local error and no send qualification', async () => {
+test('a cold model read failure opens the target history and explains the disabled control without taking layout space', async () => {
   const f = fixture({ active: false, modelErrors: { b: 'fixture_model_error' } });
   try {
     await f.render();
     await f.click('b');
-    await f.ready('b');
+    await f.until(
+      () =>
+        f.query('[data-model-trigger]')?.getAttribute('aria-description') ===
+        '暂时无法读取模型目录。',
+    );
     expect(f.host.textContent).toContain('Reply b');
-    expect(f.host.textContent).toContain('模型目录不可用：fixture_model_error');
-    expect(f.query('[data-model-trigger]').textContent).toBe('选择模型');
+    expect(f.query('[data-model-picker]').textContent).toBe('选择模型');
+    expect(f.query<HTMLButtonElement>('[data-model-trigger]').disabled).toBe(true);
     expect(f.query<HTMLButtonElement>('.composer-actions button').disabled).toBe(true);
     expect(f.requests.filter((request) => businessMethods.has(request.method))).toHaveLength(0);
   } finally {

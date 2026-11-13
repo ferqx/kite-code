@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -92,7 +93,7 @@ test('failed ordinary Action result commit retains its boundary across same-owne
         return;
       }
       if (Date.now() > deadline) throw Error('original_action_boundary_not_observed');
-      await Bun.sleep(10);
+      await sleepTimer(10);
     }
   };
   let wait: Promise<unknown> | undefined;

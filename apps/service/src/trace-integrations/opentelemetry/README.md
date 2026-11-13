@@ -4,9 +4,9 @@
 
 [configuration.ts](configuration.ts)只接受完整 endpoint、显式 sampleRate 和用途 credentialHandle。默认 metadata、全采样；本 adapter 不取 Evidence 正文，不读取项目配置、OTEL 环境变量或凭据明文。授权读取与事实记录独立，关闭集成不改变 Reader、Replay 或业务事务。Host 每次实际网络发送都重核原任务、grant revision/epoch、精确 Origin 和目的地址，并解引用用途凭据；授权结果带已检验 IP，官方 transport 的 Agent lookup 固定该 IP，关闭 keep-alive，避免重新 DNS 导致检查与连接目标不同。
 
-[index.ts](index.ts)启动独立 Bun 进程，使用无项目配置、无默认环境继承的临时工作目录；[assets.ts](assets.ts)构建并校验单一 runner 与空 Bun/TS 配置的 size/SHA-256 manifest。Service 装配传入可信 manifest hash。退休首先封住 IPC 与授权 resolver，再终止原进程；只有原 ChildProcess exit receipt 和 stdin/stdout/stderr 全部关闭才确认退出并释放安装占用，未知时不能启动同安装替身。
+[index.ts](index.ts)启动独立 Node 进程，使用私有临时工作目录、干净环境和 `--no-global-search-paths`。[assets.ts](assets.ts)校验当前 runner 的字节数和 SHA-256；Node 启动不带运行时配置文件。Service 装配传入可信 manifest hash。退休先封住 IPC 与授权 resolver，再终止原进程。确认原 ChildProcess 退出且 stdin/stdout/stderr 全部关闭后，才释放安装占用。
 
-[store.ts](store.ts)在 adapter 私有 `bun:sqlite` 保存按 task 的事件去重、open-span、稳定身份和自包含出站 envelope。它不持有 Runtime SQLite authority。一个事务完成批次去重、open-span/spool 和预算核对后才返回普通 ACK；Host ACK 丢失重投只重新确认。已接受副本不依赖业务源继续存在。默认预算为 64 MiB 编码材料和 100,000 accepted events，超限整批回滚且不 ACK。该预算是应用逻辑预算，不声称限制 SQLite 文件全部页、WAL 或文件系统配额。
+[store.ts](store.ts)通过已选 Node SQLite 引擎，在 adapter 独立数据库保存按 task 的事件去重、open-span、稳定身份和自包含出站 envelope。一个事务完成批次去重、open-span/spool 和预算核对后才返回普通 ACK。Host ACK 丢失后，重投只重新确认。已接受副本独立于原业务源。应用预算为 64 MiB 编码材料和 100,000 accepted events，超限整批回滚。
 
 出站每次取一项，状态为 pending、sending、accepted、retry_wait、rejected、partial_unknown、unconfirmed、sampled_out，取消/撤权另记 stopped。重启恢复 sending，实际发过请求才标可能重复；原 private commit 后、Host ACK 前，以及远端接收后、本地确认前都可以重投。SDK 内存 span、span.end 和 flush 均不充当持久接受。partial/permanent 不自动重试；已派发但未解码有效响应保持 unconfirmed。已知 transient 有指数退避和每 envelope 最多 8 次实际发送，耗尽保留 unconfirmed；尚未派发的暂停拒绝保留 retry_wait，恢复仍须原任务有效。取消、撤权先阻止未来授权，晚到成功不能覆盖已终止状态；变更 revision/epoch 不向低权限实例复用旧开放状态或未发送队列。
 
@@ -16,6 +16,6 @@
 
 [exporter.ts](exporter.ts)使用官方 `@opentelemetry/sdk-trace`／core／resources 3.1.0、api 1.10.0，以及 otlp-exporter-base／otlp-transformer 0.301.0。固定官方 [experimental/v0.301.0](https://github.com/open-telemetry/opentelemetry-js/tree/experimental/v0.301.0)的 `createOtlpHttpExportDelegate` 和 `ProtobufTraceSerializer`；包装官方 deserializeResponse 观察真实 decoded partialSuccess，普通 SUCCESS 回调不能单独证明 full。返回 full、partial、permanent、transient、unconfirmed 及有限 code，不保存远端自由错误或正文，不自写 Protobuf/gRPC。远端确认只证明相邻 Collector 响应，无法保证后端最终持久性；响应丢失和确认窗口崩溃可能重复。
 
-[trace-opentelemetry.test.ts](../../../test/isolated/trace-opentelemetry.test.ts)在 macOS/Bun 1.4.4 使用实际本地 HTTP receiver 验 decoded full／partial、400、503 重试、丢响应和实际地址 pin；独立 runner 验授权与退出；SIGKILL 隔离夹具验两处提交窗口恢复；官方 ReadableSpan fixture 验原实体恢复身份、parent／Link、采样和原任务取消。命令 `bun test apps/service/test/isolated/trace-opentelemetry.test.ts` 当前 7 tests 通过；本地 listener 需要相应执行权限。其他平台安装、远程 Collector 和后端存储没有由这些本机测试取得资格。第三方 SDK 完整安装、授权、live/history、Evidence、停用重开路径归 [Trace Host](../../trace-extensions/README.md)的实际集成验证。
+[Trace OpenTelemetry 测试](../../../test/isolated/trace-opentelemetry.test.ts)在 macOS arm64 上通过 Node 26.13.1 启动实际 runner 和 SIGKILL 隔离子进程，7 项通过。本机 HTTP receiver 验证 Protobuf full／partial、HTTP 拒绝与重试、丢响应和原目的地址。独立 runner 验证授权与退出，两个崩溃窗口验证去重和持久恢复，官方 ReadableSpan 夹具验证原实体、parent／Link、采样和取消。第三方 SDK 和 TraceHost 路径由 [Trace Host](../../trace-extensions/README.md)的实际集成覆盖。
 
 构建入口为 `bun apps/service/src/trace-integrations/opentelemetry/build-assets.ts <directory>`；发布者须把返回 manifest hash 与目录一起可信装配，不能接受用户自报的 runner 路径和 hash。[trace-runtime.ts](../../trace-runtime.ts)提供 profile 默认可信装配：固定读取 Service 自身 dist 的 `trace-extensions/engine/runtime` 与 `trace-integrations/opentelemetry/runtime`，不动态构建或回退源码；consumer DB 和每安装 adapter DB 位于私有 profile trace 目录。OS Vault 使用相同 profile namespace 且首次显式凭据操作才访问系统后端。缺资产给有限 trace_unavailable；原清理失败保留真实 owner 与 trace_cleanup_unconfirmed，不可作为普通能力缺失吞掉。close 只有 Host 原进程全部退出后才关 consumer DB。Service process 接入、发行闭包和 Native 界面由相应 owner 验收。

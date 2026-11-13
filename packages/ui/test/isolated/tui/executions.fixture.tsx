@@ -1,3 +1,4 @@
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import './terminal-viewport.fixture';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -123,7 +124,7 @@ const runtime = createRuntime({
             content: `AFTER_GAP_ORIGINAL_${id}\n`,
           };
           outputProduced[id] = true;
-          while (!stops[id] && !existsSync(releaseJobs)) await Bun.sleep(20);
+          while (!stops[id] && !existsSync(releaseJobs)) await fixtureDelay(20);
           finished[id] = true;
           yield {
             type: 'terminal' as const,
@@ -215,39 +216,36 @@ const service = await startService({
 });
 const actualFetch = globalThis.fetch;
 let heldOutput = false;
-globalThis.fetch = Object.assign(
-  async (...args: Parameters<typeof fetch>) => {
-    const method = args[1]?.method ?? 'GET',
-      path = new URL(String(args[0])).pathname,
-      body = args[1]?.body ? JSON.parse(String(args[1].body)) : null;
-    if (process.env.KITE_TUI_WIRE) {
-      const { appendFileSync } = await import('node:fs');
-      appendFileSync(process.env.KITE_TUI_WIRE, JSON.stringify({ method, path, body }) + '\n');
-    }
-    const response = await actualFetch(...args);
-    if (
-      method === 'GET' &&
-      path.endsWith('/output') &&
-      existsSync(join(root, 'hold-output')) &&
-      !heldOutput
-    ) {
-      heldOutput = true;
-      writeFileSync(join(root, 'output-held'), 'actual original response held');
-      while (!existsSync(join(root, 'release-output'))) await Bun.sleep(20);
-    }
-    if (method === 'POST' && body?.kind === 'execution.cancel' && !lostStop) {
-      lostStop = body.commandId;
-      await response.arrayBuffer();
-      throw Error('physical stop response lost');
-    }
-    if (method === 'GET' && path.endsWith('/commands/' + lostStop) && stopGets === 1) {
-      await response.arrayBuffer();
-      throw Error('physical first original stop GET response lost');
-    }
-    return response;
-  },
-  { preconnect: actualFetch.preconnect },
-);
+globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+  const method = args[1]?.method ?? 'GET',
+    path = new URL(String(args[0])).pathname,
+    body = args[1]?.body ? JSON.parse(String(args[1].body)) : null;
+  if (process.env.KITE_TUI_WIRE) {
+    const { appendFileSync } = await import('node:fs');
+    appendFileSync(process.env.KITE_TUI_WIRE, JSON.stringify({ method, path, body }) + '\n');
+  }
+  const response = await actualFetch(...args);
+  if (
+    method === 'GET' &&
+    path.endsWith('/output') &&
+    existsSync(join(root, 'hold-output')) &&
+    !heldOutput
+  ) {
+    heldOutput = true;
+    writeFileSync(join(root, 'output-held'), 'actual original response held');
+    while (!existsSync(join(root, 'release-output'))) await fixtureDelay(20);
+  }
+  if (method === 'POST' && body?.kind === 'execution.cancel' && !lostStop) {
+    lostStop = body.commandId;
+    await response.arrayBuffer();
+    throw Error('physical stop response lost');
+  }
+  if (method === 'GET' && path.endsWith('/commands/' + lostStop) && stopGets === 1) {
+    await response.arrayBuffer();
+    throw Error('physical first original stop GET response lost');
+  }
+  return response;
+}, {});
 const client = createClient({
   endpoint: service.endpoint,
   token: service.bootstrap.token,

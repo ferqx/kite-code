@@ -1,8 +1,8 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { expect, test } from '#kite-test';
 import { canonicalJson } from '../../../src/json';
 import { verifyDesktopCallerRows } from '../../../src/maintenance/desktop-callers';
+import { Database } from '../../../src/runtime-sqlite';
 import type { Json } from '../../../src/storage';
 
 function fixture(kind: 'run.start' | 'input.follow_up', effort?: Json) {

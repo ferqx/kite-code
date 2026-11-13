@@ -1,5 +1,6 @@
-import { expect } from 'bun:test';
 import type { Json } from '@kite-ai/agent/extensions';
+import { expect } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 
 type ProviderBody = {
@@ -8,12 +9,12 @@ type ProviderBody = {
 };
 
 /** Real local SDK transport for the same read/update/create journey in each caller. */
-export function createFileCheckpointProvider(
+export async function createFileCheckpointProvider(
   additionalMarkers: Record<string, 'first' | 'second'> = {},
 ) {
   const requests: ProviderBody[] = [],
     steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request): Promise<Response> {

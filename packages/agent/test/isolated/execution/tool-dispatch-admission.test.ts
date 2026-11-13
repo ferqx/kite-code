@@ -1,7 +1,8 @@
-import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { createToolDispatchBatch } from '../../../src/execution/tool-dispatch-admission';
@@ -20,7 +21,7 @@ async function eventually<T>(read: () => Promise<T | undefined>): Promise<T> {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > deadline) throw Error('tool_admission_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 async function fixture(tools: ToolDefinition[], ask: boolean, planReadOnly = false) {

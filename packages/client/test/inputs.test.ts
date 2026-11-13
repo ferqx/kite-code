@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { createClient, type FollowUpCommandRequest, type SteerCommandRequest } from '../src';
 
 test('additional input SDK keeps explicit original intent, rejects authority/content/cursor errors and makes zero business calls before admission', async () => {
@@ -7,7 +8,7 @@ test('additional input SDK keeps explicit original intent, rejects authority/con
   const writes: unknown[] = [];
   let query = '';
   const profile = { dataRoot: '/selected-disposable', name: 'new', accessKey: 'selected-access' };
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {

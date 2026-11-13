@@ -1,9 +1,12 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { JobReconcileResult } from '../../../src/extensions';
 import { createRuntime } from '../../../src/runtime';
@@ -20,7 +23,7 @@ async function until(check: () => Promise<boolean>) {
   const end = Date.now() + 4000;
   while (!(await check())) {
     if (Date.now() > end) throw Error('ledger_fixture_timeout');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
 
@@ -66,9 +69,10 @@ async function assertExplicitBusinessWork(
 
 test('SIGKILL after persisted Job reference preserves original unknown and explicitly verifies its external ledger', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-job-reconcile-kill-')));
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./job-reconcile-crash-child.ts', import.meta.url)),
       directory,
     ],

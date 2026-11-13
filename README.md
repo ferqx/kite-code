@@ -24,11 +24,12 @@ Kite Code helps you understand codebases, modify files, run commands, and check 
 
 ## Quick Start
 
-Use Bun 1.4.2, install the locked dependencies, and build the new workspaces and Terminal candidate:
+Use Bun 1.4.4 to install the locked dependencies and build from source. Source launchers and the default test suite use Node.js 26.13.1. Installed releases include their own Node runtime.
 
 ```bash
 bun install --frozen-lockfile
 bun run build
+bun run prepare:node-inputs
 bun run release:build
 bun run tui
 ```

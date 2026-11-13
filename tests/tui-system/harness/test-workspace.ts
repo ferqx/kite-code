@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
@@ -312,14 +312,8 @@ export function translateOriginalTestConfig(input: Record<string, unknown> = {})
     modelId: id,
     tools: [
       'files.read',
-      'files.read_path',
       'files.write',
-      'files.write_path',
       'files.edit',
-      'files.edit_path',
-      'files.list',
-      'files.glob',
-      'files.search',
       ...(process.platform === 'win32'
         ? []
         : ['shell.launch', 'shell.execute', 'shell.read', 'shell.wait', 'shell.stop']),

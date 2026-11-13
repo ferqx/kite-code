@@ -1,10 +1,10 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
+import { expect, test } from '#kite-test';
 import { canonicalJson, semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json, RunResumeExecutionPageInput } from '../../../src/storage/types';

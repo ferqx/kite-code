@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,16 +7,19 @@ import {
   assertSqliteReleaseIdentity,
   parseSqliteReleaseIdentity,
 } from '@kite-ai/service/sqlite-release-assets';
+import { expect, test } from '#kite-test';
 import { runNativeRelease } from '../../../scripts/release/native';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { runUnifiedRelease } from '../../../scripts/release/unified';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 import {
   releaseDirectory as mkdirSync,
   releaseScratch as mkdtempSync,
 } from '../../fixtures/unified-agent/release-filesystem';
 
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const repositoryRoot = resolve(import.meta.dirname, '../../..');
 test('registered frontdoor preserves bounded business codes without exposing error details', async () => {
   const entry = pathToFileURL(
     join(repositoryRoot, 'scripts/release/entrypoints/registered-entry.ts'),
@@ -31,7 +33,7 @@ test('registered frontdoor preserves bounded business codes without exposing err
     ],
     ["Error('secret/path')", 'cli_registration_failed'],
   ]) {
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
         process.execPath,
         '--eval',
@@ -77,8 +79,8 @@ test('reviewed Linux builtin source is exact; version ranges, near hashes and ex
   ).toThrow('sqlite_release_identity_mismatch');
 });
 async function execute(entry: string, argv: string[], cwd: string, home: string) {
-  const child = Bun.spawn(
-    [process.execPath, join(repositoryRoot, 'scripts/release', entry), ...argv],
+  const child = spawnFixtureProcess(
+    testNodeCommand(join(repositoryRoot, 'scripts/release', entry), argv),
     {
       cwd,
       env:
@@ -88,9 +90,8 @@ async function execute(entry: string, argv: string[], cwd: string, home: string)
               HOME: home,
               USERPROFILE: home,
               SystemRoot: process.env.SystemRoot,
-              BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
             }
-          : { PATH: '/usr/bin:/bin', HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
+          : { PATH: '/usr/bin:/bin', HOME: home },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -179,7 +180,7 @@ test('native launch reports absent or incomplete local candidates before opening
       if (process.platform === 'win32') expect(result.stderr).toBe('native_platform_unsupported\n');
       else {
         expect(result.stderr).toContain('native_bundle_unavailable\n');
-        expect(result.stderr).toContain('npm run release:build -- --product native');
+        expect(result.stderr).toContain('bun run release:build --product native');
         expect(result.stderr).not.toContain(directory);
       }
     }
@@ -203,7 +204,7 @@ test(
         // Qualify a new private, identical input; never repair the installed runtime's ACL.
         const inputs = join(root, 'inputs');
         mkdirSync(inputs);
-        runtime = join(inputs, 'bun.exe');
+        runtime = join(inputs, 'node.exe');
         copyFileSync(process.execPath, runtime);
         const hash = (path: string) =>
           createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -212,7 +213,7 @@ test(
       const bundle = await buildTerminalBundle({
         destination: join(output, 'candidate'),
         repositoryRoot,
-        bunExecutable: runtime,
+        nodeExecutable: runtime,
       });
       const result = await runUnifiedRelease(['smoke', '--directory', bundle.root]);
       expect(result).toEqual({

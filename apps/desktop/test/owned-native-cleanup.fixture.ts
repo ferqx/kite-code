@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 
 /** Only exact private candidate executables and their observed descendants are test-owned. */
 export async function cleanupOwnedNativeCandidate(root: string): Promise<void> {
@@ -33,7 +34,7 @@ export async function cleanupOwnedNativeCandidate(root: string): Promise<void> {
         (targets.has(row.pid) && identities.get(row.pid) === row.command),
     );
   const deadline = Date.now() + 2000;
-  while (remaining().length && Date.now() < deadline) await Bun.sleep(20);
+  while (remaining().length && Date.now() < deadline) await fixtureDelay(20);
   const forced: number[] = [];
   for (const row of remaining())
     try {
@@ -41,7 +42,7 @@ export async function cleanupOwnedNativeCandidate(root: string): Promise<void> {
       forced.push(row.pid);
     } catch {}
   const disappearance = Date.now() + 5000;
-  while (remaining().length && Date.now() < disappearance) await Bun.sleep(20);
+  while (remaining().length && Date.now() < disappearance) await fixtureDelay(20);
   const rest = remaining();
   console.log(
     JSON.stringify({

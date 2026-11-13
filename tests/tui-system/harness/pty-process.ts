@@ -1,19 +1,20 @@
 /**
  * PTY Process Harness — spawn and control a TUI subprocess with real PTY.
  *
- * Uses Bun.spawn({ terminal }) (verified working in Phase 0) to create
- * a TTY-connected child process running `bun run apps/kite-cli/src/tui/executable.tsx`.
+ * The harness drives the test composition root through an actual OS terminal.
  *
  * Output is collected via the terminal's `data` callback. Keystrokes are
  * sent via `terminal.write()`. Terminal resize via `terminal.resize()`.
  */
 
+import { spawnSync } from 'node:child_process';
 import { realpathSync, writeFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { testToolchainEnvironment } from '../../../scripts/test-environment';
+import { testNodeCommand } from '../../../scripts/tooling/test-command';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,
@@ -21,6 +22,7 @@ import {
 } from './cancellation';
 import type { MockModelServer } from './fixtures';
 import { activeInput } from './input-helpers';
+import { type OwnedTestProcess, spawnOwnedPty } from './pty-node';
 import {
   createHeadlessTerminalScreen,
   screenContains,
@@ -47,7 +49,7 @@ export interface PtyProcessOptions {
   noPreConfig?: boolean;
   /** Launch an already-built standalone executable instead of the source entrypoint. */
   executablePath?: string;
-  /** Launch a test-owned TypeScript composition root through Bun. */
+  /** Launch a test-owned TypeScript composition root through Node. */
   entryPath?: string;
   /** Explicit release-entrypoint arguments such as a selected daemon endpoint. */
   args?: readonly string[];
@@ -66,8 +68,7 @@ export interface PtyProcess {
   /** Write keystrokes and return the output checkpoint immediately before the action. */
   write(data: string): PtyOutputMark;
   /**
-   * Write one indivisible input transaction exactly once. Bun's versioned
-   * byte-count return cannot authorize replay.
+   * Write one indivisible input transaction exactly once and wait for acceptance.
    */
   writeExact(data: string): Promise<PtyOutputMark>;
   /** Set raw mode on the terminal (disables line buffering) */
@@ -122,21 +123,17 @@ export interface PtyOutputBuffer {
 }
 
 export interface ExactPtyInputWriter {
-  write(data: string): number;
+  write(data: string): number | Promise<void>;
 }
 
 /**
  * Deliver one PTY input transaction without replaying it.
  *
- * Bun's Terminal.write() return value is only the number of bytes flushed
- * synchronously; the writer has already buffered the remaining tail. It can
- * therefore return zero or a partial count even though the entire input was
- * accepted. Bun 1.4 reports the full accepted length instead. The count is not
- * a cross-version delivery receipt, so exactly-once harness input must write
- * once and wait for the application's semantic projection.
+ * A partial byte count does not authorize replay. Harness actions wait for
+ * the terminal writer and then for the application's semantic projection.
  */
 export async function writeExactPtyInput(data: string, writer: ExactPtyInputWriter): Promise<void> {
-  writer.write(data);
+  await writer.write(data);
 }
 
 /**
@@ -275,17 +272,12 @@ export function verifiedOwnedProcessGroupId(pid: number): number | undefined {
 }
 
 function signalOwnedProcessTree(
-  proc: ReturnType<typeof Bun.spawn>,
+  proc: OwnedTestProcess,
   signal: 'SIGTERM' | 'SIGKILL',
   processGroupId: number | undefined,
 ): void {
   if (process.platform === 'win32') {
-    // Bun's signal emulation only targets the direct process on Windows. The
-    // TUI may own descendants, so taskkill is needed to terminate its tree.
-    Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
+    spawnSync('taskkill.exe', ['/pid', String(proc.pid), '/t', '/f'], { stdio: 'ignore' });
     return;
   }
   if (processGroupId === undefined) {
@@ -296,18 +288,6 @@ function signalOwnedProcessTree(
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ESRCH') return;
-    if (code === 'EPERM') {
-      // Bun 1.4 on Darwin can surface EPERM for a negative-PGID process.kill
-      // from an aborted AsyncLocalStorage context even though the exact,
-      // same-user detached group was verified immediately before cleanup.
-      // The native POSIX utility reaches the same already-proven group and
-      // keeps the fallback disjoint from any PID or shell expansion.
-      const fallback = Bun.spawnSync(
-        ['/bin/kill', `-${signal.slice(3)}`, '--', String(-processGroupId)],
-        { stdout: 'ignore', stderr: 'ignore' },
-      );
-      if (fallback.exitCode === 0 || !processGroupExists(processGroupId)) return;
-    }
     throw error;
   }
 }
@@ -322,7 +302,7 @@ async function waitForOwnedProcessTreeExit(
 
 /** Terminate a detached test child and all members of its verified owned group. */
 export async function terminateOwnedProcessTree(
-  proc: ReturnType<typeof Bun.spawn>,
+  proc: OwnedTestProcess,
   processGroupId: number | undefined,
   timeoutMs = 2_000,
 ): Promise<void> {
@@ -378,9 +358,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   const { cwd, entryPath } = resolveTuiLaunchPaths(opts);
 
   // Pre-trust the launch directory (source:'test') so the startup gate does not
-  // block every PTY scenario. This exercises the exact production "already
-  // trusted" fast path; no env bypass exists because Bun auto-injects
-  // `<cwd>/.env*` and an env switch could be forged by workspace files.
+  // block every PTY scenario. This exercises the production already-trusted path.
   // Scenarios testing the gate itself pass enforceWorkspaceTrust: true.
   const profile = opts.workspace
     ? selectProfile({ dataRoot: join(opts.workspace.home, '.kite-code'), profile: 'development' })
@@ -440,10 +418,6 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   let screenDisposed = false;
   let lastActionMark = outputBuffer.mark();
   let exited = false;
-  let exitResolver: ((code: number) => void) | null = null;
-  const exitPromise = new Promise<number>((resolve) => {
-    exitResolver = resolve;
-  });
 
   // Build an allowlisted child environment. Test scenarios must never inherit
   // developer credentials, provider configuration, proxies, or feature flags.
@@ -488,52 +462,43 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   );
   const inheritsFaultSoakProcessGroup = process.platform !== 'win32' && !detachTuiProcess;
 
-  const proc = Bun.spawn({
-    cmd: opts.executablePath
-      ? [
-          entryPath,
-          '--data-root',
-          join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
-          '--workspace',
-          cwd,
-          ...(opts.args ?? []),
-        ]
-      : [
-          process.execPath,
-          'run',
-          entryPath,
-          '--data-root',
-          join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
-          '--workspace',
-          cwd,
-          ...(opts.args ?? []),
-        ],
+  const args = [
+    '--data-root',
+    join(opts.workspace?.home ?? userInfo().homedir, '.kite-code'),
+    '--workspace',
+    cwd,
+    ...(opts.args ?? []),
+  ];
+  const proc = spawnOwnedPty({
+    command: opts.executablePath ? [entryPath, ...args] : testNodeCommand(entryPath, args),
     cwd,
     env: childEnv,
-    detached: detachTuiProcess,
-    terminal: {
-      cols,
-      rows,
-      data(_terminal: unknown, chunk: Uint8Array) {
-        const receivedThrough = outputBuffer.append(chunk);
-        void terminalScreen.append(chunk).then(() => outputBuffer.publishThrough(receivedThrough));
-      },
+    detach: detachTuiProcess,
+    cols,
+    rows,
+    onData(chunk) {
+      const receivedThrough = outputBuffer.append(chunk);
+      void terminalScreen.append(chunk).then(() => outputBuffer.publishThrough(receivedThrough));
     },
   });
-  let ownedProcessGroupId: number | undefined;
-  if (!inheritsFaultSoakProcessGroup) {
-    try {
-      ownedProcessGroupId = verifiedOwnedProcessGroupId(proc.pid);
-    } catch (error) {
-      proc.kill('SIGKILL');
-      throw error;
-    }
-  }
-
-  proc.exited.then((code) => {
+  const ownedGroup = proc.ready.then((pid) =>
+    inheritsFaultSoakProcessGroup ? undefined : verifiedOwnedProcessGroupId(pid),
+  );
+  const exitPromise = proc.exited.finally(() => {
     exited = true;
-    exitResolver?.(code);
   });
+  void exitPromise.catch(() => {});
+  void ownedGroup.catch(() => proc.kill('SIGKILL'));
+  const pendingInput = new Set<Promise<void>>();
+  let failedInput: unknown;
+  function trackInput(operation: Promise<void>): void {
+    pendingInput.add(operation);
+    void operation
+      .catch((error) => {
+        failedInput ??= error;
+      })
+      .finally(() => pendingInput.delete(operation));
+  }
 
   /**
    * Kill the child process with SIGTERM, then force-kill it if it doesn't exit.
@@ -541,23 +506,9 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
    * SIGTERM gives the process a chance to clean up. If the process ignores
    * SIGTERM (e.g. stuck in an Ink render loop or network retry), SIGKILL
    * guarantees termination — it cannot be caught, ignored, or blocked.
-   * On Windows, force-kill uses taskkill /T because Bun's signal emulation
-   * cannot guarantee that descendant bun.exe processes are terminated.
    */
   const KILL_TIMEOUT_MS = 2000;
   const EXIT_TIMEOUT_MS = 15_000;
-
-  function signalTui(signal: 'SIGTERM' | 'SIGKILL'): void {
-    if (inheritsFaultSoakProcessGroup) {
-      try {
-        proc.kill(signal);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-      }
-      return;
-    }
-    signalOwnedProcessTree(proc, signal, ownedProcessGroupId);
-  }
 
   async function disposeScreen(): Promise<void> {
     if (screenDisposed) return;
@@ -570,12 +521,13 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     const wasRunning = !exited;
 
     try {
+      const ownedProcessGroupId = await ownedGroup;
       if (!exited) {
-        signalTui('SIGTERM');
+        proc.kill('SIGTERM');
         try {
           await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
         } catch {
-          signalTui('SIGKILL');
+          proc.kill('SIGKILL');
           await waitForPtyExit(() => exited, 5000);
         }
       }
@@ -598,38 +550,27 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
     write(data: string) {
       lastActionMark = outputBuffer.mark();
-      if (!exited && proc.terminal) {
-        proc.terminal.write(data);
-      }
+      if (!exited) trackInput(proc.write(data));
       return lastActionMark;
     },
 
     async writeExact(data: string) {
       lastActionMark = outputBuffer.mark();
-      if (exited || !proc.terminal) throw new Error('Cannot write exact input to an exited PTY');
-      await writeExactPtyInput(data, {
-        write(value) {
-          if (exited || !proc.terminal) return 0;
-          return proc.terminal.write(value);
-        },
-      });
+      if (exited) throw new Error('Cannot write exact input to an exited PTY');
+      await writeExactPtyInput(data, proc);
       return lastActionMark;
     },
 
     setRawMode(enabled: boolean) {
       lastActionMark = outputBuffer.mark();
-      if (!exited && proc.terminal && typeof proc.terminal.setRawMode === 'function') {
-        proc.terminal.setRawMode(enabled);
-      }
+      if (!exited) trackInput(proc.setRawMode(enabled));
       return lastActionMark;
     },
 
     resize(newCols: number, newRows: number) {
       lastActionMark = outputBuffer.mark();
       void terminalScreen.resize(newCols, newRows);
-      if (!exited && proc.terminal && typeof proc.terminal.resize === 'function') {
-        proc.terminal.resize(newCols, newRows);
-      }
+      if (!exited) trackInput(proc.resize(newCols, newRows));
       return lastActionMark;
     },
 
@@ -661,8 +602,10 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       return outputBuffer.output();
     },
 
-    settleScreen() {
-      return terminalScreen.settled();
+    async settleScreen() {
+      await Promise.all(pendingInput);
+      if (failedInput !== undefined) throw failedInput;
+      await terminalScreen.settled();
     },
 
     markScreen() {

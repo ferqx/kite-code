@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +6,7 @@ import type { JsonObject } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createClient } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { startService } from '../../src';
 import { createDefaultSkillCatalogueSource } from '../../src/skill-catalogue';
 import { createUserConfiguration } from '../../src/user-configuration';

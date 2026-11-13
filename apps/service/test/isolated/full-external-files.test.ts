@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -19,6 +19,8 @@ import type { FileCheckpointRecord } from '@kite-ai/agent/files';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -50,7 +52,7 @@ async function fixture(options: {
   };
   const requests: Body[] = [];
   const steps = new Map<string, number>();
-  const provider = Bun.serve({
+  const provider = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -587,7 +589,7 @@ for (const preset of ['general', 'explore'] as const) {
         !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(carrier.status)
       ) {
         if (Date.now() > deadline) throw new Error('full_external_child_deadline');
-        await Bun.sleep(5);
+        await sleepTimer(5);
         carrier = (await f.store.listExecutions('s')).find(
           (e) => e.kind === 'job' && e.childSessionId,
         );

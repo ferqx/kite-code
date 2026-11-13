@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { MessageBoxOptions } from 'electron';
+import { expect, test } from '#kite-test';
 import { ensureDesktopProfilePermissions } from '../electron/profile-permissions';
 import type { WindowsProfilePermissionIssue } from '../electron/windows-access';
 

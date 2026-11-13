@@ -1,18 +1,22 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { ModelRequest } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
 async function fixture(mode = 'running_model') {
   const directory = temporaryDirectory('kite-reconciled-rewind-');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('./run-resume-crash-child.ts', import.meta.url)),
       directory,
       mode,
@@ -24,7 +28,7 @@ async function fixture(mode = 'running_model') {
     const deadline = Date.now() + 8000;
     while (!existsSync(join(directory, 'ready.json'))) {
       if (Date.now() > deadline) throw new Error('reconciled_rewind_fixture_timeout');
-      await Bun.sleep(5);
+      await sleepTimer(5);
     }
   } catch (error) {
     child.kill('SIGKILL');

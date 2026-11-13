@@ -1,13 +1,15 @@
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import { taskToolCapability } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { expect, test } from '#kite-test';
+import { serve as fixtureServe } from '../../../../scripts/tooling/http';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createPermissionManagement } from '../../src/permission-management';
@@ -19,12 +21,12 @@ async function until<T>(read: () => Promise<T | undefined>) {
     const value = await read();
     if (value !== undefined) return value;
     if (Date.now() > end) throw new Error('task_configuration_deadline');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
-function endpoint(role = 'worker') {
+async function endpoint(role = 'worker') {
   const requests: Record<string, unknown>[] = [];
-  const server = Bun.serve({
+  const server = await fixtureServe({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
@@ -118,8 +120,8 @@ async function fixture(
   writeFileSync(join(workspace, 'input.txt'), 'actual complete private input');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   privateDirectory(profile.profilePath);
-  const a = endpoint(options.defaultRole),
-    b = endpoint();
+  const a = await endpoint(options.defaultRole),
+    b = await endpoint();
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
     modelId: 'parent',

@@ -1,11 +1,12 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createAskUserExtension } from '@kite-ai/agent/ask-user';
 import type { Json, ToolContext, ToolResult } from '@kite-ai/agent/extensions';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import { QuestionCancelledError } from '../../../src/execution/interactions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -31,7 +32,7 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
     const value = await read();
     if (value !== null) return value;
     if (Date.now() >= deadline) throw new Error('timed_out');
-    await Bun.sleep(10);
+    await sleepTimer(10);
   }
 }
 async function fixture(arguments_: Json = input) {

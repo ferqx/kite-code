@@ -1,23 +1,29 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { setTimeout as testSleep } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
 import { bootstrapSchema } from '@kite-ai/service/daemon';
+import { expect, test } from '#kite-test';
+import {
+  type Subprocess as TestSubprocess,
+  spawn as testSpawn,
+} from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 
-const repository = resolve(import.meta.dir, '../../../..');
+const repository = resolve(import.meta.dirname, '../../../..');
 const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
 const sha = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 async function until(read: () => boolean | Promise<boolean>) {
   const end = Date.now() + 10000;
   while (!(await read())) {
     if (Date.now() >= end) throw Error('tui_shared_fixture_deadline');
-    await Bun.sleep(10);
+    await testSleep(10);
   }
 }
 async function deadline<T>(promise: Promise<T>): Promise<T> {
@@ -81,8 +87,12 @@ nativeTest(
     );
     const socket = join(root, 'd.sock');
     const instanceId = randomUUID();
-    const daemon = Bun.spawn(
-      [process.execPath, join(repository, 'apps/cli/test/fixtures/tui-shared-daemon-child.ts')],
+    const daemon = testSpawn(
+      [
+        process.execPath,
+        ...testRuntimeFlags,
+        join(repository, 'apps/cli/test/fixtures/tui-shared-daemon-child.ts'),
+      ],
       {
         env: { ...process.env, ...userConfiguration.homeEnvironment },
         stdin: 'pipe',
@@ -96,8 +106,8 @@ nativeTest(
     );
     daemon.stdin.end();
     let client: ReturnType<typeof createClient> | undefined;
-    let python: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
-    let absent: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let python: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let absent: TestSubprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
       const reader = daemon.stdout.getReader();
       let frame = '';
@@ -168,8 +178,8 @@ nativeTest(
       const program = `import os,pty,subprocess,select,time,signal,re,json,fcntl,termios,struct
 def interrupted(*args):raise SystemExit(130)
 signal.signal(signal.SIGTERM,interrupted)
-bun=${JSON.stringify(process.execPath)};entry=${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))}
-base=[bun,${JSON.stringify(join(repository, 'apps/cli/test/fixtures/tui-diagnostics-entry.ts'))},entry,'--server',${JSON.stringify(socket)},'--data-root',${JSON.stringify(profile.dataRoot)},'--thread','visible']
+node=${JSON.stringify(process.execPath)};entry=${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))}
+base=[node,*${JSON.stringify(testRuntimeFlags)},${JSON.stringify(join(repository, 'apps/cli/test/fixtures/tui-diagnostics-entry.ts'))},entry,'--server',${JSON.stringify(socket)},'--data-root',${JSON.stringify(profile.dataRoot)},'--thread','visible']
 def run(mode,extra=[]):
  master,slave=pty.openpty()
  fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
@@ -224,7 +234,7 @@ while not os.path.exists(${JSON.stringify(exitsChecked)}):
 run('loss')
 print('ALL_SHARED_BOUNDARIES')
 `;
-      python = Bun.spawn(['python3', '-c', program], {
+      python = testSpawn(['python3', '-c', program], {
         env: { ...process.env, ...userConfiguration.homeEnvironment },
         stdout: 'pipe',
         stderr: 'pipe',
@@ -292,7 +302,7 @@ finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(m)
 `;
-      absent = Bun.spawn(['python3', '-c', absentScript], {
+      absent = testSpawn(['python3', '-c', absentScript], {
         env: { ...process.env, ...userConfiguration.homeEnvironment },
         stdout: 'pipe',
         stderr: 'pipe',

@@ -1,14 +1,25 @@
-import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
+import { expect, test } from '#kite-test';
+import { fixtureRuntimeBuild } from '../../../../packages/agent/test/fixtures/node-runtime';
 import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { writeFixtureFile } from '../../../../scripts/tooling/files';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildWindowsAccess } from '../../scripts/build-windows-access';
 
 test('read receipts migrate the private SQLite file and survive separate Node processes without changing drafts', async () => {
-  const root = resolve(import.meta.dir, '../../../../.cache', `turn-read-store-${randomUUID()}`);
+  const root = resolve(
+    import.meta.dirname,
+    '../../../../.cache',
+    `turn-read-store-${randomUUID()}`,
+  );
   privateDirectory(root);
   const profile = { dataRoot: join(root, 'data'), profile: 'read-receipts' };
   const initialized = acquireProfileAccess(profile);
@@ -17,16 +28,17 @@ test('read receipts migrate the private SQLite file and survive separate Node pr
   initializeDesktopBuildEnvironment();
   const asset = process.platform === 'win32' ? await buildWindowsAccess(root) : undefined;
   for (const [source, target, naming] of [
-    ['../../electron/profile-access-helper.ts', 'bun', 'access.js'],
+    ['../../electron/profile-access-helper.ts', 'node', 'access.js'],
     ['../native-turn-read-store.fixture.ts', 'node', 'check.js'],
   ] as const) {
-    const built = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, source)],
+    const built = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, source)],
       target,
       format: 'esm',
       packages: 'bundle',
       outdir: root,
       naming,
+      ...(source.endsWith('profile-access-helper.ts') ? fixtureRuntimeBuild(root) : {}),
     });
     expect(built.success).toBe(true);
   }
@@ -34,15 +46,15 @@ test('read receipts migrate the private SQLite file and survive separate Node pr
   const bunExecutable = realpathSync(process.execPath),
     helperPath = join(root, 'access.js');
   for (const phase of ['write', 'read']) {
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
-        realpathSync(Bun.which('node')!),
+        realpathSync(findFixtureExecutable('node')!),
         join(root, 'check.js'),
         JSON.stringify({
           phase,
           profile,
-          bunExecutable,
-          bunSha256: sha(bunExecutable),
+          runtimeExecutable: bunExecutable,
+          runtimeSha256: sha(bunExecutable),
           helperPath,
           helperSha256: sha(helperPath),
           ...(asset
@@ -62,7 +74,7 @@ test('read receipts migrate the private SQLite file and survive separate Node pr
       if (code !== 0) console.error(error);
       expect(code).toBe(0);
       expect(JSON.parse(output).phase).toBe(phase);
-      await Bun.write(join(root, `${phase}.json`), output);
+      await writeFixtureFile(join(root, `${phase}.json`), output);
     } finally {
       clearTimeout(timer);
     }

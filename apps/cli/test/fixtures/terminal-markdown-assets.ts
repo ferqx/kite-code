@@ -1,7 +1,8 @@
-import { expect } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { expect } from '#kite-test';
+import { scanImports } from '../../../../scripts/tooling/scan-imports';
 
 /** Verify the real candidate's bundled code and remaining stylesheet asset closure. */
 export function verifyTerminalMarkdownAssets(repository: string, candidate: string): void {
@@ -26,13 +27,12 @@ export function verifyTerminalMarkdownAssets(repository: string, candidate: stri
       expect(notices).toContain(bytes.toString('utf8'));
     }
   }
-  const scanner = new Bun.Transpiler({ loader: 'js' });
   const verifyImports = (directory: string) => {
     for (const file of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, file.name);
       if (file.isDirectory()) verifyImports(path);
       else if (file.isFile() && file.name.endsWith('.js'))
-        for (const entry of scanner.scanImports(readFileSync(path)))
+        for (const entry of scanImports(readFileSync(path)))
           expect(
             bundled.some((name) => entry.path === name || entry.path.startsWith(`${name}/`)),
           ).toBe(false);

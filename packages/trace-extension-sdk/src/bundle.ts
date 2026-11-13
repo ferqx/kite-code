@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { build as bundle } from '../../../scripts/tooling/build';
 import type { TraceManifest } from './index';
 
 export interface LocalTraceBundle {
@@ -8,7 +9,7 @@ export interface LocalTraceBundle {
 }
 /** Build-time only; this leaf is never imported by the guest extension. Host validates the manifest. */
 export async function buildTraceBundle(entrypoint: string): Promise<LocalTraceBundle> {
-  const result = await Bun.build({
+  const result = await bundle({
     entrypoints: [entrypoint],
     target: 'browser',
     format: 'iife',

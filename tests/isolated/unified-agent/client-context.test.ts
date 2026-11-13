@@ -1,12 +1,13 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
 import { startService } from '../../../apps/service/src';
 import { createClient } from '../../../packages/client/src';
 
@@ -221,7 +222,7 @@ async function until<T>(read: () => Promise<T>, valid: (value: T) => boolean) {
     const value = await read();
     if (valid(value)) return value;
     if (Date.now() > deadline) throw new Error(`Context deadline: ${JSON.stringify(value)}`);
-    await Bun.sleep(10);
+    await fixtureDelay(10);
   }
 }
 

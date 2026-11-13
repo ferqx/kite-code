@@ -1,7 +1,7 @@
-import { expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type {
   AgentClient,
@@ -14,6 +14,8 @@ import type {
 } from '@kite-ai/client';
 import { ClientError, canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { expect, spyOn, test } from '#kite-test';
+import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { callerDigest, callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
 import { createNativeCallerGenerationOwner, NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
@@ -147,7 +149,7 @@ test('execution observation progresses while an admission permission read is hel
     await caller.invoke({ method: 'attach' });
     await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
     const activationMs = performance.now() - start;
-    await Bun.sleep(120);
+    await fixtureDelay(120);
     hold = true;
     cursor = '2';
     await observe.onChange?.(sessionChange('s', cursor));
@@ -171,7 +173,7 @@ test('execution observation progresses while an admission permission read is hel
     expect(caller.state().selection?.runs[0]).toMatchObject({ id: 'r', status: 'running' });
     cursor = '4';
     await observe.onChange?.({ ...event, cursor, type: 'run.started' });
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(caller.state().executionObservation).toMatchObject({
       observedCursor: '4',
       runs: [{ id: 'r', status: 'running', isActive: true }],
@@ -253,7 +255,7 @@ test('execution bursts share the in-flight View and ignore foreign cursor pressu
     expect(inFlight).toBe(1);
     release();
     await finished;
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(maximum).toBe(1);
     expect(views).toBe(3);
     expect(caller.state().executionObservation?.observedCursor).toBe('5');
@@ -675,7 +677,7 @@ async function waitForCallerState(
   const deadline = Date.now() + 1000;
   while (!predicate(caller.state())) {
     if (Date.now() >= deadline) throw Error('native_state_observation_deadline');
-    await Bun.sleep(1);
+    await fixtureDelay(1);
   }
 }
 // The original Main predicates are the authority baseline for the narrow accessor.
@@ -775,7 +777,7 @@ for (const boundary of [
         expect(returned.sessionId).toBe(original.sessionId);
         expect(returned.viewSelection).toBeGreaterThan(other.viewSelection);
         release();
-        await Bun.sleep(0);
+        await fixtureDelay(0);
         expect(caller.browserScope('presentation')).toEqual(returned);
       } else {
         release();
@@ -864,7 +866,7 @@ test('browser scope records fresh observed facts without full state and retains 
     const deadline = Date.now() + 1000;
     while (!caller.browserScope('input')) {
       if (Date.now() >= deadline) throw Error('browser_scope_refresh_deadline');
-      await Bun.sleep(1);
+      await fixtureDelay(1);
     }
     expect(caller.browserScope('presentation')).toBeUndefined();
     hold = true;
@@ -1096,7 +1098,7 @@ test.each([
     const epoch = caller.state().historyEpoch!;
     cursor = '2';
     disconnect();
-    for (let i = 0; i < 150 && readyReturns < 2; i++) await Bun.sleep(5);
+    for (let i = 0; i < 150 && readyReturns < 2; i++) await fixtureDelay(5);
     expect(observations).toBe(2);
     expect(readyReturns).toBe(2);
     expect(caller.state().historyEpoch).toBe(epoch + 1);
@@ -1170,7 +1172,7 @@ test('Native selected message events wake durable changes directly without View 
   try {
     await caller.invoke({ method: 'attach' });
     await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
-    await Bun.sleep(120);
+    await fixtureDelay(120);
     const before = caller.state(),
       reads = views;
     for (let index = 6; index <= 10; index++)
@@ -1182,7 +1184,7 @@ test('Native selected message events wake durable changes directly without View 
         type: 'message.updated',
         payload: null,
       });
-    await Bun.sleep(120);
+    await fixtureDelay(120);
     const state = caller.state();
     expect(views).toBe(reads);
     expect(state.selection!.viewGeneration).toBe(before.selection!.viewGeneration);
@@ -1391,6 +1393,33 @@ async function ordinaryJournal(
     writes: () => writes,
   };
 }
+
+test('cold rejected input projects only an allowlisted reason from the exact verified public receipt', async () => {
+  const f = await ordinaryJournal('run.start');
+  const id = f.request.commandId;
+  f.data.finishCaller(id, 'rejected');
+  const row = f.journal.records()[0]!;
+  const requestDigest = f.command.requestDigest;
+  f.command.status = 'rejected';
+  f.command.receipt = { reason: 'credential_unavailable', detail: 'provider-private-message' };
+  expect(f.journal.metadata(row).rejectionReason).toBeUndefined();
+
+  f.command.requestDigest = 'f'.repeat(64);
+  await expect(f.journal.lookup(id)).rejects.toThrow('caller_receipt_unavailable');
+  expect(f.journal.metadata(row).rejectionReason).toBeUndefined();
+
+  f.command.requestDigest = requestDigest;
+  await f.journal.lookup(id);
+  expect(f.journal.metadata(row).rejectionReason).toBe('credential_unavailable');
+  expect(JSON.stringify(f.journal.metadata(row))).not.toContain('provider-private-message');
+  expect(f.data.callers()).toEqual([row]);
+
+  f.command.receipt = { reason: 'unrecognized_provider_reason' };
+  const cold = new NativeCallerJournal(f.port, f.data);
+  await cold.lookup(id);
+  expect(cold.metadata(row).rejectionReason).toBeNull();
+  expect(f.writes()).toBe(0);
+});
 
 test('Native ordinary journal cold lookup confirms the exact derived business Run for every original input kind', async () => {
   for (const kind of ['run.start', 'input.follow_up', 'input.steer'] as const) {
@@ -1923,7 +1952,7 @@ test('paired first admission is consumed once; standalone cached identity and re
   };
   let current = identity,
     admissions = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {
@@ -3288,7 +3317,7 @@ test('global activity refresh follows non-selected changes, retains failed obser
   });
   const caller = new NativeCaller(port, () => {}, memoryPrivateData());
   const wait = async (accept: (value: NativeState) => boolean) => {
-    for (let i = 0; i < 100 && !accept(caller.state()); i++) await Bun.sleep(1);
+    for (let i = 0; i < 100 && !accept(caller.state()); i++) await fixtureDelay(1);
     expect(accept(caller.state())).toBe(true);
   };
   try {
@@ -3313,7 +3342,7 @@ test('global activity refresh follows non-selected changes, retains failed obser
     expect(caller.state().directory!.sessions[204]!.activity?.updatedAt).toBe(2000);
     mode = 'hold';
     change();
-    for (let i = 0; i < 100 && !heldSignal; i++) await Bun.sleep(1);
+    for (let i = 0; i < 100 && !heldSignal; i++) await fixtureDelay(1);
     expect(heldSignal).toBeDefined();
     await caller.invoke({ method: 'select', generation, sessionId: 's-1' });
     expect(
@@ -3322,7 +3351,7 @@ test('global activity refresh follows non-selected changes, retains failed obser
     await caller.invoke({ method: 'detach', generation });
     expect(heldSignal!.aborted).toBe(true);
     release([]);
-    await Bun.sleep(2);
+    await fixtureDelay(2);
     expect(caller.state().directory).toBeUndefined();
     expect(port.writes).toBe(0);
   } finally {
@@ -3366,15 +3395,15 @@ test('cold observer reset invalidates the old directory read explicitly and publ
   try {
     const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
     const reading = code(caller.invoke({ method: 'directory', generation }));
-    for (let i = 0; i < 100 && !held; i++) await Bun.sleep(1);
+    for (let i = 0; i < 100 && !held; i++) await fixtureDelay(1);
     expect(held).toBeDefined();
     // invoke first drains Main refresh; allow it to join the existing held GET before reset.
-    await Bun.sleep(1);
+    await fixtureDelay(1);
     reset();
     expect(await reading).toBe('directory_observation_changed');
     expect(held!.aborted).toBe(true);
     for (let i = 0; i < 100 && caller.state().directory?.unavailable !== false; i++)
-      await Bun.sleep(5);
+      await fixtureDelay(5);
     expect(caller.state().directory).toMatchObject({
       unavailable: false,
       workspaces: [{ id: 'w', name: 'Restored project' }],
@@ -3734,7 +3763,7 @@ test('global observation routes foreign metadata away from the selected View whi
       directoryBefore = directories;
     const before = caller.state();
     for (let index = 0; index < 100; index++) await emit(index % 2 ? 'other-root' : 'other-child');
-    await Bun.sleep(150);
+    await fixtureDelay(150);
     expect(selectedReads).toBe(readsBefore);
     expect(caller.state().selection!.viewGeneration).toBe(before.selection!.viewGeneration);
     expect(caller.state().environmentRevision).toBe(before.environmentRevision! + 100);
@@ -3814,7 +3843,7 @@ test('Native close drains an in-flight scheduled save before releasing private d
     const closing = caller.close().then(() => {
       closed = true;
     });
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(closed).toBe(false);
     expect(data.scheduledTasks()).toHaveLength(0);
     release();
@@ -3823,7 +3852,7 @@ test('Native close drains an in-flight scheduled save before releasing private d
     expect(closed).toBe(true);
     expect(data.scheduledTasks()).toHaveLength(1);
     const settled = JSON.stringify(data.scheduledTasks());
-    await Bun.sleep(0);
+    await fixtureDelay(0);
     expect(JSON.stringify(data.scheduledTasks())).toBe(settled);
   } finally {
     release();
@@ -3880,7 +3909,7 @@ test('retrying an original Native activation after a lost reconciliation respons
     storeId: 'store',
   };
   let posts = 0;
-  const server = Bun.serve({
+  const server = await serveFixture({
     hostname: '127.0.0.1',
     port: 0,
     fetch(request) {

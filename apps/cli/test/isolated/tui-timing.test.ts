@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import type { SessionLogEntry, SessionLogPage, SessionView } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { readTuiTimings } from '../../host/tui-timing';
 
 function view(): SessionView {

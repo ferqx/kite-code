@@ -1,10 +1,17 @@
-import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join, resolve, sep } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { build } from 'vite';
+import { expect, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { openFixtureFile, writeFixtureFile } from '../../../../scripts/tooling/files';
+import { serve as serveFixture } from '../../../../scripts/tooling/http';
+import {
+  which as findFixtureExecutable,
+  spawn as spawnFixtureProcess,
+} from '../../../../scripts/tooling/process';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 test('actual sandboxed Electron restores model and effort after process exit on a new renderer origin', async () => {
@@ -12,7 +19,7 @@ test('actual sandboxed Electron restores model and effort after process exit on 
   privateDirectory(root);
   const output = join(root, 'renderer');
   await build({
-    root: resolve(import.meta.dir, '../..'),
+    root: resolve(import.meta.dirname, '../..'),
     configFile: false,
     envFile: false,
     plugins: [react(), tailwindcss()],
@@ -25,7 +32,7 @@ test('actual sandboxed Electron restores model and effort after process exit on 
       emptyOutDir: false,
       target: 'esnext',
       lib: {
-        entry: resolve(import.meta.dir, '../native-model-preference-page.fixture.tsx'),
+        entry: resolve(import.meta.dirname, '../native-model-preference-page.fixture.tsx'),
         formats: ['es'],
         fileName: 'fixture',
         cssFileName: 'fixture',
@@ -36,20 +43,20 @@ test('actual sandboxed Electron restores model and effort after process exit on 
     ['../native-model-preference-electron.fixture.ts', 'main.cjs'],
     ['../../electron/preload.ts', 'preload.cjs'],
   ]) {
-    const built = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, source!)],
+    const built = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, source!)],
       target: 'node',
       format: 'cjs',
       external: ['electron'],
     });
     expect(built.success).toBe(true);
-    await Bun.write(join(root, name!), built.outputs[0]!);
+    await writeFixtureFile(join(root, name!), built.outputs[0]!);
   }
-  const serve = () =>
-    Bun.serve({
+  const serve = async () =>
+    await serveFixture({
       hostname: '127.0.0.1',
       port: 0,
-      fetch(request) {
+      async fetch(request) {
         const pathname = new URL(request.url).pathname;
         if (pathname === '/')
           return new Response(
@@ -59,32 +66,32 @@ test('actual sandboxed Electron restores model and effort after process exit on 
         if (pathname === '/favicon.ico') return new Response(null, { status: 204 });
         const file = resolve(output, `.${pathname}`);
         return file.startsWith(output + sep)
-          ? new Response(Bun.file(file))
+          ? new Response(await openFixtureFile(file))
           : new Response(null, { status: 404 });
       },
     });
-  const firstServer = serve();
-  const secondServer = serve();
+  const firstServer = await serve();
+  const secondServer = await serve();
   try {
-    const driver = await Bun.build({
-      entrypoints: [resolve(import.meta.dir, '../native-model-preference-driver.fixture.ts')],
+    const driver = await buildFixture({
+      entrypoints: [resolve(import.meta.dirname, '../native-model-preference-driver.fixture.ts')],
       target: 'node',
       format: 'esm',
       packages: 'bundle',
       external: ['playwright'],
     });
     expect(driver.success).toBe(true);
-    await Bun.write(join(root, 'driver.mjs'), driver.outputs[0]!);
+    await writeFixtureFile(join(root, 'driver.mjs'), driver.outputs[0]!);
     const require = createRequire(import.meta.url);
-    const child = Bun.spawn(
+    const child = spawnFixtureProcess(
       [
-        Bun.which('node')!,
+        findFixtureExecutable('node')!,
         join(root, 'driver.mjs'),
         root,
         firstServer.url.href,
         secondServer.url.href,
         require('electron') as string,
-        resolve(import.meta.dir, '../../package.json'),
+        resolve(import.meta.dirname, '../../package.json'),
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );

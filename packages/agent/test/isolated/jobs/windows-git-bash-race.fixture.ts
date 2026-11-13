@@ -1,8 +1,9 @@
-import { mock } from 'bun:test';
-import * as fs from 'node:fs';
-import * as promises from 'node:fs/promises';
+import fs from 'node:fs';
+import promises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { mock } from '#kite-test';
 import * as locks from '../../../src/platform/locks';
 
 const [root, role, target, failure] = process.argv.slice(2) as [string, string, string, string];
@@ -14,13 +15,16 @@ const source = new URL('../../../src/jobs/windows-git-bash.ts', import.meta.url)
 // Only the fixture module bypasses the Windows entry guard on POSIX. File locks,
 // filesystem I/O and both independent processes still use their actual OS backend.
 const text = original.readFileSync(source, 'utf8');
-if (!text.includes("process.platform !== 'win32'")) throw Error('fixture_guard_missing');
+const windowsGuard = "process.platform !== 'win32' || process.arch !== 'x64'";
+if (!text.includes(windowsGuard)) throw Error('fixture_guard_missing');
 const modulePath = join(root, `${role}.ts`);
 original.writeFileSync(
   modulePath,
   text
-    .replace("process.platform !== 'win32'", 'false')
-    .replaceAll("'../platform/", `'${new URL('../../../src/platform/', import.meta.url).href}`)
+    .replace(windowsGuard, 'false')
+    .replaceAll(/'\.\.\/platform\/([^']+)'/gu, (_match, name) =>
+      JSON.stringify(new URL(`../../../src/platform/${name}.ts`, import.meta.url).href),
+    )
     .replace(
       "'./launch-identity'",
       JSON.stringify(new URL('../../../src/jobs/launch-identity.ts', import.meta.url).href),
@@ -54,11 +58,11 @@ const pause = async () => {
   paused = true;
   process.stdout.write('paused\n');
   reportPause();
-  await new Response(Bun.stdin).text();
+  for await (const _ of process.stdin) {
+  }
   if (failure === 'fail') throw Error('injected_write_failure');
 };
-mock.module('node:fs/promises', () => ({
-  ...io,
+Object.assign(promises, {
   async copyFile(...args: Parameters<typeof io.copyFile>) {
     if (!matches(args[1])) return io.copyFile(...args);
     await io.writeFile(args[1], 'partial', { flag: 'wx' });
@@ -76,9 +80,8 @@ mock.module('node:fs/promises', () => ({
     await pause();
     await io.writeFile(args[0], args[1]);
   },
-}));
-mock.module('node:fs', () => ({
-  ...original,
+});
+Object.assign(fs, {
   writeFileSync(...args: Parameters<typeof original.writeFileSync>) {
     if (!matches(args[0])) return original.writeFileSync(...args);
     paused = true;
@@ -88,8 +91,9 @@ mock.module('node:fs', () => ({
     original.readSync(0, Buffer.alloc(1), 0, 1, null);
     original.writeFileSync(args[0], args[1]);
   },
-}));
-Bun.which = () => join(root, 'git/cmd/git.exe');
+});
+syncBuiltinESMExports();
+process.env.PATH = join(root, 'git/cmd');
 try {
   const { stageWindowsGitBash, captureWindowsGitBashRuntime } = await import(
     pathToFileURL(modulePath).href

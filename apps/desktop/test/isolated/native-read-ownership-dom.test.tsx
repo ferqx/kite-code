@@ -1,7 +1,7 @@
-import { expect, test } from 'bun:test';
 import type { Interaction, Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { nativeDraftProof } from '../../electron/caller-journal';
 import { NativeInputImages } from '../../electron/input-images';
 import type { BrowserSavedAnnotation } from '../../src/browser-annotation-content';

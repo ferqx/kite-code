@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { AgentClient } from '@kite-ai/client';
 import { TuiController, type TuiPort, type TuiSnapshot } from '@kite-ai/ui/tui';
+import { expect, test } from '#kite-test';
 import { prepareTuiObservationStart, refreshTuiObservation } from '../host/tui-observation';
 
 test('reset freezes original global read baseline before selected reads without acknowledging events', async () => {

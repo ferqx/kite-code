@@ -1,13 +1,16 @@
-import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient, type ResumeRunRequest } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
+import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
+import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
 import { startService } from '../../src';
 import { resumeBinding } from '../fixtures/run-resume-binding';
 
@@ -43,9 +46,10 @@ test('SIGKILL with complete original Model and pending approval resumes original
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-http-run-resume-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   const ledger = join(root, 'effects');
-  const child = Bun.spawn(
+  const child = spawnProcess(
     [
       process.execPath,
+      ...testRuntimeFlags,
       fileURLToPath(new URL('../fixtures/run-resume-child.ts', import.meta.url)),
       profile.dataRoot,
       ledger,
@@ -245,7 +249,7 @@ test('SIGKILL with complete original Model and pending approval resumes original
       const view = await client.getView('s');
       if (view.runs.find((item) => item.id === ready.runId)?.status === 'completed') break;
       if (Date.now() > deadline) throw Error('run_resume_completion_timeout');
-      await Bun.sleep(1);
+      await sleepTimer(1);
     }
     expect(readFileSync(ledger, 'utf8')).toBe(
       'model-decision\ntool-effect:{"exact":"original"}\nmodel-completion\n',

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
+import { expect, test } from '#kite-test';
 import type { TuiController } from '../../src/tui/controller';
 import { TuiFileRecoveryPanel } from '../../src/tui/file-recovery-panel';
 import { defaultTuiPreferences } from '../../src/tui/preferences';

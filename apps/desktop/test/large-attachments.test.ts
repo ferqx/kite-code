@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
 import { interactionAttachment } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { createDesktopController } from '../src/controller';
 import { largeInteractionFixture } from './fixtures/large-interaction';
 

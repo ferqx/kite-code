@@ -1,3 +1,4 @@
+import { dlopen, ptr } from '../../runtime-ffi';
 /** Explicit read-only identity observation. Import opens no resources and grants no process authority. */
 export interface OwnedProcessIdentity {
   pid: number;
@@ -15,7 +16,6 @@ export function observeOwnedProcessIdentity(pid: number): OwnedProcessIdentity {
     if (!Number.isSafeInteger(pid) || pid < 2 || process.platform !== 'darwin')
       throw Error('unsupported');
     if (!native) {
-      const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
       const api = dlopen('/usr/lib/libproc.dylib', {
         proc_pidinfo: { args: ['i32', 'i32', 'u64', 'ptr', 'i32'], returns: 'i32' },
       });

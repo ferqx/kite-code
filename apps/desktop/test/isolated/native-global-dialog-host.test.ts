@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { IpcMain, WebContentsView } from 'electron';
+import { expect, test } from '#kite-test';
 import { createNativeGlobalDialogHost } from '../../electron/native-global-dialog-host';
 import { addNativeWindowView, focusNativeWindowContent } from '../../electron/native-overlay-layer';
 import type { NativeRootWindow } from '../../electron/native-root-window';

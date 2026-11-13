@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
@@ -8,8 +6,11 @@ import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { NativeBrowserTransport } from '@kite-ai/agent/browser';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import type { AgentClient, SessionView } from '@kite-ai/client';
 import type { WebContents } from 'electron';
+import { expect, spyOn, test } from '#kite-test';
+import { build as buildFixture } from '../../../../scripts/tooling/build';
 import { createBrowserGrantRequestId } from '../../../service/src/desktop-browser-authorization';
 import type { BrowserGrantScope, NativeBrowserPageHost } from '../../electron/browser-page-host';
 import type { DevelopmentServiceReload } from '../../electron/development';
@@ -563,9 +564,9 @@ async function mainFixture(
       }`,
   };
   try {
-    const result = await Bun.build({
+    const result = await buildFixture({
       entrypoints: [mainPath],
-      target: 'bun',
+      target: 'node',
       format: 'esm',
       outdir: root,
       define: {
@@ -573,8 +574,8 @@ async function mainFixture(
           kind: 'development',
           serviceEntrypoint: join(root, 'service.js'),
           serviceSha256: 'a'.repeat(64),
-          bunExecutable: process.execPath,
-          bunSha256: 'b'.repeat(64),
+          runtimeExecutable: process.execPath,
+          runtimeSha256: 'b'.repeat(64),
           buildId: 'fixture',
           apiMajor: 1,
           requiredCapabilities: [],
@@ -655,9 +656,9 @@ async function mainFixture(
       );
       // Only the native CLI process is finite here; Desktop transport and Main
       // page-host RPC/lease ownership are their original production modules.
-      const build = await Bun.build({
+      const build = await buildFixture({
         entrypoints: [source],
-        target: 'bun',
+        target: 'node',
         outdir: join(root, 'transport'),
         plugins: [
           {

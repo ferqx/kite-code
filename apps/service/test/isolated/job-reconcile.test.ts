@@ -1,4 +1,3 @@
-import { expect, test } from 'bun:test';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
@@ -8,6 +7,7 @@ import type { Extension } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createClient, decodeJobReconcileCommand, type ReconcileJobRequest } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 

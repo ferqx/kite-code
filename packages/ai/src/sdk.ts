@@ -16,7 +16,7 @@ import {
 } from 'ai';
 import type { Json, ModelAdapter, ModelRequest, ModelUsage } from './index';
 import { isModelImage } from './index';
-import { ModelAttemptError, modelConnectionDetail } from './model-attempt';
+import { ModelAccessError, ModelAttemptError, modelConnectionDetail } from './model-attempt';
 import {
   type ModelAdapterSnapshot,
   type ReasoningEffort,
@@ -461,8 +461,8 @@ export function createSdkModelAdapter(options: {
         signal.throwIfAborted();
         if (ModelAttemptError.isInstance(error)) throw error;
         if (APICallError.isInstance(error)) {
-          if (error.statusCode === 401 || error.statusCode === 403)
-            throw new Error('model_transport_failed');
+          if (error.statusCode === 401) throw new ModelAccessError('model_authentication_required');
+          if (error.statusCode === 403) throw new ModelAccessError('model_access_denied');
           throw new ModelAttemptError(
             error.statusCode === undefined ? 'connection_failed' : 'provider_unavailable',
             error.statusCode === 429
@@ -544,15 +544,12 @@ export function createCompatibleModelBinding(options: {
             // Never fall back to ambient OPENAI_API_KEY for an explicit host binding.
             apiKey: options.apiKey ?? '',
             headers: { ...options.headers },
-            fetch: Object.assign(
-              async (...args: Parameters<typeof fetch>) => {
-                const [input, init] = args;
-                const headers = new Headers(init?.headers);
-                if (omitAuthorization) headers.delete('authorization');
-                return transportFetch(input, { ...init, headers });
-              },
-              { preconnect: globalThis.fetch.preconnect },
-            ),
+            fetch: async (...args: Parameters<typeof fetch>) => {
+              const [input, init] = args;
+              const headers = new Headers(init?.headers);
+              if (omitAuthorization) headers.delete('authorization');
+              return transportFetch(input, { ...init, headers });
+            },
           }).responses(options.modelId),
           middleware: {
             specificationVersion: 'v4',

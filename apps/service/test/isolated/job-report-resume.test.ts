@@ -1,8 +1,8 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
@@ -10,6 +10,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createClient, decodeJobReportResumeCommand } from '@kite-ai/client';
+import { expect, test } from '#kite-test';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 
@@ -259,7 +260,7 @@ for (const outcome of ['resumed', 'deferred'] as const) {
       const releaseDeadline = Date.now() + 5000;
       while ((await coldStore.getSession('root'))!.ownerInstanceId !== null) {
         if (Date.now() > releaseDeadline) throw Error('report_failed_prepare_release_deadline');
-        await Bun.sleep(1);
+        await sleepTimer(1);
       }
       configurationChanged = false;
       const intent = { expectedStoreId, commandId: 'resume-original' };

@@ -10,7 +10,7 @@ pre-commit:
       stage_fixed: true
     typecheck:
       glob: "*.{ts,tsx}"
-      run: bun check -p tsconfig.json
+      run: node node_modules/typescript/bin/tsc -p tsconfig.json
     unified-boundary:
       glob: "*.{ts,tsx}"
       run: bun run check:runtime-packages
@@ -19,7 +19,7 @@ pre-commit:
       run: bun run check:unified-api
     store-format-lock:
       glob: "packages/agent/src/storage/**"
-      run: bun test packages/agent/test/isolated/storage/store.test.ts packages/agent/test/isolated/storage/rollback.test.ts
+      run: node --import ./scripts/tooling/register.mjs scripts/run-test-files.ts packages/agent/test/isolated/storage/store.test.ts packages/agent/test/isolated/storage/rollback.test.ts
     plan-evidence:
       glob: "{release/oss-first-release/**,scripts/check-plan-execution-matrix.ts,docs/active/open-source-first-release.md,.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md}"
       run: bun run check:plan-evidence

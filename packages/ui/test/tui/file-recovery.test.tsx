@@ -1,6 +1,6 @@
-import { expect, test } from 'bun:test';
 import type { SessionView } from '@kite-ai/client';
 import { planFileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
+import { expect, test } from '#kite-test';
 import { TuiController, type TuiPort, type TuiSnapshot } from '../../src/tui';
 
 const snapshot = (id = 'a', active = false): TuiSnapshot => ({

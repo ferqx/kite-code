@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from '#kite-test';
 import { qualifyLimitedSlo } from '../../../scripts/operations/qualify-limited-slo';
 
 const digest = `sha256:${'a'.repeat(64)}` as const;

@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import type { Execution, Interaction } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { expect, test } from '#kite-test';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 // The original Radix Portal selects its layout effect at import time, as in the model-picker fixture.
@@ -141,7 +142,7 @@ test('the original Approval form consumes the verified complete request and subm
     while (!f.host.querySelector('[data-complete-attachment="verified"]')) {
       if (f.host.querySelector('[role="alert"]')) throw new Error('approval_attachment_unverified');
       if (Date.now() >= deadline) throw new Error('approval_attachment_dom_deadline');
-      await act(async () => await Bun.sleep(5));
+      await act(async () => await fixtureDelay(5));
     }
     const command = f.host.querySelector<HTMLElement>('.approval-command')!;
     expect(command.textContent).toBe(request.input.command);

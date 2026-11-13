@@ -1,5 +1,3 @@
-import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
@@ -8,8 +6,11 @@ import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { Database } from '@kite-ai/agent/runtime-sqlite';
 import { createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { expect, test } from '#kite-test';
+import { nodeServiceFixture } from '../../service/test/fixtures/node-service-process';
 import {
   clearPermissionGrants,
   createStdioPermissionReader,
@@ -25,7 +26,8 @@ async function paired() {
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const host = await launchPairedService({
-    entrypoint: join(import.meta.dir, '../../service/src/main.ts'),
+    ...nodeServiceFixture,
+    entrypoint: join(import.meta.dirname, '../../service/src/main.ts'),
     profile,
     instanceId: crypto.randomUUID(),
     buildId: 'permission-cli',

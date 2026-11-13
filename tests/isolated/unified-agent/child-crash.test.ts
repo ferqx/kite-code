@@ -1,12 +1,14 @@
-import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { createRuntime } from '@kite-ai/agent';
 import type { OperationRef } from '@kite-ai/agent/extensions';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
+import { expect, test } from '#kite-test';
+import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
 interface Evidence {
   storeId: string;
@@ -37,10 +39,10 @@ for (const mode of ['effect', 'partial'] as const)
     const dataRoot = join(root, 'profile');
     const effects = join(root, 'external-ledger.jsonl');
     const ready = join(root, 'ready.json');
-    const host = Bun.spawn(
+    const host = spawnFixtureProcess(
       [
         process.execPath,
-        resolve(import.meta.dir, '../../fixtures/unified-agent/child-crash.ts'),
+        resolve(import.meta.dirname, '../../fixtures/unified-agent/child-crash.ts'),
         mode,
         dataRoot,
         effects,
@@ -58,7 +60,7 @@ for (const mode of ['effect', 'partial'] as const)
       while (!existsSync(ready)) {
         if (host.exitCode !== null) throw new Error(`Fixture exited: ${await stderr}`);
         if (Date.now() > deadline) throw new Error('Fixture did not reach real child dispatch.');
-        await Bun.sleep(10);
+        await fixtureDelay(10);
       }
       const evidence = JSON.parse(readFileSync(ready, 'utf8')) as Evidence;
       expect(evidence.operation.childSessionId).toBeString();
@@ -103,7 +105,7 @@ for (const mode of ['effect', 'partial'] as const)
             ?.originStoreId,
         ).toBe(evidence.storeId);
       }
-      await Bun.sleep(50);
+      await fixtureDelay(50);
       expect(await reader.getView(evidence.operation.childSessionId!)).toEqual(childBefore);
       expect(ledger(effects)).toEqual(beforeLedger);
       await reader.close();

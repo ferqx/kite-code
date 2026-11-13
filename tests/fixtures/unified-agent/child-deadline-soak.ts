@@ -2,6 +2,7 @@
 import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as fixtureDelay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../packages/agent/src';
@@ -61,7 +62,7 @@ async function eventually<T>(read: () => Promise<T | undefined>, durationMs = 10
     const result = await read();
     if (result !== undefined) return result;
     if (Date.now() > end) throw new Error('qualification_fact_timeout');
-    await Bun.sleep(20);
+    await fixtureDelay(20);
   }
 }
 const pending = new Map<
@@ -216,7 +217,7 @@ try {
   });
   await Promise.race([
     partialStarted,
-    Bun.sleep(10000).then(() => {
+    fixtureDelay(10000).then(() => {
       throw new Error('partial_start_timeout');
     }),
   ]);

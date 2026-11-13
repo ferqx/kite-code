@@ -87,7 +87,7 @@ export function createBrowserConfiguration(options: {
       configured.executable,
       configured.browserPath,
       ...(process.platform === 'darwin' && configured.darwin
-        ? [configured.darwin.guardianPath, configured.darwin.bunExecutable]
+        ? [configured.darwin.guardianPath, configured.darwin.runtimeExecutable]
         : configured.linux
           ? [configured.linux.bubblewrapPath, configured.linux.initExecutable]
           : []),
@@ -104,7 +104,7 @@ export function createBrowserConfiguration(options: {
         executable: resolved[0]!,
         browserPath: resolved[1]!,
         ...(process.platform === 'darwin'
-          ? { darwin: { guardianPath: resolved[2]!, bunExecutable: resolved[3]! } }
+          ? { darwin: { guardianPath: resolved[2]!, runtimeExecutable: resolved[3]! } }
           : { linux: { bubblewrapPath: resolved[2]!, initExecutable: resolved[3]! } }),
         runtimeDirectory: configured.runtimeDirectory ?? options.privateDirectory,
       };
@@ -113,18 +113,23 @@ export function createBrowserConfiguration(options: {
       const native = agentBrowserExecutableAsset(),
         browserPath = options.desktopBrowser ? native : installedBrowser();
       const guardianPath = executable(mcpStdioGuardianAsset(), false),
-        bunExecutable = executable(process.execPath);
+        runtimeExecutable = executable(process.execPath);
       if (!browserPath) unavailableReason = 'browser_executable_unavailable';
-      else if (!guardianPath || !bunExecutable)
+      else if (!guardianPath || !runtimeExecutable)
         unavailableReason = 'browser_process_boundary_unavailable';
       else {
         transport = {
           executable: native,
           browserPath,
-          darwin: { guardianPath, bunExecutable },
+          darwin: { guardianPath, runtimeExecutable },
           runtimeDirectory: options.privateDirectory,
         };
-        runtimeAssets = [...agentBrowserRuntimeAssets(), browserPath, guardianPath, bunExecutable];
+        runtimeAssets = [
+          ...agentBrowserRuntimeAssets(),
+          browserPath,
+          guardianPath,
+          runtimeExecutable,
+        ];
       }
     } catch {
       unavailableReason = 'browser_runtime_unavailable';

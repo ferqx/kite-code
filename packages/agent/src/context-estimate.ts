@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import type { Json, ModelMessage, ModelRequest } from '@kite-ai/ai';
 import { canonicalJson } from './json';
 
@@ -98,9 +99,12 @@ export function estimateModelContext(
   capabilities: { contextWindowTokens?: unknown; maxOutputTokens?: unknown } = {},
   requestMaxOutputTokens?: number,
 ): ModelContextEstimate {
-  // Preserve the original lazy vocabulary: ordinary startup does not initialize it.
-  const { countTokens } =
-    require('gpt-tokenizer/encoding/cl100k_base') as typeof import('gpt-tokenizer/encoding/cl100k_base');
+  // Resolve lazily in source hosts. The build inlines the literal require for the installed package.
+  const { countTokens } = (
+    import.meta.url.endsWith('.ts')
+      ? createRequire(import.meta.url)('gpt-tokenizer/encoding/cl100k_base')
+      : require('gpt-tokenizer/encoding/cl100k_base')
+  ) as typeof import('gpt-tokenizer/encoding/cl100k_base');
   // BPE on one multi-megabyte word can grow quadratically. Display accounting
   // includes every character, but bounds each tokenizer input. Counts at long
   // chunk seams are approximate; short strings retain the original tokenization.

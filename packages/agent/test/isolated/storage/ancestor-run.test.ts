@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { createRuntime } from '../../../src';
 import type { Store } from '../../../src/storage/port';
 import type { CommandRecord, ExecutionRecord, RunRecord } from '../../../src/storage/types';

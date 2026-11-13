@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, test } from '#kite-test';
 import { authorizationCheckAnswer } from '../../../src/authorization-check-output';
 import {
   AuthorizationCheckUnavailableError,

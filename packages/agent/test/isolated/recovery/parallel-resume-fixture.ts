@@ -1,5 +1,6 @@
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { setTimeout as sleepTimer } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import type { ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -143,6 +144,6 @@ if (import.meta.main) {
       await new Promise<void>(() => {});
     }
     if (Date.now() >= deadline) throw Error('parallel_planned_success_boundary_unconfirmed');
-    await Bun.sleep(5);
+    await sleepTimer(5);
   }
 }
