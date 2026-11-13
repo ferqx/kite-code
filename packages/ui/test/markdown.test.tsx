@@ -196,12 +196,15 @@ test('desktop Markdown file links use the current host callback, revoke and rest
     expect(calls).toEqual(['first:src/old file.ts', 'second:src/old file.ts']);
     const retired = host.querySelector('button.file-link') as HTMLButtonElement;
     await render();
-    expect(host.querySelector('button.file-link')).toBeNull();
+    expect(host.querySelector('button.file-link')).toBe(retired);
+    expect(retired.getAttribute('aria-disabled')).toBe('true');
     expect(host.textContent).toBe('Local file External');
     await act(async () => retired.click());
     expect(calls).toHaveLength(2);
     expect(host.querySelector('a')!.getAttribute('href')).toBe('https://example.com');
     await render((path) => calls.push(`restored:${path}`));
+    expect(host.querySelector('button.file-link')).toBe(retired);
+    expect(retired.getAttribute('aria-disabled')).toBeNull();
     await click();
     expect(calls.at(-1)).toBe('restored:src/old file.ts');
     await render((path) => calls.push(`new-body:${path}`), '[New file](src/new.ts)');
