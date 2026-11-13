@@ -19,14 +19,9 @@
 }
 
 .kite-client .client-main-panel {
-  --font-ui: system-ui, "Ubuntu", "Droid Sans", sans-serif;
-  --font-mono: "Droid Sans Mono", monospace;
-  --font-geist: var(--font-ui);
-  --font-geist-mono: var(--font-mono);
   --ui-text-size: 13px;
   --conversation-text-size: 14px;
-  --markdown-inline-code-radius: 3px;
-  font-family: var(--font-ui);
+  --markdown-inline-code-radius: 5px;
   font-size: var(--ui-text-size);
   color: var(--foreground);
 }
@@ -36,16 +31,6 @@
   --user-message-background: var(--composer-background);
   padding: var(--user-message-padding-block) 16px;
   background: var(--user-message-background);
-}
-
-html[data-platform="windows"] .kite-client .client-main-panel {
-  --font-ui: "Segoe WPC", "Segoe UI", "Microsoft YaHei", sans-serif;
-  --font-mono: Consolas, "Courier New", monospace;
-}
-
-html[data-platform="macos"] .kite-client .client-main-panel {
-  --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-  --font-mono: Menlo, Monaco, "Courier New", monospace;
 }
 
 [data-theme="dark"] .kite-client .client-content-frame {
@@ -70,55 +55,49 @@ html[data-platform="macos"] .kite-client .client-main-panel {
 }
 
 .kite-client .client-main-panel .typeset-chat {
-  --typeset-font-body: var(--font-ui);
-  --typeset-font-heading: var(--font-ui);
-  --typeset-font-mono: var(--font-mono);
-  --markdown-block-gap: 20px;
+  --markdown-block-gap: 12px;
   --markdown-rule: var(--border);
-  font-family: var(--font-ui);
   font-size: var(--conversation-text-size);
-  font-weight: 500;
-  line-height: 30px;
+  font-weight: 430;
+  line-height: 1.625;
 }
 
-.kite-client .client-main-panel .typeset-chat :is(a, .file-link) {
+.kite-client .client-main-panel .typeset-chat :is(a, .file-link):not(.file-reference) {
   text-decoration-line: underline;
   text-underline-offset: 3px;
 }
 
 .kite-client .client-main-panel .typeset-chat :where(h1, h2, h3, h4, h5, h6) {
-  margin-block: 24px 16px;
-  font-family: var(--font-ui);
-  line-height: 1.25;
+  margin-block: 18px 9px;
   letter-spacing: 0;
 }
 
 .kite-client .client-main-panel .typeset-chat h1 {
   padding-block-end: 0.3em;
   border-block-end: 1px solid var(--markdown-rule);
-  font-size: 2em;
+  font-size: 1.5em;
+  line-height: calc(4 / 3);
 }
 
 .kite-client .client-main-panel .typeset-chat h2 {
   padding-block-end: 0.3em;
   border-block-end: 1px solid var(--markdown-rule);
-  font-size: 1.5em;
+  font-size: 1.25em;
+  line-height: 1.4;
 }
 
 .kite-client .client-main-panel .typeset-chat h3 {
-  font-size: 1.25em;
+  font-size: 1.125em;
+  line-height: calc(14 / 9);
 }
 
 .kite-client .client-main-panel .typeset-chat h4 {
   font-size: 1em;
+  line-height: 1.5;
 }
 
-.kite-client .client-main-panel .typeset-chat h5 {
-  font-size: 0.875em;
-}
-
-.kite-client .client-main-panel .typeset-chat h6 {
-  font-size: 0.85em;
+.kite-client .client-main-panel .typeset-chat :is(h5, h6) {
+  font-size: 1em;
 }
 
 .kite-client .client-main-panel .typeset-chat :where(h1, h2, h3, h4, h5, h6) + * {
@@ -140,16 +119,17 @@ html[data-platform="macos"] .kite-client .client-main-panel {
   border-block-end: 0;
 }
 
+.kite-client .client-main-panel .typeset-chat :where(ul, ol):not(.contains-task-list) {
+  padding-inline-start: 1.3em;
+}
+
 .kite-client .client-main-panel .typeset-chat li {
-  padding-inline-start: 2px;
+  padding-inline-start: 1px;
 }
 
-.kite-client .client-main-panel .typeset-chat li + li {
-  margin-block-start: 4px;
-}
-
+.kite-client .client-main-panel .typeset-chat li + li,
 .kite-client .client-main-panel .typeset-chat li > :where(ul, ol) {
-  margin-block-start: 3px;
+  margin-block-start: 2px;
 }
 
 .kite-client .client-main-panel .typeset-chat blockquote:not(.markdown-alert) {
@@ -158,6 +138,7 @@ html[data-platform="macos"] .kite-client .client-main-panel {
   border-radius: 2px;
   background: var(--accent);
   color: var(--foreground);
+  font-weight: 400;
 }
 
 [data-theme="dark"] .kite-client .client-main-panel .typeset-chat blockquote:not(.markdown-alert) {
@@ -166,7 +147,7 @@ html[data-platform="macos"] .kite-client .client-main-panel {
 
 .kite-client .client-main-panel .typeset-chat :not(pre) > code {
   padding: 1px 4px;
-  font-size: 1em;
+  font-size: 0.92em;
   font-weight: 400;
 }
 
@@ -178,9 +159,9 @@ html[data-platform="macos"] .kite-client .client-main-panel {
 .kite-client .client-main-panel .typeset-chat pre {
   padding: 8px 16px 15px;
   border-radius: 3px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
-  line-height: 21px;
+  line-height: 20px;
 }
 
 .kite-client .client-main-panel .markdown-code-block [data-slot="code-block-header"] {
@@ -193,19 +174,14 @@ html[data-platform="macos"] .kite-client .client-main-panel {
   background: transparent;
 }
 
-.kite-client .client-main-panel .typeset-chat .markdown-table-scroll {
-  border: 0;
-  border-radius: 0;
-}
-
 .kite-client .client-main-panel .typeset-chat table {
   border-collapse: collapse;
   font-size: 1em;
-  line-height: 1.6;
+  line-height: inherit;
 }
 
 .kite-client .client-main-panel .typeset-chat :where(th, td) {
-  min-width: 0;
+  min-width: 5rem;
   padding: 7px 10px;
   border: 0;
 }
@@ -215,7 +191,7 @@ html[data-platform="macos"] .kite-client .client-main-panel {
 }
 
 .kite-client .client-main-panel .typeset-chat thead th {
-  border-block-end: 1px solid var(--muted-foreground);
+  border-block-end: 1px solid var(--input);
   white-space: normal;
 }
 
@@ -227,7 +203,6 @@ html[data-platform="macos"] .kite-client .client-main-panel {
   border-block-start: 1px solid var(--input);
 }
 .kite-client .client-main-panel .prompt-editor {
-  font-family: var(--font-ui);
   font-size: var(--ui-text-size);
   line-height: 30px;
 }

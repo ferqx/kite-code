@@ -8,10 +8,6 @@
 @import "./native-content-theme.css";
 @import "./native-navigation-material.css";
 @import "./native-provider-settings.css";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist/wght-italic.css";
-@import "@fontsource-variable/geist-mono";
-@import "@fontsource-variable/geist-mono/wght-italic.css";
 @source "../../../packages/ui/src";
 
 @custom-variant focus-visible (&:focus-visible:where(:root:not([data-input-modality="pointer"]) *));
@@ -23,8 +19,6 @@ html[data-input-modality="pointer"] :focus {
 }
 
 :root {
-  --font-geist: var(--font-ui);
-  --font-geist-mono: var(--font-mono);
   --native-content-shadow: 0 1px 6px rgb(0 0 0 / 6%);
   --native-content-border: rgb(0 0 0 / 5%);
   --native-sidebar-border: rgb(0 0 0 / 4%);
@@ -43,9 +37,9 @@ body,
 }
 
 .typeset-chat {
-  --typeset-font-body: var(--font-geist);
-  --typeset-font-heading: var(--font-geist);
-  --typeset-font-mono: var(--font-geist-mono);
+  --typeset-font-body: var(--font-ui);
+  --typeset-font-heading: var(--font-ui);
+  --typeset-font-mono: var(--font-mono);
   --typeset-size: var(--ui-text-size);
   --typeset-leading: 1.6;
   --typeset-flow: 1em;
@@ -61,6 +55,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
 }
 
 @theme inline {
+  --font-sans: var(--font-ui);
   --color-background: var(--background);
   --color-card: var(--card);
   --color-popover: var(--card);

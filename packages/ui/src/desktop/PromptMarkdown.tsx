@@ -10,9 +10,11 @@ import { Button } from './ui';
 export const PromptMarkdown = memo(function PromptMarkdown({
   text,
   openFile,
+  fileRootUri,
 }: {
   text: string;
   openFile?: (path: string, line?: number) => void;
+  fileRootUri?: string;
 }) {
   const { readActive } = useConversationActivity();
   const blocked = useReadGate();
@@ -73,7 +75,7 @@ export const PromptMarkdown = memo(function PromptMarkdown({
           }
         }}
       >
-        <MessageContent text={text} openFile={openFile} />
+        <MessageContent text={text} openFile={openFile} fileRootUri={fileRootUri} />
       </div>
       <div ref={controls} className="prompt-markdown-controls" hidden={!overflow}>
         {overflow && (

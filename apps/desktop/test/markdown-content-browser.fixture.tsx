@@ -5,6 +5,7 @@ import { ConversationCache } from '../../../packages/ui/src/desktop/Conversation
 import { ClipboardWriteContext } from '../../../packages/ui/src/desktop/clipboard';
 import { MessageContent } from '../../../packages/ui/src/desktop/MessageContent';
 import { PromptEditor } from '../../../packages/ui/src/desktop/PromptEditor';
+import { TurnFailure } from '../../../packages/ui/src/desktop/TurnFailure';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 import { applyTheme } from '../src/native-theme';
@@ -33,6 +34,9 @@ const overview = `# Markdown 内容
 
 > [!CAUTION]
 > 注意信息以图标、文字和底色共同表达。
+
+- [x] 已完成的检查项
+- [ ] Pending check
 
 | 内容 | 状态 |
 | --- | --- |
@@ -172,6 +176,15 @@ function Fixture() {
           {JSON.stringify(fileOpens)}
         </output>
         <main style={{ maxWidth: 780, margin: '0 auto' }}>
+          <TurnFailure
+            message={{
+              id: 'failure-alignment-fixture',
+              role: 'assistant',
+              settled: true,
+              text: '读取失败，请检查连接。\nCheck the connection and try again.',
+            }}
+            onToggle={() => {}}
+          />
           <ConversationCache
             identity={identity}
             loading={false}
@@ -194,10 +207,11 @@ function Fixture() {
                   <MessageContent
                     text={
                       referenceClosed
-                        ? `${referenceMessage}\`）与 \`packages/agent/src/extensions/host.ts\`。这里继续核对窄窗口中文和长链接的换行，最后保留原来的 \`waitMs: 0\`。`
+                        ? `${referenceMessage}\`）与 \`packages/agent/src/extensions/host.ts\`。[审批继承](packages/agent/src/extensions/host.ts:802)。这里继续核对窄窗口中文和长链接的换行，最后保留原来的 \`waitMs: 0\`。`
                         : referenceMessage
                     }
                     streaming={!referenceClosed}
+                    fileRootUri="file:///D:/Local%20Projects/kite-code"
                     openFile={(path, line) =>
                       setFileOpens((opens) => [
                         ...opens,

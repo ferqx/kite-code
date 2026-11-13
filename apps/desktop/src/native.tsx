@@ -4608,6 +4608,10 @@ function NativeDesktopContent({
       />
     );
   };
+  const messageFileRootUri =
+    selection && directory?.storeId === selection.storeId && !directory.unavailable
+      ? directory.workspaces.find(({ id }) => id === selection.session.workspaceId)?.rootUri
+      : undefined;
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
     const message = messagesById.get(model.id);
     const firstPending = firstVisible && !firstSaved && model.id === firstSubmission.commandId;
@@ -4651,7 +4655,11 @@ function NativeDesktopContent({
       return (
         <>
           {model.text && (
-            <PromptMarkdown text={model.text} openFile={message ? openFile : undefined} />
+            <PromptMarkdown
+              text={model.text}
+              openFile={message ? openFile : undefined}
+              fileRootUri={messageFileRootUri}
+            />
           )}
           {(model.delivery === 'unknown' || model.delivery === 'failed') && (
             <p className="delivery-status" role="alert">
@@ -4722,6 +4730,7 @@ function NativeDesktopContent({
         )}
         canReadRestoredOrigin
         openFile={openFile}
+        fileRootUri={messageFileRootUri}
         onContent={(text) => {
           const key = JSON.stringify([replyDisplayScope, message.id]);
           const before = verifiedReplyBodies.current.get(key),

@@ -207,7 +207,6 @@
     }
     &:where(li.task-list-item > input[type="checkbox"]) {
       margin-inline-end: 0.5em;
-      vertical-align: -0.1em;
       accent-color: var(--color-primary, currentColor);
     }
 

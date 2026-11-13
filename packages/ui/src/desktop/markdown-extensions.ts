@@ -21,7 +21,7 @@ const textContent = (node: Node): string =>
 
 export type InlineFileReference = { path: string; line?: number };
 
-function inlineFileReference(text: string): InlineFileReference | undefined {
+export function inlineFileReference(text: string): InlineFileReference | undefined {
   const match =
     /^((?:[\p{L}\p{N}_.@+-]+\/)*[\p{L}\p{N}_.@+-]+\.[\p{L}\p{N}_-]+)(?::([1-9][0-9]*))?$/u.exec(
       text,

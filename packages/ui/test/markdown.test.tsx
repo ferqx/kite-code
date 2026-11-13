@@ -122,6 +122,7 @@ test('desktop file references preserve inline code where the reference cannot be
     `同一文件（\`${reference}\`）与 \`src/雪.ts:8\`、\`${plainPath}\`。`,
     `\`sessionId\` \`object.property\` \`src/file.ts:0\` \`../outside/file.ts:3\` \`https://example.com/file.ts:3\``,
     `[\`${reference}\`](https://example.com)\n\n\`\`\`\n${reference}\n\`\`\``,
+    '[审批继承](src/host.ts:802) [同目录](README.md:8) [中文](雪.ts:2) [危险链接](javascript:9)',
   ].join('\n\n');
   const tree = parseDesktopMarkdown(text);
   const saved = JSON.stringify(tree);
@@ -135,10 +136,24 @@ test('desktop file references preserve inline code where the reference cannot be
       const document = dom.window.document;
       expect(
         [...document.querySelectorAll('.file-reference')].map((node) => node.textContent),
-      ).toEqual(openFile ? [reference, 'src/雪.ts:8', plainPath] : []);
-      expect(document.querySelector('p')!.textContent).toBe(
-        `同一文件（${reference}）与 src/雪.ts:8、${plainPath}。`,
+      ).toEqual(
+        openFile
+          ? [
+              'collaboration-observation.test.ts（第 94 行）',
+              '雪.ts（第 8 行）',
+              'index.ts',
+              '审批继承（第 802 行）',
+              '同目录（第 8 行）',
+              '中文（第 2 行）',
+            ]
+          : [],
       );
+      expect(document.querySelector('p')!.textContent).toBe(
+        openFile
+          ? '同一文件（collaboration-observation.test.ts（第 94 行））与 雪.ts（第 8 行）、index.ts。'
+          : `同一文件（${reference}）与 src/雪.ts:8、${plainPath}。`,
+      );
+      expect(document.querySelector('a[href^="javascript:"]')).toBeNull();
       expect(document.querySelector('a > code')!.textContent).toBe(reference);
       expect(document.querySelector('pre > code')!.textContent).toBe(`${reference}\n`);
       expect(

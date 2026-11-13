@@ -157,7 +157,7 @@ try {
           for (const range of highlight) {
             const { at, origin } = paintRange(name, range);
             window.streamAudit.animations.push({
-              text: range.toString(),
+              text: range.startContainer.textContent!.slice(range.startOffset, range.endOffset),
               time: performance.now(),
               delay: at - Number(origin.style.getPropertyValue('--kite-reveal-time')),
             });
@@ -558,7 +558,8 @@ try {
         scrollTop: number;
       }[] = [];
       for (let frame = 0; frame < 40; frame++) {
-        await new Promise(requestAnimationFrame);
+        // ResizeObserver updates tail following after animation callbacks and before paint.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
         const body = document.querySelector<HTMLElement>('.agent-turn .typeset-chat');
         if (!body) continue;
         samples.push({

@@ -24,12 +24,9 @@ body {
   font-synthesis: style;
 }
 :root {
-  --font-ui:
-    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono:
-    "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+    ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --ui-text-size: 14px;
   --ui-icon-size: 14px;
   /* Compact selectors share metrics across triggers, menus, and body portals. */
@@ -99,7 +96,7 @@ body {
   --attention-background: color-mix(in srgb, var(--attention-foreground) 12%, var(--card));
   --permission-full-foreground: var(--attention-foreground);
   --success: #276749;
-  --info-foreground: #305f9c;
+  --info-foreground: #244f8a;
   --info-background: color-mix(in srgb, var(--info-foreground) 12%, var(--card));
   --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
   --important-foreground: #765299;
@@ -515,6 +512,7 @@ body {
   }
   .primary-navigation .button span {
     flex: 1;
+    line-height: 20px;
     text-align: left;
   }
   .nav-label {
@@ -562,12 +560,6 @@ body {
     font-size: inherit;
     line-height: 20px;
     font-weight: 400;
-  }
-  /* Align visible Geist/CJK glyphs with the icon, beyond the line box center. */
-  .primary-navigation .button > span,
-  .space-row > .nav-copy {
-    position: relative;
-    top: 0.5px;
   }
   .sidebar-sessions {
     display: flex;
@@ -2305,7 +2297,7 @@ body {
   --attention-background: color-mix(in srgb, var(--attention-foreground) 12%, var(--card));
   --permission-full-foreground: var(--attention-foreground);
   --success: #89c797;
-  --info-foreground: #8ab4e8;
+  --info-foreground: #6599e3;
   --info-background: color-mix(in srgb, var(--info-foreground) 12%, var(--card));
   --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
   --important-foreground: #bda4d8;
@@ -3032,9 +3024,11 @@ body {
   padding-inline-start: 0;
   list-style-type: none;
 }
-.kite-client .typeset-chat .task-list-item > input[type="checkbox"] {
+.kite-client .typeset-chat .task-list-item input[type="checkbox"] {
+  inline-size: 1em;
+  block-size: 1em;
   margin-inline: 0 0.6em;
-  vertical-align: -0.1em;
+  vertical-align: calc((1cap - 1em) / 2);
   accent-color: var(--foreground);
 }
 .kite-client .typeset-chat blockquote {
@@ -3171,8 +3165,24 @@ body {
 }
 .kite-client .typeset-chat .file-reference {
   color: var(--info-foreground);
-  text-decoration-line: underline;
+  text-decoration-line: none;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.65px;
   overflow-wrap: anywhere;
+}
+.kite-client .typeset-chat .file-reference:is(:hover, :focus-visible) {
+  text-decoration-color: color-mix(in srgb, currentColor 70%, transparent);
+}
+.kite-client .typeset-chat .file-reference-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: 0.28em;
+  vertical-align: calc((1cap - 1em) / 2);
+}
+.kite-client.directory-tooltip.markdown-file-tooltip {
+  font-size: 13px;
+  text-align: center;
 }
 .kite-client .typeset-chat .file-reference:focus-visible {
   outline: 2px solid currentColor;
@@ -3650,7 +3660,7 @@ body {
 .kite-client .tool-activity {
   color: var(--muted-foreground);
   font-size: var(--conversation-text-size);
-  font-family: var(--font-geist, inherit);
+  font-family: var(--font-ui);
 }
 .kite-client .tool-activity {
   margin: 8px 0;
@@ -4275,7 +4285,7 @@ body {
   grid-row: 1;
   width: 20px;
   height: 20px;
-  margin-top: 2px;
+  margin-block-start: calc((1lh - 20px) / 2);
 }
 .kite-client .alert:has(> svg) > :not(svg) {
   grid-column: 2;
@@ -4470,7 +4480,7 @@ body {
 .kite-client .context-compacted {
   margin: 8px 0;
   font-size: var(--conversation-text-size);
-  font-family: var(--font-geist, inherit);
+  font-family: var(--font-ui);
   line-height: 24px;
   color: var(--muted-foreground);
 }
@@ -6910,7 +6920,7 @@ body {
 }
 .kite-client .trajectory-code {
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 .kite-client .trajectory-row-secondary {
   margin-inline-start: 6px;

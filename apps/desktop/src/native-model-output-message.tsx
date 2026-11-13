@@ -14,9 +14,13 @@ const RetainedModelOutput = memo(ModelOutputMessage);
 /** Keep verified copy display with its cached DOM; current activity still gates every action. */
 export function NativeModelOutputMessage({
   openFile,
+  fileRootUri,
   autoRead = true,
   ...props
-}: ModelOutputMessageProps & { openFile?: (path: string, line?: number) => void }) {
+}: ModelOutputMessageProps & {
+  openFile?: (path: string, line?: number) => void;
+  fileRootUri?: string;
+}) {
   const diagnostics = useNativeDiagnostics();
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
@@ -58,9 +62,18 @@ export function NativeModelOutputMessage({
         suspended={props.suspended}
         hasVerifiedCandidate={props.verifiedSnapshot !== undefined}
         openFile={openFile}
+        fileRootUri={fileRootUri}
       />
     ),
-    [props.message, props.storeId, props.verifiedSnapshot, autoRead, props.suspended, openFile],
+    [
+      props.message,
+      props.storeId,
+      props.verifiedSnapshot,
+      autoRead,
+      props.suspended,
+      openFile,
+      fileRootUri,
+    ],
   );
   return (
     <RetainedModelOutput
@@ -86,6 +99,7 @@ function NativeMarkdownBody({
   suspended,
   hasVerifiedCandidate,
   openFile,
+  fileRootUri,
 }: {
   text: string;
   verified?: ModelOutputMessageProps['verifiedSnapshot'];
@@ -95,6 +109,7 @@ function NativeMarkdownBody({
   suspended?: boolean;
   hasVerifiedCandidate: boolean;
   openFile?: (path: string, line?: number) => void;
+  fileRootUri?: string;
 }) {
   const scope = JSON.stringify([
     storeId,
@@ -140,7 +155,12 @@ function NativeMarkdownBody({
   );
   if (message.role === 'user' && !message.agentMessage && !message.agentResult)
     return (
-      <PromptMarkdown key={scope} text={displayed} openFile={retained ? undefined : openFile} />
+      <PromptMarkdown
+        key={scope}
+        text={displayed}
+        openFile={retained ? undefined : openFile}
+        fileRootUri={fileRootUri}
+      />
     );
   return (
     <MessageContent
@@ -148,6 +168,7 @@ function NativeMarkdownBody({
       text={displayed}
       prepared={prepared}
       openFile={retained ? undefined : openFile}
+      fileRootUri={fileRootUri}
       streaming={
         !suspended && message.role === 'assistant' && (autoRead || !verified)
           ? message.status === 'incomplete'

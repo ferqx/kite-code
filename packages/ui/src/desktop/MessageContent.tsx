@@ -2,6 +2,7 @@ import {
   Alert02Icon,
   AlertCircleIcon,
   BulbIcon,
+  File01Icon,
   InformationCircleIcon,
   Notification01Icon,
 } from '@hugeicons/core-free-icons';
@@ -9,7 +10,6 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentPropsWithoutRef } from 'react';
 import {
   createContext,
-  Fragment,
   memo,
   type ReactNode,
   useCallback,
@@ -18,16 +18,22 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
-import Markdown, { type ExtraProps } from 'react-markdown';
+import Markdown, { defaultUrlTransform, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { useConversationReadActive } from '../conversation-activity';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { incrementalMarkdown, incrementalMarkdownComponents } from './incremental-markdown';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
-import { desktopMarkdownSemantics, type InlineFileReference } from './markdown-extensions';
+import {
+  desktopMarkdownSemantics,
+  type InlineFileReference,
+  inlineFileReference,
+} from './markdown-extensions';
 import { desktopKatexOptions, wrapMarkdownMath } from './markdown-math';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
@@ -96,6 +102,22 @@ function segmentLongTextNodes({ source }: { source: string }) {
 
 type OpenFile = (path: string, line?: number) => void;
 const FileLinkContext = createContext<OpenFile | undefined>(undefined);
+const FileReferenceRootContext = createContext<string | undefined>(undefined);
+
+function projectFilePath(rootUri: string | undefined, path: string): string {
+  if (!rootUri) return path;
+  try {
+    const root = new URL(rootUri);
+    if (root.protocol !== 'file:') return path;
+    const directory = decodeURIComponent(root.pathname).replace(/\/$/, '');
+    const joined = `${root.hostname ? `//${root.hostname}` : ''}${directory}/${path}`;
+    return root.hostname || /^\/[a-z]:\//i.test(joined)
+      ? joined.replace(/^\/(?=[a-z]:)/i, '').replaceAll('/', '\\')
+      : joined;
+  } catch {
+    return path;
+  }
+}
 
 const alertIcons = new Map([
   ['note', InformationCircleIcon],
@@ -154,25 +176,31 @@ function MarkdownLink({
         {children}
       </a>
     );
+  const path = decodeMarkdownHref(href);
+  const reference = inlineFileReference(path);
+  if (reference?.line !== undefined)
+    return <MarkdownFileLink {...reference}>{children}</MarkdownFileLink>;
   if (/^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
-  let path = href;
-  try {
-    path = decodeURIComponent(href);
-  } catch {
-    /* Native validation still applies. */
-  }
   return <MarkdownFileLink path={path}>{children}</MarkdownFileLink>;
+}
+
+function decodeMarkdownHref(href: string): string {
+  try {
+    return decodeURIComponent(href);
+  } catch {
+    return href;
+  }
 }
 
 function MarkdownFileLink({
   path,
   line,
-  reference,
+  inlineCode,
   children,
 }: {
   path: string;
   line?: number;
-  reference?: boolean;
+  inlineCode?: boolean;
   children: ReactNode;
 }) {
   const openFile = useContext(FileLinkContext);
@@ -180,31 +208,13 @@ function MarkdownFileLink({
   const activate = () => {
     if (readActive) openFile?.(path, line);
   };
-  if (reference) {
-    if (!openFile) return <code>{children}</code>;
-    const segments = typeof children === 'string' ? children.match(/[^/]+\/?/g) : undefined;
+  if (inlineCode || line !== undefined) {
+    if (!openFile) return inlineCode ? <code>{children}</code> : <span>{children}</span>;
+    const label = inlineCode ? path.split('/').at(-1) : children;
     return (
-      <a
-        className="file-link file-reference"
-        role="link"
-        tabIndex={0}
-        aria-disabled={!readActive || undefined}
-        // biome-ignore lint/a11y/useValidAnchor: The host resolves the file on activation; there is no browser href.
-        onClick={activate}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.repeat) {
-            event.preventDefault();
-            activate();
-          }
-        }}
-      >
-        {segments?.map((segment, index) => (
-          <Fragment key={index}>
-            {index > 0 && <wbr />}
-            {segment}
-          </Fragment>
-        )) ?? children}
-      </a>
+      <MarkdownReference path={path} line={line} readActive={readActive} activate={activate}>
+        {label}
+      </MarkdownReference>
     );
   }
   return (
@@ -219,6 +229,51 @@ function MarkdownFileLink({
   );
 }
 
+function MarkdownReference({
+  path,
+  line,
+  readActive,
+  activate,
+  children,
+}: InlineFileReference & { readActive: boolean; activate: () => void; children: ReactNode }) {
+  const rootUri = useContext(FileReferenceRootContext);
+  const [open, setOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (!readActive) setOpen(false);
+  }, [readActive]);
+  return (
+    <Tooltip open={readActive && open} onOpenChange={setOpen} disableHoverableContent>
+      <TooltipTrigger asChild>
+        <a
+          className="file-link file-reference"
+          role="link"
+          tabIndex={0}
+          aria-disabled={!readActive || undefined}
+          // biome-ignore lint/a11y/useValidAnchor: The host resolves the file on activation; there is no browser href.
+          onClick={activate}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.repeat) {
+              event.preventDefault();
+              activate();
+            }
+          }}
+        >
+          <HugeiconsIcon icon={File01Icon} className="file-reference-icon" aria-hidden="true" />
+          {children}
+          {line === undefined ? null : `（第 ${line} 行）`}
+        </a>
+      </TooltipTrigger>
+      <TooltipContent
+        className="kite-client directory-tooltip markdown-file-tooltip"
+        sideOffset={5}
+      >
+        {projectFilePath(rootUri, path)}
+        {line === undefined ? null : `（第 ${line} 行）`}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function MarkdownInlineCode({
   children,
   node,
@@ -227,7 +282,7 @@ function MarkdownInlineCode({
   const reference = (node?.data as { fileReference?: InlineFileReference } | undefined)
     ?.fileReference;
   return reference ? (
-    <MarkdownFileLink {...reference} reference>
+    <MarkdownFileLink {...reference} inlineCode>
       {children}
     </MarkdownFileLink>
   ) : (
@@ -251,12 +306,14 @@ function MarkdownTable({ children }: { children?: ReactNode } & ExtraProps) {
 export const MessageContent = memo(function MessageContent({
   text,
   openFile,
+  fileRootUri,
   prepared,
   streaming,
   streamingReveal = true,
 }: {
   text: string;
   openFile?: OpenFile;
+  fileRootUri?: string;
   prepared?: PreparedDesktopMarkdown;
   /** true: live preview; false: its settled preview; omitted: static or explicit full-body read. */
   streaming?: boolean;
@@ -278,16 +335,29 @@ export const MessageContent = memo(function MessageContent({
   return useMemo(
     () => (
       <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
-        <MarkdownContent
-          text={text}
-          prepared={prepared}
-          streaming={streaming}
-          streamingReveal={streamingReveal}
-          readActive={readActive}
-        />
+        <FileReferenceRootContext.Provider value={fileRootUri}>
+          <TooltipProvider delayDuration={300}>
+            <MarkdownContent
+              text={text}
+              prepared={prepared}
+              streaming={streaming}
+              streamingReveal={streamingReveal}
+              readActive={readActive}
+            />
+          </TooltipProvider>
+        </FileReferenceRootContext.Provider>
       </FileLinkContext.Provider>
     ),
-    [text, prepared, streaming, streamingReveal, readActive, openFile, dispatchOpenFile],
+    [
+      text,
+      prepared,
+      streaming,
+      streamingReveal,
+      readActive,
+      openFile,
+      dispatchOpenFile,
+      fileRootUri,
+    ],
   );
 });
 
@@ -360,6 +430,11 @@ const MarkdownDocument = memo(
           [incrementalMarkdown, { source: text, revealAfter }],
         ]}
         skipHtml
+        urlTransform={(url, key) =>
+          key === 'href' && inlineFileReference(decodeMarkdownHref(url))?.line !== undefined
+            ? url
+            : defaultUrlTransform(url)
+        }
         components={{
           ...incrementalMarkdownComponents,
           a: MarkdownLink,

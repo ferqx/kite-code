@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { chromium, type Locator } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 import { build } from 'vite';
 import { promptText } from './prompt-editor-text.fixture';
 import type {} from './prompt-send-browser.fixture';
@@ -120,6 +120,40 @@ async function captureMarkdown(locator: Locator) {
     };
   });
 }
+async function verifyMarkdownFonts(page: Page) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send('DOM.enable');
+    await session.send('CSS.enable');
+    const { root } = await session.send('DOM.getDocument');
+    const fonts = async (selector: string) => {
+      const { nodeId } = await session.send('DOM.querySelector', { nodeId: root.nodeId, selector });
+      const { fonts } = await session.send('CSS.getPlatformFontsForNode', { nodeId });
+      return fonts.filter(({ glyphCount }) => glyphCount > 0).map(({ familyName }) => familyName);
+    };
+    const paragraph = '.message.assistant .typeset-chat > p';
+    const code = `${paragraph} code, .message.assistant .typeset-chat li code`;
+    const proseFonts = await fonts(paragraph);
+    const codeFonts = await fonts(code);
+    assert.ok(
+      proseFonts.some((family) => family === 'Segoe UI'),
+      JSON.stringify(proseFonts),
+    );
+    assert.ok(
+      proseFonts.some((family) => /YaHei|SimSun/i.test(family)),
+      JSON.stringify(proseFonts),
+    );
+    assert.ok(
+      codeFonts.some((family) => family === 'Consolas'),
+      JSON.stringify(codeFonts),
+    );
+    return { proseFonts, codeFonts };
+  } finally {
+    await session.detach();
+  }
+}
+
 async function verifyMarkdownEdges(theme: 'light' | 'dark', width: number) {
   const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: theme });
   await page.addInitScript((theme) => localStorage.setItem('kite.desktop.theme', theme), theme);
@@ -168,10 +202,10 @@ async function verifyMarkdownEdges(theme: 'light' | 'dark', width: number) {
       assert.equal(edges.bottomGap, 8, source);
       if (edges.heading) {
         const followed = source.endsWith('后续正文');
-        assert.equal(edges.heading.marginBottom, followed ? '16px' : '0px', source);
+        assert.equal(edges.heading.marginBottom, followed ? '9px' : '0px', source);
         assert.equal(edges.heading.borderBottom, followed ? '1px' : '0px', source);
         assert.equal(Number.parseFloat(edges.heading.paddingBottom) > 0, followed, source);
-        assert.equal(edges.heading.marginTop, source.startsWith('前文') ? '24px' : '0px', source);
+        assert.equal(edges.heading.marginTop, source.startsWith('前文') ? '18px' : '0px', source);
       }
       if (source === '# 你好') {
         const sent = await captureMarkdown(markdown);
@@ -190,6 +224,190 @@ async function verifyMarkdownEdges(theme: 'light' | 'dark', width: number) {
         });
       results.push({ source, ...edges });
     }
+    await page.evaluate(() => sessionStorage.clear());
+    await page.reload();
+    const compactSource = [
+      '# 等待 Agent 事件',
+      '核查 Agent 输出（源码：[等待循环](packages/agent/src/extensions/host.ts:1157) 与 `packages/agent/src/extensions/task/index.ts`）',
+      '**默认等待时长**',
+      '- 传入 `work_refs` 且未传 `wait_ms` 时，默认最多等待 30 秒。\n- 未传 `work_refs` 且未传 `wait_ms` 时，立即返回快照。\n- 显式 `wait_ms: 0` 始终返回快照。',
+      '**实际阻塞上限**',
+      '1. `observationEnd = now + wait_ms`\n2. `deadline = min(observationEnd, run.deadlineAt)`，取本次观察结束时间与 Run 截止时间中的较早值。',
+      '**会提前返回的情况**',
+      '- 邮箱里有匹配事件 → `reason: events`。\n- 目标都已进入 `succeeded/failed/cancelled/outcome_unknown` → `reason: completed`。\n- 到 `deadline` → `reason: timeout`。',
+      '| 条件 | 返回原因 |\n| --- | --- |\n| 匹配事件 | `events` |\n| 到达截止时间 | `timeout` |',
+      '> 引用保持常规字重。',
+      '```text\nreason: events\n```',
+    ].join('\n\n');
+    const input = page.locator('textarea.prompt-editor');
+    await input.fill(compactSource);
+    await input.press('Enter');
+    for (const name of ['确认受理', '保存用户消息', '完成回复'])
+      await page.getByRole('button', { name, exact: true }).click();
+    const reply = page.locator('.message.assistant .typeset-chat');
+    await reply.getByText('会提前返回的情况', { exact: true }).waitFor();
+    const fontStyles = await reply.evaluate((element) => ({
+      prose: getComputedStyle(element.querySelector('p')!).fontFamily,
+      heading: getComputedStyle(element.querySelector('h1')!).fontFamily,
+      code: getComputedStyle(element.querySelector('code')!).fontFamily,
+    }));
+    const sans = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+    assert.equal(fontStyles.prose, sans);
+    assert.equal(fontStyles.heading, sans);
+    assert.match(fontStyles.code, /^ui-monospace,.*Consolas/i);
+    const surfaceFonts = await page.evaluate(() => {
+      const selectors = ['body', '.kite-client', '.sidebar', 'textarea.prompt-editor'];
+      return selectors.map(
+        (selector) => getComputedStyle(document.querySelector(selector)!).fontFamily,
+      );
+    });
+    assert.deepEqual(surfaceFonts, [sans, sans, sans, sans]);
+    const fontGlyphs = process.platform === 'win32' ? await verifyMarkdownFonts(page) : undefined;
+    results.push({ fontStyles, fontGlyphs });
+    await reply.screenshot({ path: path.join(artifact, `${theme}-${width}-compact-markdown.png`) });
+    const spacing = await reply.evaluate((element) => {
+      const list = element.querySelector('ul')!;
+      const [first, second] = list.querySelectorAll('li');
+      const typography = (selector: string) => {
+        const { fontSize, fontWeight, lineHeight } = getComputedStyle(
+          element.querySelector(selector)!,
+        );
+        return [fontSize, fontWeight, Math.round(parseFloat(lineHeight) * 100) / 100];
+      };
+      return {
+        prose: typography('p'),
+        heading: typography('h1'),
+        label: typography('strong'),
+        inlineCode: typography('code')[0],
+        codeBlock: typography('pre'),
+        quote: typography('blockquote p'),
+        table: typography('td'),
+        block:
+          list.getBoundingClientRect().top -
+          list.previousElementSibling!.getBoundingClientRect().bottom,
+        item: second!.getBoundingClientRect().top - first!.getBoundingClientRect().bottom,
+        fits: element.scrollWidth <= element.clientWidth,
+      };
+    });
+    assert.deepEqual(spacing, {
+      prose: ['14px', '430', 22.75],
+      heading: ['21px', '600', 28],
+      label: ['14px', '600', 22.75],
+      inlineCode: '12.88px',
+      codeBlock: ['12px', '400', 20],
+      quote: ['14px', '400', 22.75],
+      table: ['14px', '430', 22.75],
+      block: 12,
+      item: 2,
+      fits: true,
+    });
+    const table = reply.getByRole('region', { name: '表格' });
+    const tableStyle = await table.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        frame: [style.borderTop, style.borderRight, style.borderBottom, style.borderLeft],
+        radius: parseFloat(style.borderTopLeftRadius),
+        column: getComputedStyle(element.querySelector('th + th')!).borderInlineStartWidth,
+        headerRule: getComputedStyle(element.querySelector('thead th')!).borderBlockEnd,
+        rowRule: getComputedStyle(element.querySelector('tbody tr + tr td')!).borderBlockStart,
+        overflow: style.overflowX,
+      };
+    });
+    assert.ok(tableStyle.frame.every((edge) => edge.startsWith('1px solid ')));
+    assert.ok(tableStyle.radius > 0);
+    assert.equal(tableStyle.column, '0px');
+    assert.ok(tableStyle.headerRule.startsWith('1px solid '));
+    assert.equal(tableStyle.headerRule, tableStyle.rowRule);
+    assert.equal(tableStyle.overflow, 'auto');
+
+    const sidebarRows = page.locator('.primary-navigation .button, .space-row');
+    const sidebarAlignment = await sidebarRows.evaluateAll((rows) =>
+      rows.map((row) => {
+        const label = row.querySelector('.nav-copy strong') ?? row.querySelector(':scope > span')!;
+        const icon = row.querySelector(':scope > svg')!;
+        const center = ({ top, height }: DOMRect) => top + height / 2;
+        return {
+          label: label.textContent,
+          offset: center(label.getBoundingClientRect()) - center(icon.getBoundingClientRect()),
+        };
+      }),
+    );
+    assert.deepEqual(sidebarAlignment, [
+      { label: '新对话', offset: 0 },
+      { label: '定时任务', offset: 0 },
+      { label: 'Workspace', offset: 0 },
+    ]);
+    const space = page.locator('.space-row');
+    await space.click();
+    assert.equal(await space.getAttribute('aria-expanded'), 'false');
+    await space.click();
+    assert.equal(await space.getAttribute('aria-expanded'), 'true');
+    await page.getByRole('button', { name: '新对话', exact: true }).hover();
+    await page.locator('.client-sidebar-panel').screenshot({
+      path: path.join(artifact, `${theme}-${width}-sidebar-alignment.png`),
+    });
+
+    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+    const settings = page.getByRole('menuitem', { name: '设置', exact: true });
+    assert.equal(await settings.evaluate((node) => getComputedStyle(node).fontFamily), sans);
+    await settings.click();
+    const settingsHeading = page.locator('.desktop-settings-dialog .settings-page-heading').first();
+    await settingsHeading.waitFor();
+    assert.equal(await settingsHeading.evaluate((node) => getComputedStyle(node).fontFamily), sans);
+    const settingsNavigation = page.getByRole('navigation', { name: '设置分类', exact: true });
+    const alignment = await settingsNavigation.getByRole('button').evaluateAll((buttons) => {
+      const center = ({ y, height }: DOMRect) => y + height / 2;
+      return buttons.map((button) => ({
+        label: button.textContent?.trim(),
+        offset:
+          center(button.querySelector(':scope > svg')!.getBoundingClientRect()) -
+          center(button.querySelector(':scope > span')!.getBoundingClientRect()),
+      }));
+    });
+    assert.ok(alignment.length > 0);
+    assert.ok(
+      alignment.every(({ offset }) => Math.abs(offset) <= 1),
+      JSON.stringify(alignment),
+    );
+    results.push({ alignment });
+    await page.screenshot({
+      path: path.join(artifact, `${theme}-${width}-system-font-settings.png`),
+    });
+    await page.getByRole('button', { name: '返回应用', exact: true }).click();
+    await reply.getByText('会提前返回的情况', { exact: true }).waitFor();
+
+    await page.evaluate(() => sessionStorage.clear());
+    await page.reload();
+    const headers = Array.from({ length: 12 }, (_, index) => `FIELD_${index + 1}`);
+    const row = (cells: string[]) => `| ${cells.join(' | ')} |`;
+    const wideSource = [row(headers), row(headers.map(() => '---')), row(headers)].join('\n');
+    await input.fill(wideSource);
+    await input.press('Enter');
+    for (const name of ['确认受理', '保存用户消息', '完成回复'])
+      await page.getByRole('button', { name, exact: true }).click();
+    await reply.getByRole('table').waitFor();
+    await table.focus();
+    const wideLayout = await table.evaluate((element) => ({
+      client: element.clientWidth,
+      scroll: element.scrollWidth,
+      focused: document.activeElement === element,
+      readable: [...element.querySelectorAll('th')].every((cell) => {
+        const style = getComputedStyle(cell);
+        return cell.getBoundingClientRect().height <= parseFloat(style.lineHeight) + 15;
+      }),
+    }));
+    assert.ok(
+      wideLayout.scroll > wideLayout.client && wideLayout.focused && wideLayout.readable,
+      JSON.stringify(wideLayout),
+    );
+    await table.press('ArrowRight');
+    await page.waitForFunction(() => {
+      const table = document.querySelector('.message.assistant .markdown-table-scroll');
+      return !!table && table === document.activeElement && table.scrollLeft > 0;
+    });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await table.screenshot({ path: path.join(artifact, `${theme}-${width}-wide-table.png`) });
+
     await page.evaluate(() => sessionStorage.clear());
     await page.reload();
     const source = `# 长消息\n\n${'需要完整保留的正文。\n\n'.repeat(25)}`;

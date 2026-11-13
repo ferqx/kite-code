@@ -15,20 +15,87 @@ const output = path.join(artifact, 'dist');
 async function checkFileReference(page: import('playwright').Page, width: number) {
   const text = 'packages/agent/test/isolated/business/task/collaboration-observation.test.ts:94';
   const region = page.getByRole('region', { name: '文件引用预览' });
-  const link = region.getByRole('link', { name: text, exact: true });
+  const link = region.getByRole('link', {
+    name: 'collaboration-observation.test.ts（第 94 行）',
+    exact: true,
+  });
   const plainPath = 'packages/agent/src/extensions/host.ts';
-  const plainLink = region.getByRole('link', { name: plainPath, exact: true });
+  const plainLink = region.getByRole('link', { name: 'host.ts', exact: true });
+  const namedLink = region.getByRole('link', { name: '审批继承（第 802 行）', exact: true });
+  const noteTitle = page.locator('.markdown-alert[data-alert="note"] .markdown-alert-title');
+  const tooltip = page.getByRole('tooltip');
   const calls = page.getByLabel('文件打开记录');
+  const iconOffset = (reference: typeof link) =>
+    reference.evaluate((node) => {
+      const icon = node.querySelector('.file-reference-icon')!.getBoundingClientRect();
+      const marker = document.createElement('span');
+      marker.style.cssText = 'display:inline-block;width:0;height:1cap;vertical-align:baseline';
+      node.prepend(marker);
+      const { top, height } = marker.getBoundingClientRect();
+      marker.remove();
+      return icon.top + icon.height / 2 - (top + height / 2);
+    });
+  const tooltipLayout = () =>
+    tooltip.evaluate((node) => {
+      const { fontFamily, fontSize } = getComputedStyle(node);
+      const { left, right } = node.getBoundingClientRect();
+      return {
+        fontFamily,
+        fontSize,
+        fits: left >= 0 && right <= innerWidth && node.scrollWidth <= node.clientWidth,
+      };
+    });
+  const expectedTooltipLayout = {
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
+    fontSize: '13px',
+    fits: true,
+  };
+  const checkUnderline = () =>
+    link.evaluate((node) => {
+      const {
+        textDecorationLine,
+        textDecorationStyle,
+        textDecorationThickness,
+        textDecorationColor,
+      } = getComputedStyle(node);
+      return {
+        line: textDecorationLine,
+        style: textDecorationStyle,
+        thickness: textDecorationThickness,
+        softened: textDecorationColor !== getComputedStyle(node).color,
+      };
+    });
+  const underline = { line: 'underline', style: 'dashed', thickness: '0.65px', softened: true };
   const visibility = async () =>
     link.evaluate((node) => {
-      const { color, textDecorationLine } = getComputedStyle(node);
+      const { color, textDecorationLine, textDecorationStyle } = getComputedStyle(node);
       const paragraph = node.closest('p')!;
       const bounds = paragraph.getBoundingClientRect();
       const fits = [...node.getClientRects()].every((rect) => rect.right <= bounds.right + 1);
+      const colors = document.createElement('canvas').getContext('2d')!;
+      const luminance = (value: string) => {
+        colors.fillStyle = value;
+        const hex = colors.fillStyle.slice(1);
+        return [0.2126, 0.7152, 0.0722].reduce((total, weight, index) => {
+          const channel = parseInt(hex.slice(index * 2, index * 2 + 2), 16) / 255;
+          const linear = channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+          return total + weight * linear;
+        }, 0);
+      };
+      const surfaces = ['--background', '--composer-background'].map((property) =>
+        luminance(getComputedStyle(node).getPropertyValue(property).trim()),
+      );
+      const foreground = luminance(color);
+      const readable = surfaces.every(
+        (surface) =>
+          (Math.max(foreground, surface) + 0.05) / (Math.min(foreground, surface) + 0.05) >= 4.5,
+      );
       return {
         color,
         textDecorationLine,
+        textDecorationStyle,
         fits,
+        readable,
         paragraphAlign: getComputedStyle(paragraph).textAlign,
       };
     });
@@ -40,16 +107,44 @@ async function checkFileReference(page: import('playwright').Page, width: number
   const original = await link.elementHandle();
   assert.match((await region.textContent()) ?? '', /^同一文件（.*）与 .*waitMs: 0。$/);
   assert.deepEqual(await visibility(), {
-    color: 'rgb(48, 95, 156)',
-    textDecorationLine: 'underline',
+    color: 'rgb(36, 79, 138)',
+    textDecorationLine: 'none',
+    textDecorationStyle: 'dashed',
     fits: true,
+    readable: true,
     paragraphAlign: 'start',
   });
+  assert.equal(
+    await noteTitle.evaluate((node) => getComputedStyle(node).color),
+    'rgb(36, 79, 138)',
+  );
+  for (const reference of [link, namedLink]) {
+    const offset = await iconOffset(reference);
+    assert.ok(Math.abs(offset) <= 1, `file icon offset ${offset}px`);
+  }
   assert.equal(await calls.textContent(), '[]');
+  await link.hover();
+  await tooltip.waitFor();
+  assert.deepEqual(await tooltipLayout(), expectedTooltipLayout);
+  assert.equal(
+    await tooltip.textContent(),
+    `D:\\Local Projects\\kite-code\\${text.split(':')[0]!.replaceAll('/', '\\')}（第 94 行）`,
+  );
+  assert.deepEqual(await checkUnderline(), underline);
+  await page.screenshot({ path: path.join(artifact, `file-reference-tooltip-${width}.png`) });
+  await page.mouse.move(0, 0);
+  await tooltip.waitFor({ state: 'hidden' });
+  assert.equal((await visibility()).textDecorationLine, 'none');
+  await page.keyboard.press('Shift');
   await link.focus();
+  await tooltip.waitFor();
+  assert.deepEqual(await checkUnderline(), underline);
+  await link.press('Escape');
+  await tooltip.waitFor({ state: 'hidden' });
   await link.press('Enter');
   assert.equal(await calls.textContent(), JSON.stringify([text]));
   await page.getByRole('button', { name: '暂停读取', exact: true }).click();
+  await tooltip.waitFor({ state: 'hidden' });
   assert.equal(await link.getAttribute('aria-disabled'), 'true');
   await link.click({ force: true });
   assert.equal(await calls.textContent(), JSON.stringify([text]));
@@ -63,14 +158,36 @@ async function checkFileReference(page: import('playwright').Page, width: number
   assert.equal(await calls.textContent(), JSON.stringify([text, text]));
   await plainLink.click();
   assert.equal(await calls.textContent(), JSON.stringify([text, text, plainPath]));
+  await namedLink.click();
+  assert.equal(
+    await calls.textContent(),
+    JSON.stringify([text, text, plainPath, `${plainPath}:802`]),
+  );
+  await page.mouse.move(0, 0);
   await page.getByRole('button', { name: '切换主题', exact: true }).click();
   assert.deepEqual(await visibility(), {
-    color: 'rgb(138, 180, 232)',
-    textDecorationLine: 'underline',
+    color: 'rgb(101, 153, 227)',
+    textDecorationLine: 'none',
+    textDecorationStyle: 'dashed',
     fits: true,
+    readable: true,
     paragraphAlign: 'start',
   });
+  assert.equal(
+    await noteTitle.evaluate((node) => getComputedStyle(node).color),
+    'rgb(101, 153, 227)',
+  );
   await region.screenshot({ path: path.join(artifact, `file-reference-dark-${width}.png`) });
+  await link.hover();
+  await tooltip.waitFor();
+  assert.deepEqual(await tooltipLayout(), expectedTooltipLayout);
+  assert.deepEqual(await checkUnderline(), underline);
+  await page.screenshot({ path: path.join(artifact, `file-reference-hover-dark-${width}.png`) });
+  await tooltip.screenshot({
+    path: path.join(artifact, `file-reference-tooltip-dark-${width}.png`),
+  });
+  await page.mouse.move(0, 0);
+  await tooltip.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '切换主题', exact: true }).click();
   await region.screenshot({ path: path.join(artifact, `file-reference-light-${width}.png`) });
 }
@@ -95,14 +212,34 @@ async function checkTypography(page: import('playwright').Page) {
     const italicCode = await fontsFor('.typeset-chat em code');
     const shell = await fontsFor('[data-typography-shell]');
     const heading = await fontsFor('[data-typography-heading]');
-    assert.ok(italic.some((font) => font.postScriptName === 'Geist-Italic'));
-    assert.ok(italicCode.some((font) => font.postScriptName === 'Geist-Mono-Italic'));
-    assert.ok(shell.every((font) => font.familyName === 'Geist Mono'));
+    const prose = '.typeset-chat > p, [data-typography-body], [data-typography-heading]';
+    const mono = '.typeset-chat em code, [data-typography-shell]';
+    const fontFamilies = (selector: string) =>
+      page
+        .locator(selector)
+        .evaluateAll((nodes) => [
+          ...new Set(nodes.map((node) => getComputedStyle(node).fontFamily)),
+        ]);
+    const uiStack = await page
+      .locator('body')
+      .evaluate((node) => getComputedStyle(node).fontFamily);
+    assert.deepEqual(await fontFamilies(prose), [uiStack]);
+    const monoStack = await fontFamilies(mono);
+    assert.equal(monoStack.length, 1);
+    assert.match(monoStack[0]!, /^ui-monospace,/);
+    if (process.platform === 'win32') {
+      assert.ok(
+        italic.some((font) => font.familyName === 'Segoe UI'),
+        JSON.stringify(italic),
+      );
+      assert.ok(italicCode.some((font) => font.familyName === 'Consolas'));
+      assert.ok(shell.some((font) => font.familyName === 'Consolas'));
+    }
     assert.equal(
       await page
         .locator('[data-typography-heading]')
         .evaluate((node) => getComputedStyle(node).fontWeight),
-      '600',
+      '500',
     );
     assert.equal(
       await page
@@ -110,8 +247,6 @@ async function checkTypography(page: import('playwright').Page) {
         .evaluate((node) => getComputedStyle(node).fontWeight),
       '400',
     );
-    if (process.platform === 'win32')
-      assert.ok(heading.some((font) => font.postScriptName === 'MicrosoftYaHeiUI-Bold'));
     const chinese = page.locator('.typeset-chat em').filter({ hasText: '中文斜体' }).first();
     const italicImage = await chinese.screenshot();
     await chinese.evaluate((node) => {
@@ -129,6 +264,41 @@ async function checkTypography(page: import('playwright').Page) {
   } finally {
     await session.detach();
   }
+}
+
+async function checkTextIconAlignment(page: import('playwright').Page) {
+  const tasks = page.locator('.task-list-item input[type="checkbox"]');
+  await tasks.first().waitFor();
+  const checkboxes = await tasks.evaluateAll((inputs) =>
+    inputs.map((input) => {
+      const checkbox = (input as HTMLInputElement).getBoundingClientRect();
+      const marker = document.createElement('span');
+      marker.style.cssText = 'display:inline-block;width:0;height:1cap;vertical-align:baseline';
+      input.before(marker);
+      const { top, height } = marker.getBoundingClientRect();
+      marker.remove();
+      return {
+        disabled: (input as HTMLInputElement).disabled,
+        offset: checkbox.top + checkbox.height / 2 - top - height / 2,
+      };
+    }),
+  );
+  assert.equal(checkboxes.length, 2);
+  assert.ok(
+    checkboxes.every(({ disabled, offset }) => disabled && Math.abs(offset) <= 1),
+    JSON.stringify(checkboxes),
+  );
+
+  const alert = page.getByRole('alert', { name: '本轮异常结束' });
+  const alertOffset = await alert.evaluate((node) => {
+    const { top, height } = node.querySelector('svg')!.getBoundingClientRect();
+    const text = node.querySelector('[data-slot="alert-description"]')!;
+    const firstLineCenter =
+      text.getBoundingClientRect().top + parseFloat(getComputedStyle(text).lineHeight) / 2;
+    return top + height / 2 - firstLineCenter;
+  });
+  assert.ok(Math.abs(alertOffset) <= 1, `alert icon offset ${alertOffset}px`);
+  return { checkboxes, alertOffset };
 }
 async function checkDiagramSurface(page: import('playwright').Page) {
   const surface = await page.evaluate(() => {
@@ -361,11 +531,13 @@ if (process.argv.includes('--serve')) {
           external.push(request.url());
       });
       await page.goto(server.url.toString());
+      const alignment = await checkTextIconAlignment(page);
       if (process.argv.includes('--file-references-only')) {
+        const typography = await checkTypography(page);
         await checkFileReference(page, width);
         assert.deepEqual(external, []);
         assert.deepEqual(errors, []);
-        cases.push({ width, errors, external });
+        cases.push({ width, errors, external, typography, alignment });
         await page.close();
         continue;
       }

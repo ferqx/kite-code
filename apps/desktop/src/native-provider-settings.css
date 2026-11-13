@@ -60,7 +60,7 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-mark-compatible {
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 16px;
   letter-spacing: -2px;
   padding-right: 2px;
@@ -92,27 +92,6 @@
   .provider-status-dot {
   background: var(--success);
   opacity: 1;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-directory-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 18px 0 0;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.6;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-directory-note
-  svg {
-  margin-top: 1px;
-  width: 14px;
-  height: 14px;
 }
 .kite-client .desktop-settings .provider-panel-content {
   container: provider-editor / inline-size;
@@ -261,7 +240,7 @@
   textarea {
   resize: vertical;
   min-height: 80px;
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono);
   font-size: var(--ui-text-size);
 }
 .kite-client
@@ -581,7 +560,7 @@
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .catalogue-settings .catalogue-identifier {
-  font-family: var(--font-geist-mono), monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--muted-foreground);
 }
