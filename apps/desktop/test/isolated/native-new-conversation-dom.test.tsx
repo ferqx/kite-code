@@ -2919,7 +2919,7 @@ test('Session switches highlight the pending target without reviving the retired
 });
 
 for (const withHistory of [true, false]) {
-  test(`a first Session selection waits for confirmed ${withHistory ? 'history' : 'empty history'} before showing content or an empty state`, async () => {
+  test(`a first Session selection waits for confirmed ${withHistory ? 'history' : 'empty history'} before showing the conversation and composer`, async () => {
     const f = fixture(true, true, 'accept_edits', {
       withoutSelection: true,
       messages: withHistory
@@ -2963,14 +2963,14 @@ for (const withHistory of [true, false]) {
       await f.releaseHistory();
       expect(f.host.querySelector('.conversation-loading')).toBeNull();
       expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+      expect(f.host.querySelector('.welcome')).toBeNull();
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved A');
       if (withHistory) {
-        expect(f.host.querySelector('.welcome')).toBeNull();
         expect(f.host.querySelector('.message.user')?.textContent).toContain(
           'The original saved conversation',
         );
       } else {
         expect(f.host.querySelector('.message.user')).toBeNull();
-        expect(f.host.querySelector('.welcome')).not.toBeNull();
       }
       expect(f.calls.filter((call) => call.method === 'select')).toHaveLength(1);
       expect(
@@ -5515,16 +5515,18 @@ test.each([
   const reads: string[] = [];
   const closes: string[] = [];
   const delayedRead = Promise.withResolvers<void>();
+  const expectLoadingOriginal = () => {
+    expect(f.host.querySelector('.conversation-loading')).not.toBeNull();
+    expect(f.host.body.textContent).not.toContain('从一个想法开始');
+    expect(f.host.querySelector('.message.user')).toBeNull();
+    expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
+  };
   bridge.request = async (input) => {
     if (input.method === 'caller.body') {
       f.calls.push(input);
       reads.push(input.readId);
-      if (readPath !== 'steady' && reads.length === 1) {
-        expect(f.host.querySelector('.message.user')).toBeNull();
-        expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
-        throw Error('temporary_original_body_read');
-      }
-      if (readPath !== 'steady' && reads.length === 2) await delayedRead.promise;
+      if (readPath !== 'steady' && reads.length === 1) throw Error('temporary_original_body_read');
+      if (reads.length === (readPath === 'steady' ? 1 : 2)) await delayedRead.promise;
       return body.read(input);
     }
     if (input.method === 'caller.close') {
@@ -5534,7 +5536,7 @@ test.each([
     if (input.method === 'caller.lookup') {
       f.calls.push(input);
       expect(input.commandId).toBe(commandId);
-      record.rejectionReason = 'model_authentication_required';
+      record.rejectionReason = 'credential_unavailable';
       return { ...record };
     }
     const value = await request(input);
@@ -5547,24 +5549,28 @@ test.each([
     await f.click('Other B');
     expect(f.calls.some((call) => call.method === 'caller.lookup')).toBe(false);
     await f.click('Original A');
+    expectLoadingOriginal();
+    await f.until(() => reads.length === (readPath === 'steady' ? 1 : 2));
+    expectLoadingOriginal();
     if (readPath !== 'steady') {
-      await f.until(() => reads.length === 2);
       expect(closes).toEqual(reads.slice(0, 1));
+    }
+    if (readPath === 'retry while switching') {
+      await f.click('Other B');
+      expect(closes).toEqual(reads);
+      await act(async () => delayedRead.resolve());
       expect(f.host.querySelector('.message.user')).toBeNull();
       expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
-      if (readPath === 'retry while switching') {
-        await f.click('Other B');
-        expect(closes).toEqual(reads);
-        await act(async () => delayedRead.resolve());
-        expect(f.host.querySelector('.message.user')).toBeNull();
-        expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
-        expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
-        await f.click('Original A');
-      } else {
-        await act(async () => delayedRead.resolve());
-      }
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+      await f.click('Original A');
+      expectLoadingOriginal();
+    } else {
+      await act(async () => delayedRead.resolve());
     }
-    await f.until(() => !!f.host.querySelector('.turn-failure[aria-label="无认证"]'));
+    const failureSelector = '.turn-failure[aria-label="无法读取模型凭据"]';
+    await f.until(() => !!f.host.querySelector(failureSelector));
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    expect(f.host.body.textContent).not.toContain('从一个想法开始');
     expect(reads).toHaveLength(readPath === 'steady' ? 1 : readPath === 'retry' ? 2 : 3);
     expect(new Set(reads).size).toBe(reads.length);
     expect(closes).toEqual(reads);
@@ -5575,12 +5581,12 @@ test.each([
     expect(f.host.querySelectorAll('.turn-failure[role="alert"]')).toHaveLength(1);
     expect(f.host.querySelector('.turn-failure')?.textContent).toContain('原消息已保留');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved A');
-    expect(f.host.body.textContent).not.toContain('model_authentication_required');
+    expect(f.host.body.textContent).not.toContain('credential_unavailable');
     await f.click('Other B');
     expect(f.host.querySelector('.turn-failure[role="alert"]')).toBeNull();
     await f.click('Original A');
-    await f.until(() => !!f.host.querySelector('.turn-failure[aria-label="无认证"]'));
-    expect(f.host.querySelectorAll('.turn-failure[aria-label="无认证"]')).toHaveLength(1);
+    await f.until(() => !!f.host.querySelector(failureSelector));
+    expect(f.host.querySelectorAll(failureSelector)).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'caller.lookup')).toHaveLength(1);
     expect(
       f.calls.some((call) =>

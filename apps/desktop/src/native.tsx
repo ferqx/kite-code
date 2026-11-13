@@ -5224,7 +5224,8 @@ function NativeDesktopContent({
         !(firstVisible && !firstSaved) &&
         (!!pendingReading ||
           (selectionHandoff && !messages.length) ||
-          (!!selection && historyState.phase === 'loading' && !messages.length))
+          (!!selection && historyState.phase === 'loading' && !messages.length) ||
+          (!!coldKey && coldRejectedInput?.key !== coldKey && !messageModels.length))
       }
       renderBrowser={(props) => (
         <NativeBrowserPane

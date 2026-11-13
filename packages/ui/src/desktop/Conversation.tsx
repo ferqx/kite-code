@@ -1579,16 +1579,14 @@ export function Conversation({
                 </div>
               )}
               {!loading &&
-                (empty ? (
+                (empty && (emptyState || !selected) ? (
                   <div className="welcome">
-                    <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
+                    <h1>{emptyState?.title ?? '继续你的工作'}</h1>
                     <p>
                       {emptyState?.detail ??
-                        (selected
-                          ? '描述你的目标，或写下需要一起解决的问题。'
-                          : connected
-                            ? '选择已有会话，或为新的工作创建一个会话。'
-                            : '选择本地项目，连接你的模型与工具。')}
+                        (connected
+                          ? '选择已有会话，或为新的工作创建一个会话。'
+                          : '选择本地项目，连接你的模型与工具。')}
                     </p>
                   </div>
                 ) : (

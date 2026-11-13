@@ -124,6 +124,8 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 宿主可通过 `initialPresentationPending` 延迟尚未呈现的 Conversation 首次内容提交，让已保存消息和结构事实同时进入原轮次布局；UI不读取或推断轮次／工具事实。第一次可读 layout commit 后该标记不再遮住正文，普通流式更新、缓存恢复和阅读滚动继续原行为；换 readingKey 或DOM淘汰后重新挂载才重新等待。Native的失败、缓存及首条输入豁免由 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)负责；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)核首次等待、后续更新、重新挂载及原滚动生命周期。
 
+已选中会话的 `Conversation` 确认无可见消息后，消息区留空。宿主可通过 `emptyState` 提供专用提示。
+
 [SessionPage](src/desktop/SessionPage.tsx)的 `synchronizePresentation` 将初次消息和 footer 作为同一可见提交；[Conversation](src/desktop/Conversation.tsx)完成布局后回报准确 scope／readingKey，旧页回调不能提前放开新页。宿主已有同会话只读输入区快照时传 `retainedPresentation`，现存缓存树恢复即可立即一起显示，不等待后台读取；正文 DOM 被淘汰时，新树仍须完成准备，不能只放开输入区。已经显示的同页普通刷新不重新隐藏；未启用屏障时同样记录准确的页面身份，同scope首发历史接管随后启用屏障，不重新隐藏history／footer或临时施加inert。身份变化立即撤销该豁免，新会话仍按原规则等待；记录身份不引发未启用屏障页面的额外render。footer 几何由前置 sibling 的 layout effect 在缓存消息恢复滚动前确定，避免首帧以旧输入区高度夹紧阅读位置；ResizeObserver 继续跟随实际尺寸变化，不使用固定延时。缓存预算及 `readActive`／`interactive` 准入保持，显示快照不授予读取或写入资格。[页面回归](test/isolated/desktop-session-page-render.test.tsx)分别核冷页、完整缓存、仅输入区缓存、首次分组与普通刷新时消息和 footer 的同步可见性；Native过程证据见 [Desktop owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。
 
 准备期的 history／footer 共用 `presentationStyle`，同时设置 `visibility:hidden` 和父层 `opacity:0`，并沿原 `inert` 关闭交互。按钮的 `transition-all` 会过渡继承的 visibility，使父层已隐藏时子控件短暂保持可见；父层透明度将整个子树一起停止绘制，几何测量与原 DOM 继续保留。完成准备后同步撤下此样式；缓存已就绪和普通刷新沿原显示路径。验证逐项核对子控件的 computed visibility 及祖先透明度，原仅检查 Composer 父节点的结果不足以排除残影；修前／修后及真实开发窗口证据归上述 Desktop owner。
