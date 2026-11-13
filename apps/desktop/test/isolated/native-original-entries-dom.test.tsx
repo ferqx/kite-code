@@ -282,12 +282,21 @@ test('original Markdown path callbacks apply only to the automatic verified body
     expect(opened).toEqual(['space 雪.txt']);
     expect(f.host.querySelectorAll('img')).toHaveLength(0);
     expect(f.host.querySelector('a')!.getAttribute('href')).toBe('https://example.com');
+    const fileLink = f.host.querySelector('.file-link')!;
     await render(true);
-    expect(f.host.querySelector('.file-link')).toBeNull();
+    expect(f.host.querySelector('.file-link')).toBe(fileLink);
+    expect(fileLink.getAttribute('aria-disabled')).toBe('true');
+    await click('原文件');
+    expect(opened).toEqual(['space 雪.txt']);
+    await render();
+    expect(f.host.querySelector('.file-link')).toBe(fileLink);
+    expect(fileLink.getAttribute('aria-disabled')).toBeNull();
+    await click('原文件');
+    expect(opened).toEqual(['space 雪.txt', 'space 雪.txt']);
     await render(true, true);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
     expect(reads).toBe(1);
-    expect(opened).toHaveLength(1);
+    expect(opened).toHaveLength(2);
   } finally {
     await f.close();
   }
