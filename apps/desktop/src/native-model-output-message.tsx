@@ -16,7 +16,7 @@ export function NativeModelOutputMessage({
   openFile,
   autoRead = true,
   ...props
-}: ModelOutputMessageProps & { openFile?: (path: string) => void }) {
+}: ModelOutputMessageProps & { openFile?: (path: string, line?: number) => void }) {
   const diagnostics = useNativeDiagnostics();
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
@@ -94,7 +94,7 @@ function NativeMarkdownBody({
   autoRead: boolean;
   suspended?: boolean;
   hasVerifiedCandidate: boolean;
-  openFile?: (path: string) => void;
+  openFile?: (path: string, line?: number) => void;
 }) {
   const scope = JSON.stringify([
     storeId,

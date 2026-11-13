@@ -122,7 +122,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'fileChanges.detail': ['readId', 'changeId', 'offset', 'view'],
   'fileChanges.close': ['readId'],
   'fileChanges.open': ['changeId', 'editor'],
-  'messageFile.open': ['viewSelection', 'historyEpoch', 'messageId', 'path', 'editor'],
+  'messageFile.open': ['viewSelection', 'historyEpoch', 'messageId', 'path', 'line', 'editor'],
   'background.open': ['readId'],
   'background.next': ['readId'],
   'background.close': ['readId'],
@@ -893,6 +893,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     (!resourceId(input.messageId) ||
       typeof input.path !== 'string' ||
       !input.path ||
+      (input.line !== undefined && (!Number.isSafeInteger(input.line) || Number(input.line) < 1)) ||
       Buffer.byteLength(input.path) > 8192 ||
       Buffer.from(input.path).toString('utf8') !== input.path ||
       /^[a-z][a-z\d+.-]*:|^#/i.test(input.path) ||
@@ -1378,7 +1379,9 @@ export function registerNativeIpc(options: {
   caller: () => Promise<NativeCaller>;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
   confirmProviderRemoval?: (summary: { label: string; modelCount: number }) => Promise<boolean>;
-  openEditor?: (editor: DesktopEditor, path: string) => Promise<void>;
+  openEditor?: (editor: DesktopEditor, path: string, line?: number) => Promise<void>;
+  openEditorUrl?: (url: string) => Promise<void>;
+  vscodeExecutable?: () => Promise<string>;
   desktopShell?: (
     caller: NativeCaller,
     preference?: NativeShellPreference,
@@ -1429,11 +1432,23 @@ export function registerNativeIpc(options: {
         if (confirmed) caller.providerRemovalSummary(request, true);
         value = confirmed ? { kind: 'settings.providers.remove.confirmed' } : null;
       } else if (request.method === 'fileChanges.open' || request.method === 'messageFile.open') {
-        const perform = async (editor: DesktopEditor, target: string) => {
+        const vscodeExecutable =
+          request.editor === 'vscode' && options.vscodeExecutable
+            ? await options.vscodeExecutable().catch(() => undefined)
+            : undefined;
+        const perform = async (editor: DesktopEditor, target: string, line?: number) => {
           assertNativeSender(event, options.window(), options.rendererUrl);
           try {
-            if (options.openEditor) await options.openEditor(editor, target);
-            else await caller.openEditor(editor, target);
+            if (options.openEditor) await options.openEditor(editor, target, line);
+            else
+              await caller.openEditor(
+                editor,
+                target,
+                line,
+                options.openEditorUrl
+                  ? { openUrl: options.openEditorUrl, vscodeExecutable }
+                  : undefined,
+              );
           } catch {
             throw Error('file_editor_open_failed');
           }

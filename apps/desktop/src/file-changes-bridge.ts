@@ -71,5 +71,6 @@ export type NativeFileChangeRequest =
       historyEpoch: number;
       messageId: string;
       path: string;
+      line?: number;
       editor: DesktopEditor;
     };

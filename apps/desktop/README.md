@@ -801,6 +801,10 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 ## 原消息文件路径与常规摘要
 
+行内文件引用复用 `messageFile.open`，可选正整数行号独立于路径传递。Windows Main 通过系统关联查找 VS Code，然后在原来源、工作区、普通文件和 frame 校验通过后，直接把文件作为参数交给注册的 `Code.exe`。使用 `--reuse-window` 复用最近使用的窗口，带行号时传 `--goto`。macOS 的 VS Code 行号定位使用固定 `vscode://file` 入口，其余编辑器继续打开文件。[文件回归](test/native-file-changes.test.ts)覆盖可选行号校验、编辑器参数、放行前 frame 复核和原工作区限制，[浏览器夹具](test/markdown-content-browser-runner.fixture.ts)覆盖蓝色、换行及流式和缓存交接。编辑器参数见 [VS Code 文档](https://code.visualstudio.com/docs/configure/command-line#_core-cli-options)。
+
+Windows x64／Chrome 157 运行 `bun apps/desktop/test/markdown-content-browser-runner.fixture.ts --file-references-only`，在 390／1280px 深浅主题核对完整引用、蓝色下划线、长路径换行、正文自然左对齐、反引号闭合前后的流式展示、暂停读取、会话往返、键盘和鼠标各自触发。2026-11-13 另用 Electron 44.3.0 当前源码开发构建、独立 Profile 和真实配套 Service，在 Windows x64 已打开的 VS Code 1.146.0 窗口复验。先点 `host.ts`，核对打开的标签与完整路径。回到 Kite 点 `collaboration-observation.test.ts:94`，同一 VS Code 窗口保留两个标签，前台文件切到测试文件，编辑器显示光标在第 94 行，状态栏报告行 94、列 1。证据范围为本机开发构建和单个已有 VS Code 窗口。
+
 原 [MessageContent](../../packages/ui/src/desktop/MessageContent.tsx)沿 `ModelOutputMessage.renderText` 展示同一条预览或已验证全文；普通正文自动读取并沿用原来源、哈希及读取暂停门禁。HTTP(S)仍需显式打开，图片不请求，HTML、锚点和 scheme 不产生文件操作；相对路径沿原 decodeURIComponent。子详情和未知格式不提供文件回调。消息文件点击传已读 Message ID、viewSelection/history epoch、最多8192 UTF-8 bytes 的路径及封闭 editor 枚举；[Main](electron/file-changes.ts)核当前登记项目、原 Message 来源、物理根和普通目标／保护目录，派发前核当前 frame。一般 Markdown 路径表达当前项目文件，不证明文件贡献；有原 Run 时核其准确身份和出处，无 Run 的原用户消息仍沿已观察 Message、当前准入的源 View 同 Workspace 和物理目标核对。恢复后的旧出处不因 Store 不同被拒绝，也不继承另一项目的文件范围；跨项目或来源不可核对时拒绝，缺失文件沿原 AlertDialog 告知。
 
 [元数据 reader](src/native-file-targets.ts)复用原32项扫描与所属 GET 释放，消息结果有 path 仅用于筛选请求，不授予行为；Main核准确原 Execution后只给成功的 Files read/write/edit 提供原 [ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)文件路径。完整历史不依赖 View 的近200项执行列表，未知格式／未核结果沿原正文保留。面板与工具行重复扫描同一封存结果时保持相同观察 ID，不相互撤销；历史文件元数据仍只以成功写入／编辑作为操作差异，不把读取算作变更；右侧Git列表独立读取整个仓库。失去当前scope即清元数据，刷新失败可显式重读，关正文只结束其 reader。

@@ -16,10 +16,11 @@ import { pathToFileURL } from 'node:url';
 import type { AgentClient, Execution, Json, Message } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { directoryLink } from '../../../tests/fixtures/test-filesystem';
-import { editorFileTarget } from '../electron/editor';
+import { editorFileTarget, openEditor, windowsVsCodeArgs } from '../electron/editor';
 import { NativeFileChanges } from '../electron/file-changes';
 import type { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
+import { NativeProcessOwner } from '../electron/native-processes';
 import type { NativeFileChangeScope } from '../src/file-changes-bridge';
 import { type NativeReply, nativeChannel } from '../src/native-bridge';
 
@@ -407,6 +408,7 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
     historyEpoch: 0,
     messageId: 'message',
     path: 'space 雪.txt',
+    line: 94,
     editor: 'vscode',
   } as const;
   expect(decodeNativeRequest(valid)).toEqual(valid);
@@ -418,6 +420,10 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
     { ...clicked, root: '/arbitrary' },
     { ...clicked, path: 'file:///outside' },
     { ...clicked, path: 'line\nfile' },
+    { ...clicked, line: 0 },
+    { ...clicked, line: 2.5 },
+    { ...clicked, line: '94' },
+    { ...clicked, line: Number.MAX_SAFE_INTEGER + 1 },
     { ...clicked, editor: '/bin/sh' },
     { ...clicked, viewSelection: 0 },
     {
@@ -446,11 +452,11 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
       await perform('vscode', '/qualified/file');
     },
     async openMessageFile(
-      _request: unknown,
-      perform: (editor: 'vscode', target: string) => Promise<void>,
+      request: typeof clicked,
+      perform: (editor: 'vscode', target: string, line?: number) => Promise<void>,
     ) {
       if (replace) contents.mainFrame = { url: frame.url };
-      await perform('vscode', '/qualified/file');
+      await perform('vscode', '/qualified/file', request.line);
     },
   } as unknown as NativeCaller;
   const remove = registerNativeIpc({
@@ -464,9 +470,10 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
     window: () => window,
     rendererUrl: frame.url,
     caller: async () => caller,
-    openEditor: async (editor, target) => {
+    openEditor: async (editor, target, line) => {
       expect(editor).toBe('vscode');
       expect(target).toBe('/qualified/file');
+      expect(line).toBe(launches === 0 ? undefined : 94);
       launches++;
     },
   });
@@ -485,11 +492,33 @@ test('finite editor IPC confines receipt and clicked Markdown targets and rechec
   }
 });
 
+test('Windows VS Code reuses the last window and treats the verified path as one argument', () => {
+  const path = 'D:\\repo\\space #雪.ts';
+  expect(windowsVsCodeArgs(path)).toEqual(['--reuse-window', '--', path]);
+  expect(windowsVsCodeArgs(path, 94)).toEqual(['--reuse-window', '--goto', '--', `${path}:94:1`]);
+});
+
+test.skipIf(process.platform !== 'darwin')(
+  'macOS VS Code encodes a line location as one file URL',
+  async () => {
+    const opened: string[] = [];
+    const processes = new NativeProcessOwner(() => {
+      throw new Error('unexpected child process');
+    });
+    await openEditor('vscode', '/repo/space #雪.ts', processes, 94, {
+      async openUrl(url) {
+        opened.push(url);
+      },
+    });
+    expect(opened).toEqual(['vscode://file/repo/space%20%23%E9%9B%AA.ts:94:1']);
+  },
+);
+
 test('message file paths use the current registered project and original reading scope; old tool receipts remain linked after both consumers scan', async () => {
   const f = fixture(),
     opened: string[] = [];
-  const perform = async (editor: string, path: string) => {
-    opened.push(`${editor}:${path}`);
+  const perform = async (editor: string, path: string, line?: number) => {
+    opened.push(`${editor}:${path}${line === undefined ? '' : `:${line}`}`);
   };
   try {
     f.add('read', 'files.read', 'succeeded', true, '3');
@@ -516,6 +545,7 @@ test('message file paths use the current registered project and original reading
     const input = {
       messageId: message.id,
       path: f.path,
+      line: 94,
       editor: 'zed' as const,
       viewSelection: 1,
       historyEpoch: 0,
@@ -524,7 +554,7 @@ test('message file paths use the current registered project and original reading
     expect(opened).toEqual([
       `vscode:${join(f.workspace, f.path)}`,
       `textedit:${join(f.workspace, f.path)}`,
-      `zed:${join(f.workspace, f.path)}`,
+      `zed:${join(f.workspace, f.path)}:94`,
     ]);
     for (const invalid of [
       { ...input, messageId: 'unobserved' },

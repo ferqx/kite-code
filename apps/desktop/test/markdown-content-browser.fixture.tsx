@@ -69,6 +69,9 @@ const diagrams: Record<string, string> = {
 };
 const editorSource =
   '输入中的 `sessionId` 与[外部文档](https://example.com/markdown)，*English italic* 与 *中文斜体*。\n\n> 编辑引用保持可读。\n\n```typescript\nconst draft = "编辑原文";\n```';
+const fileReference =
+  'packages/agent/test/isolated/business/task/collaboration-observation.test.ts:94';
+const referenceMessage = `同一文件（\`${fileReference}`;
 const streamingSamples = [
   '',
   '## 流式样式预览\n\n已经显示的文字与 `sessionId` 保持稳定。',
@@ -85,6 +88,8 @@ function Fixture() {
   const [copied, setCopied] = useState('');
   const [draft, setDraft] = useState(editorSource);
   const [streamStep, setStreamStep] = useState(0);
+  const [referenceClosed, setReferenceClosed] = useState(false);
+  const [fileOpens, setFileOpens] = useState<string[]>([]);
   const fence = `\n\n\`\`\`mermaid\n${source}${complete ? '\n```' : ''}`;
   return (
     <div data-theme={theme} style={{ minHeight: '100vh' }}>
@@ -135,6 +140,9 @@ function Fixture() {
           <button type="button" onClick={() => setReadActive(!readActive)}>
             暂停读取
           </button>
+          <button type="button" onClick={() => setReferenceClosed(true)}>
+            闭合文件引用
+          </button>
           <button type="button" onClick={() => setStreamStep(1)}>
             开始流式预览
           </button>
@@ -160,6 +168,9 @@ function Fixture() {
         <output aria-label="复制结果" style={{ whiteSpace: 'pre-wrap' }}>
           {copied}
         </output>
+        <output aria-label="文件打开记录" hidden>
+          {JSON.stringify(fileOpens)}
+        </output>
         <main style={{ maxWidth: 780, margin: '0 auto' }}>
           <ConversationCache
             identity={identity}
@@ -175,6 +186,27 @@ function Fixture() {
                     : '# 另一会话\n\n返回后保留源码展开和阅读位置。'
                 }
               />
+              {identity === 'first' && (
+                <section
+                  aria-label="文件引用预览"
+                  className="client-content-frame client-main-panel"
+                >
+                  <MessageContent
+                    text={
+                      referenceClosed
+                        ? `${referenceMessage}\`）与 \`packages/agent/src/extensions/host.ts\`。这里继续核对窄窗口中文和长链接的换行，最后保留原来的 \`waitMs: 0\`。`
+                        : referenceMessage
+                    }
+                    streaming={!referenceClosed}
+                    openFile={(path, line) =>
+                      setFileOpens((opens) => [
+                        ...opens,
+                        line === undefined ? path : `${path}:${line}`,
+                      ])
+                    }
+                  />
+                </section>
+              )}
             </ClipboardWriteContext.Provider>
           </ConversationCache>
           <section aria-label="输入样式预览" style={{ marginTop: 32 }}>

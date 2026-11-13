@@ -12,7 +12,7 @@ export const PromptMarkdown = memo(function PromptMarkdown({
   openFile,
 }: {
   text: string;
-  openFile?: (path: string) => void;
+  openFile?: (path: string, line?: number) => void;
 }) {
   const { readActive } = useConversationActivity();
   const blocked = useReadGate();

@@ -4,6 +4,7 @@ type Node = {
   type: string;
   tagName?: string;
   value?: string;
+  data?: Record<string, unknown>;
   properties?: Record<string, unknown>;
   children?: Node[];
 };
@@ -18,14 +19,35 @@ export const markdownAlertLabels: Record<string, string> = {
 const textContent = (node: Node): string =>
   node.value ?? node.children?.map(textContent).join('') ?? '';
 
+export type InlineFileReference = { path: string; line?: number };
+
+function inlineFileReference(text: string): InlineFileReference | undefined {
+  const match =
+    /^((?:[\p{L}\p{N}_.@+-]+\/)*[\p{L}\p{N}_.@+-]+\.[\p{L}\p{N}_-]+)(?::([1-9][0-9]*))?$/u.exec(
+      text,
+    );
+  if (!match) return;
+  const path = match[1]!;
+  if (path.split('/').includes('..')) return;
+  if (match[2] === undefined) return path.includes('/') ? { path } : undefined;
+  const line = Number(match[2]);
+  return Number.isSafeInteger(line) ? { path, line } : undefined;
+}
+
 /** Only generated HAST is transformed; raw HTML remains disabled by the renderer. */
 export function desktopMarkdownSemantics({ prefix }: { prefix: string }) {
   return (tree: Node) => {
     const slugger = new GithubSlugger();
     const nodes: Node[] = [];
-    const walk = (node: Node) => {
+    const walk = (node: Node, insideLinkOrCode = false) => {
       nodes.push(node);
-      for (const child of node.children ?? []) walk(child);
+      const tag = node.tagName;
+      if (!insideLinkOrCode && tag === 'code') {
+        const reference = inlineFileReference(textContent(node));
+        if (reference) node.data = { ...node.data, fileReference: reference };
+      }
+      const nested = insideLinkOrCode || tag === 'a' || tag === 'pre' || tag === 'code';
+      for (const child of node.children ?? []) walk(child, nested);
     };
     walk(tree);
     const ids = new Map<string, string>();

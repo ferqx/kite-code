@@ -40,7 +40,7 @@ import {
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeConversation } from './conversation';
-import { openEditor } from './editor';
+import { type EditorHandoff, openEditor } from './editor';
 import { NativeExtensions } from './extensions';
 import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
@@ -1540,9 +1540,14 @@ export class NativeCaller {
     this.changed();
     return value;
   }
-  async openEditor(editor: DesktopEditor, target: string): Promise<void> {
+  async openEditor(
+    editor: DesktopEditor,
+    target: string,
+    line?: number,
+    handoff?: EditorHandoff,
+  ): Promise<void> {
     if (this.closed) throw new ClientError('native_draining');
-    await openEditor(editor, target, this.processes);
+    await openEditor(editor, target, this.processes, line, handoff);
   }
   async openChangedFile(
     request: Extract<NativeRequest, { method: 'fileChanges.open' }>,
@@ -1556,7 +1561,7 @@ export class NativeCaller {
   }
   async openMessageFile(
     request: Extract<NativeRequest, { method: 'messageFile.open' }>,
-    perform: (editor: DesktopEditor, target: string) => Promise<void>,
+    perform: (editor: DesktopEditor, target: string, line?: number) => Promise<void>,
   ) {
     await this.drainRefresh();
     this.assertGeneration(request.generation);

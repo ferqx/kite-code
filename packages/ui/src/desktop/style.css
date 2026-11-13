@@ -3144,6 +3144,15 @@ body {
   text-decoration-line: underline;
   text-decoration-color: currentColor;
 }
+.kite-client .typeset-chat .file-reference {
+  color: var(--info-foreground);
+  text-decoration-line: underline;
+  overflow-wrap: anywhere;
+}
+.kite-client .typeset-chat .file-reference:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
 .kite-client .typeset-chat hr {
   margin-block: 1.6em;
   border: 0;

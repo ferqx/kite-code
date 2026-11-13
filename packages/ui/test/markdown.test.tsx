@@ -114,6 +114,49 @@ test('desktop GFM preserves complete large text, original links and code, and or
   }
 });
 
+test('desktop file references preserve inline code where the reference cannot be opened', () => {
+  const reference =
+    'packages/agent/test/isolated/business/task/collaboration-observation.test.ts:94';
+  const plainPath = 'packages/agent/src/extensions/task/index.ts';
+  const text = [
+    `同一文件（\`${reference}\`）与 \`src/雪.ts:8\`、\`${plainPath}\`。`,
+    `\`sessionId\` \`object.property\` \`src/file.ts:0\` \`../outside/file.ts:3\` \`https://example.com/file.ts:3\``,
+    `[\`${reference}\`](https://example.com)\n\n\`\`\`\n${reference}\n\`\`\``,
+  ].join('\n\n');
+  const tree = parseDesktopMarkdown(text);
+  const saved = JSON.stringify(tree);
+  for (const openFile of [undefined, () => {}]) {
+    const dom = new JSDOM(
+      renderToStaticMarkup(
+        <MessageContent text={text} prepared={{ text, tree }} openFile={openFile} />,
+      ),
+    );
+    try {
+      const document = dom.window.document;
+      expect(
+        [...document.querySelectorAll('.file-reference')].map((node) => node.textContent),
+      ).toEqual(openFile ? [reference, 'src/雪.ts:8', plainPath] : []);
+      expect(document.querySelector('p')!.textContent).toBe(
+        `同一文件（${reference}）与 src/雪.ts:8、${plainPath}。`,
+      );
+      expect(document.querySelector('a > code')!.textContent).toBe(reference);
+      expect(document.querySelector('pre > code')!.textContent).toBe(`${reference}\n`);
+      expect(
+        [...document.querySelectorAll('p:nth-of-type(2) code')].map((node) => node.textContent),
+      ).toEqual([
+        'sessionId',
+        'object.property',
+        'src/file.ts:0',
+        '../outside/file.ts:3',
+        'https://example.com/file.ts:3',
+      ]);
+    } finally {
+      dom.window.close();
+    }
+  }
+  expect(JSON.stringify(tree)).toBe(saved);
+});
+
 test('desktop tight and loose lists keep separate paragraph, code and nested-list edges without changing saved syntax', () => {
   const tight = [
     '1. Before **bold** [local](src/file.ts)',

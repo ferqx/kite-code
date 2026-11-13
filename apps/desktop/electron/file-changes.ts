@@ -581,11 +581,12 @@ export class NativeFileChanges {
     input: {
       messageId: string;
       path: string;
+      line?: number;
       editor: DesktopEditor;
       viewSelection: number;
       historyEpoch: number;
     },
-    perform: (editor: DesktopEditor, path: string) => Promise<void>,
+    perform: (editor: DesktopEditor, path: string, line?: number) => Promise<void>,
   ) {
     const scope = this.current();
     if (
@@ -645,7 +646,7 @@ export class NativeFileChanges {
       )
         throw new ClientError('file_editor_target_unavailable');
       this.check(lease);
-      await perform(input.editor, target);
+      await perform(input.editor, target, input.line);
     } finally {
       this.close(lease.readId);
     }

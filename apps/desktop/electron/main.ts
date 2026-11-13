@@ -871,8 +871,11 @@ void app
       window: () => window,
       rendererUrl,
       caller: openCaller,
+      openEditorUrl: (url) => shell.openExternal(url),
       ...(process.platform === 'win32'
         ? {
+            vscodeExecutable: async () =>
+              (await app.getApplicationInfoForProtocol('vscode://')).path,
             desktopShell(host, preference) {
               if (host !== caller || quitting || switchingService || !paired?.desktopShell)
                 throw Error('desktop_shell_settings_unavailable');

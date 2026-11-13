@@ -4378,7 +4378,7 @@ function NativeDesktopContent({
       !selection.viewLoading &&
       historyState.phase === 'complete' &&
       !directory?.unavailable;
-    const openFile = (path: string) => {
+    const openFile = (path: string, line?: number) => {
       if (
         !message ||
         !selection ||
@@ -4395,6 +4395,7 @@ function NativeDesktopContent({
           historyEpoch: state.historyEpoch ?? 0,
           messageId: message.id,
           path,
+          ...(line === undefined ? {} : { line }),
           editor,
         }),
       );

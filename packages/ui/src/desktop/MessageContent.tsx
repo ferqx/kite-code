@@ -9,6 +9,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentPropsWithoutRef } from 'react';
 import {
   createContext,
+  Fragment,
   memo,
   type ReactNode,
   useCallback,
@@ -26,7 +27,7 @@ import remarkMath from 'remark-math';
 import { useConversationReadActive } from '../conversation-activity';
 import { incrementalMarkdown, incrementalMarkdownComponents } from './incremental-markdown';
 import { MarkdownCodeBlock } from './MarkdownCodeBlock';
-import { desktopMarkdownSemantics } from './markdown-extensions';
+import { desktopMarkdownSemantics, type InlineFileReference } from './markdown-extensions';
 import { desktopKatexOptions, wrapMarkdownMath } from './markdown-math';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
@@ -93,7 +94,8 @@ function segmentLongTextNodes({ source }: { source: string }) {
   };
 }
 
-const FileLinkContext = createContext<((path: string) => void) | undefined>(undefined);
+type OpenFile = (path: string, line?: number) => void;
+const FileLinkContext = createContext<OpenFile | undefined>(undefined);
 
 const alertIcons = new Map([
   ['note', InformationCircleIcon],
@@ -124,7 +126,6 @@ function MarkdownLink({
   node: _node,
   ...props
 }: ComponentPropsWithoutRef<'a'> & ExtraProps) {
-  const openFile = useContext(FileLinkContext);
   const readActive = useConversationReadActive();
   if (!href) return <span>{children}</span>;
   if (href.startsWith('#'))
@@ -154,24 +155,83 @@ function MarkdownLink({
       </a>
     );
   if (/^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
+  let path = href;
+  try {
+    path = decodeURIComponent(href);
+  } catch {
+    /* Native validation still applies. */
+  }
+  return <MarkdownFileLink path={path}>{children}</MarkdownFileLink>;
+}
+
+function MarkdownFileLink({
+  path,
+  line,
+  reference,
+  children,
+}: {
+  path: string;
+  line?: number;
+  reference?: boolean;
+  children: ReactNode;
+}) {
+  const openFile = useContext(FileLinkContext);
+  const readActive = useConversationReadActive();
+  const activate = () => {
+    if (readActive) openFile?.(path, line);
+  };
+  if (reference) {
+    if (!openFile) return <code>{children}</code>;
+    const segments = typeof children === 'string' ? children.match(/[^/]+\/?/g) : undefined;
+    return (
+      <a
+        className="file-link file-reference"
+        role="link"
+        tabIndex={0}
+        aria-disabled={!readActive || undefined}
+        // biome-ignore lint/a11y/useValidAnchor: The host resolves the file on activation; there is no browser href.
+        onClick={activate}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.repeat) {
+            event.preventDefault();
+            activate();
+          }
+        }}
+      >
+        {segments?.map((segment, index) => (
+          <Fragment key={index}>
+            {index > 0 && <wbr />}
+            {segment}
+          </Fragment>
+        )) ?? children}
+      </a>
+    );
+  }
   return (
     <button
       type="button"
       className="file-link"
       aria-disabled={!readActive || !openFile || undefined}
-      onClick={() => {
-        if (!readActive || !openFile) return;
-        let path = href;
-        try {
-          path = decodeURIComponent(href);
-        } catch {
-          /* Native validation still applies. */
-        }
-        openFile(path);
-      }}
+      onClick={activate}
     >
       {children}
     </button>
+  );
+}
+
+function MarkdownInlineCode({
+  children,
+  node,
+  ...props
+}: ComponentPropsWithoutRef<'code'> & ExtraProps) {
+  const reference = (node?.data as { fileReference?: InlineFileReference } | undefined)
+    ?.fileReference;
+  return reference ? (
+    <MarkdownFileLink {...reference} reference>
+      {children}
+    </MarkdownFileLink>
+  ) : (
+    <code {...props}>{children}</code>
   );
 }
 
@@ -196,7 +256,7 @@ export const MessageContent = memo(function MessageContent({
   streamingReveal = true,
 }: {
   text: string;
-  openFile?: (path: string) => void;
+  openFile?: OpenFile;
   prepared?: PreparedDesktopMarkdown;
   /** true: live preview; false: its settled preview; omitted: static or explicit full-body read. */
   streaming?: boolean;
@@ -211,7 +271,10 @@ export const MessageContent = memo(function MessageContent({
       currentOpenFile.current = undefined;
     };
   }, [openFile]);
-  const dispatchOpenFile = useCallback((path: string) => currentOpenFile.current?.(path), []);
+  const dispatchOpenFile = useCallback<OpenFile>(
+    (path, line) => currentOpenFile.current?.(path, line),
+    [],
+  );
   return useMemo(
     () => (
       <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
@@ -300,6 +363,7 @@ const MarkdownDocument = memo(
         components={{
           ...incrementalMarkdownComponents,
           a: MarkdownLink,
+          code: MarkdownInlineCode,
           p: MarkdownParagraph,
           pre: MarkdownCodeBlock,
           table: MarkdownTable,

@@ -12,6 +12,69 @@ const cache = path.resolve(directory, '../../../.cache');
 mkdirSync(cache, { recursive: true });
 const artifact = mkdtempSync(path.join(cache, 'markdown-content-browser-'));
 const output = path.join(artifact, 'dist');
+async function checkFileReference(page: import('playwright').Page, width: number) {
+  const text = 'packages/agent/test/isolated/business/task/collaboration-observation.test.ts:94';
+  const region = page.getByRole('region', { name: '文件引用预览' });
+  const link = region.getByRole('link', { name: text, exact: true });
+  const plainPath = 'packages/agent/src/extensions/host.ts';
+  const plainLink = region.getByRole('link', { name: plainPath, exact: true });
+  const calls = page.getByLabel('文件打开记录');
+  const visibility = async () =>
+    link.evaluate((node) => {
+      const { color, textDecorationLine } = getComputedStyle(node);
+      const paragraph = node.closest('p')!;
+      const bounds = paragraph.getBoundingClientRect();
+      const fits = [...node.getClientRects()].every((rect) => rect.right <= bounds.right + 1);
+      return {
+        color,
+        textDecorationLine,
+        fits,
+        paragraphAlign: getComputedStyle(paragraph).textAlign,
+      };
+    });
+  assert.equal(await link.count(), 0);
+  assert.equal(await region.textContent(), `同一文件（\`${text}`);
+  await page.getByRole('button', { name: '闭合文件引用', exact: true }).click();
+  await link.waitFor();
+  await region.getByText('waitMs: 0', { exact: true }).waitFor();
+  const original = await link.elementHandle();
+  assert.match((await region.textContent()) ?? '', /^同一文件（.*）与 .*waitMs: 0。$/);
+  assert.deepEqual(await visibility(), {
+    color: 'rgb(48, 95, 156)',
+    textDecorationLine: 'underline',
+    fits: true,
+    paragraphAlign: 'start',
+  });
+  assert.equal(await calls.textContent(), '[]');
+  await link.focus();
+  await link.press('Enter');
+  assert.equal(await calls.textContent(), JSON.stringify([text]));
+  await page.getByRole('button', { name: '暂停读取', exact: true }).click();
+  assert.equal(await link.getAttribute('aria-disabled'), 'true');
+  await link.click({ force: true });
+  assert.equal(await calls.textContent(), JSON.stringify([text]));
+  await page.getByRole('button', { name: '暂停读取', exact: true }).click();
+  await page.getByRole('button', { name: '切换会话', exact: true }).click();
+  assert.equal(await link.count(), 0);
+  await page.getByRole('button', { name: '切换会话', exact: true }).click();
+  assert.equal(await link.count(), 1);
+  assert.equal(await original?.evaluate((node) => node.isConnected), true);
+  await link.click();
+  assert.equal(await calls.textContent(), JSON.stringify([text, text]));
+  await plainLink.click();
+  assert.equal(await calls.textContent(), JSON.stringify([text, text, plainPath]));
+  await page.getByRole('button', { name: '切换主题', exact: true }).click();
+  assert.deepEqual(await visibility(), {
+    color: 'rgb(138, 180, 232)',
+    textDecorationLine: 'underline',
+    fits: true,
+    paragraphAlign: 'start',
+  });
+  await region.screenshot({ path: path.join(artifact, `file-reference-dark-${width}.png`) });
+  await page.getByRole('button', { name: '切换主题', exact: true }).click();
+  await region.screenshot({ path: path.join(artifact, `file-reference-light-${width}.png`) });
+}
+
 async function checkTypography(page: import('playwright').Page) {
   await page.evaluate(async () => {
     await document.fonts.ready;
@@ -298,6 +361,14 @@ if (process.argv.includes('--serve')) {
           external.push(request.url());
       });
       await page.goto(server.url.toString());
+      if (process.argv.includes('--file-references-only')) {
+        await checkFileReference(page, width);
+        assert.deepEqual(external, []);
+        assert.deepEqual(errors, []);
+        cases.push({ width, errors, external });
+        await page.close();
+        continue;
+      }
       await page.getByText('图表生成中，当前显示源码').waitFor();
       assert.equal(await page.locator('.markdown-diagram img').count(), 0);
       assert.equal(await page.locator('.katex').count(), 2);
@@ -468,6 +539,7 @@ if (process.argv.includes('--serve')) {
         path: path.join(artifact, `stream-complete-${width}.png`),
         fullPage: true,
       });
+      await checkFileReference(page, width);
       assert.deepEqual(external, []);
       assert.deepEqual(errors, []);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
