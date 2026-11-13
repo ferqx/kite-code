@@ -246,6 +246,7 @@ export async function buildDevelopmentService(
   const traceSource = join(root, 'apps/service/dist/trace-extensions');
   const otelSource = join(root, 'apps/service/dist/trace-integrations');
   const wrapper = join(directory, 'main.js');
+  const modelKeyringEntries = ['macos-model-keychain', 'linux-model-keyring'];
   if (existsSync(browserConfiguration)) {
     // Both locators are compiled into this exact Service entry. Its guardian and
     // executor worker must share the same current sources on first load and reload.
@@ -278,8 +279,7 @@ export async function buildDevelopmentService(
     result = await bundle({
       entrypoints: [
         join(root, 'apps/service/src/main.ts'),
-        join(root, 'apps/service/src/macos-model-keychain.ts'),
-        join(root, 'apps/service/src/linux-model-keyring.ts'),
+        ...modelKeyringEntries.map((name) => join(root, 'apps/service/src', `${name}.ts`)),
       ],
       target: 'node',
       packages: 'bundle',
@@ -343,6 +343,20 @@ const service = await import(implementation.href);
 if (Reflect.get(import.meta, 'main') === true && typeof service.runServiceProcess === 'function') await service.runServiceProcess();
 `,
   );
+  for (const name of modelKeyringEntries) {
+    const entry = join(directory, `${name}.js`);
+    const implementation = `./${name}-implementation.js`;
+    renameSync(entry, join(directory, implementation));
+    // The keyring worker starts in a fresh Node process. Register the fixed
+    // development loader before linking its checkout source imports.
+    writeFileSync(
+      entry,
+      `import ${JSON.stringify(loader)};
+const { modelKeyringOperation } = await import(${JSON.stringify(implementation)});
+export { modelKeyringOperation };
+`,
+    );
+  }
   for (const [source, name] of [
     [traceSource, 'trace-extensions'],
     [otelSource, 'trace-integrations'],

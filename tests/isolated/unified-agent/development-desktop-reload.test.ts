@@ -19,12 +19,45 @@ import {
   startDesktopRenderer,
   startDevelopmentServiceWatcher,
 } from '../../../scripts/development/desktop-reload';
-import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
+import {
+  spawnSync as runFixtureProcess,
+  spawn as spawnFixtureProcess,
+} from '../../../scripts/tooling/process';
 
 function writeFixtureKeyringEntrypoints(serviceSource: string) {
   for (const entry of ['macos-model-keychain', 'linux-model-keyring'])
     writeFileSync(join(serviceSource, `${entry}.ts`), 'export {};');
 }
+
+test('development model credential workers load checkout sources in fresh Node children', async () => {
+  const repository = realpathSync(join(import.meta.dirname, '../../..'));
+  const output = realpathSync(mkdtempSync(join(repository, '.cache/development-model-keyring-')));
+  try {
+    const executable = fixtureNodeExecutable();
+    const service = await buildDevelopmentService(repository, output, executable);
+    for (const name of ['macos-model-keychain', 'linux-model-keyring']) {
+      const entry = pathToFileURL(join(output, 'services', service.id, `${name}.js`));
+      const result = runFixtureProcess(
+        [
+          executable,
+          '--no-global-search-paths',
+          '--input-type=module',
+          '--eval',
+          `const { modelKeyringOperation } = await import(process.argv[1]);
+if (typeof modelKeyringOperation !== 'function') throw Error('missing_model_keyring_operation');`,
+          entry.href,
+        ],
+        { env: {} },
+      );
+      expect({ code: result.exitCode, stderr: result.stderr.toString() }).toEqual({
+        code: 0,
+        stderr: '',
+      });
+    }
+  } finally {
+    rmSync(output, { recursive: true, force: true });
+  }
+}, 30000);
 
 test('runtime workspace exports are checked before publishing a development Service version', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-exports-')));

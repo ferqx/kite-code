@@ -373,6 +373,8 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 ## 开发热更新与服务重载
 
+`desktop:dev` 生成的 macOS 和 Linux 模型凭据子进程入口先注册固定的 checkout 源码加载器，再导入当前版本的实现。[开发重载回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)在两个独立 Node 进程中核对实际生成入口可加载。
+
 `desktop:dev` 在选定既有 Service 资产后，对实际 `~/.kite-code/development` 复用 Store 的只读格式预检，再准备 Electron、Vite 与新 Service。按用户要求，`store_incompatible` 由开发入口提示确认后自动解决：[准备函数](../../scripts/development/unified-desktop.ts)取得原 Profile 的 EX 使用锁，重新核对后，在交互终端展示准确备份位置、旧历史隔离及全局模型配置保留说明。只有明确输入 `y`／`yes`（忽略大小写）才将整个原目录原子改名为同一数据根下的 `development-backup-<时间戳>-<随机标识>`，再继续原启动流程，由 Service 初始化新 Profile。回车、其他输入、Ctrl+C 和 EOF 均取消并释放锁；非交互环境返回 `development_profile_confirmation_required`，不能通过管道自动接受。完整旧目录、附件、sidecar 与权限保留；不把旧授权事实转换成新版合同，不删除备份。新环境不显示备份中的历史，全局模型配置保持原位。兼容 Profile 直接复用且不询问；活跃 SH／EX 使用者、待处理 restore journal、权限／I/O／关闭未知或改名备份失败仍停止，不抢占资源或先清空目录。此处使用仓库内 Profile 锁与同步预检实现，不扩展公开 Store／维护 API，也不改变其他开发入口和正式客户端的格式拒绝。预检不代替 Service 启动时的正式准入，help、无效参数和缺失选定资产仍不触碰 Profile。
 
 [开发入口回归](../../tests/isolated/unified-agent/development-desktop.test.ts)覆盖旧同编号／伪造当前指纹／其他 major 在非交互环境拒绝、明确拒绝时零备份／原数据保持、确认后的原数据库／WAL／SHM／附件字节、全局配置保持、全新与兼容数据复用、活跃使用锁及 restore journal 拒绝。初次检查及取得独占锁后的复查都重新读取迁移文件，清单或迁移文件的读权限／I/O 错误停止准备流程，保留原 Profile。下面 2026-11-07 的拒绝／人工处置记录是当时行为的历史证据；当前确认后自动处置以本段为准。
