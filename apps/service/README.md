@@ -315,6 +315,8 @@ paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只
 
 可信 Native main 可显式提供中立 `spawnChild` port，用 Node 的进程/stream 能力启动已选定的 Bun 制品；省略时保留 Bun 宿主实现。port 不改变 bootstrap、准入、父存活或所属关闭协议，也不增加默认 PATH/源码回退。Electron main 只持有自己启动的 PID 和 handle；[paired 测试](test/isolated/paired.test.ts)及 Native 实际窗口证据分别证明 launcher 与 Node 调用者的边界。
 
+[配套启动器](src/paired.ts)在向子进程发送私有启动帧后开始等待首条 bootstrap。Windows 的 Native 与 Terminal 制品启动使用 60 秒，涵盖子进程独立校验和首次 Git Bash 运行时准备。收到 bootstrap 后独立核对 HTTP 连接，默认期限为 10 秒。超时沿所属子进程的原清理路径收尾。用户行为见[服务生命周期](../../docs/handbook/server/lifecycle.md#默认客户端与源码入口)。
+
 默认 Bun launcher 在 Windows 用 `windowsHide:true` 启动所属 Service，使其不继承 TUI 的控制台 Ctrl+C／ConPTY 关闭事件；不使用 detached，stdin 父存活通道、所属 child 与真实 exited 等待保持。2026-10-23 Windows x64／Bun1.4.3 的 [实际 TUI Host](../cli/test/isolated/tui-host.test.ts)完整4项54断言通过，核大文件完整读写、取消、冷重开零重放以及真实 ConPTY 关闭后 waiting Run／Service 仍保所属，随后显式正常停止并确认准确进程退出。PTY EOF 不冒充业务取消，独立安装资格不由开发 Host 测试推定。 同版 `paired.test.ts` 与 `paired-shutdown.test.ts` 合计7项88断言通过；两份 Service 的网络断开、所属 stdin EOF、真实退出和另一 Service 继续存活保持。原4项 POSIX 信号用例在 Windows 继续跳过，不以模拟信号补造通过。
 
 显式 Desktop 开发宿主监听 Service 源码，构建新的独立开发 bundle，并沿同一 paired 关闭／实际退出与新 SHA／build 准入替换进程。第三方依赖随版本打包，workspace 保外部 source 解析及原运行资产；开发版本不成为正式完整制品证明。UI 整页重新 attach 原 Store，不自动重发工作；编译失败保持旧服务，未知关闭和回执阻止继续替换。此行为归[Desktop 开发 owner](../desktop/README.md#开发热更新与服务重载)，Service 公共 API、Core 生命周期和正式 caller 合同保持。

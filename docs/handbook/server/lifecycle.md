@@ -6,6 +6,8 @@
 
 安装版 `kite-tui` 自动启动同发布包内的配套 stdio App Server，不需要先启动 daemon；CLI 执行 Runtime 命令时使用相同的配套方式。默认客户端不构建 Web，也不隐式连接共享服务。显式 `--server <endpoint>` 才连接共享 daemon。
 
+Windows 安装版 Kite Desktop、`kite` 任务和 `kite-tui` 启动本地配套服务时，最多等待 60 秒接收服务的启动就绪消息。
+
 源码 `bun run tui` 启动 TUI 和配套服务；`bun run server` 构建 Web、显式启动 daemon 并打印地址。构建或启动失败即停止，返回该步骤退出码。Vite 只是资源开发入口。
 
 ## 共享 daemon

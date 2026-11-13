@@ -334,14 +334,13 @@ export async function launchPairedService(options: PairedServiceOptions) {
   };
   const close = () => closeOwnedChild(options.shutdownTimeoutMs);
   const closeFailedLaunch = () => closeOwnedChild(options.shutdownTimeoutMs ?? 5000);
+  const bootstrapTimeoutMs =
+    options.startupTimeoutMs ??
+    (process.platform === 'win32' && startup.runtimeProtection ? 60_000 : 10_000);
   try {
     child.stdin.write(encoded);
     await child.stdin.flush();
-    const bootstrap = await deadline(
-      bootstrapFrom(stdout),
-      options.startupTimeoutMs ?? 10000,
-      'startup_timeout',
-    );
+    const bootstrap = await deadline(bootstrapFrom(stdout), bootstrapTimeoutMs, 'startup_timeout');
     const endpoint = new URL(bootstrap.endpoint);
     if (
       endpoint.protocol !== 'http:' ||
