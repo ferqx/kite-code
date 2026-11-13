@@ -305,3 +305,9 @@ Cookie Browser 也提供 `listBackgroundExecutions` / `listAllBackgroundExecutio
 公共 `Message.compression` 只读传递原压缩身份与 running/completed/failed/cancelled/unpublished 状态；`SessionView.compressionProgress` 可携准确摘要 Execution ID。字段由同源 Service schema 生成并校验，不消费结果或触发摘要；模型成功不等于摘要发布，缺字段不由正文或 UUID 前缀猜测。[真实 Native HTTP 回归](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)核中途摘要、后续工具、实际 Run 最终提交与冷历史。
 
 审批答案统一为 approve + 原卡 `optionId` 或不带选项的 deny。`readApprovalOptions` 仅从服务端冻结的 `request.options` 读取选项身份和完整 presentation，拒绝缺少单次选项、重复 ID 或畸形展示；它不解析领域范围、不计算授权 ID，也不产生执行资格。CLI、共享 TUI 和 Native 使用同一个 reader，Web 保持只读。
+
+## 精确办公文件交付
+
+`output_files` 能力提供 `queryOutputFiles/resolveOutputFile/retryOutputCollection`，目标始终携带 Store、Session、fileId 和原 locator；列表只读固定来源元数据，不递归扩展轨迹或猜测 latest。分页最多50项，已指定 Run 只展示原 Run 产物；Fork 下载沿验证后的原 Artifact Session。响应核当前连接代次、目标和引用大小/MIME，不改变原模型工具或协议版本。
+
+`readOutputFileStream` 使用认证 Artifact HTTP 二进制流，核全部响应头和总长；调用方必须只写临时文件、增量核完整 SHA/size 后发布，并在失败、提前退出或取消时调用 cancel。SDK 不把文件整体塞进 JSON/base64，也不将 Blob 路径交给 Renderer。`prepareInputFromOutput` 复制精确选择到新合法 input import，`prepareWorkingInputs` 在命令提交前创建独立工作副本。POST 不自动重试或更换 ID，未知结果按原身份查询与重入。实际闭环与不覆写编辑行为由[真实 HTTP 回归](../../apps/service/test/isolated/output-files.test.ts)验证。

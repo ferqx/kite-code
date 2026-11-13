@@ -1406,3 +1406,28 @@ test('ordinary paired host reads an external user-file reference through the uni
     f.close();
   }
 }, 15000);
+
+test('ordinary Office skill readers depend on Shell, not browser availability, and are unique', () => {
+  for (const browserAllowed of [false, true]) {
+    for (const unifiedBrowser of [false, true]) {
+      const ids = ordinaryHostConfigurationDefaults(
+        true,
+        false,
+        browserAllowed,
+        unifiedBrowser,
+      ).tools.map((tool) => tool.id);
+      expect(ids.filter((id) => id === 'skills.load')).toHaveLength(1);
+      expect(ids.filter((id) => id === 'skills.resource')).toHaveLength(1);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  }
+  const none = ordinaryHostConfigurationDefaults(false, false, false, true).tools.map(
+    (tool) => tool.id,
+  );
+  expect(none).not.toContain('skills.load');
+  expect(none).not.toContain('skills.resource');
+  const browser = ordinaryHostConfigurationDefaults(false, false, true, true).tools.map(
+    (tool) => tool.id,
+  );
+  expect(browser.filter((id) => id === 'skills.load')).toHaveLength(1);
+});

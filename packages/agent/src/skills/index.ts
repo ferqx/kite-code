@@ -249,3 +249,6 @@ export function createSkillSource(options: SkillSourceOptions) {
 }
 
 export { builtinComputerUseSkillId, createBuiltinComputerUseSkillSource } from './builtin';
+
+export { builtinOfficeSkillId, createBuiltinOfficeSkillSource } from './office';
+export { createBuiltinSkillSources } from './registry';

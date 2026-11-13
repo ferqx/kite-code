@@ -1722,6 +1722,284 @@ export class AgentClient {
       );
     return result;
   }
+  async queryOutputFiles(
+    input: {
+      scope: { storeId: string; sessionId: string };
+      runId?: string;
+      beforeKey?: string;
+      collectionBeforeKey?: string;
+      limit?: number;
+    },
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('output_files');
+    input = structuredClone(input);
+    if (input.scope.storeId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const query = {
+      storeId: input.scope.storeId,
+      ...(input.runId ? { runId: input.runId } : {}),
+      ...(input.beforeKey ? { beforeKey: input.beforeKey } : {}),
+      ...(input.collectionBeforeKey ? { collectionBeforeKey: input.collectionBeforeKey } : {}),
+      ...(input.limit !== undefined ? { limit: String(input.limit) } : {}),
+    };
+    validateRequest('OutputFilesQuery', query);
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.scope.sessionId)}/output-files?${new URLSearchParams(query)}`,
+      'OutputFilesPage',
+      options,
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.scope.storeId !== input.scope.storeId ||
+      result.scope.sessionId !== input.scope.sessionId ||
+      result.items.some(
+        (item) =>
+          item.storeId !== input.scope.storeId ||
+          item.sessionId !== input.scope.sessionId ||
+          (input.runId !== undefined && item.ownerRunId !== input.runId),
+      ) ||
+      result.collections.some(
+        (item) => input.runId !== undefined && item.ownerRunId !== input.runId,
+      )
+    )
+      throw new ClientError('output_file_scope_mismatch');
+    return result;
+  }
+  async renderOutputPdfPage(
+    target: import('./generated/api').OutputFileTarget,
+    options: { page: number; signal?: AbortSignal },
+  ) {
+    this.requireCapability('output_files');
+    target = {
+      storeId: target.storeId,
+      sessionId: target.sessionId,
+      fileId: target.fileId,
+      locator: structuredClone(target.locator),
+    };
+    const input = { expectedStoreId: target.storeId, target, page: options.page };
+    validateRequest('OutputPdfPageRequest', input);
+    if (target.storeId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(target.sessionId)}/output-files/pdf-page`,
+      'OutputPdfPage',
+      { method: 'POST', body: input, signal: options.signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (result.page !== options.page || result.page > result.totalPages)
+      throw new ClientError('invalid_response');
+    return result;
+  }
+  async resolveOutputFile(
+    target: import('./generated/api').OutputFileTarget,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('output_files');
+    target = {
+      storeId: target.storeId,
+      sessionId: target.sessionId,
+      fileId: target.fileId,
+      locator: structuredClone(target.locator),
+    };
+    validateRequest('OutputFileResolveRequest', { expectedStoreId: target.storeId, target });
+    if (target.storeId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(target.sessionId)}/output-files/resolve`,
+      'OutputFileResolution',
+      { method: 'POST', body: { expectedStoreId: target.storeId, target }, signal: options.signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.summary.fileId !== target.fileId ||
+      result.summary.storeId !== target.storeId ||
+      result.summary.sessionId !== target.sessionId ||
+      JSON.stringify(result.summary.locator) !== JSON.stringify(target.locator) ||
+      result.reference.size !== result.summary.size ||
+      result.reference.mediaType !== result.summary.mediaType
+    )
+      throw new ClientError('output_file_scope_mismatch');
+    return result;
+  }
+  async retryOutputCollection(
+    input: {
+      scope: { storeId: string; sessionId: string };
+      collectionId: string;
+      expectedRevision: string;
+    },
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('output_files');
+    input = structuredClone(input);
+    if (input.scope.storeId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const body = {
+      expectedStoreId: input.scope.storeId,
+      collectionId: input.collectionId,
+      expectedRevision: input.expectedRevision,
+    };
+    validateRequest('OutputCollectionRetryRequest', body);
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.scope.sessionId)}/output-files/retry`,
+      'OutputFilesPage',
+      { method: 'POST', body, signal: options.signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.scope.storeId !== input.scope.storeId ||
+      result.scope.sessionId !== input.scope.sessionId ||
+      result.items.some(
+        (file) => file.storeId !== input.scope.storeId || file.sessionId !== input.scope.sessionId,
+      )
+    )
+      throw new ClientError('output_file_scope_mismatch');
+    return result;
+  }
+  async prepareInputFromOutput(
+    input: import('./generated/api').PrepareInputFromOutputRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('output_files');
+    input = structuredClone(input);
+    input.source = {
+      storeId: input.source.storeId,
+      sessionId: input.source.sessionId,
+      fileId: input.source.fileId,
+      locator: input.source.locator,
+    };
+    validateRequest('PrepareInputFromOutputRequest', input);
+    if (input.expectedStoreId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.targetSessionId)}/input-files/from-output`,
+      'InputFileReference',
+      { method: 'POST', body: input, signal: options.signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.reference?.id !== `input-file-${input.importId}` ||
+      result.reference.sessionId !== input.targetSessionId ||
+      result.reference.storeId !== input.expectedStoreId
+    )
+      throw new ClientError(
+        'network_outcome_unknown',
+        'Query the original input file import identity.',
+      );
+    return result;
+  }
+  async prepareWorkingInputs(
+    input: import('./generated/api').PrepareWorkingInputsRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('output_files');
+    input = structuredClone(input);
+    validateRequest('PrepareWorkingInputsRequest', input);
+    if (input.expectedStoreId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(input.targetSessionId)}/input-files/prepare-working`,
+      'WorkingInputsResponse',
+      { method: 'POST', body: input, signal: options.signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (canonicalModelBody(result.files) !== canonicalModelBody(input.files))
+      throw new ClientError('input_file_scope_mismatch');
+    return result;
+  }
+  /** Stream only to a temporary host-owned sink. The sink must verify the full SHA before publication. */
+  async readOutputFileStream(
+    target: import('./generated/api').OutputFileTarget,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    const resolved = await this.resolveOutputFile(target, options);
+    const expected = resolved.reference,
+      generation = this.connectionGeneration;
+    const controller = new AbortController();
+    const abort = () => controller.abort(options.signal?.reason);
+    options.signal?.throwIfAborted();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    this.controllers.add(controller);
+    let response: Response | undefined;
+    const cleanup = async () => {
+      controller.abort();
+      if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {});
+      this.controllers.delete(controller);
+      options.signal?.removeEventListener('abort', abort);
+    };
+    try {
+      const query = new URLSearchParams({
+        storeId: target.storeId,
+        scopeKind: expected.scope.kind,
+        scopeId: expected.scope.id,
+      });
+      response = await fetch(
+        `${this.endpoint}/v1/sessions/${encodeURIComponent(expected.sessionId)}/artifacts/${encodeURIComponent(expected.id)}?${query}`,
+        {
+          redirect: 'error',
+          signal: controller.signal,
+          headers: { authorization: `Bearer ${this.token}`, accept: 'application/octet-stream' },
+        },
+      );
+      if (!response.ok) {
+        const problem = decodeResponse('Problem', await this.responseJSON(response));
+        throw new ClientError(problem.code, problem.message, response.status, problem);
+      }
+      if (
+        response.headers.get('x-artifact-id') !== expected.id ||
+        response.headers.get('x-artifact-store-id') !== expected.storeId ||
+        response.headers.get('x-artifact-hash') !== expected.hash ||
+        response.headers.get('x-artifact-size') !== expected.size ||
+        response.headers.get('content-type') !== expected.mediaType ||
+        response.headers.get('cache-control') !== 'no-store' ||
+        !response.body
+      )
+        throw new ClientError('artifact_metadata_mismatch');
+      const body = response.body;
+      let consumed = false;
+      const client = this;
+      return {
+        reference: expected,
+        cancel: cleanup,
+        content: {
+          async *[Symbol.asyncIterator]() {
+            if (consumed) throw new ClientError('artifact_stream_consumed');
+            consumed = true;
+            const reader = body.getReader();
+            let size = 0n;
+            try {
+              for (;;) {
+                controller.signal.throwIfAborted();
+                if (generation !== client.connectionGeneration)
+                  throw new ClientError('connection_superseded');
+                const item = await reader.read();
+                if (item.done) break;
+                size += BigInt(item.value.byteLength);
+                if (size > BigInt(expected.size))
+                  throw new ClientError('artifact_content_mismatch');
+                yield item.value;
+              }
+              if (size !== BigInt(expected.size))
+                throw new ClientError('artifact_content_mismatch');
+            } finally {
+              await reader.cancel().catch(() => {});
+              reader.releaseLock();
+              await cleanup();
+            }
+          },
+        },
+      };
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
+  }
   async uploadInputFile(
     sessionId: string,
     input: import('./generated/api').InputFileUploadQuery,

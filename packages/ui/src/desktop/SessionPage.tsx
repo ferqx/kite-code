@@ -36,6 +36,8 @@ import {
   type SessionChildPageProps,
   type SessionChildTabRequest,
   type SessionChildTarget,
+  type SessionFilePageProps,
+  type SessionFileTabRequest,
   SessionTabs,
   type SessionTabsModel,
   type SessionTrajectoryPageProps,
@@ -207,6 +209,7 @@ export interface SessionPageProps {
   messages: readonly Message[];
   renderMessage?: (message: Message) => ReactNode;
   renderMessageContent?: (message: Message) => ReactNode;
+  renderTurnOutputs?: React.ComponentProps<typeof Conversation>['renderTurnOutputs'];
   renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
@@ -264,6 +267,8 @@ export interface SessionPageProps {
   browserRestoreKey?: string;
   browserPending?: boolean;
   childTabRequest?: SessionChildTabRequest;
+  fileTabRequest?: SessionFileTabRequest;
+  renderFile?: (props: SessionFilePageProps) => ReactNode;
   trajectoryTabRequest?: { requestId: number };
   renderTrajectory?: (props: SessionTrajectoryPageProps) => ReactNode;
   renderChildSession?: (props: SessionChildPageProps) => ReactNode;
@@ -286,7 +291,8 @@ export function SessionPage(props: SessionPageProps) {
       props.fileChanges !== undefined ||
       props.fileChangesContent !== undefined ||
       props.renderChildSession !== undefined ||
-      props.renderTrajectory !== undefined);
+      props.renderTrajectory !== undefined ||
+      props.renderFile !== undefined);
   const tabModel = useSessionTabs(
     hasTabs ? (props.tabsScopeKey ?? props.readingKey) : 'inactive',
     props.closeBrowser,
@@ -877,6 +883,29 @@ function SessionPageContent({
     tabModel.restoreIssue,
     changeTabsOpen,
   ]);
+  const fileOpener = useRef(tabModel.openFile);
+  fileOpener.current = tabModel.openFile;
+  const handledFileRequest = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    const request = props.fileTabRequest;
+    if (!hasTabs || !request || props.loading || tabModel.restoring || tabModel.restoreIssue)
+      return;
+    if (handledFileRequest.current !== undefined && request.requestId <= handledFileRequest.current)
+      return;
+    handledFileRequest.current = request.requestId;
+    const opened = fileOpener.current(request.target, request.title);
+    setTabLimitKey(opened ? undefined : tabsScopeKey);
+    detailClose.current?.();
+    changeTabsOpen(true);
+  }, [
+    props.fileTabRequest,
+    props.loading,
+    hasTabs,
+    tabsScopeKey,
+    tabModel.restoring,
+    tabModel.restoreIssue,
+    changeTabsOpen,
+  ]);
   const handledChildRequest = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const request = props.childTabRequest;
@@ -1266,6 +1295,7 @@ function SessionPageContent({
       messages={messages}
       renderMessage={props.renderMessage}
       renderMessageContent={props.renderMessageContent}
+      renderTurnOutputs={props.renderTurnOutputs}
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       turnActivity={props.turnActivity}
@@ -1682,6 +1712,7 @@ function SessionPageContent({
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}
                       renderChildSession={props.renderChildSession}
+                      renderFile={props.renderFile}
                       renderTrajectory={props.renderTrajectory}
                       onChildSessionChange={props.onChildSessionChange}
                       changes={

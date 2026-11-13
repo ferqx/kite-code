@@ -26,6 +26,14 @@ import {
 } from './file-checkpoints';
 import { HostStatusQuerySchema, HostStatusSchema } from './host-status';
 import {
+  OutputCollectionRetryRequestSchema,
+  OutputFileResolveRequestSchema,
+  OutputFileSummarySchema,
+  OutputFilesPageSchema,
+  OutputFilesQuerySchema,
+  OutputFileTargetSchema,
+} from './output-files';
+import {
   AuthorizationPolicyReasonSchema,
   AuthorizationScopeSchema,
   BrowserSessionLogQuerySchema,
@@ -506,6 +514,54 @@ const legacyHostMutation = z.object({
 });
 
 export const schemas = {
+  OutputFileTarget: OutputFileTargetSchema,
+  OutputPdfPageRequest: z.strictObject({
+    expectedStoreId: id,
+    target: OutputFileTargetSchema,
+    page: z.number().int().min(1).max(100000),
+  }),
+  OutputPdfPage: z.strictObject({
+    page: z.number().int().min(1),
+    totalPages: z.number().int().min(1),
+    mediaType: z.literal('image/png'),
+    data: z
+      .string()
+      .min(8)
+      .max(24 * 1024 * 1024)
+      .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+  }),
+  OutputFileSummary: OutputFileSummarySchema,
+  OutputFilesPage: OutputFilesPageSchema,
+  OutputFilesQuery: OutputFilesQuerySchema,
+  OutputFileResolveRequest: OutputFileResolveRequestSchema,
+  OutputCollectionRetryRequest: OutputCollectionRetryRequestSchema,
+  OutputFileResolution: z.strictObject({
+    summary: OutputFileSummarySchema,
+    reference: z.strictObject({
+      id,
+      storeId: id,
+      sessionId: id,
+      subjectId: z.string().min(1).max(256),
+      scope: z.strictObject({ kind: z.enum(['session', 'execution', 'message']), id }),
+      hash: z.string().regex(/^[a-f0-9]{64}$/),
+      size: sequence,
+      mediaType: z.string().min(1).max(256),
+    }),
+  }),
+  PrepareInputFromOutputRequest: z.strictObject({
+    expectedStoreId: id,
+    targetSessionId: id,
+    importId: id.max(100),
+    source: OutputFileTargetSchema,
+    preparationId: id,
+  }),
+  PrepareWorkingInputsRequest: z.strictObject({
+    expectedStoreId: id,
+    targetSessionId: id,
+    commandId: id,
+    files: inputFiles,
+  }),
+  WorkingInputsResponse: z.strictObject({ files: inputFiles }),
   InputImage: inputImage,
   InputFileReference: inputFileReference,
   InputFileUploadQuery: z.strictObject({
@@ -2030,6 +2086,42 @@ export const apiSchemas = {
 };
 export const apiRoutes = [
   ...traceExtensionRoutes,
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/output-files',
+    query: 'OutputFilesQuery',
+    response: 'OutputFilesPage',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/output-files/pdf-page',
+    request: 'OutputPdfPageRequest',
+    response: 'OutputPdfPage',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/output-files/resolve',
+    request: 'OutputFileResolveRequest',
+    response: 'OutputFileResolution',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/output-files/retry',
+    request: 'OutputCollectionRetryRequest',
+    response: 'OutputFilesPage',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-files/from-output',
+    request: 'PrepareInputFromOutputRequest',
+    response: 'InputFileReference',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-files/prepare-working',
+    request: 'PrepareWorkingInputsRequest',
+    response: 'WorkingInputsResponse',
+  },
   {
     method: 'post',
     path: '/v1/sessions/{id}/input-files',

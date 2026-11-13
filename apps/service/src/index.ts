@@ -1,6 +1,7 @@
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import { Hono } from 'hono';
 import type { z } from 'zod';
+import { createArtifactStream } from './artifact-stream';
 import type { ConfigurationManagementPort } from './configuration-management';
 import {
   type DesktopShellSettingsPort,
@@ -73,6 +74,7 @@ export interface ServiceOptions {
   sessionLogs?: SessionLogsSource;
   trajectory?: TrajectorySource;
   traceHost?: TraceHost;
+  outputPreviews?: ReturnType<typeof import('./output-previews').createOutputPreviews>;
   profile: { dataRoot: string; name: string; accessKey: string };
   buildId: string;
   token?: string;
@@ -290,6 +292,7 @@ export async function startService(options: ServiceOptions) {
   };
   const subscribers = new Set<AbortController>();
   const streaming = new Set<Promise<void>>();
+  const artifactCleanupErrors = new Set<unknown>();
   const capabilities = (
     options.capabilities ?? [
       'service_lifecycle',
@@ -351,6 +354,7 @@ export async function startService(options: ServiceOptions) {
   if (options.runtime?.supportsSelectedSkills) capabilities.push('run_skill_selection');
   if (options.runtime?.supportsInputImages) capabilities.push('input_images');
   if (options.runtime?.supportsInputFiles) capabilities.push('input_files');
+  if (options.runtime?.supportsArtifactStreams) capabilities.push('output_files');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
   if (options.diagnosticSource) capabilities.push('host_status');
   if (options.userMcpManagement) capabilities.push('user_mcp_settings');
@@ -477,6 +481,10 @@ export async function startService(options: ServiceOptions) {
                   'host_control_scope_denied',
                   'permission_authority_external',
                   'artifact_scope_denied',
+                  'output_scope_denied',
+                  'output_file_scope_denied',
+                  'input_file_scope_denied',
+                  'input_preparation_scope_denied',
                   'interaction_scope_denied',
                   'group_root_required',
                   'context_scope_denied',
@@ -495,6 +503,12 @@ export async function startService(options: ServiceOptions) {
                     'trajectory_evidence_offset_invalid',
                     'invalid_page',
                     'artifact_scope_invalid',
+                    'output_target_invalid',
+                    'output_page_invalid',
+                    'output_cursor_invalid',
+                    'output_run_invalid',
+                    'input_preparation_invalid',
+                    'output_pdf_page_invalid',
                     'invalid_configuration_scope',
                     'invalid_jsonc',
                     'invalid_configuration',
@@ -570,6 +584,16 @@ export async function startService(options: ServiceOptions) {
                             'store_mismatch',
                             'store_identity_mismatch',
                             'command_conflict',
+                            'output_retry_unavailable',
+                            'output_collector_unsettled',
+                            'output_collection_inherited',
+                            'output_allocation_conflict',
+                            'output_collector_conflict',
+                            'output_set_conflict',
+                            'output_file_conflict',
+                            'input_preparation_changed',
+                            'input_preparation_conflict',
+                            'input_file_content_mismatch',
                             'session_revision_changed',
                             'session_deleted',
                             'session_busy',
@@ -1040,6 +1064,140 @@ export async function startService(options: ServiceOptions) {
     });
     return context.json(schemas.Command.parse(receipt), 202);
   });
+  app.get('/v1/sessions/:id/output-files', async (context) => {
+    const query = schemas.OutputFilesQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(context.req.queries()).map(([key, values]) => [
+          key,
+          values.length === 1 ? values[0] : values,
+        ]),
+      ),
+    );
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    return context.json(
+      schemas.OutputFilesPage.parse(
+        await runtime.queryOutputFiles({
+          expectedStoreId: query.data.storeId,
+          sessionId: context.req.param('id'),
+          subjectId,
+          ...(query.data.runId ? { runId: query.data.runId } : {}),
+          ...(query.data.beforeKey ? { beforeKey: query.data.beforeKey } : {}),
+          ...(query.data.collectionBeforeKey
+            ? { collectionBeforeKey: query.data.collectionBeforeKey }
+            : {}),
+          ...(query.data.limit ? { limit: Number(query.data.limit) } : {}),
+        }),
+      ),
+    );
+  });
+  app.post('/v1/sessions/:id/output-files/pdf-page', async (context) => {
+    const input = await readBusinessBody(context.req.raw, schemas.OutputPdfPageRequest, 4096);
+    if (
+      input.target.sessionId !== context.req.param('id') ||
+      input.expectedStoreId !== input.target.storeId
+    )
+      throw new HttpFailure('output_file_scope_denied', 403);
+    if (!options.outputPreviews) throw new HttpFailure('output_preview_unavailable', 503);
+    const controller = new AbortController();
+    subscribers.add(controller);
+    const signal = AbortSignal.any([
+      controller.signal,
+      context.req.raw.signal,
+      AbortSignal.timeout(60000),
+    ]);
+    try {
+      return context.json(
+        schemas.OutputPdfPage.parse(
+          await options.outputPreviews.renderPdfPage(input.target, input.page, signal),
+        ),
+      );
+    } finally {
+      subscribers.delete(controller);
+    }
+  });
+  app.post('/v1/sessions/:id/output-files/resolve', async (context) => {
+    const { target, expectedStoreId } = await readBusinessBody(
+      context.req.raw,
+      schemas.OutputFileResolveRequest,
+      4096,
+    );
+    if (expectedStoreId !== target.storeId) throw new HttpFailure('store_identity_mismatch', 409);
+    if (target.sessionId !== context.req.param('id'))
+      throw new HttpFailure('output_file_scope_denied', 403);
+    const record = await runtime.resolveOutputFile({
+      expectedStoreId: target.storeId,
+      sessionId: target.sessionId,
+      subjectId,
+      target,
+    });
+    return context.json(
+      schemas.OutputFileResolution.parse({
+        summary: {
+          ...target,
+          ownerRunId: record.sourceRunId,
+          name: record.name,
+          mediaType: record.mediaType,
+          size: record.size,
+          publishedAt: record.publishedAt,
+        },
+        reference: record.reference,
+      }),
+    );
+  });
+  app.post('/v1/sessions/:id/output-files/retry', async (context) => {
+    const input = await readBusinessBody(
+      context.req.raw,
+      schemas.OutputCollectionRetryRequest,
+      4096,
+    );
+    const collection = await runtime.retryOutputCollection({
+      ...input,
+      sessionId: context.req.param('id'),
+      subjectId,
+    });
+    return context.json(
+      schemas.OutputFilesPage.parse(
+        await runtime.queryOutputFiles({
+          expectedStoreId: input.expectedStoreId,
+          sessionId: context.req.param('id'),
+          subjectId,
+          runId: collection.source.runId,
+        }),
+      ),
+    );
+  });
+  app.post('/v1/sessions/:id/input-files/from-output', async (context) => {
+    const input = await readBusinessBody(
+      context.req.raw,
+      schemas.PrepareInputFromOutputRequest,
+      8192,
+    );
+    if (input.targetSessionId !== context.req.param('id'))
+      throw new HttpFailure('input_file_scope_denied', 403);
+    return context.json(
+      schemas.InputFileReference.parse(
+        await runtime.prepareInputFromOutput({
+          ...input,
+          subjectId,
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
+  });
+  app.post('/v1/sessions/:id/input-files/prepare-working', async (context) => {
+    const input = await readBusinessBody(
+      context.req.raw,
+      schemas.PrepareWorkingInputsRequest,
+      256 * 1024,
+    );
+    if (input.targetSessionId !== context.req.param('id'))
+      throw new HttpFailure('input_file_scope_denied', 403);
+    return context.json(
+      schemas.WorkingInputsResponse.parse(
+        await runtime.prepareWorkingInputs({ ...input, subjectId, signal: context.req.raw.signal }),
+      ),
+    );
+  });
   app.post('/v1/sessions/:id/input-files', async (context) => {
     const query = schemas.InputFileUploadQuery.safeParse(
       Object.fromEntries(
@@ -1142,14 +1300,53 @@ export async function startService(options: ServiceOptions) {
       .safeParse({ kind: context.req.query('scopeKind'), id: context.req.query('scopeId') });
     const expectedStoreId = context.req.query('storeId');
     if (!input.success || !expectedStoreId) throw new HttpFailure('artifact_scope_invalid', 400);
-    const { reference, content } = await runtime.readArtifact({
+    const controller = new AbortController();
+    const abort = () => controller.abort(context.req.raw.signal.reason);
+    context.req.raw.signal.addEventListener('abort', abort, { once: true });
+    if (context.req.raw.signal.aborted) abort();
+    const request = {
       expectedStoreId,
       sessionId: context.req.param('id'),
       refId: context.req.param('refId'),
       subjectId,
       scope: input.data,
+      signal: controller.signal,
+    };
+    let artifact: Awaited<ReturnType<typeof runtime.readArtifactStream>>;
+    try {
+      artifact = runtime.supportsArtifactStreams
+        ? await runtime.readArtifactStream(request)
+        : await runtime.readArtifact(request).then(({ reference, content }) => ({
+            reference,
+            content: {
+              async *[Symbol.asyncIterator]() {
+                yield content;
+              },
+            },
+          }));
+    } catch (error) {
+      context.req.raw.signal.removeEventListener('abort', abort);
+      throw error;
+    }
+    const { reference } = artifact;
+    subscribers.add(controller);
+    let finish!: () => void;
+    const completed = new Promise<void>((resolve) => {
+      finish = resolve;
     });
-    return new Response(Uint8Array.from(content), {
+    streaming.add(completed);
+    const body = createArtifactStream({
+      content: artifact.content,
+      controller,
+      settled(error, cleanupUnknown) {
+        if (cleanupUnknown && error !== undefined) artifactCleanupErrors.add(error);
+        subscribers.delete(controller);
+        streaming.delete(completed);
+        context.req.raw.signal.removeEventListener('abort', abort);
+        finish();
+      },
+    });
+    return new Response(body, {
       headers: {
         'content-type': reference.mediaType,
         'content-length': reference.size,
@@ -1358,6 +1555,11 @@ export async function startService(options: ServiceOptions) {
       },
       async () => {
         await Promise.allSettled(streaming);
+        if (artifactCleanupErrors.size)
+          throw new AggregateError(
+            [...artifactCleanupErrors],
+            'artifact_stream_cleanup_unconfirmed',
+          );
         for (const reader of bodyReaders) void reader.cancel().catch(() => {});
         await options.afterResourceClose?.();
         // Business resources have drained; unread transport output must not retain the process.

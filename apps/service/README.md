@@ -51,7 +51,7 @@
 
 ## 图片输入协议
 
-默认装配增加 `files.view_images@1`／模型名 `view_images`，位于同一个 `builtin.files` 扩展；普通无 Shell 目录为13项，有 Shell为17项，浏览器工具另按实际宿主选择。它从真实 Execution/Workspace 和当前输入登记派生读取范围，使用原只读权限与父子交集；子 Agent 的准确只读定义白名单也包含该版本。受保护根包括 Profile、协调目录、处理程序／摘要与实际 Sharp/native 依赖闭包。单次`paths`最多10张，兼容互斥的单图`path`，私有原件派发revision绑定完整有序批次；失败不交付部分图片。新增工具不增加 HTTP 图片协议、调试入口或文件写入权。
+默认装配增加 `files.view_images@1`／模型名 `view_images`，位于同一个 `builtin.files` 扩展；普通目录随实际 Shell、任务和浏览器能力选择；Shell 可用时选入既有 `skills.load/resource` 读取入口。它从真实 Execution/Workspace 和当前输入登记派生读取范围，使用原只读权限与父子交集；子 Agent 的准确只读定义白名单也包含该版本。受保护根包括 Profile、协调目录、处理程序／摘要与实际 Sharp/native 依赖闭包。单次`paths`最多10张，兼容互斥的单图`path`，私有原件派发revision绑定完整有序批次；失败不交付部分图片。新增工具不增加 HTTP 图片协议、调试入口或文件写入权。
 
 图片结果沿现有 Artifact 和后继模型链传递；本地原件／视觉结果的目录与 GC 由[Files owner](../../packages/agent/src/tools/files/README.md#本地保存与缓存目录)维护。[默认 Service 联验](test/isolated/image-reading.test.ts)覆盖真实持久化、外部／私有路径、两个图片调用、冷重开／Fork和两协议实际 SDK 编码；真实视觉识别及性能范围见同一 owner。
 
@@ -1118,3 +1118,17 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 浏览器新授权的私有请求标识由 Service 生成并持久化一次，携带固定时间范围；冷恢复沿原记录 inspect，不因超时、Main重启或记录丢失重新 prepare。旧格式申请仍按原记录只读恢复，未知结果不能重放。此调整不改变公开工具或协议版本。
 
 2026-11-06 持久默认目录差量：[权限链路](test/isolated/git-worktree-permissions.test.ts)整文件10项／109断言通过（5个启动隔离HOME子进程各自核1pass0fail），验证根与默认 worker child 的手动／Auto 省略 path 流程、批准前零mkdir、四个原Job复用、按原回执删除保留分支，以及 workspace_write 不扩权。默认根为可信 homedir() 下 `.kite-code/worktrees`，Bun会缓存启动HOME，测试必须在子进程启动时隔离并在任何Git变更前核对。
+
+## 办公文件交付与工作副本
+
+默认生产装配从现有 Shell 执行环境提供固定办公[运行时资产](../../packages/agent/src/tools/documents/README.md)，确切 OfficeCLI executable 进入平台身份，helper/字体/预览资源只读；`OFFICECLI_NO_AUTO_RESIDENT/SKIP_UPDATE/NO_AUTO_INSTALL=1` 禁止运行时驻留、更新和安装。真实 Shell Job 在私有持久 staging 分配后才启动，`KITE_OUTPUT_DIR` 由宿主派生。输出收集属于[现有 Files/Job owner](../../packages/agent/src/business/output-collection.README.md)，不新增模型工具或下一轮模型提示。
+
+默认权限装配只接纳宿主实际 Files collector Job，并用 Store 的原 Action/operation/producer/allocation 完整链及当前 attempt/startCommand/intent 请求证明动态描述。其已绑定自有暂存到私有 Artifact 的归档属于 `read`＋`record_write` 内部持久化，不是 safeRead 或用户任意外部文件写；三种模式沿原 policy 自动归档，当前 trust 与注入 ceiling 不放宽。模型 Run 不增加此 Job 能力。adapter 前权限拒绝以可见失败收口，禁普通重试、冷 owner 不重放，原执行事实保留；私有暂存独立保留7天后才可清理，未知执行仍保留。对应[默认权限回归](test/isolated/output-collection.test.ts)覆盖三种模式、伪造来源/attempt、trust 撤销和注入拒绝。
+
+具备流式 Artifact port 的 Service 宣告 `output_files`。同源 schema 定义 `/output-files` 列表、`/resolve`、`/retry` 与 `/pdf-page`；全部按认证主体及准确 Store/Session/locator 解析。PDF 页图由现有 PDF.js worker按需生成，只返回指定页PNG；原始文件可独立下载。Artifact GET 为有背压的二进制流，完整EOF验证原字节，关闭和取消等待原迭代器释放。Main必须在临时落盘完成SHA/size核实后才发布保存文件，HTTP头不单独证明完整文件。
+
+`input-files/from-output` 将精确来源导入目标 Session 的合法 input ref；`input-files/prepare-working` 在原 command ID 提交前创建工作区 `.kite-inputs` 副本。映射由Store持久保存并与原输入绑定同事务落定，模型只收到工作路径，不收到私有Blob路径或交付catalog。ACK重入不会覆盖已绑定命令的编辑；祖先symlink、hardlink、来源中断或hash不符均拒绝；生产装配额外拒绝Profile、协调目录和Runtime资产内的Workspace，逐4MiB核验让出事件循环以响应取消。路径/复制事实归[工作副本实现](../../packages/agent/src/tools/input-working-files.ts)。
+
+2026-11-11 Linux x64/Bun1.4.4基于`0d17ab9`的办公分支，[真实 Bash→HTTP→输入→工作副本回归](test/isolated/output-files.test.ts)1项17断言、[native路径与失败安全回归](../../packages/agent/test/isolated/tools/input-working-files.test.ts)5项20断言通过。模型由固定fixture提供，Bash、SQLite、Artifact、native文件I/O及HTTP为真实链路；不是外部模型或Electron视觉验收。
+
+HTTP流的[传输owner](src/artifact-stream.ts)对正常EOF、客户端取消和异常next/return统一落定；清理未知保留原错误并使Service关闭失败，不把已closed generator的后续return成功当成首次清理成功。[故障回归](test/isolated/artifact-stream.test.ts)专门覆盖return和EOF-finally抛错、取消、背压及单次结算。

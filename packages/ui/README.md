@@ -1,5 +1,12 @@
 `SessionPage.workspaceTab` 让宿主的受管网页内容进入原 `SessionTabs`：共用一条标签栏、同一个8项有界model和原可拖动分栏，不新增详情壳或放大／还原按钮。明确请求按scope／requestId去重并选择已有workspace标签；含该标签时首次调宽62%，后续tab切换保留用户拖动宽度。workspace内容保持挂载，只接收当前可见性；收起／切tab不赋予UI取消任务的权限。标签变更即时保留最新model容量，处理同一commit的并发打开；普通browser释放、child与变更读取仍遵循原owner。
 
+## 输出文件展示
+
+[Conversation](src/desktop/Conversation.tsx) 的 `renderTurnOutputs` 只挂在该轮最后已确认 finalReply 之后；没有最终回复的失败／终态轮次放在最后该轮区域之后。文件状态不改变正文、阅读位置或折叠过程。[OutputFiles](src/desktop/OutputFiles.tsx) 显示独立文件卡、已保存项与整理错误；预期数量未知或为零不闪现整理提示，参考项默认五项，可展开／分页。宿主负责可信元数据、另存、准确引用和重试，不向公共组件传 ArtifactReference。
+
+[SessionTabs](src/desktop/SessionTabs.tsx) 的 file 标签按 Store／Session／fileId 去重，与原标签共用八项容量；只有明确打开动作激活标签，后台文件到达不会打开侧栏。文件页仅在活动可见时挂载，宿主负责原生预览生命周期。相关回归归原 [Conversation 呈现](test/isolated/desktop-conversation-presentation.test.tsx) 与 [会话标签](test/isolated/desktop-session-tabs.test.tsx)：Linux／Bun 1.4.4，2026-11-11 工作树分别9项／152断言与31项／465断言通过。DOM证据不代替实际Electron窗口验收。
+
+
 Shell 活动摘要采用原调用的可选 description，省略时沿用命令预览；展开仍显示完整命令和原执行结果。统一 shell_execute 的 background:true 显示后台受理，受理不代表成功或完成；历史 shell.launch 保持原解释。展示不参与风险判断、授权或操作身份。
 
 # UI

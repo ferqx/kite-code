@@ -82,6 +82,11 @@ import {
 import { isAgentCreationTaskTool, isRootAgentObservationTaskTool } from './extensions/task/roles';
 import { inputFileContent, inputFileReferences } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType } from './input-images';
+import {
+  type PrepareWorkingInputsRequest,
+  type WorkingInputFilesPort,
+  workingInputPath,
+} from './input-working-files';
 import { canonicalJson, semanticDigest } from './json';
 import {
   defaultLoop,
@@ -431,6 +436,13 @@ type RunExecutionCheckpoint = {
 };
 
 export interface RuntimeOptions {
+  /** Host-owned filesystem preparation; the Runtime only carries identity and Store authority. */
+  readonly outputCollections?: {
+    prepare(
+      context: import('./extensions').JobContext,
+      identity: import('./output-files').OutputDirectoryIdentity,
+    ): Promise<{ env: Readonly<Record<string, string>>; cleanupTransferred: true }>;
+  };
   /** Trusted Host metadata for an accepted public input, before interpretation starts.
    * It cannot select work, dispatch Tools/Jobs/Models, or confer business permission. */
   sessionInputMetadata?: {
@@ -453,6 +465,7 @@ export interface RuntimeOptions {
   workspaceSerialLocks?: WorkspaceSerialLocks;
   sources?: ContextSources;
   artifacts?: ArtifactContentStore;
+  workingInputFiles?: WorkingInputFilesPort;
   /** Only these host bindings may be named by an extension's kind:agent request. */
   childConfigurations?: readonly ChildAgentConfiguration[];
   maxConcurrentSubagents?: number;
@@ -541,6 +554,7 @@ export class AgentRuntime {
   readonly supportsSelectedSkills: boolean;
   readonly supportsInputImages: boolean;
   readonly supportsInputFiles: boolean;
+  readonly supportsArtifactStreams: boolean;
   readonly supportsExtensionInputs: boolean;
   private readonly instanceId: string;
   private readonly tools = new Map<string, ToolDefinition>();
@@ -666,6 +680,7 @@ export class AgentRuntime {
       });
     this.supportsInputImages = !!options.artifacts;
     this.supportsInputFiles = !!options.artifacts?.publishStream;
+    this.supportsArtifactStreams = !!options.artifacts?.readStream;
     this.supportsSelectedSkills =
       options.supportsSelectedSkills === true && !!options.resolveRunConfiguration;
     this.supportsExtensionInputs =
@@ -943,8 +958,13 @@ export class AgentRuntime {
     this.uploadInputFile = this.accountEntry(this.uploadInputFile, 'admission');
     this.releaseInputFileImport = this.accountEntry(this.releaseInputFileImport, 'admission');
     this.getInputFileImport = this.accountEntry(this.getInputFileImport, 'observation');
+    this.prepareInputFromOutput = this.accountEntry(this.prepareInputFromOutput, 'admission');
+    this.prepareWorkingInputs = this.accountEntry(this.prepareWorkingInputs, 'admission');
     this.resolveInputFile = this.accountEntry(this.resolveInputFile, 'observation');
     this.getMetadata = this.accountEntry(this.getMetadata, 'observation');
+    this.queryOutputFiles = this.accountEntry(this.queryOutputFiles, 'observation');
+    this.resolveOutputFile = this.accountEntry(this.resolveOutputFile, 'observation');
+    this.retryOutputCollection = this.accountEntry(this.retryOutputCollection, 'admission');
     this.readWorkEligibility = this.accountEntry(this.readWorkEligibility, 'observation');
     this.readRunExtensionRecord = this.accountEntry(this.readRunExtensionRecord, 'observation');
     this.readSessionExportText = this.accountEntry(this.readSessionExportText, 'observation');
@@ -957,6 +977,7 @@ export class AgentRuntime {
     this.readTrajectoryEvidence = this.accountEntry(this.readTrajectoryEvidence, 'observation');
     this.readExecutionEvidence = this.accountEntry(this.readExecutionEvidence, 'observation');
     this.readArtifact = this.accountEntry(this.readArtifact, 'observation');
+    this.readArtifactStream = this.accountEntry(this.readArtifactStream, 'observation');
     this.readHostControl = this.accountEntry(this.readHostControl, 'observation');
     this.listPermissionGrants = this.accountEntry(this.listPermissionGrants, 'observation');
     this.getHostMutation = this.accountEntry(this.getHostMutation, 'observation');
@@ -2956,6 +2977,121 @@ export class AgentRuntime {
       this.automaticTitleExecutions.delete(id);
     };
   }
+  queryOutputFiles(input: Parameters<Store['queryOutputFiles']>[0]) {
+    return this.options.store.queryOutputFiles(input);
+  }
+  resolveOutputFile(input: Parameters<Store['resolveOutputFile']>[0]) {
+    return this.options.store.resolveOutputFile(input);
+  }
+  async retryOutputCollection(input: Parameters<Store['retryOutputCollection']>[0]) {
+    const result = await this.options.store.retryOutputCollection(input);
+    this.schedule(input.sessionId);
+    this.controlObservation.markDirty();
+    return result;
+  }
+  async prepareOutputCollection(
+    context: import('./extensions').JobContext,
+    identity: import('./output-files').OutputDirectoryIdentity,
+  ) {
+    if (!this.options.outputCollections) throw new AgentError('output_collection_unavailable');
+    return this.options.outputCollections.prepare(context, identity);
+  }
+  private shellOutputScope(executionId: string) {
+    const live = this.activeExecutions.get(executionId);
+    if (!live) throw new AgentError('output_execution_inactive');
+    return {
+      expectedStoreId: live.originStoreId,
+      sessionId: live.sessionId,
+      subjectId: live.subjectId,
+      owner: live.owner,
+    };
+  }
+  allocateShellOutput(
+    context: import('./extensions').JobContext,
+    identity: import('./output-files').OutputDirectoryIdentity,
+    outputIdentity: import('./output-files').OutputDirectoryIdentity,
+  ) {
+    return this.options.store.allocateOutputCollection({
+      ...this.shellOutputScope(context.executionId),
+      producerExecutionId: context.executionId,
+      identity,
+      outputIdentity,
+    });
+  }
+  mutateShellOutput(
+    context: import('./extensions').JobContext,
+    mutation: import('./output-files').OutputCollectionMutation,
+  ) {
+    return this.options.store.mutateOutputCollection({
+      ...this.shellOutputScope(context.executionId),
+      collectorExecutionId: context.executionId,
+      mutation,
+    });
+  }
+  /** Internal host permission fact; never exposed as a model or Service operation. */
+  getOutputCollectorAuthorization(request: import('./extensions').AuthorizationRequest) {
+    if (
+      request.kind !== 'job' ||
+      request.definitionId !== 'builtin.files/collect' ||
+      request.definitionVersion !== '1' ||
+      request.runId !== null
+    )
+      return Promise.resolve(null);
+    const live = this.activeExecutions.get(request.executionId);
+    if (!live || live.sessionId !== request.sessionId) return Promise.resolve(null);
+    return this.options.store.getOutputCollectorAuthorization({
+      expectedStoreId: live.originStoreId,
+      sessionId: live.sessionId,
+      subjectId: live.subjectId,
+      executionId: request.executionId,
+      input: request.input,
+    });
+  }
+  async verifyOutputCollectionAction(
+    executionId: string,
+    input: { collectionId: string; attempt: number },
+  ) {
+    const scope = this.shellOutputScope(executionId);
+    const execution = await this.options.store.getExecution(executionId);
+    const collection = await this.options.store.getOutputCollection({
+      ...scope,
+      collectionId: input.collectionId,
+    });
+    if (
+      !execution ||
+      !collection ||
+      collection.state !== 'pending' ||
+      collection.attempt !== input.attempt ||
+      execution.originCommandId !== collection.startCommandId
+    )
+      throw new AgentError('output_collection_action_invalid');
+  }
+  async publishShellOutput(
+    context: import('./extensions').JobContext,
+    collection: import('./output-files').OutputCollection,
+    refId: string,
+    mediaType: string,
+    content: AsyncIterable<Uint8Array>,
+  ) {
+    const scope = this.shellOutputScope(context.executionId);
+    if (
+      collection.collectorExecutionId !== context.executionId ||
+      collection.source.storeId !== scope.expectedStoreId ||
+      collection.source.sessionId !== scope.sessionId
+    )
+      throw new AgentError('output_collector_invalid');
+    if (!this.options.artifacts?.publishStream) throw new AgentError('artifact_stream_unavailable');
+    return this.options.artifacts.publishStream({
+      expectedStoreId: scope.expectedStoreId,
+      sessionId: scope.sessionId,
+      subjectId: scope.subjectId,
+      scope: { kind: 'session', id: scope.sessionId },
+      refId,
+      mediaType,
+      content,
+      signal: context.signal,
+    });
+  }
   /** Trusted first-input metadata only; the Store verifies eligibility atomically. */
   claimAutomaticSessionTitle(input: Readonly<CommandRecord>) {
     return this.options.store.claimAutomaticSessionTitle({
@@ -3848,6 +3984,113 @@ export class AgentRuntime {
       reference: { ...imported.reference, scope: { kind: 'session', id: imported.sessionId } },
     };
   }
+  async prepareInputFromOutput(input: {
+    expectedStoreId: string;
+    targetSessionId: string;
+    subjectId: string;
+    importId: string;
+    source: import('./output-files').OutputFileTarget;
+    preparationId: string;
+    signal?: AbortSignal;
+  }): Promise<import('./storage/types').InputFileReference> {
+    if (
+      input.source.storeId !== input.expectedStoreId ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(input.preparationId)
+    )
+      throw new AgentError('input_file_scope_denied');
+    const resolved = await this.resolveOutputFile({
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.source.sessionId,
+      subjectId: input.subjectId,
+      target: input.source,
+    });
+    const stream = await this.readArtifactStream({
+      expectedStoreId: input.expectedStoreId,
+      sessionId: resolved.reference.sessionId,
+      subjectId: input.subjectId,
+      refId: resolved.reference.id,
+      scope: resolved.reference.scope,
+      signal: input.signal,
+    });
+    return this.uploadInputFile({
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.targetSessionId,
+      subjectId: input.subjectId,
+      id: input.importId,
+      name: resolved.name,
+      mediaType: resolved.reference.mediaType,
+      content: stream.content,
+      expectedContent: { hash: resolved.reference.hash, size: resolved.reference.size },
+      signal: input.signal,
+    });
+  }
+  async prepareWorkingInputs(input: PrepareWorkingInputsRequest) {
+    if (!this.options.workingInputFiles) throw new AgentError('input_preparation_unavailable');
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(input.commandId))
+      throw new AgentError('input_preparation_invalid');
+    const session = await this.options.store.getSession(input.targetSessionId);
+    const workspace = session && (await this.options.store.getWorkspace(session.workspaceId));
+    if (!session || !workspace) throw new AgentError('input_file_scope_denied');
+    for (const file of inputFileReferences(input.files)) {
+      if (!file.reference) throw new AgentError('input_file_invalid');
+      const scope = {
+        expectedStoreId: input.expectedStoreId,
+        sessionId: input.targetSessionId,
+        subjectId: input.subjectId,
+        id: file.reference.id.slice('input-file-'.length),
+      };
+      const imported = await this.options.store.getInputFileImport(scope);
+      if (
+        !imported ||
+        imported.state === 'released' ||
+        imported.name !== file.name ||
+        canonicalJson(imported.reference as unknown as Json) !==
+          canonicalJson(file.reference as unknown as Json)
+      )
+        throw new AgentError('input_file_scope_denied');
+      const preparation = {
+        expectedStoreId: input.expectedStoreId,
+        sessionId: input.targetSessionId,
+        subjectId: input.subjectId,
+        commandId: input.commandId,
+        importId: imported.id,
+      };
+      const existing = await this.options.store.getWorkingInput(preparation);
+      const relativePath = workingInputPath(preparation, imported.name);
+      const runtime = this;
+      const identities = await this.options.workingInputFiles.materialize({
+        rootUri: workspace.rootUri,
+        relativePath,
+        reference: imported.reference,
+        existing,
+        signal: input.signal,
+        async *content() {
+          const stream = await runtime.readArtifactStream({
+            expectedStoreId: input.expectedStoreId,
+            sessionId: input.targetSessionId,
+            subjectId: input.subjectId,
+            refId: imported.reference.id,
+            scope: imported.reference.scope,
+            signal: input.signal,
+          });
+          yield* stream.content;
+        },
+      });
+      await this.options.store.registerWorkingInput({
+        ...preparation,
+        record: {
+          commandId: input.commandId,
+          importId: imported.id,
+          inputRefId: imported.reference.id,
+          workingRelativePath: relativePath,
+          workspaceRootUri: workspace.rootUri,
+          state: 'ready',
+          ...identities,
+        },
+      });
+    }
+    return { files: structuredClone(input.files) };
+  }
   getInputFileImport(input: import('./storage/input-file-imports').InputFileImportScope) {
     return this.options.store.getInputFileImport(input);
   }
@@ -3972,6 +4215,45 @@ export class AgentRuntime {
     if (reference.mediaType === 'application/vnd.kite.model-output+json')
       throw new AgentError('artifact_scope_denied');
     return { reference, content: await this.options.artifacts.read(input) };
+  }
+  /** Exact public-ref validation is identical to readArtifact. Consumption holds Runtime resources. */
+  async readArtifactStream(input: ArtifactReadInput) {
+    if (this.resourceAdmissionClosed) throw new AgentError('runtime_draining');
+    input = { ...input, scope: { ...input.scope } };
+    input.signal?.throwIfAborted();
+    if (input.refId.startsWith('model-output-')) throw new AgentError('artifact_scope_denied');
+    const artifacts = this.options.artifacts;
+    if (!artifacts?.readStream) throw new AgentError('artifact_stream_unavailable');
+    const { signal, ...referenceInput } = input;
+    const legacyBody = input.refId.startsWith('model-body-');
+    const reference = legacyBody
+      ? await this.options.store.getLegacyReviewArtifactReference(referenceInput)
+      : await this.options.store.getArtifactReference(referenceInput);
+    if (!reference)
+      throw new AgentError(legacyBody ? 'artifact_scope_denied' : 'artifact_reference_not_found');
+    if (reference.mediaType === 'application/vnd.kite.model-output+json')
+      throw new AgentError('artifact_scope_denied');
+    const runtime = this;
+    let consumed = false;
+    return {
+      reference,
+      content: {
+        async *[Symbol.asyncIterator]() {
+          if (consumed) throw new AgentError('artifact_stream_consumed');
+          consumed = true;
+          if (runtime.resourceAdmissionClosed) throw new AgentError('runtime_draining');
+          runtime.resourceUsers++;
+          try {
+            yield* artifacts.readStream!(input);
+          } finally {
+            if (--runtime.resourceUsers === 0) {
+              for (const wake of runtime.resourceWaiters) wake();
+              runtime.resourceWaiters.clear();
+            }
+          }
+        },
+      },
+    };
   }
   beginHostMutation(input: Parameters<Store['beginHostMutation']>[0]) {
     return this.options.store.beginHostMutation(input);
@@ -10925,7 +11207,27 @@ export class AgentRuntime {
                 canonicalJson(file.reference as unknown as Json)
             )
               throw new AgentError('input_file_scope_denied');
-            files.push({ ...file, uri: imported.uri });
+            const working = imported.boundCommandId
+              ? await this.options.store.getWorkingInput({
+                  expectedStoreId: storeId,
+                  sessionId: message.sessionId,
+                  subjectId,
+                  commandId: imported.boundCommandId,
+                  importId: imported.id,
+                })
+              : null;
+            if (working && working.state !== 'bound')
+              throw new AgentError('input_preparation_conflict');
+            // Keep the private immutable reference internal; only the selected working path is projected.
+            const uri = working
+              ? new URL(
+                  working.workingRelativePath.split('/').map(encodeURIComponent).join('/'),
+                  working.workspaceRootUri.endsWith('/')
+                    ? working.workspaceRootUri
+                    : `${working.workspaceRootUri}/`,
+                ).href
+              : imported.uri;
+            files.push({ name: file.name, uri });
           }
           content = inputFileContent(content, files);
         }

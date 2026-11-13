@@ -127,6 +127,39 @@ test('ordinary Native file preparation aborts active reads and generation change
       expect(() => main.finish(id)).toThrow('native_file_incomplete');
       expect(releases()).toHaveLength(1);
     }
+    const output = {
+      storeId: 'store',
+      sessionId: 'session',
+      fileId: 'immutable-file',
+      locator: { kind: 'delivery' as const, key: 'delivery/00000000000000000001/job/file' },
+    };
+    main.fromOutput('stable-chip', output, 'report.docx');
+    const chip = {
+      id: 'stable-chip',
+      name: 'report.docx',
+      uri: 'output-file:immutable-file',
+      prepared: true,
+    };
+    await act(async () => files.addFiles('session', [chip]));
+    // Main cold/read restoration is idempotent; React may retain the same chip across navigation.
+    main.fromOutput('stable-chip', output, 'report.docx');
+    await act(async () => files.addFiles('session', [chip]));
+    expect(
+      calls.filter((call) => call.method === 'input.files.release' && call.id === 'stable-chip'),
+    ).toHaveLength(0);
+    const reference = { name: 'report.docx', uri: 'input-file:prepared' };
+    const client = {
+      async prepareInputFromOutput() {
+        return reference;
+      },
+    } as unknown as import('@kite-ai/client').AgentClient;
+    expect(await main.publish(client, 'store', 'session', ['stable-chip'])).toEqual([reference]);
+    main.fromOutput('redundant-chip', output, 'report.docx');
+    await act(async () => files.addFiles('session', [{ ...chip, id: 'redundant-chip' }]));
+    expect(
+      calls.filter((call) => call.method === 'input.files.release' && call.id === 'redundant-chip'),
+    ).toHaveLength(1);
+    expect(await main.publish(client, 'store', 'session', ['stable-chip'])).toEqual([reference]);
   } finally {
     await act(async () => root.unmount());
     await main.close();

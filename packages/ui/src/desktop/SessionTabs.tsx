@@ -50,6 +50,25 @@ export interface SessionChildPageProps extends SessionChildTarget {
   readonly onTitleChange: (title: string) => void;
 }
 
+export interface SessionFileTarget {
+  readonly storeId: string;
+  readonly sessionId: string;
+  readonly fileId: string;
+  readonly locator:
+    | { kind: 'delivery'; key: string }
+    | { kind: 'legacy-operation'; executionId: string }
+    | { kind: 'legacy-inherited'; key: string };
+}
+export interface SessionFilePageProps {
+  readonly target: SessionFileTarget;
+  readonly visible: boolean;
+}
+export interface SessionFileTabRequest {
+  readonly target: SessionFileTarget;
+  readonly title: string;
+  readonly requestId: number;
+}
+
 export interface SessionTrajectoryPageProps {
   readonly visible: boolean;
 }
@@ -61,6 +80,7 @@ export interface SessionTabsProps {
   readonly changes: ReactNode;
   readonly renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
   readonly renderChildSession?: (props: SessionChildPageProps) => ReactNode;
+  readonly renderFile?: (props: SessionFilePageProps) => ReactNode;
   readonly renderTrajectory?: (props: SessionTrajectoryPageProps) => ReactNode;
   readonly onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
   readonly workspace?: {
@@ -71,6 +91,12 @@ export interface SessionTabsProps {
 }
 
 type SessionTab =
+  | {
+      readonly id: string;
+      readonly kind: 'file';
+      readonly title: string;
+      readonly target: SessionFileTarget;
+    }
   | {
       readonly id: string;
       readonly kind: 'browser' | 'changes' | 'workspace' | 'trajectory';
@@ -111,6 +137,7 @@ export interface SessionTabsModel {
     title: string,
     childAgentIdentity?: string,
   ) => boolean;
+  readonly openFile: (target: SessionFileTarget, title: string) => boolean;
   readonly openWorkspace: (title: string) => boolean;
   readonly closeTab: (id: string, committed?: () => void) => void;
 }
@@ -453,6 +480,25 @@ export function useSessionTabs(
     }));
     return true;
   };
+  const openFile = (target: SessionFileTarget, title: string) => {
+    if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
+    const id = `file-${JSON.stringify([target.storeId, target.sessionId, target.fileId])}`;
+    const existing = latest.current.tabs.find((tab) => tab.id === id);
+    if (!existing && occupiedSlots() >= maxTabs) return false;
+    intent.current++;
+    const tab: SessionTab = {
+      id,
+      kind: 'file',
+      target,
+      title: title.trim().slice(0, 80) || '文件',
+    };
+    update((value) => ({
+      ...value,
+      tabs: existing ? value.tabs : [...value.tabs, tab],
+      selected: id,
+    }));
+    return true;
+  };
   const openWorkspace = (title: string) => {
     if (pending.current || latest.current.restoring || latest.current.restoreIssue) return false;
     const tabs = latest.current.tabs;
@@ -543,6 +589,7 @@ export function useSessionTabs(
     openTrajectory,
     openChild,
     openWorkspace,
+    openFile,
     closeTab,
     select: (id) => {
       if (!latest.current.tabs.some((tab) => tab.id === id)) return;
@@ -670,6 +717,7 @@ export function SessionTabs({
   renderBrowser,
   renderChildSession,
   renderTrajectory,
+  renderFile,
   onChildSessionChange,
   workspace,
   onClose,
@@ -738,7 +786,11 @@ export function SessionTabs({
         <SessionTabsRestoreStatus {...localChrome} />
         {tabs.map((tab) => (
           <TabsContent className="session-tab-content" value={tab.id} key={tab.id} forceMount>
-            {tab.kind === 'workspace' ? (
+            {tab.kind === 'file' ? (
+              visible && active === tab.id ? (
+                renderFile?.({ target: tab.target, visible: true })
+              ) : null
+            ) : tab.kind === 'workspace' ? (
               <div className="session-tab-workspace">
                 {workspace?.render(visible && active === tab.id)}
               </div>

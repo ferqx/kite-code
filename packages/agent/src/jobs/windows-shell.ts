@@ -27,6 +27,7 @@ import {
   removeRuntimeTempAsync,
   verifyLaunchIdentitiesAsync,
 } from './launch-identity';
+import { prepareShellOutputCollection, type ShellOutputCollection } from './output-collection';
 import { ripgrepAsset } from './ripgrep';
 import type { TrustedWorkerLaunch } from './shell';
 import type { HostShellExecutionScopeResolver } from './shell-scope';
@@ -146,6 +147,7 @@ export type WindowsShellOptions = WindowsShellBackend & {
     command: string,
     context: JobContext,
   ) => (TrustedWorkerLaunch & { readonly powerShellCommand?: string }) | undefined;
+  outputCollection?: ShellOutputCollection;
 };
 /** Live native Job/HANDLE owner; durable references never reconstruct a process from a PID. */
 export async function createWindowsShellJob(
@@ -255,8 +257,14 @@ export async function createWindowsShellJob(
       const invocation = `kitecode.${randomBytes(16).toString('hex')}`;
       const temp = realpathSync.native(mkdtempSync(join(options.controlBase, 'shell-')));
       const tempIdentity = launchIdentity(temp);
-      const cleanup = () => removeRuntimeTempAsync(tempIdentity);
-      const env = { ...(trusted?.env ?? options.env) };
+      const collection = options.outputCollection
+        ? await prepareShellOutputCollection(options.outputCollection, context, {
+            runtimeTemp: tempIdentity,
+            cleanup: () => removeRuntimeTempAsync(tempIdentity),
+          })
+        : undefined;
+      const cleanup = collection ? async () => {} : () => removeRuntimeTempAsync(tempIdentity);
+      const env = { ...(trusted?.env ?? options.env), ...collection?.env };
       const inheritedPath = Object.hasOwn(env, 'PATH')
         ? env.PATH
         : Object.entries(env).find(([name]) => name.toUpperCase() === 'PATH')?.[1];

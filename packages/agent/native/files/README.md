@@ -28,11 +28,15 @@ Linux 的 cap-std 目录能力使用 `O_PATH`，不能直接 fsync。目录 sync
 
 ABI `kite-files:2/cap-std:4.0.3` 增加内部 `create-directory` 打开种类，只创建原父能力下的单个新目录。POSIX 用 `create_dir_with(0700)` 后 no-follow 打开；Windows 以 `FILE_CREATE` 取得原目录 HANDLE，使用本人私有 DACL，先登记再核身份，取得未知保原父链。既有目录冲突返回 `EEXIST`，不在 native 内跟随或重试。上层仅对新建工作区文件补父目录，详细范围和失败语义归 [Files owner](../../src/tools/files/README.md#新建文件的父目录与失败反馈)。系统权限拒绝保留 `EACCES`，不再混为一般 IO 错误。
 
+`WorkspaceFileIo.listAt(parent, maxEntries?)` 的可选预算限制实际遇到的目录项（不含 `.`／`..`，包含保护规则过滤的项）。有预算时只调用独立 native `listAtBounded`；同ABI旧 companion 即使通过自身 manifest／binary 校验，缺少此方法仍以 `file_native_bounded_listing_unavailable` 拒绝，绝不向可能忽略多余参数的旧 `listAt` 回退。省略预算的既有调用继续走不限额 `listAt`。Unix 在原目录迭代器取得条目后、名称转换与过滤前扣减；Windows 继续沿原 HANDLE 使用固定64KiB批缓冲，在解析单项后、名称分配与过滤前扣减。遇到首个超额项即返回 `file_directory_entry_limit`，不返回部分列表，也不先构造完整目录数组。参数只属于内部文件能力 API，ABI、工具和协议版本不变。[Shell collector](../../src/business/output-collection.README.md)传入剩余总预算，并在同步 native 调用前后让出事件循环检查取消；条目数量约束不构成阻塞 OS／文件系统调用的硬时延承诺。
+
 ## 构建与验证
 
 在本目录执行 `cargo test --locked --lib -- --test-threads=1` 验证本机资源边界。Unix 的嵌套关闭故障核相对父链、原 FD 和整个 owner 在显式关闭及 Drop 后仍被保留；Windows 另核真实8.3根别名拒绝、嵌套目录取得后确认未知、关闭未知不重试，以及实际发布后确认失败。owner 一旦进入 uncertain，任何子句柄关闭都在 OS 调用前拒绝；不能只保根与绝对祖先，或在 close/Drop 中先释放相对父链再检查 uncertain。故障口只在 Rust `cfg(test)` 制品内存在，普通 Node-API ABI 没有开启参数；其他平台的测试源码或编译检查不算该平台实际执行证据。
 
 2026-10-25，Linux x64／Rust1.97.1、`aefb4747` 加本次 owner guard／目录 sync 修复，上述命令3项通过；核真实 root／嵌套目录 sync、原目录改名并由同名新目录替换后仍保原能力、probe 关闭未知、故障后零额外 OS close，以及显式 close 和 Drop 后原 FD／完整 owner 保留。修复前的 `aefb4747` 和隔离构建的 `ee7ad8c6` 均实测目录 fsync 为 `EBADF`，这是既有 Linux 后端缺口，不是新父目录功能引入的回归。另在隔离 crate 副本仅移除 Unix guard，嵌套关闭测试正常编译后在祖先 close 返回成功处失败，确认回归能检出原释放缺口。Windows 嵌套取得／关闭测试本轮仅更新源码，未执行 Windows 原生测试；不据此宣称该平台验收。
+
+2026-11-11，Linux x64／Rust1.97.1、`0d17ab9` 加有界枚举改动，上述命令7项通过。新增测试核零预算、准确上限、超限、未传预算保持原行为、受保护项也占预算、原持有目录与替换路径隔离；10,000项目录在第1,001项即停止，访问计数仅存在于 Rust `cfg(test)`。真实 Node-API 测试另核预算错误映射和参数边界；Shell collector 回归核1000项全局边界、子目录剩余预算及取消让出。搬迁回归在 Bun／Node 中模拟缺少有界方法，核限额请求零无界回退；另以原版同ABI companion（SHA256 `adc748bef08189ce6e4b9db647b8fbe92bcd65ac5b583783650c93f706fbd236`）在隔离副本实际核两种 runtime 都拒绝限额请求、仍支持原无限额读取。Windows 同一测试源码已覆盖拒绝原目录改名的既有约束，本轮未执行 Windows 测试或跨目标类型检查。
 
 [原生能力测试](../../test/isolated/files/native-addon.test.ts)实际核 private temporary ACL、原生身份、create-only／replace、hardlink、junction 和删除；[完整 Windows 工具](../../test/isolated/files/windows.test.ts)、[外部工具](https://github.com/ferqx/kite-code/blob/840f71b315e5b2a48f370449ddb3dd5048dfdee8/packages/agent/test/isolated/files/path-files.test.ts)与[检查点](../../test/isolated/file-checkpoints/capture.test.ts)继续经过原 TS 引擎和 Runtime。[GC 整例](../../test/isolated/files/native-path-lifetime.test.ts)在 Node-API 边界前后强制 GC，保准确 bytes 与对象身份。
 

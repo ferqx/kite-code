@@ -2015,6 +2015,178 @@ export type HostStatus = {
     reason: 'exporter_not_configured' | 'diagnostic_source_unavailable';
   };
 };
+export type OutputFileTarget = {
+  storeId: string;
+  sessionId: string;
+  fileId: string;
+  locator:
+    | { kind: 'delivery'; key: string }
+    | { kind: 'legacy-operation'; executionId: string }
+    | { kind: 'legacy-inherited'; key: string };
+};
+export type OutputPdfPageRequest = {
+  expectedStoreId: string;
+  target: {
+    storeId: string;
+    sessionId: string;
+    fileId: string;
+    locator:
+      | { kind: 'delivery'; key: string }
+      | { kind: 'legacy-operation'; executionId: string }
+      | { kind: 'legacy-inherited'; key: string };
+  };
+  page: number;
+};
+export type OutputPdfPage = {
+  page: number;
+  totalPages: number;
+  mediaType: 'image/png';
+  data: string;
+};
+export type OutputFileSummary = {
+  storeId: string;
+  sessionId: string;
+  fileId: string;
+  locator:
+    | { kind: 'delivery'; key: string }
+    | { kind: 'legacy-operation'; executionId: string }
+    | { kind: 'legacy-inherited'; key: string };
+  ownerRunId: string;
+  name: string;
+  mediaType: string;
+  size: string;
+  publishedAt: string | '';
+};
+export type OutputFilesPage = {
+  scope: { storeId: string; sessionId: string };
+  revision: string;
+  items: Array<{
+    storeId: string;
+    sessionId: string;
+    fileId: string;
+    locator:
+      | { kind: 'delivery'; key: string }
+      | { kind: 'legacy-operation'; executionId: string }
+      | { kind: 'legacy-inherited'; key: string };
+    ownerRunId: string;
+    name: string;
+    mediaType: string;
+    size: string;
+    publishedAt: string | '';
+  }>;
+  collections: Array<{
+    collectionId: string;
+    revision: string;
+    ownerRunId: string;
+    state: 'pending' | 'failed' | 'ready';
+    expectedCount: number | null;
+    publishedCount: number;
+    errorCode?: string;
+    retryUntil?: string;
+  }>;
+  nextCursor?: string;
+  nextCollectionCursor?: string;
+};
+export type OutputFilesQuery = {
+  storeId: string;
+  runId?: string;
+  beforeKey?: string;
+  collectionBeforeKey?: string;
+  limit?: string;
+};
+export type OutputFileResolveRequest = {
+  expectedStoreId: string;
+  target: {
+    storeId: string;
+    sessionId: string;
+    fileId: string;
+    locator:
+      | { kind: 'delivery'; key: string }
+      | { kind: 'legacy-operation'; executionId: string }
+      | { kind: 'legacy-inherited'; key: string };
+  };
+};
+export type OutputCollectionRetryRequest = {
+  expectedStoreId: string;
+  collectionId: string;
+  expectedRevision: string;
+};
+export type OutputFileResolution = {
+  summary: {
+    storeId: string;
+    sessionId: string;
+    fileId: string;
+    locator:
+      | { kind: 'delivery'; key: string }
+      | { kind: 'legacy-operation'; executionId: string }
+      | { kind: 'legacy-inherited'; key: string };
+    ownerRunId: string;
+    name: string;
+    mediaType: string;
+    size: string;
+    publishedAt: string | '';
+  };
+  reference: {
+    id: string;
+    storeId: string;
+    sessionId: string;
+    subjectId: string;
+    scope: { kind: 'session' | 'execution' | 'message'; id: string };
+    hash: string;
+    size: string;
+    mediaType: string;
+  };
+};
+export type PrepareInputFromOutputRequest = {
+  expectedStoreId: string;
+  targetSessionId: string;
+  importId: string;
+  source: {
+    storeId: string;
+    sessionId: string;
+    fileId: string;
+    locator:
+      | { kind: 'delivery'; key: string }
+      | { kind: 'legacy-operation'; executionId: string }
+      | { kind: 'legacy-inherited'; key: string };
+  };
+  preparationId: string;
+};
+export type PrepareWorkingInputsRequest = {
+  expectedStoreId: string;
+  targetSessionId: string;
+  commandId: string;
+  files: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
+};
+export type WorkingInputsResponse = {
+  files: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
+};
 export type InputImage = {
   name: string;
   reference: {

@@ -1,3 +1,5 @@
+Shell最终文件沿[宿主输出收集](src/business/output-collection.README.md)从每Job持久out目录归档到不可变Artifact；原turn索引、失败重试与Fork只读引用不增加模型调用。平台实际资格与故障限制见该owner，不能用隔离subprocess测试代替受管native验收。
+
 # 通用 Agent
 
 默认命名使用一个受管detached Job和[自动标题元数据事务](src/storage/README.md#session-标题写入)，独立于主Run完成和业务模型额度；标题写入不推进执行控制修订，未知、原收据和真实清理各沿准确来源收口。当前职责与验证见[入口与职责](#入口与职责)，持久取舍见[独立命名决定](../../.agents/notes/implemented/architecture/2026-11-09-detached-session-title-metadata.md)。
@@ -413,3 +415,9 @@ Store 的锁与事务见[存储 owner](src/storage/README.md)。[Runtime 实测]
 上下文的累计实际用量、最近请求实际输入与下一请求预算分别核对；只读估算复用既有封存输入的工具正文，核对原执行、不可变终态和消息来源。主／子Loop和step工具共用，无需逐工具登记，不新增metadata字段或改变统计结构。Core 基线、完整累计 SQL、只读预测 API 与压缩交接归[上下文统计与预算](src/context-estimate.README.md)。
 
 活动Run的有限可信控制Action与只读work资格候选见[生命周期](src/lifecycle.README.md#活动run的有限控制响应候选)。它保留原owner和正常鉴权，禁止新工作，普通Action仍串行；不是新的Browser业务内核或通用并发入口。异步人工请求的耐久记录/响应Job/result.include来源和失效政策归[Browser owner](src/tools/browser/README.md#异步人工交接候选未发布)。
+
+## 办公制作与交付
+
+内置[Office Skill与运行时](src/tools/documents/README.md)通过既有Shell制作/修改DOCX、XLSX、PPTX和有限PDF，不增加模型工具或版本。[Shell输出收集](src/business/output-collection.README.md)在生产者确实结束后独立归档不可变文件，保原Run及稳定身份；列举、预览、保存与继续修改不消耗额外模型轮次。原Files文本结果和Fork兼容读取保持。
+
+输入继续使用原合法input import；[宿主工作副本](src/tools/input-working-files.ts)在命令提交前复制到工作区，Store登记映射并在原输入绑定事务标记bound。模型只看到该工作路径；同command/import重入复用原记录，不覆盖已绑定副本，历史Blob始终只读。此端口由宿主注入，Runtime不导入native文件实现。[安全回归](test/isolated/tools/input-working-files.test.ts)验证路径/链接、Unicode名称、partial/hash失败与绑定后保留编辑。

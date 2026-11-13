@@ -474,3 +474,134 @@ linuxTest(
     }),
   45000,
 );
+
+linuxTest(
+  'registered output temp survives native producer terminal and disposal',
+  () =>
+    fixture(async (f) => {
+      const staging = join(f.workspace, 'managed-shell-staging');
+      mkdirSync(staging);
+      let allocated = '';
+      const job = createLinuxHostShellJob({
+        ...f.options,
+        temporaryRoot: staging,
+        filesystemScope: 'workspace_write',
+        outputCollection: {
+          async prepare(_context, identity) {
+            await Promise.resolve();
+            allocated = identity.canonical;
+            mkdirSync(join(allocated, 'out'));
+            return { env: { KITE_OUTPUT_DIR: join(allocated, 'out') }, cleanupTransferred: true };
+          },
+        },
+      });
+      const result = await run(job, 'printf report > "$KITE_OUTPUT_DIR/report.txt"');
+      ended(result.events, result.handle, 'succeeded');
+      expect(readFileSync(join(allocated, 'out/report.txt'), 'utf8')).toBe('report');
+      expect(readdirSync(staging)).toHaveLength(1);
+    }),
+  45000,
+);
+
+linuxTest(
+  'current-user mount ownership preserves devpts, sealed flags and capability-free namespace restrictions',
+  () =>
+    fixture(async (f) => {
+      const source = join(f.assets, 'mount-probe.c');
+      const binary = join(f.assets, 'mount-probe');
+      writeFileSync(
+        source,
+        `#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/capability.h>
+#include <linux/nsfs.h>
+#include <poll.h>
+#include <pty.h>
+#include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/syscall.h>
+#include <termios.h>
+#include <unistd.h>
+static int transfer(int from, int to, const char *text) {
+  char bytes[16]; size_t size = strlen(text);
+  if (write(from, text, size) != (ssize_t)size) return -1;
+  struct pollfd wait = { .fd = to, .events = POLLIN };
+  if (poll(&wait, 1, 1000) != 1 || read(to, bytes, size) != (ssize_t)size || memcmp(bytes, text, size)) return -1;
+  return 0;
+}
+int main(void) {
+  alarm(10);
+  int mnt = open("/proc/self/ns/mnt", O_RDONLY | O_CLOEXEC);
+  int user = open("/proc/self/ns/user", O_RDONLY | O_CLOEXEC);
+  int owner = ioctl(mnt, NS_GET_USERNS);
+  struct stat own, current;
+  if (mnt < 0 || user < 0 || owner < 0 || fstat(owner, &own) || fstat(user, &current) ||
+      own.st_dev != current.st_dev || own.st_ino != current.st_ino) return 70;
+  if (close(owner) || close(user)) return 71;
+  struct __user_cap_header_struct header = { .version = _LINUX_CAPABILITY_VERSION_3, .pid = 0 };
+  struct __user_cap_data_struct caps[2];
+  if (syscall(SYS_capget, &header, caps)) return 72;
+  for (int i = 0; i < 2; i++) if (caps[i].effective || caps[i].permitted || caps[i].inheritable) return 73;
+  struct statvfs flags;
+  const char *temp = getenv("TMPDIR");
+  if (!temp || statvfs(temp, &flags) ||
+      (flags.f_flag & (ST_NOEXEC | ST_NOSUID | ST_NODEV)) != (ST_NOEXEC | ST_NOSUID | ST_NODEV)) return 74;
+  errno = 0;
+  if (unshare(CLONE_NEWNS) != -1 || errno != EPERM) return 75;
+  errno = 0;
+  if (setns(mnt, CLONE_NEWNS) != -1 || errno != EPERM) return 76;
+  errno = 0;
+  if (mount(NULL, temp, NULL, MS_BIND | MS_REMOUNT, NULL) != -1 || errno != EPERM) return 77;
+  if (close(mnt)) return 78;
+  FILE *info = fopen("/proc/self/mountinfo", "r");
+  if (!info) return 79;
+  char *line = NULL; size_t capacity = 0;
+  while (getline(&line, &capacity, info) > 0) {
+    char *separator = strstr(line, " - ");
+    if (!separator) return 80;
+    *separator = 0;
+    if (strstr(line, " shared:")) return 81;
+  }
+  free(line);
+  if (ferror(info) || fclose(info)) return 82;
+  int master, slave; char name[128]; struct termios terminal;
+  if (openpty(&master, &slave, name, NULL, NULL) || strncmp(name, "/dev/pts/", 9)) return 83;
+  if (tcgetattr(slave, &terminal)) return 84;
+  cfmakeraw(&terminal);
+  if (tcsetattr(slave, TCSANOW, &terminal) || transfer(master, slave, "TO_SLAVE") ||
+      transfer(slave, master, "TO_MASTER")) return 85;
+  if (close(slave) || close(master)) return 86;
+  if (!access(name, F_OK) || errno != ENOENT) return 87;
+  puts("OWNED_MOUNT_CAPS_SEAL_PTY_OK");
+  return 0;
+}
+`,
+      );
+      const compiled = spawnSync(
+        'cc',
+        ['-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', source, '-lutil', '-o', binary],
+        { encoding: 'utf8', timeout: 10000 },
+      );
+      expect(compiled.error).toBeUndefined();
+      expect(compiled.status, compiled.stderr).toBe(0);
+      for (const mode of ['workspace_write', 'full_access', 'confined'] as const) {
+        const options = { ...f.options, shellExecutable: binary };
+        const job =
+          mode === 'confined'
+            ? createLinuxConfinedShellJob(options)
+            : createLinuxHostShellJob({ ...options, filesystemScope: mode });
+        const result = await run(job, 'native_mount_probe');
+        ended(result.events, result.handle, 'succeeded');
+        expect(content(result.events)).toBe('OWNED_MOUNT_CAPS_SEAL_PTY_OK\n');
+        expect(readdirSync(f.temporaryRoot)).toEqual([]);
+      }
+    }),
+  45000,
+);

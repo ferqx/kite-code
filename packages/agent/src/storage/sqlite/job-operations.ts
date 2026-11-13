@@ -3,6 +3,7 @@ import type { Store } from '../port';
 import { AgentError, type ExecutionOutputRecord, type OwnerRef } from '../types';
 import { assertCurrentExecutionPurpose } from './child-operations';
 import type { SqliteOperations } from './operations';
+import { outputCollectorEffect } from './output-collection';
 import { closeUndispatchedAutomaticTitle } from './session-title-publication';
 import { automaticTitleEffect } from './session-title-scope';
 
@@ -221,22 +222,23 @@ export function finishJobDelivery(
   const target = db.row('SELECT * FROM session WHERE id=?', execution.delivery_target_session_id!);
   const title = automaticTitleEffect(db, execution);
   if (title) closeUndispatchedAutomaticTitle(db, title);
-  const reason = title
-    ? 'internal_metadata'
-    : !target || target.delete_requested
-      ? 'target_deleted'
-      : target.context_selection_id !== execution.context_selection_id
-        ? 'context_changed'
-        : BigInt(execution.root_work_seq!) <= BigInt(target.stop_boundary!)
-          ? 'root_cancelled'
-          : execution.cancel_requested
-            ? 'execution_cancel'
-            : execution.origin_store_id !== db.metadata().storeId
-              ? 'origin_unverifiable'
-              : command?.kind === 'operation.agent' &&
-                  JSON.parse(String(command.request_json)).resultDelivery === 'caller'
-                ? 'caller_owned'
-                : null;
+  const reason =
+    title || outputCollectorEffect(db, execution)
+      ? 'internal_metadata'
+      : !target || target.delete_requested
+        ? 'target_deleted'
+        : target.context_selection_id !== execution.context_selection_id
+          ? 'context_changed'
+          : BigInt(execution.root_work_seq!) <= BigInt(target.stop_boundary!)
+            ? 'root_cancelled'
+            : execution.cancel_requested
+              ? 'execution_cancel'
+              : execution.origin_store_id !== db.metadata().storeId
+                ? 'origin_unverifiable'
+                : command?.kind === 'operation.agent' &&
+                    JSON.parse(String(command.request_json)).resultDelivery === 'caller'
+                  ? 'caller_owned'
+                  : null;
   db.run(
     'UPDATE execution SET delivery=?,delivery_reason=? WHERE id=?',
     reason ? 'suppressed' : 'pending',

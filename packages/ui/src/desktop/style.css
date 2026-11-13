@@ -7730,3 +7730,33 @@ body {
   font-size: 10px;
   overflow-wrap: anywhere;
 }
+
+.turn-output-files,
+.output-references {
+  margin-block: 12px;
+}
+.turn-output-files h4,
+.output-references h4 {
+  margin: 4px 0;
+  font-size: inherit;
+}
+.turn-output-files ul,
+.output-references ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.output-file-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-block: 4px;
+}
+.output-file-card > button:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.output-file-card small {
+  opacity: 0.7;
+}

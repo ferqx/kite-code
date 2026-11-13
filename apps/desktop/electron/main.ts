@@ -63,6 +63,7 @@ import {
   registerNativeWindowMenuIpc,
 } from './native-window-menu';
 import { spawnNodePairedChild } from './node-process';
+import { registerOutputPreviewScheme } from './output-preview';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
 import { ensureDesktopProfilePermissions } from './profile-permissions';
@@ -82,6 +83,7 @@ import {
   type WindowsNativeCandidateAccess,
 } from './windows-native-candidate';
 
+registerOutputPreviewScheme();
 declare const __KITE_DESKTOP_NATIVE_ASSETS__: unknown;
 declare const __KITE_DESKTOP_PROFILE_ACCESS__: {
   relativePath: 'profile-access.js';
@@ -96,6 +98,7 @@ configureMacosElectronResize(
   app,
   typeof __KITE_DESKTOP_MACOS_RESIZE__ === 'undefined' ? null : __KITE_DESKTOP_MACOS_RESIZE__,
 );
+declare const __KITE_OFFICE_ASSETS_ROOT__: string | null;
 const inputAssets = __KITE_DESKTOP_NATIVE_ASSETS__;
 const candidate =
   !!inputAssets &&
@@ -867,6 +870,14 @@ void app
       },
     });
     registerNativeIpc({
+      officeAssetsRoot: formalAssets
+        ? join(
+            formalAssets.terminalRoot,
+            'node_modules/@kite-ai/agent/tools/documents/office-assets',
+          )
+        : typeof __KITE_OFFICE_ASSETS_ROOT__ === 'undefined'
+          ? undefined
+          : (__KITE_OFFICE_ASSETS_ROOT__ ?? undefined),
       ipcMain,
       window: () => window,
       rendererUrl,

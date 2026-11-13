@@ -1,4 +1,4 @@
-use crate::{DirectoryEntry, FileStat, fail, io_error};
+use crate::{DirectoryEntry, FileStat, consume_directory_entry, fail, io_error};
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::{
     Dir, DirBuilder, DirBuilderExt, File, Metadata, MetadataExt, OpenOptions, OpenOptionsExt,
@@ -412,7 +412,11 @@ impl Owner {
             .remove_file(name)
             .map_err(io_error)
     }
-    pub fn list_at(&mut self, parent: u32) -> Result<Vec<DirectoryEntry>> {
+    pub fn list_at(
+        &mut self,
+        parent: u32,
+        mut max_entries: Option<u32>,
+    ) -> Result<Vec<DirectoryEntry>> {
         self.verify_root()?;
         let mut entries = Vec::new();
         for entry in self
@@ -422,6 +426,7 @@ impl Owner {
             .entries()
             .map_err(io_error)?
         {
+            consume_directory_entry(&mut max_entries)?;
             let entry = entry.map_err(io_error)?;
             let name = entry
                 .file_name()

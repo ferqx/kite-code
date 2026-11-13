@@ -22,6 +22,7 @@ import type {
   NativeBackgroundChildOpen,
   NativeBackgroundPage,
 } from '../src/background-bridge';
+import { composeBrowserDraft } from '../src/browser-annotation-content';
 import {
   type NativeRequest,
   type NativeShellPreference,
@@ -4207,6 +4208,185 @@ test('Native settings rejects legacy Session/project MCP management before readi
     }
     expect(reads).toBe(0);
     expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+test('isolated Office submit rejects forged metadata, preserves composer and journals unknown across caller reopen', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  const target = {
+    storeId: 'store',
+    sessionId: 's',
+    fileId: 'output',
+    locator: { kind: 'delivery' as const, key: 'delivery/output' },
+  };
+  const context = {
+    sourceHash: 'a'.repeat(64),
+    selection: { kind: 'powerpoint' as const, slide: 1, objectPath: '/shape/1', text: 'Original' },
+  };
+  const output = {
+    id: 'office-input',
+    name: 'deck.pptx',
+    ownerRunId: 'source-run',
+    target,
+    context,
+  };
+  const document = { content: 'Change only this title', outputFiles: [output] };
+  const reference = {
+    id: 'input-file-office',
+    storeId: 'store',
+    sessionId: 's',
+    subjectId: 'local-user',
+    scope: { kind: 'session', id: 's' },
+    hash: context.sourceHash,
+    size: '8',
+    mediaType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+  let sends = 0;
+  Object.assign(port, {
+    resolveOutputFile: async () => ({
+      summary: { name: output.name, ownerRunId: output.ownerRunId },
+      reference,
+    }),
+    prepareInputFromOutput: async () => ({
+      name: output.name,
+      uri: 'file:///original.pptx',
+      reference,
+    }),
+    prepareWorkingInputs: async () => ({}),
+    startRun: async () => {
+      sends++;
+      throw new ClientError('network_error');
+    },
+    getCommand: async () => {
+      throw new ClientError('network_error');
+    },
+  });
+  let caller = new NativeCaller(port, () => {}, data);
+  try {
+    let { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 's',
+      revision: 0,
+      content: 'Unrelated composer text',
+      outputFiles: [{ ...output, id: 'unrelated-composer-attachment' }],
+    });
+    const before = await caller.invoke({ method: 'draft.read', generation, sessionId: 's' });
+    const originalResolve = port.resolveOutputFile;
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let enteredPreparation!: () => void;
+    const preparationStarted = new Promise<void>((resolve) => {
+      enteredPreparation = resolve;
+    });
+    port.resolveOutputFile = async (...args) => {
+      enteredPreparation();
+      await preparationGate;
+      return originalResolve(...args);
+    };
+    const pendingPreparation = caller.invoke({
+      method: 'input.files.fromOutput',
+      generation,
+      id: 'released-while-pending',
+      target,
+      context,
+    });
+    await preparationStarted;
+    await caller.invoke({
+      method: 'input.files.release',
+      generation,
+      id: 'released-while-pending',
+    });
+    releasePreparation();
+    await expect(pendingPreparation).rejects.toMatchObject({ code: 'native_file_missing' });
+    port.resolveOutputFile = originalResolve;
+    // A composer attachment remains live while transient inline staging exceeds
+    // the total concurrent budget over its lifetime without exhausting it.
+    for (let index = 0; index < 140; index++) {
+      const id = `temporary-office-${index}`;
+      await caller.invoke({ method: 'input.files.fromOutput', generation, id, target, context });
+      await caller.invoke({ method: 'input.files.release', generation, id });
+    }
+    await caller.invoke({
+      method: 'input.files.fromOutput',
+      generation,
+      id: output.id,
+      target,
+      context,
+    });
+    const submit = (officeDocument: typeof document, commandId = 'inline-command') =>
+      caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 's',
+        fileIds: [output.id],
+        officeDocument,
+        intent: {
+          kind: 'run.start',
+          commandId,
+          expectedStoreId: 'store',
+          content: composeBrowserDraft(officeDocument),
+        },
+      });
+    for (const file of [
+      { ...output, name: 'forged.pptx' },
+      { ...output, context: { ...context, sourceHash: 'b'.repeat(64) } },
+      {
+        ...output,
+        context: { ...context, selection: { ...context.selection, text: 'Forged selection' } },
+      },
+    ])
+      await expect(submit({ ...document, outputFiles: [file] })).rejects.toMatchObject({
+        code: 'output_draft_mismatch',
+      });
+    await expect(
+      caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 's',
+        fileIds: [output.id],
+        officeDocument: document,
+        intent: {
+          kind: 'run.start',
+          commandId: 'forged-extra-file',
+          expectedStoreId: 'store',
+          content: composeBrowserDraft(document),
+          files: [
+            { name: 'injected.pptx', uri: 'file:///other.pptx', reference: reference as never },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'output_draft_mismatch' });
+    expect(sends).toBe(0);
+    await submit(document);
+    await caller.invoke({ method: 'input.files.release', generation, id: output.id });
+    expect(sends).toBe(1);
+    expect(data.callers()[0]?.phase).toBe('unknown');
+    expect(data.callers()[0]?.intent.draft).toBeUndefined();
+    expect(data.callers()[0]?.intent.request).toMatchObject({
+      content: composeBrowserDraft(document),
+    });
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
+      before,
+    );
+    await caller.close();
+    caller = new NativeCaller(port, () => {}, data);
+    ({ generation } = (await caller.invoke({ method: 'attach' })) as NativeState);
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await expect(submit(document, 'second-command')).rejects.toMatchObject({
+      code: 'caller_clear_unconfirmed',
+    });
+    expect(sends).toBe(1);
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
+      before,
+    );
   } finally {
     await caller.close();
   }

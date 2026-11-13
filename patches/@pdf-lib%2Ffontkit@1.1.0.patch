@@ -1,0 +1,30 @@
+diff --git a/dist/fontkit.es.js b/dist/fontkit.es.js
+--- a/dist/fontkit.es.js
++++ b/dist/fontkit.es.js
+@@ -32692,6 +32692,11 @@
+       endPtsOfContours.push(pointCount - 1);
+     }
+ 
++    // Flush the final repeat count before the coordinate streams.
++    if (same > 0) {
++      flags.push(same);
++    }
++
+     var bbox = path.bbox;
+     var glyf = {
+       numberOfContours: endPtsOfContours.length,
+diff --git a/dist/fontkit.umd.js b/dist/fontkit.umd.js
+--- a/dist/fontkit.umd.js
++++ b/dist/fontkit.umd.js
+@@ -40842,6 +40842,11 @@
+ 	      endPtsOfContours.push(pointCount - 1);
+ 	    }
+ 
++	    // Flush the final repeat count before the coordinate streams.
++	    if (same > 0) {
++	      flags.push(same);
++	    }
++
+ 	    var bbox = path.bbox;
+ 	    var glyf = {
+ 	      numberOfContours: endPtsOfContours.length,

@@ -10,6 +10,7 @@ import {
 import { inputImageCount, inputImageWindowCount } from './input-images-bridge';
 import type { NativeBridge } from './native-bridge';
 import { NativeImagePreviews } from './native-image-previews';
+import type { OutputDraftFile } from './output-files-bridge';
 
 type ImageDraft = {
   id: string;
@@ -23,7 +24,14 @@ type ImageDraft = {
   previewError?: string;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
-type FileDraft = { id: string; name: string; uri: string; generation: number; prepared?: boolean };
+type FileDraft = {
+  id: string;
+  name: string;
+  uri: string;
+  generation: number;
+  prepared?: boolean;
+  output?: OutputDraftFile;
+};
 function attachmentHostOutdated(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return code === 'invalid_native_request' || code === 'native_host_operation_unavailable';
@@ -80,7 +88,13 @@ export function useNativeInputImages(
   }
   function addFiles(
     key: string,
-    selected: readonly { name: string; uri: string; id?: string; prepared?: boolean }[],
+    selected: readonly {
+      name: string;
+      uri: string;
+      id?: string;
+      prepared?: boolean;
+      output?: OutputDraftFile;
+    }[],
   ) {
     if (
       !bridge ||
@@ -91,13 +105,13 @@ export function useNativeInputImages(
       current.current.storeId !== storeId
     )
       return;
-    const uris = new Set(files(key).map((file) => file.uri));
+    const uris = new Map(files(key).map((file) => [file.uri, file.id]));
     drafts.current.set(key, [
       ...all(key),
       ...selected
         .filter((file) => {
           if (uris.has(file.uri)) {
-            if (file.prepared && file.id) {
+            if (file.prepared && file.id && file.id !== uris.get(file.uri)) {
               fileHandoffs.current.get(file.id)?.();
               preparedFiles.current.delete(file.id);
               void bridge
@@ -106,7 +120,7 @@ export function useNativeInputImages(
             }
             return false;
           }
-          uris.add(file.uri);
+          uris.set(file.uri, file.id ?? '');
           return true;
         })
         .map((file) => {

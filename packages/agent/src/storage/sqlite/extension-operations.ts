@@ -11,6 +11,7 @@ import {
 import { assertOperationResultDelivery, ensureAgent } from './child-operations';
 import { actualRoot, assertNoExecutionGroupFence, executionGuard } from './execution-group-safety';
 import type { SqliteOperations } from './operations';
+import { registerOutputCollectionAtTerminal } from './output-collection';
 
 type Method =
   | 'getExtensionRecord'
@@ -777,6 +778,7 @@ export function callExtension(db: SqliteOperations, method: Method, args: unknow
           finalizationDigest,
           input.executionId,
         );
+        if (!preparingNextAttempt) registerOutputCollectionAtTerminal(db, input.executionId);
         db.run(
           'UPDATE command SET receipt_json=? WHERE id=?',
           canonicalJson({

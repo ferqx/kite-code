@@ -21,6 +21,8 @@ import {
 import { captureMacosHostLaunch, type MacosHostPaths } from './host-preparation';
 import type { LinuxPaths } from './linux-preparation';
 import { createLinuxShellJob } from './linux-shell';
+import type { ShellOutputCollection } from './output-collection';
+import { prepareShellOutputCollection } from './output-collection';
 
 import {
   copyShellProcessEvidence,
@@ -34,6 +36,7 @@ export {
   decodeLinuxShellProcessEvidence,
   type LinuxShellProcessEvidence,
 } from './linux-shell-process-evidence';
+export type { ShellOutputCollection } from './output-collection';
 export { ripgrepAsset, withBundledRipgrep } from './ripgrep';
 export {
   decodeMacosShellProcessEvidence,
@@ -70,6 +73,7 @@ export interface ShellJobOptions {
   /** Trusted macOS host only; never supplied by the command input. */
   readonly supervision?: { readonly kind: 'macos-launchd-coalition'; readonly controlBase: string };
   readonly trustedWorkerLaunch?: TrustedWorkerLaunchResolver;
+  readonly outputCollection?: ShellOutputCollection;
 }
 interface QueueItem {
   event: JobEvent;
@@ -149,6 +153,7 @@ export function createMacosHostShellJob(options: ShellJobOptions & MacosHostPath
     supervisor,
     options.bunExecutable ?? process.execPath,
     options.shellExecutable ?? '/bin/sh',
+    ...(options.trustedExecutables ?? []),
   ]);
   return shellJob(
     {
@@ -359,12 +364,16 @@ function shellJob(
       })();
       const trusted = configuration.trustedWorkerLaunch?.(command, context);
       const confined = prepare?.(command, shell, context);
+      const collection =
+        confined && configuration.outputCollection
+          ? await prepareShellOutputCollection(configuration.outputCollection, context, confined)
+          : undefined;
       const launch = confined ?? {
         executable: shell,
         argv: ['-c', command],
         cwd: workdir,
       };
-      const launchEnv = trusted?.env ?? configuration.env;
+      const launchEnv = { ...(trusted?.env ?? configuration.env), ...collection?.env };
       const env = confined
         ? Object.fromEntries(
             Object.entries(launchEnv).filter(
@@ -396,7 +405,7 @@ function shellJob(
       const state: State = {
         nonce,
         process: proc,
-        cleanup: confined?.cleanup,
+        cleanup: collection ? undefined : confined?.cleanup,
         queue: [],
         queuedBytes: 0,
         gaps: new Map(),
@@ -737,7 +746,7 @@ function shellJob(
             executable: launch.executable,
             argv: launch.argv,
             identities: confined?.identities,
-            runtimeTemp: confined?.runtimeTemp,
+            runtimeTemp: collection ? undefined : confined?.runtimeTemp,
             profileDigest: confined?.profileDigest,
             cwd: launch.cwd,
             env: childEnv,

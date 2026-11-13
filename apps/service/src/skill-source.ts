@@ -4,8 +4,7 @@ import { AgentError } from '@kite-ai/agent';
 import type { JsonObject } from '@kite-ai/agent/config';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import {
-  builtinComputerUseSkillId,
-  createBuiltinComputerUseSkillSource,
+  createBuiltinSkillSources,
   createSkillSource,
   SkillError,
   type SkillSummary,
@@ -70,8 +69,11 @@ export function createConfiguredSkillSource(
   const allowed = [...(options.allowedCapabilities ?? [])].filter((id) =>
     options.toolIds.includes(id),
   );
-  const builtin = createBuiltinComputerUseSkillSource();
-  type KnowledgeSource = ReturnType<typeof createSkillSource> | typeof builtin;
+  const builtins = createBuiltinSkillSources();
+  const builtinSources = new Set(builtins.map((entry) => entry.source));
+  type KnowledgeSource =
+    | ReturnType<typeof createSkillSource>
+    | ReturnType<typeof createBuiltinSkillSources>[number]['source'];
   type KnowledgeBinding = { source: KnowledgeSource; installed?: InstalledUserSkill };
   type DocumentBinding = KnowledgeBinding & { id: string };
   let sources = new Map<string, KnowledgeBinding>();
@@ -97,7 +99,7 @@ export function createConfiguredSkillSource(
       if (disposal) return disposal;
       sealed = true;
       disposal = Promise.allSettled([...pending]).then(async () => {
-        await builtin.dispose();
+        await Promise.all(builtins.map((entry) => entry.source.dispose()));
         await knowledgeScope.dispose();
       });
       void disposal.catch(() => {});
@@ -116,28 +118,30 @@ export function createConfiguredSkillSource(
         const nextSources = new Map<string, KnowledgeBinding>();
         const nextIds = new Map<string, string>();
         const nextDocuments = new Map<string, DocumentBinding>();
-        const entry = (await builtin.list()).entries[0]!;
-        const missingCapabilities = entry.requiredCapabilities.filter(
-          (id) => !allowed.includes(id),
-        );
-        states.set(builtinComputerUseSkillId, {
-          id: builtinComputerUseSkillId,
-          source: null,
-          name: entry.name,
-          description: entry.description,
-          version: entry.version,
-          enabled: true,
-          state: missingCapabilities.length ? 'unavailable' : 'available',
-          reason: missingCapabilities.length ? 'skill_capability_missing' : null,
-          requiredCapabilities: [...entry.requiredCapabilities],
-          missingCapabilities,
-        });
-        nextIds.set(entry.id, builtinComputerUseSkillId);
-        // Installation is global and independent of a workspace path or Tool selection.
-        // Keeping its reader does not grant dependencies; load rechecks the host's allowed set.
-        nextSources.set(entry.id, { source: builtin });
-        nextDocuments.set(builtinComputerUseSkillId, { source: builtin, id: entry.id });
-        if (!missingCapabilities.length) summaries.set(entry.id, entry);
+        for (const { id: builtinId, source: builtin } of builtins) {
+          const entry = (await builtin.list()).entries[0]!;
+          const missingCapabilities = entry.requiredCapabilities.filter(
+            (id) => !allowed.includes(id),
+          );
+          states.set(builtinId, {
+            id: builtinId,
+            source: null,
+            name: entry.name,
+            description: entry.description,
+            version: entry.version,
+            enabled: true,
+            state: missingCapabilities.length ? 'unavailable' : 'available',
+            reason: missingCapabilities.length ? 'skill_capability_missing' : null,
+            requiredCapabilities: [...entry.requiredCapabilities],
+            missingCapabilities,
+          });
+          nextIds.set(entry.id, builtinId);
+          // Installation is global and independent of a workspace path or Tool selection.
+          // Keeping its reader does not grant dependencies; load rechecks the host's allowed set.
+          nextSources.set(entry.id, { source: builtin });
+          nextDocuments.set(builtinId, { source: builtin, id: entry.id });
+          if (!missingCapabilities.length) summaries.set(entry.id, entry);
+        }
         const publish = () => {
           sources = nextSources;
           configuredIds = nextIds;
@@ -296,7 +300,7 @@ export function createConfiguredSkillSource(
                   if (listed.errors.length) throw new SkillError(listed.errors[0]!.code);
                   const summary = listed.entries[0];
                   if (!summary) throw new SkillError('skill_unavailable');
-                  if (installed && summary.name === builtinComputerUseSkillId)
+                  if (installed && builtins.some((builtin) => summary.name === builtin.id))
                     throw new SkillError('invalid_skill_configuration');
                   Object.assign(state, {
                     name: summary.name,
@@ -375,7 +379,9 @@ export function createConfiguredSkillSource(
       return admitted(async () => {
         if (installed) await installedUserSkillDocument(installed);
         return source.load(
-          source === builtin
+          builtinSources.has(
+            source as ReturnType<typeof createBuiltinSkillSources>[number]['source'],
+          )
             ? {
                 ...input,
                 availableCapabilities: input.availableCapabilities?.filter((id) =>
@@ -403,7 +409,9 @@ export function createConfiguredSkillSource(
           await verifyInstalledUserSkillResource(installed, input.path);
         }
         return source.readResource(
-          source === builtin
+          builtinSources.has(
+            source as ReturnType<typeof createBuiltinSkillSources>[number]['source'],
+          )
             ? {
                 ...input,
                 availableCapabilities: input.availableCapabilities?.filter((id) =>

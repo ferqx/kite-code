@@ -9,6 +9,7 @@ import {
   createShellJob,
   createWindowsShellJob,
   ripgrepAsset,
+  type ShellOutputCollection,
   type TrustedWorkerLaunch,
 } from '@kite-ai/agent/jobs/shell';
 import { createShellExtension, gitWorktreeAssetDirectory } from '@kite-ai/agent/shell';
@@ -51,12 +52,16 @@ export interface ShellConfigurationOptions {
   readonly shellExecutable: string;
   readonly graceMs?: number;
   readonly maxQueuedBytes?: number;
+  readonly outputCollection?: ShellOutputCollection;
   /** Linux supervisorPath is the packaged native init, plus this verified launcher. */
   readonly linux?: { readonly bubblewrapPath: string };
   readonly windows?: WindowsShellBackend & { readonly stateRoot: string };
   /** Default host boundary; Linux requires it, explicit macOS legacy assembly may omit it. */
   readonly host?: {
     readonly controlBase: string;
+    readonly temporaryRoot?: string;
+    /** Exact executable files, never a directory-wide executable or write grant. */
+    readonly trustedExecutables?: readonly string[];
     readonly protectedRoots: readonly string[];
     /** Trusted private names may be absent or rotate. These are never read as executable assets. */
     readonly protectedFiles?: readonly string[];
@@ -190,6 +195,7 @@ export async function inspectShellAssets(
       [options.windows.fullShellExecutable, true],
       [`${dirname(options.shellExecutable)}/../../manifest.json`, true],
     );
+  for (const path of options.host?.trustedExecutables ?? []) paths.push([path, true]);
   const assets = await mapAssetVerification(
     paths,
     ([path, executable], signal) => asset(path, executable, signal),
@@ -516,7 +522,8 @@ export async function createShellConfiguration(input: {
         undefined as { action: string; phase?: string } | undefined,
     };
   if (!input.options) throw new AgentError('shell_unavailable');
-  const options = structuredClone(input.options);
+  const { outputCollection, ...serializableOptions } = input.options;
+  const options = structuredClone(serializableOptions);
   const powerShell =
     options.windows?.kind === 'powershell' ? options.windows.powerShell : undefined;
   assertShellConfiguration(options);
@@ -683,6 +690,7 @@ export async function createShellConfiguration(input: {
     const jobOptions = {
       cwd,
       env: options.env,
+      outputCollection,
       supervisorPath: supervisor.path,
       bunExecutable: bun.path,
       shellExecutable: shell.path,

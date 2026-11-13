@@ -673,7 +673,17 @@ function fixture(
           status: 'complete',
           role: 'user',
           content: send.intent.content,
-          files: send.intent.files,
+          files: [
+            ...(send.intent.files ?? []),
+            ...(send.fileIds ?? []).map((id) => {
+              const prepared = calls.find(
+                (call) => call.method === 'input.files.begin' && call.id === id,
+              );
+              if (prepared?.method !== 'input.files.begin')
+                throw Error('fixture_prepared_file_missing');
+              return { name: prepared.name, uri: `file:///synthetic/${prepared.name}` };
+            }),
+          ],
           sourceIds: [
             options.firstHumanInput ? `processing-${send.intent.commandId}` : send.intent.commandId,
           ],
@@ -1131,7 +1141,6 @@ test('a standalone worktree exit with a file attachment remains ordinary model i
       intent: {
         kind: 'run.start',
         content: '退出工作树',
-        files: [{ name: 'context.pdf', uri: 'file:///synthetic/context.pdf' }],
       },
       fileIds: [expect.any(String)],
     });

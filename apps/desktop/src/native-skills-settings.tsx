@@ -61,7 +61,7 @@ function SkillStatus({ entry }: { entry: SkillEntry }) {
   ) : null;
 }
 const sourceLabel = ({ id, source }: SkillEntry) =>
-  id === 'computer-use' && source === null
+  ['computer-use', 'office-documents'].includes(id) && source === null
     ? '内置技能'
     : source === undefined
       ? '未记录'

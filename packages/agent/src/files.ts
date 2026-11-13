@@ -16,7 +16,7 @@ export {
   type FileCheckpointSelectedLineage,
 } from './business/file-checkpoints';
 export { filesNativeAssets } from './files-native-binding';
-export { pdfAssets } from './tools/documents/pdf';
+export { pdfAssets, readCachedPdf } from './tools/documents/pdf';
 export { withExternalFileReads } from './tools/external-file-reads';
 export {
   createWorkspaceFiles,
@@ -40,6 +40,7 @@ export { imageAssets } from './tools/images/processor';
 export { createImageFileReads } from './tools/images/reader';
 export { createViewImagesTool } from './tools/images/tool';
 export { withInputFileReads } from './tools/input-files';
+export { createWorkingInputFiles } from './tools/input-working-files';
 export { type EditablePlanFile, withPlanFileTools } from './tools/plan-files';
 export {
   isManagedWorkingFilePath,

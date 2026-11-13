@@ -111,6 +111,8 @@ export {
   parseDesktopMarkdown,
   rememberDesktopMarkdownParse,
 } from './markdown-parse-cache';
+export type { OutputCollectionSummary, OutputFileSummary, OutputFilesProps } from './OutputFiles';
+export { OutputFiles, OutputReferences } from './OutputFiles';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { PromptMarkdown } from './PromptMarkdown';
 export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';
@@ -131,6 +133,7 @@ export {
   type ScheduledTasksProps,
 } from './ScheduledTasks';
 export { NAVIGATION_MIN_WIDTH, SessionPage, type SessionPageProps } from './SessionPage';
+export type { SessionFilePageProps, SessionFileTabRequest, SessionFileTarget } from './SessionTabs';
 export {
   BrowserAnnotationIcon,
   BrowserOptionsIcon,

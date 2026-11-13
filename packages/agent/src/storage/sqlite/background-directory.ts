@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { verifyFirstActivation } from './child-first-activation';
 import type { SqliteOperations } from './operations';
+import { outputCollectionActionEffect, outputCollectorEffect } from './output-collection';
 
 function decimal(value: string | undefined, fallback: string) {
   const text = value ?? fallback;
@@ -82,7 +83,7 @@ export function readBackgroundExecutions(
           AND EXISTS(SELECT 1 FROM command rw WHERE rw.id=carrier.root_work_command_id AND rw.session_id=parent.root_id AND rw.subject_id=c.subject_id AND rw.origin_store_id=carrier.origin_store_id AND rw.seq=carrier.root_work_seq)
           AND c.subject_id=? AND o.subject_id=c.subject_id AND c.origin_store_id=carrier.origin_store_id AND o.origin_store_id=carrier.origin_store_id
           AND c.root_work_command_id=carrier.root_work_command_id AND c.root_work_seq=carrier.root_work_seq)
-      ) SELECT e.id,e.session_id,e.run_id,e.origin_command_id,e.origin_store_id,e.root_work_command_id,e.root_work_seq,
+      ) SELECT e.kind,e.requirements_json,e.intent_json,e.decision_source_json,e.id,e.session_id,e.run_id,e.origin_command_id,e.origin_store_id,e.root_work_command_id,e.root_work_seq,
       e.parent_execution_id,e.predecessor_execution_id,e.child_session_id,e.root_session_id,e.cancel_with_parent,e.step_id,e.call_id,e.attempt,e.adapter_id,e.definition_version,e.state,
       e.owner_generation,e.cancel_requested,e.cancel_requested_at,e.result_revision,e.delivery,e.delivery_reason,e.delivery_target_session_id,e.context_selection_id,json_extract(e.reference_json,'$.runId') AS reference_run_id,
       origin_tool.id AS source_tool_id,origin_tool.adapter_id AS source_tool_definition_id,origin_tool.definition_version AS source_tool_definition_version,
@@ -127,182 +128,186 @@ export function readBackgroundExecutions(
       } = db.runRecord(row);
       return run;
     };
-    const items = rows.slice(0, limit).map((row) => {
-      const nullable = (name: string) => (row[name] === null ? null : String(row[name]));
-      const session = db.session(db.row('SELECT * FROM session WHERE id=?', row.session_id!)!);
-      const rootSession = db.session(
-        db.row('SELECT * FROM session WHERE id=?', session.rootSessionId)!,
-      );
-      if (
-        String(row.root_session_id) !== rootSession.id ||
-        session.workspaceId !== rootSession.workspaceId
-      )
-        throw new AgentError('directory_identity_conflict');
-      const execution: BackgroundExecution = {
-        id: String(row.id),
-        sessionId: session.id,
-        rootSessionId: rootSession.id,
-        originStoreId: String(row.origin_store_id),
-        originCommandId: String(row.origin_command_id),
-        rootWorkCommandId: String(row.root_work_command_id),
-        rootWorkSeq: String(row.root_work_seq),
-        runId: nullable('run_id'),
-        parentExecutionId: nullable('parent_execution_id'),
-        childSessionId: nullable('child_session_id'),
-        cancelWithParent: !!row.cancel_with_parent,
-        stepId: String(row.step_id),
-        callId: String(row.call_id),
-        attempt: Number(row.attempt),
-        kind: 'job',
-        definitionId: String(row.adapter_id),
-        definitionVersion: String(row.definition_version),
-        status: row.state as BackgroundExecution['status'],
-        ownerGeneration: String(row.owner_generation),
-        cancelRequested: !!row.cancel_requested,
-        cancelRequestedAt:
-          row.cancel_requested_at === null ? null : Number(row.cancel_requested_at),
-        resultRevision: String(row.result_revision),
-        delivery: row.delivery as BackgroundExecution['delivery'],
-        deliveryReason: nullable('delivery_reason'),
-        deliveryTargetSessionId: nullable('delivery_target_session_id'),
-        contextSelectionId: nullable('context_selection_id'),
-      };
-      let parentRunId = execution.runId,
-        parentId = execution.parentExecutionId;
-      const visited = new Set([execution.id]);
-      while (parentRunId === null && parentId !== null) {
-        if (visited.has(parentId)) throw new AgentError('directory_identity_conflict');
-        visited.add(parentId);
-        const parent = db.row(
-          'SELECT id,run_id,parent_execution_id,session_id,origin_store_id,root_work_command_id,root_work_seq FROM execution WHERE id=?',
-          parentId,
+    const items = rows
+      .slice(0, limit)
+      .filter((row) => !outputCollectorEffect(db, row) && !outputCollectionActionEffect(db, row))
+      .map((row) => {
+        const nullable = (name: string) => (row[name] === null ? null : String(row[name]));
+        const session = db.session(db.row('SELECT * FROM session WHERE id=?', row.session_id!)!);
+        const rootSession = db.session(
+          db.row('SELECT * FROM session WHERE id=?', session.rootSessionId)!,
         );
         if (
-          !parent ||
-          String(parent.session_id) !== session.id ||
-          String(parent.origin_store_id) !== execution.originStoreId ||
-          String(parent.root_work_command_id) !== execution.rootWorkCommandId ||
-          String(parent.root_work_seq) !== execution.rootWorkSeq
+          String(row.root_session_id) !== rootSession.id ||
+          session.workspaceId !== rootSession.workspaceId
         )
           throw new AgentError('directory_identity_conflict');
-        parentRunId = parent.run_id === null ? null : String(parent.run_id);
-        parentId = parent.parent_execution_id === null ? null : String(parent.parent_execution_id);
-      }
-      const run = leanRun(parentRunId);
-      const childSessionRow = execution.childSessionId
-        ? db.row('SELECT * FROM session WHERE id=?', execution.childSessionId)
-        : null;
-      if (execution.childSessionId && !childSessionRow)
-        throw new AgentError('directory_identity_conflict');
-      const childSession = childSessionRow ? db.session(childSessionRow) : null;
-      const command = db.row(
-        'SELECT session_id,origin_store_id,root_work_command_id,root_work_seq FROM command WHERE id=?',
-        execution.originCommandId,
-      );
-      if (
-        !command ||
-        String(command.session_id) !== session.id ||
-        String(command.origin_store_id) !== execution.originStoreId ||
-        String(command.root_work_command_id) !== execution.rootWorkCommandId ||
-        String(command.root_work_seq) !== execution.rootWorkSeq
-      )
-        throw new AgentError('directory_identity_conflict');
-      const childStart = childSession
-        ? db.row(
-            "SELECT * FROM command WHERE id=? AND session_id=? AND kind IN ('child.start','input.follow_up')",
-            `child-start-${execution.id}`,
-            childSession.id,
+        const execution: BackgroundExecution = {
+          id: String(row.id),
+          sessionId: session.id,
+          rootSessionId: rootSession.id,
+          originStoreId: String(row.origin_store_id),
+          originCommandId: String(row.origin_command_id),
+          rootWorkCommandId: String(row.root_work_command_id),
+          rootWorkSeq: String(row.root_work_seq),
+          runId: nullable('run_id'),
+          parentExecutionId: nullable('parent_execution_id'),
+          childSessionId: nullable('child_session_id'),
+          cancelWithParent: !!row.cancel_with_parent,
+          stepId: String(row.step_id),
+          callId: String(row.call_id),
+          attempt: Number(row.attempt),
+          kind: 'job',
+          definitionId: String(row.adapter_id),
+          definitionVersion: String(row.definition_version),
+          status: row.state as BackgroundExecution['status'],
+          ownerGeneration: String(row.owner_generation),
+          cancelRequested: !!row.cancel_requested,
+          cancelRequestedAt:
+            row.cancel_requested_at === null ? null : Number(row.cancel_requested_at),
+          resultRevision: String(row.result_revision),
+          delivery: row.delivery as BackgroundExecution['delivery'],
+          deliveryReason: nullable('delivery_reason'),
+          deliveryTargetSessionId: nullable('delivery_target_session_id'),
+          contextSelectionId: nullable('context_selection_id'),
+        };
+        let parentRunId = execution.runId,
+          parentId = execution.parentExecutionId;
+        const visited = new Set([execution.id]);
+        while (parentRunId === null && parentId !== null) {
+          if (visited.has(parentId)) throw new AgentError('directory_identity_conflict');
+          visited.add(parentId);
+          const parent = db.row(
+            'SELECT id,run_id,parent_execution_id,session_id,origin_store_id,root_work_command_id,root_work_seq FROM execution WHERE id=?',
+            parentId,
+          );
+          if (
+            !parent ||
+            String(parent.session_id) !== session.id ||
+            String(parent.origin_store_id) !== execution.originStoreId ||
+            String(parent.root_work_command_id) !== execution.rootWorkCommandId ||
+            String(parent.root_work_seq) !== execution.rootWorkSeq
           )
-        : null;
-      const childRequest = childStart ? JSON.parse(String(childStart.request_json)) : null;
-      const predecessor =
-        childStart?.kind === 'input.follow_up'
+            throw new AgentError('directory_identity_conflict');
+          parentRunId = parent.run_id === null ? null : String(parent.run_id);
+          parentId =
+            parent.parent_execution_id === null ? null : String(parent.parent_execution_id);
+        }
+        const run = leanRun(parentRunId);
+        const childSessionRow = execution.childSessionId
+          ? db.row('SELECT * FROM session WHERE id=?', execution.childSessionId)
+          : null;
+        if (execution.childSessionId && !childSessionRow)
+          throw new AgentError('directory_identity_conflict');
+        const childSession = childSessionRow ? db.session(childSessionRow) : null;
+        const command = db.row(
+          'SELECT session_id,origin_store_id,root_work_command_id,root_work_seq FROM command WHERE id=?',
+          execution.originCommandId,
+        );
+        if (
+          !command ||
+          String(command.session_id) !== session.id ||
+          String(command.origin_store_id) !== execution.originStoreId ||
+          String(command.root_work_command_id) !== execution.rootWorkCommandId ||
+          String(command.root_work_seq) !== execution.rootWorkSeq
+        )
+          throw new AgentError('directory_identity_conflict');
+        const childStart = childSession
           ? db.row(
-              `SELECT r.id,r.context_selection_id FROM run r JOIN execution previous
+              "SELECT * FROM command WHERE id=? AND session_id=? AND kind IN ('child.start','input.follow_up')",
+              `child-start-${execution.id}`,
+              childSession.id,
+            )
+          : null;
+        const childRequest = childStart ? JSON.parse(String(childStart.request_json)) : null;
+        const predecessor =
+          childStart?.kind === 'input.follow_up'
+            ? db.row(
+                `SELECT r.id,r.context_selection_id FROM run r JOIN execution previous
              ON previous.id=? AND previous.child_session_id=r.session_id
              WHERE r.id=? AND r.session_id=? AND r.origin_command_id='child-start-'||previous.id
              AND r.origin_store_id=? AND previous.origin_store_id=r.origin_store_id
              AND previous.session_id=? AND previous.root_session_id=?`,
-              row.predecessor_execution_id!,
-              childStart.after_run_id!,
-              childSession!.id,
-              execution.originStoreId,
-              session.id,
-              rootSession.id,
+                row.predecessor_execution_id!,
+                childStart.after_run_id!,
+                childSession!.id,
+                execution.originStoreId,
+                session.id,
+                rootSession.id,
+              )
+            : null;
+        const exactChildBinding =
+          childStart?.kind === 'child.start'
+            ? childRequest?.parentExecutionId === execution.id
+            : childStart?.kind === 'input.follow_up' &&
+              childStart.agent_carrier_execution_id === execution.id &&
+              childStart.agent_source_execution_id === execution.parentExecutionId &&
+              predecessor !== null &&
+              childRequest?.afterRunId === predecessor.id &&
+              childRequest?.contextSelectionId === predecessor.context_selection_id &&
+              childStart.input_context_selection_id === predecessor.context_selection_id;
+        if (
+          childSession &&
+          (!childStart ||
+            childStart.subject_id !== input.subjectId ||
+            childStart.origin_store_id !== execution.originStoreId ||
+            childStart.root_work_command_id !== execution.rootWorkCommandId ||
+            String(childStart.root_work_seq) !== execution.rootWorkSeq ||
+            !exactChildBinding)
+        )
+          throw new AgentError('directory_identity_conflict');
+        if (childStart)
+          verifyFirstActivation(
+            db,
+            db.row('SELECT * FROM execution WHERE id=?', execution.id)!,
+            childStart,
+          );
+        const childRow = childSession
+          ? db.row(
+              'SELECT id FROM run WHERE session_id=? AND origin_command_id=?',
+              childSession.id,
+              `child-start-${execution.id}`,
             )
           : null;
-      const exactChildBinding =
-        childStart?.kind === 'child.start'
-          ? childRequest?.parentExecutionId === execution.id
-          : childStart?.kind === 'input.follow_up' &&
-            childStart.agent_carrier_execution_id === execution.id &&
-            childStart.agent_source_execution_id === execution.parentExecutionId &&
-            predecessor !== null &&
-            childRequest?.afterRunId === predecessor.id &&
-            childRequest?.contextSelectionId === predecessor.context_selection_id &&
-            childStart.input_context_selection_id === predecessor.context_selection_id;
-      if (
-        childSession &&
-        (!childStart ||
-          childStart.subject_id !== input.subjectId ||
-          childStart.origin_store_id !== execution.originStoreId ||
-          childStart.root_work_command_id !== execution.rootWorkCommandId ||
-          String(childStart.root_work_seq) !== execution.rootWorkSeq ||
-          !exactChildBinding)
-      )
-        throw new AgentError('directory_identity_conflict');
-      if (childStart)
-        verifyFirstActivation(
-          db,
-          db.row('SELECT * FROM execution WHERE id=?', execution.id)!,
-          childStart,
-        );
-      const childRow = childSession
-        ? db.row(
-            'SELECT id FROM run WHERE session_id=? AND origin_command_id=?',
-            childSession.id,
-            `child-start-${execution.id}`,
-          )
-        : null;
-      const childRun = leanRun(childRow ? String(childRow.id) : null);
-      const referenceRunId = row.reference_run_id ?? undefined;
-      if (
-        (run &&
-          (run.sessionId !== session.id ||
-            run.originStoreId !== execution.originStoreId ||
-            run.rootWorkCommandId !== execution.rootWorkCommandId ||
-            run.rootWorkSeq !== execution.rootWorkSeq)) ||
-        (childSession &&
-          (childSession.parentSessionId !== session.id ||
-            childSession.rootSessionId !== rootSession.id ||
-            childSession.workspaceId !== session.workspaceId)) ||
-        (childRun &&
-          (childRun.originStoreId !== execution.originStoreId ||
-            childRun.rootWorkCommandId !== execution.rootWorkCommandId ||
-            childRun.rootWorkSeq !== execution.rootWorkSeq)) ||
-        (referenceRunId !== undefined && referenceRunId !== childRun?.id)
-      )
-        throw new AgentError('directory_identity_conflict');
-      return {
-        seq: String(row.directory_seq),
-        ...(input.includeSourceTool && row.source_tool_id !== null
-          ? {
-              sourceTool: {
-                id: String(row.source_tool_id),
-                definitionId: String(row.source_tool_definition_id),
-                definitionVersion: String(row.source_tool_definition_version),
-                ...(String(row.source_tool_background) === '1' ? { background: true } : {}),
-              },
-            }
-          : {}),
-        execution,
-        session,
-        rootSession,
-        run,
-        childRun,
-        childSession,
-      };
-    });
+        const childRun = leanRun(childRow ? String(childRow.id) : null);
+        const referenceRunId = row.reference_run_id ?? undefined;
+        if (
+          (run &&
+            (run.sessionId !== session.id ||
+              run.originStoreId !== execution.originStoreId ||
+              run.rootWorkCommandId !== execution.rootWorkCommandId ||
+              run.rootWorkSeq !== execution.rootWorkSeq)) ||
+          (childSession &&
+            (childSession.parentSessionId !== session.id ||
+              childSession.rootSessionId !== rootSession.id ||
+              childSession.workspaceId !== session.workspaceId)) ||
+          (childRun &&
+            (childRun.originStoreId !== execution.originStoreId ||
+              childRun.rootWorkCommandId !== execution.rootWorkCommandId ||
+              childRun.rootWorkSeq !== execution.rootWorkSeq)) ||
+          (referenceRunId !== undefined && referenceRunId !== childRun?.id)
+        )
+          throw new AgentError('directory_identity_conflict');
+        return {
+          seq: String(row.directory_seq),
+          ...(input.includeSourceTool && row.source_tool_id !== null
+            ? {
+                sourceTool: {
+                  id: String(row.source_tool_id),
+                  definitionId: String(row.source_tool_definition_id),
+                  definitionVersion: String(row.source_tool_definition_version),
+                  ...(String(row.source_tool_background) === '1' ? { background: true } : {}),
+                },
+              }
+            : {}),
+          execution,
+          session,
+          rootSession,
+          run,
+          childRun,
+          childSession,
+        };
+      });
     const result = {
       storeId: input.expectedStoreId,
       items,

@@ -954,6 +954,52 @@ export interface Store {
   releaseInputFileImport(
     input: import('./input-file-imports').InputFileImportScope,
   ): Promise<import('./input-file-imports').InputFileImport>;
+  getWorkingInput(
+    input: import('../input-working-files').WorkingInputScope,
+  ): Promise<import('../input-working-files').WorkingInputRecord | null>;
+  registerWorkingInput(
+    input: import('../input-working-files').WorkingInputScope & {
+      record: import('../input-working-files').WorkingInputRecord;
+    },
+  ): Promise<import('../input-working-files').WorkingInputRecord>;
+  allocateOutputCollection(
+    input: OwnedWrite & {
+      sessionId: string;
+      subjectId: string;
+      producerExecutionId: string;
+      identity: import('../output-files').OutputDirectoryIdentity;
+      outputIdentity: import('../output-files').OutputDirectoryIdentity;
+    },
+  ): Promise<import('../output-files').OutputCollection>;
+  mutateOutputCollection(
+    input: OwnedWrite & {
+      sessionId: string;
+      subjectId: string;
+      collectorExecutionId: string;
+      mutation: import('../output-files').OutputCollectionMutation;
+    },
+  ): Promise<import('../output-files').OutputCollection>;
+  getOutputCollection(
+    input: import('../output-files').OutputScope & { collectionId: string },
+  ): Promise<import('../output-files').OutputCollection | null>;
+  /** Host-only, read-only proof of the current collector's durable origin chain. */
+  getOutputCollectorAuthorization(
+    input: import('../output-files').OutputScope & { executionId: string; input: Json },
+  ): Promise<{ revision: string } | null>;
+  queryOutputFiles(
+    input: import('../output-files').OutputFilesQuery,
+  ): Promise<import('../output-files').OutputFilesPage>;
+  resolveOutputFile(
+    input: import('../output-files').OutputScope & {
+      target: import('../output-files').OutputFileTarget;
+    },
+  ): Promise<import('../output-files').OutputFileRecord>;
+  retryOutputCollection(
+    input: import('../output-files').OutputScope & {
+      collectionId: string;
+      expectedRevision: string;
+    },
+  ): Promise<import('../output-files').OutputCollection>;
   getArtifactReference(
     input: WriteContext & {
       refId: string;

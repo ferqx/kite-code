@@ -26,6 +26,15 @@ export type WorkerRequest =
   | { id: number; method: 'close'; args: [] };
 export const storeMethods: readonly (keyof Store)[] = [
   'getMetadata',
+  'getWorkingInput',
+  'registerWorkingInput',
+  'allocateOutputCollection',
+  'mutateOutputCollection',
+  'getOutputCollection',
+  'getOutputCollectorAuthorization',
+  'queryOutputFiles',
+  'resolveOutputFile',
+  'retryOutputCollection',
   'readFirstSessionRun',
   'readRunExecutionSafety',
   'readExecutionGroupSafety',

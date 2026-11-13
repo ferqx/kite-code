@@ -38,6 +38,11 @@ import {
   type NativeModelPreferenceReply,
   nativeModelPreferenceChannel,
 } from '../src/native-model-preference-bridge';
+import {
+  isOfficeEditContext,
+  isOutputFileTarget,
+  readOutputDraftFiles,
+} from '../src/output-files-bridge';
 import { promptTextForSend } from '../src/prompt-text';
 import {
   isSkillMarketplaceQuery,
@@ -48,6 +53,8 @@ import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-inpu
 import type { nativeModelPreferences } from './model-preference';
 import type { NativeCaller } from './native-caller';
 import type { NativeRootWindow as BrowserWindow } from './native-root-window';
+import { officeInteractionControlScript } from './office-preview-interaction';
+import type { NativeOutputPreview } from './output-preview';
 import { parseScheduledTaskSaveInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
 import { decodeNativeTraceOperation } from './trace-extensions';
@@ -55,6 +62,28 @@ import { decodeNativeTraceOperation } from './trace-extensions';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'outputs.office.preview': [
+    'target',
+    'editorId',
+    'revision',
+    'previewId',
+    'bounds',
+    'initialSlide',
+    'initialZoom',
+  ],
+  'outputs.office.save': ['target', 'editorId', 'revision'],
+  'outputs.preview.interaction': ['previewId', 'consumeRequest'],
+  'outputs.preview.control': ['previewId', 'control'],
+  'outputs.preview.request.result': ['previewId', 'requestId', 'outcome'],
+  'outputs.pdf.page': ['target', 'page'],
+  'outputs.retry': ['scope', 'collectionId', 'expectedRevision'],
+  'outputs.query': ['scope', 'runId', 'beforeKey', 'collectionBeforeKey', 'limit'],
+  'outputs.save': ['target'],
+  'outputs.info': ['target'],
+  'outputs.preview.open': ['target', 'bounds', 'previewId'],
+  'outputs.preview.close': ['previewId'],
+  'outputs.preview.bounds': ['previewId', 'bounds'],
+  'input.files.fromOutput': ['id', 'target', 'context'],
   'trace.manage': ['operation'],
   'session.markRead': ['expectedStoreId', 'sessionId', 'runId', 'status'],
   'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
@@ -253,7 +282,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
   messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit', 'changes'],
   'messages.close': ['readId'],
-  submit: ['sessionId', 'intent', 'draft', 'imageIds', 'fileIds'],
+  submit: ['sessionId', 'intent', 'draft', 'imageIds', 'fileIds', 'officeDocument'],
   'caller.prepare': ['sessionId', 'intent', 'draft'],
   'caller.submit': ['commandId'],
   'caller.lookup': ['commandId'],
@@ -275,6 +304,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
     'content',
     'browserAnnotations',
     'annotationImageOffset',
+    'outputFiles',
   ],
   'permission.mode': ['observationId', 'mode', 'makeDefault'],
   'permission.trust': ['observationId', 'trusted'],
@@ -335,6 +365,117 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (
+    [
+      'outputs.office.preview',
+      'outputs.office.save',
+      'outputs.save',
+      'outputs.info',
+      'outputs.pdf.page',
+      'outputs.preview.open',
+      'input.files.fromOutput',
+    ].includes(method) &&
+    !isOutputFileTarget(input.target)
+  )
+    throw Error('invalid_native_request');
+  if (
+    method === 'input.files.fromOutput' &&
+    input.context !== undefined &&
+    !isOfficeEditContext(input.context)
+  )
+    throw Error('invalid_native_request');
+  if (
+    method === 'outputs.preview.interaction' &&
+    input.consumeRequest !== undefined &&
+    typeof input.consumeRequest !== 'boolean'
+  )
+    throw Error('invalid_native_request');
+  if (method === 'outputs.preview.request.result') {
+    if (typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.requestId))
+      throw Error('invalid_native_request');
+    const outcome = record(input.outcome);
+    if (
+      Object.keys(outcome).some((k) => !['status', 'message'].includes(k)) ||
+      !['accepted', 'failed', 'unknown'].includes(String(outcome.status)) ||
+      (outcome.message !== undefined &&
+        (typeof outcome.message !== 'string' || outcome.message.length > 1024))
+    )
+      throw Error('invalid_native_request');
+  }
+  if (method === 'outputs.preview.control')
+    officeInteractionControlScript(
+      input.control as import('../src/output-files-bridge').OfficePreviewControl,
+    );
+  if (method === 'outputs.office.preview') {
+    if (input.initialSlide !== undefined)
+      officeInteractionControlScript({ kind: 'slide', value: input.initialSlide as number });
+    if (input.initialZoom !== undefined)
+      officeInteractionControlScript({ kind: 'zoom', value: input.initialZoom as number | 'fit' });
+  }
+  if (method.startsWith('outputs.office.')) {
+    if (typeof input.editorId !== 'string' || !/^[a-f0-9]{64}$/.test(input.editorId))
+      throw Error('invalid_native_request');
+    const revision = input.revision;
+    if (!Number.isSafeInteger(revision) || Number(revision) < 0 || Number(revision) > 10000)
+      throw Error('invalid_native_request');
+  }
+  if (
+    method === 'outputs.pdf.page' &&
+    (!Number.isSafeInteger(input.page) || Number(input.page) < 1 || Number(input.page) > 100000)
+  )
+    throw Error('invalid_native_request');
+  if (method === 'outputs.retry') {
+    const scope = record(input.scope);
+    exact(scope, ['storeId', 'sessionId']);
+    if (
+      ![scope.storeId, scope.sessionId, input.collectionId].every(
+        (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v),
+      ) ||
+      typeof input.expectedRevision !== 'string' ||
+      !/^(0|[1-9][0-9]*)$/.test(input.expectedRevision)
+    )
+      throw Error('invalid_native_request');
+  }
+  if (method === 'outputs.query') {
+    const scope = record(input.scope);
+    exact(scope, ['storeId', 'sessionId']);
+    if (
+      ![scope.storeId, scope.sessionId].every(
+        (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v),
+      ) ||
+      (input.runId !== undefined &&
+        (typeof input.runId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.runId))) ||
+      (input.beforeKey !== undefined &&
+        (typeof input.beforeKey !== 'string' || input.beforeKey.length > 1024)) ||
+      (input.collectionBeforeKey !== undefined &&
+        (typeof input.collectionBeforeKey !== 'string' ||
+          input.collectionBeforeKey.length > 1024)) ||
+      (input.limit !== undefined &&
+        (!Number.isInteger(input.limit) || Number(input.limit) < 1 || Number(input.limit) > 50))
+    )
+      throw Error('invalid_native_request');
+  }
+  if (
+    (method.startsWith('outputs.preview.') || method === 'outputs.office.preview') &&
+    (typeof input.previewId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.previewId))
+  )
+    throw Error('invalid_native_request');
+  if (
+    method === 'outputs.preview.open' ||
+    method === 'outputs.preview.bounds' ||
+    method === 'outputs.office.preview'
+  ) {
+    const bounds = record(input.bounds);
+    exact(bounds, ['x', 'y', 'width', 'height']);
+    if (
+      !Object.values(bounds).every(
+        (v) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= 16384,
+      ) ||
+      !bounds.width ||
+      !bounds.height
+    )
+      throw Error('invalid_native_request');
+  }
   if (
     method === 'settings.general.shell.save' &&
     input.preference !== 'auto' &&
@@ -798,7 +939,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     (input.browserAnnotations !== undefined || input.annotationImageOffset !== undefined)
   ) {
     readBrowserAnnotations(input.browserAnnotations);
-    composeBrowserDraft(input as unknown as Parameters<typeof composeBrowserDraft>[0]);
+    composeBrowserDraft({ ...input, outputFiles: undefined } as unknown as Parameters<
+      typeof composeBrowserDraft
+    >[0]);
   }
   if (method === 'conversation.send' && input.draftDocument !== undefined) {
     const doc = input.draftDocument;
@@ -807,12 +950,15 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       typeof doc !== 'object' ||
       Array.isArray(doc) ||
       Object.keys(doc).some(
-        (key) => !['content', 'browserAnnotations', 'annotationImageOffset'].includes(key),
+        (key) =>
+          !['content', 'browserAnnotations', 'annotationImageOffset', 'outputFiles'].includes(key),
       )
     )
       throw Error('invalid_native_request');
     composeBrowserDraft(doc as Parameters<typeof composeBrowserDraft>[0]);
   }
+  if (method === 'draft.write')
+    readOutputDraftFiles(input.outputFiles, { allowLegacyExcelRanges: true });
   if (method === 'draft.write' && typeof input.content !== 'string')
     throw Error('invalid_native_request');
   if (
@@ -1046,6 +1192,30 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
   }
+  if (method === 'submit' && input.officeDocument !== undefined) {
+    const officeIntent = record(input.intent);
+    if (officeIntent.files !== undefined || officeIntent.images !== undefined)
+      throw Error('invalid_native_request');
+    const document = record(input.officeDocument);
+    exact(document, ['content', 'outputFiles']);
+    if (
+      typeof document.content !== 'string' ||
+      !document.content.trim() ||
+      document.content.length > 16000 ||
+      input.draft !== undefined ||
+      (input.imageIds !== undefined && (!Array.isArray(input.imageIds) || input.imageIds.length))
+    )
+      throw Error('invalid_native_request');
+    const outputs = readOutputDraftFiles(document.outputFiles);
+    if (
+      outputs.length !== 1 ||
+      !outputs[0]!.context ||
+      !Array.isArray(input.fileIds) ||
+      input.fileIds.length !== 1 ||
+      input.fileIds[0] !== outputs[0]!.id
+    )
+      throw Error('invalid_native_request');
+  }
   if (method === 'submit' || method === 'caller.prepare' || method === 'conversation.send') {
     const intent = record(input.intent);
     if (
@@ -1054,7 +1224,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       !intent.content.trim() &&
       !(intent.images as unknown[] | undefined)?.length &&
       !(intent.files as unknown[] | undefined)?.length &&
-      !(input.imageIds as unknown[] | undefined)?.length
+      !(input.imageIds as unknown[] | undefined)?.length &&
+      !(input.fileIds as unknown[] | undefined)?.length
     )
       throw Error('invalid_native_request');
     if (
@@ -1070,13 +1241,14 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
     try {
       // Staged bytes are resolved by Main before the real command is journaled.
-      // Validate the remaining closed intent here; image-only steer/follow-up
-      // cannot carry immutable image references until that publication finishes.
+      // Validate the remaining closed intent here; attachment-only steer/follow-up
+      // cannot carry immutable references until host publication finishes.
       canonicalCallerCommandRequest(
         (typeof intent.content === 'string' &&
         !intent.content.trim() &&
-        (input.imageIds as unknown[] | undefined)?.length
-          ? { ...intent, content: 'image' }
+        ((input.imageIds as unknown[] | undefined)?.length ||
+          (input.fileIds as unknown[] | undefined)?.length)
+          ? { ...intent, content: 'attachment' }
           : intent) as CallerCommandRequest,
       );
     } catch {
@@ -1093,7 +1265,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
         typeof intent.content !== 'string' ||
         (!intent.content.trim() &&
           !(intent.files as unknown[] | undefined)?.length &&
-          !(input.imageIds as unknown[] | undefined)?.length))
+          !(input.imageIds as unknown[] | undefined)?.length &&
+          !(input.fileIds as unknown[] | undefined)?.length))
     )
       throw Error('invalid_native_request');
     if (input.draft !== undefined) {
@@ -1375,6 +1548,7 @@ export function registerNativeIpc(options: {
   ipcMain: IpcMain;
   window: () => BrowserWindow | undefined;
   rendererUrl: string;
+  officeAssetsRoot?: string;
   caller: () => Promise<NativeCaller>;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
   confirmProviderRemoval?: (summary: { label: string; modelCount: number }) => Promise<boolean>;
@@ -1388,15 +1562,156 @@ export function registerNativeIpc(options: {
     caller: NativeCaller,
   ) => Promise<undefined | { workspaceId: string }>;
 }) {
+  let preview: NativeOutputPreview | undefined;
+  const closePreview = () => {
+    preview?.dispose();
+    preview = undefined;
+  };
+
   options.ipcMain.handle(nativeChannel, async (event, payload: unknown): Promise<NativeReply> => {
     try {
       assertNativeSender(event, options.window(), options.rendererUrl);
       const request = decodeNativeRequest(payload);
+      if (request.method === 'outputs.preview.close') {
+        preview?.closeOwned(request.previewId, request.generation);
+        return { ok: true, value: null };
+      }
       const caller = await options.caller();
       // Recheck sender after startup/admission awaits; a replaced frame cannot submit work.
       assertNativeSender(event, options.window(), options.rendererUrl);
+      if (options.officeAssetsRoot) caller.configureOfficeRuntime(options.officeAssetsRoot);
+      if (request.method === 'select' || request.method === 'attach') preview?.close();
       let value: NativeResult;
       if (
+        request.method === 'outputs.preview.open' ||
+        request.method === 'outputs.office.preview'
+      ) {
+        const window = options.window();
+        if (!window) throw Error('native_window_unavailable');
+        if (!preview) {
+          preview = new (await import('./output-preview')).NativeOutputPreview(
+            options.officeAssetsRoot,
+          );
+          window.once('closed', closePreview);
+          window.webContents.once('render-process-gone', closePreview);
+          window.webContents.once('did-start-navigation', closePreview);
+        }
+        const check = () => {
+          assertNativeSender(event, options.window(), options.rendererUrl);
+          caller.checkOutputScope(request.generation, request.target);
+        };
+        const edited =
+          request.method === 'outputs.office.preview'
+            ? await caller.officeRevision(request, options.officeAssetsRoot, check)
+            : undefined;
+        value = await preview.open({
+          id: request.previewId,
+          generation: request.generation,
+          target: request.target,
+          bounds: request.bounds,
+          ...(request.method === 'outputs.office.preview' && edited
+            ? {
+                initialControls: [
+                  ...(edited.revision.snapshot.slideCount > 0
+                    ? [
+                        {
+                          kind: 'slide' as const,
+                          value: Math.min(
+                            request.initialSlide ?? 1,
+                            edited.revision.snapshot.slideCount,
+                          ),
+                        },
+                      ]
+                    : []),
+                  { kind: 'zoom' as const, value: request.initialZoom ?? 'fit' },
+                ],
+              }
+            : {}),
+          window,
+          check,
+          materialize: async (path) =>
+            edited
+              ? {
+                  ...edited.summary,
+                  ...(await edited.editor.materialize(
+                    edited.snapshot.editorId,
+                    edited.revision.snapshot.revision,
+                    path,
+                    check,
+                  )),
+                }
+              : caller.materializeOutput(request.generation, request.target, path, check),
+        });
+      } else if (request.method === 'outputs.office.save') {
+        value = await caller.saveOfficeRevision(
+          request,
+          async (name) => {
+            const window = options.window();
+            if (!window) throw Error('native_window_unavailable');
+            const result = await (await import('electron')).dialog.showSaveDialog(window, {
+              defaultPath: name.replace(/[\\/]/g, '_'),
+            });
+            return result.canceled ? undefined : result.filePath;
+          },
+          options.officeAssetsRoot,
+          () => assertNativeSender(event, options.window(), options.rendererUrl),
+        );
+      } else if (request.method === 'outputs.preview.interaction') {
+        caller.checkOutputGeneration(request.generation);
+        if (!preview) throw Error('preview_replaced');
+        const interaction = await preview.readInteraction(
+          request.previewId,
+          request.generation,
+          request.consumeRequest !== false,
+        );
+        caller.checkOutputScope(request.generation, interaction.target);
+        assertNativeSender(event, options.window(), options.rendererUrl);
+        value = { kind: 'outputs.preview.interaction', interaction };
+      } else if (request.method === 'outputs.preview.request.result') {
+        caller.checkOutputGeneration(request.generation);
+        if (!preview) throw Error('preview_replaced');
+        const interaction = await preview.readInteraction(
+          request.previewId,
+          request.generation,
+          false,
+        );
+        caller.checkOutputScope(request.generation, interaction.target);
+        await preview.settleRequest(
+          request.previewId,
+          request.generation,
+          request.requestId,
+          request.outcome,
+        );
+        value = null;
+      } else if (request.method === 'outputs.preview.control') {
+        caller.checkOutputGeneration(request.generation);
+        if (!preview) throw Error('preview_replaced');
+        const interaction = await preview.readInteraction(
+          request.previewId,
+          request.generation,
+          false,
+        );
+        caller.checkOutputScope(request.generation, interaction.target);
+        await preview.control(request.previewId, request.generation, request.control);
+        value = null;
+      } else if (request.method === 'outputs.preview.bounds') {
+        caller.checkOutputGeneration(request.generation);
+        preview?.bounds(request.previewId, request.bounds);
+        value = null;
+      } else if (request.method === 'outputs.save') {
+        value = await caller.saveOutput(
+          request,
+          async (name) => {
+            const window = options.window();
+            if (!window) throw Error('native_window_unavailable');
+            const result = await (await import('electron')).dialog.showSaveDialog(window, {
+              defaultPath: name.replace(/[\\/]/g, '_'),
+            });
+            return result.canceled ? undefined : result.filePath;
+          },
+          () => assertNativeSender(event, options.window(), options.rendererUrl),
+        );
+      } else if (
         request.method === 'settings.general.shell.read' ||
         request.method === 'settings.general.shell.save'
       ) {
@@ -1458,5 +1773,8 @@ export function registerNativeIpc(options: {
       };
     }
   });
-  return () => options.ipcMain.removeHandler(nativeChannel);
+  return () => {
+    closePreview();
+    options.ipcMain.removeHandler(nativeChannel);
+  };
 }

@@ -516,7 +516,6 @@ export function withSessionOutputs(options: {
       ],
       context: {
         async capture(request, context) {
-          const rows = await records(context);
           const content = canonicalJson({
             kind: 'session_files',
             outputDirectory: sessionOutputDirectory(
@@ -524,11 +523,8 @@ export function withSessionOutputs(options: {
               await options.storeId(),
               context.sessionId,
             ),
-            complete: rows.length <= 200,
-            files: rows.slice(0, 200).map((record) => ({
-              path: join(profile, ...record.value.path.split('/')),
-              state: record.value.state,
-            })),
+            instruction:
+              'Create working files in the workspace. Deliver final files by writing them into the current Shell KITE_OUTPUT_DIR. Historical references are loaded only when explicitly selected as input.',
           });
           return [
             ...((await options.extension.context?.capture(request, context)) ?? []),

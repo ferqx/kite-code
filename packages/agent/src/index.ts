@@ -11,6 +11,11 @@ export {
   type ExecutionEvidenceRecord,
   executionEvidenceToolId,
 } from './business/execution-evidence';
+export {
+  prepareOutputDirectory,
+  prepareOutputStaging,
+  withOutputCollection,
+} from './business/output-collection';
 export type {
   CompressionInput,
   ContextCompressor,
@@ -30,6 +35,7 @@ export type { WorkspaceSerialLocks } from './execution/resource-port';
 export type { ModelBodyReference } from './model-body';
 export { modelHistory } from './model-context';
 export type { ModelInputMetadata, ModelRequestMetadata } from './model-snapshot';
+export * from './output-files';
 export {
   type AfterTurnPolicy,
   AgentRuntime,

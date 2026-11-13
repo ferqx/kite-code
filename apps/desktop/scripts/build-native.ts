@@ -16,6 +16,7 @@ import {
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { acquireArtifactAccess, retainWindowsCandidateFiles } from '@kite-ai/agent/artifact-access';
+import { resolveOfficeRuntimeAssets } from '@kite-ai/agent/documents';
 import { defaultWindowsPathSecurity, privateDirectory } from '@kite-ai/agent/windows-path-security';
 import {
   type NativeBundleManifest,
@@ -128,6 +129,9 @@ async function buildNativeApp(
       naming: `${entry}.cjs`,
       define: {
         __KITE_DESKTOP_NATIVE_ASSETS__: JSON.stringify(assets),
+        __KITE_OFFICE_ASSETS_ROOT__: JSON.stringify(
+          assets.kind === 'candidate' ? null : resolveOfficeRuntimeAssets().root,
+        ),
         __KITE_DESKTOP_DEVELOPMENT__: JSON.stringify(development),
         __KITE_DESKTOP_PROFILE_ACCESS__: JSON.stringify(profileAccessAsset),
         __KITE_DESKTOP_WINDOWS_ACCESS__: JSON.stringify(windowsAccessAsset),

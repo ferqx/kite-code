@@ -2,6 +2,10 @@ import type * as API from './generated/api';
 import { queryInput, requestValidators, responseValidators } from './generated/validators.js';
 
 export interface Responses {
+  OutputFilesPage: API.OutputFilesPage;
+  OutputFileResolution: API.OutputFileResolution;
+  WorkingInputsResponse: API.WorkingInputsResponse;
+  OutputPdfPage: API.OutputPdfPage;
   TraceRemoteDeliveryStatus: API.TraceRemoteDeliveryStatus;
   TraceBundleValidation: API.TraceBundleValidation;
   TraceInstallResult: API.TraceInstallResult;
@@ -201,6 +205,12 @@ export function validateRequest(
     | 'ResumeJobReportTarget'
     | 'StartCommandRequest'
     | 'InputImageUploadRequest'
+    | 'OutputFilesQuery'
+    | 'OutputFileResolveRequest'
+    | 'OutputCollectionRetryRequest'
+    | 'PrepareInputFromOutputRequest'
+    | 'PrepareWorkingInputsRequest'
+    | 'OutputPdfPageRequest'
     | 'InputFileUploadQuery'
     | 'InputFileReleaseRequest'
     | 'CancelCommandRequest'

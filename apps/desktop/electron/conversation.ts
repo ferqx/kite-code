@@ -374,14 +374,25 @@ export class NativeConversation {
       const images = request.imageIds?.length
         ? await this.publishImages(creation.input.sessionId, request.imageIds)
         : undefined;
+      if (draft.outputFiles?.some((file) => !request.fileIds?.includes(file.id)))
+        throw new ClientError('output_draft_mismatch');
       const files = request.fileIds?.length
         ? await this.publishFiles(creation.input.sessionId, request.fileIds)
         : undefined;
       this.check(scope);
+      if (files?.length) {
+        await this.client.prepareWorkingInputs({
+          expectedStoreId: scope.storeId,
+          targetSessionId: creation.input.sessionId,
+          commandId: request.intent.commandId,
+          files,
+        });
+        this.check(scope);
+      }
       const intent = {
         ...request.intent,
         ...(images?.length ? { images } : {}),
-        ...(files?.length ? { files } : {}),
+        ...(files?.length ? { files: [...(request.intent.files ?? []), ...files] } : {}),
       };
       const prepared = await this.journal().prepare(
         creation.input.sessionId,

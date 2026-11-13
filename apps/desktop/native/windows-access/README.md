@@ -36,3 +36,9 @@ Windows transport/release CI在真实消费之前调用[有限准备脚本](../.
 
 
 独立审查指出的UI prepare→SQLite身份窗口沿原retention保持；Windows实际反例仍核同SID替代、原FileID和释放后成功。加载前交接已由固定C和两跳证书接线，不能退回事后hash/manifest或PPID相同。整包构建及上述后端与完整installed正常/切换/维护恢复、发布者认证分开；后者仍未验收，取舍和原边界见[Native创建链决定](../../../../.agents/notes/implemented/architecture/2026-10-10-windows-managed-native-admission.md)。
+
+## Office 历史副本只读使用权
+
+[固定Office扩展](office-access.h)只接受genuine、live且已preparePrivateUi的原Profile lease，宿主只传固定root、64位摘要稿ID及0–100版本的有限文件名。它不创建目录或文件，不接任意路径、SID、ACL或HANDLE，不提供Office写锁、flush与修权限接口。owner-only DACL定义账户边界，不承诺隔离同SID恶意进程或管理员。每个guard独立取得同原协调锁SH并固定完整祖先；原Profile关闭后，已取得的guard保自己的使用权，新请求拒绝。
+
+历史文件以read/no-write/no-delete HANDLE覆盖元数据、query、hash及流读取，拒绝reparse、hardlink、宽权限、异主和身份漂移。reader没有batch/publish或原件恢复；close等待实际子进程及流关闭。测试和资格归[Desktop owner](../../README.md#办公输出文件)，取舍见[Office历史决定](../../../../.agents/notes/implemented/architecture/2026-11-11-windows-office-private-leases.md)。

@@ -10,7 +10,7 @@ Status: proposed
 
 正式 Service 持有 namespace 外的原 ChildProcess、私有 SOCK_SEQPACKET、原 init/root pidfd 和 namespace FD；可信 Bubblewrap 建立新的 user、mount、PID namespace，固定 C init 为 PID 1。namespace → P → gated root → G 的两次交接在业务执行前核对原内核对象、credentials、birth、父子关系与 namespace 内 PID 映射。受保护的 init 设置 DUMPABLE=0，不依赖 namespace 外无法读取的 `/proc/<pid>/ns` 链接取得控制权。
 
-Workspace 与 Full 从最终派发授权的所有 leaf 求交，保宿主 HOME 和固定解释器；Workflow verifier 的 cwd 可以是 Skill 目录，写范围仍绑定原 Workspace。严格补偿沿已有契约封存代码、固定读取根、拒绝网络与非线程 fork。可信 init 仅在父端接纳后使用 namespace 内唯一 CAP_SYS_ADMIN，核原 mount、NOEXEC 与只读 flags，清空所有 capabilities 后才创建业务根。明确可执行文件与保护 mask 是闭合交接列表；未知子 mount 拒绝启动，不从任意文件推断许可。
+Workspace 与 Full 从最终派发授权的所有 leaf 求交，保宿主 HOME 和固定解释器；Workflow verifier 的 cwd 可以是 Skill 目录，写范围仍绑定原 Workspace。严格补偿沿已有契约封存代码、固定读取根、拒绝网络与非线程 fork。可信 init 仅在父端接纳后使用 namespace 内唯一 CAP_SYS_ADMIN，先以 CLONE_NEWNS 复制既有 mount view至当前 user namespace 所有的新 mount namespace，再核原 mount、NOEXEC 与只读 flags，清空所有 capabilities 后才创建业务根。Bubblewrap 0.12.0 的非root `--dev` 会在devpts准备后进入第二层user namespace，原mount namespace仍归父user namespace；只持当前cap时seal会EPERM。新namespace不改PID/user身份、路径布局或权限scope，unshare失败继续原清cap尾段并保unknown，业务尚未fork。明确可执行文件与保护 mask 是闭合交接列表；未知子 mount 拒绝启动，不从任意文件推断许可。
 
 保护根使用 canonical 外层 antichain，避免先遮蔽父目录后再次遍历已不可读的子目录；所有原路径身份仍逐项复核。native 可执行列表仅取 canonical regular file，保原 symlink 身份检查而不把 alias 传给 O_NOFOLLOW。严格补偿在 Workspace 内的祖先独立挂载也纳入 noexec 闭合列表，全部 native 路径合计最多 200；公开 Job、父端和 init 的取消宽限统一最多 5 秒。
 
@@ -27,6 +27,9 @@ Profile Skill 的[准确原来源交接](../../implemented/architecture/2026-10-
 - 将 Bun supervisor 放入 namespace 直接持有 Service 协议 FD：业务可能经 `/proc` 获得 owner 的私有通道，不能作为既有权限保护的替代。
 - 使用 Landlock 代替全部 mount 边界：这会新增 kernel 能力要求，也不能由本机 macOS 证明其实际效果；本片保持 Bubblewrap 与明确 mount／syscall 规则，实际支持仍由原生资格核实。
 
+- 删除 `--dev` 来避免第二层 user namespace：会丢失既有 devpts／PTY能力，未采用。改用宿主 `/dev` 或放宽cap／seal失败会改变安全边界，也不作为修复。
+- 在可信init中重新mount devpts或重构Bubblewrap的UID配置：超出修复mount owner的最小需要；保原映射和设备树，仅复制mount namespace。
+
 ## Acceptance criteria
 
 - 正式安装后的默认 Shell、Task 和 Workflow 沿同一公开 Job 合同，保存完整输出与准确取消；严格补偿保持独立范围，没有不受限回退。
@@ -37,6 +40,6 @@ Profile Skill 的[准确原来源交接](../../implemented/architecture/2026-10-
 
 ## Risks
 
-user namespace、Linux headers、mount、pidfd、close_range 和 seccomp 的实际可用性仍未在 Linux 验证；缺任一能力均失败封闭。内核 mount 与 flags 的别名、子挂载及当前 UID 行为须由原生测试确认。外部同 UID 不协作替换仍沿现有可信宿主与 sealed asset 边界，不以本片承诺任意外部攻击者隔离。
+Linux本机限定验证与尚缺资格以当前Jobs owner为准，不能把单环境通过推广至所有架构／内核或正式安装链；缺user namespace、Linux headers、mount、pidfd、close_range或seccomp任一必要能力均失败封闭。内核 mount 与 flags 的别名、子挂载及当前 UID 行为须由原生测试确认。外部同 UID 不协作替换仍沿现有可信宿主与 sealed asset 边界，不以本片承诺任意外部攻击者隔离。
 
 当前实现与验证归 [Job owner](../../../../packages/agent/src/jobs/README.md)、[Service owner](../../../../apps/service/README.md) 和 [实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10profile-workflow-原来源与正式-verifier-迁移)。完整Linux原生和installed资格尚未交付，故保留 proposed。

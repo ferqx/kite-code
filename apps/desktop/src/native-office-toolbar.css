@@ -1,0 +1,194 @@
+.native-file-preview {
+  min-width: 0;
+  min-height: 0;
+  background: var(--page-background);
+  color: var(--foreground);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.native-office-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.native-office-identity {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.native-office-identity strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.native-office-identity strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.native-office-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--control-gap, 4px);
+}
+.native-office-pill button,
+.native-office-pill select,
+.native-office-footer button {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px 8px;
+  border-radius: var(--button-radius, 8px);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+  transition:
+    background-color 100ms,
+    color 100ms;
+}
+.native-office-pill button:hover:not(:disabled),
+.native-office-pill select:hover:not(:disabled),
+.native-office-footer button:hover:not(:disabled),
+.native-office-notes summary:hover {
+  background: var(--control-hover);
+}
+.native-office-pill button[aria-pressed="true"] {
+  background: var(--control-selected);
+}
+.native-office-pill button:active:not(:disabled),
+.native-office-pill select:active:not(:disabled),
+.native-office-footer button:active:not(:disabled),
+.native-office-notes summary:active {
+  background: var(--control-pressed);
+}
+.native-office-pill button:focus-visible,
+.native-office-pill select:focus-visible,
+.native-office-footer button:focus-visible,
+.native-office-notes summary:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+.native-office-pill button:disabled,
+.native-office-pill select:disabled,
+.native-office-footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.native-office-pill select {
+  max-width: 120px;
+}
+.native-office-pill option {
+  background: var(--card);
+  color: var(--foreground);
+}
+.native-office-status {
+  padding: 4px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.native-office-footer {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  gap: 8px;
+  font-size: 12px;
+}
+.native-office-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.native-office-notes {
+  max-width: 60%;
+}
+.native-office-notes summary {
+  padding: 4px 8px;
+  border-radius: var(--button-radius, 8px);
+  cursor: pointer;
+}
+.native-office-notes p {
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .native-office-pill button,
+  .native-office-pill select,
+  .native-office-footer button {
+    transition: none;
+  }
+}
+.native-excel-readonly {
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.native-excel-readonly-row {
+  align-items: flex-start;
+}
+.native-excel-readonly-row > button:first-child {
+  min-width: 72px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.native-excel-dimensions {
+  font-size: 12px;
+  line-height: 28px;
+  white-space: nowrap;
+}
+.native-excel-value {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.native-excel-value > span {
+  line-height: 28px;
+  white-space: nowrap;
+}
+.native-excel-value textarea {
+  min-height: 0;
+  max-height: none;
+  height: 28px;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--foreground);
+  background: var(--page-background);
+  font: inherit;
+  line-height: 18px;
+}
+.native-excel-value textarea[rows="5"] {
+  height: 100px;
+}
+.native-excel-value textarea:focus-visible,
+.native-excel-help summary:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+.native-excel-help {
+  font-size: 12px;
+}
+.native-excel-help summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.native-excel-help p {
+  margin: 4px 0;
+}

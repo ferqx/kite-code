@@ -4,6 +4,7 @@ import type { CancelCommandInput, CancelWorkInput } from '../port';
 import { AgentError, type Json } from '../types';
 import { cancelHumanCommandBindings } from './human-work-control';
 import type { SqliteOperations } from './operations';
+import { cancelOutputCollectionCommand } from './output-collection';
 
 /** Page a complete effect set inside the caller's single cancellation transaction. */
 function* rows(db: SqliteOperations, sql: string, ...args: (string | number | bigint | null)[]) {
@@ -36,6 +37,7 @@ function commandCancelled(db: SqliteOperations, id: string, now: number) {
     canonicalJson({ outcome: 'cancelled_before_apply' }),
     id,
   );
+  cancelOutputCollectionCommand(db, id);
 }
 /** Exact durable seeds and attached edges, including terminal parents with live descendants. */
 function expand(db: SqliteOperations, rootId: string, seeds: string[]): string[] {

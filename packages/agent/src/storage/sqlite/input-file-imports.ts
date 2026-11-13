@@ -7,6 +7,7 @@ import type { InputFileImport, InputFileImportScope } from '../input-file-import
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type Json } from '../types';
 import { lookupArtifactReference } from './artifact-operations';
+import { bindWorkingInput } from './input-working-files';
 import type { SqliteOperations } from './operations';
 
 function scope(ops: SqliteOperations, input: InputFileImportScope, write: boolean) {
@@ -185,6 +186,14 @@ export function admitInputFiles(
       canonicalJson(actual as unknown as Json) !== canonicalJson(file.reference as unknown as Json)
     )
       throw new AgentError('input_file_scope_denied');
+    if (commandId)
+      bindWorkingInput(ops, {
+        expectedStoreId: input.expectedStoreId,
+        sessionId: input.sessionId,
+        subjectId: input.subjectId,
+        commandId,
+        importId: imported.id,
+      });
     if (commandId && imported.state === 'prepared') {
       ops.run(
         "UPDATE input_file_import SET state='bound',bound_command_id=? WHERE id=? AND state='prepared'",

@@ -545,7 +545,7 @@ if (mode === 'denied') {
         commandId,
         expectedStoreId: original.storeId,
         content: composeBrowserDraft(original),
-        images: original.browserAnnotations!.map((note) => ({
+        images: (original.browserAnnotations ?? []).map((note) => ({
           name: 'snapshot.jpg',
           reference: {
             id: note.id,
@@ -606,6 +606,60 @@ if (mode === 'denied') {
     data = await open();
     assert.equal(data.read(editScope).content, 'new prompt');
     assert.deepEqual(data.read(modifiedScope).browserAnnotations, [editedVersion]);
+    const outputScope = { ...scope, rootSessionId: 'output-draft' };
+    const outputFiles = [
+      {
+        id: 'stable-chip',
+        name: '报告.docx',
+        context: {
+          sourceHash: 'a'.repeat(64),
+          selection: {
+            kind: 'word' as const,
+            start: { path: '/body/p[1]', offset: 0 },
+            end: { path: '/body/p[1]', offset: 4 },
+            text: '报告文本',
+          },
+        },
+        target: {
+          storeId: scope.storeId,
+          sessionId: outputScope.rootSessionId,
+          fileId: 'immutable-file',
+          locator: {
+            kind: 'delivery' as const,
+            key: 'delivery/00000000000000000001/job/immutable-file',
+          },
+        },
+      },
+    ];
+    outputFiles.push({
+      ...outputFiles[0]!,
+      id: 'second-selection',
+      context: {
+        ...outputFiles[0]!.context,
+        selection: {
+          ...outputFiles[0]!.context.selection,
+          start: { path: '/body/p[2]', offset: 2 },
+          end: { path: '/body/p[2]', offset: 6 },
+        },
+      },
+    });
+    const outputDraft = data.save(outputScope, 0, 'please edit', [], 0, outputFiles);
+    const proof = nativeDraftProof(outputDraft);
+    assert.notEqual(proof.textDigest, callerTextDigest(outputDraft.content));
+    assert.throws(
+      () => data.save(outputScope, outputDraft.revision, 'unsafe omission'),
+      /output_draft_required/,
+    );
+    data.close();
+    data = await open();
+    assert.deepEqual(data.read(outputScope).outputFiles, outputFiles);
+    assert.deepEqual(nativeDraftProof(data.read(outputScope)), proof);
+    data.beginCaller(noteCaller('output-edit-command', data.read(outputScope)));
+    data.finishCaller('output-edit-command', 'unknown');
+    assert.deepEqual(data.read(outputScope).outputFiles, outputFiles);
+    data.finishCaller('output-edit-command', 'accepted');
+    assert.equal(data.read(outputScope).outputFiles, undefined);
+    assert.equal(data.read(outputScope).content, '');
     data.close();
     let corrupt = new DatabaseSync(privatePath);
     const intact = String(

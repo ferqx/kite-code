@@ -34,10 +34,9 @@ export function ordinaryHostConfigurationDefaults(
           ? shellToolIds.filter((id) => id !== 'git.worktree' || gitWorktreeAvailable)
           : []),
         'web_fetch',
-        ...(browserAllowed
-          ? unifiedBrowser
-            ? ['browser.execute', 'skills.load', 'skills.resource']
-            : browserToolIds
+        ...(browserAllowed ? (unifiedBrowser ? ['browser.execute'] : browserToolIds) : []),
+        ...(shellAvailable || (browserAllowed && unifiedBrowser)
+          ? ['skills.load', 'skills.resource']
           : []),
         ...(taskAvailable
           ? [
