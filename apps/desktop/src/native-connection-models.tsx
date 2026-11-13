@@ -1,4 +1,11 @@
-import { Button, Popover, PopoverContent, PopoverTrigger, ScrollArea } from '@kite-ai/ui/desktop';
+import {
+  Button,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  ScrollArea,
+} from '@kite-ai/ui/desktop';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { NativeModelSettingsRows, type NativeModelSettingsState } from './native-model-settings';
 
@@ -13,12 +20,19 @@ export function NativeConnectionModels({
   label: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const focusedRow = useRef<HTMLElement | null>(null);
   const ids = new Set(modelIds);
   const models = state.facts?.models.filter((model) => ids.has(model.id)) ?? [];
-  const modelKey = JSON.stringify(models.map((model) => model.id));
+  const needle = query.trim().toLocaleLowerCase();
+  const visibleModels = needle
+    ? models.filter((model) => model.model?.toLocaleLowerCase().includes(needle))
+    : models;
+  const visibleIds = visibleModels.map((model) => model.id);
+  const modelKey = JSON.stringify(visibleIds);
   // A protected outcome can disable the focused switch; a refresh can remove its model.
   // Keep keyboard reading in this manager instead of letting focus fall to body.
   // biome-ignore lint/correctness/useExhaustiveDependencies: Recheck focus after rows or write eligibility change.
@@ -36,7 +50,16 @@ export function NativeConnectionModels({
     : undefined;
   return (
     <div className="connection-models">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen);
+          if (!nextOpen) {
+            setQuery('');
+            focusedRow.current = null;
+          }
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             ref={triggerRef}
@@ -70,9 +93,21 @@ export function NativeConnectionModels({
             container={container}
             onOpenAutoFocus={(event) => {
               event.preventDefault();
-              viewportRef.current?.focus({ preventScroll: true });
+              searchRef.current?.focus({ preventScroll: true });
             }}
           >
+            <Input
+              ref={searchRef}
+              className="connection-models-search"
+              type="search"
+              aria-label={`搜索 ${label} 的模型`}
+              placeholder="搜索模型名称"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.currentTarget.value);
+                if (viewportRef.current) viewportRef.current.scrollTop = 0;
+              }}
+            />
             <ScrollArea
               className="connection-models-scroll"
               fade="y"
@@ -86,8 +121,12 @@ export function NativeConnectionModels({
                     focusedRow.current = event.target;
                 }}
               >
-                <NativeModelSettingsRows state={state} modelIds={modelIds} />
-                {!models.length && <p className="connection-models-empty">暂无模型</p>}
+                <NativeModelSettingsRows state={state} modelIds={visibleIds} />
+                {!visibleIds.length && (
+                  <p className="connection-models-empty" role="status">
+                    {models.length ? '没有匹配的模型' : '暂无模型'}
+                  </p>
+                )}
               </div>
             </ScrollArea>
           </PopoverContent>

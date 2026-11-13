@@ -841,7 +841,7 @@ try {
                 ).length,
                 headerRefreshControls: [
                   ...document.querySelectorAll(
-                    '.provider-model-settings .provider-page-heading button',
+                    '.provider-model-settings .settings-page-heading button',
                   ),
                 ].filter((node) =>
                   /刷新|重新读取/.test(node.getAttribute('aria-label') ?? node.textContent ?? ''),
@@ -1180,7 +1180,7 @@ try {
       assert.ok(normal.box[0]! < 80, 'return retained the traffic-light horizontal indent');
       assert.equal(normal.overflow, false);
       const settingsNavigation = page.getByRole('navigation', { name: '设置分类', exact: true });
-      const navigationLabels = ['返回应用', '常规', '提供商与模型', 'MCP', 'Skills'];
+      const navigationLabels = ['返回应用', '常规', '提供商与模型', 'MCP', '轨迹与集成', 'Skills'];
       assert.equal(await settingsNavigation.getByRole('button').count(), navigationLabels.length);
       for (const label of navigationLabels) {
         const button = settingsNavigation.getByRole('button', { name: label, exact: true });
@@ -1278,6 +1278,10 @@ try {
             const color = document.createElement('canvas');
             color.width = color.height = 1;
             const context = color.getContext('2d')!;
+            context.fillStyle = style.getPropertyValue('--card').trim();
+            context.fillRect(0, 0, 1, 1);
+            const cardColor = context.fillStyle;
+            context.clearRect(0, 0, 1, 1);
             context.fillStyle = style.backgroundColor;
             context.fillRect(0, 0, 1, 1);
             const trigger = [...document.querySelectorAll('.connection-models-trigger')].find(
@@ -1301,19 +1305,20 @@ try {
               hidden: !!node.closest('[aria-hidden="true"],[inert]'),
               horizontal: node.scrollWidth > node.clientWidth + 1,
               visibility: style.visibility,
-              background: style.backgroundColor,
+              background: context.fillStyle,
               backgroundAlpha: context.getImageData(0, 0, 1, 1).data[3],
-              cardBackground: getComputedStyle(document.querySelector('.provider-instance')!)
-                .backgroundColor,
+              cardBackground: cardColor,
               filterControls: node.querySelectorAll('select,[role="combobox"]').length,
               searchControls: node.querySelectorAll('input:not([role="switch"]),[role="searchbox"]')
                 .length,
-              toolbars: node.querySelectorAll('.connection-models-toolbar').length,
               listCount: node.querySelectorAll('.connection-models-scroll').length,
-              extraButtons: node.querySelectorAll('button,[role="button"]').length,
-              listInsetTop:
-                node.querySelector('.connection-models-viewport')!.getBoundingClientRect().top -
-                box.top,
+              extraButtons: node.querySelectorAll(
+                ':is(button,[role="button"]):not([role="switch"])',
+              ).length,
+              searchBottom: node.querySelector('input[type="search"]')!.getBoundingClientRect()
+                .bottom,
+              listTop: node.querySelector('.connection-models-viewport')!.getBoundingClientRect()
+                .top,
               listBorderTop: getComputedStyle(node.querySelector('.connection-models-scroll')!)
                 .borderTopWidth,
               triggerWidth: triggerBox.width,
@@ -1350,18 +1355,17 @@ try {
             'model popup does not use the actual card surface',
           );
           assert.equal(geometry.filterControls, 0, 'removed status filter is still rendered');
-          assert.equal(geometry.searchControls, 0, 'removed search is still rendered');
-          assert.equal(geometry.toolbars, 0, 'removed toolbar left a reserved container');
+          assert.equal(geometry.searchControls, 1);
           assert.equal(geometry.listCount, 1);
           assert.equal(geometry.extraButtons, 0);
           assert.ok(
-            geometry.listInsetTop > 0 && geometry.listInsetTop <= 5.5,
-            'removed toolbar left top spacing',
+            geometry.searchBottom <= geometry.listTop,
+            'model search overlaps the scrolling list',
           );
           assert.equal(geometry.listBorderTop, '0px');
           assert.ok(
-            Math.abs(geometry.box[2]! - geometry.triggerWidth) < 0.5,
-            'model popup width differs from its trigger',
+            geometry.box[2]! > 0 && geometry.box[2]! <= Math.min(320, geometry.triggerWidth) + 0.5,
+            'model popup exceeds its width cap',
           );
           assert.ok(Math.abs(geometry.triggerTextLeft - 10) < 0.5);
           assert.ok(Math.abs(geometry.triggerTextRight - 10) < 0.5);
@@ -1377,7 +1381,7 @@ try {
         await manager('Fixture Connection').waitFor();
         assert.equal(
           await page
-            .locator('.provider-page-heading')
+            .locator('.provider-model-settings .settings-page-heading')
             .getByRole('button', { name: /刷新|重新读取/ })
             .count(),
           0,
@@ -1395,7 +1399,7 @@ try {
           }),
           headingBottom: node
             .closest('.provider-settings')!
-            .querySelector('.provider-page-heading')!
+            .querySelector('.settings-page-heading')!
             .getBoundingClientRect().bottom,
           directoryTop: node
             .closest('.provider-settings')!
@@ -1416,19 +1420,17 @@ try {
         );
         assert.equal(grid.display, 'grid');
         assert.equal(grid.cards.length, 2);
-        if (width >= 1100) {
-          assert.equal(grid.cards[0]!.y, grid.cards[1]!.y);
-          assert.ok(grid.cards[1]!.x >= grid.cards[0]!.x + grid.cards[0]!.width);
-        } else {
-          assert.equal(grid.cards[0]!.x, grid.cards[1]!.x);
-          assert.ok(grid.cards[1]!.y >= grid.cards[0]!.y + grid.cards[0]!.height);
-        }
+        assert.equal(grid.cards[0]!.x, grid.cards[1]!.x);
+        assert.ok(grid.cards[1]!.y >= grid.cards[0]!.y + grid.cards[0]!.height);
         const closedCards = await cardGeometry();
         await manager('Fixture Connection').click();
         await toggle('model-a').waitFor();
+        const modelSearch = primary.getByRole('searchbox', {
+          name: '搜索 Fixture Connection 的模型',
+        });
         await page.waitForFunction(
           () =>
-            document.activeElement?.getAttribute('aria-label') === 'Fixture Connection 的模型列表',
+            document.activeElement?.getAttribute('aria-label') === '搜索 Fixture Connection 的模型',
         );
         assert.equal(await primary.getByRole('switch').count(), 60);
         const primaryPopup = await assertPopup('Fixture Connection');
@@ -1502,9 +1504,8 @@ try {
         );
         assert.ok(listMiddle.fadeTop > 0 && listMiddle.fadeBottom > 0);
         assert.ok(
-          listMiddle.thumbLeft !== null &&
-            listMiddle.switchRight !== null &&
-            listMiddle.thumbLeft > listMiddle.switchRight,
+          listMiddle.thumbLeft === null ||
+            (listMiddle.switchRight !== null && listMiddle.thumbLeft > listMiddle.switchRight),
           'model scrollbar thumb covers switches',
         );
         await page.keyboard.press('End');
@@ -1520,6 +1521,23 @@ try {
         assert.equal(listBottom.fadeBottom, 0);
         assert.ok(listBottom.fadeTop > 0);
         assert.equal(listBottom.horizontal, false);
+        await modelSearch.pressSequentially('BULK-MODEL-05');
+        await stage('settings-search-by-name');
+        assert.equal(await modelSearch.inputValue(), 'BULK-MODEL-05');
+        assert.equal(await primary.getByRole('switch').count(), 10);
+        assert.equal(await toggle('primary-059').count(), 1);
+        assert.equal((await scrollState()).top, 0);
+        assert.equal(await modelSearch.evaluate((node) => node === document.activeElement), true);
+        await modelSearch.fill('primary-059');
+        await stage('settings-search-no-name-match');
+        assert.equal(await primary.getByRole('switch').count(), 0);
+        assert.equal(await primary.getByRole('status').textContent(), '没有匹配的模型');
+        await modelSearch.fill('');
+        assert.equal(await primary.getByRole('switch').count(), 60);
+        await modelSearch.fill('fixture-model-b');
+        await stage('settings-search-disabled-model');
+        assert.equal(await primary.getByRole('switch').count(), 1);
+        assert.equal(await toggle('model-b').isChecked(), false);
         await page.keyboard.press('Escape');
         await primary.waitFor({ state: 'hidden' });
         await stage('settings-popup-escape');
@@ -1534,6 +1552,7 @@ try {
         await manager('Fixture Connection').click();
         await primary.waitFor();
         await stage('settings-popup-short-viewport');
+        assert.equal(await modelSearch.inputValue(), '');
         const shortPopup = await assertPopup('Fixture Connection');
         const shortList = await scrollState();
         assert.ok(shortList.height > 0 && shortList.height <= 320);
@@ -1606,7 +1625,7 @@ try {
         assert.equal(await popup('其他模型').getByRole('switch').count(), 1);
         await assertPopup('其他模型');
         await stage('settings-popup-fallback');
-        await page.locator('.provider-page-heading h2').click();
+        await page.locator('.provider-model-settings .settings-page-heading h2').click();
         await popup('其他模型').waitFor({ state: 'hidden' });
         assert.equal(await page.locator('.desktop-settings-dialog').isVisible(), true);
         assert.deepEqual(await cardGeometry(), closedCards);
@@ -1735,10 +1754,29 @@ try {
         await page.keyboard.press('End');
         await page.evaluate(() => window.liveAggregationFixture.settings('hold'));
         await page.evaluate(() => window.liveAggregationFixture.settings('hold-model-reads'));
-        await intent('model-b', true);
+        const updatedSearch = primary.getByRole('searchbox');
+        await updatedSearch.fill('fixture-model-b');
+        assert.equal(await primary.getByRole('switch').count(), 1);
+        const filteredRow = await toggle('model-b').elementHandle();
+        await page.keyboard.press('Tab');
+        assert.equal((await focusState()).label, 'Fixture Connection Updated 的模型列表');
+        await page.keyboard.press('Tab');
+        assert.equal((await focusState()).label, '启用模型 model-b');
+        await page.keyboard.press('Space');
         await page.waitForFunction(
           async () => (await window.liveAggregationFixture.settings('state')).pending === 1,
         );
+        await stage('settings-search-switch-pending');
+        assert.equal(await updatedSearch.inputValue(), 'fixture-model-b');
+        assert.equal(await primary.getByRole('switch').count(), 1);
+        assert.equal(await toggle('model-b').isChecked(), true);
+        assert.equal(await toggle('model-b').isDisabled(), false);
+        assert.equal(
+          await toggle('model-b').evaluate((node, previous) => node === previous, filteredRow),
+          true,
+        );
+        assert.equal((await focusState()).label, '启用模型 model-b');
+        await updatedSearch.fill('');
         await intent('model-b', false);
         await intent('model-b', true);
         await intent('model-b', false);

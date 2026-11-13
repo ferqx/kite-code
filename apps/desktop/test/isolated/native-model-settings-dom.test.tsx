@@ -2203,7 +2203,7 @@ for (const peer of ['own-submitting', 'foreign-submitting', 'provider-submitting
     }
   });
 
-test('a large connection popover contains only its full exact model list and switches, retaining focus and position through one save', async () => {
+test('a large connection popover filters by name and retains focus, results, and position through one save', async () => {
   const many = Array.from({ length: 60 }, (_, index) => ({
     ...facts.models[0]!,
     id: `route-${String(index).padStart(3, '0')}`,
@@ -2230,16 +2230,25 @@ test('a large connection popover contains only its full exact model list and swi
     await act(async () => trigger.click());
     const popup = f.element.querySelector('[aria-label="服务一 的模型管理"]')!;
     const viewport = f.element.querySelector<HTMLDivElement>('[aria-label="服务一 的模型列表"]')!;
-    expect(
-      popup.querySelector('input[type="search"], select, .connection-models-toolbar'),
-    ).toBeNull();
+    const search = popup.querySelector<HTMLInputElement>('[aria-label="搜索 服务一 的模型"]')!;
     expect(viewport.classList.contains('scroll-fade-y')).toBe(true);
     expect(viewport.getAttribute('tabindex')).toBe('0');
-    expect(f.dom.window.document.activeElement === viewport).toBe(true);
+    expect(f.dom.window.document.activeElement === search).toBe(true);
     expect(
       [...popup.querySelectorAll('[role="switch"]')].map((node) => node.getAttribute('aria-label')),
     ).toEqual(many.map((model) => `启用模型 ${model.id}`));
     expect(f.toggle('route-000').disabled).toBe(false);
+    viewport.scrollTop = 180;
+    await act(async () => setField(f, '搜索 服务一 的模型', 'route-059'));
+    expect(popup.querySelectorAll('[role="switch"]')).toHaveLength(0);
+    expect(popup.querySelector('[role="status"]')?.textContent).toBe('没有匹配的模型');
+    expect(viewport.scrollTop).toBe(0);
+    expect(trigger.textContent).toContain('60 个模型 · 已启用 30 个');
+    await act(async () => setField(f, '搜索 服务一 的模型', '  ReMoTe-5  '));
+    expect(
+      [...popup.querySelectorAll('[role="switch"]')].map((node) => node.getAttribute('aria-label')),
+    ).toEqual([many[5]!, ...many.slice(50)].map((model) => `启用模型 ${model.id}`));
+    expect(f.dom.window.document.activeElement === search).toBe(true);
     expect(f.calls).toEqual([{ method: 'settings.models.read', generation: 1, scope: 'user' }]);
     const row = f.toggle('route-059');
     viewport.scrollTop = 180;
@@ -2253,7 +2262,7 @@ test('a large connection popover contains only its full exact model list and swi
     expect(f.dom.window.document.activeElement === row).toBe(true);
     expect(f.element.querySelector('.connection-models-viewport') === viewport).toBe(true);
     expect(viewport.scrollTop).toBe(180);
-    expect(popup.querySelectorAll('[role="switch"]')).toHaveLength(60);
+    expect(popup.querySelectorAll('[role="switch"]')).toHaveLength(11);
     expect(trigger.textContent).toContain('60 个模型 · 已启用 31 个');
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toEqual([
       {
@@ -2286,12 +2295,15 @@ test('a large connection popover contains only its full exact model list and swi
     expect(f.dom.window.document.activeElement === row).toBe(true);
     expect(f.element.querySelector('.connection-models-viewport') === viewport).toBe(true);
     expect(viewport.scrollTop).toBe(180);
+    expect(search.value).toBe('  ReMoTe-5  ');
+    expect(popup.querySelectorAll('[role="switch"]')).toHaveLength(11);
     expect(f.saved).toBe(1);
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(2);
     await act(async () => trigger.click());
     expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(0);
     await act(async () => trigger.click());
     expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(60);
+    expect(f.element.querySelector<HTMLInputElement>('input[type="search"]')?.value).toBe('');
     expect(f.toggle('route-059').getAttribute('aria-checked') === 'true').toBe(true);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(1);
   } finally {
@@ -2406,7 +2418,6 @@ test('connection summary waits for first facts and refresh retains the complete 
     await act(async () => refreshing.resolve({ ...facts, observationId: 8 }));
     expect(viewport.scrollTop).toBe(180);
     expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(4);
-    expect(f.element.querySelector('.connection-models-toolbar')).toBeNull();
     expect(trigger.textContent).toContain('4 个模型 · 已启用 3 个');
     expect(reads).toBe(2);
     expect(f.calls.every((input) => input.method === 'settings.models.read')).toBe(true);
@@ -2445,13 +2456,13 @@ test('connection manager portals inside its settings dialog, closes only itself 
     expect(popup.closest('.fixture-provider-card')).toBeNull();
     expect(popup.closest('.connection-models')).toBeNull();
     expect(popup.parentElement === f.element).toBe(false);
-    const viewport = f.element.querySelector<HTMLDivElement>('[aria-label="服务一 的模型列表"]')!;
-    expect(f.dom.window.document.activeElement === viewport).toBe(true);
-    expect(
-      popup.querySelector('input[type="search"], select, .connection-models-toolbar'),
-    ).toBeNull();
+    const search = popup.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(f.dom.window.document.activeElement === search).toBe(true);
+    await act(async () => setField(f, '搜索 服务一 的模型', 'BROKEN'));
+    expect(popup.querySelectorAll('[role="switch"]')).toHaveLength(1);
+    expect(popup.textContent).toContain('model_unconfigured');
     await act(async () =>
-      viewport.dispatchEvent(
+      search.dispatchEvent(
         new f.dom.window.KeyboardEvent('keydown', {
           key: 'Escape',
           bubbles: true,
@@ -2478,11 +2489,9 @@ test('connection manager portals inside its settings dialog, closes only itself 
     expect(f.toggle('b').disabled).toBe(true);
     expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(4);
     expect(f.element.querySelectorAll('[role="switch"]:disabled')).toHaveLength(4);
-    expect(
-      f.element.querySelector(
-        '[aria-label="服务一 的模型管理"] input[type="search"], [aria-label="服务一 的模型管理"] select',
-      ),
-    ).toBeNull();
+    await act(async () => setField(f, '搜索 服务一 的模型', 'disabled'));
+    expect(f.element.querySelectorAll('[role="switch"]')).toHaveLength(1);
+    expect(f.toggle('c').disabled).toBe(true);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toEqual([
       {
         method: 'settings.models.enabled',

@@ -927,15 +927,21 @@
 .kite-client .desktop-settings .settings-content .settings-model-search {
   min-width: 0;
 }
+.kite-client .desktop-settings .connection-models-popover .connection-models-search {
+  flex: none;
+  width: auto;
+  margin: 3px 3px 8px;
+}
 .kite-client .desktop-settings .connection-models-popover .connection-models-scroll {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  max-height: var(--connection-models-list-height);
+  max-height: 320px;
 }
 .kite-client .desktop-settings .connection-models-popover .connection-models-viewport {
   height: auto;
-  max-height: var(--connection-models-list-height);
+  min-height: 0;
   overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
 }
 .kite-client .desktop-settings .connection-models-popover .settings-model-options {
   border: 0;
@@ -1036,14 +1042,10 @@
 
 .kite-client .desktop-settings .connection-models-popover {
   -webkit-app-region: no-drag;
-  --connection-models-list-height: min(
-    320px,
-    max(0px, calc(var(--radix-popover-content-available-height, 420px) - 10px))
-  );
   display: flex;
   flex-direction: column;
-  width: var(--radix-popover-trigger-width);
-  max-width: min(calc(100vw - 24px), var(--radix-popover-content-available-width, 420px));
+  width: min(320px, var(--radix-popover-trigger-width, 320px));
+  max-width: min(calc(100vw - 24px), var(--radix-popover-content-available-width, 320px));
   max-height: var(--radix-popover-content-available-height, calc(100vh - 24px));
   overflow: hidden;
   padding: 4px;

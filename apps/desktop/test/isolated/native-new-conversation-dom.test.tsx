@@ -3116,12 +3116,9 @@ test('settings replace the painted page without remounting its draft or re-readi
     )!;
     expect(manager).not.toBeNull();
     expect(manager.closest('.desktop-settings')).not.toBeNull();
-    expect(
-      manager.querySelector('input[type="search"], select, .connection-models-toolbar'),
-    ).toBeNull();
-    expect(
-      f.host.activeElement === manager.querySelector('[data-slot="scroll-area-viewport"]'),
-    ).toBe(true);
+    const search = manager.querySelector('input[type="search"][aria-label="搜索 其他模型 的模型"]');
+    expect(search).not.toBeNull();
+    expect(f.host.activeElement === search).toBe(true);
     expect(f.host.querySelector('.settings-content')!.contains(manager)).toBe(false);
     await act(async () => {
       manager.dispatchEvent(

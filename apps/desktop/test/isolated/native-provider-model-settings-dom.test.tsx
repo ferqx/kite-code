@@ -773,7 +773,7 @@ test('continuous toggles keep peer rows interactive through model continuation a
   }
 });
 
-test('a sixty-model connection opens only a scrollable model list, retains its reading state and submits the exact original route', async () => {
+test('a sixty-model connection retains its reading state and submits the exact original route', async () => {
   const state = configuration();
   const routes = Array.from({ length: 60 }, (_, index) => ({
     id: `route-${String(index).padStart(3, '0')}`,
@@ -829,16 +829,14 @@ test('a sixty-model connection opens only a scrollable model list, retains its r
     const popup = await f.openModels('Catalog service');
     expect(switches()).toHaveLength(60);
     expect(trigger.getAttribute('aria-expanded')).toBe('true');
-    expect(
-      popup.querySelector('input[type="search"], select, .connection-models-toolbar'),
-    ).toBeNull();
-    expect(popup.querySelector('[aria-label="搜索 Catalog service 的模型"]')).toBeNull();
+    const search = popup.querySelector('[aria-label="搜索 Catalog service 的模型"]');
     expect(popup.querySelector('[aria-label="筛选 Catalog service 的模型"]')).toBeNull();
     const viewport = popup.querySelector<HTMLElement>(
       '[data-slot="scroll-area-viewport"][aria-label="Catalog service 的模型列表"]',
     )!;
     expect(viewport.getAttribute('tabindex')).toBe('0');
-    expect(f.dom.window.document.activeElement === viewport).toBe(true);
+    expect(search?.getAttribute('type')).toBe('search');
+    expect(f.dom.window.document.activeElement === search).toBe(true);
     const reads = f.calls.length;
     // JSDOM has no layout; retain a non-zero observed scroll position through the state transitions.
     await act(async () => {
