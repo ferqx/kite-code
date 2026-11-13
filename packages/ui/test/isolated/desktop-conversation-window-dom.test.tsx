@@ -222,6 +222,69 @@ async function fixture(count = 220) {
   };
 }
 
+test('message navigation uses mounted input identities across history expansion and delivery handoff', async () => {
+  const f = await fixture(140);
+  const navigation = () => f.host.querySelector('nav[aria-label="会话消息导航"]');
+  const markers = () => [...(navigation()?.querySelectorAll('button') ?? [])];
+  const current = () => navigation()?.querySelector<HTMLButtonElement>('[aria-current="location"]');
+  const click = (button: HTMLButtonElement) => act(async () => button.click());
+  try {
+    await f.render({ messageNavigation: true });
+    expect(markers()).toHaveLength(40);
+    expect(current()?.title).toContain('History #139 marker.');
+    const target = markers()[10]!;
+    await click(target);
+    expect(current()).toBe(target);
+    expect(f.row('u-110')!.getBoundingClientRect().top).toBe(12);
+    expect(f.host.querySelector('.jump-latest')).toBeTruthy();
+    await f.scroll(0);
+    await f.step();
+    expect(markers()).toHaveLength(60);
+    expect(markers()[30]).toBe(target);
+    expect(current()?.title).toContain('History #99 marker.');
+    await click(f.host.querySelector<HTMLButtonElement>('.jump-latest')!);
+    expect(markers()).toHaveLength(40);
+
+    const history = messages(140);
+    const pending: Message = {
+      id: 'local',
+      presentationKey: 'send',
+      role: 'user',
+      text: 'History #139 marker.',
+      settled: false,
+      delivery: 'sending',
+    };
+    await f.render({
+      messages: [
+        ...history,
+        pending,
+        { ...pending, id: 'guidance', presentationKey: 'guidance', inputKind: 'input.steer' },
+      ],
+    });
+    const outgoing = markers().at(-1)!;
+    expect(markers()).toHaveLength(41);
+    expect(outgoing).not.toBe(markers().at(-2));
+    await f.render({
+      messages: [...history, { ...pending, id: 'saved', settled: true, delivery: undefined }],
+    });
+    expect(markers().at(-1)).toBe(outgoing);
+    expect(markers()).toHaveLength(41);
+    expect(current()).toBe(outgoing);
+    f.resize();
+    expect(f.viewport().scrollTop).toBe(f.viewport().scrollHeight - f.viewport().clientHeight);
+
+    await f.render({ loading: true });
+    expect(navigation()).toBeNull();
+    await f.render({ loading: false, messages: [] });
+    expect(navigation()).toBeNull();
+    await f.render({ messages: messages(1) });
+    await click(markers()[0]!);
+    expect(f.host.querySelector('.jump-latest')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
 test('native conversation applies its 100 entry threshold and initially renders the last forty whole messages', async () => {
   for (const count of [100, 101, 220]) {
     const f = await fixture(count);

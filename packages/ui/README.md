@@ -225,6 +225,8 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
+[SessionPage](src/desktop/SessionPage.tsx)为主会话启用[消息导航](src/desktop/ConversationMessageNavigation.tsx)。刻度来自已挂载的主输入，沿用消息展示身份，发送占位交给持久消息时保留同一刻度。点击刻度写入原正文滚动区并保存阅读锚点，历史补入、缓存恢复与回到最新消息沿用 [Conversation](src/desktop/Conversation.tsx) 的阅读状态。
+
 `Composer.confirmFullPermission`是可选宿主确认port：提供时使用宿主异步确认及AbortSignal，只有准确当前scope／权限／回调与严格true才调用原权限变更；取消、失效与卸载退休确认，失败显示有限可重试说明。没有port的Web／共享调用保留原DOM确认及风险文案。普通模式菜单的原门控保持，仅本地完全访问确认在途禁止重复选择。[权限DOM回归](test/isolated/permissions-dom.test.tsx)核宿主与Web两条路径；Native专用自绘浮层与原有权限命令分离，实际身份／窗口和像素资格归[Desktop owner](../../apps/desktop/README.md#固定-renderer-布局收敛2026-11-02)。
 
 [ApplicationConfirmationDialog](src/desktop/FullPermissionConfirmationDialog.tsx)集中维护完全权限与移除空间两种应用确认的固定内容和相同视觉组件；Full包装继续由Composer的Web路径复用。取消保持默认焦点，Esc取消，危险操作按钮使用共享红色样式；组件只返回用户决定，不执行权限变更或空间移除；Native退出应用保留系统原生确认框。Native在独立WebContentsView渲染同一组件、CSS和主题，Main拥有原生层序及跨视图焦点；临时失败message由Native owner负责，不复用此模态组件。

@@ -12,6 +12,12 @@ import {
   useState,
 } from 'react';
 import { useConversationActivity } from '../conversation-activity';
+import {
+  type ConversationMessageMarker,
+  ConversationMessageNavigation,
+  conversationMessageNavigationTop,
+  currentConversationMessage,
+} from './ConversationMessageNavigation';
 import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
 import { Collapsible, CollapsibleTrigger } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
@@ -70,6 +76,12 @@ function processTurnId(message: Message): string | undefined {
   )
     return undefined;
   return message.turnId;
+}
+
+function isNavigationMessage(message: Message) {
+  return (
+    message.role === 'user' && !message.inputKind && !message.agentMessage && !message.agentResult
+  );
 }
 
 function isTurnFailure(message: Message): boolean {
@@ -496,6 +508,7 @@ export function Conversation({
   initialPresentationPending = false,
   onPresentationReady,
   lazyHistory = false,
+  messageNavigation = false,
   turnActivity: incomingTurnActivity,
 
   selected,
@@ -520,6 +533,7 @@ export function Conversation({
   onPresentationReady?: () => void;
   /** Native limits cold large-history mounting; data and read admission stay host-owned. */
   lazyHistory?: boolean;
+  messageNavigation?: boolean;
   turnActivity?: TurnActivity;
 
   selected: boolean;
@@ -558,13 +572,27 @@ export function Conversation({
   const content = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
   const writtenScrollTop = useRef<number | undefined>(undefined);
-  const writeScroll = useCallback((element: HTMLElement, top: number) => {
-    element.scrollTop = top;
-    // Use the browser's clamped value, not scrollHeight. The scroll event may
-    // arrive after another chunk has changed that height.
-    writtenScrollTop.current = element.scrollTop;
-    reading.current.top = element.scrollTop;
+  const markerTargets = useRef<HTMLElement[]>([]);
+  const jumpedMarker = useRef<string | undefined>(undefined);
+  const [activeMarker, setActiveMarker] = useState<string>();
+  const syncMessageNavigation = useCallback((element: HTMLElement) => {
+    if (!markerTargets.current.length) return;
+    setActiveMarker(
+      jumpedMarker.current ??
+        currentConversationMessage(markerTargets.current, element, reading.current.follow),
+    );
   }, []);
+  const writeScroll = useCallback(
+    (element: HTMLElement, top: number) => {
+      element.scrollTop = top;
+      // Use the browser's clamped value, not scrollHeight. The scroll event may
+      // arrive after another chunk has changed that height.
+      writtenScrollTop.current = element.scrollTop;
+      reading.current.top = element.scrollTop;
+      syncMessageNavigation(element);
+    },
+    [syncMessageNavigation],
+  );
   const restoredExpanded = useRef(
     new Set(
       Object.entries(initialReading?.expanded ?? {})
@@ -735,11 +763,12 @@ export function Conversation({
         restoreConversationScrollAnchor(element, reading.current.anchor)
       )
         writeScroll(element, element.scrollTop);
+      else syncMessageNavigation(element);
     });
     observer.observe(element);
     if (content.current) observer.observe(content.current);
     return () => observer.disconnect();
-  }, [loading, writeScroll, lazyHistory]);
+  }, [loading, writeScroll, lazyHistory, syncMessageNavigation]);
   // Restore identity/window handoffs synchronously. Ordinary content geometry is
   // followed by ResizeObserver before paint, after layout has already completed.
   // Reading scrollHeight on every metadata commit would force that layout early.
@@ -769,7 +798,7 @@ export function Conversation({
       else writeScroll(element, reading.current.top);
       restore.current = false;
     }
-    if (lazyHistory && !reading.current.follow)
+    if (lazyHistory && !reading.current.follow && !jumpedMarker.current)
       reading.current.anchor = captureConversationScrollAnchor(element) ?? reading.current.anchor;
     const range = rangeRef.current;
     mountedEntries.current = new Set(
@@ -1407,30 +1436,96 @@ export function Conversation({
     entryKeys.current = keys;
     rangeRef.current = lazyHistory ? range : undefined;
   }
-  const { entryContent, openTurns } = useMemo(() => {
+  const { entryContent, openTurns, markers } = useMemo(() => {
     const openTurns: string[] = [];
     const visible = lazyHistory
       ? projection.entries.slice(range.start, range.end)
       : projection.entries;
-    const entryContent = visible.map((entry) =>
-      lazyHistory ? (
+    const markers: ConversationMessageMarker[] = [];
+    const entryContent = visible.map((entry) => {
+      const message = entry.groups[0]?.[0];
+      const isMarker = messageNavigation && !loading && message && isNavigationMessage(message);
+      if (isMarker)
+        markers.push({
+          key: entry.key,
+          preview:
+            message.text.slice(0, 80).replace(/\s+/g, ' ').trim() ||
+            (message.hasAttachments ? '附件' : ''),
+        });
+      return lazyHistory || isMarker ? (
         <div
           key={entry.key}
           className="conversation-entry"
-          data-conversation-entry-key={entry.key}
-          data-entry-kind={entry.turnId ? 'turn' : (entry.groups[0]?.[0]?.role ?? 'other')}
+          data-conversation-entry-key={lazyHistory ? entry.key : undefined}
+          data-entry-kind={
+            lazyHistory ? (entry.turnId ? 'turn' : (message?.role ?? 'other')) : undefined
+          }
+          data-conversation-message-marker={isMarker ? entry.key : undefined}
         >
           {projection.renderEntry(entry, openTurns)}
         </div>
       ) : (
         projection.renderEntry(entry, openTurns)
-      ),
-    );
-    return { entryContent, openTurns };
-  }, [projection, lazyHistory, range.start, range.end]);
+      );
+    });
+    return { entryContent, openTurns, markers };
+  }, [projection, lazyHistory, range.start, range.end, messageNavigation, loading]);
   useLayoutEffect(() => {
     committedOpenTurns.current = openTurns;
   }, [openTurns]);
+  const markerKeys = JSON.stringify(markers.map((marker) => marker.key));
+  // Refresh the targets when the mounted input identities change or the cached DOM reconnects.
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    if (!element || markerKeys === '[]') {
+      jumpedMarker.current = undefined;
+      return;
+    }
+    markerTargets.current = [
+      ...element.querySelectorAll<HTMLElement>('[data-conversation-message-marker]'),
+    ];
+    if (
+      jumpedMarker.current &&
+      !markerTargets.current.some(
+        (target) => target.dataset.conversationMessageMarker === jumpedMarker.current,
+      )
+    )
+      jumpedMarker.current = undefined;
+    syncMessageNavigation(element);
+    return () => {
+      markerTargets.current = [];
+    };
+  }, [markerKeys, syncMessageNavigation]);
+  const jumpToMessage = useCallback(
+    (key: string) => {
+      const element = viewport.current;
+      const target = markerTargets.current.find(
+        (candidate) => candidate.dataset.conversationMessageMarker === key,
+      );
+      if (!element || !target) return;
+      const top =
+        element.scrollTop +
+        target.getBoundingClientRect().top -
+        conversationMessageNavigationTop(element);
+      if (reading.current.follow && (top >= element.scrollTop - 1 || element.scrollTop <= 1)) {
+        setActiveMarker(key);
+        return;
+      }
+      pendingLoad.current?.cancel();
+      pendingLoad.current = undefined;
+      reading.current.follow = false;
+      jumpedMarker.current = key;
+      writeScroll(element, top);
+      reading.current.anchor = lazyHistory
+        ? {
+            entryKey: key,
+            offset: target.getBoundingClientRect().top - element.getBoundingClientRect().top,
+          }
+        : undefined;
+      setFollowing(false);
+    },
+    [lazyHistory, writeScroll],
+  );
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
@@ -1451,6 +1546,7 @@ export function Conversation({
               )
                 return;
               writtenScrollTop.current = undefined;
+              jumpedMarker.current = undefined;
               // Resume only at the actual bottom. A wider near-bottom zone
               // makes the following-state commit snap a manual scroll to the tail.
               // scrollTop is fractional while the two heights are rounded.
@@ -1469,6 +1565,7 @@ export function Conversation({
                 pendingLoad.current.top = element.scrollTop;
               }
               setFollowing(follow);
+              syncMessageNavigation(element);
               if (element.scrollTop <= 200) loadWindow('before');
               else if (remaining <= 200) loadWindow('after');
             }}
@@ -1506,6 +1603,13 @@ export function Conversation({
               )}
             </div>
           </section>
+          {markers.length > 0 && (
+            <ConversationMessageNavigation
+              markers={markers}
+              activeKey={activeMarker}
+              onJump={jumpToMessage}
+            />
+          )}
         </div>
         {loading && (
           <div className="conversation-loading" role="status" aria-label="正在加载聊天">
@@ -1526,6 +1630,7 @@ export function Conversation({
                 pendingLoad.current = undefined;
                 reading.current.follow = true;
                 reading.current.anchor = undefined;
+                jumpedMarker.current = undefined;
                 if (lazyHistory) {
                   restore.current = true;
                   setWindowState(jumpConversationWindowToLatest(entryKeys.current));

@@ -1270,6 +1270,7 @@ function SessionPageContent({
       renderToolActivity={props.renderToolActivity}
       turnActivity={props.turnActivity}
       lazyHistory={keepAlive}
+      messageNavigation
       loading={props.loading}
       initialPresentationPending={props.initialPresentationPending}
       onPresentationReady={() => finishPresentation(presentationIdentity)}
