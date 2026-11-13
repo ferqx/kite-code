@@ -22,11 +22,16 @@ function validState(input: unknown): input is NativeGlobalDialogState {
     case 'full-permission':
       return Object.keys(value).length === 4;
     case 'workspace-removal':
+    case 'provider-removal':
       return (
-        Object.keys(value).length === 5 &&
+        Object.keys(value).length === (value.kind === 'provider-removal' ? 6 : 5) &&
         typeof value.label === 'string' &&
         value.label.length >= 1 &&
-        value.label.length <= 256
+        value.label.length <= 256 &&
+        (value.kind === 'workspace-removal' ||
+          (typeof value.modelCount === 'number' &&
+            Number.isSafeInteger(value.modelCount) &&
+            value.modelCount >= 0))
       );
     default:
       return false;

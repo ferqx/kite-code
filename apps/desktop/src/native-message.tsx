@@ -18,8 +18,13 @@ export function humanReadableOperationError(code: string | undefined, operation?
 }
 
 export type NativeToastProps = {
-  message?: { id: number; text: string };
-  onDismiss: (id: number) => void;
+  message?: {
+    id: number;
+    text: string;
+    role?: 'alert' | 'status';
+    actions?: readonly { label: string; onClick: () => void; disabled?: boolean }[];
+  };
+  onDismiss?: (id: number) => void;
   container?: HTMLElement;
 };
 
@@ -47,27 +52,29 @@ function MessageOccurrence({
     setFocused(false);
   }, [container]);
   const paused = hovered || focused;
+  const dismissible = onDismiss !== undefined;
 
   useEffect(() => {
-    if (paused) return;
+    if (paused || !dismissible) return;
     let active = true;
     const deadline = Date.now() + remaining.current;
     const timer = setTimeout(() => {
-      if (active) dismiss.current(message.id);
+      if (active) dismiss.current?.(message.id);
     }, remaining.current);
     return () => {
       active = false;
       clearTimeout(timer);
       remaining.current = Math.max(0, deadline - Date.now());
     };
-  }, [message.id, paused]);
+  }, [message.id, paused, dismissible]);
 
   return createPortal(
     <div className="native-toast">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Hover and focus only pause dismissal. Buttons handle all actions. */}
       <div
         className="native-toast-card"
-        role="status"
-        aria-live="polite"
+        role={message.role ?? 'status'}
+        aria-live={message.role === 'alert' ? 'assertive' : 'polite'}
         aria-atomic="true"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -77,16 +84,34 @@ function MessageOccurrence({
         }}
       >
         <p>{message.text}</p>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          type="button"
-          className="native-toast-close"
-          aria-label="关闭提示"
-          onClick={() => dismiss.current(message.id)}
-        >
-          <span aria-hidden="true">×</span>
-        </Button>
+        {!!message.actions?.length && (
+          <div className="native-toast-actions">
+            {message.actions.map((action, index) => (
+              <Button
+                key={`${action.label}/${index}`}
+                variant="outline"
+                size="sm"
+                type="button"
+                disabled={action.disabled}
+                onClick={action.onClick}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        )}
+        {dismissible && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            type="button"
+            className="native-toast-close"
+            aria-label="关闭提示"
+            onClick={() => dismiss.current?.(message.id)}
+          >
+            <span aria-hidden="true">×</span>
+          </Button>
+        )}
       </div>
     </div>,
     container,
@@ -105,9 +130,12 @@ export function NativeToast({ message, onDismiss, container = document.body }: N
       key={message.id}
       message={message}
       container={container}
-      onDismiss={(id) => {
-        if (current.current.id === id) current.current.onDismiss(id);
-      }}
+      onDismiss={
+        onDismiss &&
+        ((id) => {
+          if (current.current.id === id) current.current.onDismiss?.(id);
+        })
+      }
     />
   );
 }

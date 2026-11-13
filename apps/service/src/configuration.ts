@@ -93,7 +93,7 @@ import {
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
 import { parseModelPreset } from './model-options';
-import { isSupportedModelProvider, modelProtocol } from './model-providers';
+import { isSupportedModelProvider, modelProtocol, providerModelFetch } from './model-providers';
 import { resolveModelTransport } from './model-transport';
 import {
   createDefaultPermissionConfiguration,
@@ -730,6 +730,7 @@ export function createDefaultProcessConfiguration(options: {
   const resolveModel = async (
     selected: ModelConfiguration,
     transport: Awaited<ReturnType<typeof resolveModelTransport>>,
+    sessionId: string,
   ) => {
     if (selected.provider === 'codex') {
       if (!localCodex) throw new ConfigurationError('codex_auth_required');
@@ -764,7 +765,7 @@ export function createDefaultProcessConfiguration(options: {
       baseURL: selected.baseURL!,
       modelId: selected.model,
       apiKey,
-      fetch: transport.fetch,
+      fetch: providerModelFetch(selected.baseURL!, sessionId, transport.fetch),
     });
     const preset = parseModelPreset(selected.options);
     return createRunModelAdapters({
@@ -954,7 +955,7 @@ export function createDefaultProcessConfiguration(options: {
           )
             throw new AgentError('session_title_configuration_changed');
         }
-        const resolved = await resolveModel(selected, modelTransport);
+        const resolved = await resolveModel(selected, modelTransport, session.id);
         signal?.throwIfAborted();
         return {
           model: resolved.model,
@@ -1310,7 +1311,11 @@ export function createDefaultProcessConfiguration(options: {
               `Original binding changed: ${changed.join(', ')}.`,
             );
         }
-        const { model, checkModel, checkOptions } = await resolveModel(selected, modelTransport);
+        const { model, checkModel, checkOptions } = await resolveModel(
+          selected,
+          modelTransport,
+          session.id,
+        );
         const authorizationCheck = {
           ...(options.authorizationCheck ?? {
             id: 'builtin.auto',

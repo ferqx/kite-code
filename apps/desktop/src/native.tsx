@@ -6000,8 +6000,6 @@ function NativeDesktopContent({
                         bridge={bridge}
                         generation={generation.current}
                         storeId={directory?.storeId}
-                        selection={!preparing ? selection : undefined}
-                        revision={settingsRevision}
                         editor={editor}
                         onEditorChange={setEditor}
                         windowsShell={
@@ -6045,6 +6043,7 @@ function NativeDesktopContent({
                           selection?.viewSelection,
                         ])}
                         panelHost={settingsEditorHost}
+                        toastHost={settingsToastHost}
                         editorControl={settingsEditorControl}
                         bridge={bridge}
                         generation={generation.current}

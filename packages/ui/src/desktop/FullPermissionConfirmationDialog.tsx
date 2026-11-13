@@ -47,6 +47,7 @@ export type ApplicationConfirmationDialogProps = ConfirmationProps &
   (
     | { kind: 'full-permission'; language: 'zh' | 'en' }
     | { kind: 'workspace-removal'; label: string }
+    | { kind: 'provider-removal'; label: string; modelCount: number }
     | { kind: 'skill-uninstall'; label: string }
   );
 
@@ -108,6 +109,15 @@ function confirmationCopy(props: ApplicationConfirmationDialogProps) {
         description: '该 Skill 及其配套文件将移到系统废纸篓。',
         cancel: '取消',
         confirm: '确认卸载',
+      };
+    case 'provider-removal':
+      return {
+        title: `删除「${props.label}」？`,
+        description: props.modelCount
+          ? `将删除此连接及 ${props.modelCount} 个关联模型的配置。`
+          : '将删除此连接。',
+        cancel: '取消',
+        confirm: '确认删除提供商',
       };
   }
 }

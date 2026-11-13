@@ -437,13 +437,6 @@ function settingsBackend() {
     () => {},
     data,
   );
-  const generalConfiguration = new NativeConfiguration(
-    client,
-    () => scope,
-    () => {},
-    undefined,
-    true,
-  );
   const snapshot = () => ({
     providerSettingsSubmissions: providers.submissions,
     modelSettingsSubmissions: configuration.submissions,
@@ -498,14 +491,6 @@ function settingsBackend() {
             break;
           case 'settings.providers.close':
             providers.cancelRead();
-            break;
-          case 'settings.general.models.read':
-            audit.push({ method: input.method });
-            value = await generalConfiguration.read();
-            break;
-          case 'settings.general.models.close':
-            audit.push({ method: input.method });
-            generalConfiguration.release();
             break;
           case 'settings.models.read':
             audit.push({ method: 'settings.models.read', input: structuredClone(input) });
@@ -1928,20 +1913,9 @@ try {
         });
         await page.getByRole('button', { name: '常规', exact: true }).click();
         const general = page.getByRole('region', { name: '常规设置', exact: true });
-        await page.waitForFunction(
-          () =>
-            !!document
-              .querySelector('[aria-label="常规设置"] .settings-value')
-              ?.textContent?.includes('fixture-model-a-updated'),
-        );
+        await general.getByRole('combobox', { name: '默认编辑器' }).waitFor();
+        assert.equal(await general.getByText('当前默认模型', { exact: true }).count(), 0);
         await stage('settings-queue-general-read');
-        const generalRead = await state();
-        assert.equal(
-          generalRead.audit.filter((entry) => entry.method === 'settings.general.models.read')
-            .length,
-          beforeGeneral.audit.filter((entry) => entry.method === 'settings.general.models.read')
-            .length + 1,
-        );
         assert.equal(await general.getAttribute('aria-busy'), null);
         assert.equal(await general.getByRole('alert').count(), 0);
         await page.evaluate(() => window.liveAggregationFixture.settings('release-provider-reads'));
@@ -1953,12 +1927,6 @@ try {
           ordinaryReads(afterGeneral),
           ordinaryReads(beforeGeneral),
           'General navigation invalidated the retained model controller',
-        );
-        assert.equal(
-          afterGeneral.audit.filter((entry) => entry.method === 'settings.general.models.close')
-            .length,
-          beforeGeneral.audit.filter((entry) => entry.method === 'settings.general.models.close')
-            .length + 1,
         );
         assert.equal(await toggle('model-b').isChecked(), true);
         assert.equal(await toggle(cId).isChecked(), false);
@@ -2094,7 +2062,6 @@ try {
           providerFlushFailed,
           providerFlushRecovered,
           beforeGeneral,
-          generalRead,
           afterGeneral,
           queueDrained,
         };

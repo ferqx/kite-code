@@ -39,9 +39,7 @@ function CurrentDialog({
   };
   return (
     <ApplicationConfirmationDialog
-      {...(state.kind === 'workspace-removal'
-        ? { kind: state.kind, label: state.label }
-        : { kind: state.kind, language: state.language })}
+      {...state}
       open
       confirmDisabled={!presented}
       onConfirm={() => decide(true)}

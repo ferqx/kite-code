@@ -887,6 +887,13 @@ void app
           new AbortController().signal,
         );
       },
+      async confirmProviderRemoval(summary) {
+        if (quitting || stoppingNativeProcess || exitAllowed) return false;
+        return globalDialog.confirm(
+          { kind: 'provider-removal', language: 'zh', ...summary },
+          new AbortController().signal,
+        );
+      },
       async pickWorkspace(generation, host) {
         await host.invoke({ method: 'state', generation });
         const selected = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] });

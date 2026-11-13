@@ -5,6 +5,7 @@ export const nativeGlobalDialogActiveChannel = 'kite:native:global-dialog-active
 export type NativeGlobalDialogContent = { language: 'zh' | 'en' } & (
   | { kind: 'full-permission' }
   | { kind: 'workspace-removal'; label: string }
+  | { kind: 'provider-removal'; label: string; modelCount: number }
 );
 
 export type NativeGlobalDialogState =

@@ -16,6 +16,8 @@ Kite Code 是 provider-neutral 系统。当前默认 Service 的手动模型来�
 
 当前 SDK 适配器在 transport 边界将 namespaced Tool ID 转为符合 compatible 函数名语法的无碰撞名称，并用同一请求映射还原返回调用。Core ID、权限和持久历史不重命名，实际转换版本与严格端点证据归[AI owner](../../packages/ai/README.md)；下文旧 Model Surface 的序列化身份不因当前 SDK 编码变化而改写。
 
+桌面服务商预设只填充普通连接字段，不是新的 Provider family、计费凭据来源或目录准入。需要随会话发送的 OpenCode Go 标识由 [Service 的准确地址绑定](../../apps/service/README.md)派生，不接受客户端自定义请求头，不随重定向离开订阅地址。桌面套餐选择、旧 OpenCode Go 路由及发布 smoke 的资格各自核对，取舍见[预设与套餐 Note](../../.agents/notes/implemented/architecture/2026-11-13-provider-presets-and-plan-routes.md)。
+
 当前默认 Service 以同 Session 首个实际 Run 的封存模型协议约束后续根运行，Responses 与 Chat Completions 不在一个会话内互换；同协议模型、连接与下一轮 effort 仍可调整。校验在凭据／模型绑定前独立执行，Native 只过滤另一协议候选，不能以客户端缓存授权跨协议。原有界 View 保留真正最早 Run，冷重建和恢复不以最新记录或当前默认替代；无 Run 的准备拒绝不提前绑定。准确决定与测试入口见[会话协议 Note](../../.agents/notes/implemented/architecture/2026-10-24-session-model-protocol.md)。
 
 本机 Codex 的凭据读取由 [Service 私有来源](../../apps/service/src/codex-auth.ts)负责，不能通过 JSONC/HTTP/renderer 指定认证路径或更改请求目标。只读虚拟连接不物化 token；账户摘要绑定 route 和每次实际派发，token 轮换不等同账户切换。私有 continuation 按认证来源及完整账户／主体身份绑定，同账户 token 更新不丢已保存的 encrypted reasoning；其他 Provider 的原凭据隔离保持。无效可选目录不进入普通工具资产保护，合法但暂缺文件的绝对路径仍受保护。固定 Codex Responses endpoint、拒绝 redirect、请求时重读、认证过期明确失败及无隐式刷新/回写的边界见 [Service owner](../../apps/service/README.md#本机-codex-来源)。原有 Provider 中立模型流、工具授权和取消仍由原 owner 负责，自动接入不授予外部工具或新账户 fallback。文件模式外的登录缓存未取得支持资格。

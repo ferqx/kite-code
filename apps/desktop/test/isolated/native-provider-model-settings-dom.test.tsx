@@ -377,6 +377,14 @@ test('a provider save synchronously excludes a peer model write and each applied
     expect(f.calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toHaveLength(0);
     expect(f.toggle('unmapped').disabled).toBe(true);
+    const deleteButton = f.element.querySelector<HTMLButtonElement>(
+      '.provider-instance button[aria-label^="删除 "]',
+    )!;
+    expect(deleteButton.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => deleteButton.click());
+    expect(f.calls.some((input) => input.method === 'settings.providers.remove.confirm')).toBe(
+      false,
+    );
     state.providers.providers[0]!.connections[0]!.modelIds = ['a', 'new-route'];
     state.providers.providers[0]!.connections[0]!.modelNames.push('new-route');
     state.models.models.push({
@@ -412,12 +420,6 @@ test('a provider save synchronously excludes a peer model write and each applied
     expect(f.toggle('a').disabled).toBe(false);
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(3);
     expect(f.calls.filter((input) => input.method === 'settings.providers.read')).toHaveLength(3);
-    await act(async () =>
-      f.element
-        .querySelectorAll<HTMLButtonElement>('.provider-instance button[aria-label^="删除 "]')[0]!
-        .click(),
-    );
-    expect(f.button('确认删除提供商').disabled).toBe(true);
     expect(f.saved).toBe(2);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toEqual([
       {
@@ -509,9 +511,11 @@ for (const owner of ['provider', 'model'] as const) {
       await f.click('关闭');
       await editFirst();
       expect(f.button('保存提供商配置').disabled).toBe(true);
-      const notice = f.element.querySelector(
-        `[aria-label="待确认的${owner === 'provider' ? '提供商' : '模型'}更改"]`,
-      )!;
+      const pendingNotice = () =>
+        owner === 'provider'
+          ? f.dom.window.document.querySelector('.native-toast-card')
+          : f.element.querySelector('[aria-label="待确认的模型更改"]');
+      const notice = pendingNotice()!;
       expect(notice).not.toBeNull();
       expect(f.calls.some((input) => input.method.endsWith('.lookup'))).toBe(false);
       await act(async () => notice.querySelector<HTMLButtonElement>('button')!.click());
@@ -528,11 +532,7 @@ for (const owner of ['provider', 'model'] as const) {
       ]);
       await f.openModels('其他模型');
       expect(f.toggle('unmapped').disabled).toBe(false);
-      expect(
-        f.element.querySelector(
-          `[aria-label="待确认的${owner === 'provider' ? '提供商' : '模型'}更改"]`,
-        ),
-      ).toBeNull();
+      expect(pendingNotice()).toBeNull();
       expect(
         f.calls.filter(
           (input) =>
@@ -949,7 +949,9 @@ test('failed provider flush preserves applied model results and lets the accepte
     expect(f.toggle('b').disabled).toBe(false);
     expect(state.models.models.find((model) => model.id === 'b')!.enabled).toBe(true);
     expect(f.saved).toBe(2);
-    expect(f.element.textContent).toContain('peer_model_read_unavailable');
+    expect(f.dom.window.document.querySelector('.native-toast-card')?.textContent).toContain(
+      'peer_model_read_unavailable',
+    );
   } finally {
     flush.resolve();
     await f.close();
@@ -1044,12 +1046,16 @@ test('a model publication forces a newer Provider GET instead of borrowing an ol
     expect(row.getAttribute('aria-checked') === 'true').toBe(false);
     expect(row.disabled).toBe(false);
     expect(reads).toBe(2);
-    expect(f.element.textContent).toContain('peer_model_read_unavailable');
+    expect(f.dom.window.document.querySelector('.native-toast-card')?.textContent).toContain(
+      'peer_model_read_unavailable',
+    );
     expect(clock.pending).toBe(1);
     await clock.fire();
     expect(reads).toBe(3);
     expect(clock.pending).toBe(0);
-    expect(f.element.textContent).toContain('peer_model_read_unavailable');
+    expect(f.dom.window.document.querySelector('.native-toast-card')?.textContent).toContain(
+      'peer_model_read_unavailable',
+    );
     expect(row.disabled).toBe(false);
     await act(async () => row.click());
     expect(posts).toBe(2);
@@ -1057,7 +1063,9 @@ test('a model publication forces a newer Provider GET instead of borrowing an ol
     expect(f.toggle('b') === row).toBe(true);
     expect(row.getAttribute('aria-checked') === 'true').toBe(true);
     expect(row.disabled).toBe(false);
-    expect(f.element.textContent).not.toContain('peer_model_read_unavailable');
+    expect(
+      f.dom.window.document.querySelector('.native-toast-card')?.textContent ?? '',
+    ).not.toContain('peer_model_read_unavailable');
     expect(f.element.textContent).toContain('Newest snapshot');
     expect(f.saved).toBe(2);
     await act(async () => f.button('编辑 Newest snapshot').click());

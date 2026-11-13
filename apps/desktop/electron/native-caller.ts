@@ -119,7 +119,6 @@ export class NativeCaller {
   private readonly workspaceRemoval: NativeWorkspaceRemovalPort;
   private readonly configuration: NativeConfiguration;
   private readonly inputConfiguration: NativeConfiguration;
-  private readonly generalConfiguration: NativeConfiguration;
   private readonly preparationConfiguration: NativeConfiguration;
   private readonly conversation: NativeConversation;
   private workspaceObservation?: { generation: number; storeId: string; workspaces: Workspace[] };
@@ -584,13 +583,6 @@ export class NativeCaller {
           }
         : undefined;
     this.inputConfiguration = new NativeConfiguration(client, configurationScope);
-    this.generalConfiguration = new NativeConfiguration(
-      client,
-      configurationScope,
-      () => {},
-      undefined,
-      true,
-    );
     this.providers = new NativeProviderSettings(
       client,
       configurationScope,
@@ -743,7 +735,6 @@ export class NativeCaller {
     this.controller.cancelInteractionRead();
     this.callerReads.clear();
     this.configuration.release();
-    this.generalConfiguration.release();
     this.inputConfiguration.release();
     this.providers.release();
     this.mcp.release();
@@ -2274,13 +2265,6 @@ export class NativeCaller {
       case 'state':
         result = this.state();
         break;
-      case 'settings.general.models.read':
-        result = await this.generalConfiguration.read();
-        break;
-      case 'settings.general.models.close':
-        this.generalConfiguration.release();
-        result = null;
-        break;
       case 'settings.general.shell.read':
       case 'settings.general.shell.save':
         throw new ClientError('desktop_shell_settings_unavailable');
@@ -2314,6 +2298,20 @@ export class NativeCaller {
       case 'settings.providers.read':
         result = await this.providers.read();
         break;
+      case 'settings.providers.discover':
+        result = await this.providers.discover(
+          request.observationId,
+          request.readId,
+          request.operation,
+          request.secret,
+        );
+        break;
+      case 'settings.providers.discover.cancel':
+        this.providers.cancelDiscovery(request.readId);
+        result = null;
+        break;
+      case 'settings.providers.remove.confirm':
+        throw new ClientError('native_host_operation_unavailable');
       case 'settings.providers.save':
         result = await this.serializeSettingsMutation(async () => {
           this.assertGeneration(generation);
@@ -3150,6 +3148,18 @@ export class NativeCaller {
     }
     this.invalidateDirectory();
     this.changed();
+  }
+  providerRemovalSummary(
+    request: Extract<NativeRequest, { method: 'settings.providers.remove.confirm' }>,
+    confirmed = false,
+  ) {
+    this.assertGeneration(request.generation);
+    return this.providers.removalSummary(
+      request.observationId,
+      request.provider,
+      request.connectionId,
+      confirmed,
+    );
   }
   async removeWorkspace(
     generation: number,

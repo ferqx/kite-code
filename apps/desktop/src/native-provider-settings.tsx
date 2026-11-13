@@ -10,10 +10,15 @@ import type {
   NativeSelection,
 } from './native-bridge';
 import { NativeConnectionModels } from './native-connection-models';
+import { NativeToast, type NativeToastProps } from './native-message';
 import {
   NativeModelSettingsFeedback,
   type NativeModelSettingsState,
 } from './native-model-settings';
+import {
+  type CompatibleProviderPreset,
+  compatibleProviderPresets,
+} from './native-provider-presets';
 import { NativeSettingsSelect } from './native-settings-select';
 
 export type NativeProviderSettingsActivity = {
@@ -121,6 +126,13 @@ function rejectedBeforeProviderDispatch(code: string) {
     'provider_credential_required',
   ].includes(code);
 }
+function removalBlockedMessage(code: string) {
+  if (code === 'provider_default_model_in_use') return '请先在配置文件中改用其他默认模型。';
+  if (code === 'provider_scheduled_model_in_use')
+    return '仍有定时任务使用此连接，请先改用其他模型或等待运行结束。';
+  if (code === 'configuration_observation_changed') return '配置已更新，请重新确认删除。';
+  return undefined;
+}
 function connectionLabel(provider: Provider, connection: Connection) {
   return (
     connection.name?.trim() || `${provider.label} ${provider.connections.indexOf(connection) + 1}`
@@ -167,6 +179,31 @@ function validEndpoint(value: string) {
     return false;
   }
 }
+function modelIds(text: string) {
+  return [
+    ...new Set(
+      text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+function directoryError(code: string) {
+  switch (code) {
+    case 'provider_discovery_auth_failed':
+      return '服务商拒绝访问模型目录，请检查 API key 和服务地址。';
+    case 'provider_discovery_endpoint_mismatch':
+      return '服务地址已修改。请填写该地址对应的新 API key，再获取目录。';
+    case 'provider_discovery_empty':
+      return '服务商返回的模型目录为空，可以手动填写模型 ID。';
+    case 'configuration_read_set_conflict':
+    case 'configuration_observation_changed':
+      return '配置已变化，请重新打开设置后再试。';
+    default:
+      return `无法获取模型目录（${code}），可重试或手动填写模型 ID。`;
+  }
+}
 
 export function NativeProviderSettings({
   bridge,
@@ -176,6 +213,7 @@ export function NativeProviderSettings({
   onSaved,
   onRecovered,
   panelHost,
+  toastHost,
   editorControl,
   refreshControl,
   models,
@@ -190,6 +228,7 @@ export function NativeProviderSettings({
   onSaved?: () => void;
   onRecovered?: () => void;
   panelHost: HTMLElement | null;
+  toastHost?: HTMLElement | null;
   editorControl?: RefObject<{ close: () => void } | null>;
   refreshControl?: RefObject<(() => Promise<boolean>) | null>;
   models?: NativeModelSettingsState;
@@ -200,7 +239,9 @@ export function NativeProviderSettings({
   const fieldId = useId();
   const [facts, setFacts] = useState<NativeProviderSettingsFacts>();
   const [providerId, setProviderId] = useState<NativeProvider>();
+  const [compatiblePreset, setCompatiblePreset] = useState<CompatibleProviderPreset>();
   const [panelMode, setPanelMode] = useState<PanelMode>();
+  const confirmingRemoval = useRef(false);
   const [name, setName] = useState('');
   const [draftBasis, setDraftBasis] = useState<{
     storeId: string;
@@ -216,13 +257,23 @@ export function NativeProviderSettings({
     [modelNames, setModelNames] = useState(''),
     [secret, setSecret] = useState('');
   const [credential, setCredential] = useState<NativeProviderOperation['credential']>('replace');
+  const [directory, setDirectory] = useState<{
+    names?: string[];
+    error?: string;
+    loading?: boolean;
+  }>({});
+  const directoryRead = useRef<string | undefined>(undefined);
   const [fieldError, setFieldError] = useState<{
-    field: 'name' | 'url' | 'key';
+    field: 'name' | 'url' | 'key' | 'models';
     message: string;
   }>();
   const [error, setError] = useState(''),
     [reading, setReading] = useState(false),
     [writing, setWriting] = useState(false);
+  const [dismissedError, setDismissedError] = useState<string>();
+  useEffect(() => {
+    if (!error) setDismissedError(undefined);
+  }, [error]);
   const [local, setLocal] = useState<NativeProviderSubmission[]>([]);
   const [lookupCompletion, setLookupCompletion] = useState(0);
   const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
@@ -257,10 +308,17 @@ export function NativeProviderSettings({
 
   const nameField = useRef<HTMLInputElement>(null),
     presetField = useRef<HTMLButtonElement>(null),
-    cancelField = useRef<HTMLButtonElement>(null),
     addButton = useRef<HTMLButtonElement>(null),
     urlField = useRef<HTMLInputElement>(null),
-    keyField = useRef<HTMLInputElement>(null);
+    keyField = useRef<HTMLInputElement>(null),
+    modelsField = useRef<HTMLTextAreaElement>(null),
+    directoryButton = useRef<HTMLButtonElement>(null),
+    directoryList = useRef<HTMLUListElement>(null);
+  const directoryVisible = !!directory.names;
+  useLayoutEffect(() => {
+    if (directoryVisible && directoryButton.current === document.activeElement)
+      directoryList.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [directoryVisible]);
   const origin = useRef<HTMLButtonElement | null>(null);
   const restoreFocus = useRef(false);
   const all = new Map(submissions.map((submission) => [submission.commandId, submission]));
@@ -291,6 +349,8 @@ export function NativeProviderSettings({
           ['submitting', 'unknown'].includes(submission.phase),
       ));
   const provider = facts?.providers.find((entry) => entry.id === providerId);
+  const requiresCredential = !!compatiblePreset || provider?.requiresCredential;
+  const selectedModels = new Set(modelIds(modelNames));
   const connection = provider?.connections.find((entry) => entry.id === connectionId);
   const entries =
     facts?.providers.flatMap((provider) =>
@@ -303,8 +363,6 @@ export function NativeProviderSettings({
       draftBasis.storeId !== facts.storeId ||
       (connectionId !== null && draftBasis.observationId !== facts.observationId) ||
       draftBasis.fingerprint !== connectionFingerprint(provider, connection));
-  const blockedRemoval =
-    !!connection?.defaultModelIds?.length || !!connection?.scheduledTaskNames?.length;
   const writable =
     facts?.canWrite &&
     provider?.id !== 'codex' &&
@@ -345,13 +403,12 @@ export function NativeProviderSettings({
           .filter((model) => !assignedModelIds.has(model.id))
           .map((model) => model.id)
       : undefined;
-  const panelTitle =
-    panelMode === 'remove' ? '删除提供商' : panelMode === 'edit' ? '编辑提供商' : '新增提供商';
+  const panelTitle = panelMode === 'edit' ? '编辑提供商' : '新增提供商';
   const editingLabel =
     provider && connection
       ? connectionLabel(provider, connection)
       : provider
-        ? presetLabel(provider)
+        ? (compatiblePreset?.label ?? presetLabel(provider))
         : '选择服务商预设';
   function remember(submission: NativeProviderSubmission) {
     settleSent(submission);
@@ -454,10 +511,20 @@ export function NativeProviderSettings({
     notified.current.add(key);
     onSaved?.();
   }
+  function invalidateDirectory() {
+    const readId = directoryRead.current;
+    directoryRead.current = undefined;
+    setDirectory({});
+    if (readId)
+      void bridge
+        .request({ method: 'settings.providers.discover.cancel', generation, readId })
+        .catch(() => {});
+  }
   async function read(afterSave?: 'upsert' | 'remove', force = false) {
     if (!force && readFlight.current?.request === sequence.current)
       return readFlight.current.promise;
     cancelRecovery();
+    invalidateDirectory();
     const editing = editorVersion.current;
     const original = identity,
       request = ++sequence.current;
@@ -547,6 +614,7 @@ export function NativeProviderSettings({
     sequence.current++;
     setFacts(undefined);
     setProviderId(undefined);
+    setCompatiblePreset(undefined);
     setPanelMode(undefined);
     setDraftBasis(undefined);
     setName('');
@@ -559,6 +627,7 @@ export function NativeProviderSettings({
     void read();
     return () => {
       mounted.current = false;
+      directoryRead.current = undefined;
       cancelRecovery();
       readFlight.current = undefined;
       sequence.current++;
@@ -639,11 +708,14 @@ export function NativeProviderSettings({
     existing?: Connection,
     mode: PanelMode = 'add',
     button?: HTMLButtonElement,
+    preset?: CompatibleProviderPreset,
   ) {
+    invalidateDirectory();
     editorVersion.current++;
     if (button) origin.current = button;
     setPanelMode(mode);
     setProviderId(entry.id);
+    setCompatiblePreset(preset);
     setConnectionId(existing?.id ?? null);
     setDraftBasis(
       facts
@@ -654,12 +726,14 @@ export function NativeProviderSettings({
           }
         : undefined,
     );
-    setName(existing ? connectionLabel(entry, existing) : presetLabel(entry));
-    setProtocol(existing?.protocol ?? 'chat-completions');
-    setBaseURL(existing?.baseURL ?? entry.defaultBaseURL);
+    setName(existing ? connectionLabel(entry, existing) : (preset?.label ?? presetLabel(entry)));
+    setProtocol(existing?.protocol ?? preset?.protocol ?? 'chat-completions');
+    setBaseURL(existing?.baseURL ?? preset?.baseURL ?? entry.defaultBaseURL);
     setModelNames(existing?.modelNames.join('\n') ?? '');
     setSecret('');
-    setCredential(existing?.hasCredential ? 'keep' : entry.requiresCredential ? 'replace' : 'none');
+    setCredential(
+      existing?.hasCredential ? 'keep' : preset || entry.requiresCredential ? 'replace' : 'none',
+    );
     setFieldError(undefined);
     setError('');
   }
@@ -668,7 +742,61 @@ export function NativeProviderSettings({
     const preset = facts?.providers.find((entry) => entry.id !== 'codex');
     if (preset) choose(preset, undefined, 'add', button);
   }
+  async function remove(entry: Provider, item: Connection, button: HTMLButtonElement) {
+    if (
+      !facts?.canWrite ||
+      !item.canWrite ||
+      confirmingRemoval.current ||
+      pending ||
+      reading ||
+      writing ||
+      flight.current ||
+      models?.reading ||
+      models?.writing ||
+      models?.pending
+    )
+      return;
+    choose(entry, item, 'remove', button);
+    const editing = editorVersion.current;
+    const original = sequence.current;
+    const isCurrent = () =>
+      mounted.current && current.current === identity && editorVersion.current === editing;
+    confirmingRemoval.current = true;
+    try {
+      const answer = await bridge.request({
+        method: 'settings.providers.remove.confirm',
+        generation,
+        observationId: facts.observationId,
+        provider: entry.id,
+        connectionId: item.id,
+      });
+      if (!isCurrent()) return;
+      if (!answer || !('kind' in answer) || answer.kind !== 'settings.providers.remove.confirmed') {
+        close();
+        return;
+      }
+      if (sequence.current !== original) throw Error('configuration_observation_changed');
+    } catch (cause) {
+      if (isCurrent()) {
+        close();
+        setError(removalBlockedMessage(safeError(cause)) ?? '无法打开删除确认，请重试。');
+      }
+      return;
+    } finally {
+      confirmingRemoval.current = false;
+    }
+    await submit({
+      kind: 'remove',
+      provider: entry.id,
+      connectionId: item.id,
+      baseURL: item.baseURL,
+      ...(supportsResponses(entry.id) ? { protocol: item.protocol ?? 'chat-completions' } : {}),
+      modelNames: [],
+      credential: 'none',
+    });
+  }
   function close() {
+    invalidateDirectory();
     restoreFocus.current = true;
     editorVersion.current++;
     if (readFlight.current) {
@@ -678,6 +806,7 @@ export function NativeProviderSettings({
     sequence.current++;
     setReading(false);
     setProviderId(undefined);
+    setCompatiblePreset(undefined);
     setPanelMode(undefined);
     setDraftBasis(undefined);
     setName('');
@@ -692,54 +821,93 @@ export function NativeProviderSettings({
   // biome-ignore lint/correctness/useExhaustiveDependencies: Switching between instances of one preset must reset field focus.
   useEffect(() => {
     if (editorControl)
-      editorControl.current = panelMode ? { close: () => closeCurrent.current() } : null;
+      editorControl.current =
+        panelMode === 'add' || panelMode === 'edit'
+          ? { close: () => closeCurrent.current() }
+          : null;
     if (!panelMode && restoreFocus.current) {
       restoreFocus.current = false;
       (origin.current?.isConnected ? origin.current : addButton.current)?.focus();
     }
     if (panelMode && panelHost) {
-      if (panelMode === 'remove') cancelField.current?.focus();
-      else if (panelMode === 'add') presetField.current?.focus();
-      else nameField.current?.focus();
+      if (panelMode === 'add') presetField.current?.focus();
+      else if (panelMode === 'edit') nameField.current?.focus();
     }
     return () => {
       if (editorControl) editorControl.current = null;
     };
-  }, [providerId, connectionId, panelMode, panelHost, editorControl]);
-  async function save() {
-    if (!facts || !provider || !writable || flight.current) return;
-    if (panelMode === 'remove') {
-      if (!connection || blockedRemoval) return;
-      await submit({
-        kind: 'remove',
-        provider: provider.id,
-        connectionId: connection.id,
-        baseURL: connection.baseURL,
-        ...(supportsResponses(provider.id)
-          ? { protocol: connection.protocol ?? 'chat-completions' }
-          : {}),
-        modelNames: [],
-        credential: 'none',
-      });
-      return;
+  }, [providerId, compatiblePreset, connectionId, panelMode, panelHost, editorControl]);
+  function validConnectionDraft() {
+    if (!validEndpoint(baseURL.trim())) {
+      setFieldError({ field: 'url', message: '请输入有效的 HTTP 或 HTTPS 服务地址。' });
+      urlField.current?.focus();
+      return false;
     }
+    if (
+      (credential === 'replace' && !secret.trim()) ||
+      (requiresCredential && credential === 'none') ||
+      (credential === 'keep' && !connection?.hasCredential)
+    ) {
+      setFieldError({ field: 'key', message: '请输入 API key。' });
+      keyField.current?.focus();
+      return false;
+    }
+    return true;
+  }
+  async function discover() {
+    if (!facts || !provider || !writable || directoryRead.current || flight.current) return;
+    if (!validConnectionDraft()) return;
+    const readId = crypto.randomUUID();
+    const original = identity;
+    const currentRead = () =>
+      mounted.current && current.current === original && directoryRead.current === readId;
+    directoryRead.current = readId;
+    setFieldError(undefined);
+    setDirectory((previous) => ({ names: previous.names, loading: true }));
+    try {
+      const response = await bridge.request({
+        method: 'settings.providers.discover',
+        generation,
+        observationId: facts.observationId,
+        readId,
+        operation: {
+          provider: provider.id,
+          connectionId,
+          baseURL: baseURL.trim(),
+          credential,
+        },
+        ...(credential === 'replace' ? { secret } : {}),
+      });
+      if (!currentRead()) return;
+      if (
+        !response ||
+        !('modelNames' in response) ||
+        response.kind !== 'settings.providers.directory'
+      )
+        throw Error('provider_discovery_invalid');
+      if (!response.modelNames.length) throw Error('provider_discovery_empty');
+      setDirectory({ names: response.modelNames });
+    } catch (cause) {
+      if (currentRead())
+        setDirectory((previous) => ({
+          names: previous.names,
+          error: directoryError(safeError(cause)),
+        }));
+    } finally {
+      if (currentRead()) directoryRead.current = undefined;
+    }
+  }
+  async function save() {
+    if (!facts || !provider || !writable || directoryRead.current || flight.current) return;
     if (!name.trim()) {
       setFieldError({ field: 'name', message: '请输入提供商名称。' });
       nameField.current?.focus();
       return;
     }
-    if (!validEndpoint(baseURL.trim())) {
-      setFieldError({ field: 'url', message: '请输入有效的 HTTP 或 HTTPS 服务地址。' });
-      urlField.current?.focus();
-      return;
-    }
-    if (
-      (credential === 'replace' && !secret.trim()) ||
-      (provider.requiresCredential && credential === 'none') ||
-      (credential === 'keep' && !connection?.hasCredential)
-    ) {
-      setFieldError({ field: 'key', message: '请输入 API key。' });
-      keyField.current?.focus();
+    if (!validConnectionDraft()) return;
+    if ((compatiblePreset?.manualModel || directory.names) && !selectedModels.size) {
+      setFieldError({ field: 'models', message: '请输入至少一个模型 ID。' });
+      modelsField.current?.focus();
       return;
     }
     const operation: NativeProviderOperation = {
@@ -749,14 +917,7 @@ export function NativeProviderSettings({
       connectionId,
       baseURL: baseURL.trim(),
       ...(supportsResponses(provider.id) ? { protocol } : {}),
-      modelNames: [
-        ...new Set(
-          modelNames
-            .split(/\r?\n/)
-            .map((name) => name.trim())
-            .filter(Boolean),
-        ),
-      ],
+      modelNames: [...selectedModels],
       credential,
     };
     await submit(operation, credential === 'replace' ? secret : undefined);
@@ -817,20 +978,30 @@ export function NativeProviderSettings({
       } else if (response.phase !== 'unknown') {
         requireRecovery(response.error ?? 'configuration_unavailable');
         setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
-        if (response.error) setError(`${action}失败：${response.error}`);
+        if (response.error)
+          setError(
+            (operation.kind === 'remove' && removalBlockedMessage(response.error)) ||
+              `${action}失败：${response.error}`,
+          );
       }
     } catch (cause) {
-      if (rejectedBeforeProviderDispatch(safeError(cause)) && retained.get(original) === sent)
-        retained.delete(original);
+      const code = safeError(cause);
+      const rejected = rejectedBeforeProviderDispatch(code);
+      if (rejected && retained.get(original) === sent) retained.delete(original);
       if (mounted.current && current.current === original) {
         // IPC failure does not prove the Main intent was never created. Keep the
         // exact non-secret request locked until an authoritative original is found.
-        if (!rejectedBeforeProviderDispatch(safeError(cause))) {
+        if (!rejected) {
           awaitingOriginal.current = sent;
           setAwaitingOriginalRecord(true);
         }
-        requireRecovery(safeError(cause));
-        if (editorVersion.current === editing) setError(`${action}结果未确认，正在后台核对。`);
+        requireRecovery(code);
+        if (editorVersion.current === editing)
+          setError(
+            rejected && operation.kind === 'remove'
+              ? (removalBlockedMessage(code) ?? `删除失败：${code}`)
+              : `${action}结果未确认，正在后台核对。`,
+          );
       }
     } finally {
       release?.();
@@ -999,29 +1170,42 @@ export function NativeProviderSettings({
     } else if (recovery.current.needsRead) await read();
   };
   const unresolvedSubmissions = originals.filter((submission) => submission.phase === 'unknown');
-  const unresolvedNotice = unresolvedSubmissions.length > 0 && (
-    <section className="provider-pending" aria-label="待确认的提供商更改">
-      {unresolvedSubmissions.map((submission) => (
-        <div className="provider-notice" key={submission.commandId}>
-          <p role="status">
-            {submission.operation.name ||
-              facts?.providers.find((entry) => entry.id === submission.operation.provider)?.label ||
-              submission.operation.provider}
-            ：{submission.operation.kind === 'remove' ? '删除' : '保存'}结果待确认。
-            {facts && submission.storeId !== facts.storeId && '此更改来自先前的数据源。'}
-          </p>
-          <Button
-            className="provider-button"
-            type="button"
-            disabled={reading || writing}
-            onClick={() => void lookup(submission)}
-          >
-            查看结果
-          </Button>
-        </div>
-      ))}
-    </section>
-  );
+  const visibleError = error !== dismissedError ? error : '';
+  const configurationReadOnly = facts && !facts.canWrite && !pending && !reading;
+  let toast: NativeToastProps['message'];
+  if (unresolvedSubmissions.length) {
+    const actionName = (submission: NativeProviderSubmission) =>
+      submission.operation.kind === 'remove' ? '删除' : '保存';
+    const label = (submission: NativeProviderSubmission) =>
+      submission.operation.name ||
+      facts?.providers.find((entry) => entry.id === submission.operation.provider)?.label ||
+      submission.operation.provider;
+    const [first] = unresolvedSubmissions;
+    const multiple = unresolvedSubmissions.length > 1;
+    toast = {
+      id: 1,
+      text: [
+        multiple
+          ? '有提供商更改结果待确认。'
+          : `${label(first!)}：${actionName(first!)}结果待确认。`,
+        !multiple && facts && first!.storeId !== facts.storeId && '此更改来自先前的数据源。',
+        visibleError,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      actions: unresolvedSubmissions.map((submission) => ({
+        label: multiple ? `查看 ${label(submission)} 的${actionName(submission)}结果` : '查看结果',
+        disabled: reading || writing,
+        onClick: () => void lookup(submission),
+      })),
+    };
+  } else if (visibleError) {
+    toast = { id: 0, role: 'alert', text: visibleError };
+  } else if (pending && !writing) {
+    toast = { id: 2, text: '有提供商更改尚未确认，暂时无法保存。' };
+  } else if (panelMode && configurationReadOnly && !error) {
+    toast = { id: 3, text: '当前配置不可写，请检查配置诊断。' };
+  }
   return (
     <section
       aria-label={models ? '提供商与模型设置' : '提供商设置'}
@@ -1062,11 +1246,12 @@ export function NativeProviderSettings({
           </Button>
         </div>
       </header>
-      {!panelMode && error && (
-        <p className="provider-notice provider-notice-error" role="alert">
-          {error}
-        </p>
-      )}
+      <NativeToast
+        key={toast?.id === 0 ? visibleError : undefined}
+        container={toastHost ?? undefined}
+        message={toast}
+        onDismiss={toast?.id === 0 ? () => setDismissedError(error) : undefined}
+      />
       {models && (
         <div className="settings-models provider-model-feedback">
           <NativeModelSettingsFeedback state={models} />
@@ -1119,11 +1304,22 @@ export function NativeProviderSettings({
                           className="provider-button provider-delete-link"
                           type="button"
                           aria-label={`删除 ${label}`}
-                          aria-expanded={selected && panelMode === 'remove'}
-                          aria-controls={selected ? `${fieldId}-editor` : undefined}
-                          onClick={(event) => choose(entry, item, 'remove', event.currentTarget)}
+                          aria-haspopup="dialog"
+                          aria-disabled={
+                            !facts?.canWrite ||
+                            !item.canWrite ||
+                            pending ||
+                            reading ||
+                            writing ||
+                            models?.reading ||
+                            models?.writing ||
+                            models?.pending ||
+                            undefined
+                          }
+                          aria-busy={(selected && panelMode === 'remove' && writing) || undefined}
+                          onClick={(event) => void remove(entry, item, event.currentTarget)}
                         >
-                          删除
+                          {selected && panelMode === 'remove' && writing ? '正在删除…' : '删除'}
                         </Button>
                       </div>
                     )}
@@ -1167,6 +1363,7 @@ export function NativeProviderSettings({
           )}
         </div>
         {panelMode &&
+          panelMode !== 'remove' &&
           panelHost &&
           createPortal(
             <RightSidebar
@@ -1193,101 +1390,6 @@ export function NativeProviderSettings({
                       </Button>
                     </footer>
                   </div>
-                ) : panelMode === 'remove' && connection ? (
-                  <form
-                    className="provider-editor right-sidebar-editor"
-                    aria-label={`删除 ${editingLabel} 确认`}
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void save();
-                    }}
-                  >
-                    <header className="provider-editor-heading">
-                      <ProviderMark provider={provider.id} />
-                      <div>
-                        <h3>{editingLabel}</h3>
-                        <p>删除前确认影响范围</p>
-                      </div>
-                    </header>
-                    <div className="provider-editor-body right-sidebar-editor-body">
-                      {draftStale && (
-                        <p className="provider-notice provider-notice-error" role="alert">
-                          {panelMode === 'remove'
-                            ? '已重新读取配置。请从列表重新打开此提供商，重新确认删除影响。'
-                            : '已重新读取配置，当前草稿已保留。请从列表重新打开此提供商，核对最新配置后再提交。'}
-                        </p>
-                      )}
-                      {error && (
-                        <p className="provider-notice provider-notice-error" role="alert">
-                          {error}
-                        </p>
-                      )}
-                      <section className="provider-removal-impact" aria-label="删除影响">
-                        <h4>将删除 {connection.modelNames.length} 个关联模型</h4>
-                        {connection.modelNames.length ? (
-                          <ul>
-                            {connection.modelNames.map((model, index) => (
-                              <li key={`${index}/${model}`}>{model}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p>此提供商没有关联模型。</p>
-                        )}
-                        <p>仅删除此连接及其模型配置。系统凭证库中的 API key 会保留。</p>
-                        <p>不会自动选择替代模型，也不会修改已经开始的运行。</p>
-                        {connection.defaultModelIds?.length ? (
-                          <p className="provider-notice provider-notice-error" role="alert">
-                            此提供商包含当前全局默认模型，暂时无法删除。 请先在
-                            ~/.kite-code/kite-code.jsonc 中将 model
-                            改为其他已启用模型的“提供商别名:模型名”（models/modelId 格式的配置改
-                            modelId），再关闭并重新打开设置。输入区选择模型或禁用模型不会更改全局默认。
-                          </p>
-                        ) : (
-                          <p>不影响当前全局默认模型。</p>
-                        )}
-                        {connection.scheduledTaskNames?.length ? (
-                          <div className="provider-notice provider-notice-error" role="alert">
-                            <p>以下定时任务正在使用此提供商的模型，请先修改或删除这些任务：</p>
-                            <ul>
-                              {connection.scheduledTaskNames.map((task, index) => (
-                                <li key={`${index}/${task}`}>{task}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : (
-                          <p>没有定时任务引用此提供商的模型。</p>
-                        )}
-                      </section>
-                      {pending && !unresolvedSubmissions.length && (
-                        <p className="provider-notice" role="status">
-                          有提供商更改尚未确认，暂时无法保存。
-                        </p>
-                      )}
-                      {facts && !facts.canWrite && !pending && !reading && (
-                        <p className="provider-notice" role="status">
-                          当前配置不可写，请检查配置诊断。
-                        </p>
-                      )}
-                      {unresolvedNotice}
-                    </div>
-                    <footer className="provider-editor-footer right-sidebar-editor-footer">
-                      <Button
-                        ref={cancelField}
-                        className="provider-button"
-                        type="button"
-                        onClick={close}
-                      >
-                        取消
-                      </Button>
-                      <Button
-                        className="provider-button provider-remove"
-                        type="submit"
-                        disabled={!writable || blockedRemoval}
-                      >
-                        {writing ? '正在删除…' : '确认删除提供商'}
-                      </Button>
-                    </footer>
-                  </form>
                 ) : (
                   <form
                     className="provider-editor right-sidebar-editor"
@@ -1308,14 +1410,7 @@ export function NativeProviderSettings({
                     <div className="provider-editor-body right-sidebar-editor-body">
                       {draftStale && (
                         <p className="provider-notice provider-notice-error" role="alert">
-                          {panelMode === 'remove'
-                            ? '已重新读取配置。请从列表重新打开此提供商，重新确认删除影响。'
-                            : '已重新读取配置，当前草稿已保留。请从列表重新打开此提供商，核对最新配置后再提交。'}
-                        </p>
-                      )}
-                      {error && (
-                        <p className="provider-notice provider-notice-error" role="alert">
-                          {error}
+                          已重新读取配置，当前草稿已保留。请从列表重新打开此提供商，核对最新配置后再提交。
                         </p>
                       )}
                       <section
@@ -1334,21 +1429,33 @@ export function NativeProviderSettings({
                                 id={`${fieldId}-field-1`}
                                 ref={presetField}
                                 aria-label="服务商预设"
-                                value={provider.id}
+                                value={compatiblePreset?.id ?? provider.id}
                                 disabled={writing}
                                 onValueChange={(value) => {
-                                  const preset = facts?.providers.find(
-                                    (entry) => entry.id !== 'codex' && entry.id === value,
+                                  const preset = compatibleProviderPresets.find(
+                                    (entry) => entry.id === value,
                                   );
-                                  if (preset) choose(preset);
+                                  const family = facts?.providers.find(
+                                    (entry) =>
+                                      entry.id !== 'codex' &&
+                                      entry.id === (preset ? 'compatible' : value),
+                                  );
+                                  if (family) choose(family, undefined, 'add', undefined, preset);
                                 }}
                                 options={
-                                  facts?.providers
-                                    .filter((entry) => entry.id !== 'codex')
-                                    .map((entry) => ({
-                                      value: entry.id,
-                                      label: presetLabel(entry),
-                                    })) ?? []
+                                  facts?.providers.flatMap((entry) => {
+                                    if (entry.id === 'codex') return [];
+                                    const option = { value: entry.id, label: presetLabel(entry) };
+                                    return entry.id === 'compatible'
+                                      ? [
+                                          ...compatibleProviderPresets.map(({ id, label }) => ({
+                                            value: id,
+                                            label,
+                                          })),
+                                          option,
+                                        ]
+                                      : [option];
+                                  }) ?? []
                                 }
                               />
                             </label>
@@ -1424,6 +1531,7 @@ export function NativeProviderSettings({
                             disabled={writing}
                             aria-invalid={fieldError?.field === 'url'}
                             onInput={(event) => {
+                              invalidateDirectory();
                               setBaseURL(event.currentTarget.value);
                               setFieldError(undefined);
                             }}
@@ -1459,6 +1567,7 @@ export function NativeProviderSettings({
                             value={credential}
                             disabled={writing}
                             onValueChange={(value) => {
+                              invalidateDirectory();
                               setCredential(value as NativeProviderOperation['credential']);
                               setSecret('');
                               setFieldError(undefined);
@@ -1468,7 +1577,7 @@ export function NativeProviderSettings({
                                 ? [{ value: 'keep', label: '保留已保存凭据' }]
                                 : []),
                               { value: 'replace', label: '保存新 API key' },
-                              ...(!provider.requiresCredential
+                              ...(!requiresCredential
                                 ? [{ value: 'none', label: '不使用凭据' }]
                                 : []),
                             ]}
@@ -1496,6 +1605,7 @@ export function NativeProviderSettings({
                               disabled={writing}
                               aria-invalid={fieldError?.field === 'key'}
                               onInput={(event) => {
+                                invalidateDirectory();
                                 setSecret(event.currentTarget.value);
                                 setFieldError(undefined);
                               }}
@@ -1516,7 +1626,7 @@ export function NativeProviderSettings({
                               ? '继续使用已保存的凭据，无需重新输入。'
                               : credential === 'none'
                                 ? '此连接不会附带 API key。'
-                                : '提交后清空输入，密钥不会回显。'}
+                                : (compatiblePreset?.keyHelp ?? '提交后清空输入，密钥不会回显。')}
                           </p>
                         )}
                       </section>
@@ -1528,37 +1638,109 @@ export function NativeProviderSettings({
                           <ProviderIcon name="models" />
                           连接模型目录
                         </h4>
-                        <label className="provider-field" htmlFor={`${fieldId}-field-7`}>
-                          <span>
-                            模型名称 <span className="provider-field-optional">可选</span>
-                          </span>
+                        <div className="provider-field">
+                          <div className="provider-model-directory-header">
+                            <label
+                              className="provider-model-directory-label"
+                              htmlFor={`${fieldId}-field-7`}
+                            >
+                              模型名称{' '}
+                              {!compatiblePreset?.manualModel && !directory.names && (
+                                <span className="provider-field-optional">可选</span>
+                              )}
+                            </label>
+                            <Button
+                              className="provider-button"
+                              type="button"
+                              ref={directoryButton}
+                              disabled={!writable}
+                              aria-disabled={directory.loading || undefined}
+                              aria-busy={directory.loading || undefined}
+                              onClick={() => void discover()}
+                            >
+                              {directory.loading ? '正在获取…' : '获取模型目录'}
+                            </Button>
+                          </div>
                           <Textarea
                             id={`${fieldId}-field-7`}
+                            ref={modelsField}
                             aria-label="模型名称"
-                            aria-describedby={`${fieldId}-models-help`}
+                            aria-describedby={
+                              fieldError?.field === 'models'
+                                ? `${fieldId}-models-error`
+                                : `${fieldId}-models-help`
+                            }
+                            aria-invalid={fieldError?.field === 'models'}
                             rows={3}
                             spellCheck={false}
                             placeholder="每行输入一个模型名称"
                             value={modelNames}
                             disabled={writing}
-                            onInput={(event) => setModelNames(event.currentTarget.value)}
+                            onInput={(event) => {
+                              setModelNames(event.currentTarget.value);
+                              if (fieldError?.field === 'models') setFieldError(undefined);
+                            }}
                           />
-                        </label>
-                        <p className="provider-field-help" id={`${fieldId}-models-help`}>
-                          每行一个准确模型名称；留空时保存会查询该连接的模型目录。
-                        </p>
+                        </div>
+                        {fieldError?.field === 'models' ? (
+                          <p
+                            className="provider-field-error"
+                            id={`${fieldId}-models-error`}
+                            role="alert"
+                          >
+                            {fieldError.message}
+                          </p>
+                        ) : (
+                          <p className="provider-field-help" id={`${fieldId}-models-help`}>
+                            {directory.names
+                              ? '勾选要保存的模型，也可手动填写模型 ID，每行一个。'
+                              : compatiblePreset?.manualModel
+                                ? '获取目录后勾选模型，或手动填写模型 ID，每行一个。'
+                                : '每行一个准确模型名称；留空时保存会查询该连接的模型目录。'}
+                          </p>
+                        )}
+                        {directory.error && (
+                          <p className="provider-field-error" role="alert">
+                            {directory.error}
+                          </p>
+                        )}
+                        {directory.names && (
+                          <>
+                            <p className="provider-field-help" role="status">
+                              获取到 {directory.names.length} 个模型
+                            </p>
+                            <ul
+                              ref={directoryList}
+                              className="provider-model-directory"
+                              aria-label="服务商模型目录"
+                            >
+                              {directory.names.map((model) => (
+                                <li key={model}>
+                                  <label className="provider-model-directory-row">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedModels.has(model)}
+                                      disabled={writing}
+                                      onChange={(event) => {
+                                        const checked = event.currentTarget.checked;
+                                        setModelNames((previous) => {
+                                          const next = new Set(modelIds(previous));
+                                          if (checked) next.add(model);
+                                          else next.delete(model);
+                                          return [...next].join('\n');
+                                        });
+                                        if (fieldError?.field === 'models')
+                                          setFieldError(undefined);
+                                      }}
+                                    />
+                                    <span>{model}</span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        )}
                       </section>
-                      {pending && !unresolvedSubmissions.length && (
-                        <p className="provider-notice" role="status">
-                          有提供商更改尚未确认，暂时无法保存。
-                        </p>
-                      )}
-                      {facts && !facts.canWrite && !pending && !reading && (
-                        <p className="provider-notice" role="status">
-                          当前配置不可写，请检查配置诊断。
-                        </p>
-                      )}
-                      {unresolvedNotice}
                     </div>
                     <footer className="provider-editor-footer right-sidebar-editor-footer">
                       <Button className="provider-button" type="button" onClick={close}>
@@ -1567,7 +1749,8 @@ export function NativeProviderSettings({
                       <Button
                         className="provider-button provider-save"
                         type="submit"
-                        disabled={!writable}
+                        disabled={!writable || directory.loading}
+                        aria-busy={writing || undefined}
                       >
                         {writing ? '正在保存…' : '保存提供商配置'}
                       </Button>
@@ -1584,7 +1767,6 @@ export function NativeProviderSettings({
           {code}
         </p>
       ))}
-      {!panelMode && unresolvedNotice}
     </section>
   );
 }

@@ -190,7 +190,6 @@ const bridge: NativeBridge = {
       settingsEnabled &&
       request.method.startsWith('settings.') &&
       (request.method.startsWith('settings.models.') ||
-        request.method.startsWith('settings.general.models.') ||
         request.method.startsWith('settings.providers.'))
     ) {
       return (await settingsRequest(request)).value ?? null;

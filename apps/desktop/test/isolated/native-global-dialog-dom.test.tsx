@@ -99,6 +99,30 @@ const state = (
   theme: 'dark',
 });
 
+test('provider removal shows only the connection and model count in the global confirmation', async () => {
+  const f = await fixture();
+  try {
+    await f.show({
+      ...state('provider'),
+      kind: 'provider-removal',
+      label: 'Fixture',
+      modelCount: 3,
+    });
+    const dialog = document.querySelector('[role="alertdialog"]')!;
+    expect(dialog.querySelector('.full-permission-title')?.textContent).toBe('删除「Fixture」？');
+    expect(dialog.querySelector('.full-permission-intro')?.textContent).toBe(
+      '将删除此连接及 3 个关联模型的配置。',
+    );
+    expect(dialog.querySelector('ul')).toBeNull();
+    expect(document.activeElement).toBe(f.button('取消'));
+    await f.frame();
+    await act(async () => f.button('确认删除提供商').click());
+    expect(f.events.at(-1)).toEqual(['decision', 'provider', true]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('the overlay subscribes before ready, paints the shared warning and reports presented only after its frame', async () => {
   const f = await fixture();
   try {

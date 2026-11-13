@@ -9,8 +9,10 @@ import type {
   NativeProviderSettingsFacts,
   NativeProviderSubmission,
   NativeRequest,
+  NativeResult,
   NativeSelection,
 } from '../../src/native-bridge';
+import { compatibleProviderPresets } from '../../src/native-provider-presets';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>');
@@ -52,7 +54,7 @@ function fixture() {
     panelHost = dom.window.document.getElementById('panel')!,
     root = createRoot(main);
   const button = (name: string) =>
-    [...element.querySelectorAll('button')].find(
+    [...dom.window.document.querySelectorAll('button')].find(
       (entry) => entry.textContent === name || entry.getAttribute('aria-label') === name,
     )!;
   const field = <
@@ -91,6 +93,7 @@ function fixture() {
           deepseek: 'DeepSeek',
           compatible: '自定义服务商',
           ollama: 'Ollama',
+          ...Object.fromEntries(compatibleProviderPresets.map(({ id, label }) => [id, label])),
         },
         'API 协议': { 'chat-completions': 'Chat Completions', responses: 'Responses' },
         凭据处理: { keep: '保留已保存凭据', replace: '保存新 API key', none: '不使用凭据' },
@@ -115,6 +118,7 @@ function fixture() {
       );
     });
   }
+  let removal: ReturnType<typeof Promise.withResolvers<NativeResult>> | undefined;
   return {
     dom,
     element,
@@ -125,7 +129,27 @@ function fixture() {
     field,
     edit,
     optionLabels,
-    click: async (name: string) => act(async () => button(name).click()),
+    toast: () => dom.window.document.querySelector<HTMLElement>('.native-toast-card'),
+    requestRemoval: () => {
+      if (removal) throw Error('duplicate confirmation');
+      removal = Promise.withResolvers<NativeResult>();
+      return removal.promise;
+    },
+    async decideRemoval(confirmed: boolean, code?: string) {
+      const pending = removal!;
+      removal = undefined;
+      await act(async () => {
+        if (code) pending.reject(Error(code));
+        else pending.resolve(confirmed ? { kind: 'settings.providers.remove.confirmed' } : null);
+      });
+    },
+    click: async (name: string) => {
+      const target = button(name);
+      const wasModal = !!target.closest('[role="alertdialog"]');
+      await act(async () => target.click());
+      if (wasModal && !dom.window.document.querySelector('[role="alertdialog"]'))
+        await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    },
     async addPreset(name: string) {
       await act(async () => button('新增提供商').click());
       const presets: Record<string, string> = {
@@ -140,6 +164,7 @@ function fixture() {
     },
     async close() {
       await act(async () => root.unmount());
+      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
       restoreDom();
       Object.assign(globalThis, prior);
       dom.window.close();
@@ -259,6 +284,7 @@ test('Provider settings show the automatic local Codex source without manual con
     expect(await f.optionLabels('服务商预设')).toEqual([
       'OpenAI',
       'DeepSeek',
+      ...compatibleProviderPresets.map(({ label }) => label),
       '自定义服务商',
       'Ollama',
     ]);
@@ -363,7 +389,7 @@ test('Provider form validates inline with focus, clears switched drafts and send
     await f.click('刷新提供商配置');
     expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(calls.filter((input) => input.method === 'settings.providers.lookup')).toHaveLength(0);
-    expect(f.element.textContent).toContain('OpenAI：保存结果待确认。');
+    expect(f.toast()?.textContent).toContain('OpenAI：保存结果待确认。');
     expect(f.element.textContent).not.toContain('save-one');
     expect(f.element.textContent).not.toContain('API key 保存结果待核实');
     expect(f.element.textContent).not.toContain('模型配置未保存；凭证保存结果单独显示');
@@ -374,7 +400,7 @@ test('Provider form validates inline with focus, clears switched drafts and send
     expect(applied).toBe(1);
     expect(f.element.textContent).not.toContain('API key 已存入凭证库');
     expect(f.element.textContent).not.toContain('模型配置已保存，用于下一次新运行');
-    expect(f.element.querySelector('[aria-label="待确认的提供商更改"]')).toBeNull();
+    expect(f.toast()).toBeNull();
     expect(f.element.textContent).not.toContain('已保存提供商配置。');
     expect(calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(1);
   } finally {
@@ -442,8 +468,8 @@ test('Provider keeps distinct endpoint connection intent, discovery uses empty n
         },
       },
     ]);
-    expect(f.element.textContent).toContain('已保存，正在后台同步配置');
-    expect(f.element.textContent).toContain('无需重复保存');
+    expect(f.toast()?.textContent).toContain('已保存，正在后台同步配置');
+    expect(f.toast()?.textContent).toContain('无需重复保存');
     expect(f.element.textContent).not.toContain('applied');
   } finally {
     await f.close();
@@ -511,12 +537,12 @@ test('late Provider reads cannot replace the selected Store and only its unknown
     await f.addPreset('Ollama');
     expect(f.button('保存提供商配置').disabled).toBe(false);
     expect(f.panelHost.textContent).not.toContain('原提交 old');
-    expect(f.panelHost.textContent).toContain('OpenAI：保存结果待确认。');
-    expect(f.panelHost.textContent).toContain('此更改来自先前的数据源。');
+    expect(f.toast()?.textContent).toContain('OpenAI：保存结果待确认。');
+    expect(f.toast()?.textContent).toContain('此更改来自先前的数据源。');
     expect(f.button('查看结果').disabled).toBe(false);
     await f.click('关闭');
     expect(f.element.textContent).not.toContain('原提交 old');
-    expect(f.main.textContent).toContain('OpenAI：保存结果待确认。');
+    expect(f.toast()?.textContent).toContain('OpenAI：保存结果待确认。');
   } finally {
     await f.close();
   }
@@ -800,14 +826,16 @@ test('Provider save failure stays in the rail with its non-secret draft and acti
     const form = f.panelHost.querySelector('form');
     await f.click('保存提供商配置');
     expect(f.panelHost.querySelector('form')).toBe(form);
-    expect(f.panelHost.querySelector('[role="alert"]')?.textContent).toContain(
-      '保存失败：configuration_conflict',
-    );
+    expect(f.toast()?.textContent).toContain('保存失败：configuration_conflict');
     expect(f.main.querySelector('[role="alert"]')).toBeNull();
     expect(f.field('服务地址').value).toBe('https://failed.invalid/v1');
     expect(f.field('模型名称').value).toBe('draft-model');
     expect(f.field('API key').value).toBe('');
     expect(f.button('保存提供商配置').disabled).toBe(true);
+    expect(f.toast()?.getAttribute('role')).toBe('alert');
+    await f.click('关闭提示');
+    expect(f.toast()).toBeNull();
+    expect(f.panelHost.querySelector('form')).toBe(form);
     await f.click('保存提供商配置');
     expect(f.field('API key').value).toBe('');
     expect(saves).toHaveLength(1);
@@ -1099,7 +1127,7 @@ test('Provider closing an active refresh cannot restore the old write observatio
     expect(reads).toBe(2);
     expect(f.button('刷新提供商配置').disabled).toBe(false);
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    expect(f.panelHost.textContent).toContain('当前配置不可写，请检查配置诊断。');
+    expect(f.toast()?.textContent).toContain('当前配置不可写，请检查配置诊断。');
     await f.click('保存提供商配置');
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
     await act(async () => release(structuredClone(facts)));
@@ -1107,7 +1135,7 @@ test('Provider closing an active refresh cannot restore the old write observatio
     await f.click('刷新提供商配置');
     expect(reads).toBe(3);
     expect(f.button('保存提供商配置').disabled).toBe(false);
-    expect(f.panelHost.textContent).not.toContain('当前配置不可写，请检查配置诊断。');
+    expect(f.toast()?.textContent ?? '').not.toContain('当前配置不可写，请检查配置诊断。');
   } finally {
     await f.close();
   }
@@ -1195,8 +1223,8 @@ test('Provider hides submission history and technical identities, but unknown st
       expect(f.element.textContent).not.toContain(hidden);
     expect(f.button('返回列表查看未决提交')).toBeUndefined();
   };
-  const assertUnknown = (host: HTMLElement) => {
-    const notice = host.querySelector('[aria-label="待确认的提供商更改"]')!;
+  const assertUnknown = () => {
+    const notice = f.toast()!;
     expect(notice).not.toBeNull();
     expect(notice.textContent).toContain('Pending OpenAI service：保存结果待确认。');
     expect(notice.querySelectorAll('button')).toHaveLength(1);
@@ -1215,20 +1243,18 @@ test('Provider hides submission history and technical identities, but unknown st
         />,
       ),
     );
-    assertUnknown(f.main);
+    assertUnknown();
     await f.addPreset('DeepSeek');
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    assertUnknown(f.panelHost);
+    assertUnknown();
     await f.click('编辑 OpenAI-compatible 1');
     expect(f.field('服务商预设')).toBeNull();
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    assertUnknown(f.panelHost);
+    assertUnknown();
+    expect(f.button('删除 OpenAI-compatible 1').getAttribute('aria-disabled')).toBe('true');
     await f.click('删除 OpenAI-compatible 1');
-    expect(f.field('服务商预设')).toBeNull();
-    expect(f.button('确认删除提供商').disabled).toBe(true);
-    assertUnknown(f.panelHost);
-    await f.click('关闭');
-    assertUnknown(f.main);
+    expect(calls.some((call) => call.method === 'settings.providers.remove.confirm')).toBe(false);
+    assertUnknown();
     await f.addPreset('DeepSeek');
     completeLookup = true;
     await f.click('查看结果');
@@ -1238,11 +1264,11 @@ test('Provider hides submission history and technical identities, but unknown st
     expect(
       lookups.every((call) => call.generation === 1 && call.commandId === unknown.commandId),
     ).toBe(true);
-    expect(f.element.querySelector('[aria-label="待确认的提供商更改"]')).toBeNull();
+    expect(f.toast()).toBeNull();
     expect(f.button('保存提供商配置').disabled).toBe(false);
     assertNoHistory();
     await f.click('关闭');
-    expect(f.element.querySelector('[aria-label="待确认的提供商更改"]')).toBeNull();
+    expect(f.toast()).toBeNull();
     assertNoHistory();
   } finally {
     await f.close();
@@ -1286,6 +1312,7 @@ test('Empty provider list opens the actual Add form with a shared preset select 
     expect(await f.optionLabels('服务商预设')).toEqual([
       'OpenAI',
       'DeepSeek',
+      ...compatibleProviderPresets.map(({ label }) => label),
       '自定义服务商',
       'Ollama',
     ]);
@@ -1329,6 +1356,194 @@ test('Empty provider list opens the actual Add form with a shared preset select 
     expect(f.panelHost.childElementCount).toBe(0);
     expect(f.dom.window.document.activeElement).toBe(f.button('添加第一个提供商'));
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Named API and plan templates reset credentials, then save only the chosen compatible route', async () => {
+  const f = fixture();
+  const calls: NativeRequest[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      if (input.method === 'settings.providers.read') return structuredClone(facts);
+      calls.push(input);
+      if (input.method === 'settings.providers.save') {
+        return {
+          kind: 'settings.providers.submission',
+          commandId: 'plan-save',
+          observationId: input.observationId,
+          storeId: facts.storeId,
+          operation: input.operation,
+          phase: 'applied',
+        };
+      }
+      return null;
+    },
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeProviderSettings
+          bridge={bridge}
+          generation={1}
+          panelHost={f.panelHost}
+          submissions={[]}
+        />,
+      ),
+    );
+    await f.click('新增提供商');
+    await f.edit('服务商预设', 'mimo-api');
+    expect(f.field('提供商名称').value).toBe('小米 MiMo · 按量 API');
+    expect(f.field('服务地址').value).toBe('https://api.xiaomimimo.com/v1');
+    expect(f.field('API 协议').textContent).toBe('Responses');
+    expect(f.panelHost.textContent).toContain('按量 API key（sk-）');
+    await f.edit('API key', 'sk-fixture');
+    await f.edit('模型名称', 'mimo-v2.6-pro');
+    await f.edit('服务商预设', 'mimo-token-plan');
+    expect(f.field('提供商名称').value).toBe('小米 MiMo · Token Plan');
+    expect(f.field('服务地址').value).toBe('https://token-plan-cn.xiaomimimo.com/v1');
+    expect(f.field('API 协议').textContent).toBe('Responses');
+    expect(f.panelHost.textContent).toContain('个人（tp-）或团队（ttp-）');
+    expect(f.field('API key').value).toBe('');
+    expect(f.field('模型名称').value).toBe('');
+    await f.edit('服务商预设', 'minimax-api');
+    expect(f.field('服务地址').value).toBe('https://api.minimax.cn/v1');
+    expect(f.panelHost.textContent).toContain('留空时保存会查询');
+    await f.edit('服务商预设', 'minimax-m-plan');
+    expect(f.field('服务地址').value).toBe('https://api.minimax.cn/v1');
+    expect(f.panelHost.textContent).toContain('使用 MiniMax 中国站的订阅 key');
+    expect(f.panelHost.textContent).not.toContain('留空时保存会查询');
+    await f.edit('服务商预设', 'kimi-api');
+    expect(f.field('服务地址').value).toBe('https://api.moonshot.cn/v1');
+    expect(f.field('API 协议').textContent).toBe('Chat Completions');
+    await f.edit('API key', 'api-fixture');
+    await f.edit('模型名称', 'kimi-open-model');
+    await f.edit('服务商预设', 'kimi-code');
+    expect(f.field('服务地址').value).toBe('https://api.kimi.com/coding/v1');
+    expect(f.field('API 协议').textContent).toBe('Responses');
+    expect(f.field('API key').value).toBe('');
+    expect(f.field('模型名称').value).toBe('');
+    expect(await f.optionLabels('凭据处理')).toEqual(['保存新 API key']);
+    await f.edit('API key', 'plan-fixture');
+    await f.click('保存提供商配置');
+    expect(calls).toHaveLength(0);
+    expect(f.panelHost.querySelector('[role="alert"]')?.textContent).toBe(
+      '请输入至少一个模型 ID。',
+    );
+    expect(f.dom.window.document.activeElement).toBe(f.field('模型名称'));
+    await f.edit('模型名称', 'k3');
+    await f.click('保存提供商配置');
+    expect(calls.filter(({ method }) => method === 'settings.providers.save')).toEqual([
+      {
+        method: 'settings.providers.save',
+        generation: 1,
+        observationId: facts.observationId,
+        operation: {
+          kind: 'upsert',
+          name: 'Kimi Code · 会员套餐',
+          provider: 'compatible',
+          connectionId: null,
+          baseURL: 'https://api.kimi.com/coding/v1',
+          protocol: 'responses',
+          modelNames: ['k3'],
+          credential: 'replace',
+        },
+        secret: 'plan-fixture',
+      },
+    ]);
+    expect(f.field('API key')?.value ?? '').toBe('');
+  } finally {
+    await f.close();
+  }
+});
+
+test('Provider directory keeps the draft across failure and selects exact IDs without replaying stale reads', async () => {
+  const f = fixture();
+  const calls: NativeRequest[] = [];
+  let finish!: (value: { kind: 'settings.providers.directory'; modelNames: string[] }) => void;
+  let fail!: (error: Error) => void;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      if (input.method === 'settings.providers.read') return structuredClone(facts);
+      calls.push(input);
+      if (input.method === 'settings.providers.discover')
+        return new Promise((resolve, reject) => {
+          finish = resolve;
+          fail = reject;
+        });
+      if (input.method === 'settings.providers.save')
+        return {
+          kind: 'settings.providers.submission',
+          commandId: 'directory-save',
+          storeId: facts.storeId,
+          observationId: input.observationId,
+          operation: input.operation,
+          phase: 'applied',
+        };
+      return null;
+    },
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeProviderSettings
+          bridge={bridge}
+          generation={1}
+          panelHost={f.panelHost}
+          submissions={[]}
+        />,
+      ),
+    );
+    await f.click('新增提供商');
+    await f.click('获取模型目录');
+    expect(f.dom.window.document.activeElement).toBe(f.field('API key'));
+    expect(calls).toEqual([]);
+    await f.edit('API key', 'fixture-key');
+    await f.edit('模型名称', 'manual-id');
+    await f.click('获取模型目录');
+    expect(f.button('保存提供商配置').disabled).toBe(true);
+    await f.click('正在获取…');
+    expect(calls).toHaveLength(1);
+    await act(async () => fail(Object.assign(Error(), { code: 'provider_discovery_auth_failed' })));
+    expect(f.panelHost.querySelector('[role="alert"]')?.textContent).toContain('检查 API key');
+    expect(f.field('模型名称').value).toBe('manual-id');
+    expect(f.field('API key').value).toBe('fixture-key');
+    await f.click('获取模型目录');
+    await f.edit('服务地址', 'https://example.invalid/v1');
+    expect(calls.at(-1)).toMatchObject({
+      method: 'settings.providers.discover.cancel',
+      readId: (calls.at(-2) as { readId: string }).readId,
+    });
+    await act(async () =>
+      finish({ kind: 'settings.providers.directory', modelNames: ['stale-id'] }),
+    );
+    expect(f.panelHost.textContent).not.toContain('stale-id');
+    await f.click('获取模型目录');
+    expect(calls.at(-1)).toMatchObject({
+      method: 'settings.providers.discover',
+      operation: { baseURL: 'https://example.invalid/v1' },
+      secret: 'fixture-key',
+    });
+    await act(async () =>
+      finish({ kind: 'settings.providers.directory', modelNames: ['alpha', 'beta'] }),
+    );
+    expect(f.panelHost.textContent).toContain('获取到 2 个模型');
+    const list = f.panelHost.querySelector('[aria-label="服务商模型目录"]')!;
+    const boxes = [...list.querySelectorAll<HTMLInputElement>('input')];
+    expect(boxes.map((box) => box.checked)).toEqual([false, false]);
+    await act(async () => boxes[1]!.click());
+    expect(f.field('模型名称').value).toBe('manual-id\nbeta');
+    expect(f.panelHost.querySelector('[aria-label="服务商模型目录"]')).toBe(list);
+    await f.click('保存提供商配置');
+    expect(calls.filter(({ method }) => method === 'settings.providers.save')).toEqual([
+      expect.objectContaining({
+        operation: expect.objectContaining({ modelNames: ['manual-id', 'beta'] }),
+      }),
+    ]);
+    expect(f.panelHost.querySelector('form')).toBeNull();
   } finally {
     await f.close();
   }
@@ -1416,7 +1631,7 @@ test('Named instances of one preset remain separate even at the same endpoint; e
 });
 
 for (const impact of ['default', 'schedule', 'both'] as const) {
-  test(`Deletion confirms model and ${impact} impact and blocks referenced instances without sending`, async () => {
+  test(`Deletion shows a Toast after a native confirmation blocks a ${impact} reference`, async () => {
     const f = fixture(),
       state = structuredClone(facts),
       calls: NativeRequest[] = [];
@@ -1430,6 +1645,7 @@ for (const impact of ['default', 'schedule', 'both'] as const) {
       watch: () => () => {},
       request: async (input) => {
         calls.push(input);
+        if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
         return input.method === 'settings.providers.read' ? structuredClone(state) : null;
       },
     };
@@ -1446,39 +1662,15 @@ for (const impact of ['default', 'schedule', 'both'] as const) {
       );
       const origin = f.button('删除 生产服务');
       await f.click('删除 生产服务');
-      expect(f.panelHost.querySelector('form')!.getAttribute('aria-label')).toBe(
-        '删除 生产服务 确认',
+      expect(f.toast()).toBeNull();
+      await f.decideRemoval(
+        true,
+        impact === 'schedule' ? 'provider_scheduled_model_in_use' : 'provider_default_model_in_use',
       );
-      expect(f.panelHost.textContent).toContain('将删除 2 个关联模型');
-      expect(f.panelHost.textContent).toContain('model-a');
-      expect(f.panelHost.textContent).toContain('model-b');
-      expect(f.panelHost.textContent).toContain('系统凭证库中的 API key 会保留');
-      expect(f.panelHost.textContent).toContain('不会自动选择替代模型');
-      expect(f.panelHost.textContent).not.toContain('private-model');
-      expect(f.dom.window.document.activeElement).toBe(f.button('取消'));
-      if (impact !== 'schedule') {
-        expect(f.panelHost.textContent).toContain('此提供商包含当前全局默认模型，暂时无法删除。');
-        expect(f.panelHost.textContent).toContain('~/.kite-code/kite-code.jsonc 中将 model');
-        expect(f.panelHost.textContent).toContain('其他已启用模型的“提供商别名:模型名”');
-        expect(f.panelHost.textContent).toContain('models/modelId 格式的配置改');
-        expect(f.panelHost.textContent).toContain('再关闭并重新打开设置');
-        expect(f.panelHost.textContent).toContain('输入区选择模型或禁用模型不会更改全局默认');
-      } else {
-        expect(f.panelHost.textContent).not.toContain('~/.kite-code/kite-code.jsonc');
-      }
-      if (impact !== 'default') {
-        expect(f.panelHost.textContent).toContain('每日报告');
-        expect(f.panelHost.textContent).toContain('每周总结');
-        expect(f.panelHost.textContent).toContain('请先修改或删除这些任务');
-      }
-      expect(f.button('确认删除提供商').disabled).toBe(true);
-      await act(async () => {
-        f.panelHost
-          .querySelector('form')!
-          .dispatchEvent(new f.dom.window.Event('submit', { bubbles: true, cancelable: true }));
-      });
+      expect(f.toast()?.textContent).toContain(
+        impact === 'schedule' ? '仍有定时任务使用此连接' : '请先在配置文件中改用其他默认模型',
+      );
       expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
-      await f.click('取消');
       expect(f.dom.window.document.activeElement).toBe(origin);
       expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(2);
     } finally {
@@ -1498,6 +1690,7 @@ test('Delete requires explicit confirmation, submits once without secret, refres
     watch: () => () => {},
     request: async (input) => {
       calls.push(input);
+      if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
       if (input.method === 'settings.providers.read') return structuredClone(state);
       if (input.method === 'settings.providers.save') {
         await new Promise<void>((resolve) => {
@@ -1534,15 +1727,17 @@ test('Delete requires explicit confirmation, submits once without secret, refres
     await f.click('删除 可删除服务');
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
     expect(f.field('API key')).toBeNull();
-    expect(f.panelHost.textContent).toContain('不影响当前全局默认模型');
-    expect(f.panelHost.textContent).toContain('没有定时任务引用');
-    await f.click('取消');
+    expect(f.panelHost.querySelector('form')).toBeNull();
+    expect(f.main.querySelector('[role="alertdialog"]')).toBeNull();
+    await f.decideRemoval(false);
+    expect(f.dom.window.document.activeElement).toBe(f.button('删除 可删除服务'));
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
     await f.click('删除 可删除服务');
-    await act(async () => {
-      f.button('确认删除提供商').click();
-      f.button('确认删除提供商').click();
-    });
+    await f.click('删除 可删除服务');
+    expect(
+      calls.filter((call) => call.method === 'settings.providers.remove.confirm'),
+    ).toHaveLength(2);
+    await f.decideRemoval(true);
     expect(calls.filter((call) => call.method === 'settings.providers.save')).toEqual([
       {
         method: 'settings.providers.save',
@@ -1559,7 +1754,7 @@ test('Delete requires explicit confirmation, submits once without secret, refres
         },
       },
     ]);
-    expect(f.button('正在删除…').disabled).toBe(true);
+    expect(f.button('删除 可删除服务').getAttribute('aria-busy')).toBe('true');
     await act(async () => release());
     expect(applied).toBe(1);
     expect(f.panelHost.childElementCount).toBe(0);
@@ -1577,12 +1772,13 @@ test('Delete requires explicit confirmation, submits once without secret, refres
 });
 
 for (const outcome of ['failed', 'unknown'] as const) {
-  test(`Delete ${outcome} preserves its confirmation and never chooses a fallback`, async () => {
+  test(`Delete ${outcome} uses a Toast and never chooses a fallback`, async () => {
     const f = fixture(),
       calls: NativeRequest[] = [];
     const bridge: NativeBridge = {
       watch: () => () => {},
       request: async (input) => {
+        if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
         calls.push(input);
         if (input.method === 'settings.providers.read') return structuredClone(facts);
         if (input.method === 'settings.providers.save')
@@ -1610,15 +1806,11 @@ for (const outcome of ['failed', 'unknown'] as const) {
         ),
       );
       await f.click('删除 OpenAI-compatible 1');
-      await f.click('确认删除提供商');
-      expect(f.panelHost.querySelector('form')!.getAttribute('aria-label')).toBe(
-        '删除 OpenAI-compatible 1 确认',
-      );
+      await f.decideRemoval(true);
       expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(2);
-      expect(f.panelHost.textContent).toContain(
+      expect(f.toast()?.textContent).toContain(
         outcome === 'failed' ? '删除失败：configuration_conflict' : '删除结果待确认',
       );
-      expect(f.button('确认删除提供商').disabled).toBe(true);
       expect(calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
       expect(calls.every((call) => call.method.startsWith('settings.providers.'))).toBe(true);
     } finally {
@@ -1634,6 +1826,7 @@ for (const outcome of ['applied', 'failed', 'unknown', 'throw'] as const) {
     const bridge: NativeBridge = {
       watch: () => () => {},
       request: async (input) => {
+        if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
         if (input.method === 'settings.providers.read') return structuredClone(facts);
         if (input.method === 'settings.providers.save') {
           await new Promise<void>((resolve) => {
@@ -1665,7 +1858,7 @@ for (const outcome of ['applied', 'failed', 'unknown', 'throw'] as const) {
         ),
       );
       await f.click('删除 OpenAI-compatible 1');
-      await f.click('确认删除提供商');
+      await f.decideRemoval(true);
       await f.click('编辑 OpenAI-compatible 2');
       await act(async () => release());
       expect(f.panelHost.querySelector('form')!.getAttribute('aria-label')).toBe(
@@ -1730,6 +1923,7 @@ for (const dismissal of ['close', 'unmount', 'generation'] as const) {
     const bridge: NativeBridge = {
       watch: () => () => {},
       request: async (input) => {
+        if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
         if (input.method === 'settings.providers.read') return structuredClone(facts);
         if (input.method === 'settings.providers.save') {
           await new Promise<void>((resolve) => {
@@ -1747,6 +1941,7 @@ for (const dismissal of ['close', 'unmount', 'generation'] as const) {
         return null;
       },
     };
+    const editorControl = { current: null as { close: () => void } | null };
     const render = (generation: number) =>
       f.root.render(
         <NativeProviderSettings
@@ -1755,14 +1950,18 @@ for (const dismissal of ['close', 'unmount', 'generation'] as const) {
           generation={generation}
           submissions={[]}
           onSaved={() => applied++}
+          editorControl={editorControl}
         />,
       );
     try {
       await act(async () => render(1));
       await f.click('删除 OpenAI-compatible 1');
-      await f.click('确认删除提供商');
-      if (dismissal === 'close') await f.click('关闭');
-      else if (dismissal === 'unmount') await act(async () => f.root.unmount());
+      await f.decideRemoval(true);
+      if (dismissal === 'close') {
+        expect(editorControl.current).toBeNull();
+        await f.click('编辑 OpenAI-compatible 2');
+        await act(async () => editorControl.current?.close());
+      } else if (dismissal === 'unmount') await act(async () => f.root.unmount());
       else await act(async () => render(2));
       await act(async () => release());
       expect(f.panelHost.childElementCount).toBe(0);
@@ -1779,21 +1978,26 @@ test('Repeated Add submission is synchronously blocked while its original reques
   const f = fixture(),
     calls: NativeRequest[] = [];
   let release!: () => void;
+  let submitting!: NativeProviderSubmission;
   const bridge: NativeBridge = {
     watch: () => () => {},
     request: async (input) => {
       calls.push(input);
       if (input.method === 'settings.providers.read') return structuredClone(facts);
       if (input.method === 'settings.providers.save') {
+        submitting = {
+          kind: 'settings.providers.submission',
+          commandId: 'duplicate-add',
+          storeId: 'store',
+          observationId: input.observationId,
+          operation: input.operation,
+          phase: 'submitting',
+        };
         await new Promise<void>((resolve) => {
           release = resolve;
         });
         return {
-          kind: 'settings.providers.submission',
-          commandId: 'duplicate-add',
-          storeId: 'store',
-          observationId: 7,
-          operation: input.operation,
+          ...submitting,
           phase: 'failed',
           error: 'configuration_conflict',
         };
@@ -1801,17 +2005,17 @@ test('Repeated Add submission is synchronously blocked while its original reques
       return null;
     },
   };
-  try {
-    await act(async () =>
-      f.root.render(
-        <NativeProviderSettings
-          panelHost={f.panelHost}
-          bridge={bridge}
-          generation={1}
-          submissions={[]}
-        />,
-      ),
+  const render = (submissions: NativeProviderSubmission[] = []) =>
+    f.root.render(
+      <NativeProviderSettings
+        panelHost={f.panelHost}
+        bridge={bridge}
+        generation={1}
+        submissions={submissions}
+      />,
     );
+  try {
+    await act(async () => render());
     await f.addPreset('Ollama');
     await f.edit('模型名称', 'fixture-model');
     await act(async () => {
@@ -1819,10 +2023,13 @@ test('Repeated Add submission is synchronously blocked while its original reques
       f.button('保存提供商配置').click();
     });
     expect(calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
+    await act(async () => render([submitting]));
     expect(f.button('正在保存…').disabled).toBe(true);
-    expect(f.panelHost.textContent).not.toContain('正在保存提供商配置。');
+    expect(f.button('正在保存…').getAttribute('aria-busy')).toBe('true');
+    expect(f.panelHost.querySelectorAll('.provider-notice')).toHaveLength(0);
+    expect(f.toast()?.textContent).toBeUndefined();
     await act(async () => release());
-    expect(f.panelHost.textContent).toContain('保存失败：configuration_conflict');
+    expect(f.toast()?.textContent).toContain('保存失败：configuration_conflict');
     expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(f.field('模型名称').value).toBe('fixture-model');
   } finally {
@@ -2008,7 +2215,7 @@ test('Every new observation locks existing drafts even when credentials and publ
   }
 });
 
-test('A refreshed deletion confirmation requires reopening and always shows current task/default guards', async () => {
+test('A refreshed deletion confirmation requires a new native decision after the observation changes', async () => {
   const f = fixture(),
     state = structuredClone(facts),
     calls: NativeRequest[] = [];
@@ -2016,6 +2223,7 @@ test('A refreshed deletion confirmation requires reopening and always shows curr
     watch: () => () => {},
     request: async (input) => {
       calls.push(input);
+      if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
       return input.method === 'settings.providers.read' ? structuredClone(state) : null;
     },
   };
@@ -2031,29 +2239,15 @@ test('A refreshed deletion confirmation requires reopening and always shows curr
       ),
     );
     await f.click('删除 OpenAI-compatible 1');
-    expect(f.button('确认删除提供商').disabled).toBe(false);
     state.observationId++;
-    state.providers[2]!.connections[0]!.scheduledTaskNames = ['new-task'];
     await f.click('刷新提供商配置');
-    expect(f.button('确认删除提供商').disabled).toBe(true);
-    expect(f.panelHost.textContent).toContain('new-task');
-    expect(f.panelHost.textContent).toContain('请从列表重新打开此提供商，重新确认删除影响');
+    await f.decideRemoval(true);
+    expect(f.toast()?.textContent).toContain('配置已更新，请重新确认删除。');
     await f.click('删除 OpenAI-compatible 1');
-    expect(f.button('确认删除提供商').disabled).toBe(true);
-    expect(f.panelHost.textContent).not.toContain('已重新读取配置');
-    state.observationId++;
-    state.providers[2]!.connections[0]!.scheduledTaskNames = [];
-    await f.click('刷新提供商配置');
-    expect(f.button('确认删除提供商').disabled).toBe(true);
-    expect(f.panelHost.textContent).not.toContain('new-task');
-    await f.click('删除 OpenAI-compatible 1');
-    expect(f.button('确认删除提供商').disabled).toBe(false);
-    state.observationId++;
-    state.providers[2]!.connections[0]!.defaultModelIds = ['new-global-default'];
-    await f.click('刷新提供商配置');
-    expect(f.button('确认删除提供商').disabled).toBe(true);
-    expect(f.panelHost.textContent).toContain('请从列表重新打开此提供商，重新确认删除影响');
-    expect(f.panelHost.textContent).toContain('当前全局默认模型');
+    expect(
+      calls.filter((call) => call.method === 'settings.providers.remove.confirm').at(-1),
+    ).toMatchObject({ observationId: state.observationId });
+    await f.decideRemoval(false);
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
   } finally {
     await f.close();
@@ -2067,6 +2261,7 @@ function unknownDeletionFixture(
     dropSubmitReply?: boolean;
   } = {},
 ) {
+  const editorControl = { current: null as { close: () => void } | null };
   const f = fixture(),
     calls: NativeRequest[] = [];
   const state = structuredClone(facts);
@@ -2138,6 +2333,7 @@ function unknownDeletionFixture(
     watch: () => () => {},
     request: async (input) => {
       calls.push(input);
+      if (input.method === 'settings.providers.remove.confirm') return f.requestRemoval();
       if (input.method === 'settings.providers.read') return manager.read();
       if (input.method === 'settings.providers.save') {
         const result = await manager.submit(input.observationId, input.operation, input.secret);
@@ -2180,13 +2376,19 @@ function unknownDeletionFixture(
             generation={generation}
             submissions={[]}
             onSaved={() => saved++}
+            editorControl={editorControl}
           />,
         ),
       );
     },
+    async dismissRemoval() {
+      expect(editorControl.current).toBeNull();
+      await f.click('编辑 Other connection');
+      await act(async () => editorControl.current?.close());
+    },
     async remove() {
       await f.click('删除 Deleted connection');
-      await f.click('确认删除提供商');
+      await f.decideRemoval(true);
       expect(manager.submissions[0]!.phase).toBe('unknown');
     },
   };
@@ -2223,9 +2425,9 @@ test('Confirmed unknown deletion keeps a refresh failure read-only and allows an
     await f.remove();
     await f.click('查看结果');
     expect(f.manager.submissions[0]!.phase).toBe('applied');
-    expect(f.panelHost.textContent).toContain('已删除，正在后台同步配置，无需重复删除。');
-    expect(f.button('确认删除提供商').disabled).toBe(true);
-    await f.click('确认删除提供商');
+    expect(f.toast()?.textContent).toContain('已删除，正在后台同步配置，无需重复删除。');
+    expect(f.button('删除 Deleted connection').getAttribute('aria-disabled')).toBe('true');
+    await f.click('删除 Deleted connection');
     fail = false;
     await f.click('刷新提供商配置');
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
@@ -2263,8 +2465,9 @@ for (const stage of ['lookup', 'after-lookup read'] as const) {
         expect(f.counts().reads).toBe(stage === 'lookup' ? 1 : 2);
         if (next === 'unmount') await act(async () => f.root.render(null));
         else if (next === 'generation') await f.render(2);
-        else if (next === 'close') await f.click('关闭');
+        else if (next === 'close') await f.dismissRemoval();
         else {
+          await f.dismissRemoval();
           await f.click(
             `编辑 ${next === 'same instance' ? 'Deleted connection' : 'Other connection'}`,
           );
@@ -2276,9 +2479,10 @@ for (const stage of ['lookup', 'after-lookup read'] as const) {
         expect(f.manager.submissions[0]!.phase).toBe('applied');
         expect(f.counts().posts).toBe(1);
         if (next === 'same instance' && stage === 'after-lookup read') {
-          expect(f.panelHost.textContent).toContain('此提供商已不在最新配置中');
-          expect(f.panelHost.querySelector('form')).toBeNull();
-          expect(f.button('返回列表')).toBeDefined();
+          expect(f.panelHost.querySelector('form')?.getAttribute('aria-label')).toBe(
+            'Deleted connection 配置',
+          );
+          expect(f.button('保存提供商配置').disabled).toBe(true);
         } else if (next === 'same instance' || next === 'other instance') {
           expect(f.field('提供商名称').value).toBe('Keep this newer draft');
           expect(f.panelHost.querySelector('form')).not.toBeNull();
@@ -2297,6 +2501,7 @@ test('Querying an original deletion from another instance refreshes the list wit
   try {
     await f.render();
     await f.remove();
+    await f.dismissRemoval();
     await f.click('编辑 Other connection');
     await f.edit('提供商名称', 'Keep other draft');
     await f.click('查看结果');
@@ -2314,7 +2519,7 @@ test('Querying an unknown deletion from the closed list refreshes it without reo
   try {
     await f.render();
     await f.remove();
-    await f.click('关闭');
+    await f.dismissRemoval();
     await f.click('查看结果');
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
     expect(f.panelHost.childElementCount).toBe(0);
@@ -2427,12 +2632,12 @@ test('Provider recovery backs off one GET at a time, preserves the visible error
   try {
     await f.render();
     expect(clock.delays).toEqual([250]);
-    expect(f.main.textContent).toContain('network_unavailable');
-    const error = f.main.querySelector('[role="alert"]')!.textContent;
+    expect(f.toast()?.textContent).toContain('network_unavailable');
+    const error = f.toast()!.textContent;
     await clock.fire();
     expect(clock.delays).toEqual([]);
     expect(reads).toBe(2);
-    expect(f.main.querySelector('[role="alert"]')!.textContent).toBe(error);
+    expect(f.toast()!.textContent).toBe(error);
     await f.render();
     expect(reads).toBe(2);
     await act(async () => reject(Error('network_unavailable')));
@@ -2612,7 +2817,7 @@ test('a rejected Provider save recovers fresh facts without replay, changing its
     await f.edit('提供商名称', 'Keep failed draft');
     await f.click('保存提供商配置');
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    expect(f.panelHost.textContent).toContain('configuration_conflict');
+    expect(f.toast()?.textContent).toContain('configuration_conflict');
     await clock.fire();
     expect(f.saved).toBe(0);
     expect(f.recovered).toBe(1);
@@ -2697,7 +2902,7 @@ test('automatic original-ID lookup settles the actual Main unknown deletion with
       { method: 'settings.providers.lookup', generation: 1, commandId: original },
     ]);
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
-    expect(f.panelHost.textContent).toContain('此提供商已不在最新配置中');
+    expect(f.button('删除 Deleted connection')).toBeUndefined();
     expect(clock.delays).toEqual([]);
   } finally {
     await f.close();
@@ -2713,7 +2918,7 @@ test('a lost Provider RPC result with no watcher discovers only its actual Main 
     await f.remove();
     const original = f.manager.submissions[0]!;
     expect(f.calls.some((call) => call.method === 'settings.providers.lookup')).toBe(false);
-    expect(f.button('确认删除提供商').disabled).toBe(true);
+    expect(f.button('删除 Deleted connection').getAttribute('aria-disabled')).toBe('true');
     await clock.fire();
     expect(f.calls.filter((call) => call.method === 'state')).toEqual([
       { method: 'state', generation: 1 },
@@ -2723,7 +2928,7 @@ test('a lost Provider RPC result with no watcher discovers only its actual Main 
     ]);
     expect(f.counts()).toEqual({ reads: 2, posts: 1, saved: 1 });
     expect(f.manager.submissions[0]!.phase).toBe('applied');
-    expect(f.panelHost.textContent).toContain('此提供商已不在最新配置中');
+    expect(f.button('删除 Deleted connection')).toBeUndefined();
     expect(clock.delays).toEqual([]);
   } finally {
     await f.close();
@@ -2791,7 +2996,7 @@ for (const mismatch of [
       await f.click('刷新提供商配置');
       expect(reads).toBe(2);
       expect(f.button('保存提供商配置').disabled).toBe(true);
-      expect(f.element.textContent).toContain('结果未确认');
+      expect(f.toast()?.textContent).toContain('结果未确认');
       await clock.fire();
       expect(reads).toBe(2);
       expect(f.calls.filter((call) => call.method === 'state')).toHaveLength(1);

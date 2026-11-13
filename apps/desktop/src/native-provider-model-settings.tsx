@@ -20,6 +20,7 @@ export function NativeProviderModelSettings({
   modelSubmissions,
   onSaved,
   panelHost,
+  toastHost,
   editorControl,
 }: {
   bridge: NativeBridge;
@@ -30,6 +31,7 @@ export function NativeProviderModelSettings({
   modelSubmissions: readonly NativeModelSettingsSubmission[];
   onSaved?: () => void;
   panelHost: HTMLElement | null;
+  toastHost?: HTMLElement | null;
   editorControl?: RefObject<{ close: () => void } | null>;
 }) {
   const providerReader = useRef<(() => Promise<boolean>) | null>(null);
@@ -102,6 +104,7 @@ export function NativeProviderModelSettings({
       submissions={providerSubmissions}
       refreshControl={providerReader}
       panelHost={panelHost}
+      toastHost={toastHost}
       editorControl={editorControl}
       models={models}
       onActivityChange={onActivityChange}

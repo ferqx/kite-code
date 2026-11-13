@@ -167,8 +167,6 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'settings.mcp.descriptor.close': ['readId'],
   'interactions.next': ['viewGeneration', 'afterId'],
   'interactions.close': ['viewGeneration'],
-  'settings.general.models.read': [],
-  'settings.general.models.close': [],
   'settings.general.shell.read': [],
   'settings.general.shell.save': ['preference'],
   'settings.models.read': ['scope', 'afterCommandId'],
@@ -188,6 +186,9 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'conversation.lookup': ['commandId'],
   'settings.providers.read': [],
   'settings.providers.close': [],
+  'settings.providers.remove.confirm': ['observationId', 'provider', 'connectionId'],
+  'settings.providers.discover': ['observationId', 'readId', 'operation', 'secret'],
+  'settings.providers.discover.cancel': ['readId'],
   'settings.providers.save': ['observationId', 'operation', 'secret'],
   'settings.providers.lookup': ['commandId'],
   'settings.models.close': [],
@@ -627,16 +628,22 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
           !/^[A-Za-z0-9_-]{1,128}$/.test(input.afterCommandId))))
   )
     throw Error('invalid_native_request');
-  if (method === 'settings.providers.save') {
+  if (
+    method === 'settings.providers.remove.confirm' &&
+    (!['openai', 'deepseek', 'compatible', 'ollama'].includes(String(input.provider)) ||
+      typeof input.connectionId !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(input.connectionId))
+  )
+    throw Error('invalid_native_request');
+  if (method === 'settings.providers.save' || method === 'settings.providers.discover') {
     const operation = record(input.operation);
+    const save = method === 'settings.providers.save';
     exact(operation, [
-      'kind',
-      'name',
+      ...(save ? ['kind', 'name', 'modelNames'] : []),
       'provider',
       'protocol',
       'connectionId',
       'baseURL',
-      'modelNames',
       'credential',
     ]);
     if (
@@ -675,10 +682,11 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       typeof operation.baseURL !== 'string' ||
       !operation.baseURL ||
       operation.baseURL.length > 4096 ||
-      !Array.isArray(operation.modelNames) ||
-      operation.modelNames.some(
-        (name) => typeof name !== 'string' || !name.trim() || name.length > 256,
-      ) ||
+      (save &&
+        (!Array.isArray(operation.modelNames) ||
+          operation.modelNames.some(
+            (name) => typeof name !== 'string' || !name.trim() || name.length > 256,
+          ))) ||
       !['keep', 'replace', 'none'].includes(String(operation.credential)) ||
       (operation.credential === 'replace') !== (input.secret !== undefined) ||
       (input.secret !== undefined &&
@@ -1369,6 +1377,7 @@ export function registerNativeIpc(options: {
   rendererUrl: string;
   caller: () => Promise<NativeCaller>;
   confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
+  confirmProviderRemoval?: (summary: { label: string; modelCount: number }) => Promise<boolean>;
   openEditor?: (editor: DesktopEditor, path: string) => Promise<void>;
   desktopShell?: (
     caller: NativeCaller,
@@ -1412,6 +1421,13 @@ export function registerNativeIpc(options: {
             return confirmed;
           },
         );
+      } else if (request.method === 'settings.providers.remove.confirm') {
+        if (!options.confirmProviderRemoval) throw Error('native_host_operation_unavailable');
+        const summary = caller.providerRemovalSummary(request);
+        const confirmed = await options.confirmProviderRemoval(summary);
+        assertNativeSender(event, options.window(), options.rendererUrl);
+        if (confirmed) caller.providerRemovalSummary(request, true);
+        value = confirmed ? { kind: 'settings.providers.remove.confirmed' } : null;
       } else if (request.method === 'fileChanges.open' || request.method === 'messageFile.open') {
         const perform = async (editor: DesktopEditor, target: string) => {
           assertNativeSender(event, options.window(), options.rendererUrl);

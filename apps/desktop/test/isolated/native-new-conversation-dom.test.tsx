@@ -414,7 +414,6 @@ function fixture(
       if (
         input.method === 'conversation.models.read' ||
         input.method === 'input.models.read' ||
-        input.method === 'settings.general.models.read' ||
         input.method === 'settings.models.read'
       ) {
         if (holdModels) {

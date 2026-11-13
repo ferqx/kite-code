@@ -301,6 +301,8 @@ paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只
 
 模型连接由 [model-transport.ts](src/model-transport.ts)补齐系统代理自动发现：有显式代理环境时继续由 Bun 解释原值、认证和 NO_PROXY；无环境代理时复用 [系统设置读取](src/web-fetch-proxy.ts)，选择 Windows HKCU／macOS 手动 HTTP(S) 代理及绕过名单，支持主机通配符、端口、IPv6 与 `<local>`。每个绑定复制系统设置并显式传给 fetch，不改写进程环境、不探测常用端口、不执行 PAC/WPAD、不在失败后直连重发。普通 Chat Completions／Responses、Codex 认证包装和显式提供商目录查询均消费该传输；`webFetch` 用户配置仍仅属于网页工具，MCP 的网络准入保持原边界。
 
+[OpenCode Go](https://opencode.ai/docs/console/harnesses) 的现行 `https://opencode.ai/inference/go/openai/v1` 由 [providerModelFetch](src/model-providers.ts)在模型绑定时补齐真实 `Kite-Code` User-Agent 和由当前会话 ID 派生的稳定 `x-opencode-session`。普通执行和标题使用各自绑定的会话；只允许发往该地址的 Chat Completions 或 Responses 路径并拒绝重定向。其他 URL（包括旧 `/zen/go/v1`）沿原传输。[SDK 请求回归](test/isolated/provider-model-fetch.test.ts)核两种协议的实际 URL、原授权头、会话隔离和拒绝转发；不替代公网订阅验证。
+
 ## 模型连接池与原取消恢复边界
 
 当前 Bun1.4.4 模型传输在绑定的首次真实请求时懒创建独立 `Bun.FetchSession`，配置 `idleTimeout:30` 与每类 `maxIdleSockets:8`。同一绑定的请求可复用连接，不与其他绑定或全局 fetch 共用；显式代理环境仍由 Bun 解释，系统代理和绕过名单仍按原绑定选择，失败不自动改出口。SDK 原 `fetch.preconnect` 兼容字段保留，实际 session 请求不消费全局预连接池，不增加主动预热请求。

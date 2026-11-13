@@ -60,7 +60,7 @@ if (settingsGeometry) {
   const request = control.bridge.request.bind(control.bridge);
   control.bridge.request = async (input) => {
     if (input.method === 'scheduled.list') return { kind: 'scheduled.tasks', tasks: [], runs: [] };
-    if (input.method === 'settings.models.read' || input.method === 'settings.general.models.read')
+    if (input.method === 'settings.models.read')
       return {
         kind: 'settings.models',
         storeId: 'store',

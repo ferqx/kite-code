@@ -342,6 +342,14 @@ export type NativeProviderOperation = {
   modelNames: string[];
   credential: 'keep' | 'replace' | 'none';
 };
+export type NativeProviderDiscoveryOperation = Omit<
+  NativeProviderOperation,
+  'kind' | 'name' | 'modelNames'
+>;
+export type NativeProviderDirectory = {
+  kind: 'settings.providers.directory';
+  modelNames: string[];
+};
 export type NativeProviderSettingsFacts = {
   kind: 'settings.providers';
   observationId: number;
@@ -678,7 +686,6 @@ export type NativeRequest =
   | NativeMcpRequest
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
-  | { method: 'settings.general.models.read' | 'settings.general.models.close'; generation: number }
   | { method: 'settings.general.shell.read'; generation: number }
   | {
       method: 'settings.general.shell.save';
@@ -708,6 +715,22 @@ export type NativeRequest =
   | { method: 'conversation.lookup'; generation: number; commandId: string }
   | { method: 'settings.providers.read'; generation: number }
   | { method: 'settings.providers.close'; generation: number }
+  | {
+      method: 'settings.providers.remove.confirm';
+      generation: number;
+      observationId: number;
+      provider: NativeProvider;
+      connectionId: string;
+    }
+  | {
+      method: 'settings.providers.discover';
+      generation: number;
+      observationId: number;
+      readId: string;
+      operation: NativeProviderDiscoveryOperation;
+      secret?: string;
+    }
+  | { method: 'settings.providers.discover.cancel'; generation: number; readId: string }
   | {
       method: 'settings.providers.save';
       generation: number;
@@ -999,6 +1022,8 @@ export type NativeResult =
   | NativeModelSettingsFacts
   | NativeShellSettingsFacts
   | NativeProviderSettingsFacts
+  | { kind: 'settings.providers.remove.confirmed' }
+  | NativeProviderDirectory
   | NativeProviderSubmission
   | NativeModelSettingsSubmission
   | NativeSessionFacts

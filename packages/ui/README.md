@@ -26,7 +26,7 @@ Shell 活动摘要采用原调用的可选 description，省略时沿用命令�
 
 2026-11-09，Windows x64／Bun1.4.4，`e8a483d65`加会话缩进修复：两份侧栏完整回归14项／393断言、定向Biome、隔离Native生产样式编译及文档检查通过。用户截图中的旧26px缩进改为34px，与空间行文字起点一致。IAB连接本机服务超时，本机Chrome观察因工具无法可靠识别当前URL而中止，修后实际外观及折叠／切换全过程尚未验收；不以DOM回归或编译结果代替实机结论。
 
-应用确认框另有公开的 `@kite-ai/ui/desktop/confirmation` [专用入口](src/desktop/confirmation.ts)，只重新导出原 `ApplicationConfirmationDialog` 与 Full 确认组件；[Desktop 构建](scripts/build-desktop.ts)同步产出 `confirmation.js`。固定确认页面无需通过桌面总出口加载会话 Markdown／公式／高亮初始化，统一呈现完全权限、空间移除与技能卸载确认。确认文案和样式由共享组件负责，焦点恢复和动作提交由调用方负责。共享加载动画 `conversation-loading-shimmer` 的关键帧位于顶层，保留原动画参数与减少动态效果覆盖，避免生产 CSS 优化器拒绝嵌套关键帧。
+应用确认框另有公开的 `@kite-ai/ui/desktop/confirmation` [专用入口](src/desktop/confirmation.ts)，只重新导出原 `ApplicationConfirmationDialog` 与 Full 确认组件；[Desktop 构建](scripts/build-desktop.ts)同步产出 `confirmation.js`。固定确认页面无需通过桌面总出口加载会话 Markdown／公式／高亮初始化，统一呈现完全权限、空间移除、提供商删除与技能卸载确认。确认文案和样式由共享组件负责，焦点恢复和动作提交由调用方负责。共享加载动画 `conversation-loading-shimmer` 的关键帧位于顶层，保留原动画参数与减少动态效果覆盖，避免生产 CSS 优化器拒绝嵌套关键帧。
 
 表单样式按职责分类：主题提供`--card`、`--input`与8px的`--form-control-radius`；公共Input／Textarea／SelectTrigger共用[form-control](src/desktop/components/ui/form-control.ts)的背景、边框、文字、焦点、禁用和无效状态，控件自身只补尺寸及各自语义。`ui-form-control`标记使旧原生控件兜底避开这些组件，因此脱离设置页容器仍保持相同外观；Native不再为它们另设错误边框或禁用透明度。公共Select的浮层选项直接消费同一圆角token。右栏表单与底栏沿用RightSidebar背景，容器只提供布局和表单内选择器形态变量，PillSelectTrigger在表单内使用常规圆角。
 

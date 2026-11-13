@@ -467,7 +467,7 @@ Input、Textarea、SelectTrigger的基础外观与交互状态归[UI公共表单
 
 模型和提供商设置的普通保存过程不再插入独立状态段落，提供商保存／删除成功直接更新原列表并关闭所属编辑面板；取消、控件忙碌及失败／结果未知的原申请查询保持。附件准备仅保留原忙碌图标、无障碍名称和取消入口。环境信息有业务名称时保留原名，否则普通页面回退为“Shell”／“子 Agent”；内部执行 ID 及“执行状态待核实”仅供测试诊断显示，实际操作仍绑定原 ID，执行权未核实仍撤销停止资格。定时任务的运行记录沿共享 UI 显示中文状态。设置、环境、附件和任务的回归归各自原有 DOM 测试，不改变 Main／Service 操作协议。
 
-Native 使用现有捆绑的 Geist Variable 与 Geist Mono Variable 正体、真实斜体资源；`--font-geist` 指向共享 `--font-ui`，让会话、工具、输入、设置及浮层消费同一界面字体栈，中文优先系统 UI 字体。设置页的页面、右栏标题与编辑器名称为 500，字段名、分组名、模型／连接名称、徽标说明、表单标签与当前值为 400；不再让普通设置名称继承 `strong` 或标题的粗体。其他界面标题仍消费共享 `--font-weight-semibold: 600`，Markdown 强调沿原语义样式。共享 `--font-mono` 是代码块、行内代码、Shell 输出、`font-mono` utility 和等宽配置输入的同一字体栈，Native 的 `--font-geist-mono` 只作别名。`font-synthesis: style` 只允许缺少真实斜体的字形倾斜，不合成粗体；英文及代码优先使用随包交付的真实斜体。字体加载不改变阅读区排版变量。客户端默认字号由共享 `--ui-text-size: 14px` 管理；[Native样式](src/native-tailwind.css)与[设置样式](src/native-provider-settings.css)中的窗口菜单、设置普通段落、按钮、模型／连接主名称、表单标签和输入、完整详情正文，以及浏览器地址和失败正文统一消费该基准。模型名称多行输入保留等宽字体，字号与普通输入一致；页面标题、徽标、标识符与辅助说明保留各自层级。设置导航不再重复定义窄窗字号，窗口缩放只改变布局。设置与输入区沿[公共控件](../../packages/ui/README.md)的图文对齐规则，选项勾选使用14px并垂直居中，长名称截断时前后图标保持完整；具体归属与本轮隔离验证由UI owner维护。样式入口先登记 `theme, base` 层，再引入 utilities，保持原生控件的字体继承低于组件明确字号；既有 utilities 与 components 的相对优先级保持。提供商删除确认的正文显式继承该区域字号，避免旧段落小字规则覆盖。
+Native 使用现有捆绑的 Geist Variable 与 Geist Mono Variable 正体、真实斜体资源；`--font-geist` 指向共享 `--font-ui`，让会话、工具、输入、设置及浮层消费同一界面字体栈，中文优先系统 UI 字体。设置页的页面、右栏标题与编辑器名称为 500，字段名、分组名、模型／连接名称、徽标说明、表单标签与当前值为 400；不再让普通设置名称继承 `strong` 或标题的粗体。其他界面标题仍消费共享 `--font-weight-semibold: 600`，Markdown 强调沿原语义样式。共享 `--font-mono` 是代码块、行内代码、Shell 输出、`font-mono` utility 和等宽配置输入的同一字体栈，Native 的 `--font-geist-mono` 只作别名。`font-synthesis: style` 只允许缺少真实斜体的字形倾斜，不合成粗体；英文及代码优先使用随包交付的真实斜体。字体加载不改变阅读区排版变量。客户端默认字号由共享 `--ui-text-size: 14px` 管理；[Native样式](src/native-tailwind.css)与[设置样式](src/native-provider-settings.css)中的窗口菜单、设置普通段落、按钮、模型／连接主名称、表单标签和输入、完整详情正文，以及浏览器地址和失败正文统一消费该基准。模型名称多行输入保留等宽字体，字号与普通输入一致；页面标题、徽标、标识符与辅助说明保留各自层级。设置导航不再重复定义窄窗字号，窗口缩放只改变布局。设置与输入区沿[公共控件](../../packages/ui/README.md)的图文对齐规则，选项勾选使用14px并垂直居中，长名称截断时前后图标保持完整；具体归属与本轮隔离验证由UI owner维护。样式入口先登记 `theme, base` 层，再引入 utilities，保持原生控件的字体继承低于组件明确字号；既有 utilities 与 components 的相对优先级保持。提供商删除确认沿用共享窗口级弹窗的正文样式。
 
 2026-11-06，Windows x64／Bun1.4.3，`5d39518e1` 加本轮字重调整：生产 CSS 编译与三个样式文件的 Biome 检查通过。隔离浏览器加载实际 Native 组件及生产 CSS，逐步观察用户菜单进入设置、四个分类切换、提供商右栏与下拉开合、Escape、取消及返回会话；普通标签和列表名称实测为400，页面／编辑栏标题为500，“个人工作区”为14px／400，会话正文仍为500。返回后草稿保留，用户与助手消息各一份，未见重复或卡住。截图保存在本机 `.cache/regular-settings-20261106/`。本轮仅修改样式，复用未变的组件与交互回归；未重验完整安装版 Electron、真实 Service、macOS 或 Linux。
 
@@ -787,7 +787,7 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 [Main reader](electron/file-changes.ts)从 NativeCaller 已登记的原 Message 取得唯一 `sourceIds`，经生成 Client GET 核真实原 Run 和 Execution 的 Store、Session、Run、定义、结果 revision 和准确 content。当前 Store 负责连接准入，备份恢复后的原出处仍保留；封存 Fork 严格沿 `originMessage` 的原 Run，不借当前消息补来源，也不要求整 Run 成功才可读其中已成功的 Files。观察 ID 封存原 Run/Command、Execution 定义和完整结果的固定 SHA-256 摘要，详情与打开前重新核对，同 revision 的结果或来源变化也不能换绑旧 ID。仅 succeeded 的 `files.write/edit` 进入列表；同名 tool call 不建立关联，Shell/MCP 和 failed/unknown/cancelled 不猜逐文件贡献。`details.fileChange@1` 由 [Files owner](../../packages/agent/src/tools/files/README.md#逐操作文件变更预览)提供。旧 receipt 或未知格式保留已确认操作与可用路径，明确无差异，不从当前文件或恢复检查点重建。原来源和当前 Workspace 不同或不能确认时不提供打开按钮。
 
-“常规”复用原编辑器选择，默认 VS Code，Zed/TextEdit 可选，只在当前 renderer 进程保留。文件操作中的路径按钮传 Main 观察 ID 和封闭 editor 枚举，不传任意路径、工作区根或应用名。Main 再读原 receipt、当前登记 Workspace 和物理根 dev/inode，沿迁入的 [editor leaf](electron/editor.ts)只接受该项目内存在的普通文件；保护 Profile 与候选目录。调用固定 macOS `/usr/bin/open` 的独立 argv，打开当前磁盘内容；编辑器未安装或目标漂移明确失败。Main 在所有读取后、分发前重新检查原 renderer frame。正文阅读不以编辑器可用为前提，路径按钮也不证明历史 diff 等于当前磁盘。原消息路径与常规默认摘要的当前接入见下一节；本面板仍不代表整个 PC 迁移完成。
+“常规”复用原编辑器选择，默认 VS Code，Zed/TextEdit 可选，只在当前 renderer 进程保留。文件操作中的路径按钮传 Main 观察 ID 和封闭 editor 枚举，不传任意路径、工作区根或应用名。Main 再读原 receipt、当前登记 Workspace 和物理根 dev/inode，沿迁入的 [editor leaf](electron/editor.ts)只接受该项目内存在的普通文件；保护 Profile 与候选目录。调用固定 macOS `/usr/bin/open` 的独立 argv，打开当前磁盘内容；编辑器未安装或目标漂移明确失败。Main 在所有读取后、分发前重新检查原 renderer frame。正文阅读不以编辑器可用为前提，路径按钮也不证明历史 diff 等于当前磁盘。原消息路径与常规设置的当前接入见下一节；本面板仍不代表整个 PC 迁移完成。
 
 取舍见[文件结果迁移决定](../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)。[真实 Files 回归](../../packages/agent/test/isolated/files/change-preview.test.ts)、[Main 端口](test/native-file-changes.test.ts)、[原面板 DOM](test/isolated/native-file-changes-dom.test.tsx)与原[源码外窗口](test/isolated/native-bundle.test.ts)分别负责 IO/receipt、准确作用域、原入口与冷读。实际执行输入、失败与通过边界归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原文件变更与编辑器入口迁入)；OS 编辑器窗口、安装版全路径和 Windows/Linux 资格不由有限 callback 或按钮断言代证。
 
@@ -805,7 +805,7 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 [元数据 reader](src/native-file-targets.ts)复用原32项扫描与所属 GET 释放，消息结果有 path 仅用于筛选请求，不授予行为；Main核准确原 Execution后只给成功的 Files read/write/edit 提供原 [ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)文件路径。完整历史不依赖 View 的近200项执行列表，未知格式／未核结果沿原正文保留。面板与工具行重复扫描同一封存结果时保持相同观察 ID，不相互撤销；历史文件元数据仍只以成功写入／编辑作为操作差异，不把读取算作变更；右侧Git列表独立读取整个仓库。失去当前scope即清元数据，刷新失败可显式重读，关正文只结束其 reader。
 
-[常规卡](src/native-general-settings.tsx)直接迁入原设置行，无论当前主会话、新对话准备页或项目，均读取用户级模型配置并核 Store/scope。显示配置 defaultModelId 的 Provider 与模型，不把临时下一轮选择或活动 Run 的冻结模型当作默认。常规卡通过封闭的 `settings.general.models.read/close` 使用独立只读 Main 观察，不能取得模型写入资格；切换/关闭只释放自身 GET，不覆盖或关闭提供商与模型的后台队列观察。迟到旧观察不显示；没有默认、读取失败与配置诊断分别表达。编辑继续进入提供商/模型分类。
+[常规卡](src/native-general-settings.tsx)保留编辑器及 Windows 集成终端设置。移除默认模型行后，常规不再请求模型配置，Main 移除该行专用的 `settings.general.models.read/close` 端口。
 
 ### Windows 集成终端 Shell
 
@@ -817,7 +817,7 @@ Windows 的[集成终端 Shell](src/native-shell-settings.tsx)复用设置下拉
 
 2026-10-25，后台模型队列与常规页的租约冲突已通过生产 queue＋Main manager 精确复现：模型保存后的健康 flush 中，旧 General GET／close 覆盖或清空队列 observation，下一次开关在 POST 前被拒，恢复按钮普通 GET 后才重获资格。独立只读 manager 修复后，Main 配置／提供商30项／302断言、General与模型DOM45项／649断言、完整NativeDesktop82项／1705断言通过；并发 GET 用例确认 General close 不取消模型续读，封闭IPC拒绝注入scope、Store、写入或continuation authority。此路径不依赖未决journal或Service保存失败；不据此推定每一种重新读取提示都来自该冲突。同轮匿名生产UI／真实Main浏览器夹具在1100／550px深浅四组合通过，共12391次过程采样／2127帧，无页面错误；每组合常规read/close各1次，返回后台队列不增加普通模型GET，原5次串行POST继续完成。健康阶段2442次采样中恢复控件、alert及只读状态均为零，原未知、失败、foreign read-set和草稿读取断言保持。该证据不代表当前已运行的旧Main已热更新，也不代证安装版或真实用户配置操作。
 
-[原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)、[Main 文件端口](test/native-file-changes.test.ts)和原[源码外窗口](test/isolated/native-bundle.test.ts)核默认与临时选择分离、旧scope、预览／全文／关闭、准确路径／frame和首次／冷读；窗口只核可用路径按钮及真实缺失目标拒绝，不实际启动 OS 编辑器。输入、实际通过与旧错误见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原消息文件路径与常规摘要)，完整PC／installed全路径／其他平台和阶段退出仍按原条件核对。
+[原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)、[Main 文件端口](test/native-file-changes.test.ts)和原[源码外窗口](test/isolated/native-bundle.test.ts)核常规编辑器选择、旧 scope、预览／全文／关闭、准确路径／frame 和首次／冷读；窗口只核可用路径按钮及真实缺失目标拒绝，不实际启动 OS 编辑器。输入、实际通过与旧错误见[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原消息文件路径与常规摘要)，完整PC／installed全路径／其他平台和阶段退出仍按原条件核对。
 
 ## 原工具过程与结果阅读
 
@@ -1998,7 +1998,7 @@ Service 为 applied 模型更新回执持久保存准确 `postReadSet`；[Main](
 
 保存响应和状态通知同时缺失时，先只读查询Main现有state，核generation、Store、准确observationId与完整非秘密operation，只有唯一匹配原记录才取得commandId；无ID、foreign或歧义不会猜测、普通GET也不能解除未知锁。自动恢复与原保存结果通知分别处理。Model和Provider只在“需要恢复→有效新事实”的边沿刷新对端，正常GET不互刷；提供商保存成功后的刷新强制取得发布后的新观察，不复用较早在途GET。自动lookup不借调用当下的editorVersion关闭后来打开的编辑器，不回填或重基草稿；只有原applied结果通知一次onSaved，failed恢复不冒充保存成功。关闭旧页后的原查询若通过 Main watcher 在重开页确认终态，只处理本页先前观察到的同 Store、commandId、observationId 和 operation；强制新 GET 同步连接及模型，重复／历史／外来终态不触发互刷，旧编辑草稿保持原资格且不重发保存。自动重试保留旧错误直到读取成功，避免重试期间反复闪现。准确只读但无诊断的事实停止轮询并继续只读；权限、身份或私有journal错误停止当前恢复，不能凭旧事实放权。
 
-controller 生命周期独立于设置组件，常规页的默认摘要读取也使用独立 manager，不与队列共享 observation／close。关闭设置移除订阅但继续保存已接受队列；同 bridge 与完整 scope 重开复用活跃 worker，不额外启动普通模型读取。空闲普通 reader 关闭即取消释放。切换 scope 清除旧的未派发尾部，迟到回执只完成原提交，不替换新页面事实。关闭窗口或退出进程后的恢复仍沿原 journal／unknown 合同，不宣称内存队列跨进程保存。
+controller 生命周期独立于设置组件，常规页不读取模型配置，切换分类不会修改模型队列的 observation。关闭设置移除订阅但继续保存已接受队列；同 bridge 与完整 scope 重开复用活跃 worker，不额外启动普通模型读取。空闲普通 reader 关闭即取消释放。切换 scope 清除旧的未派发尾部，迟到回执只完成原提交，不替换新页面事实。关闭窗口或退出进程后的恢复仍沿原 journal／unknown 合同，不宣称内存队列跨进程保存。
 
 2026-10-25，自动恢复最终七文件组合258项／3942断言通过（macOS／Bun1.4.2当前工作树），覆盖实际Main原记录、bad／empty回执、无watcher状态找回、无ID关闭重开、shared pending硬锁、冷原记录／foreign拒绝、proof网络重试与冲突分支，以及原NativeDesktop。Desktop类型、定向Biome、文档、统一边界和测试归属检查通过。同轮生产UI／真实Main匿名浏览器夹具在1100／550px深浅四组合通过，共13291次过程采样／2218帧，无页面错误；Provider读取失败在同页自动恢复且模型尾部继续，unknown只查原ID，known failed／foreign恢复不新增POST，恢复后只有新点击产生新POST。每组合正常5次串行保存、最大写并发1，最终Model10次（含默认setup）、Provider1次、原ID lookup1次；焦点、行与viewport、2320px滚动及General独立读取／草稿／4次会话读取保持。漏watcher及坏回执分支由上述DOM／Main回归覆盖；浏览器使用匿名内存Client数据，不代证真实Service、付费模型、钥匙串或进程冷启动资格。
 
@@ -2111,6 +2111,20 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 ## Native Provider 与下一次模型选择
 
+提供商正常保存期间仅底部按钮显示忙碌。确认删除后，原列表按钮显示忙碌。Main 的 `submitting` 仍参与写入互斥。提交失败、结果待确认和后台核对提示通过 [NativeToast](src/native-message.tsx)显示在设置对话框内，避开表单滚动区域。未决操作的 Toast 保留至原提交核实，每个未决结果可独立查询。字段校验保留在表单控件处。删除受阻原因在窗口级弹窗关闭后通过 Toast 显示。[表单回归](test/isolated/native-provider-settings-dom.test.tsx)在保存未返回时注入 Main 的 `submitting`，核对单次写入、按钮忙碌、Toast 的出现条件和原回执查询。
+
+Windows x64／Bun 1.4.4／Electron 44.3.0，`cb2486cbe` 加工作树，使用隔离开发窗口和本机服务验证先拒绝保存、关闭失败 Toast 后重试成功，再打开删除弹窗、按 Escape 取消和确认删除。547 个保存忙碌帧中没有额外提示，表单内容高度保持。删除弹窗显示 48 个关联模型的数量，省略模型名称，初始焦点在取消。Escape 后配置原样保留并聚焦原删除按钮。确认后原连接和模型配置移除，列表更新并聚焦新增。截图和过程帧位于 `.cache/provider-delete-count-56e5ecbd-ced2-48ab-ac69-e10220ce8575/`。默认模型、定时任务引用和结果未知由表单回归覆盖。
+
+[提供商表单](src/native-provider-settings.tsx)显式查询时，通过 [Main 目录读取](electron/provider-settings.ts)以当前 Store、原读取集、连接地址和所选凭据调用现有 Service discovery API。Main 只返回模型 ID，不创建保存意图，也不写入凭据或 JSONC。改地址、改凭据、切换或关闭表单会取消对应读取。Main 按读取 ID 取消，renderer 不接收迟到的结果。已加载目录以独立滚动列表展示，勾选与手填共享同一个模型草稿。保存仍走原提交路径。相关回归见[表单](test/isolated/native-provider-settings-dom.test.tsx)、[Main](test/native-provider-settings.test.ts)和[真实 HTTP 查询](../service/test/isolated/provider-settings.test.ts)。
+
+Windows x64／Bun 1.4.4／Electron 44.3.0，`cb2486cbe` 加工作树，通过 `runDevelopmentDesktop` 在隔离用户目录启动实窗，以本机 HTTP 服务依次返回拒绝、48 个模型和待取消响应。逐步核对读取中、失败保留草稿、重试后的完整滚动列表、勾选位置、关闭取消远端读取、重开无旧结果，以及保存只写入选定模型。已有连接重查会预选已保存的模型，保存没有再次请求目录。截图在 `.cache/provider-directory-c5c77542-60c8-4244-a2bc-8021a07e4b37/`。验证范围为开发窗口和本机服务，不含公网套餐和系统凭据库。
+
+[服务商预设](src/native-provider-presets.ts)是 [Provider 新增表单](src/native-provider-settings.tsx)的本地数据，普通 API 与编程套餐各自提供地址、默认协议和 key 提示。新增模板沿已有 `compatible` family 提交，只保存实际连接和模型；模板 ID 不进入 IPC、Service 或配置文件。通用 `/models` 未确认或需按账户套餐选择模型的新增模板要求在保存前手填或从显式查询结果勾选模型 ID。适用范围和官方接入参数见[手册](../../docs/handbook/features/models-and-configuration.md#服务商预设与套餐)；[表单回归](test/isolated/native-provider-settings-dom.test.tsx)核对普通 API 切换到套餐、清空上一条草稿、手填校验焦点及原格式保存。
+
+小米 MiMo 的按量 API 与 Token Plan 并列在内置 OpenAI、DeepSeek 之后，均默认 Responses。套餐地址预填中国集群，密钥提示区分按量、个人和团队套餐。按量模型目录含语音模型，两个预设都要求用户勾选或填写实际要使用的模型 ID。
+
+2026-11-13，`85088d9b8` 加本次工作树，Windows x64／Bun 1.4.4／Electron 44.3.0 的普通开发窗口观察：新增右栏显示原连接列表，预设菜单可用 End 滚到末尾；Kimi 普通 API 编辑名称后切 Kimi Code，草稿、地址和协议正确重置；OpenCode Go 显示新订阅地址，Escape 恢复新增按钮焦点，重开是新的 OpenAI 表单。实窗未保存或调用远端；保存、关闭后原提交核对和已知失败恢复由原表单及 Main 回归覆盖。
+
 切页时，[模型选择器](src/native-model-picker.tsx)只为当前有效页面发起目录读取，离开后使在途成功和失败回调同时失效。[Native 导航](src/native.tsx)每次切换都以 `pendingSessionId` 锁定目标，选择或草稿失败后标题、阅读 key 与加载状态仍属于该目标。直接冷切换可在隐藏且只读的状态保留原布局；定时任务／缓存返回撤下旧业务 selection，使用目标自己的完整展示快照。目标选择、权限、模型和草稿准备完成后以一个 frame 接管，草稿失败在发布前退出。准备失败及重试期间，Main 状态通知更新全局事实并保持原选择暂停，不能绕过此边界发布半套目标会话；更换目标沿原 nonce 拒绝晚结果。从新对话准备页快速替换目标仍保留该准备页自己的草稿与节点，直到准确目标接管。同一会话返回也重新核实，页面读取与可见选择器通过 `NativeModelSnapshots.prepare` 合并准确相同 bridge／generation／Store／Session／选择代次／配置修订的在途读取；已完成读取不作资格缓存。真实目录失败继续显示并撤销发送资格，不在 IPC 层吞掉未知错误；设置保存、原读取集校验和 Main 取消语义保持。
 
 缓存显示不等待上述确认：[Native](src/native.tsx)用现有有界 `NativeDisplayCache` 保存当前会话已核实的 `CachedComposer` 纯展示事实，包含草稿、实际模型／effort、审核方式、发送／停止标签、排队摘要与用量；按 bridge／generation／Store／配置修订隔离，目标必须仍在目录且 Workspace 匹配，真实权限、历史或模型失败撤销健康快照。选择器 `onReady` 同时交付独立的 `NativeModelPresentation`：`settled` 表示目录读取已结束，`display` 只代表已核实的成功展示，发送资格继续使用原 `ready/choice`。未选模型及没有审核标签也可构成完整展示，缓存保留其真实空态，不补默认模型或权限标签；真正读取／路由错误没有健康展示快照。选择资格 identity 包含配置修订；可编辑目标的首次整页呈现还须等待同一 identity 的模型读取结束，失败以真实错误结束等待，交互／只读页面不等待不存在的模型输入组件。返回时只读输入区先随原 `ConversationCache` 正文一起恢复，附件与浏览器注释沿目标自己的本机 scope；所有回调、队列及编辑操作被关闭。选择器的 `preview` 只绘制标签，不发目录 GET、不清真实目录缓存，也不能回报 ready；[环境信息](src/native-environment.tsx)的 `preview` 只定位展示缓存，不能成为读取 scope 或控制依据。原正文8个非当前项、容量／节点限制、滚动和展开保留保持；缺少完整配对缓存时才进入统一加载，`SessionPage.synchronizePresentation` 等目标历史与首轮结构完成后一并显示消息和 footer，前置 layout effect 在恢复阅读前确定 footer 占位。普通刷新不重新隐藏已有页面，完整大正文、图片与用量仍异步读取。显示缓存、当前读取及写入资格分离，不增加公开调试开关或协议版本。
@@ -2129,7 +2143,9 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 额外运行原[模型输入目录集成](test/native-model-input.test.ts)时，受限账户首先在本机 HTTP 准入失败；正常账户下两项读取合同通过，205次固定模型运行例在原30秒期限超时，未计为通过。该例的 Main、Client、Service、Runtime 与输入 reader 均无本轮 diff，不由 renderer 定向结果取得完整集成资格。本轮隔离浏览器与 Windows 开发窗口的验收范围以上述最终记录为准，未取得完整安装包、真实模型或其他平台资格；IPC、工具、持久格式与发布边界保持。
 
-统一页移除默认卡片后，默认引用导致的删除保护仍保留；[删除确认](src/native-provider-settings.tsx)明确指向用户文件的 `model`（装配格式为 `modelId`）及关闭重开后的重新核对，不再让用户寻找不存在的默认改选控件。[常规摘要](src/native-general-settings.tsx)同样区分模型启停／连接设置与文件中的全局默认。具体操作见[模型手册](../../docs/handbook/features/models-and-configuration.md#配置范围)；[Provider DOM](test/isolated/native-provider-settings-dom.test.tsx)覆盖提示和禁止提交并存，[原入口 DOM](test/isolated/native-original-entries-dom.test.tsx)覆盖常规指引。该提示不恢复桌面默认编辑入口，不改变默认引用、删除保护或后端权限。
+[提供商设置](src/native-provider-settings.tsx)通过封闭 IPC 交给 [Main](electron/native-ipc.ts) 打开[窗口级确认](electron/native-global-dialog-host.ts)。独立弹层只接收从当前观察提取的连接名称和模型数量。Main 在确认返回后核验原观察和引用，再由现有保存路径复核并提交原删除操作。[Provider DOM](test/isolated/native-provider-settings-dom.test.tsx)覆盖取消、过时确认和引用受阻 Toast，[窗口级弹层 DOM](test/isolated/native-global-dialog-dom.test.tsx)覆盖精简文案。默认引用的调整方式见[模型手册](../../docs/handbook/features/models-and-configuration.md#配置范围)。
+
+2026-11-13，Windows x64／Electron 44.3.0 普通开发窗口，隔离 Profile 与本机模型目录验证常规只保留两项设置。窗口级弹层遮罩从应用内容区原点覆盖 1100 × 782 px，根视图暂停交互。弹层初始焦点在取消，正文只显示 48 个关联模型。Escape 后保留配置、返回原删除按钮；确认删除后列表清空、焦点回新增按钮。另用隔离配置建立默认模型引用，确认后关闭弹层并显示简短 Toast，连接和配置保留。原生窗口合成图核对自绘菜单同时被遮罩，截图在 `.cache/provider-global-confirm-28560034-096c-4924-bf8c-b9c2fba924ba/`。本次相关设置、Main、弹层测试 143 项通过。
 
 会话首次实际 Run 后，[模型选择器](src/native-model-picker.tsx)从原有序 View 的首 Run 封存配置读取 Responses／Chat Completions 协议，只在原列表提供同协议候选；思考面板不显示协议提示；仅在模型列表底部以12px辅助文字显示“仅显示当前对话可用的模型”。同协议模型与连接仍可选择，effort 从下一轮生效，活动 Run 保持原值。首次实际 Run 前不限制协议，准备拒绝没有 Run 时也不提前绑定；首配置无法核实或原所选路由协议已变时保留当前标签并明确不可用，不跳到晚 Run、不静默回退另一协议。Core 视图额外保留最早实际 Run，超过200轮及冷重建同样有效；恢复后的旧 Store 出处由原准入 View 保留。服务端独立校验归[Service owner](../service/README.md#会话模型协议)，不以客户端过滤代替准备守卫。
 
@@ -2147,7 +2163,7 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 本机 Codex 连接显示“自动接入”，说明沿用本机登录；没有编辑、删除、地址或 key 控件，也不会出现在新增模板中。模型启停、默认和思考设置仍走现有模型页与选择器，完整认证来源及失效恢复见[模型手册](../../docs/handbook/features/models-and-configuration.md#chatgpt--codex-本机自动接入)。Main 与 Service 都独立拒绝将自动连接改为手工意图，即使 renderer 伪造可写标记也不会发送保存。此来源只传非秘密模型与连接事实，账户原文和 token 不进入 Native IPC。
 
-提供商目录现在平铺真实连接及自动发现的本机 ChatGPT / Codex 来源，四个手动协议族仅作新增模板；名称与稳定连接 ID 分离，同模板/同地址可多实例。新增、编辑、删除确认均沿 settings shell 最右 `RightSidebar`，保存失败留表单，成功且刷新完成后关闭，删除后的焦点回新增入口；迟到回执不覆盖新表单。Main 从 Service安全快照复制模型/默认引用，并只从本机私有库读取关联定时任务与未结束运行名称。删除在提交前重读这些引用，拒绝默认或定时依赖，不撤销 Vault 秘密。Native caller 将提供商写入与定时任务保存/启用串行，未知删除期间禁止新增任务引用，冷行仍只查原 GET。该保护不宣称能阻止非参与式外部编辑器或其他客户端修改用户 JSONC。
+提供商目录现在平铺真实连接及自动发现的本机 ChatGPT / Codex 来源，四个手动协议族仅作新增模板；名称与稳定连接 ID 分离，同模板/同地址可多实例。新增和编辑使用 settings shell 最右的 `RightSidebar`，保存失败留表单，成功且刷新完成后关闭。删除使用窗口级确认，成功后焦点回新增入口。迟到回执不覆盖新表单。Main 从 Service安全快照复制模型/默认引用，并只从本机私有库读取关联定时任务与未结束运行名称。删除在提交前重读这些引用，拒绝默认或定时依赖，不撤销 Vault 秘密。Native caller 将提供商写入与定时任务保存/启用串行，未知删除期间禁止新增任务引用，冷行仍只查原 GET。该保护不宣称能阻止非参与式外部编辑器或其他客户端修改用户 JSONC。
 
 [Provider DOM](test/isolated/native-provider-settings-dom.test.tsx)、[Main/IPC](test/native-provider-settings.test.ts)和[真实HTTP](../service/test/isolated/provider-settings.test.ts)覆盖列表/CRUD、旧配置、删除保护、重复点击和未知原回执；隔离 Linux Electron 预览使用无凭据本机测试配置，不代表付费服务、系统 Vault、正式完整构建或三平台发行资格。
 
@@ -2155,7 +2171,7 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 提供商页的展示样式由 [专属 CSS](src/native-provider-settings.css)维护：连接列表显示名称、类型和配置状态，选中行保留高亮。按照[配置编辑交互约定](../../docs/handbook/clients/desktop/README.md#配置编辑交互)，[Native 设置壳层](src/native.tsx)在 `settings-content` 同级的应用最右端提供 `settings-editor-panel` 宿主；[Provider 面板](src/native-provider-settings.tsx)以 portal 复用定时任务使用的 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx)，而非主区内分栏或新弹窗。面板头与底部取消/保存固定，连接、凭据与模型字段独立滚动；窄窗贴右覆盖而不把表单排入列表，沿用亮暗主题变量。
 
-新增直接打开表单并聚焦服务商预设下拉框，编辑聚焦名称；关闭、取消、Escape 恢复原列表按钮焦点，Escape 在编辑器打开时不关闭设置。直接提交或原提交查询确认 applied 后共用刷新并收起原面板的流程；仅当前身份、编辑代次和原目标仍匹配时关闭，验证/保存/刷新错误保留表单；提交仍立即清密钥，未知提交跨面板关闭保留且只能查询原提交。新增表单内通过服务商预设下拉框选择模板；不另显示预设列表。列表和编辑栏均不展示历史提交结果、技术详情或内部 ID，成功后直接更新列表，不另加成功提示；失败及结果未知仍保留必要反馈。结果未知时显示精简提示与“查看结果”，跨提供商或数据源的未决更改仍可查询；原内部账本和写入锁不变。关闭时清理读等待状态；读取开始即废止旧写观察，取消读取后需重新刷新才可保存；编辑版本隔离迟到保存/刷新，不关闭或重绑定后来选择的编辑器。切换分类或 Store 卸载原面板并保留原提交语义。该轮不新增 Service、发现请求、凭据读取或协议降级；模型及常规设置的其余编辑布局仍待单独迁移。
+新增直接打开表单并聚焦服务商预设下拉框，编辑聚焦名称。删除使用设置内的 AlertDialog，打开时聚焦取消。关闭、取消或 Escape 恢复原列表按钮焦点，删除成功后返回新增按钮。直接提交或原提交查询确认 applied 后共用刷新并收起原面板的流程；仅当前身份、编辑代次和原目标仍匹配时关闭，验证/保存/刷新错误保留表单；提交仍立即清密钥，未知提交跨面板关闭保留且只能查询原提交。新增表单内通过服务商预设下拉框选择模板；不另显示预设列表。列表和编辑栏均不展示历史提交结果、技术详情或内部 ID，成功后直接更新列表，不另加成功提示；失败及结果未知仍保留必要反馈。结果未知时显示精简提示与“查看结果”，跨提供商或数据源的未决更改仍可查询；原内部账本和写入锁不变。关闭时清理读等待状态；读取开始即废止旧写观察，取消读取后需重新刷新才可保存；编辑版本隔离迟到保存/刷新，不关闭或重绑定后来选择的编辑器。切换分类或 Store 卸载原面板并保留原提交语义。该轮不新增 Service、发现请求、凭据读取或协议降级；模型及常规设置的其余编辑布局仍待单独迁移。
 
 [Provider DOM](test/isolated/native-provider-settings-dom.test.tsx)核 portal 归属、表单语义、成功关闭、失败保留及迟到结果；[完整 NativeDesktop DOM](test/isolated/native-new-conversation-dom.test.tsx)核实际设置壳层的最右侧宿主、Escape 分层、分类退出、焦点及原会话草稿不变。测试断言与实际运行结果仍分别记录，不能据 DOM 测试宣称系统凭证库或真实付费模型已验。
 

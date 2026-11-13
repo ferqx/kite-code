@@ -3,6 +3,7 @@ import {
   type AgentClient,
   ClientError,
   type HostMutation,
+  type ProviderDiscoveryRequest,
   type ProviderSettingsRequest,
   type ProviderSettingsView,
 } from '@kite-ai/client';
@@ -93,6 +94,75 @@ async function rejection(work: Promise<unknown>, code: string) {
   }
   expect(error).toMatchObject({ code });
 }
+
+test('Native directory discovery uses the observed Store and cancels only the matching read', async () => {
+  const reads: { input: ProviderDiscoveryRequest; signal: AbortSignal; finish: () => void }[] = [];
+  const data = memoryPrivateData();
+  const reader = new NativeProviderSettings(
+    {
+      getProviderSettings: async () => view,
+      discoverProviderSettings: (
+        input: ProviderDiscoveryRequest,
+        { signal }: { signal: AbortSignal },
+      ) =>
+        new Promise((resolve) => {
+          reads.push({
+            input,
+            signal,
+            finish: () => resolve({ modelNames: ['remote-model'], secret: 'private' }),
+          });
+        }),
+    } as unknown as AgentClient,
+    () => ({ generation: 1, selection: 1, storeId: 'store', sessionId: 's' }),
+    () => {},
+    data,
+  );
+  const facts = await reader.read();
+  const request = {
+    method: 'settings.providers.discover' as const,
+    generation: 1,
+    observationId: facts.observationId,
+    readId: 'first',
+    operation: {
+      provider: 'openai' as const,
+      baseURL: 'https://api.openai.com/v1',
+      connectionId: null,
+      credential: 'replace' as const,
+    },
+    secret: 'fixture-key',
+  };
+  expect(decodeNativeRequest(request)).toEqual(request);
+  expect(() =>
+    decodeNativeRequest({ ...request, operation: { ...request.operation, modelNames: [] } }),
+  ).toThrow('invalid_native_request');
+  expect(() => decodeNativeRequest({ ...request, expectedStoreId: 'foreign' })).toThrow(
+    'invalid_native_request',
+  );
+  await rejection(
+    reader.discover(0, 'stale', request.operation, request.secret),
+    'configuration_observation_changed',
+  );
+  const first = reader.discover(facts.observationId, 'first', request.operation, request.secret);
+  const second = reader.discover(facts.observationId, 'second', request.operation, request.secret);
+  expect(reads[0]!.signal.aborted).toBe(true);
+  reader.cancelDiscovery('first');
+  expect(reads[1]!.signal.aborted).toBe(false);
+  expect(reads[1]!.input).toEqual({
+    expectedStoreId: view.storeId,
+    expectedReadSet: view.readSet!,
+    operation: request.operation,
+    secret: request.secret,
+  });
+  reads[0]!.finish();
+  reads[1]!.finish();
+  await rejection(first, 'provider_discovery_cancelled');
+  expect(await second).toEqual({
+    kind: 'settings.providers.directory',
+    modelNames: ['remote-model'],
+  });
+  expect(data.configurations()).toEqual([]);
+  expect(reader.submissions).toEqual([]);
+});
 
 test('Native Provider exposes only safe facts and its closed IPC cannot inject vault, file or Store authority', async () => {
   const reader = new NativeProviderSettings(
@@ -453,6 +523,24 @@ test('Native Provider deletion protects fresh default, scheduled and unfinished-
     name: connection.name,
     scheduledTaskNames: [],
   });
+  const confirmation = {
+    method: 'settings.providers.remove.confirm',
+    generation: 1,
+    observationId: facts.observationId,
+    provider: 'ollama',
+    connectionId: connection.id,
+  } as const;
+  expect(decodeNativeRequest(confirmation)).toEqual(confirmation);
+  expect(() => decodeNativeRequest({ ...confirmation, modelCount: 99 })).toThrow(
+    'invalid_native_request',
+  );
+  expect(() => decodeNativeRequest({ ...confirmation, provider: 'codex' })).toThrow(
+    'invalid_native_request',
+  );
+  expect(manager.removalSummary(facts.observationId, 'ollama', connection.id)).toEqual({
+    label: connection.name,
+    modelCount: 1,
+  });
   const task = data.saveScheduledTask({
     name: 'Morning report',
     storeId: 'store',
@@ -465,7 +553,13 @@ test('Native Provider deletion protects fresh default, scheduled and unfinished-
   expect(() => manager.submit(facts.observationId, remove)).toThrow(
     'provider_scheduled_model_in_use',
   );
+  expect(() => manager.removalSummary(facts.observationId, 'ollama', connection.id, true)).toThrow(
+    'provider_scheduled_model_in_use',
+  );
   facts = await manager.read();
+  expect(() =>
+    manager.removalSummary(confirmation.observationId, 'ollama', connection.id, true),
+  ).toThrow('configuration_observation_changed');
   expect(facts.providers[3]!.connections[0]?.scheduledTaskNames).toEqual(['Morning report']);
   const run = data.claimScheduledTask(task.id, Date.now(), { manual: true, storeId: 'store' })!;
   data.saveScheduledTask({
@@ -485,6 +579,9 @@ test('Native Provider deletion protects fresh default, scheduled and unfinished-
   data.deleteScheduledTask(task.id);
   connection.defaultModelIds = ['local-model'];
   facts = await manager.read();
+  expect(() => manager.removalSummary(facts.observationId, 'ollama', connection.id, true)).toThrow(
+    'provider_default_model_in_use',
+  );
   expect(() => manager.submit(facts.observationId, remove)).toThrow(
     'provider_default_model_in_use',
   );

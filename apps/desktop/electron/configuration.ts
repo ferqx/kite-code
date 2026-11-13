@@ -34,20 +34,17 @@ export class NativeConfiguration {
   private readonly current: () => Scope | undefined;
   private readonly notify: () => void;
   private readonly data?: NativeConfigurationData;
-  private readonly readOnly: boolean;
   private unavailable = false;
   constructor(
     client: AgentClient,
     current: () => Scope | undefined,
     notify: () => void = () => {},
     data?: NativeConfigurationData,
-    readOnly = false,
   ) {
     this.client = client;
     this.current = current;
     this.notify = notify;
     this.data = data;
-    this.readOnly = readOnly;
     try {
       for (const row of data?.configurations() ?? []) {
         if (row.kind !== 'model') continue;
@@ -140,8 +137,7 @@ export class NativeConfiguration {
         observationId: ++this.sequence,
         storeId: scope.storeId,
         scope: 'user',
-        canWrite:
-          !this.readOnly && configuration.readSet !== null && configuration.errors.length === 0,
+        canWrite: configuration.readSet !== null && configuration.errors.length === 0,
         errors: [...configuration.errors],
         defaultModelId: configuration.defaultModelId,
         models: configuration.models.map((model) => ({
@@ -171,7 +167,6 @@ export class NativeConfiguration {
     }
   }
   submit(observationId: number, operation: NativeModelSettingsSubmission['operation']) {
-    if (this.readOnly) throw new ClientError('configuration_unavailable');
     if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
     const observed = this.observed;
     if (!observed || observed.facts.observationId !== observationId || !this.same(observed.scope))

@@ -283,6 +283,43 @@
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-field-error {
   color: var(--destructive);
 }
+.kite-client .desktop-settings .provider-model-directory-header,
+.kite-client .desktop-settings .provider-model-directory-header .provider-model-directory-label {
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+  margin: 0;
+}
+.kite-client .desktop-settings .provider-model-directory-header {
+  justify-content: space-between;
+}
+.kite-client .desktop-settings .provider-model-directory {
+  max-height: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  padding: 4px;
+  margin: 8px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.kite-client .desktop-settings .provider-model-directory .provider-model-directory-row {
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  min-height: 30px;
+  padding: 4px 8px;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  font-size: var(--ui-text-size);
+  overflow-wrap: anywhere;
+}
+.kite-client .desktop-settings .provider-model-directory input {
+  flex: none;
+  accent-color: var(--primary);
+}
 .kite-client
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
@@ -441,12 +478,15 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-instance-actions
-  .provider-button:hover:not(:disabled) {
+  .provider-button:hover:not(:disabled, [aria-disabled="true"]) {
   background: var(--control-hover);
   border-color: var(--border);
 }
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-delete-link {
   color: var(--destructive);
+}
+.kite-client .desktop-settings .provider-delete-link[aria-disabled="true"] {
+  opacity: 0.6;
 }
 .kite-client
   .desktop-settings
@@ -493,46 +533,6 @@
   margin: 0 0 6px;
   color: var(--muted-foreground);
   font-size: 12px;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-removal-impact {
-  color: var(--foreground);
-  font-size: var(--ui-text-size);
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-removal-impact
-  p {
-  font-size: inherit;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-removal-impact
-  h4 {
-  margin: 0 0 12px;
-  font-size: var(--ui-text-size);
-  font-weight: 400;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-removal-impact
-  ul {
-  padding-left: 20px;
-  margin: 8px 0 16px;
-}
-.kite-client
-  .desktop-settings
-  :is(.provider-settings, .catalogue-settings)
-  .provider-removal-impact
-  .provider-notice {
-  margin-top: 20px;
 }
 @container provider-settings (max-width: 540px) {
   .kite-client
@@ -817,17 +817,6 @@
   white-space: pre-wrap;
 }
 
-.kite-client .desktop-settings .provider-settings .provider-pending .provider-notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-.kite-client .desktop-settings .provider-settings .provider-pending p {
-  flex: 1;
-  min-width: 160px;
-  margin: 0;
-}
 .kite-client .desktop-settings .catalogue-settings .provider-submissions {
   margin-top: 28px;
   border-top: 1px solid var(--border);

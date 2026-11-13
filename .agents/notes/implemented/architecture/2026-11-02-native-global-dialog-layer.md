@@ -14,13 +14,15 @@ Status: implemented
 
 普通固定客户端的浮层只加载构建产物中的 global-dialog.html、专用 preload 和同一套共享 AlertDialog、CSS 与字体；显式开发入口沿原 Main 从同一受限 Vite renderer 地址派生 global-dialog.html，专用 preload 与原隔离配置保持。背景透明，遮罩覆盖完整内容区，原网页保持真实可见，不导航、刷新、复制截图或调整网页 bounds。主题跟随 Main 的实际主题；自绘确认按钮、布局和风险文案由共享组件维护。目录／文件选择器保留系统行为；启动致命失败或主窗口已不存在时，原无法依附应用浮层的系统路径仍保留。
 
-Root IPC 仍只提交准确请求 ID 与固定语言的 Full 确认。Main 校验准确 Root、主 frame、URL、父窗口和在途 owner；专用 Renderer 只能接收有限 kind 的状态并返回同一 requestId 的决定，没有 Service、浏览器、文件或通用 HTML 执行桥。空间名称按文本呈现，不能成为 HTML。两类自绘确认共用一个 modal owner；退出请求先退休旧自绘确认，再立即隐藏界面并进入原后台清理，旧肯定结果不能落到继任者。
+Root IPC 仍只提交准确请求 ID 与固定语言的 Full 确认。Main 校验准确 Root、主 frame、URL、父窗口和在途 owner；专用 Renderer 只能接收有限 kind 的状态并返回同一 requestId 的决定，没有 Service、浏览器、文件或通用 HTML 执行桥。空间名称按文本呈现，不能成为 HTML。自绘确认共用一个 modal owner；退出请求先退休旧自绘确认，再立即隐藏界面并进入原后台清理，旧肯定结果不能落到继任者。
 
 Root 的准确应用节点在 modal 期间 inert，Main 只拦截 Root 的 before-input／before-mouse 事件。Page 的这些事件也接收授权 CDP 输入，不能统一 preventDefault；人工鼠标由最高原生 Overlay 命中，人工键盘由浮层焦点与 DOM 模态约束，Page 授权输入继续沿原 lease／控制门禁。显式焦点操作仅在父窗口仍 focused 时执行，后台取消不重新激活客户端；重新激活时当前浮层接回焦点，隐藏浮层不再参与 Root 的焦点目标选择。关闭后仅在父窗仍 focused 时恢复仍属于同一主窗口、仍可见、文档未替换的原 WebContents；隐藏、最小化、Root 导航／崩溃／销毁、overlay 崩溃或请求取消都退休当前决定。崩溃的 overlay 可以在下一次请求重新创建。Host在创建时保存准确contentView与Root WebContents，用同一引用注册及解绑；closed回调不重新读取已销毁BaseWindow的原生访问器。该清理修正针对实际退出时的Object has been destroyed／原生错误框留存，不改变document reload、确认或输入门。当前取消不等待首帧，肯定决定仍需presented；初始化或提交失败不构成确认；明确退出不再依赖窗口、状态查询或对话框；准确资源释放仍沿原停止owner进行，超过4秒的未完成清理不再阻止进程结束，也不据强退补写成功。
 
 预热 view 平时隐藏；发起确认时，冷启动与预热未 ready 的 view 都立即以完整尺寸、最高原生层级显示透明背景并承接人工输入，再等待共享 Dialog 提交后的 presented 通知，避免加载空档和依赖隐藏 Chromium view 的 rAF。Dialog DOM 尚未加载时没有取消按钮或 Esc 处理器；当前 false 不等待 presented，只说明已有决定的准入，不承诺整个加载阶段物理 Esc 可立即处理。通知用于当前 dialog 的决策准入，不是 WindowServer 像素回执，也不恢复被删除的浏览器 ACK／witness 或截图交接。网页绘制与 UI 实际过程仍分别核证据。
 
 Full 的有效确认继续交给原 Composer／权限控制器，新对话只修改本地待创建偏好；空间移除仍在确认后核新鲜空间身份并沿原 journal／命令提交；退出沿原 ownsQuit 与服务清理控制器。Overlay 自身不执行这些业务动作，不改变工具、服务协议或依赖版本。
+
+2026-11-13，提供商删除接入同一个 modal owner。原设置页内的 AlertDialog 只能遮住设置区，窗口级浮层覆盖应用自绘菜单并接管输入。Main 从准确观察中提取名称和模型数量，弹层只回传决定。确认后 Main 复核观察与引用，配置写入继续走原 journal，保证结果未知时仍能核对同一次删除。常规页移除默认模型摘要后撤销专用读取端口，引用保护仍在删除路径执行。实现及 Windows 观察见[Desktop owner](../../../../apps/desktop/README.md#native-provider-与下一次模型选择)。
 
 旧“操作未完成”AlertDialog 已移除。现有展示范围内的失败按用户2026-11-06确认改为临时 Toast，由 Root Renderer 通过 Portal 挂到 `document.body`，脱离聊天区域的 DOM 与滚动布局；位置与最大宽度沿会话区域的 CSS anchor，避免跨入右侧原生网页，并避开标题栏。打开设置时移入当前设置Dialog，避免模态范围外的提示不可访问；保留剩余计时，脱离旧挂载点的hover／focus不继续暂停。仍约六秒、hover／focus暂停、可以手动关闭；每次 occurrence 有独立身份，旧计时器、旧按钮及未提交的 React 渲染不能清除新消息。错误只映射为普通客户端独立业务实际能触发的项目记录不存在、本地数据存储异常与Service处理异常三种说明，其他普通业务使用中性兜底。诊断开关不再开启全局Toast；无来源、仅枚举、只有测试展示或其他局部owner的别名删除。普通异常及GET失败不推断业务结果未知；已知回执后的刷新失败沿原读取恢复。真正回执未知要求先核原操作，不诱导重复提交。普通、迟到或退出中的读取仍沿原归属门禁，不因此新增提示；设置表单自己的错误继续局部呈现，全局错误不复制到设置行内。
 

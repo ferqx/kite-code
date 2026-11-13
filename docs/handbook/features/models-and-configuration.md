@@ -22,7 +22,7 @@ Provider 凭据通过实际支持的配置和认证入口维护，不在手册�
 
 桌面设置通过“提供商与模型”单一入口管理连接与模型启用。打开时自动加载上述用户文件，按连接的准确模型 ID 展示模型列表，未归属连接的模型保留在“其他模型”，不提供项目范围切换。提供商列表的每一项显示模型总数与启用数。“管理模型”浮层支持按模型名称搜索和逐项启停，最宽 320 px，模型列表独立滚动。浮层内保存及后台刷新时保留当前搜索和滚动位置。禁用和配置不完整的条目保留，同名路由显示 ID；页面不展示独立的默认模型选择卡片，模型列表不显示“默认”标识。启停仍按准确路由逐项保存。打开页面及保存后自动核对本地连接与模型配置，不查询远端目录；不提供刷新或重新读取按钮；读取与同步异常自动退避核对，恢复有效配置后自动恢复操作，无需关闭重开。任一侧保存成功后核对另一侧。模型开关在正常保存和后台核对期间保持可用，未提交的同模型修改合并为最后选择，实际写入串行；关闭设置后继续在后台保存已接受的修改。连接保存仍与模型队列互斥。已保存后的临时读取错误重试同一保存结果的校验，校验一致才继续队列；明确失败或配置冲突丢弃未提交修改，后台重读只恢复新操作资格，不重放旧修改。未知结果及当前数据源的历史未决配置自动按原ID核对，确认终态后再恢复，不重新提交原保存。默认模型与其他模型一样允许禁用和重新启用，也允许全部禁用；启停不会自动改写默认模型引用。禁用模型不出现在输入区的可选列表，后续新运行不能使用它，即使它仍是配置默认也不会自动换成其他模型。保存保留无关注释、字段和其他模型；文件被外部修改时拒绝旧读取集保存，需重新读取。
 
-删除提供商时，若其模型仍被全局默认引用，删除确认会继续阻止提交。统一设置页不提供默认模型改选入口；可先在 `~/.kite-code/kite-code.jsonc` 中将顶层 `model` 改为其他已启用模型的 `提供商别名:模型名`，使用 `models`/`modelId` 装配格式的配置则将 `modelId` 改为其他已启用模型的准确 ID，再关闭并重新打开设置核对。输入区的手动选择和模型禁用均不改写该默认引用；删除不会自动清除或替换默认模型。
+删除提供商时，若其模型仍被全局默认引用，确认后会通过 Toast 提示，配置保留。统一设置页不提供默认模型改选入口；可先在 `~/.kite-code/kite-code.jsonc` 中将顶层 `model` 改为其他已启用模型的 `提供商别名:模型名`，使用 `models`/`modelId` 装配格式的配置则将 `modelId` 改为其他已启用模型的准确 ID，再关闭并重新打开设置核对。输入区的手动选择和模型禁用均不改写该默认引用；删除不会自动清除或替换默认模型。
 
 ## 网页网络配置
 
@@ -88,11 +88,11 @@ Run 封存实际审核 preset、总预算、checker 和准确工具行为绑定�
 
 自动压缩的已知失败或中断保留旧上下文，不发布半份摘要，也不永久禁用压缩；同一未变化上下文只让出一次普通决策边界，之后仍可再次触发，新增上下文也可直接重试。明确取消 Run 或子 Run 到期仍终止该次执行；存储损坏、未知派发和无法核实的发布不能冒充安全压缩失败。真实 Provider 窗口／输出能力仍约束单次请求。
 
-“提供商与模型”页列出用户实际添加的连接及自动发现的本机 Codex 连接；两者都没有时显示空列表和“新增提供商”。OpenAI、DeepSeek、Ollama 与自定义兼容服务仅作为新增表单的快捷模板，不默认加入列表。同一种模板、同一地址可以添加多个独立命名的连接；修改名称、地址、协议或凭据不改变连接身份与既有模型 ID。旧用户配置和没有模型的旧提供商声明继续可见，读取不自动写入迁移；不能安全编辑的旧声明显示只读。
+“提供商与模型”页列出用户实际添加的连接及自动发现的本机 Codex 连接；两者都没有时显示空列表和“新增提供商”。新增表单的[服务商预设](#服务商预设与套餐)仅填入表单，不默认加入列表。同一种模板、同一地址可以添加多个独立命名的连接；修改名称、地址、协议或凭据不改变连接身份与既有模型 ID。旧用户配置和没有模型的旧提供商声明继续可见，读取不自动写入迁移；不能安全编辑的旧声明显示只读。
 
-新增和编辑在应用最右侧面板完成。删除先展示连接、相关模型与引用影响并要求明确确认；连接包含当前默认模型时，须先选择其他默认模型。本机定时任务（包括停用任务）或未结束的定时运行仍引用其模型时，须先修改相关任务或等待原运行结束。删除移除该连接及其模型配置，不自动选择替代模型，不撤销系统凭据库中的秘密，也不更改其他连接；旧会话的原模型选择和历史不会被改写，后续需要使用可用的明确路由。未知删除结果仍须查询同一原提交。
+新增和编辑在应用最右侧面板完成。删除使用窗口级确认弹窗，正文显示受影响的关联模型数量。确认后重新核对配置和引用，受阻原因通过 Toast 反馈。连接包含当前默认模型时，须先选择其他默认模型。本机定时任务（包括停用任务）或未结束的定时运行仍引用其模型时，须先修改相关任务或等待原运行结束。删除移除该连接及其模型配置，不自动选择替代模型，不撤销系统凭据库中的秘密，也不更改其他连接；旧会话的原模型选择和历史不会被改写，后续需要使用可用的明确路由。未知删除结果仍须查询同一原提交。
 
-通用 Native 的提供商设置支持 OpenAI、DeepSeek、OpenAI-compatible 和 Ollama 的明确连接与模型名称。手动填写名称时直接保存；留空时，只有这次显式保存才查询该连接的模型目录。新加入模型默认禁用，需先启用再选择。现有用户文件中的 API key 只由宿主私下读取，不进入模型列表、快照或日志；更换 key 时保存到用户级系统凭据库，文件改存引用，提交后清空表单。配置可用不表示远端账户或模型已验证成功。
+桌面新增或编辑提供商时，可以[显式获取模型目录](../clients/desktop/README.md#获取服务商模型目录)，也可每行手填一个模型 ID。保存非空模型草稿会直接写入选定 ID。允许留空的表单仍可在未取得目录时通过显式保存查询并导入模型。新加入模型默认禁用，需先启用再选择。现有用户文件中的 API key 只由宿主私下读取，不进入模型列表、快照或日志。更换 key 时保存到用户级系统凭据库，文件改存引用，提交后清空表单。配置可用不表示远端账户或模型已验证成功。
 
 OpenAI 和 OpenAI-compatible 连接可在“API 协议”中选择 Chat Completions 或 Responses。未设置协议的旧配置继续使用 Chat Completions，无需迁移；DeepSeek 和 Ollama 当前仍使用 Chat Completions。协议按连接保存，同一地址的两种协议是不同连接；Responses 失败不会自动回退或切换模型。用户 JSONC 的提供商条目可显式设置 `"protocol": "responses"`，基础地址仍填写 API 前缀（例如 `https://api.openai.com/v1`），无需追加 `/responses`。
 
@@ -115,7 +115,7 @@ Responses 使用原有运行、工具授权和定时任务执行链，支持流�
 
 桌面输入区首次没有显式选择、当前Session已存选择或有效的已手选记忆时，只显示“选择模型”，不使用全局默认模型自动填充；未选时不能发起新的运行，手选后才取得发送资格。新对话准备页不继承旧会话选择，已有Run但缺少已存选择的旧会话也不猜测路由。输入区从已启用且配置可用的模型中选择下一次运行的路由，选择按 Session 隔离，不修改全局默认或其他会话。新 Session 在首条输入前不绑定模型；首次输入保存实际选择，已有会话在下一次新运行采用其选择。活动运行保持原模型，运行中的普通发送仍是文本引导。
 
-桌面端在任意项目的对话或新对话输入区选择模型、调整思考程度时，会同时记住这组设置，作为全局新对话的推荐。随后点击“新对话”，无论选择哪个空间项目，都自动使用最近记住的模型与思考程度；关闭后重新打开仍保留。没有推荐记录，或推荐模型已删除、禁用、配置不可用时，显示“选择模型”并等待手动选择，不回退全局默认或列表首项，也不沿用失效模型的档位。仅打开新对话或恢复推荐不会覆盖推荐记录。已有会话继续使用自己的选择和历史档位，设置页的全局默认模型保持独立；推荐保存失败会明确提示，可重新选择。
+桌面端在任意项目的对话或新对话输入区选择模型、调整思考程度时，会同时记住这组设置，作为全局新对话的推荐。随后点击“新对话”，无论选择哪个空间项目，都自动使用最近记住的模型与思考程度；关闭后重新打开仍保留。没有推荐记录，或推荐模型已删除、禁用、配置不可用时，显示“选择模型”并等待手动选择，不回退全局默认或列表首项，也不沿用失效模型的档位。仅打开新对话或恢复推荐不会覆盖推荐记录。已有会话继续使用自己的选择和历史档位，配置文件中的全局默认模型保持独立；推荐保存失败会明确提示，可重新选择。
 
 同一会话首次实际运行后，只能选择相同协议的模型：Responses 会话不能切到 Chat Completions，Chat 会话也不能切到 Responses。同协议内仍可更换模型和连接、调整下一轮思考程度；切换协议需要新建会话。首次运行前可自由选择，尚未生成 Run 的准备失败不会固定协议；已经开始但失败或取消的 Run 仍确定原协议。界面只提供同协议候选，直接 API 和外部配置变化也由服务端校验；旧历史继续可读。
 
@@ -134,3 +134,23 @@ CLI 当前拒绝 `--feature` 等已退役覆盖选项。设置操作见[TUI 设�
 统计分别保留累计实际用量、最近请求实际输入和下一请求上下文估算。默认自动压缩以可核实的原请求实测输入为基线，加上新增内容的通用估算；模型／工具或已测量内容变化、重排、压缩和重置使基线无法沿用时全量重估。未知提供商和自定义模型使用相同回退，不凭名称猜分词器或容量。累计统计显示缺失覆盖情况，不等于账户完整账单。
 
 已保存的工具结果统一按原模型实际看到的正文参与上下文估算，主Agent和子Agent共用同一口径，新增工具无需另加统计逻辑。统计数据结构保持不变，相同事实在重启前后应得到相同结果。只读估算不重新执行工具；确实缺少原请求或来源不符时保留未知，不伪造实际用量。
+
+## 服务商预设与套餐
+
+在桌面端进入 **设置 → 提供商与模型 → 新增提供商**。预设会填入名称、服务地址和默认协议，并提示密钥来源。切换预设会清空未保存的密钥和模型名称。已有连接可编辑；TUI 和 CLI 读取相同的用户配置。服务商的价格、剩余额度和账户资格以其控制台为准，Kite 不查询套餐余额，也不会在套餐失败后改走按量 API。
+
+普通 API、预付资源包和编程订阅是三种不同的情况。以百炼为例，[通用资源包和节省计划](https://help.aliyun.com/zh/model-studio/savings-plan-and-resource-package)继续使用普通 API 的地址和 key，由百炼在结算时抵扣；Token Plan 和 Coding Plan 各有独立地址和专属 key。MiniMax M Plan 的地址与普通 API 相同，按哪种方式计费由 key 决定。
+
+| 服务 | 普通 API | 编程套餐与限制 |
+| --- | --- | --- |
+| Kimi | [开放平台](https://platform.kimi.com/docs/api/chat)，中国站 `https://api.moonshot.cn/v1`，默认 Chat Completions。 | [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code/models.html)，中国站 `https://api.kimi.com/coding/v1`，默认 Responses。用 Code 控制台 key，按档位填写准确模型 ID；海外账户按官方地址修改。 |
+| DeepSeek | [官方 API](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) `https://api.deepseek.com`，Chat Completions，按用量从充值或赠送余额扣减。 | 经其他平台订阅的 DeepSeek 模型使用对应平台的连接和 key，例如 OpenCode Go。 |
+| 智谱 GLM | [标准 API](https://docs.bigmodel.cn/cn/api/introduction) `https://open.bigmodel.cn/api/paas/v4`，Chat Completions，手填模型 ID。 | [GLM Coding Plan](https://docs.bigmodel.cn/cn/coding-plan/quick-start) 的 Chat Completions 地址为 `https://open.bigmodel.cn/api/coding/paas/v4`，Responses 地址为 `https://open.bigmodel.cn/api/v1`。个人、团队和标准 API 新签发的 key 互不通用。官方限定使用[指定工具](https://docs.bigmodel.cn/cn/coding-plan/tool/others)，Kite 未列入，故不提供该套餐预设。 |
+| 阿里云百炼（千问） | [北京地域](https://help.aliyun.com/zh/model-studio/base-url) `https://dashscope.aliyuncs.com/compatible-mode/v1`，Chat Completions，使用通用 key。 | [Token Plan 与 Coding Plan](https://help.aliyun.com/zh/model-studio/more-tools) 分别使用 `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 和 `https://coding.dashscope.aliyuncs.com/v1`。按套餐填写专属 key 和模型 ID，仅用于交互式开发，不用于后台定时任务或批量脚本。 |
+| 小米 MiMo | [按量 API](https://mimo.mi.com/docs/zh-CN/tokenplan/integration/codex-configuration) `https://api.xiaomimimo.com/v1`，默认 Responses，使用 `sk-` key。从[模型目录](https://mimo.mi.com/docs/en-US/api/model/list-models-get)勾选对话模型，或手填模型 ID。 | [Token Plan](https://mimo.mi.com/docs/zh-CN/tokenplan/integration/codex-configuration) 默认填入中国集群地址 `https://token-plan-cn.xiaomimimo.com/v1` 和 Responses。以套餐控制台显示的 OpenAI 兼容地址为准，使用个人 `tp-` 或团队 `ttp-` key，选择或填写套餐可用的模型 ID。 |
+| MiniMax | [中国站 API](https://platform.minimax.cn/docs/api-reference/text-openai-api) `https://api.minimax.cn/v1`，Chat Completions，使用按量 key，可[查询模型目录](https://platform.minimax.cn/docs/api-reference/models/openai/list-models)。 | [M Plan](https://platform.minimax.cn/docs/m-plan/other-tools) 使用同一地址和订阅 key。旧 Token Plan 的续订及升级以[官方安排](https://platform.minimax.cn/docs/m-plan/token-plan-notice)为准。 |
+| 火山方舟（豆包） | [北京地域 API](https://docs.volcengine.com/docs/ark/ai-tools-other-tools) `https://ark.cn-beijing.volces.com/api/v3`，Chat Completions，手填已开通的模型或接入点 ID。 | [Coding Plan](https://docs.volcengine.com/docs/ark/coding-plan-personal-faq) 与 [Agent Plan](https://docs.volcengine.com/docs/ark/agent-plan-personal-zcode) 分别使用 `https://ark.cn-beijing.volces.com/api/coding/v3` 和 `https://ark.cn-beijing.volces.com/api/plan/v3`。按套餐使用对应 key 和官方支持的工具；Kite 未确认套餐资格，暂仅预设普通 API。 |
+| Grok (xAI) | [xAI API](https://docs.x.ai/developers/quickstart) `https://api.x.ai/v1`，默认 Responses，使用 API Console key。 | Grok 或 X 客户端的会员凭据不填入此预设。 |
+| OpenCode Go | Go 与 [OpenCode 按量 API](https://opencode.ai/docs/console/harnesses) 使用不同的地址。 | [Go](https://opencode.ai/docs/console/go/) 使用 `https://opencode.ai/inference/go/openai/v1` 和已订阅工作区的 API key。默认 Chat Completions，也可选 Responses。按[官方目录](https://opencode.ai/inference/go/v1/models)手填原始模型 ID，无需添加 `opencode-go/` 前缀；超额后是否扣工作区余额由 OpenCode Console 设置决定。 |
+
+OpenAI、DeepSeek、Ollama 与自定义兼容服务仍可选。各预设都可显式尝试获取目录。新增预设中，Kimi 开放平台、Grok 和 MiniMax 普通 API 也可留空保存以查询目录。其余新增预设在保存前需要勾选查询结果或填写准确模型 ID。地址可按账户地域调整，改用不同地址或协议前请核对它与所填的 key、模型 ID 和计费方式匹配。

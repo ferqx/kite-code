@@ -219,6 +219,31 @@ export function safeProviderEndpoint(value: string): string {
     throw new AgentError('invalid_provider_endpoint');
   }
 }
+
+const openCodeGoBaseURL = 'https://opencode.ai/inference/go/openai/v1';
+
+/** OpenCode Go requires a stable conversation identifier on its current inference route. */
+export function providerModelFetch(baseURL: string, sessionId: string, transport: typeof fetch) {
+  if (baseURL.replace(/\/$/, '') !== openCodeGoBaseURL) return transport;
+  const session = `ses_${createHash('sha256').update(sessionId).digest('hex')}`;
+  return Object.assign(
+    (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (
+        url.href !== `${openCodeGoBaseURL}/chat/completions` &&
+        url.href !== `${openCodeGoBaseURL}/responses`
+      )
+        return Promise.reject(new AgentError('invalid_provider_endpoint'));
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      headers.set('user-agent', 'Kite-Code');
+      headers.set('x-opencode-session', session);
+      return transport(input, { ...init, headers, redirect: 'manual' });
+    },
+    { preconnect: transport.preconnect },
+  );
+}
 export function providerModelNames(names: readonly string[]): string[] {
   const result = [...new Set(names.map((name) => name.trim()))];
   if (

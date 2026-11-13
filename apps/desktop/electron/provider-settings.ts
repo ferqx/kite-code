@@ -7,6 +7,9 @@ import {
   type ProviderSettingsView,
 } from '@kite-ai/client';
 import type {
+  NativeProvider,
+  NativeProviderDirectory,
+  NativeProviderDiscoveryOperation,
   NativeProviderOperation,
   NativeProviderSettingsFacts,
   NativeProviderSubmission,
@@ -35,6 +38,7 @@ export class NativeProviderSettings {
   private readonly data?: ProviderData;
   private readonly entries = new Map<string, Entry>();
   private reading?: AbortController;
+  private discovery?: { readId: string; controller: AbortController };
   private sequence = 0;
   private unavailable = false;
   private observed?: {
@@ -94,13 +98,18 @@ export class NativeProviderSettings {
     return [...names];
   }
   release() {
-    this.reading?.abort();
-    this.reading = undefined;
+    this.cancelRead();
     this.observed = undefined;
   }
   cancelRead() {
     this.reading?.abort();
     this.reading = undefined;
+    this.cancelDiscovery();
+  }
+  cancelDiscovery(readId?: string) {
+    if (!this.discovery || (readId !== undefined && this.discovery.readId !== readId)) return;
+    this.discovery.controller.abort();
+    this.discovery = undefined;
   }
   private same(scope: Scope) {
     const current = this.current();
@@ -153,29 +162,48 @@ export class NativeProviderSettings {
       if (this.reading === reading) this.reading = undefined;
     }
   }
-  submit(
-    observationId: number,
-    operation: NativeProviderOperation,
-    secret?: string,
-  ): Promise<NativeProviderSubmission> {
+  private requireObservation(observationId: number) {
     if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
     const observed = this.observed;
     if (!observed || observationId !== observed.facts.observationId || !this.same(observed.scope))
       throw new ClientError('configuration_observation_changed');
     if (!observed.view.readSet || !observed.facts.canWrite)
       throw new ClientError('configuration_unavailable');
+    return { ...observed, readSet: observed.view.readSet };
+  }
+  removalSummary(
+    observationId: number,
+    providerId: NativeProvider,
+    connectionId: string,
+    confirmed = false,
+  ) {
+    const { facts } = this.requireObservation(observationId);
+    const provider = facts.providers.find((entry) => entry.id === providerId);
+    const index = provider?.connections.findIndex((entry) => entry.id === connectionId) ?? -1;
+    const connection = provider?.connections[index];
+    if (!provider || provider.id === 'codex' || !connection?.canWrite)
+      throw new ClientError('provider_settings_override');
+    if (confirmed) this.requireUnreferencedRemoval(facts.storeId, connection);
+    return {
+      label: (connection.name?.trim() || `${provider.label} ${index + 1}`).slice(0, 256),
+      modelCount: connection.modelNames.length,
+    };
+  }
+  private requireUnreferencedRemoval(
+    storeId: string,
+    connection: NativeProviderSettingsFacts['providers'][number]['connections'][number],
+  ) {
+    if (connection.defaultModelIds?.length) throw new ClientError('provider_default_model_in_use');
+    if (!this.data?.scheduledTasks || !this.data?.scheduledTaskRuns)
+      throw new ClientError('configuration_storage_unavailable');
+    if (this.scheduledReferences(storeId, connection.modelIds ?? []).length)
+      throw new ClientError('provider_scheduled_model_in_use');
+  }
+  private requireConnection(
+    observed: ReturnType<NativeProviderSettings['requireObservation']>,
+    operation: NativeProviderDiscoveryOperation,
+  ) {
     if (operation.provider === 'codex') throw new ClientError('provider_settings_override');
-    if (operation.kind !== undefined && operation.kind !== 'upsert' && operation.kind !== 'remove')
-      throw new ClientError('invalid_request');
-    if (
-      operation.name !== undefined &&
-      (!operation.name.trim() ||
-        operation.name.length > 120 ||
-        [...operation.name].some(
-          (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
-        ))
-    )
-      throw new ClientError('invalid_provider_name');
     try {
       const url = new URL(operation.baseURL);
       if (
@@ -205,6 +233,69 @@ export class NativeProviderSettings {
     const connection = provider?.connections.find((entry) => entry.id === operation.connectionId);
     if (!provider || (operation.connectionId !== null && !connection?.canWrite))
       throw new ClientError('provider_settings_override');
+    return { provider, connection };
+  }
+  private requireCredential(
+    { provider, connection }: ReturnType<NativeProviderSettings['requireConnection']>,
+    operation: NativeProviderDiscoveryOperation,
+    secret?: string,
+  ) {
+    if (
+      (operation.credential === 'replace') !== (secret !== undefined) ||
+      (operation.credential === 'replace' && !secret?.trim()) ||
+      (operation.credential === 'keep' && !connection?.hasCredential) ||
+      (provider.requiresCredential && operation.credential === 'none')
+    )
+      throw new ClientError('provider_credential_required');
+  }
+  async discover(
+    observationId: number,
+    readId: string,
+    operation: NativeProviderDiscoveryOperation,
+    secret?: string,
+  ): Promise<NativeProviderDirectory> {
+    const observed = this.requireObservation(observationId);
+    this.requireCredential(this.requireConnection(observed, operation), operation, secret);
+    this.cancelDiscovery();
+    const controller = new AbortController();
+    const discovery = { readId, controller };
+    this.discovery = discovery;
+    try {
+      const result = await this.client.discoverProviderSettings(
+        {
+          expectedStoreId: observed.scope.storeId,
+          expectedReadSet: observed.readSet,
+          operation,
+          ...(secret === undefined ? {} : { secret }),
+        },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted || this.discovery !== discovery || !this.same(observed.scope))
+        throw new ClientError('provider_discovery_cancelled');
+      return { kind: 'settings.providers.directory', modelNames: [...result.modelNames] };
+    } finally {
+      if (this.discovery === discovery) this.discovery = undefined;
+    }
+  }
+  submit(
+    observationId: number,
+    operation: NativeProviderOperation,
+    secret?: string,
+  ): Promise<NativeProviderSubmission> {
+    const observed = this.requireObservation(observationId);
+    if (operation.kind !== undefined && operation.kind !== 'upsert' && operation.kind !== 'remove')
+      throw new ClientError('invalid_request');
+    if (
+      operation.name !== undefined &&
+      (!operation.name.trim() ||
+        operation.name.length > 120 ||
+        [...operation.name].some(
+          (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+        ))
+    )
+      throw new ClientError('invalid_provider_name');
+    const target = this.requireConnection(observed, operation);
+    const { connection } = target;
     if (operation.kind === 'remove') {
       if (
         !connection ||
@@ -213,19 +304,8 @@ export class NativeProviderSettings {
         operation.modelNames.length
       )
         throw new ClientError('invalid_request');
-      if (connection.defaultModelIds?.length)
-        throw new ClientError('provider_default_model_in_use');
-      if (!this.data?.scheduledTasks || !this.data?.scheduledTaskRuns)
-        throw new ClientError('configuration_storage_unavailable');
-      if (this.scheduledReferences(observed.scope.storeId, connection.modelIds ?? []).length)
-        throw new ClientError('provider_scheduled_model_in_use');
-    } else if (
-      (operation.credential === 'replace') !== (secret !== undefined) ||
-      (operation.credential === 'replace' && !secret?.trim()) ||
-      (operation.credential === 'keep' && !connection?.hasCredential) ||
-      (provider.requiresCredential && operation.credential === 'none')
-    )
-      throw new ClientError('provider_credential_required');
+      this.requireUnreferencedRemoval(observed.scope.storeId, connection);
+    } else this.requireCredential(target, operation, secret);
     const key = `${observationId}:${canonicalModelBody(operation)}`;
     const prior = this.entries.get(key);
     if (prior?.promise) return prior.promise;
@@ -252,7 +332,7 @@ export class NativeProviderSettings {
     const input: Omit<ProviderSettingsRequest, 'secret'> = {
       expectedStoreId: observed.scope.storeId,
       commandId: crypto.randomUUID(),
-      expectedReadSet: structuredClone(observed.view.readSet),
+      expectedReadSet: structuredClone(observed.readSet),
       operation: structuredClone(operation),
     };
     const entry: Entry = {
@@ -266,6 +346,7 @@ export class NativeProviderSettings {
         phase: 'submitting',
       },
     };
+    this.cancelDiscovery();
     this.data?.saveConfiguration({ kind: 'provider', input, state: entry.state });
     this.entries.set(key, entry);
     this.notify();

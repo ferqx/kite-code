@@ -403,12 +403,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .settings-row [data-slot="select-trigger"] {
   min-width: 130px;
 }
-.kite-client .settings-value {
-  color: var(--muted-foreground);
-  font-size: var(--ui-text-size);
-  text-align: right;
-  overflow-wrap: anywhere;
-}
 .kite-client .settings-hint {
   margin-top: 18px;
 }

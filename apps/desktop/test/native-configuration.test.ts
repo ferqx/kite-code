@@ -640,15 +640,8 @@ test('a still-running original POST cannot be used for continuation and no read 
   expect((await saving).phase).toBe('applied');
 });
 
-test('General model read and close preserve a healthy background queue observation through another accepted toggle', async () => {
+test('A healthy background queue keeps its observation through another accepted toggle', async () => {
   const f = continuationFixture();
-  const general = new NativeConfiguration(
-    f.client,
-    () => f.scope,
-    () => {},
-    undefined,
-    true,
-  );
   let resolve!: () => void;
   const flush = new Promise<void>((done) => {
     resolve = done;
@@ -665,11 +658,6 @@ test('General model read and close preserve a healthy background queue observati
         });
       if (input.method === 'settings.models.close') {
         f.reader.release();
-        return null;
-      }
-      if (input.method === 'settings.general.models.read') return general.read();
-      if (input.method === 'settings.general.models.close') {
-        general.release();
         return null;
       }
       throw Error('unexpected_test_request');
@@ -699,14 +687,6 @@ test('General model read and close preserve a healthy background queue observati
     expect(queue.getSnapshot().writing).toBe(true);
     expect(queue.getSnapshot().healthy).toBe(true);
     const own = f.reader.observation!;
-    const displayed = await bridge.request({
-      method: 'settings.general.models.read',
-      generation: 1,
-    });
-    expect(displayed).toMatchObject({ kind: 'settings.models', canWrite: false });
-    expect(f.reader.observation).toEqual(own);
-    await bridge.request({ method: 'settings.general.models.close', generation: 1 });
-    expect(f.reader.observation).toEqual(own);
     queue.toggle({
       method: 'settings.models.enabled',
       generation: 1,
@@ -730,79 +710,14 @@ test('General model read and close preserve a healthy background queue observati
   } finally {
     resolve();
     queue.detach(true);
-    general.release();
   }
 });
 
-test('General owns an independent readonly lease: closing it aborts only its GET, never the model continuation reader', async () => {
-  const f = continuationFixture();
-  const general = new NativeConfiguration(
-    f.client,
-    () => f.scope,
-    () => {},
-    undefined,
-    true,
-  );
-  const facts = await f.reader.read();
-  const saved = await f.reader.submit(facts.observationId, {
-    kind: 'enabled',
-    modelId: 'model-b',
-    enabled: false,
-  });
-  let resolve!: (value: ModelSettingsView) => void;
-  f.readGate = new Promise((done) => {
-    resolve = done;
-  });
-  const continuation = f.reader.read(saved.commandId);
-  const modelSignal = f.reads.at(-1)!.signal;
-  const displaying = general.read().catch((cause: unknown) => cause);
-  const generalSignal = f.reads.at(-1)!.signal;
-  expect(modelSignal === generalSignal).toBe(false);
-  general.release();
-  expect(generalSignal.aborted).toBe(true);
-  expect(modelSignal.aborted).toBe(false);
-  resolve(f.configuration);
-  expect((await continuation).canWrite).toBe(true);
-  expect(((await displaying) as Error).name).toBe('AbortError');
-  expect(f.reader.observation?.canWrite).toBe(true);
-  f.readGate = undefined;
-  const readOnly = await general.read();
-  expect(readOnly.canWrite).toBe(false);
-  expect(general.observation?.canWrite).toBe(false);
-  expect(() =>
-    general.submit(readOnly.observationId, { kind: 'enabled', modelId: 'model-b', enabled: true }),
-  ).toThrow('configuration_unavailable');
-  expect(f.writes).toHaveLength(1);
-  const modelObservation = f.reader.observation!;
-  await general.read();
-  expect(f.reader.observation).toEqual(modelObservation);
-});
-
-test('General closed IPC accepts no model write, scope, Store or continuation authority', () => {
-  for (const method of ['settings.general.models.read', 'settings.general.models.close'] as const) {
-    const request = { method, generation: 1 };
-    expect(decodeNativeRequest(request)).toEqual(request);
-    for (const injected of [
-      { scope: 'user' },
-      { storeId: 'store' },
-      { afterCommandId: 'old' },
-      { observationId: 1 },
-      { readOnly: false },
-      { readSet: base.readSet },
-    ])
-      expect(() => decodeNativeRequest({ ...request, ...injected })).toThrow(
-        'invalid_native_request',
-      );
-  }
-  expect(() =>
-    decodeNativeRequest({
-      method: 'settings.general.models.enabled',
-      generation: 1,
-      observationId: 1,
-      modelId: 'model-b',
-      enabled: true,
-    }),
-  ).toThrow('invalid_native_request');
+test('General IPC no longer admits model reads or writes', () => {
+  for (const method of ['read', 'close', 'enabled'])
+    expect(() =>
+      decodeNativeRequest({ method: `settings.general.models.${method}`, generation: 1 }),
+    ).toThrow('invalid_native_request');
 });
 
 test('Native model settings can disable the configured default and every model, then re-enable it without rewriting the default', async () => {

@@ -4,9 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type {
   NativeBridge,
-  NativeModelSettingsFacts,
   NativeRequest,
-  NativeSelection,
   NativeShellSettingsFacts,
 } from '../../src/native-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
@@ -52,35 +50,6 @@ function fixture() {
     },
   };
 }
-const facts: NativeModelSettingsFacts = {
-  kind: 'settings.models',
-  observationId: 1,
-  storeId: 'store',
-  scope: 'user',
-  canWrite: true,
-  errors: [],
-  defaultModelId: 'default',
-  selectedModelId: 'temporary',
-  models: [
-    {
-      id: 'default',
-      provider: 'compatible',
-      model: 'config-default',
-      enabled: true,
-      configured: true,
-      diagnostics: [],
-    },
-    {
-      id: 'temporary',
-      provider: 'other',
-      model: 'temporary-choice',
-      enabled: true,
-      configured: true,
-      diagnostics: [],
-    },
-  ],
-};
-
 test('General keeps the Windows Shell choice through failed preparation and updates it on confirmed retry', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];
@@ -97,7 +66,6 @@ test('General keeps the Windows Shell choice through failed preparation and upda
   const bridge = {
     async request(request: NativeRequest) {
       requests.push(request);
-      if (request.method === 'settings.general.models.read') return facts;
       if (request.method === 'settings.general.shell.read') {
         if (failInitialRead) {
           failInitialRead = false;
@@ -120,7 +88,6 @@ test('General keeps the Windows Shell choice through failed preparation and upda
           bridge={bridge}
           generation={1}
           storeId="store"
-          revision={0}
           editor="vscode"
           onEditorChange={() => {}}
           windowsShell={windowsShell}
@@ -188,54 +155,31 @@ test('General keeps the Windows Shell choice through failed preparation and upda
   }
 });
 
-test('retained General card reads the accurate configuration default and never shows a late other-Workspace or temporary choice', async () => {
-  const f = fixture(),
-    requests: NativeRequest[] = [],
-    editors: string[] = [];
-  let release!: (value: NativeModelSettingsFacts) => void;
-  const held = new Promise<NativeModelSettingsFacts>((resolve) => {
-    release = resolve;
-  });
-  let phase = 'user';
+test('General displays file preferences without reading model configuration', async () => {
+  const f = fixture();
+  const requests: NativeRequest[] = [];
+  const editors: string[] = [];
   const bridge = {
-    request: async (request: NativeRequest) => {
+    watch: () => () => {},
+    async request(request: NativeRequest) {
       requests.push(request);
-      if (request.method !== 'settings.general.models.read') return null;
-      if (phase === 'held') return held;
-      if (phase === 'error') throw Error('configuration_unavailable');
-      return phase === 'user'
-        ? facts
-        : {
-            ...facts,
-            defaultModelId: 'b',
-            models: [{ ...facts.models[0]!, id: 'b', model: 'workspace-b' }],
-          };
+      return null;
     },
-  } as NativeBridge;
-  const selection = (id: string, workspaceId: string, viewSelection: number) =>
-    ({ storeId: 'store', session: { id, workspaceId }, viewSelection }) as NativeSelection;
-  const render = (selection?: NativeSelection) =>
-    act(async () =>
+  } satisfies NativeBridge;
+  try {
+    await act(async () =>
       f.root.render(
         <NativeGeneralSettings
           bridge={bridge}
           generation={1}
-          storeId="store"
-          selection={selection}
-          revision={0}
           editor="vscode"
           onEditorChange={(value) => editors.push(value)}
         />,
       ),
     );
-  try {
-    await render();
-    expect(f.host.querySelector('.settings-value')!.textContent).toBe(
-      'compatible · config-default',
-    );
-    expect(f.host.textContent).not.toContain('temporary-choice');
-    expect(f.host.textContent).toContain('模型启停与连接配置请前往“提供商与模型”');
-    expect(f.host.textContent).toContain('全局默认请在 ~/.kite-code/kite-code.jsonc');
+    expect(f.host.textContent).toContain('默认文件打开位置');
+    expect(f.host.textContent).not.toContain('模型');
+    expect(f.host.querySelectorAll('.settings-row')).toHaveLength(1);
     const editor = f.host.querySelector('[role="combobox"][aria-label="默认编辑器"]')!;
     await act(async () => {
       editor.dispatchEvent(
@@ -252,27 +196,7 @@ test('retained General card reads the accurate configuration default and never s
       );
     });
     expect(editors).toEqual(['zed']);
-    phase = 'held';
-    await render(selection('a', 'wa', 1));
-    expect(f.host.querySelector('.settings-value')!.textContent).toBe('');
-    expect(f.host.querySelector('[aria-label="常规设置"]')?.getAttribute('aria-busy')).toBe('true');
-    phase = 'b';
-    await render(selection('b', 'wb', 2));
-    expect(f.host.querySelector('.settings-value')!.textContent).toBe('compatible · workspace-b');
-    await act(async () => release({ ...facts, scope: 'workspace', workspaceId: 'wa' }));
-    expect(f.host.querySelector('.settings-value')!.textContent).toBe('compatible · workspace-b');
-    phase = 'error';
-    await render();
-    expect(f.host.querySelector('.settings-value')!.textContent).toBe('读取失败');
-    expect(f.host.querySelector('[role="alert"]')!.textContent).toContain('当前默认模型不可读');
-    expect(
-      requests.every((request) =>
-        ['settings.general.models.read', 'settings.general.models.close'].includes(request.method),
-      ),
-    ).toBe(true);
-    expect(requests.filter((request) => request.method === 'settings.general.models.read')).toEqual(
-      Array.from({ length: 4 }, () => ({ method: 'settings.general.models.read', generation: 1 })),
-    );
+    expect(requests).toEqual([]);
   } finally {
     await f.close();
   }

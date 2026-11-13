@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import {
   nativeGlobalDialogEventChannel,
@@ -8,7 +9,9 @@ import {
 
 test('the isolated dialog preload exposes only its fixed decision bridge and rejects other payloads', async () => {
   const result = await Bun.build({
-    entrypoints: [new URL('../../electron/global-dialog-preload.ts', import.meta.url).pathname],
+    entrypoints: [
+      fileURLToPath(new URL('../../electron/global-dialog-preload.ts', import.meta.url)),
+    ],
     target: 'node',
     format: 'cjs',
     external: ['electron'],
@@ -53,6 +56,7 @@ test('the isolated dialog preload exposes only its fixed decision bridge and rej
     stop = bridge.watch((value) => values.push(value));
   const state = { requestId: 'one', kind: 'full-permission', language: 'zh', theme: 'light' };
   const workspace = { ...state, kind: 'workspace-removal', label: '<img src=x> My space' };
+  const provider = { ...state, kind: 'provider-removal', label: 'Fixture', modelCount: 2 };
   const quit = { ...state, kind: 'quit-active-work' };
   for (const value of [
     { ...state, kind: 'remote-html' },
@@ -62,6 +66,10 @@ test('the isolated dialog preload exposes only its fixed decision bridge and rej
     { ...workspace, label: 'x'.repeat(257) },
     { ...workspace, label: 1 },
     { ...workspace, html: '<script>' },
+    { ...provider, modelCount: -1 },
+    { ...provider, modelCount: 0.5 },
+    { ...provider, modelCount: '2' },
+    { ...provider, modelNames: ['unexpected'] },
     quit,
     { ...quit, label: 'unexpected' },
     { ...state, label: 'unexpected' },
@@ -71,8 +79,9 @@ test('the isolated dialog preload exposes only its fixed decision bridge and rej
   expect(values).toEqual([]);
   ipcRenderer.emit(nativeGlobalDialogStateChannel, {}, state);
   ipcRenderer.emit(nativeGlobalDialogStateChannel, {}, workspace);
+  ipcRenderer.emit(nativeGlobalDialogStateChannel, {}, provider);
   ipcRenderer.emit(nativeGlobalDialogStateChannel, {}, null);
-  expect(values).toEqual([state, workspace, null]);
+  expect(values).toEqual([state, workspace, provider, null]);
   stop();
   expect(ipcRenderer.listenerCount(nativeGlobalDialogStateChannel)).toBe(0);
 });
