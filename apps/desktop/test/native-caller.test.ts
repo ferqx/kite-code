@@ -30,6 +30,7 @@ import {
   nativeChannel,
 } from '../src/native-bridge';
 import type { NativeBrowserRestoreScope } from '../src/native-browser-bridge';
+import { nativePreviewLayoutChannel } from '../src/native-preview-layout-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
@@ -2667,8 +2668,8 @@ test('main IPC denies foreign/subframe senders and closed or oversized requests 
     calls = 0;
   const ipcMain = {
     handle(channel: string, value: typeof handler) {
-      expect(channel).toBe(nativeChannel);
-      handler = value;
+      expect([nativeChannel, nativePreviewLayoutChannel]).toContain(channel);
+      if (channel === nativeChannel) handler = value;
     },
     removeHandler() {},
   } as unknown as IpcMain;
@@ -4553,4 +4554,45 @@ test('local PDF submit uses Main content and original journal without uploading 
   } finally {
     await caller.close();
   }
+});
+
+test('dedicated preview geometry channel rejects foreign frames and cannot acknowledge a missing view or start caller', async () => {
+  const auth = authority();
+  const handlers = new Map<string, (event: IpcMainInvokeEvent, value: unknown) => unknown>();
+  let calls = 0;
+  const stop = registerNativeIpc({
+    ipcMain: {
+      handle(channel: string, handler: (event: IpcMainInvokeEvent, value: unknown) => unknown) {
+        handlers.set(channel, handler);
+      },
+      removeHandler(channel: string) {
+        handlers.delete(channel);
+      },
+    } as unknown as IpcMain,
+    window: () => auth.window,
+    rendererUrl: auth.frame.url,
+    caller: async () => {
+      calls++;
+      throw Error('must_not_start');
+    },
+  });
+  try {
+    const handle = handlers.get(nativePreviewLayoutChannel)!;
+    const request = { previewId: 'view', generation: 1, presentationRevision: 1, bounds: null };
+    expect(
+      handle(
+        { ...auth.event, senderFrame: { url: auth.frame.url } } as IpcMainInvokeEvent,
+        request,
+      ),
+    ).toEqual({ ok: false, code: 'native_sender_denied' });
+    expect(handle(auth.event, { ...request, path: '/private' })).toEqual({
+      ok: false,
+      code: 'invalid_preview_layout',
+    });
+    expect(handle(auth.event, request)).toEqual({ ok: false, code: 'preview_replaced' });
+    expect(calls).toBe(0);
+  } finally {
+    stop();
+  }
+  expect(handlers.size).toBe(0);
 });

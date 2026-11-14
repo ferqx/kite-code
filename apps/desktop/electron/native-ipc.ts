@@ -40,6 +40,11 @@ import {
   nativeModelPreferenceChannel,
 } from '../src/native-model-preference-bridge';
 import {
+  type NativePreviewLayoutReply,
+  nativePreviewLayoutChannel,
+  parseNativePreviewLayout,
+} from '../src/native-preview-layout-bridge';
+import {
   isOfficeEditContext,
   isOutputFileTarget,
   readOutputDraftFiles,
@@ -1611,6 +1616,27 @@ export function registerNativeIpc(options: {
     preview = undefined;
   };
 
+  const presentLayout = (event: IpcMainInvokeEvent, payload: unknown): NativePreviewLayoutReply => {
+    try {
+      assertNativeSender(event, options.window(), options.rendererUrl);
+      const request = parseNativePreviewLayout(payload);
+      if (!preview) throw Error('preview_replaced');
+      preview.present(request);
+      return { ok: true, value: { previewId: request.previewId, generation: request.generation } };
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'preview_layout_unavailable';
+      return {
+        ok: false,
+        code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'preview_layout_unavailable',
+      };
+    }
+  };
+  const presentLayoutSync = (event: Electron.IpcMainEvent, payload: unknown) => {
+    event.returnValue = presentLayout(event as unknown as IpcMainInvokeEvent, payload);
+  };
+  options.ipcMain.on?.(nativePreviewLayoutChannel, presentLayoutSync);
+  options.ipcMain.handle(nativePreviewLayoutChannel, presentLayout);
+
   options.ipcMain.handle(nativeChannel, async (event, payload: unknown): Promise<NativeReply> => {
     try {
       assertNativeSender(event, options.window(), options.rendererUrl);
@@ -1989,5 +2015,7 @@ export function registerNativeIpc(options: {
   return () => {
     closePreview();
     options.ipcMain.removeHandler(nativeChannel);
+    options.ipcMain.removeHandler(nativePreviewLayoutChannel);
+    options.ipcMain.off?.(nativePreviewLayoutChannel, presentLayoutSync);
   };
 }

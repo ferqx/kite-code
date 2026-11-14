@@ -51,6 +51,11 @@ import {
   nativeModelPreferenceChannel,
 } from '../src/native-model-preference-bridge';
 import {
+  nativePreviewLayoutChannel,
+  nativePreviewPresentationChannel,
+  readNativePreviewLayoutReply,
+} from '../src/native-preview-layout-bridge';
+import {
   type NativeTrajectoryFileBridge,
   type NativeTrajectoryFileReply,
   nativeTrajectoryFileChannel,
@@ -106,6 +111,22 @@ const bridge: NativeBridge &
     if (reply.value !== null && !isNativeBrowserState(reply.value))
       throw Error('invalid_browser_state');
     return reply.value;
+  },
+  presentPreviewLayout(input) {
+    readNativePreviewLayoutReply(ipcRenderer.sendSync(nativePreviewLayoutChannel, input), input);
+  },
+  async presentPreviewLayoutAsync(input) {
+    return readNativePreviewLayoutReply(
+      await ipcRenderer.invoke(nativePreviewLayoutChannel, input),
+      input,
+    );
+  },
+  subscribePreviewPresentation(listener) {
+    const receive = (_event: unknown, value: unknown) => {
+      if (value === true) listener();
+    };
+    ipcRenderer.on(nativePreviewPresentationChannel, receive);
+    return () => ipcRenderer.removeListener(nativePreviewPresentationChannel, receive);
   },
   presentBrowserLayout(input) {
     return readBrowserLayoutReply(

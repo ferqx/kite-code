@@ -3338,7 +3338,7 @@ Word 页导航与修改范围校验分离：原页身份、分页代际、顺序
 
 产物区只承担交付与整理状态：未进入整理且无已发布输出的 producer_failed 不重复展示步骤级错误，原工具轨迹及会话终态失败保留。此职责分离不判断步骤已恢复，不因同轮或其他轮成功文件隐藏未知结果、真实整理失败或过期提示。
 
-浏览器与文件预览共用 `native-content-observer` 的宿主布局观察/清理和 `native-content-layout` 的 CSS→原生坐标投影、向内裁剪与窗口/root resize、zoom、隐藏/恢复监听。零尺寸只隐藏预览及请求输入窗，不结束 pending 请求；关闭后迟到事件不能复活视图。浏览器导航、paint/lease 与侧栏预测布局仍独立，预览未接入侧栏 projection metadata，使用共享观察器的位置跟踪。预览独立 session、manifest 资源和权限拒绝策略不变。
+浏览器与文件预览共用 `native-content-observer` 的宿主布局观察/清理和 `native-content-layout` 的 CSS→原生坐标投影、向内裁剪与窗口/root resize、zoom、隐藏/恢复监听。零尺寸只隐藏预览及请求输入窗，不结束 pending 请求；关闭后迟到事件不能复活视图。侧栏约束测量和 resize 预测现复用同一纯几何模块，文件两入口通过独立带 revision 的呈现通道提交；具体同步移动、恢复与帧准入见下文“原生内容布局复用”。浏览器导航与控制租约、预览独立 session、manifest 资源和权限拒绝策略不变。
 
 PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-preview` WebContentsView 中显示；不用浏览器 PDF 插件。Word、PPT、PDF 共用受信页栏布局：宽屏常显、窄屏细线 hover/focus 浮层，正文缩放不改变页栏尺寸。PDF 使用独立选区描述与可信备注输入，不伪装 Office 原生文字路径或直接编辑 PDF；具体提交与验证边界见下文“PDF 标注候选”。页请求串行、可取消，最多500页，PNG与文字层共同受单页8MiB、当前预览累计256MiB预算约束，失败保留页内错误而不伪造空白成功。
 
@@ -3365,3 +3365,13 @@ PDF.js 固定资产提供与 PNG 同视口的有界文字几何。Desktop 用透
 2026-11-14，独立客户端与正式 Service 的回环 mock 验收已完成两条入口：本地中文文字选区与真正 image-only 扫描 PDF 区域经 Enter 提交后各自 completed；源文件变更使预览和输入自动关闭，未新增 run，100%→200% 缩放及切页清除旧选区。另经正式 Shell 与 collector 生成的产物 PDF，文字和区域请求分别经 Enter 提交并 completed，fileId、源 SHA-256 与附件摘要一致。最新冷构建确认扫描页 empty 文案及空占位行已移除，区域请求仍可打开并取消而不产生新 run。证据为本阶段 `pdf-local-mock-v29/safe-summary.json` 与后续 `pdf-output-mock-final/safe-summary.json`；后者补齐前者当时未完成的产物入口和新提示版本。外部模型请求为0，这证明提交链与上述交互，不证明 PDF 编辑正确率或真实模型成功率；unknown 结果与切会话尚未在这次 GUI 中实测，完整结构化上下文的消息展示限制继续保留。
 
 本地 PDF 提交在 journal 准备读取结束、持久化之前再次核对 Main 持有的源权限与摘要；校验失败不产生 journal 行或派发，冷重开不会重放该拒绝请求。已有 unknown 行仍保留且不自动重试。PDF 图片加载与文字层抵达共用状态计算，两种顺序都对 empty 隐藏无文字占位文案及空占位行，保留页／区域操作；unavailable 仍显示简短限制提示，图片读取失败独立显示。
+
+### 原生内容布局复用
+
+浏览器与产物／本地文件预览共用 `native-content-geometry` 的约束校验及投影、`native-content-measurement` 的祖先裁剪／可见性／面板测量和既有 observer。浏览器兼容导出保持；文件两入口使用同一 `native-preview-presentation`，ready 后初次与拖动／侧栏动画同步呈现，稳定测量单个异步请求在途并合并末值，隐藏以递增 revision 撤回，恢复通知重新测量。位置 RAF 暂保留并去重，未以模块抽取冒充动画实机资格。几何通道不携文件路径或内容，也不共享浏览器 session／grant；文件授权、源摘要、generation 与 previewId 仍由各自 owner 复核。正文缩放与宿主窗口几何分离。
+
+Main 的共享原生帧辅助层仅负责帧订阅、匹配与 abort 生命周期；各 owner 继续决定初帧何时可显示、保留画面何时退休及当前身份是否有效，不通过共用辅助层转移浏览器控制权或文件访问权。
+
+Preview 初次呈现须有当前身份的几何准入与有效原生帧；恢复时先等待唤醒重测和有效帧，再显示。真实帧异常 `preview_paint_failed` 由 Main 标为当前预览终态，Renderer 仅提示一次“预览绘制失败，请关闭后重新打开。”，停止该呈现器后续正向尝试，不自动重开文件；正常取消、旧身份及过期几何不冒充绘制失败，清理仍撤回并释放监听。Root 遮挡、Windows 临时帧节流以及旧画面退休由 Main owner 保留，不由共享几何或帧辅助函数授予权限。本阶段独立冷构建的真实 Electron Main／Renderer／Service 已验证 PDF 与浏览器的窗口 resize、面板及导航拖动、侧栏动画、宿主缩放、最小化恢复；另核 PDF 正文100%／200%缩放与工具栏分离、网页按钮命中及 PDF 选文、临时祖先裁剪约束，松开拖动后立即切换并关闭 PDF 未留下其 WebContents 或迟到复活。该轮范围仅 PDF 与浏览器，不单凭此轮推导 Word／Excel／PPT 资格；0外部模型，未改原文件，已有 run 保持。证据归 `shared-layout-cold`。稳定末态边界约在1 CSS像素内；跨进程采样并不同步，瞬态出现原生预测领先旧DOM及浏览器拖动约2帧／12px差异，不能据此宣称逐帧零间隙、零闪烁或操作系统全屏命中资格。窗口缩小关闭未发送的 PDF 备注是本次观察事实，用户已确认接受，未保留重锚或自动恢复草稿的额外改动。
+
+后续 `shared-layout-office-v33/safe-summary.json` 补齐 Word／Excel／PPT 的独立冷读过程：每格式48步连续窗口 resize、两组各20步面板／导航拖动、侧栏动画与关闭，原文件摘要均未变，模型请求为0，关闭后无剩余该预览。每格式43个可见同步呈现 revision 均在同一次 Main IPC 回调、产品 listener 执行后采样，实际原生矩形与正式共享约束投影及向内整数化结果43／43完全一致。这是同步通道的同 revision 几何证明，不含异步稳定通道的同版本采样；`event.returnValue` 不可读，未取得独立 ACK 捕获，也不保证显示合成器逐帧零延迟或零闪烁。此前浏览器／PDF 的独立采样结果及局限继续保留，不混成同一时钟的全帧证明。

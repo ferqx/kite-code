@@ -2,8 +2,8 @@ import type { OutputFileTarget } from '@kite-ai/client';
 import { Button, type OutputFileSummary } from '@kite-ai/ui/desktop';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
-import { observeNativeContent } from './native-content-observer';
 import { NativeExcelReadonlyBar, NativeOfficeToolbar } from './native-office-toolbar';
+import { presentNativePreview } from './native-preview-presentation';
 import type {
   OfficeEditContext,
   OfficePreviewControl,
@@ -195,6 +195,13 @@ function FilePreview(props: Props) {
         reading = false;
       }
     };
+    const presentation = presentNativePreview(
+      viewport.current!,
+      bridge,
+      props.generation,
+      previewId,
+      setStatus,
+    );
     void bridge
       .request({
         method: 'outputs.preview.open',
@@ -210,8 +217,8 @@ function FilePreview(props: Props) {
           'kind' in result &&
           result.kind === 'outputs.preview' &&
           result.status === 'ready';
-        if (ready) syncBounds(true);
         setStatus(ready ? '' : '文件已保存，暂时无法预览');
+        if (ready) presentation.ready();
         if (ready && (isOffice || isPdf)) {
           await bridge
             .request({
@@ -232,38 +239,11 @@ function FilePreview(props: Props) {
               : '文件已保存，暂时无法预览',
           );
       });
-    let lastBounds = '';
-    const syncBounds = (force = false) => {
-      if (cancelled) return;
-      const next = bounds();
-      const key = JSON.stringify(next);
-      if (!force && key === lastBounds) return;
-      lastBounds = key;
-      void bridge
-        .request({
-          method: 'outputs.preview.bounds',
-          generation: props.generation,
-          previewId,
-          bounds: next,
-        })
-        .catch(() => {
-          // A pending/replaced host may reject; the ready handoff resends once.
-          // Do not turn a rejected geometry into a per-frame retry loop.
-        });
-    };
-    // Preview lacks browser sidebar projection metadata; track position-only transitions
-    // through the shared observer while still suppressing unchanged geometry IPC.
-    const unobserve = observeNativeContent(
-      viewport.current!,
-      () => syncBounds(),
-      () => syncBounds(),
-      true,
-    );
     const timer = setInterval(() => void read(), 200);
     return () => {
       cancelled = true;
       clearInterval(timer);
-      unobserve();
+      presentation.dispose();
       if (preview.current === previewId) preview.current = undefined;
       void bridge
         .request({ method: 'outputs.preview.close', generation: props.generation, previewId })

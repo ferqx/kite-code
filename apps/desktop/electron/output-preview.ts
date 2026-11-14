@@ -13,6 +13,16 @@ import {
 import type { OutputFileSummary, OutputFileTarget } from '@kite-ai/client';
 import { protocol, session, WebContentsView } from 'electron';
 import { filePreviewFormat } from '../src/file-preview-format';
+import {
+  assertPanelMeasurement,
+  type NativeBrowserBounds,
+  type NativeBrowserLayout,
+  projectNativeBrowserLayout,
+} from '../src/native-content-geometry';
+import {
+  type NativePreviewLayoutRequest,
+  nativePreviewPresentationChannel,
+} from '../src/native-preview-layout-bridge';
 import type {
   OfficeEditContext,
   OfficeInlineRequest,
@@ -20,6 +30,7 @@ import type {
 } from '../src/output-files-bridge';
 import { officeSelectionLabel } from '../src/output-files-bridge';
 import { nativeContentBounds, watchNativeContentWindow } from './native-content-layout';
+import { waitForNativeFrame } from './native-frame-readiness';
 import { addNativeWindowView, focusNativeWindowContent } from './native-overlay-layer';
 import { NativeProcessOwner } from './native-processes';
 import { getNativeRootView, type NativeRootWindow } from './native-root-window';
@@ -79,6 +90,10 @@ export class NativeOutputPreview {
     localHandleId?: string;
     bounds: Bounds;
     nativeBounds?: Bounds;
+    presentationRevision: number;
+    presentationError?: string;
+    presentation?: { bounds: NativeBrowserBounds; layout?: NativeBrowserLayout };
+    projection?: { bounds: NativeBrowserBounds; layout: NativeBrowserLayout };
     sourceHash?: string;
     pdf?: boolean;
     pdfPageCount?: number;
@@ -134,6 +149,7 @@ export class NativeOutputPreview {
       window: input.window,
       localHandleId: input.localHandleId,
       pending: true,
+      presentationRevision: 0,
       check: input.check,
     } as NonNullable<NativeOutputPreview['active']>;
     this.active = active;
@@ -449,6 +465,130 @@ export class NativeOutputPreview {
       view.webContents.on('will-redirect', (event) => event.preventDefault());
       view.webContents.on('will-attach-webview', (event) => event.preventDefault());
       let drawable = false;
+      let contentReady = false;
+      type PreviewPaint = { controller: AbortController; stop?: () => void; restore?: () => void };
+      let paint: PreviewPaint | undefined;
+      const cancelPaint = () => {
+        const job = paint;
+        paint = undefined;
+        job?.controller.abort();
+        job?.stop?.();
+        job?.restore?.();
+      };
+      const covered = () => {
+        const root = getNativeRootView(input.window);
+        const [width = 0, height = 0] = input.window.getContentSize();
+        const children = input.window.contentView.children;
+        return (
+          !!root &&
+          root.getVisible() &&
+          ['x', 'y', 'width', 'height'].every(
+            (key) =>
+              Reflect.get(root.getBounds(), key) ===
+              Reflect.get({ x: 0, y: 0, width, height }, key),
+          ) &&
+          children.indexOf(view) >= 0 &&
+          children.indexOf(view) < children.indexOf(root)
+        );
+      };
+      const prepareFrame = () => {
+        if (
+          paint ||
+          drawable ||
+          active.presentationError ||
+          !contentReady ||
+          !active.nativeBounds ||
+          !active.presentation ||
+          !input.window.isVisible() ||
+          input.window.isMinimized()
+        )
+          return;
+        const root = getNativeRootView(input.window);
+        if (!root) return;
+        const contents = view.webContents,
+          frame = contents.mainFrame,
+          rootFrame = input.window.webContents.mainFrame,
+          bounds = { ...active.nativeBounds },
+          job = { controller: new AbortController() } as PreviewPaint;
+        paint = job;
+        const currentPaint = () => {
+          if (
+            paint !== job ||
+            this.active !== active ||
+            active.abort.signal.aborted ||
+            job.controller.signal.aborted ||
+            input.window.isDestroyed() ||
+            contents.isDestroyed() ||
+            input.window.webContents.isDestroyed() ||
+            !input.window.isVisible() ||
+            input.window.isMinimized() ||
+            !active.presentation ||
+            contents.mainFrame !== frame ||
+            input.window.webContents.mainFrame !== rootFrame ||
+            JSON.stringify(active.nativeBounds) !== JSON.stringify(bounds) ||
+            !covered()
+          )
+            return false;
+          try {
+            active.check?.();
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        void (async () => {
+          try {
+            const children = input.window.contentView.children;
+            addNativeWindowView(input.window, view, children.indexOf(root));
+            if (!currentPaint()) throw Error('preview_paint_cancelled');
+            if (process.platform === 'win32') {
+              const before = contents.getBackgroundThrottling();
+              job.restore = () => {
+                job.restore = undefined;
+                if (!contents.isDestroyed()) contents.setBackgroundThrottling(before);
+              };
+              contents.setBackgroundThrottling(false);
+            }
+            view.setVisible(true);
+            await waitForNativeFrame({
+              contents,
+              bounds,
+              signal: job.controller.signal,
+              cancelled: Error('preview_paint_cancelled'),
+              current: currentPaint,
+              cancel: () => job.controller.abort(),
+              setStop: (stop) => {
+                job.stop = stop;
+              },
+              ownsStop: (stop) => job.stop === stop,
+            });
+            if (!currentPaint()) throw Error('preview_paint_cancelled');
+            drawable = true;
+            paint = undefined;
+            addNativeWindowView(
+              input.window,
+              view,
+              input.window.contentView.children.indexOf(root),
+            );
+            sync();
+          } catch (error) {
+            const failed =
+              currentPaint() &&
+              !(error instanceof Error && error.message === 'preview_paint_cancelled');
+            if (paint === job) {
+              paint = undefined;
+              if (!contents.isDestroyed()) view.setVisible(false);
+              if (failed) {
+                active.presentationError = 'preview_paint_failed';
+                if (!input.window.webContents.isDestroyed())
+                  input.window.webContents.send(nativePreviewPresentationChannel, true);
+              }
+            }
+          } finally {
+            job.restore?.();
+          }
+        })();
+      };
       const sync = () => {
         if (
           this.active !== active ||
@@ -458,37 +598,72 @@ export class NativeOutputPreview {
         )
           return;
         const [width = 0, height = 0] = input.window.getContentSize();
-        const next = nativeContentBounds(
-          active.bounds,
-          input.window.webContents.getZoomFactor(),
-          width,
-          height,
-        );
+        const zoom = input.window.webContents.getZoomFactor();
+        const anchor = active.projection ?? active.presentation;
+        const projected =
+          anchor?.layout &&
+          projectNativeBrowserLayout(anchor.bounds, anchor.layout, width / zoom, height / zoom);
+        if (projected) active.projection = projected;
+        const cssBounds = anchor?.layout ? projected?.bounds : anchor?.bounds;
+        const next = cssBounds && nativeContentBounds(cssBounds, zoom, width, height);
         active.nativeBounds = next;
         if (next) {
           const previous = view.getBounds();
-          if (JSON.stringify(previous) !== JSON.stringify(next)) view.setBounds(next);
+          if (JSON.stringify(previous) !== JSON.stringify(next)) {
+            cancelPaint();
+            view.setBounds(next);
+          }
           active.request?.view.bounds(next);
+          view.setBorderRadius(
+            Math.floor(
+              Math.min(
+                Math.round((cssBounds?.radius ?? 0) * zoom),
+                next.width / 2,
+                next.height / 2,
+              ),
+            ),
+          );
         }
         const visible =
           !!next && drawable && input.window.isVisible() && !input.window.isMinimized();
-        view.setVisible(visible);
+        if (!next) cancelPaint();
+        if (!(paint && covered())) view.setVisible(visible);
         active.request?.view.visible(visible);
+        if (next && !drawable) prepareFrame();
       };
       const hide = () => {
         if (this.active !== active || active.abort.signal.aborted || view.webContents.isDestroyed())
           return;
+        cancelPaint();
+        drawable = false;
+        active.presentation = undefined;
+        active.projection = undefined;
         view.setVisible(false);
         active.request?.view.visible(false);
       };
+      const resume = () => {
+        hide();
+        if (!input.window.webContents.isDestroyed())
+          input.window.webContents.send(nativePreviewPresentationChannel, true);
+      };
       const dispose = watchNativeContentWindow(input.window, getNativeRootView(input.window), {
         resize: sync,
-        hide,
-        minimize: hide,
-        show: sync,
-        restore: sync,
+        hide: () => {
+          if (!input.window.isVisible() || input.window.isMinimized()) hide();
+        },
+        minimize: () => {
+          if (input.window.isMinimized()) hide();
+        },
+        show: resume,
+        restore: resume,
       });
-      active.layout = { sync, dispose };
+      active.layout = {
+        sync,
+        dispose: () => {
+          cancelPaint();
+          dispose();
+        },
+      };
       sync();
       addNativeWindowView(input.window, view);
       await view.webContents.loadURL(`${origin}/${entry}`);
@@ -519,7 +694,7 @@ export class NativeOutputPreview {
         }
       }
       current();
-      drawable = true;
+      contentReady = true;
       sync();
       return { kind: 'outputs.preview' as const, status: 'ready' as const };
     } catch (error) {
@@ -864,6 +1039,38 @@ export class NativeOutputPreview {
     for (const cached of this.cache.values())
       void rm(cached.directory, { recursive: true, force: true }).catch(() => {});
     this.cache.clear();
+  }
+  /** Trusted Root geometry commits, ordered independently of async conversion or page reads. */
+  present(request: NativePreviewLayoutRequest) {
+    const active = this.active;
+    if (
+      !active ||
+      active.id !== request.previewId ||
+      active.generation !== request.generation ||
+      active.abort.signal.aborted
+    )
+      throw Error('preview_replaced');
+    active.check?.();
+    if (request.bounds && active.presentationError) throw Error(active.presentationError);
+    if (request.presentationRevision <= active.presentationRevision)
+      throw Error('preview_layout_stale');
+    let presentation: typeof active.presentation;
+    if (request.bounds && active.window.isVisible() && !active.window.isMinimized()) {
+      const [width = 0, height = 0] = active.window.getContentSize();
+      const zoom = active.window.webContents.getZoomFactor();
+      try {
+        if (request.layout)
+          assertPanelMeasurement(request.bounds, request.layout, width / zoom, height / zoom);
+      } catch {
+        throw Error('preview_layout_stale');
+      }
+      presentation = { bounds: { ...request.bounds }, layout: structuredClone(request.layout) };
+    }
+    // Reject a mixed old-DOM/new-window measurement before changing the last coherent anchor.
+    active.presentationRevision = request.presentationRevision;
+    active.presentation = presentation;
+    active.projection = undefined;
+    active.layout?.sync();
   }
   bounds(id: string, bounds: Bounds) {
     const active = this.active;

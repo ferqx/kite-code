@@ -2,8 +2,8 @@ import type { SessionFileTarget } from '@kite-ai/ui/desktop';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { filePreviewFormat } from './file-preview-format';
 import type { NativeBridge } from './native-bridge';
-import { observeNativeContent } from './native-content-observer';
 import { NativeOfficeToolbar } from './native-office-toolbar';
+import { presentNativePreview } from './native-preview-presentation';
 import type { LocalOfficeRequest, OfficeRequestOutcome } from './output-files-bridge';
 
 type Target = Extract<SessionFileTarget, { kind: 'local-preview' }>;
@@ -33,7 +33,6 @@ export function NativeLocalFilePreview({
   useLayoutEffect(() => {
     if (!bridge || !viewport.current) return;
     let cancelled = false;
-    let lastBounds = '';
     let revoked = false;
     let checking = false;
     let ready = false;
@@ -54,16 +53,13 @@ export function NativeLocalFilePreview({
         height: Math.max(0, rect.height),
       };
     };
-    const sync = (force = false) => {
-      if (cancelled || revoked) return;
-      const next = bounds();
-      const key = JSON.stringify(next);
-      if (!force && lastBounds === key) return;
-      lastBounds = key;
-      void bridge
-        .request({ method: 'outputs.preview.bounds', generation, previewId, bounds: next })
-        .catch(() => {});
-    };
+    const presentation = presentNativePreview(
+      viewport.current!,
+      bridge,
+      generation,
+      previewId,
+      setIssue,
+    );
     setStatus('正在读取文件…');
     setIssue('');
     void bridge
@@ -84,7 +80,7 @@ export function NativeLocalFilePreview({
         ) {
           setStatus('');
           ready = true;
-          sync(true);
+          presentation.ready();
         } else setStatus('文件暂时无法预览');
       })
       .catch((error: unknown) => {
@@ -107,12 +103,6 @@ export function NativeLocalFilePreview({
                   : '文件读取或预览失败，请重试',
         );
       });
-    const unobserve = observeNativeContent(
-      viewport.current,
-      () => sync(),
-      () => sync(),
-      true,
-    );
     const settle = async (requestId: string) => {
       const value = outcomes.get(requestId);
       if (!value || value.settled || value.settling || value.attempts >= 3 || cancelled || revoked)
@@ -218,7 +208,7 @@ export function NativeLocalFilePreview({
       clearInterval(timer);
       clearInterval(requestTimer);
       if (preview.current === previewId) preview.current = undefined;
-      unobserve();
+      presentation.dispose();
       // Switching tabs unmounts this view but must not revoke the tab's read-only handle.
       void bridge
         .request({ method: 'outputs.preview.close', generation, previewId })

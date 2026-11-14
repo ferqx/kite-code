@@ -74,6 +74,10 @@ import type {
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeModelPreferenceBridge } from './native-model-preference-bridge';
+import type {
+  NativePreviewLayoutIdentity,
+  NativePreviewLayoutRequest,
+} from './native-preview-layout-bridge';
 import type { NativeTraceRequest, NativeTraceResult } from './native-trace-bridge';
 import type { NativeTrajectoryFileBridge } from './native-trajectory-file-bridge';
 import type {
@@ -1175,6 +1179,11 @@ export type NativeResult =
   | null;
 export type NativeReply = { ok: true; value: NativeResult } | { ok: false; code: string };
 export interface NativeBridge {
+  presentPreviewLayout?(input: NativePreviewLayoutRequest): void;
+  presentPreviewLayoutAsync?(
+    input: NativePreviewLayoutRequest,
+  ): Promise<NativePreviewLayoutIdentity>;
+  subscribePreviewPresentation?(listener: () => void): () => void;
   readonly trajectoryFiles?: NativeTrajectoryFileBridge;
   fileReferences?(files: readonly File[]): readonly { name: string; uri: string }[];
   request(input: NativeRequest): Promise<NativeResult>;

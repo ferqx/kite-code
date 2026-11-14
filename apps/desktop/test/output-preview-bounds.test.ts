@@ -34,7 +34,8 @@ test('pending conversion retains latest bounds for the eventual native view', ()
   preview.bounds('old', initial);
   assert.equal(preview.active.bounds.x, 700);
   // Guard the exact initialization site that previously reused input.bounds.
-  assert.match(source, /nativeContentBounds\(\s*active\.bounds/);
+  assert.match(source, /nativeContentBounds\(cssBounds/);
+  assert.match(source, /active\.projection \?\? active\.presentation/);
   assert.doesNotMatch(source, /view\.setBounds\(input\.bounds\)/);
   const applied: Rect[] = [];
   preview.active.layout = { sync: () => applied.push(preview.active!.bounds) };
@@ -52,12 +53,14 @@ test('native view remains hidden until load, interaction install and initial con
     'const initialControls = input.initialControls ?? []',
     'for (const command of initialControls)',
     'officeInteractionControlScript(command)',
-    'drawable = true;',
+    'contentReady = true;',
     "return { kind: 'outputs.preview' as const, status: 'ready' as const }",
   ].map((step) => source.indexOf(step));
   assert.ok(steps.every((position) => position >= 0));
   for (let i = 1; i < steps.length; i++) assert.ok(steps[i]! > steps[i - 1]!);
-  assert.match(source, /current\(\);\s*drawable = true;\s*sync\(\)/);
+  assert.match(source, /current\(\);\s*contentReady = true;\s*sync\(\)/);
+  assert.match(source, /await waitForNativeFrame/);
+  assert.match(source, /if \(!currentPaint\(\)\) throw Error/);
   assert.equal(source.match(/drawable = true;/g)?.length, 1);
   assert.match(source, /this.active !== active \|\|/);
   assert.match(source, /active\.layout\?\.dispose\(\)/);
