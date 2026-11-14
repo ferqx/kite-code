@@ -10,6 +10,7 @@ import {
   Globe02Icon,
   Image02Icon,
   Search01Icon,
+  Shield01Icon,
   ShieldAlertIcon,
   ShieldCheckIcon,
   TerminalIcon,
@@ -19,7 +20,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
-import { ChildAgentIcon } from './ApprovalHeader';
+import { ChildAgentIcon, childAgentAppearance } from './ApprovalHeader';
 import {
   CodeBlock,
   CodeBlockActions,
@@ -43,7 +44,7 @@ import {
 } from './components/ui/trace';
 import { DeferredProcessContent } from './DeferredProcessContent';
 import { useDesktopDiagnostics } from './diagnostics';
-import { FileDiff } from './FileChanges';
+import { diffFileName, FileDiff, FileDiffCounts } from './FileChanges';
 import { cn } from './lib/utils';
 import { statusLabel } from './status';
 import type { Message } from './types';
@@ -86,6 +87,8 @@ function toolTitle(message: Message): string {
     message.decisionRefresh
   )
     return label;
+  if (message.toolName === 'edit_file' && message.status === 'completed' && message.changeConfirmed)
+    return '已编辑';
   if (message.toolName === 'browser_execute') return '已完成浏览器操作';
   return /^(读取|写入|修改|查找|列出|加载|运行|查看|搜索|使用|请求|更新|编写|创建|继续|调用|询问)/.test(
     label,
@@ -188,6 +191,10 @@ function shellOperation(message: Message): NonNullable<Message['shell']>['operat
   );
 }
 
+function isShellExecution(message: Message): boolean {
+  return isShellMessage(message) && shellOperation(message) === 'execute';
+}
+
 function shellCommand(message: Message): string | undefined {
   if (message.shell) return message.shell.command;
   if (typeof message.arguments?.command === 'string') return message.arguments.command;
@@ -205,41 +212,15 @@ function shellTitle(message: Message): string {
     wait: '等待命令',
     stop: '停止命令',
   }[operation];
-  if (executionUnconfirmed(message) || message.status === undefined) return action;
-  if (message.status === 'unknown') return '结果未知';
-  if (message.status === 'completed' && message.shell?.jobStatus === 'outcome_unknown')
-    return '命令结果未知';
-  if (message.status === 'completed' && message.shell?.jobStatus === 'failed')
-    return operation === 'execute' ? '已运行' : '命令失败';
   if (
-    operation === 'execute' &&
-    (message.shell?.timedOut || message.toolResult?.terminationReason === 'timed_out')
-  )
-    return '运行超时';
-  if (message.status === 'completed' && operation === 'wait' && message.shell?.timedOut)
-    return '等待超时';
-  if (
-    stoppedDuringAutoCheck(message) ||
-    (message.approval?.state === 'cancelled' && message.dispatchCommitted === false) ||
+    message.dispatchCommitted === false ||
     message.approval?.state === 'rejected' ||
-    (automaticChecking(message) && !message.settled) ||
-    message.approval?.state === 'awaiting_user'
+    message.toolResult?.terminationReason === 'timed_out' ||
+    message.shell?.timedOut ||
+    message.shell?.jobStatus === 'outcome_unknown'
   )
     return action;
-  if (message.status === 'not_executed') return executionLabel(message, false) || action;
-  if (message.status === 'queued') return '等待执行';
-  if (message.status === 'failed')
-    return {
-      execute: '已运行',
-      launch: '启动失败',
-      read: '读取失败',
-      wait: '等待失败',
-      stop: '停止请求失败',
-    }[operation];
-  if (message.status === 'cancelled')
-    return operation === 'execute' && (!message.shell || message.shell.jobStatus === 'cancelled')
-      ? '已停止'
-      : '操作已取消';
+  if (operation === 'execute' && message.status === 'failed') return '已运行';
   if (
     message.status === 'completed' &&
     message.shell &&
@@ -256,15 +237,7 @@ function shellTitle(message: Message): string {
       wait: '已等待命令',
       stop: '已请求停止',
     }[operation];
-  return message.status === 'running'
-    ? {
-        execute: '运行中',
-        launch: '正在启动',
-        read: '正在读取输出',
-        wait: '正在等待命令',
-        stop: '正在请求停止',
-      }[operation]
-    : action;
+  return action;
 }
 
 function toolTarget(message: Message): string | undefined {
@@ -349,19 +322,33 @@ function hasToolIssue(message: Message): boolean {
   );
 }
 
+function needsResultDetails(message: Message): boolean {
+  return (
+    hasToolIssue(message) ||
+    message.status === 'cancelled' ||
+    message.status === 'not_executed' ||
+    message.fileMissing === true
+  );
+}
+
 /** Keep complete error material behind the item's own disclosure without repeating shared text. */
-function toolDetailText(message: Message, includeProgress = false): string {
+function toolDetailText(message: Message): string {
   const parts: string[] = [];
   for (const value of [
-    hasToolIssue(message) &&
+    needsResultDetails(message) &&
     !(message.approval?.source === 'auto' && message.approval.state === 'approved')
       ? message.approval?.reason
       : undefined,
-    message.toolResult?.stderr ?? (includeProgress ? message.toolProgress?.stderr : undefined),
-    message.toolResult?.stdout ?? (includeProgress ? message.toolProgress?.stdout : undefined),
+    message.toolResult?.stderr,
+    message.toolResult?.stdout,
     message.text,
   ]) {
-    if (!value?.trim() || parts.some((part) => part.includes(value))) continue;
+    if (
+      !value?.trim() ||
+      value.trim() === message.decisionRefresh ||
+      parts.some((part) => part.includes(value))
+    )
+      continue;
     for (let index = parts.length - 1; index >= 0; index--)
       if (value.includes(parts[index]!)) parts.splice(index, 1);
     parts.push(value);
@@ -514,23 +501,16 @@ function activityLabel(messages: readonly Message[]): string {
   return [...new Set(messages.map((message) => activityAction(message)))].join('');
 }
 
-function toolTraceLabel(message: Message, running = false): string {
-  const shell = isShellMessage(message);
-  if (running) return `正在${shell ? activityAction(message, true) : toolActionTitle(message)}`;
+function toolTraceLabel(message: Message): string {
   if (message.fileCreated) return '已创建文件';
-  if (toolTextFailed(message)) {
-    if (!shell) return toolActionTitle(message);
-    if (shellOperation(message) === 'execute' && message.shell?.jobStatus === 'failed')
-      return '已运行命令';
-    return activityAction(message, true);
-  }
-  return shell ? shellTitle(message) : toolTitle(message);
+  if (isShellMessage(message)) return shellTitle(message);
+  return toolTextFailed(message) ? toolActionTitle(message) : toolTitle(message);
 }
 
-export function toolTraceTitle(message: Message, running = false): string {
+export function toolTraceTitle(message: Message): string {
   const shell = isShellMessage(message);
   const target = toolTarget(message) ?? (shell ? shellCommand(message) : undefined);
-  return [toolTraceLabel(message, running), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
+  return [toolTraceLabel(message), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
     .filter(Boolean)
     .join(' ');
 }
@@ -543,10 +523,7 @@ export function completedToolActions(messages: readonly Message[]): string {
   const actions = new Set<string>();
   for (const message of messages) {
     // A finite Shell process can exit unsuccessfully and still have run.
-    const ran =
-      isShellMessage(message) &&
-      shellOperation(message) === 'execute' &&
-      message.shell?.jobStatus === 'failed';
+    const ran = isShellExecution(message) && message.shell?.jobStatus === 'failed';
     if ((message.status === 'completed' || ran) && message.dispatchCommitted !== false)
       actions.add(`已${activityAction(message, true)}`);
   }
@@ -611,13 +588,6 @@ function approvalLabel(message: Message): string | undefined {
   }
 }
 
-function approvalIcon(message: Message) {
-  if (message.approval?.state === 'approved') return ShieldCheckIcon;
-  if (message.approval?.source === 'auto' && message.approval.state === 'rejected')
-    return ShieldAlertIcon;
-  return undefined;
-}
-
 function ToolApproval({
   message,
   label,
@@ -630,13 +600,9 @@ function ToolApproval({
   summaryFocused?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const icon = approvalIcon(message);
-  if (!icon)
-    return (
-      <span className="tool-approval" role="status">
-        {label}
-      </span>
-    );
+  const approved = message.approval?.state === 'approved';
+  const autoRejected = message.approval?.source === 'auto' && message.approval.state === 'rejected';
+  const icon = approved ? ShieldCheckIcon : autoRejected ? ShieldAlertIcon : Shield01Icon;
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip open={open || summaryFocused} onOpenChange={setOpen}>
@@ -644,9 +610,8 @@ function ToolApproval({
           <span
             className={cn(
               'tool-approval tool-approval-icon',
-              message.approval?.state === 'approved'
-                ? 'tool-approval-approved'
-                : 'tool-approval-rejected',
+              approved && 'tool-approval-approved',
+              autoRejected && 'tool-approval-rejected',
             )}
             role="img"
             aria-label={label}
@@ -814,52 +779,42 @@ function ShellOutput({
     shell?.truncated ||
     (result?.totalLines !== undefined && result.totalLines > lineCount(stdout) + lineCount(stderr));
   const stoppedBeforeExecution = stoppedDuringAutoCheck(message);
-  const reason =
-    message.approval?.state === 'rejected' || message.approval?.state === 'awaiting_user'
-      ? message.approval.reason
-      : undefined;
+  const showFailure =
+    needsResultDetails(message) ||
+    shell?.jobStatus === 'failed' ||
+    shell?.jobStatus === 'outcome_unknown';
+  const failure = stoppedBeforeExecution
+    ? '任务在自动审批期间停止，命令未开始执行。'
+    : showFailure
+      ? toolDetailText({
+          ...message,
+          toolResult: undefined,
+          text: shell?.failureReason ?? message.text,
+        })
+      : '';
   let output: string;
-  if (stoppedBeforeExecution) output = '任务在自动审批期间停止，命令未开始执行。';
+  if (shell?.output !== undefined) output = shell.output;
+  else if (streams) output = streams;
+  else if (showFailure || stoppedBeforeExecution) output = '';
   else if (shell) {
-    if (streams) {
-      const detail =
-        hasToolIssue(message) ||
-        reason ||
-        shell.jobStatus === 'outcome_unknown' ||
-        shell.jobStatus === 'failed'
-          ? toolDetailText(message, true)
-          : '';
-      output = detail && !streams.includes(detail) ? `${streams}\n\n${detail}` : streams;
-    } else if (
-      hasToolIssue(message) ||
-      reason ||
-      shell.jobStatus === 'outcome_unknown' ||
-      shell.jobStatus === 'failed'
-    )
-      output = toolDetailText(message, true);
-    else if (shell.jobStatus === 'succeeded' && shell.outputComplete === true)
+    if (shell.jobStatus === 'succeeded' && shell.outputComplete === true)
       output = '命令执行成功，无输出。';
     else if (!shell.jobStatus && message.text && !(shell.operation === 'launch' && shell.accepted))
       output = message.text;
     else output = shell.outputComplete === false ? '本次记录未包含完整输出。' : '';
-  } else
-    output =
-      hasToolIssue(message) || reason
-        ? toolDetailText(message, true)
-        : streams ||
-          (message.status === 'completed'
-            ? '命令执行成功，无输出。'
-            : message.status === 'cancelled'
-              ? '命令已停止。'
-              : message.text);
-  const label = metadataPending ? '' : shellResultLabel(message, diagnostics);
+  } else output = message.status === 'completed' ? '命令执行成功，无输出。' : message.text;
+  const label = metadataPending
+    ? ''
+    : originalContent && !shell?.jobStatus
+      ? executionLabel(message, diagnostics)
+      : shellResultLabel(message, diagnostics);
   const exitCode = shell?.exitCode ?? result?.exitCode;
   const resultSummary = [
     label,
     exitCode !== undefined && label !== '成功' ? `退出码 ${exitCode}` : '',
-    truncated ? '输出已截断' : '',
-    !truncated && shell?.outputComplete === false && streams ? '部分输出' : '',
-    result?.status === 'exhausted' ? '输出已达到工具限制' : '',
+    shell?.output === undefined && !truncated && shell?.outputComplete === false && streams
+      ? '部分输出'
+      : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -916,27 +871,25 @@ function ShellOutput({
         }}
       >
         {metadataPending || originalContent ? (
-          <div className="shell-original-record">
-            {metadataPending ? <p>正在读取记录…</p> : originalContent}
-          </div>
+          <div className="shell-original-record">{!metadataPending && originalContent}</div>
         ) : (
           <CodeBlockContent tabIndex={-1}>
             <span className="shell-console-output">
               {output ||
-                (!command && !preview && !executionUnconfirmed(message) ? '等待输出…' : '')}
-              {!shell &&
-              !hasToolIssue(message) &&
-              streams &&
-              ['cancelled', 'failed', 'rejected'].includes(message.status ?? '') &&
-              message.text &&
-              message.text !== 'Tool execution cancelled.' &&
-              !streams.includes(message.text)
-                ? `\n${message.text}`
-                : ''}
+                (shell?.output === undefined &&
+                !failure &&
+                !command &&
+                !preview &&
+                !executionUnconfirmed(message)
+                  ? '等待输出…'
+                  : '')}
             </span>
           </CodeBlockContent>
         )}
       </ScrollArea>
+      {!metadataPending && failure && failure !== 'Tool execution cancelled.' && (
+        <p className="shell-failure-reason">{failure}</p>
+      )}
       {resultSummary && (
         <CodeBlockFooter className="shell-output-footer">
           <span className="shell-result" role="status">
@@ -970,8 +923,8 @@ export function ToolRow({
       status={traceStatus(message)}
       className={`tool-activity-step ${executionUnconfirmed(message) ? '' : !message.settled && automaticChecking(message) ? 'running' : (message.status ?? '')}`}
     >
-      <div>
-        <TraceIcon className="tool-step-marker-icon">
+      <article aria-label={status && status !== '成功' ? status : undefined}>
+        <TraceIcon>
           <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
         </TraceIcon>
         <TraceTitle className="tool-step-content">
@@ -988,24 +941,16 @@ export function ToolRow({
                 )}
               </span>
             )}
-            {approval && <ToolApproval message={message} label={approval} />}
-            {status && status !== '成功' && status !== approval && (
-              <TraceDescription
-                className={`tool-step-status${traceStatus(message) === 'error' ? ' sr-only' : ''}`}
-                data-status={executionUnconfirmed(message) ? undefined : message.status}
-              >
-                {status}
-              </TraceDescription>
-            )}
           </span>
         </TraceTitle>
-      </div>
+        {approval && <ToolApproval message={message} label={approval} />}
+      </article>
     </TraceLine>
   );
 }
 
 export interface ChildAgentActivity {
-  readonly identity: string;
+  readonly identity?: string;
   readonly name: string;
 }
 
@@ -1032,12 +977,14 @@ export function ToolActivity({
   aggregate = false,
   inTrace = false,
   directTraceDetails = false,
+  parentDisclosureOpen = true,
 }: {
   /** Stable outer activity, including its first tool before more calls arrive. */
   aggregate?: boolean;
   /** The conversation Trace owns grouping and disclosure defaults. */
   inTrace?: boolean;
   directTraceDetails?: boolean;
+  parentDisclosureOpen?: boolean;
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
   messages: readonly Message[];
@@ -1045,13 +992,13 @@ export function ToolActivity({
   onToggle: (open: boolean) => void;
   openFile?: (path: string) => void;
   openFileForMessage?: (message: Message) => ((path: string) => void) | undefined;
-  renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
+  renderChildren: (toolCallId: string, expanded: boolean, messageId: string) => ReactNode;
   /** Keep a host's original per-item reader inside the aggregate's disclosure. */
   renderItem?: (message: Message) => ReactNode | undefined;
   /** Verified image receipts use the host's existing scoped image reader. */
   renderImages?: (message: Message) => ReactNode;
   /** A confirmed receipt can disclose a scoped, lazy diff without preloading its body. */
-  renderFileChange?: (message: Message) => ReactNode;
+  renderFileChange?: (message: Message, open: boolean) => ReactNode;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
   activityId?: string;
@@ -1117,7 +1064,7 @@ export function ToolActivity({
     ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
   );
   const childIssue = childProcess && issues.length > 0;
-  const itemIssue = !grouped && (hasToolIssue(message) || childIssue);
+  const itemIssue = !grouped && (needsResultDetails(message) || childIssue);
   const summaryOnly =
     !grouped &&
     !itemIssue &&
@@ -1140,7 +1087,7 @@ export function ToolActivity({
     projectedChildren ??=
       agent || grouped || summaryOnly
         ? []
-        : messages.map((item) => renderChildren(item.id.slice(5), true));
+        : messages.map((item) => renderChildren(item.id.slice(5), !shell || open, item.id));
     return projectedChildren;
   };
   const approval = grouped ? undefined : approvalLabel(message);
@@ -1157,6 +1104,7 @@ export function ToolActivity({
           : undefined;
   const hasDiff =
     edit && message.changeConfirmed && !itemIssue && (!!renderFileChange || !!message.toolResult);
+  const inlineEdit = hasDiff && message.toolName === 'edit_file';
   const canExpand =
     !agent &&
     !summaryOnly &&
@@ -1174,16 +1122,14 @@ export function ToolActivity({
       (imageOnly && !!renderImages) ||
       getChildren().some(Boolean));
   const label = imageOnly
-    ? running
-      ? '正在查看图像'
-      : imageCount && !issues.length
-        ? `已查看 ${imageCount} 张图像`
-        : '查看图像'
+    ? imageCount && !issues.length && !running
+      ? `已查看 ${imageCount} 张图像`
+      : '查看图像'
     : grouped
       ? activityLabel(messages)
       : ask
         ? askMultiple
-          ? `询问用户 · ${message.status === 'completed' && !ask.cancelled ? '已回答 ' : ''}${ask.questions.length} 项`
+          ? `询问用户 · ${ask.questions.length} 项`
           : '询问用户'
         : inTrace
           ? toolTraceLabel(message)
@@ -1204,35 +1150,43 @@ export function ToolActivity({
             message.shell?.commandPreview ??
             message.shell?.shellId)
           : toolTarget(message);
-  const status =
-    ask && (ask.cancelled || message.status === 'cancelled')
-      ? open
-        ? undefined
-        : ask.cancelled
-          ? '已取消回答'
-          : '已取消'
-      : grouped
-        ? undefined
-        : unverified && message.status === undefined
-          ? diagnostics
-            ? '状态待核对'
-            : undefined
-          : executionLabel(message, diagnostics);
+  const displayedFile = target && inlineEdit ? diffFileName(target) : target;
+  const status = grouped
+    ? undefined
+    : ask?.cancelled
+      ? '已取消回答'
+      : unverified && message.status === undefined
+        ? diagnostics
+          ? '状态待核对'
+          : undefined
+        : executionLabel(message, diagnostics);
   const commandSummary = shell && target ? target.replace(/\s+/g, ' ').trim() : undefined;
   const shortCommand =
     commandSummary && commandSummary.length > 512
       ? `${commandSummary.slice(0, 512)}…`
       : commandSummary;
   const accessibleStatus = shell ? shellResultLabel(message, diagnostics) : status;
+  const startedChildIdentity =
+    message.toolName === 'spawn_agent' && message.status === 'completed'
+      ? agent?.identity
+      : undefined;
+  const childOperationLabel = startedChildIdentity ? '子agent开始工作' : label;
   const heading = agent ? (
     <>
       <TraceIcon className="tool-activity-marker-icon">
-        <ChildAgentIcon identity={agent.identity} />
+        {agent.identity ? (
+          <ChildAgentIcon identity={agent.identity} neutral={!startedChildIdentity} />
+        ) : (
+          <HugeiconsIcon icon={BotIcon} />
+        )}
       </TraceIcon>
-      <TraceTitle className="tool-agent-name tool-label" title={agent.name}>
-        {agent.name}
+      <TraceTitle className="tool-activity-marker-content">
+        <span className="tool-agent-name tool-label" title={agent.name}>
+          {agent.name}
+        </span>
+        {startedChildIdentity && <span aria-hidden="true">·</span>}
+        <TraceDescription className="tool-agent-operation">{childOperationLabel}</TraceDescription>
       </TraceTitle>
-      <TraceDescription className="tool-agent-operation">{label}</TraceDescription>
     </>
   ) : (
     <>
@@ -1258,7 +1212,7 @@ export function ToolActivity({
             </span>
           ))}
       </TraceTitle>
-      {approval && approvalIcon(message) && (
+      {approval && (
         <ToolApproval
           message={message}
           label={approval}
@@ -1266,23 +1220,10 @@ export function ToolActivity({
           summaryFocused={approvalFocused}
         />
       )}
-      {canExpand && <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />}
-      {approval && !approvalIcon(message) && <ToolApproval message={message} label={approval} />}
-      {status && !shell && status !== '成功' && status !== approval && (
-        <TraceDescription
-          className={`tool-activity-state${traceStatus(message) === 'error' ? ' sr-only' : ''}`}
-          data-status={issues.length ? 'issue' : 'neutral'}
-          role="status"
-        >
-          {status}
-        </TraceDescription>
-      )}
-      {managedShell && !shell && !executionUnconfirmed(message) && (
-        <span className="managed-shell-summary" role="status">
-          {shellSnapshotLabel(managedShell)}
-          {managedShell.shellId && <code>{managedShell.shellId}</code>}
-          {managedShell.cursor !== undefined && <span>日志游标 {managedShell.cursor}</span>}
-        </span>
+      {canExpand && (
+        <TraceIcon className="tool-activity-chevron">
+          <HugeiconsIcon icon={ArrowDown01Icon} />
+        </TraceIcon>
       )}
     </>
   );
@@ -1290,6 +1231,9 @@ export function ToolActivity({
     <TraceCollapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
       <article
         className={`message tool-activity${imageOnly ? ' tool-image-activity' : ''}${grouped ? ' tool-activity-aggregate' : ''}${shell ? ' shell-activity' : ''}${agent ? ' child-agent-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
+        data-child-color={
+          startedChildIdentity ? childAgentAppearance(startedChildIdentity).color : undefined
+        }
         data-restored-expanded={restoredExpanded?.has(activityId ?? message.id) || undefined}
         onFocusCapture={(event) =>
           setApprovalFocused(
@@ -1303,7 +1247,7 @@ export function ToolActivity({
         }}
         aria-label={
           agent
-            ? `${agent.name} · ${label}`
+            ? `${agent.name} · ${childOperationLabel}`
             : `${label}${!grouped && accessibleStatus ? ` · ${accessibleStatus}` : ''}`
         }
       >
@@ -1353,16 +1297,20 @@ export function ToolActivity({
                   (messageOpenFile ? (
                     <Button
                       className="file-link"
+                      data-short-file={inlineEdit || undefined}
                       title={target}
                       onClick={() => messageOpenFile(target)}
                     >
-                      {target}
+                      {displayedFile}
                     </Button>
                   ) : (
                     <span className="tool-step-target" title={target}>
-                      {target}
+                      {displayedFile}
                     </span>
                   ))}
+                {inlineEdit && message.fileDiffCounts && (
+                  <FileDiffCounts {...message.fileDiffCounts} />
+                )}
               </TraceTitle>
               {hasDiff && (
                 <Button
@@ -1376,14 +1324,6 @@ export function ToolActivity({
                 </Button>
               )}
               {approval && <ToolApproval message={message} label={approval} />}
-              {status && status !== '成功' && status !== approval && (
-                <TraceDescription
-                  className={`tool-step-status${traceStatus(message) === 'error' ? ' sr-only' : ''}`}
-                  data-status={executionUnconfirmed(message) ? undefined : message.status}
-                >
-                  {status}
-                </TraceDescription>
-              )}
             </div>
           </TraceLine>
         ) : canExpand ? (
@@ -1406,6 +1346,7 @@ export function ToolActivity({
               if (imageOnly && !issues.length && message.status !== 'cancelled')
                 return imageThumbnails();
               const children = getChildren();
+              const detailText = itemIssue && !shell ? toolDetailText(message) : undefined;
               return (
                 <>
                   {grouped && (
@@ -1421,7 +1362,7 @@ export function ToolActivity({
                         {messages.map((item) => (
                           <Fragment key={item.presentationKey ?? item.id}>
                             {renderItem?.(item) ??
-                              (!hasToolIssue(item) &&
+                              (!needsResultDetails(item) &&
                               [
                                 'read_file',
                                 'search_content',
@@ -1444,6 +1385,7 @@ export function ToolActivity({
                                   }
                                   activityId={item.presentationKey ?? item.id}
                                   restoredExpanded={restoredExpanded}
+                                  parentDisclosureOpen={open && parentDisclosureOpen}
                                   openFile={openFile}
                                   openFileForMessage={openFileForMessage}
                                   childDetail={childDetailForMessage?.(item)}
@@ -1461,11 +1403,29 @@ export function ToolActivity({
                     <ShellOutput
                       message={message}
                       metadataPending={metadataPending}
-                      originalContent={unverified && children.some(Boolean) ? children : undefined}
+                      originalContent={children.some(Boolean) ? children : undefined}
                     />
                   )}
+                  {!grouped && !shell && !ask && status && status !== '成功' && (
+                    <p className="tool-detail-status" role="status">
+                      {status}
+                    </p>
+                  )}
+                  {managedShell && !shell && !executionUnconfirmed(message) && (
+                    <span className="managed-shell-summary" role="status">
+                      {shellSnapshotLabel(managedShell)}
+                      {managedShell.shellId && <code>{managedShell.shellId}</code>}
+                      {managedShell.cursor !== undefined && (
+                        <span>日志游标 {managedShell.cursor}</span>
+                      )}
+                    </span>
+                  )}
                   {hasDiff &&
-                    (renderFileChange ? renderFileChange(message) : <FileDiff message={message} />)}
+                    (renderFileChange ? (
+                      renderFileChange(message, open && parentDisclosureOpen)
+                    ) : (
+                      <FileDiff message={message} inline={inlineEdit} />
+                    ))}
                   {ask && (
                     <div className="tool-ask-answers">
                       {ask.cancelled || message.status === 'cancelled' ? (
@@ -1500,7 +1460,7 @@ export function ToolActivity({
                       message.status === 'cancelled' && message.text === 'Tool execution cancelled.'
                     ) &&
                     (itemIssue
-                      ? toolDetailText(message)
+                      ? detailText
                       : message.toolResult?.stderr ||
                         message.toolResult?.stdout ||
                         message.text) && (
@@ -1513,34 +1473,34 @@ export function ToolActivity({
                       >
                         <pre className="tool-detail">
                           {itemIssue
-                            ? toolDetailText(message)
+                            ? detailText
                             : message.toolResult?.stderr ||
                               message.toolResult?.stdout ||
                               message.text}
                         </pre>
                       </ScrollArea>
                     )}
-                  <div className="tool-activity-children">
-                    {shell
-                      ? null
-                      : unverified || !message.toolName
-                        ? children.some(Boolean) && (
-                            <ScrollArea
-                              className="tool-detail-scroll"
-                              fade="y"
-                              chainScroll
-                              viewportClassName="tool-detail-viewport"
-                              viewportProps={{
-                                role: 'region',
-                                'aria-label': '工具原始记录',
-                                tabIndex: 0,
-                              }}
-                            >
-                              {children}
-                            </ScrollArea>
-                          )
-                        : children}
-                  </div>
+                  {!shell && children.some(Boolean) && (
+                    <div className="tool-activity-children">
+                      {unverified || !message.toolName ? (
+                        <ScrollArea
+                          className="tool-detail-scroll"
+                          fade="y"
+                          chainScroll
+                          viewportClassName="tool-detail-viewport"
+                          viewportProps={{
+                            role: 'region',
+                            'aria-label': '工具原始记录',
+                            tabIndex: 0,
+                          }}
+                        >
+                          {children}
+                        </ScrollArea>
+                      ) : (
+                        children
+                      )}
+                    </div>
+                  )}
                   {imageOnly && imageThumbnails()}
                 </>
               );

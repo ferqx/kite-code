@@ -2191,7 +2191,9 @@ export class ExtensionHost {
               targetSessionId: selected.sessionId,
               contextSelectionId: selected.contextSelectionId,
               ...(ref === 'parent' ? {} : { targetCarrierExecutionId: ref.executionId! }),
-              ...(selected.targetRunId === null ? {} : { targetRunId: selected.targetRunId }),
+              ...(ref === 'parent' || selected.targetRunId === null
+                ? {}
+                : { targetRunId: selected.targetRunId }),
               stableTarget: target,
               body,
             })

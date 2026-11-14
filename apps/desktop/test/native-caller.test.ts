@@ -7,6 +7,7 @@ import type {
   AgentClient,
   CallerCommandRequest,
   Command,
+  Execution,
   Message,
   ModelOutputSnapshot,
   Run,
@@ -2696,6 +2697,110 @@ async function code(promise: Promise<unknown>) {
     return (error as { code?: string }).code ?? (error as Error).message;
   }
 }
+
+test('history cursor expiry invalidates only its current read and does not wait for a fresh View', async () => {
+  const connection = client();
+  const originalView = connection.getView.bind(connection);
+  const pendingView = Promise.withResolvers<void>();
+  const pendingChanges = Promise.withResolvers<never>();
+  let holdView = false;
+  connection.getView = async (id) => {
+    if (holdView) await pendingView.promise;
+    return { ...(await originalView(id)), snapshotCursor: '2' };
+  };
+  connection.listMessageChanges = async () => pendingChanges.promise;
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    const epoch = caller.state().historyEpoch!;
+    const request = {
+      method: 'messages' as const,
+      generation: 1,
+      sessionId: 's',
+      expectedStoreId: 'store',
+      changes: { afterCursor: '1', upperCursor: '2' },
+    };
+    const retired = code(caller.invoke({ ...request, readId: 'retired' }));
+    await caller.invoke({ method: 'messages.close', generation: 1, readId: 'retired' });
+    const current = code(caller.invoke({ ...request, readId: 'current' }));
+    holdView = true;
+    pendingChanges.reject(Object.assign(Error('cursor_expired'), { code: 'cursor_expired' }));
+    expect(await retired).toBe('cursor_expired');
+    expect(await current).toBe('native_selection_changed');
+    expect(caller.state().historyEpoch).toBe(epoch + 1);
+    expect(caller.state().selection?.permissionUnavailable).toBe(true);
+    expect(connection.writes).toBe(0);
+  } finally {
+    pendingView.resolve();
+    await caller.close();
+  }
+});
+
+test('execution detail reads the observed result revision only after disclosure and rejects a late scope', async () => {
+  const connection = client();
+  const original = connection.getView.bind(connection);
+  const detail: Execution = {
+    id: 'execution',
+    sessionId: 's',
+    resultRevision: '3',
+    kind: 'tool',
+    runId: 'run',
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    cancelRequestedAt: null,
+    status: 'succeeded',
+    result: { content: 'saved result' },
+  };
+  connection.getView = (async (id) => ({
+    ...(await original(id)),
+    executions: id === 's' ? [{ ...detail, result: null }] : [],
+  })) as AgentClient['getView'];
+  let reads = 0;
+  let release: ((value: Execution) => void) | undefined;
+  const entered = Promise.withResolvers<void>();
+  connection.getExecution = async () => {
+    reads++;
+    if (reads === 1) return detail;
+    entered.resolve();
+    return new Promise((resolve) => (release = resolve));
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const selected = (await caller.invoke({
+      method: 'select',
+      generation,
+      sessionId: 's',
+    })) as NativeState;
+    const request = {
+      method: 'execution.result' as const,
+      generation,
+      viewSelection: selected.selection!.viewSelection!,
+      historyEpoch: selected.historyEpoch ?? 0,
+      executionId: detail.id,
+      resultRevision: detail.resultRevision,
+    };
+    expect(reads).toBe(0);
+    expect(await code(caller.invoke({ ...request, resultRevision: '2' }))).toBe(
+      'native_selection_changed',
+    );
+    expect(reads).toBe(0);
+    expect(await caller.invoke(request)).toEqual({
+      kind: 'execution.result',
+      result: detail.result,
+    });
+    const late = code(caller.invoke(request));
+    await entered.promise;
+    await caller.invoke({ method: 'select', generation, sessionId: 'other' });
+    release?.(detail);
+    expect(await late).toBe('native_selection_changed');
+    expect(reads).toBe(2);
+  } finally {
+    release?.(detail);
+    await caller.close();
+  }
+});
 test('main IPC denies foreign/subframe senders and closed or oversized requests before client/startup; oversize reply stays local', async () => {
   const auth = authority();
   expect(() => assertNativeSender(auth.event, auth.window, auth.frame.url)).not.toThrow();
@@ -2763,6 +2868,82 @@ test('main IPC denies foreign/subframe senders and closed or oversized requests 
     code: 'native_response_too_large',
   });
   expect(calls).toBe(1);
+});
+
+test('Native IPC opens a session whose saved tool result fits once and preserves model failure observations', async () => {
+  const connection = client();
+  const originalView = connection.getView.bind(connection);
+  const identity = {
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'run',
+    definitionVersion: '1',
+    resultRevision: '1',
+    cancelRequestedAt: null,
+  };
+  const tool: Execution = {
+    ...identity,
+    id: 'shell',
+    kind: 'tool',
+    status: 'succeeded',
+    definitionId: 'shell.execute',
+    toolInput: { command: 'read saved output' },
+    result: { content: 'x'.repeat(2200000) },
+  };
+  const model: Execution = {
+    ...identity,
+    id: 'model',
+    kind: 'model',
+    status: 'failed',
+    definitionId: 'fixed-model',
+    result: {
+      code: 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable',
+      incomplete: true,
+      modelFailure: { detail: 'service_unavailable' },
+    },
+  };
+  connection.getView = async (id) => ({
+    ...(await originalView(id)),
+    executions: [tool, model],
+  });
+  const caller = new NativeCaller(connection, () => {});
+  const auth = authority();
+  let handler!: (event: IpcMainInvokeEvent, request: NativeRequest) => Promise<unknown>;
+  const ipcMain = {
+    handle(_channel: string, value: typeof handler) {
+      handler = value;
+    },
+    removeHandler() {},
+  } as unknown as IpcMain;
+  registerNativeIpc({
+    ipcMain,
+    window: () => auth.window,
+    rendererUrl: auth.frame.url,
+    caller: async () => caller,
+  });
+  try {
+    await caller.invoke({ method: 'attach' });
+    expect(
+      await handler(auth.event, { method: 'select', generation: 1, sessionId: 's' }),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        selection: { executions: [{ id: 'shell' }, { id: 'model' }] },
+        executionObservation: {
+          executions: [{ id: 'shell', kind: 'tool', status: 'succeeded' }, model],
+        },
+      },
+    });
+    expect(caller.state().selection?.executions[0]?.result).toBe(tool.result);
+    expect(caller.state().executionObservation?.executions[0]).not.toHaveProperty('result');
+    expect(caller.state().executionObservation?.executions[0]).not.toHaveProperty('toolInput');
+    expect(await handler(auth.event, { method: 'state', generation: 1 })).toMatchObject({
+      ok: true,
+    });
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
 });
 
 test('Shell settings IPC checks sender and generation without projecting conversation state', async () => {

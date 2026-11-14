@@ -138,6 +138,7 @@ for (const name of [
       );
     expect(body).toContain(`shell_id: ${JSON.stringify(f.ref.key)}`);
     expect(body).toContain(`stdout:\n${f.details.stdout}`);
+    expect(body).not.toContain('stderr:');
     expect(f).toEqual(before);
   });
 
@@ -166,11 +167,13 @@ test('completed command preserves original Unicode streams and usable handle wit
 
 test('exit17 is a command failure with actionable original diagnostic, not an approval refusal', () => {
   const f = fixture('failed');
+  f.details.stdout = '';
   f.details.stderr = 'INPUT_NOT_READY: ready.flag must contain READY.\n';
   const body = render(f)!;
   expect(body).toContain('command failed');
   expect(body).toContain('Exit code: 17');
-  expect(body).toContain(f.details.stderr as string);
+  expect(body).toContain(`stderr:\n${f.details.stderr}`);
+  expect(body).not.toContain('stdout:');
   expect(body).not.toContain('user denied');
 });
 
@@ -338,9 +341,9 @@ test('paged original output keeps stream order, Unicode, cursor and missing-byte
   const scope = { kind: 'shell_output', ref: f.ref };
   f.execution.input = {
     shellId: f.ref.key!,
-    cursor: modelCursor(scope, { afterSeq: '1', upperSeq: '3' }),
+    cursor: modelCursor(scope, { afterSeq: '1', upperSeq: '4' }),
   };
-  f.details.next_cursor = modelCursor(scope, { afterSeq: '3' });
+  f.details.next_cursor = modelCursor(scope, { afterSeq: '4' });
   f.details.caught_up = true;
   f.details.terminal = true;
   f.details.output = {
@@ -357,16 +360,26 @@ test('paged original output keeps stream order, Unicode, cursor and missing-byte
         executionId: f.operation.id,
         seq: '3',
         throughSeq: '3',
+        stream: 'stderr',
+        content: '',
+        droppedBytes: '9',
+      },
+      {
+        executionId: f.operation.id,
+        seq: '4',
+        throughSeq: '4',
         stream: 'stdout',
         content: '下一行\n',
         droppedBytes: '0',
       },
     ],
-    highWaterSeq: '3',
+    highWaterSeq: '4',
   };
   const body = render(f)!;
   expect(body.indexOf('stderr:\n原错误🪁\n')).toBeLessThan(body.indexOf('stdout:\n下一行\n'));
   expect(body).toContain('Output bytes unavailable: 7');
+  expect(body).toContain('Output bytes unavailable: 9 (stderr).');
+  expect(body.match(/^stderr:$/gm)).toHaveLength(1);
   expect(body).toContain(JSON.stringify(f.details.next_cursor));
   expect(body).toContain('"caught_up":true');
   expect(body).toContain('"terminal":true');
@@ -392,6 +405,27 @@ test('the default model preview preserves both ends within the approximate 10000
   expect(body).not.toContain('\uFFFD');
   expect(Buffer.byteLength(body)).toBeLessThan(40500);
   expect(f.details.stdout).toEndWith(`${'你'.repeat(15000)}end`);
+});
+
+test('a smaller receiving model trims a saved Shell output without rewriting the original receipt', () => {
+  const f = fixture();
+  const saved = `stdout:\nstart 🪁${'你'.repeat(1500)}end`;
+  for (const key of ['stdout', 'stderr', 'stdoutBytes', 'stderrBytes']) delete f.details[key];
+  f.details.outputFormat = 'model-preview';
+  f.details.outputLimited = false;
+  f.result.content = saved;
+  expect(formatShellResult(f)).toContain(saved);
+  const smaller = formatShellResult({ ...f, modelTokenLimit: 100 })!;
+  expect(smaller).toContain('stdout:\nstart 🪁');
+  expect(smaller).toContain('Model output preview omitted');
+  expect(smaller).toContain('end\n');
+  expect(smaller).not.toContain(saved);
+  expect(smaller).not.toContain('\uFFFD');
+  const output = smaller.slice(smaller.indexOf('stdout:'), smaller.indexOf('\nUse shell_read'));
+  expect(Buffer.byteLength(output)).toBeLessThanOrEqual(400);
+  const smallest = formatShellResult({ ...f, modelTokenLimit: 1 })!;
+  expect(smallest).toContain('\n…\nUse shell_read');
+  expect(f.result.content).toBe(saved);
 });
 
 for (const damage of [

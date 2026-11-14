@@ -115,6 +115,8 @@ export const storeMethods: readonly (keyof Store)[] = [
   'listMessages',
   'listMessageChanges',
   'getView',
+  'getSessionState',
+  'listSessionHistoryEntries',
   'getExtensionRecord',
   'listExtensionRecords',
   'writeExtensionRecord',

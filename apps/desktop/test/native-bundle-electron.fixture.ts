@@ -753,7 +753,7 @@ try {
         const write = page
           .locator('.tool-activity-summary')
           .filter({ hasText: 'bundle approval probe' })
-          .filter({ hasText: '等待人工审批' });
+          .filter({ has: page.getByRole('img', { name: '等待人工审批', exact: true }) });
         while (!(await write.isVisible())) {
           // The interaction card can precede the saved process metadata. Expand
           // the real process when it arrives, within the same original deadline.
@@ -786,7 +786,7 @@ try {
           );
           await page.waitForTimeout(20);
         }
-        assert.ok((await write.textContent())!.includes('等待人工审批'));
+        assert.ok(!(await write.textContent())!.includes('等待人工审批'));
         if (approvals.length === 0) {
           const pendingRow = page
             .getByRole('button', { name: 'write one', exact: true })

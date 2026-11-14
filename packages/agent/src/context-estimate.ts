@@ -119,6 +119,29 @@ export function modelInputCapacity(
   };
 }
 
+export function frozenTokenModel(configuration: unknown, modelId?: string) {
+  const frozen = configuration as {
+    modelId?: string;
+    configuration?: { models?: Record<string, Json>[] };
+    snapshot?: { configuration?: { models?: Record<string, Json>[] } };
+  } | null;
+  const models = (frozen?.snapshot?.configuration ?? frozen?.configuration)?.models;
+  const id = modelId ?? frozen?.modelId;
+  if (typeof id !== 'string' || !Array.isArray(models)) return;
+  const matches = models.filter((model) => model?.id === id);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function frozenModelInputLimit(configuration: unknown, modelId?: string) {
+  const model = frozenTokenModel(configuration, modelId);
+  const capabilities = model?.modelCapabilities as
+    | { contextWindowTokens?: unknown; maxOutputTokens?: unknown }
+    | undefined;
+  const options = model?.options as { maxOutputTokens?: unknown } | undefined;
+  const capacity = modelInputCapacity(capabilities ?? undefined, options?.maxOutputTokens);
+  return capacity.usableInputTokens ?? capacity.contextWindowTokens;
+}
+
 /** Pure local estimate. Capabilities must be explicit facts from the original frozen Model. */
 export function estimateModelContext(
   request: Pick<ModelRequest, 'messages' | 'tools'>,

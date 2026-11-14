@@ -197,7 +197,10 @@ function ExecutionGroup({
                 )
               ) : null;
             return (
-              <li key={execution.executionId} data-execution-id={execution.executionId}>
+              <li
+                key={execution.childAgentIdentity ?? execution.executionId}
+                data-execution-id={execution.executionId}
+              >
                 <span className="background-execution-identity">
                   {childSessionId ? (
                     <Button

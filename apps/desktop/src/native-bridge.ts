@@ -84,6 +84,7 @@ import type { NativeSkillDocument, NativeSkillsPage, NativeSkillsRequest } from 
 import type {
   NativeContextUsagePage,
   NativeModelUsagePage,
+  NativeToolExecution,
   NativeToolMessagePage,
   NativeToolMessageRequest,
   NativeToolRunPage,
@@ -210,7 +211,7 @@ export type NativeExecutionObservation = {
   readonly phase: 'fresh' | 'refreshing' | 'unavailable';
   readonly session: Session;
   readonly runs: readonly Run[];
-  readonly executions: readonly Execution[];
+  readonly executions: readonly NativeToolExecution[];
   readonly compressionProgress?: SessionView['compressionProgress'];
 };
 export type NativeSelection = {
@@ -220,6 +221,7 @@ export type NativeSelection = {
   readonly canReadSkills?: boolean;
   readonly canReadContext?: boolean;
   readonly canReadModelOutput: boolean;
+  readonly canReadHistoryPreviews?: boolean;
   readonly canReadModelInput?: boolean;
   readonly canReadTrajectory?: boolean;
   readonly canReadPermissionGrants?: boolean;
@@ -921,9 +923,26 @@ export type NativeRequest =
       afterSeq?: string;
       upperSeq?: string;
       limit?: number;
+      previews?: true;
       changes?: { afterCursor: string; upperCursor: string };
     }
   | { method: 'messages.close'; generation: number; readId: string }
+  | {
+      method: 'messages.text';
+      generation: number;
+      viewSelection: number;
+      historyEpoch: number;
+      messageId: string;
+      offset: string;
+    }
+  | {
+      method: 'execution.result';
+      generation: number;
+      viewSelection: number;
+      historyEpoch: number;
+      executionId: string;
+      resultRevision: string;
+    }
   | {
       method: 'submit';
       generation: number;
@@ -991,6 +1010,7 @@ export type NativeRequest =
     };
 export type NativeResult =
   | NativeTraceResult
+  | { kind: 'execution.result'; result: unknown }
   | { kind: 'trajectory.snapshot'; trajectory: TrajectorySnapshot }
   | { kind: 'trajectory.page'; trajectory: TrajectoryPage }
   | { kind: 'trajectory.evidence.opened'; trajectory: TrajectoryEvidenceDescriptor }
@@ -1050,6 +1070,7 @@ export type NativeResult =
   | NativeAttachmentOpen
   | NativeAttachmentChunk
   | NativeDirectory
+  | ({ kind: 'messages.text' } & import('@kite-ai/client').MessageTextChunk)
   | {
       messages: Message[];
       nextAfterSeq: string | null;

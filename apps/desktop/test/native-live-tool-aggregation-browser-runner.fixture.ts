@@ -2753,13 +2753,13 @@ try {
       const allCases = [
         { kind: 'launch', title: '已请求运行', footer: /已受理/, success: false },
         { kind: 'read', title: '已读取输出', footer: /执行中/, success: false },
-        { kind: 'wait', title: '等待超时', footer: /等待超时.*命令仍在运行/, success: false },
+        { kind: 'wait', title: '等待命令', footer: /等待超时.*命令仍在运行/, success: false },
         { kind: 'stop', title: '已请求停止', footer: /已请求停止.*等待结束/, success: false },
         { kind: 'execute', title: '已运行', footer: /^成功$/, success: true },
         { kind: 'execute-large', title: '已运行', footer: /^成功$/, success: true },
         { kind: 'execute-model-late', title: '已运行', footer: /^成功$/, success: true },
         { kind: 'execute-failed', title: '已运行', footer: /失败.*退出码 7/, success: false },
-        { kind: 'execute-unknown', title: '结果未知', footer: /结果未知/, success: false },
+        { kind: 'execute-unknown', title: '运行命令', footer: /结果未知/, success: false },
         { kind: 'execute-rejected', title: '运行命令', footer: null, success: false },
         { kind: 'execute-live', title: '已运行', footer: /^成功$/, success: true },
       ] as const;
@@ -2908,8 +2908,8 @@ try {
             if (phase === 'auto') assert.equal(state.approval, '正在自动审批');
             if (phase === 'human') assert.match(state.approval, /等待人工/);
             if (phase === 'running') assert.equal(state.approval, '已人工批准');
+            assert.equal(state.approvalText, '', `live Shell ${phase} displayed approval text`);
             if (phase === 'running') {
-              assert.equal(state.approvalText, '', 'approved Shell retained permanent status text');
               const marker = item.locator('.tool-approval-approved');
               const summary = item.locator(':scope > .tool-activity-summary');
               const geometry = async () => ({
@@ -3927,17 +3927,17 @@ try {
         .getByRole('button', { name: '收起 fixture-diff.ts 的差异', exact: true })
         .click();
       const cases = [
-        { scenario: 'execute-running', title: '运行中', footer: /执行中/, success: false },
+        { scenario: 'execute-running', title: '运行命令', footer: /执行中/, success: false },
         { scenario: 'execute-success', title: '已运行', footer: /^成功$/, success: true },
         { scenario: 'execute-failed', title: '已运行', footer: /失败.*退出码 7/, success: false },
-        { scenario: 'execute-unknown', title: '结果未知', footer: /结果未知/, success: false },
+        { scenario: 'execute-unknown', title: '运行命令', footer: /结果未知/, success: false },
         { scenario: 'execute-rejected', title: '运行命令', footer: null, success: false },
         { scenario: 'launch-accepted', title: '已请求运行', footer: /已受理/, success: false },
         { scenario: 'launch-running', title: '已请求运行', footer: /执行中/, success: false },
         { scenario: 'read-running', title: '已读取输出', footer: /执行中/, success: false },
         {
           scenario: 'wait-timeout',
-          title: '等待超时',
+          title: '等待命令',
           footer: /等待超时.*命令仍在运行/,
           success: false,
         },
@@ -4447,6 +4447,7 @@ try {
             [...node.querySelectorAll('.tool-approval,.tool-step-status,.tool-activity-state')].map(
               (label) => ({
                 text: label.getAttribute('aria-label') ?? label.textContent ?? '',
+                visibleText: label.textContent ?? '',
                 approval: label.classList.contains('tool-approval'),
                 fontSize: getComputedStyle(label).fontSize,
                 color: getComputedStyle(label).color,
@@ -4460,22 +4461,39 @@ try {
           `${entry.definitionId}: approved explanation visible in closed item`,
         );
         const approvalLabels = normal.filter((label) => label.approval);
-        const executionLabels = normal.filter((label) => !label.approval);
         assert.deepEqual(
           approvalLabels.map((label) => label.text),
           [entry.approval],
           `${entry.definitionId}: approval status differs`,
         );
-        assert.deepEqual(
-          executionLabels.map((label) => label.text),
-          entry.status ? [entry.status] : [],
-          `${entry.definitionId}: redundant or missing tool status`,
+        assert.equal(
+          normal.length,
+          1,
+          `${entry.definitionId}: tool heading includes a status suffix`,
         );
+        assert.equal(
+          normal[0]?.visibleText,
+          '',
+          `${entry.definitionId}: approval is visible as text`,
+        );
+        if (entry.status)
+          assert.ok((await item.getAttribute('aria-label'))?.includes(entry.status));
         for (const label of normal) {
           assert.equal(label.fontSize, '13px', `${entry.definitionId}: status font differs`);
           assert.equal(
             label.color,
-            rowError || (!label.approval && entry.issue) ? colors.destructive : colors.muted,
+            entry.approval === '自动审批未通过'
+              ? await itemSummary.evaluate((node) => {
+                  const probe = document.createElement('span');
+                  probe.style.color = 'var(--attention-foreground)';
+                  node.append(probe);
+                  const color = getComputedStyle(probe).color;
+                  probe.remove();
+                  return color;
+                })
+              : rowError
+                ? colors.destructive
+                : colors.muted,
             `${entry.definitionId}: status color differs`,
           );
         }

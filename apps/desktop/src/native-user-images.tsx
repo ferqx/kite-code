@@ -22,6 +22,7 @@ type Props = {
   readAvailable: boolean;
   previews: NativeImagePreviews;
   images?: readonly ImageDescriptor[];
+  childHandle?: string;
 };
 type ImageDescriptor = {
   name: string;
@@ -31,19 +32,41 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
   const readId = crypto.randomUUID(),
     { bridge, generation } = props;
   const close = () =>
-    bridge.request({ method: 'input.image.close', generation, readId }).catch(() => {});
+    bridge
+      .request(
+        props.childHandle
+          ? {
+              method: 'background.child.image.close',
+              surface: 'environment',
+              generation,
+              readId,
+            }
+          : { method: 'input.image.close', generation, readId },
+      )
+      .catch(() => {});
   signal.addEventListener('abort', close, { once: true });
   try {
     signal.throwIfAborted();
-    const opened = await bridge.request({
-      method: 'input.image.open',
-      generation,
-      readId,
-      messageId: props.message.id,
-      index,
-      viewSelection: props.viewSelection,
-      historyEpoch: props.historyEpoch,
-    });
+    const opened = await bridge.request(
+      props.childHandle
+        ? {
+            method: 'background.child.image.open',
+            surface: 'environment',
+            handle: props.childHandle,
+            generation,
+            readId,
+            index,
+          }
+        : {
+            method: 'input.image.open',
+            generation,
+            readId,
+            messageId: props.message.id,
+            index,
+            viewSelection: props.viewSelection,
+            historyEpoch: props.historyEpoch,
+          },
+    );
     signal.throwIfAborted();
     if (
       !opened ||
@@ -63,12 +86,22 @@ async function readImage(props: Props, index: number, image: ImageDescriptor, si
     const bytes = new Uint8Array(opened.size);
     let offset = 0;
     while (offset < bytes.length) {
-      const chunk = await bridge.request({
-        method: 'input.image.read',
-        generation,
-        readId,
-        offset,
-      });
+      const chunk = await bridge.request(
+        props.childHandle
+          ? {
+              method: 'background.child.image.read',
+              surface: 'environment',
+              generation,
+              readId,
+              offset,
+            }
+          : {
+              method: 'input.image.read',
+              generation,
+              readId,
+              offset,
+            },
+      );
       signal.throwIfAborted();
       if (
         !chunk ||
@@ -144,7 +177,12 @@ function NativeUserImage({
     [nearby, setNearby] = useState(false),
     [visible, setVisible] = useState(typeof document === 'undefined' || !document.hidden);
   const card = useRef<HTMLDivElement>(null);
-  const readScope = JSON.stringify([props.generation, props.viewSelection, props.historyEpoch]);
+  const readScope = JSON.stringify([
+    props.generation,
+    props.viewSelection,
+    props.historyEpoch,
+    props.childHandle,
+  ]);
   const current = useRef({ props, image, index, readAvailable, readScope });
   useLayoutEffect(() => {
     current.current = { props, image, index, readAvailable, readScope };

@@ -52,11 +52,15 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html.match(/role="separator"/g)).toHaveLength(2);
 });
 
-test('the session header limits long labels to ten visible characters', () => {
+test('the session header shortens long labels and exposes the full text without a hover tooltip', () => {
   const html = renderToStaticMarkup(
     <SessionPage {...base} sessionLabel="请测试一次 ask_user 多问题交互" />,
   );
-  expect(html).toContain('<strong title="请测试一次 ask_user 多问题交互">请测试一次 ask…</strong>');
+  const { document } = new JSDOM(html).window;
+  const title = document.querySelector('.session-header .breadcrumb strong');
+  expect(title?.hasAttribute('title')).toBe(false);
+  expect(title?.querySelector('[aria-hidden="true"]')?.textContent).toBe('请测试一次 ask…');
+  expect(title?.querySelector('.sr-only')?.textContent).toBe('请测试一次 ask_user 多问题交互');
   expect(
     renderToStaticMarkup(<SessionPage {...base} sessionLabel="正好十个字符标题呀哦" />),
   ).toContain('>正好十个字符标题呀哦</strong>');

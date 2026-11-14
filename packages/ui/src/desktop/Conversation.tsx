@@ -1,4 +1,9 @@
-import { ArrowDown01Icon, ArrowDown02Icon, KiteIcon } from '@hugeicons/core-free-icons';
+import {
+  ArrowDown01Icon,
+  ArrowDown02Icon,
+  KiteIcon,
+  ReduceParagraphIcon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Fragment,
@@ -26,19 +31,12 @@ import {
 } from './ConversationTrace';
 import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
 import { Collapsible, CollapsibleTrigger } from './components/ui/collapsible';
-import { Marker, MarkerContent } from './components/ui/marker';
 import { ScrollArea } from './components/ui/scroll-area';
+import { TraceIcon, TraceLine, TraceTitle } from './components/ui/trace';
 import {
   type ConversationScrollAnchor,
-  type ConversationWindow,
-  type ConversationWindowRange,
   captureConversationScrollAnchor,
-  createConversationWindow,
-  expandConversationWindow,
-  jumpConversationWindowToLatest,
-  resolveConversationWindow,
   restoreConversationScrollAnchor,
-  scheduleConversationWindowLoad,
 } from './conversation-window';
 import { DeferredProcessContent } from './DeferredProcessContent';
 import { useDesktopDiagnostics } from './diagnostics';
@@ -66,6 +64,7 @@ export interface ToolActivityState {
   aggregate?: boolean;
   inTrace?: boolean;
   directTraceDetails?: boolean;
+  parentDisclosureOpen?: boolean;
   expanded?: boolean;
   activityId: string;
   restoredExpanded: ReadonlySet<string>;
@@ -165,6 +164,33 @@ function TurnElapsed({
       {prefix}
       {formatTurnElapsed(elapsed)}
     </span>
+  );
+}
+
+function TurnSummary({
+  label,
+  open,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="agent-turn-summary-row">
+      <CollapsibleTrigger asChild>
+        <Button
+          className="agent-turn-summary"
+          variant="ghost"
+          aria-label={`${label}，${open ? '收起' : '展开'}本轮处理过程`}
+        >
+          {children}
+          <TraceIcon className="agent-turn-chevron" data-icon="inline-end">
+            <HugeiconsIcon icon={ArrowDown01Icon} />
+          </TraceIcon>
+        </Button>
+      </CollapsibleTrigger>
+    </div>
   );
 }
 
@@ -319,9 +345,22 @@ const MessageItem = memo(function MessageItem({
   if (message.systemKind === 'compaction')
     return (
       <article className={`message context-compacted ${message.status ?? ''}`}>
-        <Marker role="status">
-          <MarkerContent className="tool-label">{message.title}</MarkerContent>
-        </Marker>
+        <TraceLine
+          className="conversation-trace-line"
+          status={
+            message.status === 'running'
+              ? 'running'
+              : message.status === 'failed'
+                ? 'error'
+                : undefined
+          }
+          role="status"
+        >
+          <TraceIcon>
+            <HugeiconsIcon icon={ReduceParagraphIcon} />
+          </TraceIcon>
+          <TraceTitle>{message.title}</TraceTitle>
+        </TraceLine>
         {message.status === 'failed' && message.text && <p>{message.text}</p>}
       </article>
     );
@@ -515,7 +554,7 @@ export function Conversation({
   loading: historyLoading,
   initialPresentationPending = false,
   onPresentationReady,
-  lazyHistory = false,
+  preserveReadingAnchor = false,
   messageNavigation = false,
   turnActivity: incomingTurnActivity,
 
@@ -541,8 +580,8 @@ export function Conversation({
   initialPresentationPending?: boolean;
   /** The initial readable message tree has committed; this never grants read or write authority. */
   onPresentationReady?: () => void;
-  /** Native limits cold large-history mounting; data and read admission stay host-owned. */
-  lazyHistory?: boolean;
+  /** Retain the visible message identity when the transcript changes size or resumes. */
+  preserveReadingAnchor?: boolean;
   messageNavigation?: boolean;
   turnActivity?: TurnActivity;
 
@@ -618,60 +657,6 @@ export function Conversation({
   const restore = useRef(true);
   const [following, setFollowing] = useState(reading.current.follow);
   const [expanded, setExpanded] = useState(reading.current.expanded);
-  const [windowState, setWindowState] = useState<ConversationWindow>();
-  const rangeRef = useRef<ConversationWindowRange | undefined>(undefined);
-  const entryKeys = useRef<readonly string[]>([]);
-  const mountedEntries = useRef(new Set<string>());
-  const knownEntries = useRef(new Set<string>());
-  const pendingLoad = useRef<
-    | {
-        anchor?: ConversationScrollAnchor;
-        top: number;
-        cancel: () => void;
-        committed: boolean;
-      }
-    | undefined
-  >(undefined);
-  const loadWindow = useCallback(
-    (direction: 'before' | 'after') => {
-      const element = viewport.current;
-      const range = rangeRef.current;
-      const view = element?.ownerDocument.defaultView;
-      if (
-        !lazyHistory ||
-        !element ||
-        !range ||
-        !view ||
-        pendingLoad.current ||
-        !(direction === 'before' ? range.hasBefore : range.hasAfter)
-      )
-        return;
-      reading.current.follow = false;
-      setFollowing(false);
-      const request = {
-        anchor: captureConversationScrollAnchor(element),
-        top: element.scrollTop,
-        cancel: () => {},
-        committed: false,
-      };
-      pendingLoad.current = request;
-      request.cancel = scheduleConversationWindowLoad(view, () => {
-        if (pendingLoad.current !== request || !viewport.current) return;
-        const latest = rangeRef.current;
-        if (!latest) return;
-        const next = expandConversationWindow(entryKeys.current, latest.state, direction);
-        if (next === latest.state) {
-          pendingLoad.current = undefined;
-          return;
-        }
-        request.anchor = captureConversationScrollAnchor(viewport.current);
-        request.top = viewport.current.scrollTop;
-        request.committed = true;
-        setWindowState(next);
-      });
-    },
-    [lazyHistory],
-  );
   const committedOpenTurns = useRef<readonly string[]>([]);
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
@@ -754,8 +739,6 @@ export function Conversation({
   currentTurn.current = turnActivity?.turnId;
   useLayoutEffect(
     () => () => {
-      pendingLoad.current?.cancel();
-      pendingLoad.current = undefined;
       restore.current = true;
       save.current(
         currentMessages.current
@@ -779,13 +762,14 @@ export function Conversation({
         traceDisclosure.current = false;
         reading.current.follow = false;
         reading.current.top = element.scrollTop;
-        reading.current.anchor = lazyHistory ? captureConversationScrollAnchor(element) : undefined;
+        reading.current.anchor = preserveReadingAnchor
+          ? captureConversationScrollAnchor(element)
+          : undefined;
         setFollowing(false);
       }
-      if (reading.current.follow && !rangeRef.current?.hasAfter)
-        writeScroll(element, element.scrollHeight);
+      if (reading.current.follow) writeScroll(element, element.scrollHeight);
       else if (
-        lazyHistory &&
+        preserveReadingAnchor &&
         reading.current.anchor &&
         restoreConversationScrollAnchor(element, reading.current.anchor)
       )
@@ -795,7 +779,7 @@ export function Conversation({
     observer.observe(element);
     if (content.current) observer.observe(content.current);
     return () => observer.disconnect();
-  }, [loading, writeScroll, lazyHistory, syncMessageNavigation]);
+  }, [loading, writeScroll, preserveReadingAnchor, syncMessageNavigation]);
   // Restore identity/window handoffs synchronously. Ordinary content geometry is
   // followed by ResizeObserver before paint, after layout has already completed.
   // Reading scrollHeight on every metadata commit would force that layout early.
@@ -805,33 +789,19 @@ export function Conversation({
       restore.current = true;
       return;
     }
-    const pending = pendingLoad.current;
-    if (pending?.committed) {
-      pendingLoad.current = undefined;
-      if (pending.anchor) {
-        const offset = pending.anchor.offset - (element.scrollTop - pending.top);
-        if (restoreConversationScrollAnchor(element, { ...pending.anchor, offset }))
-          writeScroll(element, element.scrollTop);
-      }
-    }
-    if (restore.current || (reading.current.follow && typeof ResizeObserver === 'undefined')) {
-      if (reading.current.follow) writeScroll(element, element.scrollHeight);
-      else if (
-        lazyHistory &&
-        reading.current.anchor &&
-        restoreConversationScrollAnchor(element, reading.current.anchor)
-      )
-        writeScroll(element, element.scrollTop);
-      else writeScroll(element, reading.current.top);
-      restore.current = false;
-    }
-    if (lazyHistory && !reading.current.follow && !jumpedMarker.current)
+    if (reading.current.follow) {
+      if (restore.current || typeof ResizeObserver === 'undefined')
+        writeScroll(element, element.scrollHeight);
+    } else if (
+      preserveReadingAnchor &&
+      reading.current.anchor &&
+      restoreConversationScrollAnchor(element, reading.current.anchor)
+    ) {
+      writeScroll(element, element.scrollTop);
+    } else if (restore.current) writeScroll(element, reading.current.top);
+    restore.current = false;
+    if (preserveReadingAnchor && !reading.current.follow && !jumpedMarker.current)
       reading.current.anchor = captureConversationScrollAnchor(element) ?? reading.current.anchor;
-    const range = rangeRef.current;
-    mountedEntries.current = new Set(
-      range ? entryKeys.current.slice(range.start, range.end) : entryKeys.current,
-    );
-    knownEntries.current = new Set(entryKeys.current);
   });
   const onToggle = useRef((id: string, open: boolean) => {
     restoredExpanded.current.delete(id);
@@ -1090,8 +1060,17 @@ export function Conversation({
     const renderGroup = (
       group: Message[],
       placement: 'standalone' | 'process' | 'result' | 'trace' = 'standalone',
-      directTraceDetails = false,
-      showTraceReply = false,
+      {
+        directTraceDetails = false,
+        showTraceReply = false,
+        parentDisclosureOpen = true,
+        onToolToggle,
+      }: {
+        directTraceDetails?: boolean;
+        showTraceReply?: boolean;
+        parentDisclosureOpen?: boolean;
+        onToolToggle?: (open: boolean) => void;
+      } = {},
     ) => {
       const message = group[0]!;
       if (structural(message)) return null;
@@ -1110,6 +1089,9 @@ export function Conversation({
       const activityKey = aggregate
         ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
         : `activity:${message.presentationKey ?? message.id}`;
+      const toggle =
+        onToolToggle ??
+        ((open: boolean) => (inTrace ? onTraceToggle : onToggle)(activityKey, open));
       if (message.role === 'tool' && renderToolActivity)
         return (
           <Fragment key={activityKey}>
@@ -1118,10 +1100,11 @@ export function Conversation({
               expanded: expanded[activityKey],
               inTrace,
               directTraceDetails,
+              parentDisclosureOpen,
               activityId: activityKey,
               restoredExpanded: restoredExpanded.current,
               expandedItems: expanded,
-              onToggle: (open) => (inTrace ? onTraceToggle : onToggle)(activityKey, open),
+              onToggle: toggle,
               onToggleItem: inTrace ? onTraceToggle : onToggle,
             })}
           </Fragment>
@@ -1133,6 +1116,7 @@ export function Conversation({
           aggregate={aggregate}
           inTrace={inTrace}
           directTraceDetails={directTraceDetails}
+          parentDisclosureOpen={parentDisclosureOpen}
           suppressGenericFailure={
             message.toolName === 'task' &&
             (children.get(message.id.slice(5)) ?? []).some(
@@ -1147,7 +1131,7 @@ export function Conversation({
           restoredExpanded={restoredExpanded.current}
           expandedItems={expanded}
           onToggleItem={onToggle}
-          onToggle={(open) => (inTrace ? onTraceToggle : onToggle)(activityKey, open)}
+          onToggle={toggle}
           openFile={openFile}
           childDetail={parentTaskDetail(message, group.length)}
           childDetailForMessage={(item) => parentTaskDetail(item, 1)}
@@ -1267,10 +1251,34 @@ export function Conversation({
         lastTurnEntry && ended
           ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
           : undefined;
+      const finishedLabel =
+        finishedDuration === undefined ? '用时未知' : `用时 ${formatTurnElapsed(finishedDuration)}`;
+      // The Run can end before its final saved reply replaces the live body.
+      const lastProcessMessage = processGroups.at(-1)?.[0];
+      const retainingReply =
+        completed &&
+        !finalReplyByTurn.has(entry.turnId) &&
+        lastProcessMessage?.role === 'assistant' &&
+        !lastProcessMessage.settled;
+      const incompleteFailure = (failed || aborted) && !finalReplyByTurn.has(entry.turnId);
+      const trackOpen = (id: string) => {
+        openTurns.push(id);
+        if (restore.current) restoredExpanded.current.add(id);
+      };
       if (traceTurns) {
-        const messages = entry.groups.flat().filter((message) => !structural(message));
+        const messages = processGroups.flat();
+        const lastMessage = messages.at(-1);
+        const showElapsed = lastTurnEntry && ended;
+        // Keep the trailing live body and its saved final reply under the same
+        // keyed parent, outside the process that closes on settlement.
+        const reply =
+          finalGroup?.[0] ??
+          ((!showElapsed || completed) && lastMessage?.role === 'assistant'
+            ? lastMessage
+            : undefined);
         const blocks: Message[][] = [];
         for (const message of messages) {
+          if (message === reply) continue;
           const previous = blocks.at(-1);
           if (
             isConversationTraceStep(message) &&
@@ -1280,21 +1288,19 @@ export function Conversation({
             previous.push(message);
           else blocks.push([message]);
         }
-        const lastMessage = messages.at(-1);
         const streaming =
           lastTurnEntry &&
           !ended &&
           !activity?.executionUnconfirmed &&
           (!activity || activity.status === 'running') &&
-          lastMessage?.role === 'assistant' &&
-          lastMessage.streaming === true;
+          reply?.streaming === true;
         const waitingLabel = lastTurnEntry
           ? failed && !failureGroups.length
             ? '本轮异常结束'
             : aborted && !failureGroups.length
               ? '本轮执行已中断'
               : cancelled
-                ? '已停止'
+                ? '你已停止'
                 : activity?.status === 'recovery_required'
                   ? '需要恢复'
                   : activity?.status === 'cancelling'
@@ -1305,11 +1311,135 @@ export function Conversation({
                           !activity.executionUnconfirmed &&
                           !messages.some((message) => message.role === 'tool' && !message.settled)
                         ? '正在等待'
-                        : activity?.responsePhase === 'preparing' && blocks.length === 0
+                        : activity?.responsePhase === 'preparing' && messages.length === 0
                           ? '正在准备回复…'
                           : undefined
           : undefined;
+        const turnKey = `turn:${entry.turnId}:complete`;
+        const open = !showElapsed || (expanded[turnKey] ?? incompleteFailure);
+        if (showElapsed && blocks.length > 0 && open) trackOpen(turnKey);
+        const statusContent = <span className="agent-turn-status-label">{finishedLabel}</span>;
         const lastBlock = blocks.at(-1);
+        const turnActive =
+          !ended &&
+          lastTurnEntry &&
+          !activity?.executionUnconfirmed &&
+          (!activity || activity.status === 'running' || activity.status === 'waiting');
+        const renderBody = (message: Message, showReply = false) => (
+          <div
+            key={message.presentationKey ?? message.id}
+            className={cn('agent-turn-body', message.finalReply && 'agent-turn-final')}
+          >
+            {renderGroup([message], showReply || message.finalReply ? 'result' : 'process', {
+              showTraceReply: showReply && streaming,
+            })}
+          </div>
+        );
+        const renderBlocks = () =>
+          blocks.map((block, index) => {
+            const first = block[0]!;
+            if (!isConversationTraceStep(first)) return renderBody(first);
+            const phaseActive = turnActive && block === lastBlock && !reply;
+            const tool = turnActive ? latestRunningTraceTool(block) : undefined;
+            const trailing = block.at(-1);
+            const thinking =
+              phaseActive &&
+              !tool &&
+              (!activity || activity.status === 'running') &&
+              trailing?.role === 'thinking' &&
+              !trailing.settled &&
+              trailing.tracePending !== 'tool';
+            const working = tool ? toolTraceTitle(tool) : thinking ? '正在思考…' : undefined;
+            const steps = block.filter((item) => !item.tracePending);
+            const singleTool =
+              steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
+            const editedFiles =
+              steps.length > 1 &&
+              steps.every(
+                (step) =>
+                  step.role === 'tool' &&
+                  step.toolName === 'edit_file' &&
+                  step.status === 'completed' &&
+                  step.settled &&
+                  step.dispatchCommitted !== false,
+              );
+            const summary =
+              working ??
+              ((singleTool
+                ? toolTraceTitle(singleTool)
+                : editedFiles
+                  ? '已编辑的文件'
+                  : completedToolActions(steps.filter((step) => step.role === 'tool'))) ||
+                (phaseActive && trailing?.tracePending === 'tool'
+                  ? '等待工具执行'
+                  : block.some((item) => item.role === 'tool')
+                    ? '工具执行'
+                    : '已思考'));
+            const boundary = blocks[index - 1]?.[0];
+            const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
+            if (open && expanded[id] === true) trackOpen(id);
+            return (
+              <ConversationTrace
+                key={id}
+                id={id}
+                steps={steps}
+                waitingForTool={!steps.length && trailing?.tracePending === 'tool'}
+                label={summary}
+                running={!!working}
+                failed={!!singleTool && toolTextFailed(singleTool)}
+                processOpen={open}
+                notice={
+                  turnActive &&
+                  block.some((item) => item.toolStopping && !item.executionUnconfirmed) && (
+                    <p className="conversation-turn-notice" role="status">
+                      已请求停止，等待执行结果。
+                    </p>
+                  )
+                }
+                expanded={expanded}
+                restoredExpanded={restoredExpanded.current}
+                onToggle={onTraceToggle}
+                renderTool={(item, direct, traceOpen, onToolToggle) =>
+                  renderGroup([item], 'trace', {
+                    directTraceDetails: direct,
+                    parentDisclosureOpen: traceOpen,
+                    onToolToggle,
+                  })
+                }
+                renderReasoning={renderReasoning}
+              />
+            );
+          });
+        const process = showElapsed ? (
+          blocks.length > 0 ? (
+            <Collapsible
+              key={turnKey}
+              asChild
+              open={open}
+              onOpenChange={(next) => onTraceToggle(turnKey, next)}
+            >
+              <div
+                className="agent-turn-process"
+                data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
+              >
+                <TurnSummary label={finishedLabel} open={open}>
+                  {statusContent}
+                </TurnSummary>
+                <DeferredProcessContent
+                  open={open}
+                  className="agent-turn-content"
+                  render={() => <div className="conversation-trace-process">{renderBlocks()}</div>}
+                />
+              </div>
+            </Collapsible>
+          ) : (
+            <div key={turnKey} className="agent-turn-summary agent-turn-summary-static">
+              {statusContent}
+            </div>
+          )
+        ) : null;
+        const content = process ? [process] : renderBlocks();
+        if (reply) content.push(renderBody(reply, true));
         return (
           <section
             key={entry.key}
@@ -1318,95 +1448,12 @@ export function Conversation({
               terminalStatus ?? activity?.status ?? (completed ? 'completed' : 'unknown')
             }
           >
-            {blocks.map((block, index) => {
-              const first = block[0]!;
-              if (!isConversationTraceStep(first)) {
-                return (
-                  <Fragment key={first.presentationKey ?? first.id}>
-                    <div className={cn('agent-turn-body', first.finalReply && 'agent-turn-final')}>
-                      {renderGroup(
-                        block,
-                        first.finalReply || (first === lastMessage && first.role === 'assistant')
-                          ? 'result'
-                          : 'process',
-                        false,
-                        streaming && first === lastMessage,
-                      )}
-                    </div>
-                  </Fragment>
-                );
-              }
-              const phaseActive =
-                !ended &&
-                lastTurnEntry &&
-                !activity?.executionUnconfirmed &&
-                block === lastBlock &&
-                (!activity || activity.status === 'running' || activity.status === 'waiting');
-              const tool = phaseActive ? latestRunningTraceTool(block) : undefined;
-              const trailing = block.at(-1);
-              const thinking =
-                phaseActive &&
-                !tool &&
-                (!activity || activity.status === 'running') &&
-                trailing?.role === 'thinking' &&
-                !trailing.settled &&
-                trailing.tracePending !== 'tool';
-              const working = tool
-                ? toolTraceTitle(tool, true)
-                : thinking
-                  ? '正在思考…'
-                  : undefined;
-              const steps = block.filter((item) => !item.tracePending);
-              const singleTool =
-                steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
-              const summaryStep = tool ?? (thinking || !steps.length ? trailing : singleTool);
-              const summary =
-                working ??
-                ((singleTool ? toolTraceTitle(singleTool) : completedToolActions(steps)) ||
-                  (phaseActive && trailing?.tracePending === 'tool'
-                    ? '等待工具执行'
-                    : block.some((item) => item.role === 'tool')
-                      ? '工具执行'
-                      : '思考完成'));
-              const boundary = blocks[index - 1]?.[0];
-              const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
-              if (expanded[id] === true) {
-                openTurns.push(id);
-                if (
-                  restore.current ||
-                  (lazyHistory &&
-                    knownEntries.current.has(entry.key) &&
-                    !mountedEntries.current.has(entry.key))
-                )
-                  restoredExpanded.current.add(id);
-              }
-              return (
-                <ConversationTrace
-                  key={id}
-                  id={id}
-                  steps={steps}
-                  summaryStep={summaryStep}
-                  label={summary}
-                  running={!!working}
-                  failed={!!singleTool && toolTextFailed(singleTool)}
-                  notice={
-                    phaseActive &&
-                    block.some((item) => item.toolStopping && !item.executionUnconfirmed) && (
-                      <p className="conversation-turn-notice" role="status">
-                        已请求停止，等待执行结果。
-                      </p>
-                    )
-                  }
-                  expanded={expanded}
-                  restoredExpanded={restoredExpanded.current}
-                  onToggle={onTraceToggle}
-                  renderTool={(item, open) => renderGroup([item], 'trace', open)}
-                  renderReasoning={renderReasoning}
-                />
-              );
-            })}
+            {content}
             {waitingLabel && (
-              <small className="conversation-turn-notice" role="status">
+              <small
+                className={cn('conversation-turn-notice', cancelled && 'conversation-turn-stopped')}
+                role="status"
+              >
                 {waitingLabel}
               </small>
             )}
@@ -1449,31 +1496,14 @@ export function Conversation({
         failureGroups.length > 0 ||
         ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '') ||
         (!!finalGroup && !ongoing);
-      // Run completion and saved message updates arrive independently. Keep
-      // the readable process mounted until its final reply can take over.
-      const lastProcessMessage = processGroups.at(-1)?.[0];
-      const retainingReply =
-        completed &&
-        !finalReplyByTurn.has(entry.turnId) &&
-        lastProcessMessage?.role === 'assistant' &&
-        !lastProcessMessage.settled;
       // Settlement regroups the final reply outside the process. Start a new
       // container so the old process cannot repaint during its exit animation.
       const turnKey = `turn:${entry.turnId}:${settled && !retainingReply ? 'complete' : 'process'}`;
-      const incompleteFailure = (failed || aborted) && !finalReplyByTurn.has(entry.turnId);
       const open = !settled || (expanded[turnKey] ?? (incompleteFailure || retainingReply));
-      if (showProcess && open) openTurns.push(turnKey);
       // Cold history and restored readings start at their full height. Replaying
       // the default-open process moves the transcript for the entire animation.
       // A later user toggle removes this marker and keeps the normal animation.
-      if (
-        open &&
-        (restore.current ||
-          (lazyHistory &&
-            knownEntries.current.has(entry.key) &&
-            !mountedEntries.current.has(entry.key)))
-      )
-        restoredExpanded.current.add(turnKey);
+      if (showProcess && open) trackOpen(turnKey);
       const statusContent = (
         <span
           className="agent-turn-status-label"
@@ -1516,35 +1546,28 @@ export function Conversation({
                 data-live={!settled || undefined}
                 data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
               >
-                <div className="agent-turn-summary-row">
-                  {settled ? (
-                    <CollapsibleTrigger asChild>
-                      <Button
-                        className="agent-turn-summary"
-                        variant="ghost"
-                        aria-label={`${finishedDuration === undefined ? label : `用时 ${formatTurnElapsed(finishedDuration)}`}，${open ? '收起' : '展开'}本轮处理过程`}
-                      >
-                        {statusContent}
-                        <HugeiconsIcon
-                          className="agent-turn-chevron"
-                          icon={ArrowDown01Icon}
-                          aria-hidden="true"
-                          data-icon="inline-end"
-                        />
-                      </Button>
-                    </CollapsibleTrigger>
-                  ) : (
+                {settled ? (
+                  <TurnSummary
+                    label={finishedDuration === undefined ? label : finishedLabel}
+                    open={open}
+                  >
+                    {statusContent}
+                  </TurnSummary>
+                ) : (
+                  <div className="agent-turn-summary-row">
                     <div className="agent-turn-summary agent-turn-summary-static" role="status">
                       {statusContent}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
                 <DeferredProcessContent
                   open={open}
                   className="agent-turn-content"
                   render={() => (
                     <section className="agent-turn-process-messages" aria-label="本轮处理过程">
-                      {processGroups.map((group) => renderGroup(group, 'process'))}
+                      {processGroups.map((group) =>
+                        renderGroup(group, 'process', { parentDisclosureOpen: open }),
+                      )}
                     </section>
                   )}
                 />
@@ -1606,31 +1629,13 @@ export function Conversation({
     onToggle,
     restoredMarkerSignature,
     loading,
-    lazyHistory,
+    preserveReadingAnchor,
   ]);
   const { empty, busy } = projection;
-  const keys = useMemo(() => projection.entries.map((entry) => entry.key), [projection.entries]);
-  const initialWindow =
-    windowState ??
-    createConversationWindow(keys, {
-      anchorKey: !reading.current.follow ? reading.current.anchor?.entryKey : undefined,
-      legacyManual: !reading.current.follow && !reading.current.anchor,
-    });
-  const range = resolveConversationWindow(keys, initialWindow, {
-    followTail: reading.current.follow,
-  });
-  if (lazyHistory && !loading && windowState !== range.state) setWindowState(range.state);
-  if (!loading) {
-    entryKeys.current = keys;
-    rangeRef.current = lazyHistory ? range : undefined;
-  }
   const { entryContent, openTurns, markers } = useMemo(() => {
     const openTurns: string[] = [];
-    const visible = lazyHistory
-      ? projection.entries.slice(range.start, range.end)
-      : projection.entries;
     const markers: ConversationMessageMarker[] = [];
-    const entryContent = visible.map((entry) => {
+    const entryContent = projection.entries.map((entry) => {
       const message = entry.groups[0]?.[0];
       const isMarker = messageNavigation && !loading && message && isNavigationMessage(message);
       if (isMarker)
@@ -1640,24 +1645,23 @@ export function Conversation({
             message.text.slice(0, 80).replace(/\s+/g, ' ').trim() ||
             (message.hasAttachments ? '附件' : ''),
         });
-      return lazyHistory || isMarker ? (
+      if (!preserveReadingAnchor && !isMarker) return projection.renderEntry(entry, openTurns);
+      return (
         <div
           key={entry.key}
           className="conversation-entry"
-          data-conversation-entry-key={lazyHistory ? entry.key : undefined}
+          data-conversation-entry-key={preserveReadingAnchor ? entry.key : undefined}
           data-entry-kind={
-            lazyHistory ? (entry.turnId ? 'turn' : (message?.role ?? 'other')) : undefined
+            preserveReadingAnchor ? (entry.turnId ? 'turn' : (message?.role ?? 'other')) : undefined
           }
           data-conversation-message-marker={isMarker ? entry.key : undefined}
         >
           {projection.renderEntry(entry, openTurns)}
         </div>
-      ) : (
-        projection.renderEntry(entry, openTurns)
       );
     });
     return { entryContent, openTurns, markers };
-  }, [projection, lazyHistory, range.start, range.end, messageNavigation, loading]);
+  }, [projection, preserveReadingAnchor, messageNavigation, loading]);
   useLayoutEffect(() => {
     committedOpenTurns.current = openTurns;
   }, [openTurns]);
@@ -1699,13 +1703,11 @@ export function Conversation({
         setActiveMarker(key);
         return;
       }
-      pendingLoad.current?.cancel();
-      pendingLoad.current = undefined;
       reading.current.follow = false;
       jumpedMarker.current = key;
       traceDisclosure.current = false;
       writeScroll(element, top);
-      reading.current.anchor = lazyHistory
+      reading.current.anchor = preserveReadingAnchor
         ? {
             entryKey: key,
             offset: target.getBoundingClientRect().top - element.getBoundingClientRect().top,
@@ -1713,7 +1715,7 @@ export function Conversation({
         : undefined;
       setFollowing(false);
     },
-    [lazyHistory, writeScroll],
+    [preserveReadingAnchor, writeScroll],
   );
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
@@ -1741,35 +1743,24 @@ export function Conversation({
               // makes the following-state commit snap a manual scroll to the tail.
               // scrollTop is fractional while the two heights are rounded.
               const remaining = element.scrollHeight - element.clientHeight - element.scrollTop;
-              const follow = !rangeRef.current?.hasAfter && remaining <= 1;
+              const follow = remaining <= 1;
               reading.current = {
                 ...reading.current,
                 top: element.scrollTop,
                 follow,
                 expanded: reading.current.expanded,
                 anchor:
-                  lazyHistory && !follow ? captureConversationScrollAnchor(element) : undefined,
+                  preserveReadingAnchor && !follow
+                    ? captureConversationScrollAnchor(element)
+                    : undefined,
               };
-              if (pendingLoad.current) {
-                pendingLoad.current.anchor = captureConversationScrollAnchor(element);
-                pendingLoad.current.top = element.scrollTop;
-              }
               setFollowing(follow);
               syncMessageNavigation(element);
-              if (element.scrollTop <= 200) loadWindow('before');
-              else if (remaining <= 200) loadWindow('after');
             }}
           >
             <div ref={content} className="reading-column">
-              {!loading && lazyHistory && range.hasBefore && (
-                <div className="conversation-history-boundary">
-                  <Button variant="ghost" onClick={() => loadWindow('before')}>
-                    加载更早消息
-                  </Button>
-                </div>
-              )}
               {!loading &&
-                (empty ? (
+                (empty && !entryContent.length ? (
                   <div className="welcome">
                     <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
                     <p>
@@ -1784,13 +1775,6 @@ export function Conversation({
                 ) : (
                   entryContent
                 ))}
-              {!loading && lazyHistory && range.hasAfter && (
-                <div className="conversation-history-boundary">
-                  <Button variant="ghost" onClick={() => loadWindow('after')}>
-                    加载后续消息
-                  </Button>
-                </div>
-              )}
             </div>
           </section>
           {markers.length > 0 && (
@@ -1816,16 +1800,10 @@ export function Conversation({
               onClick={() => {
                 const element = viewport.current;
                 if (!element) return;
-                pendingLoad.current?.cancel();
-                pendingLoad.current = undefined;
                 reading.current.follow = true;
                 traceDisclosure.current = false;
                 reading.current.anchor = undefined;
                 jumpedMarker.current = undefined;
-                if (lazyHistory) {
-                  restore.current = true;
-                  setWindowState(jumpConversationWindowToLatest(entryKeys.current));
-                }
                 writeScroll(element, element.scrollHeight);
                 reading.current = { ...reading.current, follow: true, top: element.scrollTop };
                 setFollowing(true);

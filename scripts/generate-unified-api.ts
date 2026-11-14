@@ -146,6 +146,8 @@ const responseNames = [
   'ExtensionList',
   'QueryResponse',
   'MessageChangesPage',
+  'MessageTextChunk',
+  'SessionHistoryEntries',
 ];
 const requestNames = [
   ...new Set(
@@ -241,6 +243,8 @@ const requestNames = [
   'CancelSessionRequest',
   'ExtensionCommandRequest',
   'MessageChangesQuery',
+  'MessageTextQuery',
+  'SessionHistoryEntriesQuery',
 ];
 function allowFutureFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(allowFutureFields);

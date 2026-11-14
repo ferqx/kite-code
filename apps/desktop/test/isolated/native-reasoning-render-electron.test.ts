@@ -118,7 +118,7 @@ test.skipIf(process.platform !== 'darwin')(
                 send({
                   reasoning_content:
                     calls === 1
-                      ? 'PRIVATE_REASONING_SENTINEL_INITIAL'
+                      ? '**PRIVATE_REASONING_SENTINEL_INITIAL**\n\n核对原记录。'
                       : 'PRIVATE_REASONING_SENTINEL_SECOND_MODEL',
                 });
             },

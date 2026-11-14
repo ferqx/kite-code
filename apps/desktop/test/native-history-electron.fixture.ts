@@ -123,16 +123,16 @@ try {
     });
   });
   await page
-    .locator('[role="status"]')
-    .filter({ hasText: /^历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。$/ })
-    .waitFor();
+    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .waitFor({ state: 'hidden' });
   eq(await page.locator('article').count(), 5051);
   eq((await page.locator('main').textContent())!.includes('LARGE_HISTORY_TAIL_5051'), true);
   eq(await page.getByRole('button', { name: '发送明确的新轮次' }).isEnabled(), false);
+  eq(await page.getByRole('button', { name: '重新加载会话', exact: true }).count(), 0);
+  eq(await page.locator('main > .notice.error').count(), 0);
   phase('failure_original_body_retained');
   phase('reload_begin');
   await app.evaluate('globalThis.__historyFail=false');
-  await page.getByRole('button', { name: '重新加载会话', exact: true }).click();
   await page
     .locator('[role="status"]')
     .filter({ hasText: /^历史已完整读取至固定高水位；当前执行事实仍须核实。$/ })

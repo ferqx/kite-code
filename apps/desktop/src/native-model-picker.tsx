@@ -13,6 +13,7 @@ import {
   readNativeRecommendedModel,
   rememberNativeRecommendedModel,
 } from './native-model-preference';
+import { nativeReadDeadline } from './native-read-deadline';
 
 export type NativeModelChoice = { modelId?: string; reasoningEffort?: NativeReasoningEffort };
 /** A cached label only; displaying it never starts a read or qualifies a choice. */
@@ -206,10 +207,12 @@ export async function prepareNativeModels(
 ): Promise<NativePreparedModels> {
   const scope = nativeModelScope(generation, selection, preparing, revision);
   try {
-    const response = await bridge.request({
-      method: preparing ? 'conversation.models.read' : 'input.models.read',
-      generation,
-    });
+    const response = await nativeReadDeadline(
+      bridge.request({
+        method: preparing ? 'conversation.models.read' : 'input.models.read',
+        generation,
+      }),
+    );
     if (
       !response ||
       !('models' in response) ||

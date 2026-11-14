@@ -452,6 +452,23 @@ test('Shell success, unknown and asynchronous launch preserve uncertainty and ne
   });
 });
 
+test('a child carries the saved model output when the Shell receipt has no raw streams', async () => {
+  const { tool, job } = shellRecords('succeeded');
+  const result = tool.result as { content: string; details: Record<string, Json> };
+  result.content = 'stdout:\n模型可见的内容 🪁';
+  result.details.outputFormat = 'model-preview';
+  result.details.outputLimited = true;
+  delete result.details.stdout;
+  delete result.details.stderr;
+  const evidence = await childToolEvidence(
+    pair(tool.id, tool.definitionId),
+    identity,
+    async (id) => (id === tool.id ? tool : id === job.id ? job : null),
+    () => true,
+  );
+  expect(evidence!.shellReceipts![0]!.output).toEqual({ text: result.content, truncated: true });
+});
+
 test('Shell output and command previews share the existing total budget and preserve Unicode and complete originals', async () => {
   const records = new Map<string, ExecutionRecord>();
   const history: ModelMessage[] = [];

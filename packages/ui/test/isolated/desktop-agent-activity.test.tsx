@@ -191,6 +191,10 @@ test('child tool history keeps its operation and DOM across legacy lifecycle obs
     expect(icons[0]!.getAttribute('data-child-color')).toBe(
       icons[1]!.getAttribute('data-child-color'),
     );
+    expect(article.getAttribute('data-child-color')).toBe(
+      icons[1]!.getAttribute('data-child-color'),
+    );
+    expect(icons[0]!.hasAttribute('data-neutral')).toBe(false);
     const clean = () => {
       expect(host.querySelector('article') === article).toBe(true);
       expect(host.querySelector('.tool-activity-summary') === button).toBe(true);
@@ -236,7 +240,12 @@ test('child tool history keeps its operation and DOM across legacy lifecycle obs
       const articleClass = article.className;
       const buttonClass = button.className;
       const buttonStatus = button.getAttribute('data-status');
-      expect(host.querySelector('.tool-agent-operation')!.textContent).toBe(message.title!);
+      const operationLabelText =
+        message.toolName === 'spawn_agent' ? '子agent开始工作' : message.title!;
+      expect(host.querySelector('.tool-agent-operation')!.textContent).toBe(operationLabelText);
+      expect(name.nextElementSibling?.textContent).toBe(
+        message.toolName === 'spawn_agent' ? '·' : operationLabelText,
+      );
       for (const state of lifecycleStates) {
         for (const fresh of [true, false]) {
           const legacyPayload = agent(state, fresh);
@@ -247,7 +256,7 @@ test('child tool history keeps its operation and DOM across legacy lifecycle obs
           expect(article.className).toBe(articleClass);
           expect(button.className).toBe(buttonClass);
           expect(button.getAttribute('data-status')).toBe(buttonStatus);
-          expect(host.querySelector('.tool-agent-operation')!.textContent).toBe(message.title!);
+          expect(host.querySelector('.tool-agent-operation')!.textContent).toBe(operationLabelText);
           expect(selection.toString()).toBe(legacyPayload.name);
         }
       }
@@ -263,7 +272,7 @@ test('child tool history keeps its operation and DOM across legacy lifecycle obs
     await render(agent('completed'));
     clean();
     expect(button.disabled).toBe(false);
-    expect(host.querySelector('.tool-agent-operation')!.textContent).toBe('创建子 Agent');
+    expect(host.querySelector('.tool-agent-operation')!.textContent).toBe('子agent开始工作');
     await render(undefined);
     expect(host.textContent).toContain('创建子 Agent');
     expect(host.textContent).toContain('Original receipt');

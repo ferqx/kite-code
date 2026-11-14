@@ -308,7 +308,7 @@ test('a live long command survives queued approvals, View refresh and receipt-fi
     expect(projected.find((model) => model.id === 'receipt')?.shell).toMatchObject({
       command,
       jobStatus: 'succeeded',
-      stdout: 'done\n',
+      output: 'stdout:\ndone\n',
     });
     expect(f.host.querySelector('.shell-output') === card).toBe(true);
     expect(f.host.querySelector('.shell-output-viewport') === viewport).toBe(true);
@@ -675,7 +675,7 @@ test('the exact saved Shell request is readable before Model history completes a
     const item = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
     await act(async () => item.click());
     const card = f.host.querySelector('.shell-output')!;
-    expect(card.querySelector('.shell-console-output')?.textContent).toBe(stdout);
+    expect(card.querySelector('.shell-console-output')?.textContent).toBe(result.content);
     history.set(declaration.id, { ...declaration, status: 'complete', toolCalls: [call] });
     await render();
     expect(gets).toEqual(['actual-tool', 'file-tool']);
@@ -685,7 +685,7 @@ test('the exact saved Shell request is readable before Model history completes a
     expect(f.host.querySelector('.shell-output') === card).toBe(true);
     expect(item.getAttribute('aria-expanded')).toBe('true');
     expect(card.querySelector('.shell-command-text')?.textContent).toBe(command);
-    expect(card.querySelector('.shell-console-output')?.textContent).toBe(stdout);
+    expect(card.querySelector('.shell-console-output')?.textContent).toBe(result.content);
     expect(card.textContent).not.toContain('"execution"');
     const unrelated = {
       ...declaration,
@@ -817,7 +817,7 @@ test('the exact saved Shell request is readable before Model history completes a
       await render();
     }
     expect(gets).toHaveLength(noSourceReads);
-    expect(f.host.querySelector('.shell-console-output')?.textContent).toBe(stdout);
+    expect(f.host.querySelector('.shell-console-output')?.textContent).toBe(result.content);
     execution.definitionVersion = '9';
     await act(async () =>
       [...f.host.querySelectorAll<HTMLButtonElement>('button')]
@@ -871,6 +871,7 @@ test('Shell command continuations retain verified siblings and the same disclosu
               definitionVersion: '1',
               status: 'succeeded',
               resultRevision: '1',
+              ...(request.commandOffsets ? {} : { shellDisplay: { output: 'stdout:\n保留输出' } }),
               shellInput: request.commandOffsets
                 ? {
                     operation: 'execute',
@@ -935,10 +936,49 @@ test('Shell command continuations retain verified siblings and the same disclosu
     expect(f.host.querySelector('button.tool-activity-summary')).toBe(disclosure);
     expect(disclosure.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelector('.shell-command-text')?.textContent).toContain(command);
-    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain(
-      'original Shell receipt',
-    );
+    expect(f.host.querySelector('.shell-output pre')?.textContent).toBe('stdout:\n保留输出');
     expect(requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Shell output metadata retries oversized batches before either disclosure is opened', async () => {
+  const f = fixture();
+  const messages = [message('first-shell', 'preview'), message('second-shell', 'preview')];
+  const batches: string[][] = [];
+  const bridge = {
+    async request(request: NativeRequest) {
+      if (request.method !== 'toolMessages.list') return null;
+      batches.push(request.messageIds);
+      if (request.messageIds.length > 1) throw Error('tool_message_page_too_large');
+      const [id] = request.messageIds;
+      return {
+        ...pageFor(request, 's'),
+        entries: [
+          {
+            messageId: id,
+            executionId: `e-${id}`,
+            definitionId: 'shell.execute',
+            definitionVersion: '1',
+            status: 'succeeded',
+            resultRevision: '1',
+            shellDisplay: { output: `stdout:\n${id}` },
+          },
+        ],
+      };
+    },
+  } as NativeBridge;
+  try {
+    await act(async () =>
+      f.root.render(<ShellMetadataHarness bridge={bridge} messages={messages} />),
+    );
+    const facts = JSON.parse(f.host.querySelector('[data-testid="shell-facts"]')!.textContent!);
+    expect(batches).toEqual([['first-shell', 'second-shell'], ['first-shell'], ['second-shell']]);
+    expect(facts.entries.map((entry: NativeToolMessageFact) => entry.shellDisplay?.output)).toEqual(
+      ['stdout:\nfirst-shell', 'stdout:\nsecond-shell'],
+    );
+    expect(facts.error).toBeUndefined();
   } finally {
     await f.close();
   }
@@ -1505,7 +1545,7 @@ test('a verified MCP name replaces its generic title in place without closing th
   }
 });
 
-test('the retained tool UI shows exact failures and unverified Shell original results without claiming acceptance; unknown versions remain literal and escaped', async () => {
+test('the retained tool UI shows exact failures without exposing unverified Shell JSON; unknown versions remain literal and escaped', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];
   const values = [
@@ -1528,7 +1568,10 @@ test('the retained tool UI shows exact failures and unverified Shell original re
     const failed = [...f.host.querySelectorAll('.tool-activity')].find((node) =>
       node.textContent?.includes('missing.txt'),
     )!;
-    expect(failed.textContent).toContain('读取missing.txt失败');
+    expect(failed.querySelector('.tool-activity-summary')?.textContent).toContain(
+      '已读取missing.txt',
+    );
+    expect(failed.querySelector('.tool-activity-summary')?.textContent).not.toContain('失败');
     expect(failed.querySelector('button.file-link')).toBeNull();
     expect(failed.querySelector('.tool-step-preview')).toBeNull();
     expect(f.host.textContent).not.toContain('file_not_found');
@@ -1540,14 +1583,14 @@ test('the retained tool UI shows exact failures and unverified Shell original re
     await act(async () => failedToggle.click());
     await act(async () => nextDesktopPresentation(f.dom));
     expect(failedToggle.getAttribute('aria-expanded')).toBe('false');
-    expect(f.host.textContent).not.toContain('file_not_found');
+    expect(failedToggle.textContent).not.toContain('file_not_found');
     const shell = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
       button.textContent?.includes('启动命令'),
     )!;
     expect(shell).toBeDefined();
     expect(f.host.textContent).not.toContain('已退出');
     await act(async () => shell.click());
-    expect(f.host.querySelector('.shell-output pre')?.textContent).toContain(values[0]!.content);
+    expect(f.host.querySelector('.shell-output')?.textContent).not.toContain(values[0]!.content);
     expect(f.host.querySelector('.shell-result')?.textContent).toBe('启动结果未提供');
     expect(f.host.querySelector('.shell-result-icon')).toBeNull();
     expect(f.host.textContent).not.toContain('已受理');
@@ -1865,20 +1908,15 @@ for (const definitionId of ['files.read', 'files.edit', 'files.write', 'task.lis
         );
         for (const section of f.host.querySelectorAll('[data-case]')) {
           const active = section.querySelector('[data-slot="trace-line"][data-status="running"]');
+          expect(section.textContent).not.toMatch(/等待执行|执行中/);
           if (status === 'planned') {
-            expect(section.textContent).toContain('等待执行');
-            expect(section.textContent).not.toContain('执行中');
             expect(active).toBeNull();
             expect(
               section.querySelector('[data-slot="trace-line"][data-status="pending"]'),
             ).not.toBeNull();
           } else if (status === 'dispatching') {
-            expect(section.textContent).toContain('执行中');
-            expect(section.textContent).not.toContain('等待执行');
             expect(active).not.toBeNull();
           } else {
-            expect(section.textContent).not.toContain('等待执行');
-            expect(section.textContent).not.toContain('执行中');
             expect(active).toBeNull();
             expect(
               section.querySelector('[data-slot="trace-line"][data-status="pending"]'),
@@ -1918,8 +1956,13 @@ test('a mixed Native exploration batch shows the dispatched read as active while
     expect(f.host.querySelector('.tool-activity-summary')?.textContent).toContain('读取文件');
     expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件搜索内容');
     expect(f.host.querySelector('.tool-activity.is-running')).not.toBeNull();
-    expect(f.host.querySelector('.tool-activity-step.running')?.textContent).toContain('执行中');
-    expect(f.host.querySelector('.tool-activity-step.queued')?.textContent).toContain('等待执行');
+    expect(f.host.querySelector('.tool-activity-step.running')?.getAttribute('aria-label')).toBe(
+      '执行中',
+    );
+    expect(f.host.querySelector('.tool-activity-step.queued')?.getAttribute('aria-label')).toBe(
+      '等待执行',
+    );
+    expect(f.host.textContent).not.toMatch(/等待执行|执行中/);
   } finally {
     await f.close();
   }
@@ -1977,7 +2020,8 @@ test('Native execution labels preserve automatic check, human approval and refus
           </>,
         ),
       );
-      expect(f.host.textContent).toContain(item.label);
+      expect(f.host.querySelectorAll(`.tool-approval[aria-label="${item.label}"]`)).toHaveLength(2);
+      expect(f.host.textContent).not.toContain(item.label);
       expect(f.host.textContent).not.toContain('等待执行');
       expect(f.host.textContent).not.toContain('执行中');
       if (item.status === 'failed') expect(f.host.textContent).not.toContain('未执行');
@@ -2085,7 +2129,15 @@ test('verified freshness rejections stay neutral in the real Native grouped tran
     expect(group.textContent).toContain('读取文件');
     expect(group.textContent).toBe('读取文件');
     await act(async () => group.click());
-    expect(f.host.querySelectorAll('.tool-activity-step.not_executed')).toHaveLength(4);
+    const neutral = f.host.querySelectorAll<HTMLButtonElement>(
+      '.tool-activity-steps > .tool-activity[aria-label*="此次未执行"] > button',
+    );
+    expect(neutral).toHaveLength(4);
+    for (const row of neutral) {
+      expect(row.textContent).not.toContain('此次未执行');
+      expect(row.getAttribute('data-status')).toBeNull();
+      await act(async () => row.click());
+    }
     expect(
       f.host.querySelectorAll(
         '.tool-activity-steps > .tool-activity > button[data-status="error"]',

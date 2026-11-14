@@ -3514,6 +3514,7 @@ export type Message = {
   };
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
+  deferredText?: { bytes: string; sha256: string };
   outputBody?: {
     kind: 'model_output';
     executionId: string;
@@ -4367,6 +4368,7 @@ export type SelectedContextPage = {
     };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
+    deferredText?: { bytes: string; sha256: string };
     outputBody?: {
       kind: 'model_output';
       executionId: string;
@@ -4775,6 +4777,7 @@ export type MessageList = Array<{
   };
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
+  deferredText?: { bytes: string; sha256: string };
   outputBody?: {
     kind: 'model_output';
     executionId: string;
@@ -4791,7 +4794,40 @@ export type MessageList = Array<{
   contextSelectionId?: string;
   inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
 }>;
+export type MessageTextQuery = { storeId: string; seq: string; sha256: string; offset: string };
+export type MessageTextChunk = {
+  storeId: string;
+  sessionId: string;
+  messageId: string;
+  seq: string;
+  sha256: string;
+  bytes: string;
+  offset: string;
+  nextOffset: string;
+  data: string;
+};
+export type SessionHistoryEntriesQuery = { storeId: string; upperSeq: string; afterSeq: string };
+export type SessionHistoryEntries = {
+  storeId: string;
+  sessionId: string;
+  upperSeq: string;
+  entries: Array<{
+    id: string;
+    runId: string | null;
+    firstSeq: string;
+    lastSeq: string;
+    count: number;
+  }>;
+};
+export type MessageListQuery = {
+  limit?: number;
+  afterSeq?: string;
+  upperSeq?: string;
+  direction?: 'older';
+  previews?: 'true';
+};
 export type MessageChangesQuery = {
+  previews?: 'true';
   storeId: string;
   afterCursor: string;
   upperCursor: string;
@@ -4873,6 +4909,7 @@ export type MessageChangesPage = {
     };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
+    deferredText?: { bytes: string; sha256: string };
     outputBody?: {
       kind: 'model_output';
       executionId: string;
@@ -5079,6 +5116,7 @@ export type SessionView = {
     };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
+    deferredText?: { bytes: string; sha256: string };
     outputBody?: {
       kind: 'model_output';
       executionId: string;

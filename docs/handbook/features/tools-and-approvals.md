@@ -50,7 +50,7 @@ remove 只接受同仓库的 linked worktree，保护主树、当前来源、已
 | Git 工作树 | `git_worktree` | `action:list/create/remove`；变更要求 `key/path`，创建可选 `baseRef/newBranch`，不迁移 cwd |
 | Shell | `shell_execute`、`shell_read`、`shell_wait`、`shell_stop` | 统一执行以 `background:true` 选择后台；运行时管理执行身份，读取、等待和停止使用返回的原 `shell_id` |
 | 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |
-| 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 新默认 `preset:general/explore`，省略与显式 `general` 等价；稳定 `agent_id`，消息只排队，显式追问才续轮 |
+| 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`wait_agent_events`、`interrupt_agent` | 默认 `preset:general/explore`，省略与显式 `general` 等价。普通消息用于工作协作，最终回复由 Runtime 交付。主 Agent 可等待指定工作的事件。 |
 | 子 Agent 等待与目录 | `wait_agent_events`、`list_agents` | 事件等待仅向主 Agent 开放，只读其自身邮箱，使用 `work_refs/cursor/wait_ms`；列表按稳定身份分页，并提供原委派/最近工作/结果的可读来源 |
 | 计划 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 计划保存、批准和基于真实回执的进度分别核实 |
 | 当前任务证据 | `read_execution_evidence` | 按真实任务分页列出 Tool／Job；`execution_id` 查询原公开结果，不重跑操作 |
@@ -194,7 +194,7 @@ Windows x64 本地 Workspace 的三个文件工具及检查点原字节恢复已
 
 Shell 检索使用 rg 自身的忽略规则和命令选项；需要包含普通忽略项或隐藏文件时，分别显式使用 `--no-ignore`、`--hidden`。命令输出不是旧工具的 `scope`／`next` 分页结果，须结合准确命令、路径、退出状态及 stderr 判断范围和失败，不能把空输出当成完整无匹配证明。
 
-普通 Shell 命令共用输出预算。每条命令保留最多 1 MiB 的头尾输出（含记录开销），中间省略的字节数随原 Job 保存。运行中先提供稳定的前缀，Job 终结前发布省略区间和保留的尾部。`shell_execute` 和 `shell_read` 的 `max_output_tokens` 控制模型看到的输出预览，默认 10,000，受所选模型已知输入容量约束。此预算按 UTF-8 字节估算 tokens。命令继续执行到原终态，需要时用原 `shell_id` 读取已经保留的输出。
+普通 Shell 命令共用输出预算。每条命令保留最多 1 MiB 的头尾输出（含记录开销）供原 `shell_id` 续读，中间省略的字节数随原 Job 保存。运行中先提供稳定的前缀，Job 终结前发布省略区间和保留的尾部。`shell_execute` 和 `shell_read` 的 `max_output_tokens` 控制工具回执保存和模型看到的同一份输出，默认 10,000，受原模型已知输入容量约束，按 UTF-8 字节估算。命令继续执行到原终态，需要时用原 `shell_id` 读取已保留的输出。
 
 `shell_stop` 使用原 `shell_id`，为本次取消创建新的 `command_id`，不能复制启动回执里的旧 Command ID。MCP 工具使用 `search_mcp_tools` 查找本轮已选择的工具；`list_mcp_sources` 查看来源目录，来源目录不代表全量工具清单。
 

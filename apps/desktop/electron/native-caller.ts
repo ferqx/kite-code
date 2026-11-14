@@ -241,6 +241,7 @@ export class NativeCaller {
       admittedClient: client,
       readContextOnSelect: false,
       readActiveCommandOnSelect: true,
+      lightweightSessionState: true,
       onSnapshot: (snapshot) => {
         if (snapshot.sessionId === this.selected)
           this.lastView = { selection: this.selection, snapshot };
@@ -927,7 +928,25 @@ export class NativeCaller {
           : 'fresh',
       session: view.session,
       runs: view.runs,
-      executions: view.executions,
+      // The selection already carries full results for the execution details.
+      // Only failed Model attempts need result facts in this independent observation.
+      executions: view.executions.map((execution) => ({
+        id: execution.id,
+        originStoreId: execution.originStoreId,
+        sessionId: execution.sessionId,
+        runId: execution.runId,
+        kind: execution.kind,
+        definitionId: execution.definitionId,
+        definitionVersion: execution.definitionVersion,
+        status: execution.status,
+        resultRevision: execution.resultRevision,
+        cancelRequestedAt: execution.cancelRequestedAt,
+        parentExecutionId: execution.parentExecutionId,
+        modelRetry: execution.modelRetry,
+        ...(execution.kind === 'model' && execution.status === 'failed'
+          ? { result: execution.result }
+          : {}),
+      })),
       compressionProgress: view.compressionProgress,
     };
     this.changed();
@@ -1391,6 +1410,9 @@ export class NativeCaller {
               this.client.serverInfo!.capabilities.includes('commands') &&
               !snapshot.workspaceUnavailable,
             canReadModelOutput: this.client.serverInfo!.capabilities.includes('model_outputs'),
+            canReadHistoryPreviews:
+              this.client.serverInfo!.capabilities.includes('session_state') &&
+              this.client.serverInfo!.capabilities.includes('message_changes'),
             canReadModelInput: this.client.serverInfo!.capabilities.includes('model_inputs'),
             canReadTrajectory: this.client.serverInfo!.capabilities.includes('trajectory'),
             canReadPermissionGrants:
@@ -1433,7 +1455,10 @@ export class NativeCaller {
                 role: 'assistant' as const,
                 content: '',
               })),
-            activeCommand: snapshot.activeCommand,
+            activeCommand: snapshot.activeCommand && {
+              ...snapshot.activeCommand,
+              receipt: null,
+            },
             executions: snapshot.view.executions,
             interactions: snapshot.interactions,
             interactionsAfterId: snapshot.interactionsAfterId,
@@ -2045,6 +2070,31 @@ export class NativeCaller {
         background.childClose(request.readId);
         result = null;
         break;
+      case 'background.child.file':
+        result = await background.childFile(
+          request.changeId,
+          request.readId,
+          request.offset,
+          request.view,
+        );
+        break;
+      case 'background.child.file.close':
+        background.childFileClose(request.readId);
+        result = null;
+        break;
+      case 'background.child.text':
+        result = await background.childText(request.handle, request.offset);
+        break;
+      case 'background.child.image.open':
+        result = await background.childImageOpen(request.handle, request.readId, request.index);
+        break;
+      case 'background.child.image.read':
+        result = background.childImageRead(request.readId, request.offset);
+        break;
+      case 'background.child.image.close':
+        background.childImageClose(request.readId);
+        result = null;
+        break;
       case 'jobOutput.open':
         result = await this.jobOutput.open(request);
         break;
@@ -2633,6 +2683,89 @@ export class NativeCaller {
         }
         result = null;
         break;
+      case 'execution.result': {
+        const snapshot = this.controller.snapshot;
+        const verify = () => {
+          this.assertGeneration(request.generation);
+          const current = this.controller.snapshot;
+          if (
+            !snapshot ||
+            !current ||
+            current.view.storeId !== snapshot.view.storeId ||
+            this.selected !== snapshot.sessionId ||
+            current.sessionId !== snapshot.sessionId ||
+            this.observationUnavailable ||
+            this.permissionUnavailable ||
+            this.selection !== request.viewSelection ||
+            this.historyEpoch !== request.historyEpoch ||
+            !current.view.executions.some(
+              (execution) =>
+                execution.id === request.executionId &&
+                execution.resultRevision === request.resultRevision,
+            )
+          )
+            throw new ClientError('native_selection_changed');
+        };
+        verify();
+        const execution = await this.client.getExecution(request.executionId, {
+          signal: AbortSignal.timeout(8_000),
+        });
+        verify();
+        if (
+          execution.id !== request.executionId ||
+          execution.sessionId !== snapshot!.sessionId ||
+          execution.resultRevision !== request.resultRevision
+        )
+          throw new ClientError('native_selection_changed');
+        result = { kind: 'execution.result', result: execution.result };
+        break;
+      }
+      case 'messages.text': {
+        const snapshot = this.controller.snapshot;
+        const message = this.observedMessages.get(request.messageId);
+        const body = message?.deferredText;
+        const verify = () => {
+          this.assertGeneration(request.generation);
+          if (
+            !snapshot ||
+            !message ||
+            !body ||
+            this.observationUnavailable ||
+            this.permissionUnavailable ||
+            this.selected !== message.sessionId ||
+            snapshot.sessionId !== message.sessionId ||
+            this.selection !== request.viewSelection ||
+            this.historyEpoch !== request.historyEpoch ||
+            this.observedMessages.get(request.messageId)?.deferredText?.sha256 !== body.sha256
+          )
+            throw new ClientError('message_text_unavailable');
+        };
+        verify();
+        const chunk = await this.client.readMessageText(
+          message!.sessionId,
+          message!.id,
+          {
+            storeId: snapshot!.view.storeId,
+            seq: message!.seq,
+            sha256: body!.sha256,
+            offset: request.offset,
+          },
+          { signal: AbortSignal.timeout(8_000) },
+        );
+        verify();
+        if (
+          chunk.storeId !== snapshot!.view.storeId ||
+          chunk.sessionId !== message!.sessionId ||
+          chunk.messageId !== message!.id ||
+          chunk.seq !== message!.seq ||
+          chunk.sha256 !== body!.sha256 ||
+          chunk.bytes !== body!.bytes ||
+          chunk.offset !== request.offset
+        )
+          throw new ClientError('message_text_identity_mismatch');
+        result = { kind: 'messages.text', ...chunk };
+        break;
+      }
       case 'messages': {
         const snapshot =
           this.controller.snapshot?.sessionId === request.sessionId
@@ -2646,7 +2779,8 @@ export class NativeCaller {
         if (request.expectedStoreId && request.expectedStoreId !== snapshot.view.storeId)
           throw new ClientError('store_identity_mismatch');
         const upperSeq = request.upperSeq ?? snapshot.view.session.nextSeq,
-          selection = this.selection;
+          selection = this.selection,
+          historyEpoch = this.historyEpoch;
         if (!request.changes && BigInt(upperSeq) > BigInt(snapshot.view.session.nextSeq))
           throw new ClientError('history_high_water_unavailable');
         const historyCursor =
@@ -2690,6 +2824,9 @@ export class NativeCaller {
                 {
                   storeId: snapshot.view.storeId,
                   ...request.changes,
+                  ...(this.client.serverInfo?.capabilities.includes('session_state')
+                    ? { previews: 'true' as const }
+                    : {}),
                   upperSeq: request.upperSeq,
                   afterSeq: request.afterSeq,
                   limit,
@@ -2702,19 +2839,25 @@ export class NativeCaller {
                 afterSeq: request.afterSeq,
                 upperSeq,
                 limit,
+                ...(request.previews ? { previews: true } : {}),
                 signal: reading.abort.signal,
               });
           } catch (error) {
             if (
               request.changes &&
               (error as { code?: string }).code === 'cursor_expired' &&
+              !reading.abort.signal.aborted &&
+              this.messageRead === reading &&
+              historyEpoch === this.historyEpoch &&
               selection === this.selection &&
               request.sessionId === this.selected
             ) {
               this.historyEpoch++;
               this.historyHead = undefined;
-              await this.controller.refreshSession(request.sessionId);
+              this.permissionUnavailable = true;
+              if (this.observer) this.scheduleSelectionRefresh(this.observer.signal);
               this.changed();
+              throw new ClientError('native_selection_changed');
             }
             if ((error as { code?: string }).code !== 'response_too_large' || limit === 1)
               throw error;
@@ -2724,6 +2867,7 @@ export class NativeCaller {
           reading.abort.signal.throwIfAborted();
           if (
             selection !== this.selection ||
+            historyEpoch !== this.historyEpoch ||
             request.sessionId !== this.selected ||
             this.messageRead !== reading
           )
@@ -3319,7 +3463,9 @@ export class NativeCaller {
   async hasActiveWork(signal?: AbortSignal) {
     const sessions = await this.client.listAllSessions({ signal });
     for (const session of sessions) {
-      const view = await this.client.getView(session.id, { signal });
+      const view = this.client.serverInfo?.capabilities.includes('session_state')
+        ? await this.client.getSessionState(session.id, { signal })
+        : await this.client.getView(session.id, { signal });
       if (
         view.runs.some((run) => run.isActive) ||
         view.executions.some((execution) =>

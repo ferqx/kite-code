@@ -5,7 +5,9 @@ import type {
   ModelOutputSnapshot,
   Run,
   Session,
+  SessionView,
 } from '@kite-ai/client';
+import type { NativeFileChange } from './file-changes-bridge';
 import type { NativeJobOutputPage } from './job-output-bridge';
 import type {
   NativeRunFact,
@@ -51,6 +53,25 @@ export type NativeBackgroundRequest = (
       offset: number;
       limit: number;
     }
+  | {
+      method: 'background.child.file';
+      generation: number;
+      changeId: string;
+      readId: string;
+      offset?: number;
+      view?: 'diff' | 'snapshot';
+    }
+  | { method: 'background.child.file.close'; generation: number; readId: string }
+  | { method: 'background.child.text'; generation: number; handle: string; offset: string }
+  | {
+      method: 'background.child.image.open';
+      generation: number;
+      handle: string;
+      readId: string;
+      index: number;
+    }
+  | { method: 'background.child.image.read'; generation: number; readId: string; offset: number }
+  | { method: 'background.child.image.close'; generation: number; readId: string }
 ) & { surface?: 'environment' };
 export type NativeBackgroundPage = {
   kind: 'background.page';
@@ -74,7 +95,12 @@ export type NativeBackgroundChild = {
     tools: NativeToolMessageFact[];
     /** Original live Shell inputs only; never Tool receipts or control authority. */
     liveTools?: NativeToolMessageFact[];
+    /** Scoped tool facts and top-level Model phases consumed by the shared transcript. */
     executions: NativeToolExecution[];
+    fileTargets?: NativeFileChange[];
+    textHandles?: { messageId: string; handle: string }[];
+    imageHandles?: { messageId: string; handle: string }[];
+    compressionProgress?: SessionView['compressionProgress'];
   };
   control?: {
     runs: Pick<

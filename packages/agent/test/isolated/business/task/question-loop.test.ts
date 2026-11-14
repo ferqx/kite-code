@@ -419,7 +419,7 @@ for (const carried of [true, false])
     }
   }, 20000);
 
-test('ordinary human successor does not adopt queued mail or retarget R1, and a lost QueueOnly response creates no second mail', async () => {
+test('the active parent receives queued child messages once even after the original turn or a lost queue response', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-parent-mail-cutoff-')));
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile),
@@ -471,7 +471,7 @@ test('ordinary human successor does not adopt queued mail or retarget R1, and a 
           text:
             rootCalls === 2
               ? 'Parent ordinary round ended.'
-              : 'Continued same work without adopting late or obsolete mail.',
+              : 'Continued work in the next parent turn.',
         };
         yield finish;
       }
@@ -480,9 +480,9 @@ test('ordinary human successor does not adopt queued mail or retarget R1, and a 
   const child: ModelAdapter = {
     async *stream() {
       const text = [
-        'Bound only to R1',
-        'Queued before successor but confirmed after its cursor',
-        'Queued after successor sequence cutoff',
+        'Queued during the original turn and confirmed after it ends',
+        'Queued while the parent is idle',
+        'Queued during a later active parent turn',
       ][childCalls++];
       if (text)
         for (const event of call('send_agent_message', { target: 'parent', content: text }))
@@ -569,45 +569,23 @@ test('ordinary human successor does not adopt queued mail or retarget R1, and a 
     };
     expect(sealed.mailAdoption).toBeUndefined();
     lateSender.release();
-    await until(async () =>
-      queued.length === 3 &&
-      (await store.getAgentMessage({ ...identity, messageId: queued[2]!.id }))!.state === 'accepted'
-        ? true
-        : undefined,
-    );
-    const all = await store.listAgentMessages({ ...identity });
-    expect(all.items).toHaveLength(3);
-    expect(all.items.every((mail) => mail.receivedMessageId === null)).toBe(true);
-    expect(
-      (await store.listAgentMessages({ ...identity, runId: secondRun.id, pendingOnly: true }))
-        .items,
-    ).toHaveLength(0);
-    const rootView = await store.getView('root');
-    const owner = {
-      sessionId: 'root',
-      instanceId: rootView.session.ownerInstanceId!,
-      generation: rootView.session.ownerGeneration,
-    };
-    for (const mail of all.items) {
-      let rejected = false;
-      try {
-        await store.receiveAgentMessages({
-          expectedStoreId,
-          owner,
-          runId: secondRun.id,
-          messageIds: [mail.id],
-        });
-      } catch (error) {
-        expect((error as { code: string }).code).toBe('agent_message_not_found');
-        rejected = true;
-      }
-      expect(rejected).toBe(true);
-    }
-    expect(
-      (await store.getAgentMessage({ ...identity, messageId: firstMail.id }))!.targetRunId,
-    ).toBe(firstRun.id);
+    await until(async () => {
+      if (queued.length < 3) return undefined;
+      const mail = await store.getAgentMessage({ ...identity, messageId: queued[2]!.id });
+      return mail?.state === 'accepted' || mail?.state === 'received' ? true : undefined;
+    });
     successorFinish.release();
     await runtime.waitForCommand('continue-A', { timeoutMs: 7000 });
+    const { items } = await store.listAgentMessages({ ...identity, runId: secondRun.id });
+    expect(items.map((mail) => mail.id)).toEqual(queued.map((mail) => mail.id));
+    expect(items.map((mail) => mail.targetRunId)).toEqual([firstRun.id, null, secondRun.id]);
+    const parentMessages = (await store.getView('root')).messages;
+    for (const mail of items) {
+      expect(mail.receivedRunId).toBe(secondRun.id);
+      expect(parentMessages.filter((message) => message.sourceIds?.includes(mail.id))).toHaveLength(
+        1,
+      );
+    }
     childId = (await store.listExecutions('root')).find((execution) => execution.childSessionId)!
       .childSessionId!;
     const childRun = (await store.getView(childId)).runs[0]!;

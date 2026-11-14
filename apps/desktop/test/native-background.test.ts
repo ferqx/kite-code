@@ -137,6 +137,20 @@ function fixture(items: BackgroundExecutionItem[]) {
         case 'background.child.close':
           owner.childClose(request.readId);
           return null;
+        case 'background.child.file':
+          return owner.childFile(request.changeId, request.readId, request.offset, request.view);
+        case 'background.child.file.close':
+          owner.childFileClose(request.readId);
+          return null;
+        case 'background.child.text':
+          return owner.childText(request.handle, request.offset);
+        case 'background.child.image.open':
+          return owner.childImageOpen(request.handle, request.readId, request.index);
+        case 'background.child.image.read':
+          return owner.childImageRead(request.readId, request.offset);
+        case 'background.child.image.close':
+          owner.childImageClose(request.readId);
+          return null;
         case 'background.stop':
           return owner.stop(request.observationId, request.executionId, request.commandId);
         default:
@@ -597,6 +611,296 @@ test('live child tail reuses only stable verified rows and resets on context rep
     const replaced = await read(updated);
     expect(after).toEqual(['0', '1', '0']);
     expect(replaced.messages[0]!.content).toBe('replaced stable');
+  } finally {
+    f.environment.release();
+  }
+});
+
+test('the child file card uses the saved receipt only on disclosure and rejects changed child history', async () => {
+  const item = backgroundItem(1, true);
+  const f = fixture([item]);
+  const path = 'project.ts';
+  const delivered = Buffer.from('new 🙂');
+  const baseline = {
+    hash: createHash('sha256').update(delivered).digest('hex'),
+    size: delivered.length,
+    device: '1',
+    inode: '1',
+  };
+  const content = JSON.stringify({ path, baseline });
+  const preview = 'Line diff (bounded alignment; unchanged gaps omitted)\n 1 -old\n 1 +new\n';
+  const run = {
+    ...item.childRun!,
+    configuration: { tools: [{ id: 'files.edit', version: '2', extensionId: 'builtin.files' }] },
+  } as unknown as NonNullable<typeof item.childRun>;
+  const message: Message = {
+    id: 'saved-edit',
+    sessionId: 'child',
+    runId: run.id,
+    seq: '1',
+    role: 'tool',
+    status: 'complete',
+    sourceIds: ['edit'],
+    toolCallId: 'edit-call',
+    content,
+  };
+  const execution = {
+    ...item.execution,
+    id: 'edit',
+    kind: 'tool',
+    sessionId: 'child',
+    runId: run.id,
+    definitionId: 'files.edit',
+    definitionVersion: '2',
+    status: 'succeeded',
+    toolCallId: message.toolCallId,
+    result: {
+      outcome: 'succeeded',
+      content,
+      details: {
+        fileChange: {
+          version: 1,
+          path,
+          before: baseline,
+          after: baseline,
+          format: 'line_diff',
+          text: preview,
+          truncated: false,
+        },
+      },
+    },
+  } as Execution;
+  const reference = {
+    id: 'snapshot-original',
+    size: String(delivered.length),
+    mediaType: 'text/plain',
+    scope: { kind: 'execution', id: execution.id },
+  };
+  execution.result = {
+    outcome: 'succeeded',
+    content,
+    artifactRefs: [reference],
+    details: {
+      fileChange: {
+        version: 1,
+        path,
+        before: baseline,
+        after: baseline,
+        format: 'line_diff',
+        text: preview,
+        truncated: false,
+      },
+      fileOutput: { path, snapshot: reference },
+    },
+  };
+  f.port.readArtifact = async (sessionId, query, options) => {
+    f.calls.push('GET delivery body');
+    expect({ sessionId, ...query }).toMatchObject({
+      sessionId: 'child',
+      refId: reference.id,
+      expectedStoreId: 'store',
+      scope: reference.scope,
+    });
+    expect(options?.expectedReference?.hash).toBe(baseline.hash);
+    return { content: delivered } as never;
+  };
+  let selection = 'child-history';
+  const getOriginal = f.port.getExecution;
+  f.port.getExecution = async (id) => (id === execution.id ? execution : getOriginal(id));
+  f.port.getView = async () =>
+    ({
+      storeId: 'store',
+      session: { ...item.childSession!, contextSelectionId: selection, nextSeq: '1' },
+      runs: [run],
+      executions: [],
+    }) as never;
+  f.port.listMessages = async () => [message];
+  try {
+    const directory = await f.environment.open('child-files');
+    const child = await readNativeBackgroundChild({
+      bridge: f.bridge,
+      generation: 1,
+      storeId: 'store',
+      observationId: directory.observationId,
+      item,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      environment: { rootSessionId: 'root', viewSelection: 1 },
+    });
+    const entry = child.presentation?.fileTargets?.[0];
+    if (!entry) throw Error('child_file_target_missing');
+    expect(entry).toMatchObject({
+      messageId: message.id,
+      operation: 'edit',
+      openable: false,
+      snapshot: true,
+      diffCounts: { added: 1, removed: 1 },
+    });
+    expect(JSON.stringify(child)).not.toContain(preview.trimEnd());
+    const request = {
+      method: 'background.child.file',
+      surface: 'environment',
+      generation: 1,
+      changeId: entry.changeId,
+      readId: 'operation',
+    } as const;
+    expect(await f.bridge.request(request)).toMatchObject({
+      kind: 'fileChanges.detail',
+      text: preview,
+    });
+    expect(f.calls).not.toContain('GET delivery body');
+    expect(await f.bridge.request({ ...request, view: 'snapshot', offset: 4 })).toMatchObject({
+      kind: 'fileChanges.detail',
+      snapshot: true,
+      text: '🙂',
+      nextOffset: null,
+    });
+    expect(() => decodeNativeRequest({ ...request, surface: undefined })).toThrow(
+      'invalid_native_request',
+    );
+    selection = 'rewound';
+    await expect(f.bridge.request(request)).rejects.toMatchObject({
+      code: 'background_child_binding_changed',
+    });
+  } finally {
+    f.environment.release();
+  }
+});
+
+test('child body handles are typed, lazy and bound to the original child selection', async () => {
+  const item = backgroundItem(1, true);
+  const f = fixture([item]);
+  const childId = item.childSession!.id;
+  const body = Buffer.from('原始正文🙂');
+  const sha256 = createHash('sha256').update(body).digest('hex');
+  const bytes = String(body.length);
+  const image = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==',
+    'base64',
+  );
+  const reference = {
+    id: 'image-original',
+    storeId: 'store',
+    sessionId: childId,
+    subjectId: 'user',
+    scope: { kind: 'session' as const, id: childId },
+    hash: createHash('sha256').update(image).digest('hex'),
+    size: String(image.length),
+    mediaType: 'image/png' as const,
+  };
+  const message: Message = {
+    id: 'child-input',
+    sessionId: childId,
+    runId: item.childRun!.id,
+    seq: '1',
+    role: 'user',
+    status: 'complete',
+    content: '原始',
+    deferredText: { sha256, bytes },
+    images: [{ name: 'source.png', reference }],
+  };
+  let contextSelectionId = 'child-history';
+  f.port.getView = async () =>
+    ({
+      storeId: 'store',
+      session: { ...item.childSession!, contextSelectionId, nextSeq: '1' },
+      runs: [item.childRun!],
+      executions: [],
+    }) as never;
+  f.port.listMessages = async () => [message];
+  f.port.readMessageText = async (sessionId, messageId, query) => {
+    f.calls.push('GET message body');
+    expect({ sessionId, messageId, ...query }).toMatchObject({
+      sessionId: childId,
+      messageId: message.id,
+      storeId: 'store',
+      sha256,
+      seq: '1',
+      offset: '0',
+    });
+    return {
+      ...query,
+      sessionId,
+      messageId,
+      bytes,
+      nextOffset: bytes,
+      data: body.toString('base64'),
+    };
+  };
+  f.port.readArtifact = async (sessionId, query, options) => {
+    f.calls.push('GET image body');
+    expect(sessionId).toBe(childId);
+    expect(query).toMatchObject({ refId: reference.id, expectedStoreId: 'store' });
+    expect(options?.expectedReference).toEqual(reference);
+    return { reference, content: image } as never;
+  };
+  const surface = { surface: 'environment', generation: 1 } as const;
+  try {
+    const directory = await f.environment.open('child-bodies');
+    const child = await readNativeBackgroundChild({
+      bridge: f.bridge,
+      generation: 1,
+      storeId: 'store',
+      observationId: directory.observationId,
+      item,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      environment: { rootSessionId: 'root', viewSelection: 1 },
+    });
+    expect(f.calls).not.toContain('GET message body');
+    expect(f.calls).not.toContain('GET image body');
+    const textHandle = child.presentation!.textHandles![0]!.handle;
+    const imageHandle = child.presentation!.imageHandles![0]!.handle;
+    const textRead = {
+      ...surface,
+      method: 'background.child.text',
+      handle: textHandle,
+      offset: '0',
+    } as const;
+    const imageRead = {
+      ...surface,
+      method: 'background.child.image.open',
+      handle: imageHandle,
+      readId: 'preview',
+      index: 0,
+    } as const;
+    await expect(f.bridge.request({ ...textRead, handle: imageHandle })).rejects.toMatchObject({
+      code: 'background_child_text_unavailable',
+    });
+    expect(await f.bridge.request(textRead)).toMatchObject({
+      kind: 'messages.text',
+      data: body.toString('base64'),
+    });
+    expect(await f.bridge.request(imageRead)).toMatchObject({
+      kind: 'input.image.open',
+      hash: reference.hash,
+    });
+    const next = {
+      ...surface,
+      method: 'background.child.image.read',
+      readId: imageRead.readId,
+      offset: 0,
+    } as const;
+    expect(await f.bridge.request(next)).toMatchObject({
+      kind: 'input.image.chunk',
+      data: image.toString('base64'),
+      done: true,
+    });
+    await f.bridge.request({
+      ...surface,
+      method: 'background.child.image.close',
+      readId: imageRead.readId,
+    });
+    await expect(f.bridge.request(next)).rejects.toMatchObject({
+      code: 'background_child_image_unavailable',
+    });
+    contextSelectionId = 'replaced-child-history';
+    await expect(f.bridge.request(textRead)).rejects.toMatchObject({
+      code: 'background_child_binding_changed',
+    });
+    await expect(f.bridge.request(imageRead)).rejects.toMatchObject({
+      code: 'background_child_binding_changed',
+    });
   } finally {
     f.environment.release();
   }
@@ -1185,6 +1489,10 @@ for (const scenario of [
         session: { ...item.childSession!, nextSeq: '3' },
         runs: scenario === 'active Run retires' && first ? [structuredClone(run)] : [],
         executions: [],
+        compressionProgress:
+          scenario === 'active Run retires'
+            ? { runId: run.id, originStoreId: 'store', phase: 'summarizing' }
+            : undefined,
       }) as never;
     const cursors: string[] = [];
     f.port.listMessages = async (_id, options) => {
@@ -1234,6 +1542,10 @@ for (const scenario of [
           isActive: true,
           status: 'running',
         });
+        expect(initial.presentation!.compressionProgress).toMatchObject({
+          runId: run.id,
+          phase: 'summarizing',
+        });
       } else {
         expect(initial.messages[2]!.status).toBe('incomplete');
         expect(initial.presentation!.tools).toEqual([]);
@@ -1246,6 +1558,7 @@ for (const scenario of [
       const recovered = await read(initial);
       expect(recovered.messages).toEqual(rows);
       expect(recovered.presentation!.unavailable).toBeUndefined();
+      expect(recovered.presentation!.compressionProgress).toBeUndefined();
       expect(recovered.presentation!.runs).toMatchObject([
         { id: run.id, status: 'completed', isActive: false },
       ]);
@@ -1369,6 +1682,15 @@ test('exact child snapshots collect live Shell command fragments within the adde
     { ...executions[0]!, id: 'foreign', sessionId: 'other-child' },
     { ...executions[0]!, id: 'legacy-no-call', toolCallId: undefined },
   );
+  const model: Execution = {
+    ...executions[0]!,
+    id: 'child-model',
+    kind: 'model',
+    definitionId: 'model',
+    parentExecutionId: null,
+    toolInput: undefined,
+  };
+  executions.push(model, { ...model, id: 'approval-model', parentExecutionId: 'live-shell-0' });
   const rows: Message[] = [];
   f.port.getView = async () =>
     ({
@@ -1401,6 +1723,15 @@ test('exact child snapshots collect live Shell command fragments within the adde
       environment: { rootSessionId: 'root', viewSelection: 1 },
     });
     expect(body.presentation!.liveTools).toHaveLength(3);
+    expect(body.presentation!.executions.filter((entry) => entry.kind === 'model')).toMatchObject([
+      {
+        id: model.id,
+        sessionId: 'child',
+        runId: model.runId,
+        status: 'running',
+        parentExecutionId: null,
+      },
+    ]);
     const [first, second, preview] = body.presentation!.liveTools!;
     expect(first!.shellInput).toEqual({
       operation: 'execute',

@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
+import { limitShellOutput, shellOutputPreview } from '@kite-ai/trajectory';
 import { modelExecutionId } from './model-identifier';
-import { parseShellCommandInput, shellOperationKey, validShellOutputTokens } from './shell-input';
+import { parseShellCommandInput, shellOperationKey } from './shell-input';
 import type { ExecutionRecord, Json } from './storage/types';
 import { failureOutcomeExplanation, toolFailurePresentation } from './tool-failure-presentation';
 
@@ -9,30 +10,6 @@ const object = (value: unknown): Record<string, Json> | undefined =>
     ? (value as Record<string, Json>)
     : undefined;
 const terminal = new Set(['succeeded', 'failed', 'cancelled', 'outcome_unknown']);
-const defaultMaxOutputTokens = 10000;
-
-/** Use Codex CLI's approximate four UTF-8 bytes per token. Keep Unicode intact. */
-function previewOutput(output: string, maxTokens: number): string {
-  const bytes = Buffer.from(output);
-  const budget = maxTokens * 4;
-  if (bytes.length <= budget) return output;
-  // Reserve space for the largest possible omission marker before slicing.
-  const markerBytes = Buffer.byteLength(
-    `[Model output preview omitted ${bytes.length} retained bytes.]`,
-  );
-  const excerptBudget = Math.max(0, budget - markerBytes - 2);
-  let start = Math.ceil(excerptBudget / 2);
-  let end = bytes.length - Math.floor(excerptBudget / 2);
-  while (start > 0 && (bytes[start]! & 0xc0) === 0x80) start--;
-  while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end++;
-  return [
-    bytes.toString('utf8', 0, start),
-    `[Model output preview omitted ${end - start} retained bytes.]`,
-    bytes.toString('utf8', end),
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
 
 /** Model presentation only. Callers must verify the frozen builtin registration.
  * Match the exact original operation before using its authorization observations.
@@ -92,13 +69,22 @@ export function formatShellResult(input: {
     object(execution.input)?.shellId !== ref.key
   )
     return;
-  let saved: Record<string, Json> | undefined;
-  try {
-    saved = object(JSON.parse(String(result.content)));
-  } catch {
-    return;
+  const savedPreview = details.outputFormat === 'model-preview';
+  if (savedPreview) {
+    if (
+      !['shell.execute', 'shell.read'].includes(execution.definitionId) ||
+      typeof result.content !== 'string' ||
+      typeof details.outputLimited !== 'boolean' ||
+      ['stdout', 'stderr', 'output'].some((key) => details[key] !== undefined)
+    )
+      return;
+  } else {
+    try {
+      if (!isDeepStrictEqual(object(JSON.parse(String(result.content))), details)) return;
+    } catch {
+      return;
+    }
   }
-  if (!isDeepStrictEqual(saved, details)) return;
   const observed = object(details.execution);
   if (
     observed &&
@@ -109,7 +95,6 @@ export function formatShellResult(input: {
       observed.originStoreId !== operation.originStoreId)
   )
     return;
-  const output = object(details.output);
   const lines: string[] = [];
   const handle = `shell_id: ${JSON.stringify(ref.key)}`;
   if (details.accepted === true && !observed) {
@@ -223,58 +208,33 @@ export function formatShellResult(input: {
     }
   } else return;
   lines.push(`execution_id: ${JSON.stringify(modelExecutionId(starter.id))}`, handle);
-  const outputLines: string[] = [];
   const missingBytes =
     typeof details.droppedBytes === 'string' && /^[1-9]\d*$/.test(details.droppedBytes)
       ? details.droppedBytes
       : undefined;
-  for (const stream of ['stdout', 'stderr']) {
-    if (typeof details[stream] === 'string') outputLines.push(`${stream}:\n${details[stream]}`);
-  }
   let cursorLine: string | undefined;
-  const gaps: string[] = [];
-  if (output) {
+  if (details.output !== undefined || (execution.definitionId === 'shell.read' && savedPreview)) {
     if (
       typeof details.next_cursor !== 'string' ||
       typeof details.caught_up !== 'boolean' ||
       typeof details.terminal !== 'boolean'
     )
       return;
-    if (!Array.isArray(output.items)) return;
-    for (const raw of output.items) {
-      const item = object(raw);
-      if (
-        !item ||
-        item.executionId !== operation.id ||
-        typeof item.content !== 'string' ||
-        !['stdout', 'stderr'].includes(String(item.stream))
-      )
-        return;
-      outputLines.push(`${item.stream}:\n${item.content}`);
-      if (item.droppedBytes === null) {
-        gaps.push(`Output gap in ${item.stream} (byte count unavailable for this page).`);
-        outputLines.push(gaps.at(-1)!);
-      } else if (item.droppedBytes && item.droppedBytes !== '0') {
-        gaps.push(`Output bytes unavailable: ${item.droppedBytes} (${item.stream}).`);
-        outputLines.push(gaps.at(-1)!);
-      }
-    }
     cursorLine = `Output cursor: ${JSON.stringify({ cursor: details.next_cursor, caught_up: details.caught_up, terminal: details.terminal })}`;
   }
-  if (outputLines.length) {
-    const requested = object(execution.input)?.max_output_tokens;
-    const limit = Math.min(
-      requested !== undefined && validShellOutputTokens(requested)
-        ? requested
-        : defaultMaxOutputTokens,
-      input.modelTokenLimit ?? Number.POSITIVE_INFINITY,
-    );
-    const outputText = outputLines.join('\n');
-    const preview = previewOutput(outputText, limit);
-    lines.push(preview);
-    if (preview !== outputText) {
-      for (const gap of gaps) if (!preview.includes(gap)) lines.push(gap);
-      if (output)
+  const preview = savedPreview
+    ? limitShellOutput(String(result.content), input.modelTokenLimit ?? Number.POSITIVE_INFINITY)
+    : shellOutputPreview(
+        details,
+        operation.id,
+        object(execution.input)?.max_output_tokens,
+        input.modelTokenLimit,
+      );
+  if (!preview) return;
+  if (preview.text) {
+    lines.push(preview.text);
+    if (preview.limited || details.outputLimited === true) {
+      if (cursorLine)
         lines.push(
           'Use the same input cursor with a smaller page limit or a larger output budget to inspect this retained page.',
         );

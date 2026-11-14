@@ -175,20 +175,13 @@ test('Native environment activity preserves a receipt-free detail row and exact 
   };
   const operation = () => host.querySelector('article')?.textContent ?? '';
   const staticOperation = () => {
-    expect(operation()).toContain('创建子 Agent');
-    expect(host.querySelector('.tool-agent-operation')?.textContent).toBe('创建子 Agent');
+    expect(operation()).toContain('子agent开始工作');
+    expect(host.querySelector('.tool-agent-operation')?.textContent).toBe('子agent开始工作');
     expect(host.querySelector('.tool-agent-operation')?.getAttribute('role')).not.toBe('status');
     expect(operation()).toContain('Grant review');
     expect(host.querySelector('article')!.classList.contains('is-running')).toBe(false);
-    expect(host.querySelector('article')!.querySelector('[class*="shimmer"]')).toBeNull();
-    for (const label of [
-      '排队中',
-      '开始工作',
-      '已完成工作',
-      '已停止工作',
-      '结果未知',
-      '状态待核对',
-    ])
+    expect(host.querySelector('article')!.querySelector('[data-status="running"]')).toBeNull();
+    for (const label of ['排队中', '已完成工作', '已停止工作', '结果未知', '状态待核对'])
       expect(operation()).not.toContain(label);
   };
   try {
@@ -230,6 +223,10 @@ test('Native environment activity preserves a receipt-free detail row and exact 
       item,
       ...Array.from({ length: 6 }, (_, index) => {
         const extra = backgroundItem(index + 2, true);
+        const childId = `extra-child-${index}`;
+        extra.execution.childSessionId = childId;
+        extra.childSession!.id = childId;
+        extra.childRun!.sessionId = childId;
         extra.sourceTool = {
           id: `extra-${index}`,
           definitionId: 'task.spawn',

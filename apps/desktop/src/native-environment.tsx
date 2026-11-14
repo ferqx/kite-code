@@ -48,6 +48,48 @@ type Child = {
   facts?: NativeBackgroundChild;
   error?: string;
 };
+
+/** Retain verified display identity across directory reads with the same content. */
+function retainChildDisplay(next: NativeBackgroundChild, previous?: NativeBackgroundChild) {
+  if (!previous || next.session.contextSelectionId !== previous.session.contextSelectionId)
+    return next;
+  const previousOutputs = new Map(previous.modelOutputs.map((entry) => [entry.messageId, entry]));
+  const modelOutputs = next.modelOutputs.map((entry) => {
+    const prior = previousOutputs.get(entry.messageId);
+    if (!prior) return entry;
+    if (prior === entry) return prior;
+    // The verified body hash identifies content. The cursor is the store-wide
+    // read watermark, which can advance without any change to this output.
+    const { output: _body, snapshotCursor: _cursor, ...metadata } = entry.snapshot;
+    const { output: _priorBody, snapshotCursor: _priorCursor, ...priorMetadata } = prior.snapshot;
+    return JSON.stringify(metadata) === JSON.stringify(priorMetadata) ? prior : entry;
+  });
+  const sameOutputs =
+    modelOutputs.length === previous.modelOutputs.length &&
+    modelOutputs.every((entry, index) => entry === previous.modelOutputs[index]);
+  const sameMessages =
+    next.messages.length === previous.messages.length &&
+    next.messages.every((message, index) => {
+      const prior = previous.messages[index];
+      return message === prior || JSON.stringify(message) === JSON.stringify(prior);
+    });
+  if (sameOutputs && sameMessages) {
+    const { modelOutputs: _outputs, messages: _messages, afterSeq: _afterSeq, ...display } = next;
+    const {
+      modelOutputs: _priorOutputs,
+      messages: _priorMessages,
+      afterSeq: _priorAfterSeq,
+      ...priorDisplay
+    } = previous;
+    if (JSON.stringify(display) === JSON.stringify(priorDisplay)) return previous;
+  }
+  return {
+    ...next,
+    messages: sameMessages ? previous.messages : next.messages,
+    modelOutputs: sameOutputs ? previous.modelOutputs : modelOutputs,
+  };
+}
+
 const safeError = (cause: unknown) => {
   const code = (cause as { code?: string; message?: string })?.code ?? (cause as Error)?.message;
   return typeof code === 'string' && /^[a-z][a-z0-9_]{0,80}$/.test(code)
@@ -103,8 +145,10 @@ export function environmentDisplay(
   items: readonly BackgroundExecutionItem[],
   storeId: string,
 ): Display {
-  const rows: BackgroundExecutionSummary[] = [],
-    children = new Map<string, string>();
+  const entries = new Map<
+    string,
+    { row: BackgroundExecutionSummary; childSessionId: string | null }
+  >();
   for (const item of items) {
     const e = item.execution;
     // Automatic title generation stays in execution history, outside this task list.
@@ -135,19 +179,30 @@ export function environmentDisplay(
               : e.status === 'outcome_unknown'
                 ? 'unknown'
                 : e.status;
-    rows.push({
+    const childAgentIdentity = e.childSessionId
+      ? JSON.stringify([e.originStoreId, e.childSessionId])
+      : undefined;
+    const row: BackgroundExecutionSummary = {
       executionId: e.id,
       ...(item.childSession?.title ? { displayName: item.childSession.title } : {}),
-      ...(e.childSessionId
-        ? { childAgentIdentity: JSON.stringify([e.originStoreId, e.childSessionId]) }
-        : {}),
+      ...(childAgentIdentity ? { childAgentIdentity } : {}),
       kind: e.childSessionId ? 'subagent' : 'shell',
       status,
       cleanupConfirmed: false,
       canStop:
         !restored && e.status === 'running' && !e.cancelRequested && e.cancelRequestedAt === null,
+    };
+    // The verified directory is in ascending sequence order. A follow-up replaces the row in place.
+    entries.set(childAgentIdentity ?? `shell:${e.id}`, {
+      row,
+      childSessionId: item.childSession ? e.childSessionId : null,
     });
-    if (e.childSessionId && item.childSession) children.set(e.id, e.childSessionId);
+  }
+  const rows: BackgroundExecutionSummary[] = [],
+    children = new Map<string, string>();
+  for (const { row, childSessionId } of entries.values()) {
+    rows.push(row);
+    if (childSessionId) children.set(row.executionId, childSessionId);
   }
   return {
     rows,
@@ -494,7 +549,8 @@ export function useNativeEnvironment({
               facts: job.cached,
             });
           }
-          const result = await readNativeBackgroundChild({
+          const previousDisplay = job.facts;
+          const verified = await readNativeBackgroundChild({
             bridge,
             generation,
             storeId,
@@ -505,14 +561,18 @@ export function useNativeEnvironment({
               readable.current && live.current === job.scope && childJob.current === job,
             environment: { rootSessionId, viewSelection },
             incremental: !full,
-            previous: !full ? job.facts : undefined,
+            previous: !full ? previousDisplay : undefined,
           });
-          const owner = new NativeMarkdownOwner(job.abort.signal);
+          const result = retainChildDisplay(verified, previousDisplay);
+          const owner =
+            result.modelOutputs !== previousDisplay?.modelOutputs
+              ? new NativeMarkdownOwner(job.abort.signal)
+              : undefined;
           try {
-            for (const entry of result.modelOutputs) await owner.prepare(entry.snapshot);
+            if (owner) for (const entry of result.modelOutputs) await owner.prepare(entry.snapshot);
             job.abort.signal.throwIfAborted();
           } catch (cause) {
-            owner.dispose();
+            owner?.dispose();
             throw cause;
           }
           if (
@@ -521,40 +581,54 @@ export function useNativeEnvironment({
             live.current !== job.scope ||
             childJob.current !== job
           ) {
-            owner.dispose();
+            owner?.dispose();
             return;
           }
-          job.markdown?.dispose();
-          job.markdown = owner;
+          if (owner) {
+            job.markdown?.dispose();
+            job.markdown = owner;
+          }
           job.facts = result;
           job.cached = undefined;
-          const key = JSON.stringify([
-            generation,
-            historyEpoch,
-            storeId,
-            rootSessionId,
-            job.sessionId,
-            job.executionId,
-          ]);
-          // Bound all retained strings and metadata, including tool arguments and
-          // source IDs, without serializing full bodies or allocating wire copies.
-          const bytes = estimateNativeSnapshotBytes(result);
-          childCache.current.delete(key);
-          if (bytes <= 16 * 1024 * 1024) childCache.current.set(key, { facts: result, bytes });
-          let total = [...childCache.current.values()].reduce((sum, entry) => sum + entry.bytes, 0);
-          while (childCache.current.size > 12 || total > 64 * 1024 * 1024) {
-            const oldest = childCache.current.keys().next().value!;
-            total -= childCache.current.get(oldest)!.bytes;
-            childCache.current.delete(oldest);
+          if (full || result !== previousDisplay) {
+            const key = JSON.stringify([
+              generation,
+              historyEpoch,
+              storeId,
+              rootSessionId,
+              job.sessionId,
+              job.executionId,
+            ]);
+            // Bound all retained strings and metadata, including tool arguments and
+            // source IDs, without serializing full bodies or allocating wire copies.
+            const bytes = estimateNativeSnapshotBytes(result);
+            childCache.current.delete(key);
+            if (bytes <= 16 * 1024 * 1024) childCache.current.set(key, { facts: result, bytes });
+            let total = [...childCache.current.values()].reduce(
+              (sum, entry) => sum + entry.bytes,
+              0,
+            );
+            while (childCache.current.size > 12 || total > 64 * 1024 * 1024) {
+              const oldest = childCache.current.keys().next().value!;
+              total -= childCache.current.get(oldest)!.bytes;
+              childCache.current.delete(oldest);
+            }
           }
-          setChild({
-            scope: job.scope,
-            sessionId: job.sessionId,
-            executionId: job.executionId,
-            title: job.title,
-            loading: false,
-            facts: result,
-          });
+          setChild((current) =>
+            current?.facts === result &&
+            current.title === job.title &&
+            !current.loading &&
+            !current.error
+              ? current
+              : {
+                  scope: job.scope,
+                  sessionId: job.sessionId,
+                  executionId: job.executionId,
+                  title: job.title,
+                  loading: false,
+                  facts: result,
+                },
+          );
         } catch (cause) {
           // A failed full calibration cannot turn cached data into a verified
           // prefix for this visit. The next revision must retry the whole read.
@@ -592,6 +666,13 @@ export function useNativeEnvironment({
       awaitingFreshRead
     )
       return;
+    const retained =
+      executionId !== undefined &&
+      child?.scope === scope &&
+      child.sessionId === sessionId &&
+      child.executionId === executionId
+        ? child.facts
+        : undefined;
     childNavigation.current = { scope, sessionId, executionId };
     childRead.current?.abort();
     const abort = new AbortController();
@@ -612,9 +693,10 @@ export function useNativeEnvironment({
       running: false,
       queued: true,
       full: true,
+      cached: retained,
     };
     childJob.current = job;
-    setChild({ scope, sessionId, executionId, title: job.title, loading: true });
+    setChild({ scope, sessionId, executionId, title: job.title, loading: true, facts: retained });
     void runChild(job);
   }
   // A completed directory revision queues one tail read; changes during a read coalesce.

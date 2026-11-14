@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-11-14，[上下文与子结果决定](2026-11-14-agent-context-and-completion-delivery.md)明确子 Agent 最终回复与普通消息的用途，沿用本文的原邮箱接收及续轮资格。
+
 2026-10-28，[前台批次收尾决定](2026-10-28-guidance-after-foreground-tools.md)部分替代下述用户引导使未派发 Tool／审批失效的行为：原 Tool 队列先收尾，独立引导随后进入模型。本文的统一邮箱、来源、权限、去重和续跑理由继续适用。
 
 ## Problem

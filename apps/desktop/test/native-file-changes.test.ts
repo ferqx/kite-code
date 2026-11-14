@@ -889,3 +889,42 @@ test('explicit per-operation diff wins over simultaneous snapshot, while histori
     f.close();
   }
 });
+
+test('verified edit summaries count saved preview rows without sending the diff body', async () => {
+  const f = fixture();
+  try {
+    const execution = f.executions.get('execution-old')!;
+    const original = execution.result as { content: string };
+    const after = JSON.parse(original.content).baseline;
+    const text = [
+      'Line diff (bounded alignment; unchanged gaps omitted)',
+      ' 1 -old',
+      ' 1 +new',
+      ' 2 +added',
+      '... unchanged lines omitted ...',
+      '20  context',
+    ].join('\n');
+    execution.result = {
+      ...original,
+      details: {
+        fileChange: {
+          version: 1,
+          format: 'line_diff',
+          path: f.path,
+          before: after,
+          after,
+          text,
+          truncated: true,
+        },
+      },
+    };
+    const page = await f.list(['old']);
+    expect(page.entries[0]?.diffCounts).toEqual({ added: 2, removed: 1 });
+    expect(page.entries[0]).not.toHaveProperty('text');
+    expect((await f.manager.detail(page.entries[0]!.changeId, 'read-counts', 0, 'diff')).text).toBe(
+      text,
+    );
+  } finally {
+    f.close();
+  }
+});

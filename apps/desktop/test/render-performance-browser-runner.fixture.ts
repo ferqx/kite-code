@@ -453,7 +453,9 @@ try {
       const before = await page.locator('.conversation-viewport .message').count();
       if (before === expectedIDs.length) break;
       assert.ok(before < expectedIDs.length, 'full history duplicated messages');
-      await page.getByRole('button', { name: '加载更早消息', exact: true }).click();
+      await page.locator('.conversation-viewport').evaluate((viewport) => {
+        viewport.scrollTop = 0;
+      });
       await page.waitForFunction(
         (before) => document.querySelectorAll('.conversation-viewport .message').length > before,
         before,

@@ -10,4 +10,5 @@ export * from './integrity';
 export * from './presentation';
 export * from './projection';
 export * from './reader';
+export * from './shell-output-preview';
 export * from './validation';

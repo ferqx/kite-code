@@ -1,5 +1,64 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
+import type { NativeBridge, NativeRequest } from './native-bridge';
 import { useNativeDiagnostics } from './native-diagnostics';
+import { nativeReadDeadline } from './native-read-deadline';
+
+export function NativeExecutionResultRead({
+  bridge,
+  generation,
+  viewSelection,
+  historyEpoch,
+  executionId,
+  resultRevision,
+  model,
+}: Omit<Extract<NativeRequest, { method: 'execution.result' }>, 'method'> & {
+  bridge: NativeBridge;
+  model: boolean;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  const [state, setState] = useState<{ result: unknown } | { failed: true }>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: An explicit retry rereads the same result revision.
+  useEffect(() => {
+    let active = true;
+    void nativeReadDeadline(
+      bridge.request({
+        method: 'execution.result',
+        generation,
+        viewSelection,
+        historyEpoch,
+        executionId,
+        resultRevision,
+      }),
+    )
+      .then((reply) => {
+        if (active)
+          setState(
+            reply && 'kind' in reply && reply.kind === 'execution.result' && 'result' in reply
+              ? { result: reply.result }
+              : { failed: true },
+          );
+      })
+      .catch(() => {
+        if (active) setState({ failed: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt, bridge, generation, viewSelection, historyEpoch, executionId, resultRevision]);
+  if (state && 'failed' in state)
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setState(undefined);
+          setAttempt((value) => value + 1);
+        }}
+      >
+        重试读取执行结果
+      </button>
+    );
+  return state ? <NativeExecutionResult result={state.result} model={model} /> : null;
+}
 
 function resultFields(value: unknown, path: string): ReactNode {
   if (Array.isArray(value)) {

@@ -4288,7 +4288,7 @@ test('the first reply status follows the original submission into the dispatched
     await f.publishMessages([input, reply], [terminal]);
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
-    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
+    expect(f.host.querySelector('button.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
     await f.publishMessages([input, { ...reply, status: 'complete' }], [terminal]);

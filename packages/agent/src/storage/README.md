@@ -156,6 +156,8 @@ Run安全观察完整流式扫描递归成员，执行组安全观察完整流�
 
 ## 当前会话视图
 
+轻量会话状态在同一只读事务读取会话、执行观察水位和有界元数据。查询普通执行时省略结果正文，首尾 Run 只投影会话模型选择需要的事实。历史位置索引按原序号分组，索引读取不取消息正文，现有完整 View 仍独立提供。
+
 累计实际用量不通过有限 `getView` 求和。`getSessionTokenUsage` 只读准确当前 Store／Session 原 Model 终态的 usage 叶子，每个原 Execution 计一次，包含已经收到统计的失败、取消与摘要；继承和其他会话的消费不纳入。未知字段由统计覆盖数表达，不补零或混入本地估算。聚合与完整 205 次调用的验证见[上下文统计 owner](../context-estimate.README.md)。
 
 `getView` 在同一短只读事务读取原 Session、Store、通知水位与显示投影。Run 选取该 Session 最近200个分配身份，加全部 `is_active=1`；Execution 选取最近200个身份，加全部 `planned/dispatching/running/outcome_unknown` 原事实。两组身份分别去重后按原 rowid 顺序返回，历史数量不能隐藏当前 Run、较早的运行中 Job 或未知结果。未知结果即使另有核实证明，也不在此查询中改写原状态；显示不授予恢复或取消权限。
@@ -327,7 +329,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 邮箱以 `kind:message/result` 区分两种内容。普通消息只从成功 sender Tool 的原 Artifact 发布实体 Message；结果从可信 carrier 发布既有 `result_ref` Source，不额外写普通正文。结果的逻辑作者是原 child Session，`receivedSourceId` 与普通 `receivedMessageId` 分开保存，禁止把 Source ID 填入 Message 外键。`receivedSeq` 取两类发布在接收会话中的真实序号，列表、等待和 received 回执均不冒充实际 Model 已读。
 
-活动父轮从同一邮箱检查点接收结果。父轮结束后，同条结果邮件经原配置 lease、after-turn 当前授权和资格检查决定是否创建一轮；普通 QueueOnly 消息仍只排队。最终接收事务选择准确 Run，整体提交 Run／Source／consume／mail 回执；多结果可进入同一轮，已接受用户输入保原空闲优先级。派发与完成的 `input_pending` 门禁识别本轮可接收结果，已暂缓且准入条件未变化的结果不把本轮永久卡住。回执丢失只查回原身份，停止、Rewind、unknown 与冷缺绑定不取得新执行资格。
+活动父轮从同一邮箱检查点接收结果。默认空闲父轮的普通消息和结果留在邮箱，后继活动轮按原 Store、主体、选择、父子关系和确认事实接收。通过稳定工具发送给父级的普通消息保留入队时的父轮和实际接收轮，原轮结束前未接收时可由后继轮接管。显式注册 after-turn 策略的宿主仍按原配置 lease、当前授权及资格决定是否创建通知轮。结果接收事务提交准确 Run／Source／consume／mail 回执。回执丢失只查回原身份，停止、Rewind、unknown 与冷缺绑定不取得新执行资格。
 
 原 `applyJobReport` 保留为结果发布事务及旧恢复适配；新 Runtime 接收和 idle 调度均通过邮箱入口进入它。结果气泡继续由真实 idle 续跑的原 Source／回执证明投影，active 接纳在结束和重开后不补气泡。取舍见[统一接收决定](../../../../.agents/notes/implemented/architecture/2026-10-23-unified-message-reception.md)。
 

@@ -1585,13 +1585,13 @@ try {
     );
     assert.deepEqual(compressing.rootRunIds, [running.originalRunId]);
     await until(
-      () => parentNodes('.context-compacted.running').filter({ hasText: '正在压缩上下文' }).count(),
+      () => parentNodes('.context-compacted.running').filter({ hasText: '压缩上下文中' }).count(),
       (count) => count > 0,
       'real_compression_progress_visible',
     );
     await assertSteers(compressing, true);
     const parentCompression = parentNodes('.context-compacted').filter({
-      has: page!.getByText('正在压缩上下文', { exact: true }),
+      has: page!.getByText('压缩上下文中', { exact: true }),
     });
     assert.equal(await parentCompression.count(), 1);
     await parentCompression.scrollIntoViewIfNeeded();

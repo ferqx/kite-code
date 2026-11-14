@@ -1,23 +1,30 @@
 import type { ModelOutputSnapshot } from '@kite-ai/client';
-import {
-  Conversation,
-  ConversationActivityContext,
-  ReadingStateCache,
-  ToolActivity,
-} from '@kite-ai/ui/desktop';
+import { Conversation, ConversationActivityContext, ReadingStateCache } from '@kite-ai/ui/desktop';
 import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
+import type { NativeFileChangeDetail } from './file-changes-bridge';
+import type { NativeBridge } from './native-bridge';
 import { useNativeDiagnostics } from './native-diagnostics';
+import { NativeDisplayCache } from './native-display-cache';
 import { nativeChildActivity, type useNativeEnvironment } from './native-environment';
+import { NativeOperationDiff, NativeOutputFile } from './native-file-changes';
+import type { NativeImagePreviews } from './native-image-previews';
+import { NativeMessageText } from './native-message-text';
 import { NativeModelOutputMessage } from './native-model-output-message';
+import { type NativeReasoningBody, renderNativeReasoning } from './native-reasoning';
 import {
   groupNativeToolMessages,
   liveToolMessages,
   NativeToolPresentation,
 } from './native-tool-messages';
+import { type NativeToolRenderer, renderNativeToolGroup } from './native-tool-renderer';
 import { desktopTranscript, nativeReplyKey } from './native-transcript';
+import { NativeUserImages } from './native-user-images';
+import type { NativeToolMessageFact } from './tool-messages-bridge';
 
 export interface NativeChildDetailProps {
   child: ReturnType<typeof useNativeEnvironment>['child'];
+  bridge?: NativeBridge;
+  imagePreviews?: NativeImagePreviews;
   generation: number;
   storeId: string;
   sessionId: string;
@@ -33,6 +40,8 @@ export interface NativeChildDetailProps {
 /** Presents only the exact admitted child; all bridge reads remain owned by the environment. */
 export function NativeChildDetail({
   child,
+  bridge,
+  imagePreviews,
   generation,
   storeId,
   sessionId,
@@ -67,14 +76,16 @@ export function NativeChildDetail({
     if (title) onTitleChange(title);
   }, [title, onTitleChange]);
   const readingKey = JSON.stringify([generation, storeId, sessionId, executionId]);
-  const messages = useMemo(() => facts?.messages ?? [], [facts]);
+  const savedMessages = facts?.messages;
+  const savedOutputs = facts?.modelOutputs;
+  const messages = useMemo(() => savedMessages ?? [], [savedMessages]);
   const originals = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
     [messages],
   );
   const outputs = useMemo(
-    () => new Map(facts?.modelOutputs.map((output) => [output.messageId, output.snapshot])),
-    [facts],
+    () => new Map(savedOutputs?.map((output) => [output.messageId, output.snapshot])),
+    [savedOutputs],
   );
   // Snapshot availability is not display admission: a closed reader shows only its preview.
   const [displayedReplies, setDisplayedReplies] = useState(
@@ -106,8 +117,13 @@ export function NativeChildDetail({
         runs: facts?.presentation?.runs ?? [],
         tools: facts?.presentation?.tools ?? [],
         executions: facts?.presentation?.executions,
+        compressionProgress:
+          activity.readActive && !executionUnconfirmed
+            ? facts?.presentation?.compressionProgress
+            : undefined,
         storeId,
         sessionId,
+        traceTurns: true,
         fullReply: (message) => {
           const displayed = displayedReplies.get(message.id);
           return displayed?.identity === nativeReplyKey(readingKey, message) &&
@@ -116,9 +132,41 @@ export function NativeChildDetail({
             : undefined;
         },
       }),
-    [facts, messages, storeId, sessionId, outputs, readingKey, displayedReplies],
+    [
+      facts,
+      messages,
+      storeId,
+      sessionId,
+      outputs,
+      readingKey,
+      displayedReplies,
+      activity.readActive,
+      executionUnconfirmed,
+    ],
   );
   const toolPresentation = useRef(new NativeToolPresentation());
+  const reasoningBodies = useRef(new NativeDisplayCache<NativeReasoningBody>());
+  const operationDiffs = useRef(new NativeDisplayCache<NativeFileChangeDetail>());
+  const renderImages = (id: string, images?: NativeToolMessageFact['images']) => {
+    const message = originals.get(id);
+    const handle = facts?.presentation?.imageHandles?.find(
+      (entry) => entry.messageId === id,
+    )?.handle;
+    return message && (handle || message.files?.length) && bridge && imagePreviews ? (
+      <NativeUserImages
+        key={message.id}
+        bridge={bridge}
+        previews={imagePreviews}
+        generation={generation}
+        viewSelection={0}
+        historyEpoch={0}
+        childHandle={handle}
+        message={message}
+        images={handle ? images : []}
+        readAvailable={activity.readActive && !!handle}
+      />
+    ) : null;
+  };
   const models = useMemo(
     () =>
       groupNativeToolMessages(
@@ -137,11 +185,32 @@ export function NativeChildDetail({
       liveTools,
     ],
   );
-  const renderMessage: NonNullable<ComponentProps<typeof Conversation>['renderMessageContent']> = (
-    model,
+  const renderMessage = (
+    model: Parameters<NonNullable<ComponentProps<typeof Conversation>['renderMessageContent']>>[0],
+    open = true,
   ) => {
     const message = originals.get(model.id);
     if (!message) return null;
+    if (message.deferredText && (model.shell || model.toolName === 'shell_execute')) return null;
+    if (message.deferredText && !model.agentWait && bridge) {
+      const handle = facts?.presentation?.textHandles?.find(
+        (entry) => entry.messageId === message.id,
+      )?.handle;
+      if (handle)
+        return (
+          <NativeMessageText
+            key={handle}
+            bridge={bridge}
+            generation={generation}
+            storeId={storeId}
+            message={message}
+            childHandle={handle}
+            available={activity.readActive}
+            active={open}
+            automatic={message.role !== 'tool' && message.role !== 'user'}
+          />
+        );
+    }
     const snapshot = outputs.get(model.id);
     const identity = nativeReplyKey(readingKey, message);
     const publishDisplayed = (text: string | undefined, explicitClose = false) => {
@@ -204,91 +273,46 @@ export function NativeChildDetail({
       />
     );
   };
-  const renderTools: NonNullable<ComponentProps<typeof Conversation>['renderToolActivity']> = (
-    group,
-    controls,
-  ) => {
-    const aggregate = !!group[0]?.presentationGroupId || group.length > 1;
-    const displayTools = group.flatMap((model) => {
-      const fact =
-        facts?.presentation?.tools.find((entry) => entry.messageId === model.id) ??
-        toolPresentation.current.retainedFact(model);
-      return fact ? [fact] : [];
+  const renderTools: NativeToolRenderer = (group, controls) =>
+    renderNativeToolGroup(group, controls, {
+      tools: facts?.presentation?.tools ?? [],
+      targets: facts?.presentation?.fileTargets,
+      renderFileChange: bridge
+        ? (entry, open) => (
+            <NativeOperationDiff
+              key={entry.changeId}
+              bridge={bridge}
+              generation={generation}
+              entry={entry}
+              editor="vscode"
+              open={open}
+              cache={operationDiffs.current}
+              child
+            />
+          )
+        : undefined,
+      renderDelivery: bridge
+        ? (entry) => (
+            <NativeOutputFile
+              key={entry.changeId}
+              bridge={bridge}
+              generation={generation}
+              entry={entry}
+              editor="vscode"
+              child
+            />
+          )
+        : undefined,
+      retainedFact: (model) => toolPresentation.current.retainedFact(model),
+      liveTools,
+      executionUnconfirmed,
+      observationUnavailable: !!detail?.error,
+      diagnostics,
+      renderOriginal: renderMessage,
+      renderImages: (model, fact) =>
+        fact?.images?.length ? renderImages(model.id, fact.images) : null,
+      hasDeferredText: (model) => !!originals.get(model.id)?.deferredText,
     });
-    const unverified = new Set(
-      group
-        .filter(
-          (model) =>
-            !displayTools.some((entry) => entry.messageId === model.id) &&
-            !liveTools.some((entry) => entry.message.id === model.id),
-        )
-        .map((model) => model.id),
-    );
-    const originalTool = (
-      model: (typeof group)[number],
-      expanded: boolean | undefined,
-      onToggle: (open: boolean) => void,
-    ) => (
-      <ToolActivity
-        aggregate={false}
-        unverified
-        messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
-        expanded={expanded}
-        onToggle={onToggle}
-        activityId={
-          !aggregate && group.length === 1
-            ? controls.activityId
-            : (model.presentationKey ?? model.id)
-        }
-        restoredExpanded={controls.restoredExpanded}
-        renderChildren={() => renderMessage(model)}
-      />
-    );
-    return (
-      <>
-        {unverified.size && !aggregate && group.length === 1 ? (
-          originalTool(group[0]!, controls.expanded, controls.onToggle)
-        ) : (
-          <ToolActivity
-            {...controls}
-            aggregate={aggregate}
-            unverified={unverified.size > 0}
-            messages={group.map((model) =>
-              unverified.has(model.id)
-                ? { ...model, title: model.title ?? '工具结果', text: '' }
-                : model,
-            )}
-            renderItem={(model) =>
-              unverified.has(model.id)
-                ? originalTool(
-                    group.find((original) => original.id === model.id)!,
-                    controls.expandedItems[model.presentationKey ?? model.id],
-                    (open) => controls.onToggleItem(model.presentationKey ?? model.id, open),
-                  )
-                : undefined
-            }
-            renderChildren={() => null}
-          />
-        )}
-        {group.map((model) => {
-          const live = liveTools.find((entry) => entry.message.id === model.id);
-          const notice =
-            !live || executionUnconfirmed
-              ? undefined
-              : detail?.error
-                ? '上次确认状态'
-                : live.execution.cancelRequestedAt !== null
-                  ? '已请求停止，等待执行结果。'
-                  : undefined;
-          return notice ? (
-            <p key={model.id} role="status">
-              {notice}
-            </p>
-          ) : null;
-        })}
-      </>
-    );
-  };
   return (
     <section className="native-child-detail" aria-label="子 Agent 详情">
       {diagnostics && facts?.presentation?.unavailable && (
@@ -330,7 +354,31 @@ export function NativeChildDetail({
           initialReading={readings.get(readingKey)}
           saveReading={(state) => readings.save(readingKey, state)}
           renderMessageContent={renderMessage}
+          renderMessageAttachments={(model) => renderImages(model.id)}
           renderToolActivity={renderTools}
+          traceTurns
+          preserveReadingAnchor
+          renderReasoning={(model, open) => {
+            const original = model.reasoningSource
+              ? originals.get(model.reasoningSource)
+              : undefined;
+            const snapshot = original && outputs.get(original.id);
+            return renderNativeReasoning({
+              scope: readingKey,
+              model,
+              original,
+              open,
+              revision: snapshot?.bodyHash,
+              cache: reasoningBodies.current,
+              read:
+                snapshot && activity.readActive
+                  ? async (signal) => {
+                      signal.throwIfAborted();
+                      return snapshot.output.reasoning;
+                    }
+                  : undefined,
+            });
+          }}
           writeClipboardText={writeClipboardText}
         />
       </ConversationActivityContext>

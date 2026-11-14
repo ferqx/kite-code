@@ -451,7 +451,8 @@ test('default foreground execution waits for one original Job and preserves its 
     )!.result;
     expect(result).toMatchObject({
       outcome: 'succeeded',
-      details: { ref: { executionId: jobs[0]!.id }, stdout: 'original durable output\n' },
+      content: 'stdout:\noriginal durable output\n',
+      details: { ref: { executionId: jobs[0]!.id }, outputFormat: 'model-preview' },
     });
     expect(
       f.model.requests[1]!.messages.some(
@@ -481,7 +482,7 @@ test('default foreground execution waits for one original Job and preserves its 
   }
 });
 
-test('large Shell output retains its head and tail with exact omissions and budgets the next Model request independently', async () => {
+test('large Shell output keeps the supervised cursor and saves only the output section received by the model', async () => {
   const chunks = Array.from({ length: 180 }, (_, index) => {
     const prefix = `chunk-${String(index).padStart(3, '0')}: `;
     return `${prefix}${'x'.repeat(16384 - prefix.length - 1)}\n`;
@@ -513,7 +514,13 @@ test('large Shell output retains its head and tail with exact omissions and budg
     expect(Buffer.byteLength(retained)).toBeLessThanOrEqual(1024 * 1024);
     expect(omitted).toHaveLength(1);
     expect(omitted[0]!.droppedBytes).toBe(String(chunks.length * 16384 - retained.length));
-    expect(tool.result).toMatchObject({ details: { stdout: retained, truncated: true } });
+    expect(tool.result).toMatchObject({
+      details: { outputFormat: 'model-preview', outputLimited: true, truncated: true },
+    });
+    const stored = tool.result as { content: string; details: Record<string, Json> };
+    expect(stored.details).not.toHaveProperty('stdout');
+    expect(stored.details).not.toHaveProperty('stderr');
+    expect(Buffer.byteLength(stored.content)).toBeLessThanOrEqual(2000);
     expect(view.runs.map((run) => ({ status: run.status, reason: run.reason }))).toEqual([
       { status: 'completed', reason: null },
     ]);
@@ -521,12 +528,22 @@ test('large Shell output retains its head and tail with exact omissions and budg
       -1,
     )!.content;
     expect(started).toContain('chunk-000');
+    expect(started).toContain(stored.content);
     expect(started).toContain('Model output preview omitted');
     expect(started).toContain(`Collection omitted ${omitted[0]!.droppedBytes} output bytes`);
     expect(Buffer.byteLength(started)).toBeLessThan(2500);
     const read = f.model.requests[2]!.messages.filter((message) => message.role === 'tool').at(
       -1,
     )!.content;
+    const storedRead = view.executions.find((entry) => entry.definitionId === 'shell.read')!
+      .result as { content: string; details: Record<string, Json> };
+    expect(storedRead.details).not.toHaveProperty('output');
+    expect(storedRead.details).toMatchObject({
+      outputFormat: 'model-preview',
+      outputLimited: true,
+    });
+    expect(read).toContain(storedRead.content);
+    expect(Buffer.byteLength(storedRead.content)).toBeLessThanOrEqual(256);
     expect(read).toContain('Output cursor:');
     expect(read).toContain('Model output preview omitted');
     expect(Buffer.byteLength(read)).toBeLessThan(1000);

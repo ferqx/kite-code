@@ -58,6 +58,8 @@ export interface ToolResult {
 }
 export interface ToolContext extends ActionContext {
   readonly runId: string | null;
+  /** Frozen input budget of the model that uses this Tool result, when known. */
+  readonly modelInputTokenLimit?: number;
   /** Frozen total host capacities, not free slots or dispatch permission. */
   readonly resourceCapacity: ResourceCapacity;
   /** Final Store-accepted dispatch evidence; this metadata never grants permission itself. */

@@ -146,12 +146,41 @@ try {
   };
   await checkpoint('initial-lazy');
   assert.deepEqual((await page.evaluate(() => window.fileDiffFixture.snapshot())).events, []);
+  const edited = operation.locator('.tool-edit-heading');
+  assert.equal(await edited.locator('.tool-label').textContent(), '已编辑');
+  assert.match((await edited.locator('.file-diff-counts').textContent()) ?? '', /^\+396\s*-1$/);
+  await edited.getByRole('button', { name: 'example.ts', exact: true }).click();
+  assert.deepEqual((await page.evaluate(() => window.fileDiffFixture.snapshot())).events, [
+    'editor:src/example.ts',
+  ]);
+  assert.equal(await operation.locator('.tool-diff-toggle').getAttribute('aria-expanded'), 'false');
 
   await operation.locator('.tool-diff-toggle').click();
   await pending('fileChanges.detail');
-  await checkpoint('operation-loading');
+  const waiting = await checkpoint('operation-waiting-empty');
+  assert.ok(!waiting.status.some((text) => text?.includes('正在读取本次差异')));
+  await operation.locator('.tool-diff-toggle').click();
+  await page.waitForFunction(() =>
+    window.fileDiffFixture.snapshot().events.includes('fileChanges.close'),
+  );
   await release('fileChanges.detail');
-  await operation.locator('.file-diff[data-layout="split"]').waitFor();
+  assert.equal(await operation.locator('.file-diff').count(), 0);
+  await operation.locator('.tool-diff-toggle').click();
+  await pending('fileChanges.detail');
+  const motion = await operation.evaluate(async (node) => {
+    window.fileDiffFixture.release('fileChanges.detail');
+    const frames: number[] = [];
+    const until = performance.now() + 500;
+    while (performance.now() < until) {
+      await new Promise(requestAnimationFrame);
+      const content = node.querySelector('.tool-activity-content');
+      if (content?.querySelector('.file-diff')) frames.push(content.getBoundingClientRect().height);
+    }
+    return frames;
+  });
+  assert.ok(motion.length > 1 && motion[0]! < motion.at(-1)! * 0.45, JSON.stringify(motion));
+  const card = operation.locator('.file-diff[data-layout="unified"][data-inline]');
+  await card.waitFor();
   assert.ok((await operation.locator('.diff-output > *').count()) <= 400);
   assert.ok((await operation.locator('.diff-output > *').count()) > 350);
   assert.ok(
@@ -159,7 +188,19 @@ try {
       .locator('.file-diff-code')
       .evaluateAll((es) => es.every((e) => (e.textContent?.length ?? 0) <= 2048)),
   );
-  await checkpoint('bounded-split-diff');
+  assert.equal(await card.locator('.file-diff-path').textContent(), 'example.ts');
+  assert.match((await card.locator('.file-diff-counts').textContent()) ?? '', /^\+396\s*-1$/);
+  assert.equal(await card.getByRole('group', { name: '差异布局' }).count(), 0);
+  assert.equal(await card.locator('.diff-removed .file-diff-number').textContent(), '1263');
+  assert.equal(await card.locator('.diff-added .file-diff-number').first().textContent(), '1263');
+  await checkpoint('bounded-inline-diff');
+  await card.getByRole('button', { name: '复制差异', exact: true }).click();
+  await card.getByRole('button', { name: '已复制差异', exact: true }).waitFor();
+  const copied = await page.evaluate(() => window.fileDiffFixture.copiedText());
+  assert.ok(copied.startsWith('Line diff (bounded alignment; unchanged gaps omitted)\n1262'));
+  assert.ok(
+    copied.includes('1263 -const status = "old operation";\n1263 +const status = "new operation";'),
+  );
   const operationRegion = operation.getByRole('region', { name: '文件差异', exact: true });
   await operationRegion.focus();
   await page.keyboard.press('End');
@@ -169,31 +210,38 @@ try {
   await page.keyboard.press('Home');
   await page.waitForTimeout(100);
   assert.equal(await operationRegion.evaluate((e) => e.scrollTop), 0);
-  await operation.getByRole('button', { name: '统一', exact: true }).click();
-  assert.equal(await operation.locator('.diff-output > *').count(), 400);
-  await checkpoint('bounded-unified-diff');
   await page.getByText('查看本次交付的文件', { exact: true }).click();
   await release('fileChanges.detail');
   await page.getByText('ORIGINAL HISTORICAL SNAPSHOT', { exact: true }).waitFor();
   assert.equal(await operation.locator('.file-diff').count(), 1);
   await checkpoint('snapshot-separate');
+  const readsBeforeReopen = (
+    await page.evaluate(() => window.fileDiffFixture.snapshot())
+  ).events.filter((event) => event === 'fileChanges.detail:diff').length;
   for (let i = 0; i < 3; i++) {
     await operation.locator('.tool-diff-toggle').click();
     await operation.locator('.file-diff').waitFor({ state: 'detached' });
     await operation.locator('.tool-diff-toggle').click();
-    await release('fileChanges.detail');
     await operation.locator('.file-diff').waitFor();
   }
-  await checkpoint('repeated-operation-toggles');
+  const reopened = await checkpoint('repeated-operation-toggles');
+  assert.equal(
+    reopened.events.filter((event) => event === 'fileChanges.detail:diff').length,
+    readsBeforeReopen,
+  );
   await operation.locator('.tool-diff-toggle').click();
+
+  await page.evaluate(() => window.fileDiffFixture.nextOperation());
   await operation.locator('.tool-diff-toggle').click();
   await release('fileChanges.detail', true);
   await operation.getByRole('alert').waitFor();
-  await checkpoint('operation-failed');
+  const failed = await checkpoint('operation-failed');
+  assert.ok(!failed.status.some((text) => text?.includes('正在读取本次差异')));
   await operation.getByText('重新读取历史内容', { exact: true }).click();
   await release('fileChanges.detail');
   await operation.locator('.file-diff').waitFor();
   await operation.locator('.tool-diff-toggle').click();
+  await operation.locator('.file-diff').waitFor({ state: 'detached' });
 
   await openChanges();
   await release('workspaceChanges.list');
@@ -263,6 +311,13 @@ try {
   await page.getByRole('button', { name: '标签页', exact: true }).click();
   await release('workspaceChanges.list');
   await source.waitFor();
+  await page.waitForFunction(
+    (previousWidth) =>
+      Math.abs(
+        (document.querySelector('#details')?.getBoundingClientRect().width ?? 0) - previousWidth,
+      ) < 2,
+    resized,
+  );
   assert.ok(Math.abs((await width()) - resized) < 2);
   await checkpoint('reopen-keeps-user-width');
 
@@ -306,7 +361,7 @@ try {
   assert.equal(await page.locator('textarea.prompt-editor').inputValue(), 'Unsent original draft');
   writeFileSync(
     join(artifact, 'report.json'),
-    JSON.stringify({ browser: browser.version(), passed: true, stages, errors }, null, 2),
+    JSON.stringify({ browser: browser.version(), passed: true, stages, motion, errors }, null, 2),
   );
 } finally {
   await browser.close();

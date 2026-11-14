@@ -350,14 +350,83 @@ export async function readNativeBackgroundChild(
         }) ||
         executions.some(
           (execution) =>
-            execution.kind !== 'tool' ||
+            (execution.kind !== 'tool' &&
+              (execution.kind !== 'model' || execution.parentExecutionId !== null)) ||
             execution.sessionId !== childId ||
             execution.originStoreId !== input.storeId ||
             !runs.some((run) => run.id === execution.runId),
         )
       )
         throw new ClientError('background_child_history_mismatch');
+      const targets = body.presentation.fileTargets;
+      const compression = body.presentation.compressionProgress;
+      if (
+        compression !== undefined &&
+        (!compression ||
+          !['preparing', 'summarizing', 'validating'].includes(compression.phase) ||
+          (compression.executionId !== undefined && typeof compression.executionId !== 'string') ||
+          !runs.some(
+            (run) =>
+              run.id === compression.runId &&
+              run.isActive &&
+              run.originStoreId === compression.originStoreId,
+          ))
+      )
+        throw new ClientError('background_child_history_mismatch');
+      if (
+        targets !== undefined &&
+        (!Array.isArray(targets) ||
+          new Set(targets.map((target) => target?.messageId)).size !== targets.length ||
+          targets.some(
+            (target) =>
+              !target ||
+              !/^[a-f0-9]{64}$/.test(target.changeId) ||
+              target.openable !== false ||
+              (target.snapshot !== undefined &&
+                (target.snapshot !== true || target.preview !== 'available')) ||
+              !['read', 'write', 'edit'].includes(target.operation ?? '') ||
+              !['available', 'unavailable'].includes(target.preview) ||
+              typeof target.path !== 'string' ||
+              !tools.some(
+                (tool) => tool.messageId === target.messageId && tool.status === 'succeeded',
+              ) ||
+              (target.diffCounts &&
+                [target.diffCounts.added, target.diffCounts.removed].some(
+                  (count) => !Number.isSafeInteger(count) || count < 0 || count > 400,
+                )),
+          ))
+      )
+        throw new ClientError('background_child_history_mismatch');
       const liveTools = body.presentation.liveTools;
+      const textHandles = body.presentation.textHandles;
+      if (
+        textHandles !== undefined &&
+        (!Array.isArray(textHandles) ||
+          new Set(textHandles.map((entry) => entry?.messageId)).size !== textHandles.length ||
+          textHandles.some(
+            (entry) =>
+              !entry ||
+              !/^[a-f0-9]{64}$/.test(entry.handle) ||
+              !messages.get(entry.messageId)?.deferredText,
+          ))
+      )
+        throw new ClientError('background_child_history_mismatch');
+      const imageHandles = body.presentation.imageHandles;
+      if (
+        imageHandles !== undefined &&
+        (!Array.isArray(imageHandles) ||
+          new Set(imageHandles.map((entry) => entry?.messageId)).size !== imageHandles.length ||
+          imageHandles.some(
+            (entry) =>
+              !entry ||
+              !/^[a-f0-9]{64}$/.test(entry.handle) ||
+              !(
+                messages.get(entry.messageId)?.images?.length ||
+                tools.some((tool) => tool.messageId === entry.messageId && tool.images?.length)
+              ),
+          ))
+      )
+        throw new ClientError('background_child_history_mismatch');
       if (liveTools !== undefined) {
         if (
           !Array.isArray(liveTools) ||
@@ -378,7 +447,7 @@ export async function readNativeBackgroundChild(
           const shell = fact.shellInput;
           const source = fact.inputSource;
           if (
-            !execution ||
+            execution?.kind !== 'tool' ||
             !runs.some((run) => run.id === execution.runId && run.isActive) ||
             fact.messageId !== `native-execution:${execution.id}` ||
             fact.definitionVersion !== '1' ||
@@ -489,6 +558,21 @@ export async function readNativeBackgroundChild(
         body.presentation.tools = [
           ...(previous.presentation?.tools.filter((tool) => ids.has(tool.messageId)) ?? []),
           ...body.presentation.tools,
+        ];
+        body.presentation.fileTargets = [
+          ...(previous.presentation?.fileTargets?.filter((entry) => ids.has(entry.messageId)) ??
+            []),
+          ...(body.presentation.fileTargets ?? []),
+        ];
+        body.presentation.textHandles = [
+          ...(previous.presentation?.textHandles?.filter((entry) => ids.has(entry.messageId)) ??
+            []),
+          ...(body.presentation.textHandles ?? []),
+        ];
+        body.presentation.imageHandles = [
+          ...(previous.presentation?.imageHandles?.filter((entry) => ids.has(entry.messageId)) ??
+            []),
+          ...(body.presentation.imageHandles ?? []),
         ];
         body.presentation.runs = [
           ...new Map([

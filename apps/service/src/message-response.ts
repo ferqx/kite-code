@@ -1,5 +1,5 @@
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
-import type { ExecutionRecord, MessageRecord } from '@kite-ai/agent/storage';
+import type { ExecutionRecord, MessageRecord, SessionStateExecution } from '@kite-ai/agent/storage';
 
 /** The output head is private. Public history exposes only the original Execution and preview facts. */
 export function messageResponse(
@@ -82,7 +82,7 @@ export async function messageResponses(
   );
 }
 
-export function executionResponse(execution: ExecutionRecord) {
+export function executionResponse(execution: ExecutionRecord | SessionStateExecution) {
   const source = execution.decisionSource;
   const retry =
     execution.kind === 'model' &&

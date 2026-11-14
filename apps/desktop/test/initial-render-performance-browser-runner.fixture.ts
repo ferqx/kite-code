@@ -237,7 +237,7 @@ const report = {
   toolsPerTurn,
   artifact,
   method:
-    'Trusted click to first CDP PNG frame whose marker verifies the committed target tail visible; stable marker requires the initial entry window (all entries through 100, otherwise latest 40), unchanged entry keys and height across two RAF samples. History EOF still reads the whole source independently of mounted DOM. Loader/inert/aria-hidden/opacity block readability, and hidden frames do not sample geometry or computed style. DOM times and history EOF are separate. Visible geometry/count sampling is fixture overhead. Message bodies are already present in history, without real Service/body FIFO. React Profiler reports only development commits. Churn compares visible tail text against layout-committed input props and remains active through compositor paint.',
+    'Trusted click to the first CDP PNG frame with a readable tail. The stable marker requires the complete timeline and unchanged entry keys and height over two frames. History EOF, DOM readiness and paint are measured separately. Message bodies come from a controlled bridge. Churn compares visible tail text against committed input props.',
   cases: [] as unknown[],
   pageDiagnostics: [] as {
     turns: number;
@@ -328,34 +328,16 @@ async function windowJourney(page: Page, folder: string) {
     (id) => /^[um]-large-[0-9]+$/.test(id),
   );
   steps.push({ phase: 'initial', snapshot: initial, selection: await checkLoadedSelection(page) });
+  assert.deepEqual(initial.messageIds, source);
   await page.screenshot({ path: path.join(folder, 'window-initial.png') });
-  if (source.length > 100) {
-    for (let index = 0; index < 2; index++) {
-      const before = await page.evaluate(() => window.initialRenderFixture.beginEarlierWatch());
-      const expected = Math.min(source.length, before.entries + 20);
-      await page.waitForFunction(
-        (expected) => window.initialRenderFixture.windowSnapshot().entryKeys.length === expected,
-        expected,
-      );
-      await frames(page, 6);
-      const anchor = checkAnchor(
-        await page.evaluate(() => window.initialRenderFixture.endEarlierWatch()),
-      );
-      const snapshot = await page.evaluate(() => window.initialRenderFixture.windowSnapshot());
-      assert.deepEqual(
-        snapshot.messageIds,
-        source.slice(-expected),
-        'upper scrolling did not mount the next earlier complete entries',
-      );
-      steps.push({
-        phase: 'earlier',
-        snapshot,
-        anchor,
-        selection: await checkLoadedSelection(page),
-      });
-      await page.screenshot({ path: path.join(folder, `window-earlier-${index + 1}.png`) });
-    }
-  }
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('.conversation-viewport')!.scrollTop = 0;
+  });
+  await frames(page, 6);
+  const first = await page.evaluate(() => window.initialRenderFixture.windowSnapshot());
+  assert.deepEqual(first.entryKeys, initial.entryKeys);
+  assert.equal(first.top, 0);
+  steps.push({ phase: 'oldest', snapshot: first });
   if (toolsPerTurn) return steps;
   const jump = page.getByRole('button', { name: '回到最新消息', exact: true });
   if (await jump.count()) await jump.click();
@@ -407,24 +389,34 @@ async function windowJourney(page: Page, folder: string) {
   await frames(page);
   const manual = await page.evaluate(() => window.initialRenderFixture.windowSnapshot());
   await page.evaluate(() => window.initialRenderFixture.beginManualWatch());
-  const update = await page.evaluate(() => window.initialRenderFixture.appendTurn());
-  await page.waitForFunction(
-    (version) => window.initialRenderFixture.windowSnapshot().committedVersion === version,
-    update.version,
+  const update = await page.evaluate(() => {
+    window.initialRenderFixture.interruptHistory(true);
+    return window.initialRenderFixture.appendTurn();
+  });
+  await page.waitForFunction(() =>
+    window.initialRenderFixture.events.some((event) => event.kind === 'history:failed'),
   );
+  await frames(page, 8);
+  assert.equal(await page.locator('main > .notice.error, .conversation-loading').count(), 0);
+  assert.equal(await page.getByRole('button', { name: /^(重试|重新加载会话)$/ }).count(), 0);
+  const interrupted = await page.evaluate(() => window.initialRenderFixture.windowSnapshot());
+  assert.deepEqual(interrupted.messageIds, manual.messageIds);
+  steps.push({ phase: 'reading-interrupted', snapshot: interrupted });
+  await page.evaluate(() => window.initialRenderFixture.interruptHistory(false));
+  await waitTail(page, update.tailId, update.version);
   await frames(page, 8);
   const anchor = checkAnchor(
     await page.evaluate(() => window.initialRenderFixture.endEarlierWatch()),
   );
   const after = await page.evaluate(() => window.initialRenderFixture.windowSnapshot());
   assert.deepEqual(
-    after.entryKeys,
-    manual.entryKeys,
-    'manual reading mounted or trimmed an unrelated new tail',
+    after.messageIds.slice(0, manual.messageIds.length),
+    manual.messageIds,
+    'resuming the read replaced or reordered existing messages',
   );
   assert.ok(
-    !after.messageIds.includes(update.tailId),
-    'manual window eagerly mounted the unrelated tail',
+    after.messageIds.includes(update.tailId),
+    'automatic recovery did not publish the new tail',
   );
   steps.push({
     phase: 'manual-append',
@@ -451,7 +443,10 @@ async function lateNavigationJourney(page: Page) {
   const result = await page.evaluate(() => ({
     snapshot: window.initialRenderFixture.windowSnapshot(),
     nodes: window.initialRenderFixture.retainedWindow(),
-    title: document.querySelector('.breadcrumb strong')?.getAttribute('title'),
+    title: (
+      document.querySelector('.breadcrumb strong .sr-only') ??
+      document.querySelector('.breadcrumb strong')
+    )?.textContent,
     draft: document.querySelector('[role="textbox"]')?.textContent,
     released: window.initialRenderFixture.events.filter(
       (event) => event.kind === 'history:released',
@@ -715,7 +710,7 @@ try {
       const visibleCommits = data.commits.filter(
         (entry) => entry.at >= click.at && entry.at <= (first?.at ?? Number.POSITIVE_INFINITY),
       );
-      const expectedInitialEntries = turns * 2 > 100 ? 40 : turns * 2;
+      const expectedInitialEntries = turns * 2;
       const expectedSourceMessages = turns * (toolsPerTurn + 2);
       const initialWindowFrame = data.frames.find(
         (frame) => frame.at >= click.at && frame.entryKeys.length === expectedInitialEntries,
@@ -872,7 +867,7 @@ try {
         assert.ok(smallPaint, 'no correct small target compositor frame');
       } else {
         assert.ok(first, 'no readable large target compositor frame');
-        assert.ok(complete, 'no stable loaded-window compositor frame');
+        assert.ok(complete, 'no stable complete-timeline compositor frame');
         assert.equal(
           sourceMessageIds.size,
           expectedSourceMessages,
@@ -882,13 +877,13 @@ try {
         assert.equal(nodeCounts.messages, expectedInitialEntries);
         assert.ok(initialReadFrames.length);
         const expectedIds = Array.from({ length: expectedInitialEntries }, (_, index) => {
-          const sourceIndex = turns * 2 - expectedInitialEntries + index;
+          const sourceIndex = index;
           return `${sourceIndex % 2 ? 'm' : 'u'}-large-${Math.floor(sourceIndex / 2)}`;
         });
         assert.deepEqual(
           initialReadFrames[0]!.messageIds,
           expectedIds,
-          'initial DOM is not the latest complete entries',
+          'initial DOM did not include the complete timeline',
         );
         if (shape === 'long') {
           const bodyCounts = await page.evaluate(() => ({

@@ -283,6 +283,13 @@ test('a completion received during the original active parent Run prepares a Sou
       async () => f.reports().find((row) => row.status === 'applied') ?? null,
     );
     expect(report.receipt.mode).toBe('active');
+    expect(
+      f.db
+        .query(
+          "SELECT COUNT(*) AS count FROM command WHERE kind='agent.message' AND mail_target_session_id='root'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
     expect(report.receipt.runId).toBe((original.receipt as { runId: string }).runId);
     expect(f.policies()).toBe(0);
     expect(

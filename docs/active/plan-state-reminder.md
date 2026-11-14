@@ -14,18 +14,18 @@
 
 ## 规则
 
-静态 Agent contract 与 cacheable Runtime context 必须保持稳定。Plan、phase、interaction mode、authorization、sandbox、verification repair 等高频动态事实应由当前 `RuntimeState` 投影到会话尾部，不能写入静态 system prompt 前缀。
+静态 Agent contract 与可缓存上下文保持稳定。Plan、phase、interaction mode、authorization、sandbox、verification repair 等动态事实由当前 `RuntimeState` 投影到独立上下文块。
 
-通用新基线由 [Agent 模型上下文](../../packages/agent/src/model-context.ts)负责位置组装：默认 Service 只装配 Agent 的纯静态工厂，项目文件为历史之后的带出处 user 来源；[Planning 业务叶](../../packages/agent/src/business/planning/README.md#计划与真实来源)按 Core 当前 Run 与实际批准证明贡献唯一动态尾部。新增内部 `placement` 与 `runId` 不改变 HTTP／Store 格式，不授权限；无 placement 的既有来源保原前缀。普通、压缩和展开共用组装，实际权限、业务必要条件及完整来源 freshness 仍独立核验。下面旧 RuntimeState／epoch／事件名称不能作为读取旧 Store 的入口，D08 新数据基线保持。
+当前 [Agent 模型上下文](../../packages/agent/src/model-context.ts)先放无 placement 的静态来源，再放带出处的低权限项目来源及唯一动态块，最后接原会话历史。[Planning 业务叶](../../packages/agent/src/business/planning/README.md#计划与真实来源)按 Core 当前 Run 和实际批准证明贡献状态。普通、压缩和展开共用组装，实际权限、业务必要条件及完整来源 freshness 独立核验。[上下文与子结果决定](../../.agents/notes/implemented/architecture/2026-11-14-agent-context-and-completion-delivery.md)记录位置调整及缓存代价。
 
 推荐消息顺序：
 
 ```text
 System(static agent contract)
 System(cacheable runtime context)
-...compacted transcript messages
 Synthetic user(project instructions; refreshed from disk)
 Synthetic runtime-state message(exactly one)
+...compacted transcript and current conversation messages
 ```
 
 动态投影必须明确标记为 Runtime 生成，不得伪装成用户原始输入。当前路径不追加独立的 Plan reminder；phase、interaction mode、authorization、真实 sandbox backend、副作用状态和完整 PlanningState 只在一个 runtime block 中出现。投影是给模型的视图，不是状态权威；下一轮始终从 RuntimeState 重建。
@@ -33,7 +33,7 @@ Synthetic runtime-state message(exactly one)
 动态 runtime block 只从当前 epoch 的 PlanningState 构建。缺少当前 schema version、format epoch 或
 PlanDocument V2 身份的恢复数据不会进入 Context Projection、token preflight 或 Provider 调用。
 
-项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的 synthetic user context 注入，不能提升为 System 权限；每个模型请求从磁盘重新生成 snapshot，但它放在已持久化的 transcript 之后、Runtime state 之前，使规则变更在下一请求生效而不改变稳定的 system/history cache 前缀。其 snapshot revision 与当前 Prompt metadata 共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。production builtin 名称、description 与 JSON schema 不随 Planning/Building 变化；edit/write/shell 和完整 `task` role schema 在两阶段都披露，已绑定动态 MCP 也不因 phase 消失。Planning 的动态 Runtime block 引导模型只做只读检查；Runtime Policy 允许 Planning 非 Full 的 Workspace read-only baseline Shell direct，已知 external/sensitive scope 进入 Accept/Auto durable approval queue；edit/write、code/review child 与其他副作用仍按 phase hard deny，并把结构化 phase Tool Result 回灌模型。Capability 未加载、execution surface 收窄和 plan recovery 仍可改变工具面；不得把 phase-stable 声明误解为执行许可。PTY Prompt 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle，并以真实 request/UI evidence 验证该路径；`plan-review` 与 write-plan `tool-lifecycle` 场景另在只读、turn-scoped Runtime Store window 中证明 draft 的唯一 `completion.blocked(code=plan_draft_pending, planning=planning_draft, correctionAttempt=1)` 先于 continuation，并以 `run.completed`/`turn.completed` 收敛。所有场景都不能以第二个文本 final 绕过 completion guard。
+项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的 synthetic user context 注入，不能提升为 System 权限；每个模型请求从磁盘重新生成 snapshot，它位于动态状态之前，二者后接原会话历史。规则和动态状态仍在原请求生效，变化时历史部分的缓存可能重新计算。其 snapshot revision 与当前 Prompt metadata 共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。production builtin 名称、description 与 JSON schema 不随 Planning/Building 变化；edit/write/shell 和完整 `task` role schema 在两阶段都披露，已绑定动态 MCP 也不因 phase 消失。Planning 的动态 Runtime block 引导模型只做只读检查；Runtime Policy 允许 Planning 非 Full 的 Workspace read-only baseline Shell direct，已知 external/sensitive scope 进入 Accept/Auto durable approval queue；edit/write、code/review child 与其他副作用仍按 phase hard deny，并把结构化 phase Tool Result 回灌模型。Capability 未加载、execution surface 收窄和 plan recovery 仍可改变工具面；不得把 phase-stable 声明误解为执行许可。PTY Prompt 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle，并以真实 request/UI evidence 验证该路径；`plan-review` 与 write-plan `tool-lifecycle` 场景另在只读、turn-scoped Runtime Store window 中证明 draft 的唯一 `completion.blocked(code=plan_draft_pending, planning=planning_draft, correctionAttempt=1)` 先于 continuation，并以 `run.completed`/`turn.completed` 收敛。所有场景都不能以第二个文本 final 绕过 completion guard。
 
 工具协议链必须保留原始 assistant tool call 与对应 tool result 关系。不得为了缓存命中率把工具结果改写为普通用户消息，或将 transient binding/tool schema 固化进长期 transcript。
 

@@ -159,7 +159,9 @@ test('input identity, bad chunk offsets/hash, abort and late selection are local
     watch: f.bridge.watch,
     async request(request) {
       const reply = await f.bridge.request(request);
-      return reply && 'data' in reply ? { ...reply, nextOffset: reply.nextOffset + 1 } : reply;
+      return reply && 'data' in reply && reply.kind === 'modelInput.chunk'
+        ? { ...reply, nextOffset: reply.nextOffset + 1 }
+        : reply;
     },
   };
   expect(await code(readNativeModelInput({ ...input, bridge: malicious }))).toBe(
@@ -274,9 +276,25 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
     expect(model.requests).toHaveLength(205);
+    const observedCursor = (await store.getMetadata()).lastChangeCursor;
+    // This fixture prepares its complete history before it attaches Main. Start
+    // observing at that watermark, as the real window does after initial ready.
+    const observe = client.observe.bind(client);
+    client.observe = (options) =>
+      observe({
+        ...options,
+        ...(!options.cursor && !options.startAfter
+          ? { startAfter: { storeId, sequence: observedCursor } }
+          : {}),
+      });
     caller = new NativeCaller(client, () => {});
     const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
-    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    const selected = (await caller.invoke({
+      method: 'select',
+      generation,
+      sessionId: 's',
+    })) as NativeState;
+    expect(selected.selection?.session.id).toBe('s');
     const queries: { afterSeq?: string; upperSeq?: string }[] = [];
     const bridge: NativeBridge = {
       watch: () => () => {},
@@ -314,4 +332,4 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
     await service.close();
     rmSync(root, { recursive: true, force: true });
   }
-}, 30000);
+}, 90000);

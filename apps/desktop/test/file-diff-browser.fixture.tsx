@@ -1,9 +1,11 @@
 // Isolated synthetic bridge only; never imported by ordinary Native entrypoints.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionPage } from '../../../packages/ui/src/desktop/SessionPage';
 import { ToolActivity } from '../../../packages/ui/src/desktop/ToolActivity';
+import type { NativeFileChangeDetail } from '../src/file-changes-bridge';
 import type { NativeBridge, NativeResult, NativeSelection } from '../src/native-bridge';
+import { NativeDisplayCache } from '../src/native-display-cache';
 import { NativeOperationDiff, NativeOutputFile } from '../src/native-file-changes';
 import { NativeWorkspaceChanges } from '../src/native-workspace-changes';
 import '../src/native-tailwind.css';
@@ -12,11 +14,13 @@ import '@kite-ai/ui/desktop/style.css';
 const events: string[] = [];
 const pending: { method: string; release: (fail?: boolean) => void }[] = [];
 const patch = [
-  '@@ -1 +1,1002 @@',
-  '-old operation',
-  '+new operation',
-  `+${'x'.repeat(10000)}`,
-  ...Array.from({ length: 1000 }, (_, i) => `+synthetic line ${i}`),
+  'Line diff (bounded alignment; unchanged gaps omitted)',
+  '1262  const original = true;',
+  '1263 -const status = "old operation";',
+  '1263 +const status = "new operation";',
+  `1264 +${'x'.repeat(10000)}`,
+  '... unchanged lines omitted ...',
+  ...Array.from({ length: 1000 }, (_, i) => `${1524 + i} +synthetic line ${i}`),
 ].join('\n');
 const workspacePatch = [
   '@@ -1,31 +1,31 @@',
@@ -96,13 +100,17 @@ const entry = {
   path: 'src/example.ts',
   preview: 'available' as const,
   openable: false,
-  operation: 'write' as const,
+  operation: 'edit' as const,
   snapshot: true,
   diff: true,
+  diffCounts: { added: 396, removed: 1 },
 };
 function App() {
+  const operationDiffs = useRef(new NativeDisplayCache<NativeFileChangeDetail>());
+  const copied = useRef('');
   const [expanded, setExpanded] = useState(false),
     [selection, setSelection] = useState(1),
+    [operationRevision, setOperationRevision] = useState(0),
     [draft, setDraft] = useState('Unsent original draft');
   Object.assign(window, {
     fileDiffFixture: {
@@ -115,8 +123,16 @@ function App() {
         setSelection((v) => v + 1);
         setExpanded(false);
       },
+      nextOperation() {
+        setOperationRevision((value) => value + 1);
+      },
+      copiedText: () => copied.current,
       snapshot() {
-        return { events: [...events], pending: pending.map((item) => item.method), selection };
+        return {
+          events: [...events],
+          pending: pending.map((item) => item.method),
+          selection,
+        };
       },
     },
   });
@@ -131,6 +147,9 @@ function App() {
         connected
         connectionLabel=""
         actions={{}}
+        writeClipboardText={async (text) => {
+          copied.current = text;
+        }}
         messages={[
           {
             id: 'operation-fixture',
@@ -146,24 +165,30 @@ function App() {
                 {
                   id: 'message',
                   role: 'tool',
-                  toolName: 'write_file',
+                  toolName: 'edit_file',
                   text: '',
                   changedFile: 'src/example.ts',
                   changeConfirmed: true,
+                  fileDiffCounts: entry.diffCounts,
                   status: 'completed',
                   settled: true,
                 },
               ]}
               expanded={expanded}
               onToggle={setExpanded}
+              openFile={(path) => {
+                events.push(`editor:${path}`);
+              }}
               renderChildren={() => null}
-              renderFileChange={() => (
+              renderFileChange={(_message, open) => (
                 <NativeOperationDiff
-                  key={selection}
+                  key={`${selection}-${operationRevision}`}
                   bridge={bridge}
                   generation={1}
-                  entry={entry}
+                  entry={{ ...entry, changeId: `operation-${selection}-${operationRevision}` }}
                   editor="vscode"
+                  open={open}
+                  cache={operationDiffs.current}
                 />
               )}
             />
@@ -201,6 +226,8 @@ declare global {
     fileDiffFixture: {
       release(method: string, fail?: boolean): void;
       switchSession(): void;
+      nextOperation(): void;
+      copiedText(): string;
       snapshot(): { events: string[]; pending: string[]; selection: number };
     };
   }

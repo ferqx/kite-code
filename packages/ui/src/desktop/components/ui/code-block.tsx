@@ -86,19 +86,20 @@ function CodeBlockActions({ className, ...props }: React.ComponentProps<'div'>) 
 
 function CodeBlockCopyButton({
   value,
+  contentLabel = '代码',
   variant = 'ghost',
   size = 'icon-xs',
   className,
   onClick,
   ...props
-}: React.ComponentProps<typeof Button> & { value: string }) {
+}: React.ComponentProps<typeof Button> & { value: string; contentLabel?: string }) {
   const { copyState, copyMessage, readActive } = useTextCopy(value, undefined, props.disabled);
   const label =
     copyState === 'copied'
-      ? '已复制代码'
+      ? `已复制${contentLabel}`
       : copyState === 'failed'
         ? '复制失败，请重试'
-        : '复制代码';
+        : `复制${contentLabel}`;
   return (
     <Button
       {...props}

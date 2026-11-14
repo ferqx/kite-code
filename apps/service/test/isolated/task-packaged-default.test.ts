@@ -1,10 +1,14 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  privateDirectory,
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(label: string, read: () => Promise<T>, done: (value: T) => boolean) {
@@ -28,17 +32,19 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-test('source-free default collaboration preserves full child result and emits exactly one authorized idle report', async () => {
+test('source-free default collaboration queues the full child result until the next parent turn', async () => {
   const root = realpathSync(temporaryDirectory('kite-packaged-task-'));
+  const buildRoot = join(root, 'build');
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
+  privateDirectory(buildRoot);
   mkdirSync(workspace);
   mkdirSync(home);
   const { buildTerminalBundle, verifyTerminalBundle } = await import(
     '../../../../scripts/release/terminal-bundle'
   );
   const built = await buildTerminalBundle({
-    destination: join(root, 'bundle'),
+    destination: join(buildRoot, 'bundle'),
     repositoryRoot: resolve(import.meta.dir, '../../../..'),
     bunExecutable: process.execPath,
   });
@@ -85,14 +91,11 @@ test('source-free default collaboration preserves full child result and emits ex
     'wait_agent_event',
   ];
   const parentToolDirectories: string[][] = [];
-  let disposition = 'after_turn';
   let parentCalls = 0,
     childCalls = 0,
-    reports = 0,
     reviews = 0;
   let release!: () => void;
   let gate = Promise.resolve();
-  let reportActive = () => false;
   const fullResult = `PACKAGED_RESULT_START\n${'中文é👋'.repeat(9000)}\nPACKAGED_RESULT_END`;
   expect(Buffer.byteLength(fullResult)).toBeGreaterThan(65536);
   const provider = Bun.serve({
@@ -115,7 +118,6 @@ test('source-free default collaboration preserves full child result and emits ex
       const child =
         !review &&
         body.messages.some((message) => message.content?.includes('PACKAGED_CHILD_INPUT'));
-      const report = !review && !child && reportActive();
       if (!review && !child)
         parentToolDirectories.push((body.tools ?? []).map((tool) => tool.function.name));
       let selected: unknown = null;
@@ -127,9 +129,6 @@ test('source-free default collaboration preserves full child result and emits ex
         childCalls++;
         await gate;
         content = fullResult;
-      } else if (report) {
-        reports++;
-        content = 'PACKAGED_REPORT_DONE';
       } else {
         const index = parentCalls++;
         if (index === 0)
@@ -143,7 +142,7 @@ test('source-free default collaboration preserves full child result and emits ex
             tool_calls: [
               {
                 index: 0,
-                id: `task-${disposition}`,
+                id: 'packaged-task-call',
                 type: 'function',
                 function: { name: 'spawn_agent', arguments: JSON.stringify(selected) },
               },
@@ -227,25 +226,13 @@ test('source-free default collaboration preserves full child result and emits ex
         })
       ).state,
     ).toBe('applied');
-    for (const scenario of ['after_turn'] as const) {
-      disposition = scenario;
-      parentCalls = 0;
-      childCalls = 0;
-      reports = 0;
-      reviews = 0;
+    {
+      const scenario = 'queued-result';
       gate = new Promise<void>((resolve) => {
         release = resolve;
       });
       const sessionId = `s-${scenario}`,
         work = `work-${scenario}`;
-      reportActive = () =>
-        Boolean(
-          database!
-            .query(
-              "SELECT id FROM run WHERE session_id=? AND is_active=1 AND origin_command_id LIKE 'report-%'",
-            )
-            .get(sessionId),
-        );
       await client.createSession({
         expectedStoreId,
         commandId: `create-${scenario}`,
@@ -279,7 +266,6 @@ test('source-free default collaboration preserves full child result and emits ex
         async () => childCalls,
         (calls) => calls === 1,
       );
-      expect(reports).toBe(0);
       const held = await client.getView(sessionId);
       const heldParent = held.runs.find((run) => run.originCommandId === work)!;
       expect(heldParent).toBeDefined();
@@ -308,7 +294,6 @@ test('source-free default collaboration preserves full child result and emits ex
           parentStatus: heldParent.status,
           parentActive: heldParent.isActive,
           childCalls,
-          reports,
         }),
       );
       const carrier = held.executions.find(
@@ -350,7 +335,11 @@ test('source-free default collaboration preserves full child result and emits ex
         expect(authorization.revision.length).toBeGreaterThan(0);
         expect(authorization.definitionVersion).toBe('1');
         expect(authorization.inputDigest).toBe(hash(canonical(JSON.parse(row.intent_json))));
-        expect(authorization.snapshot).toMatchObject({
+        const permissionSnapshot =
+          authorization.snapshot.namespace === 'builtin.business.permissions'
+            ? authorization.snapshot.data.current
+            : authorization.snapshot;
+        expect(permissionSnapshot).toMatchObject({
           namespace: 'builtin.permissions',
           version: '1',
           data: {
@@ -401,7 +390,32 @@ test('source-free default collaboration preserves full child result and emits ex
       expect(
         held.executions.find((execution) => execution.id === carrier.parentExecutionId)!.runId,
       ).toBe(heldParent.id);
+      const parent = await until(
+        'original parent completed',
+        async () => (await client.getView(sessionId)).runs.find((run) => run.id === heldParent.id)!,
+        (run) => run.status === 'completed',
+      );
       release();
+      const reportId = await until(
+        'result queued while parent is idle',
+        async () =>
+          database!
+            .query<{ id: string }, [string]>(
+              "SELECT id FROM command WHERE session_id=? AND kind='job.report' AND status='accepted' AND json_extract(receipt_json,'$.reason')='idle_authorization_required'",
+            )
+            .get(sessionId)?.id,
+        (id) => !!id,
+      );
+      expect((await client.getView(sessionId)).runs).toHaveLength(1);
+      expect(parentCalls).toBe(2);
+      expect(childCalls).toBe(1);
+      const nextWork = 'next-parent-input';
+      await client.startRun(sessionId, {
+        kind: 'run.start',
+        expectedStoreId,
+        commandId: nextWork,
+        content: 'Use the queued child result.',
+      });
       const view = await until(
         `completed-${scenario}`,
         () => client.getView(sessionId),
@@ -411,18 +425,15 @@ test('source-free default collaboration preserves full child result and emits ex
             (execution) => execution.id === carrier.id && execution.status === 'succeeded',
           ),
       );
-      // Required result delivery adds the post-delivery completion step; the earlier completion proposal cannot finish the parent.
-      expect(parentCalls).toBe(2);
+      expect(parentCalls).toBe(3);
       expect(childCalls).toBe(1);
       // Independent default record-only authorizations dispatch no reviewer Model or human answer; child effects retain their own ordinary gates.
       expect(reviews).toBe(0);
-      expect(reports).toBe(1);
       for (const ids of parentToolDirectories) {
         for (const id of publicTaskTools)
           expect(ids.filter((candidate) => candidate === id)).toHaveLength(1);
         for (const id of legacyTaskTools) expect(ids).not.toContain(id);
       }
-      const parent = view.runs.find((run) => run.originCommandId === work)!;
       const childView = await client.getView(carrier.childSessionId!);
       expect(childView.runs).toHaveLength(1);
       expect(childView.runs[0]!.status).toBe('completed');
@@ -442,16 +453,16 @@ test('source-free default collaboration preserves full child result and emits ex
       });
       expect(childInput.runId).toBe(childView.runs[0]!.id);
       expect(childInput.request.modelId).toBe('fixed');
-      expect(childInput.request.tools.map((tool) => tool.id)).toContain('spawn_agent');
-      if (scenario === 'after_turn') {
-        const reportRun = view.runs.find((run) => run.originCommandId !== work)!;
-        const reportCommand = await client.getCommand(reportRun.originCommandId);
+      expect(childInput.request.tools.map((tool) => tool.id)).toContain('send_agent_message');
+      {
+        const reportRun = view.runs.find((run) => run.originCommandId === nextWork)!;
+        const reportCommand = await client.getCommand(reportId!);
         expect(reportCommand.status).toBe('applied');
         const model = view.executions.find(
           (execution) => execution.kind === 'model' && execution.runId === reportRun.id,
         )!;
         const input = await client.getModelInput(sessionId, model.id, { expectedStoreId });
-        expect(input.rootWorkCommandId).toBe(work);
+        expect(input.rootWorkCommandId).toBe(nextWork);
         expect(input.rootSessionId).toBe(sessionId);
         expect(input.request.messages.some((message) => message.content.includes(fullResult))).toBe(
           true,
@@ -474,6 +485,8 @@ test('source-free default collaboration preserves full child result and emits ex
         expect(reportCommand.receipt).toMatchObject({
           runId: reportRun.id,
           executionId: carrier.id,
+          mode: 'active',
+          outcome: 'report_received',
         });
         const context = await client.getContext(sessionId, {
           storeId: expectedStoreId,
@@ -492,6 +505,9 @@ test('source-free default collaboration preserves full child result and emits ex
         const sourceMessage = input.request.messages.find((message) =>
           message.sourceIds?.includes(source.id),
         )!;
+        expect(
+          input.request.messages.filter((message) => message.sourceIds?.includes(source.id)),
+        ).toHaveLength(1);
         const begin = sourceMessage.content.indexOf('PACKAGED_RESULT_START');
         const end =
           sourceMessage.content.indexOf('PACKAGED_RESULT_END', begin) +
@@ -506,14 +522,11 @@ test('source-free default collaboration preserves full child result and emits ex
         const scopes = database
           .query('SELECT root_work_command_id FROM run WHERE id IN (?,?)')
           .all(reportRun.id, parent.id) as { root_work_command_id: string }[];
-        expect(scopes.map((row) => row.root_work_command_id)).toEqual([work, work]);
-      } else
-        expect(
-          database
-            .query("SELECT id FROM command WHERE session_id=? AND kind='job.report'")
-            .all(sessionId),
-        ).toHaveLength(0);
-      const before = { parentCalls, childCalls, reports, reviews, runs: view.runs.length };
+        expect(scopes.map((row) => row.root_work_command_id).sort()).toEqual(
+          [nextWork, work].sort(),
+        );
+      }
+      const before = { parentCalls, childCalls, reviews, runs: view.runs.length };
       for (let n = 0; n < 3; n++) {
         await client.getView(sessionId);
         await client.getModelOutput(carrier.childSessionId!, childModel.id, { expectedStoreId });
@@ -522,7 +535,6 @@ test('source-free default collaboration preserves full child result and emits ex
       expect({
         parentCalls,
         childCalls,
-        reports,
         reviews,
         runs: (await client.getView(sessionId)).runs.length,
       }).toEqual(before);
@@ -582,6 +594,6 @@ test('source-free default collaboration preserves full child result and emits ex
     database?.close();
     await paired?.close().catch(() => {});
     provider.stop(true);
-    rmSync(root, { recursive: true, force: true });
+    removeTemporaryDirectory(root);
   }
 }, 180000);

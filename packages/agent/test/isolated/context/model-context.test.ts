@@ -103,28 +103,27 @@ test('read-only task and automatic rejection guidance remain one deterministic t
   expect(modelHistory(sources, input)).toEqual(history);
 });
 
-test('normal, summary and expanded admission preserve stable prefix, exact Tool pairs and one actual runtime tail', () => {
+test('normal, summary and expanded admission keep host context before the real conversation and Tool pairs', () => {
   const contract = agentContractSource('/actual-workspace');
   const sources = [runtime, project, contract];
   sources.forEach(assertContextSource);
   const input = assembleModelContext(sources, history);
   expect(input[0]).toMatchObject({ role: 'system', content: contract.content });
-  expect(input.slice(1, 4)).toEqual(history);
-  expect(input[4]).toMatchObject({ role: 'user', content: project.content });
-  expect(input[5]).toEqual({
+  expect(input[1]).toMatchObject({ role: 'user', content: project.content });
+  expect(input[2]).toEqual({
     role: 'user',
     content: '<runtime-state source="runtime.kernel">\nplan_requirement: pending\n</runtime-state>',
     sourceIds: [runtime.id],
   });
+  expect(input.slice(3)).toEqual(history);
   expect(modelHistory(sources, input)).toEqual(history);
   const instruction: ModelMessage = {
     role: 'user',
     content: 'Summarize the actual original history',
   };
   const summary = assembleModelContext(sources, [...modelHistory(sources, input), instruction]);
-  expect(summary.slice(1, 4)).toEqual(history);
-  expect(summary[4]).toEqual(instruction);
-  expect(summary.at(-1)).toEqual(input.at(-1));
+  expect(summary.slice(3, -1)).toEqual(history);
+  expect(summary.at(-1)).toEqual(instruction);
   const refreshed = assembleModelContext(
     [
       contract,
@@ -134,8 +133,8 @@ test('normal, summary and expanded admission preserve stable prefix, exact Tool 
     history,
   );
   expect(refreshed[0]).toEqual(input[0]);
-  expect(refreshed.slice(1, 4)).toEqual(history);
-  expect(refreshed.at(-1)?.content).toContain('plan_requirement: approved');
+  expect(refreshed.slice(3)).toEqual(history);
+  expect(refreshed[2]?.content).toContain('plan_requirement: approved');
 });
 
 test('worktree exit guidance requires client navigation evidence and explicit target deletion intent', () => {

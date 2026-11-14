@@ -26,11 +26,15 @@ Native MCP／Skills 全局设置沿[独立用户 API](../../apps/service/README.
 
 Native消息历史在完整基线之后，可按`message_changes`能力用持久`change_event`游标接续，`Message.seq`不成为正文版本。SSE只唤醒读取，领先View的目标游标不能冒充同View基线或ACK；每批候选页完成后按原ID原子合并，失败、回收、重连和冷重开保原失效/恢复边界。正常正文事件跳过View全读，Run/权限/执行事实仍独立核验；稳定历史不重传，元数据变化仍覆盖展示依赖。新协议不增加执行authority，不改变Web/TUI读取路径，完整合同和实际证据归[Store](../../packages/agent/src/storage/README.md#消息历史变更读取)、[Client](../../packages/client/README.md#消息历史增量)及[Native owner](../../apps/desktop/README.md)。
 
+支持 `session_state` 时，Native 从轻量快照取得历史观察水位，独立分批读取完整时间线和后继持久变更。Renderer 后台自动恢复同一会话的读取，当前权限、停止与提交仍由原准入读取决定。超大旧正文通过原消息的分块读取。Web／TUI 继续使用各自的读取路径。
+
+主 Agent 活动轮在原 inbox checkpoint 接纳子载体终态。普通 Service 将空闲父会话的结果持久排队，下一次活动轮接收。可信嵌入宿主可显式提供自动续轮策略。Runtime 提示模型以最终回复交付报告，普通协作消息承载需要对端处理的工作信息。Desktop 主／子会话共用消息组件，子详情证据读取绑定原载体、会话和持久消息身份。跨层取舍见[上下文与子结果决定](../../.agents/notes/implemented/architecture/2026-11-14-agent-context-and-completion-delivery.md)，桌面读口归 [Native owner](../../apps/desktop/README.md#内部模型调用与子-agent)。
+
 工具反馈不成为执行权威：[Shell leaf](../../packages/agent/src/tools/shell.README.md)仅在可确定的本地引用缺失预查返回 failed，Store 读取异常及派发后未知仍保守结算。`files.search@3` 的过滤、预览与当前页跳过范围归 [Files owner](../../packages/agent/src/tools/files/README.md)，其描述和结果不能放宽原路径、权限及恢复约束。公开预设说明来自实际注册目录，准确只读 definition/version 白名单与父能力交集保持；[行为合同](../../packages/agent/src/model-context.ts)只指导推进、取证和交付，不新增完成状态、自动重放或额外审批。Runtime 仍以原 Command/Run、真实派发和必要条件作为权威。
 
 普通 Files 的确定缺失由[原读取 owner](../../packages/agent/src/tools/files-tools.ts)及[外部读取适配器](../../packages/agent/src/tools/external-file-reads.ts)返回 `outcome:succeeded/details.exists:false`，没有正文或基线；只包住实际目标读取，Artifact 发布、私有引用、保护范围与取消失败不被通用 `ENOENT` 转成缺失。[Service 最终 Files 装配](../../apps/service/src/file-checkpoint-configuration.ts)统一模型说明和 path 文案，保留输入 schema 语义、定义版本及原 Full-only 外写策略，不让附件说明覆盖普通外部读取范围。[模型错误呈现](../../packages/agent/src/tool-failure-presentation.ts)只用已知公开原因生成英文解释，保原调用出处、审批和未知事实；[补充原因表](../../packages/agent/src/tool-failure-causes.ts)不改变分类或授权。原 stdout／stderr、MCP 业务数据与非英文业务正文不因移除解释中的内部执行术语而被翻译或裁剪，原持久回执仍完整保存。产品表现归[工具手册](../handbook/features/tools-and-approvals.md)，验收边界与取舍见[缺失观察及工具反馈记录](../../.agents/notes/implemented/bug-fix/2026-11-05-ordinary-missing-file-and-readable-tool-feedback.md)。
 
-Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。准确失败的子结果也保已取得的工具观察和 Shell 两流预览，原效果与失败状态不互相覆盖；不认识的证据限定保原完整 Source，不因错误简化丢失。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不按具体文件工具 ID 改写完成条件，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型；上述准确图像版本识别仅用于请求展开的资源预算。
+Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。准确失败的子结果也保已取得的工具观察和 已保存的 Shell 模型输出段，兼容带两流预览的旧回执，原效果与失败状态不互相覆盖；不认识的证据限定保原完整 Source，不因错误简化丢失。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不按具体文件工具 ID 改写完成条件，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型；上述准确图像版本识别仅用于请求展开的资源预算。
 
 会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
 
@@ -90,7 +94,7 @@ Files 的原生 I/O 沿 [Node-API owner](../../packages/agent/native/files/READM
 
 客户端测试专用的调试入口、诊断展示和辅助控件只允许由隔离测试夹具或明确测试制品开启，dev 与 prod 客户端必须关闭。公开启动参数、环境变量、URL 或环境名不提供开启资格；TUI 普通入口拒绝 `--test-ui-diagnostics`，Native 的开发与正式 renderer 将测试常量固定为 false，组件传入 true 也不能覆盖该值。测试目录的入口可向可信 host 显式传 `testDiagnostics:true`，测试 Native 可单独构建诊断制品；共享 Desktop context 默认关闭，不再按 `NODE_ENV=development` 增加技术详情。测试诊断只控制展示，不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
-[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行的 builtin effect 分类、计划/恢复审批约束、默认 Task 后续汇报许可，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。默认 after-turn 判定由 Agent 核原 role/source/root work、取消／删除和当前信任，Service 只提供可信读取；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
+[Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行的 builtin effect 分类、计划/恢复审批约束、可信宿主可选的 Task 后续汇报策略，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。显式启用 after-turn 时，由 Agent 核原 role/source/root work、取消／删除和当前信任；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
 
 Native 的明确普通输入在 Main 内按 Session 绑定的 Workspace 准备当前读取授权，不显示独立范围确认；准备使用原权限 observation、trust revision、目录身份和读取范围摘要 CAS，以及原权限 journal。未知或过期观察不继续输入，切换主体／Store／Session／项目不把旧申请改绑；打开历史和状态核实不自动授予范围，审批模式及工具硬上限独立。负责实现与回归归 [Desktop owner](../../apps/desktop/README.md#原会话输入区权限与停止)。
 
@@ -105,6 +109,8 @@ Native累计缓存用量沿已观察Message的原Model Execution只读取得：�
 Extension 的业务 Context 贡献只接收 scoped read projections，Core 检查 namespace 和有限格式，并强制以 user 数据呈现；来源没有累计数量额度。公开执行证明仅提供准确 identity、attempt、定义、参数摘要、结果 revision 和原来源 id/digest；信息 receipt 另行核实原 Interaction 的 accepted revision，不替代工具授权。配置文件、正文、展示卡和调用者自报证明不能生成这些权威事实。
 
 文件变更阅读继续沿原 Message 的唯一 source Execution 和准确原 Run/Store/结果 revision，不以 tool call 名称或模型参数关联。普通 Files 可保存有版本的中立 `details.fileChange`，由实际已验证 preimage 与确认 postimage 生成；只限展示预算，不改完整文件或 Model 内容合同。Main 只给当前已读 scope 的成功 File receipt 建立有限观察，缺预览明确不可读；恢复检查点和当前磁盘不是历史 diff 的替代来源。编辑器跳转另核当前登记项目的物理根、目标普通文件和原 frame，不从历史来源继承另一 Workspace 的文件范围。当前实现与证据见 [Files owner](../../packages/agent/src/tools/files/README.md#逐操作文件变更预览)和 [Native owner](../../apps/desktop/README.md#原文件变更面板与编辑器)。Core、生成 HTTP schema 与私有 UI 数据格式均保持。 当前 Native 另外提供只读 Git 工作区观察：由 Main 的当前登记 Workspace 解析实际仓库根和有限文件 ID，独立于上述成功操作历史，不将工作区改动归因 Agent。扩大到仓库根前检查受保护目录；状态与按需正文有独立容量、取消和期限，不开放 renderer 任意路径或 Git mutation。实现与限制由同一 Native owner 维护。
+
+会话文件编辑的 Native 私有文件元数据可附已验证的预览增删行数。该统计从成功回执的有界预览提取，差异正文继续使用原按需读取。统计不改变公开 HTTP schema、原 Tool 版本或编辑器准入。
 
 Native Files 恢复读取将当前 Store 准入与原 Run/Execution 出处分开：plain 原 Message 沿准确原 Run 核 Execution，sealed Fork 严格沿封存原 Session/Run/Store，不从当前 Run 补空来源。GET 原 Run 只核固定身份，不用其后来状态限制已有成功 Files；观察封存原定义、revision 和完整结果的固定摘要，detail/open 再核，同 revision 换绑也拒绝。普通 Markdown 只命名当前文件，有原 Run 时核出处，无 Run 的原用户消息仍沿当前准入的源 View 同项目和物理目标；不能据此取得文件贡献或执行权。完整原结果摘要不额外持久保存正文，实际恢复/冷读与安全范围归上述 Native owner。
 
@@ -521,7 +527,7 @@ Native首次页面授权候选在原browser.open Tool内先取得既有持久Que
 
 ## Trajectory 与 Trace 独立消费者边界
 
-普通 Shell 的 1 MiB 输出保留预算覆盖原 Job 的头尾及省略区间。Store 沿原输出事件顺序发布稳定前缀，原终态前追加省略记录和保留的尾部，公开游标继续读取已发布记录。模型输出预算独立应用于发送给模型的预览。采集和呈现的当前合同归 [Jobs owner](../../packages/agent/src/jobs/README.md) 与 [Shell tools](../../packages/agent/src/tools/shell.README.md)。
+普通 Shell 的 1 MiB 输出保留预算覆盖原 Job 的头尾及省略区间。Store 沿原输出事件顺序发布稳定前缀，原终态前追加省略记录和保留的尾部，公开游标继续读取已发布记录。模型输出预算应用于 `shell_execute` 和 `shell_read` 保存并发送给模型的同一输出段。桌面工具卡复用该段，旧回执走原预算投影。Main 在原工具消息核验时准备延迟 Shell 输出，桌面展开直接呈现。完整读取游标仍绑定原 Job 的有界输出记录。采集和呈现的当前合同归 [Jobs owner](../../packages/agent/src/jobs/README.md) 与 [Shell tools](../../packages/agent/src/tools/shell.README.md)。
 
 [Trajectory](../../packages/trajectory/README.md)与[Trace SDK](../../packages/trace-extension-sdk/README.md)是明确新增的两个 workspace，根清单共十包。纯协议保存闭合事件／Evidence／完整性、固定上界分页、原来源身份和确定性投影；SDK公共入口只承担有限消费、broker context与明确ACK／reject，不提供通用CAS／outbox。纯入口不导入Agent、SQLite、Provider、React、Electron或宿主网络／文件I/O；SDK本地打包叶与guest入口分别检查。
 

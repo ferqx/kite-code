@@ -201,9 +201,15 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
     await act(async () => f.root.render(<NativeToolMessage message={model} />));
     return model;
   };
+  const expectApproval = (label: string) => {
+    const marker = f.host.querySelector('.tool-approval');
+    expect(marker?.getAttribute('role')).toBe('img');
+    expect(marker?.getAttribute('aria-label')).toBe(label);
+    expect(f.host.textContent).not.toContain(label);
+  };
   try {
     const saved = await render({ dispatched: false, human });
-    expect(f.host.textContent).toContain('已提交批准，待核对');
+    expectApproval('已提交批准，待核对');
     expect(saved.status).toBe('failed');
     await render({
       dispatched: false,
@@ -213,12 +219,12 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       f.host.querySelector('[role="img"][aria-label="已人工批准 · 本会话相同命令"]'),
     ).not.toBeNull();
     const denied = await render({ dispatched: false, human: { ...human, decision: 'deny' } });
-    expect(f.host.textContent).toContain('人工审批已拒绝');
+    expectApproval('人工审批已拒绝');
     expect(denied.dispatchCommitted).toBe(false);
     expect(denied.status).toBe('failed');
     expect(f.host.textContent).not.toContain('成功');
     await render({ dispatched: false, human: { ...human, state: 'cancelled' } });
-    expect(f.host.textContent).toContain('审批已取消');
+    expectApproval('审批已取消');
     await render({
       dispatched: true,
       check: {
@@ -240,7 +246,7 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
         requireApproval: false,
       },
     });
-    expect(f.host.textContent).toContain('自动审批结果未知');
+    expectApproval('自动审批结果未知');
     for (const decision of ['ask_user', 'unavailable'] as const) {
       const reason = `原转人工原因 ${decision} 雪🙂`;
       const awaiting = await render(
@@ -264,7 +270,7 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
         },
         'planned',
       );
-      expect(f.host.textContent).toContain('等待人工审批');
+      expectApproval('等待人工审批');
       expect(awaiting.approval?.reason).toBe(reason);
       expect(f.host.textContent).not.toContain('已人工批准');
     }
@@ -281,7 +287,7 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       },
       'planned',
     );
-    expect(f.host.textContent).toContain('正在自动审批');
+    expectApproval('正在自动审批');
     await render(
       {
         dispatched: false,
@@ -295,8 +301,7 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       },
       'cancelled',
     );
-    expect(f.host.textContent).toContain('自动审批已停止');
-    expect(f.host.textContent).not.toContain('正在自动审批');
+    expectApproval('自动审批已停止');
   } finally {
     await f.close();
   }

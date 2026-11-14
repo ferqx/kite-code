@@ -91,6 +91,8 @@ export declare function response_StreamCheckpoint(value: unknown): boolean;
 export declare function response_ExtensionList(value: unknown): boolean;
 export declare function response_QueryResponse(value: unknown): boolean;
 export declare function response_MessageChangesPage(value: unknown): boolean;
+export declare function response_MessageTextChunk(value: unknown): boolean;
+export declare function response_SessionHistoryEntries(value: unknown): boolean;
 export declare function request_TraceOtelInstallRequest(value: unknown): boolean;
 export declare function request_TraceInstallRequest(value: unknown): boolean;
 export declare function request_TraceConfigureRequest(value: unknown): boolean;
@@ -187,6 +189,8 @@ export declare function request_CancelExecutionRequest(value: unknown): boolean;
 export declare function request_CancelSessionRequest(value: unknown): boolean;
 export declare function request_ExtensionCommandRequest(value: unknown): boolean;
 export declare function request_MessageChangesQuery(value: unknown): boolean;
+export declare function request_MessageTextQuery(value: unknown): boolean;
+export declare function request_SessionHistoryEntriesQuery(value: unknown): boolean;
 export declare function queryInput(value: unknown): boolean;
 export declare const responseValidators: {
   TraceRemoteDeliveryStatus: (value: unknown) => boolean;
@@ -281,6 +285,8 @@ export declare const responseValidators: {
   ExtensionList: (value: unknown) => boolean;
   QueryResponse: (value: unknown) => boolean;
   MessageChangesPage: (value: unknown) => boolean;
+  MessageTextChunk: (value: unknown) => boolean;
+  SessionHistoryEntries: (value: unknown) => boolean;
 };
 export declare const requestValidators: {
   TraceOtelInstallRequest: (value: unknown) => boolean;
@@ -379,4 +385,6 @@ export declare const requestValidators: {
   CancelSessionRequest: (value: unknown) => boolean;
   ExtensionCommandRequest: (value: unknown) => boolean;
   MessageChangesQuery: (value: unknown) => boolean;
+  MessageTextQuery: (value: unknown) => boolean;
+  SessionHistoryEntriesQuery: (value: unknown) => boolean;
 };

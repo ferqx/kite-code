@@ -1581,7 +1581,7 @@ export class AgentClient {
   /** Explicit lifecycle handoff. Ordinary history reads never invoke reconciliation. */
   async reconcileSessionState(
     sessionId: string,
-    options: { signal?: AbortSignal } = {},
+    options: { signal?: AbortSignal; lightweight?: boolean } = {},
   ): Promise<Responses['SessionView']> {
     this.requireCapability('session_reconciliation');
     const generation = this.connectionGeneration,
@@ -1595,13 +1595,15 @@ export class AgentClient {
       )
         throw new ClientError('connection_superseded');
     };
-    const original = await this.getView(sessionId, options);
+    const read = (id: string) =>
+      options.lightweight ? this.getSessionState(id, options) : this.getView(id, options);
+    const original = await read(sessionId);
     check(original, sessionId);
     const rootId =
       original.session.rootSessionId ??
       (original.session.parentSessionId === null ? original.session.id : undefined);
     if (!rootId) throw new ClientError('session_identity_mismatch');
-    const root = rootId === sessionId ? original : await this.getView(rootId, options);
+    const root = rootId === sessionId ? original : await read(rootId);
     check(root, rootId);
     if (
       root.session.parentSessionId !== null ||
@@ -1623,7 +1625,7 @@ export class AgentClient {
       { expectedStoreId: storeId, commandId, expectedOwnerGeneration },
       options,
     );
-    const current = await this.getView(sessionId, options);
+    const current = await read(sessionId);
     check(current, sessionId);
     if (
       (current.session.rootSessionId ??
@@ -1892,6 +1894,16 @@ export class AgentClient {
     this.requireConnection();
     return this.fetchJSON(
       `/v1/sessions/${encodeURIComponent(sessionId)}/view`,
+      'SessionView',
+      options,
+    );
+  }
+  getSessionState(sessionId: string, options: { signal?: AbortSignal } = {}) {
+    this.requireConnection();
+    if (!this.serverInfo?.capabilities.includes('session_state'))
+      return this.getView(sessionId, options);
+    return this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/state`,
       'SessionView',
       options,
     );
@@ -2925,10 +2937,22 @@ export class AgentClient {
   }
   listMessages(
     sessionId: string,
-    options: { afterSeq?: string; upperSeq?: string; limit?: number; signal?: AbortSignal } = {},
+    options: {
+      afterSeq?: string;
+      upperSeq?: string;
+      limit?: number;
+      signal?: AbortSignal;
+      newestFirst?: boolean;
+      previews?: boolean;
+    } = {},
   ) {
     this.requireCapability('history');
     const query = new URLSearchParams();
+    if (options.newestFirst) {
+      this.requireCapability('session_state');
+      query.set('direction', 'older');
+    }
+    if (options.previews) query.set('previews', 'true');
     if (options.afterSeq !== undefined) {
       parseCursorSequence(options.afterSeq);
       query.set('afterSeq', options.afterSeq);
@@ -2946,6 +2970,33 @@ export class AgentClient {
       `/v1/sessions/${encodeURIComponent(sessionId)}/messages?${query}`,
       'MessageList',
       { signal: options.signal },
+    );
+  }
+  readMessageText(
+    sessionId: string,
+    messageId: string,
+    input: import('./generated/api').MessageTextQuery,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('session_state');
+    validateRequest('MessageTextQuery', input);
+    return this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/text?${new URLSearchParams(input)}`,
+      'MessageTextChunk',
+      options,
+    );
+  }
+  listSessionHistoryEntries(
+    sessionId: string,
+    input: import('./generated/api').SessionHistoryEntriesQuery,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('session_state');
+    validateRequest('SessionHistoryEntriesQuery', input);
+    return this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/history-entries?${new URLSearchParams(input)}`,
+      'SessionHistoryEntries',
+      options,
     );
   }
   async listMessageChanges(

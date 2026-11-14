@@ -1230,6 +1230,9 @@ export const schemas = {
       })
       .optional(),
     contentFormat: z.literal('unsupported').optional(),
+    deferredText: z
+      .object({ bytes: sequence, sha256: z.string().regex(/^[a-f0-9]{64}$/) })
+      .optional(),
     outputBody: z
       .object({
         kind: z.literal('model_output'),
@@ -1559,6 +1562,7 @@ export const PendingInputQueueSchema = z.object({
   snapshotCursor: sequence,
 });
 export const MessageChangesQuerySchema = z.strictObject({
+  previews: z.literal('true').optional(),
   storeId: id,
   afterCursor: sequence,
   upperCursor: sequence,
@@ -2004,6 +2008,51 @@ export const apiSchemas = {
   WorkspaceList: z.array(schemas.Workspace),
   SessionList: z.array(schemas.Session),
   MessageList: z.array(schemas.Message),
+  MessageTextQuery: z.strictObject({
+    storeId: id,
+    seq: sequence,
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    offset: sequence,
+  }),
+  MessageTextChunk: z.strictObject({
+    storeId: id,
+    sessionId: id,
+    messageId: id,
+    seq: sequence,
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    bytes: sequence,
+    offset: sequence,
+    nextOffset: sequence,
+    data: z.string().max(87384),
+  }),
+  SessionHistoryEntriesQuery: z.strictObject({
+    storeId: id,
+    upperSeq: sequence,
+    afterSeq: sequence,
+  }),
+  SessionHistoryEntries: z.strictObject({
+    storeId: id,
+    sessionId: id,
+    upperSeq: sequence,
+    entries: z
+      .array(
+        z.strictObject({
+          id,
+          runId: id.nullable(),
+          firstSeq: sequence,
+          lastSeq: sequence,
+          count: z.number().int().positive(),
+        }),
+      )
+      .max(256),
+  }),
+  MessageListQuery: z.strictObject({
+    limit: z.number().int().min(1).max(200).optional(),
+    afterSeq: sequence.optional(),
+    upperSeq: sequence.optional(),
+    direction: z.literal('older').optional(),
+    previews: z.literal('true').optional(),
+  }),
   MessageChangesQuery: MessageChangesQuerySchema,
   MessageChangesPage: MessageChangesPageSchema,
   SessionView: SessionViewSchema,
@@ -2431,7 +2480,18 @@ export const apiRoutes = [
     statuses: [201],
   },
   { method: 'get', path: '/v1/sessions', response: 'SessionList' },
-  { method: 'get', path: '/v1/sessions/{id}/messages', response: 'MessageList' },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/messages',
+    query: 'MessageListQuery',
+    response: 'MessageList',
+  },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/messages/{messageId}/text',
+    query: 'MessageTextQuery',
+    response: 'MessageTextChunk',
+  },
   {
     method: 'get',
     path: '/v1/sessions/{id}/message-changes',
@@ -2439,6 +2499,13 @@ export const apiRoutes = [
     response: 'MessageChangesPage',
   },
   { method: 'get', path: '/v1/sessions/{id}/view', response: 'SessionView' },
+  { method: 'get', path: '/v1/sessions/{id}/state', response: 'SessionView' },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/history-entries',
+    query: 'SessionHistoryEntriesQuery',
+    response: 'SessionHistoryEntries',
+  },
   {
     method: 'post',
     path: '/v1/sessions/{id}/commands',

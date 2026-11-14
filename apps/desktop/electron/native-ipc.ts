@@ -133,6 +133,12 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'background.child.open': ['observationId', 'executionId', 'readId', 'cursor'],
   'background.child.read': ['readId', 'offset', 'limit'],
   'background.child.close': ['readId'],
+  'background.child.file': ['changeId', 'readId', 'offset', 'view'],
+  'background.child.file.close': ['readId'],
+  'background.child.text': ['handle', 'offset'],
+  'background.child.image.open': ['handle', 'readId', 'index'],
+  'background.child.image.read': ['readId', 'offset'],
+  'background.child.image.close': ['readId'],
   'settings.skills.open': ['readId'],
   'settings.skills.document': ['readId', 'skillId', 'skillVersion', 'revision'],
   'settings.skills.document.close': ['readId'],
@@ -253,8 +259,19 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'workspace.removal.lookup': ['commandId'],
   select: ['sessionId', 'activationId'],
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
-  messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit', 'changes'],
+  messages: [
+    'sessionId',
+    'expectedStoreId',
+    'readId',
+    'afterSeq',
+    'upperSeq',
+    'limit',
+    'changes',
+    'previews',
+  ],
   'messages.close': ['readId'],
+  'messages.text': ['viewSelection', 'historyEpoch', 'messageId', 'offset'],
+  'execution.result': ['viewSelection', 'historyEpoch', 'executionId', 'resultRevision'],
   submit: ['sessionId', 'intent', 'draft', 'imageIds', 'fileIds'],
   'caller.prepare': ['sessionId', 'intent', 'draft'],
   'caller.submit': ['commandId'],
@@ -938,6 +955,33 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     typeof value === 'string' &&
     /^(0|[1-9][0-9]{0,18})$/.test(value) &&
     BigInt(value) <= 9223372036854775807n;
+  if (
+    method === 'background.child.text' &&
+    (input.surface !== 'environment' || !resourceId(input.handle) || !sequence(input.offset))
+  )
+    throw Error('invalid_native_request');
+  if (
+    method.startsWith('background.child.image.') &&
+    (input.surface !== 'environment' ||
+      (method === 'background.child.image.open' &&
+        (!resourceId(input.handle) ||
+          !Number.isSafeInteger(input.index) ||
+          Number(input.index) < 0 ||
+          Number(input.index) > 9)) ||
+      (method === 'background.child.image.read' &&
+        (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0)))
+  )
+    throw Error('invalid_native_request');
+  if (
+    (method === 'background.child.file' || method === 'background.child.file.close') &&
+    (input.surface !== 'environment' ||
+      (method === 'background.child.file' &&
+        (!resourceId(input.changeId) ||
+          (input.view !== undefined && input.view !== 'diff' && input.view !== 'snapshot') ||
+          (input.offset !== undefined &&
+            (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0)))))
+  )
+    throw Error('invalid_native_request');
   if (method === 'background.child.open' && input.cursor !== undefined) {
     const cursor = record(input.cursor);
     exact(cursor, ['afterSeq', 'contextSelectionId']);
@@ -994,7 +1038,31 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       Number(input.limit) > 65536)
   )
     throw Error('invalid_native_request');
+  if (
+    method === 'execution.result' &&
+    (!resourceId(input.executionId) ||
+      !sequence(input.resultRevision) ||
+      !Number.isSafeInteger(input.viewSelection) ||
+      Number(input.viewSelection) < 0 ||
+      !Number.isSafeInteger(input.historyEpoch) ||
+      Number(input.historyEpoch) < 0)
+  )
+    throw Error('invalid_native_request');
+  if (
+    method === 'messages.text' &&
+    (typeof input.messageId !== 'string' ||
+      !input.messageId ||
+      input.messageId.length > 512 ||
+      !Number.isSafeInteger(input.viewSelection) ||
+      Number(input.viewSelection) < 0 ||
+      !Number.isSafeInteger(input.historyEpoch) ||
+      Number(input.historyEpoch) < 0 ||
+      !sequence(input.offset))
+  )
+    throw Error('invalid_native_request');
   if (method === 'messages' || method === 'modelInputs.list' || method === 'grants.read') {
+    if (method === 'messages' && input.previews !== undefined && input.previews !== true)
+      throw Error('invalid_native_request');
     if (method === 'messages' && input.changes !== undefined) {
       const changes = input.changes as Record<string, unknown>;
       if (

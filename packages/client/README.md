@@ -24,6 +24,8 @@ V1 bundle 保留新 `tool_input` 引用、有限压缩字段及缺少新字段�
 
 [AgentClient.listMessageChanges](src/index.ts)要求`message_changes`能力，GET `/v1/sessions/:id/message-changes`，查询`storeId/afterCursor/upperCursor/upperSeq?/afterSeq?/limit?`。首个候选页省略`upperSeq`时由Store只读事务取得当前序号上界，后页传回该`highWaterSeq`；`nextAfterSeq`按候选行推进，可能含已移除的ID，不能假定总等于最后一条可见消息。穷尽候选页面后才沿`nextCursor`读取下一批事件，达到`upperCursor`表示覆盖该持久事件范围，不表示SSE ACK或执行准入。
 
+具备 `session_state` 能力时，桌面使用 `getSessionState`、`listSessionHistoryEntries` 和 `readMessageText`。轮次索引按同一序号水位翻页，正文读取按原消息序号和摘要定位。历史降级到旧能力时使用既有完整 View 与正序历史。
+
 生成schema校验之外，SDK核连接代次、原Store/Session、两个请求游标、返回上界、游标前进、消息严格序号、ID去重和移除冲突；十进制游标不用Number。正文追加复用消息原`id/seq`，不能用`afterSeq`替代变更游标。协议和回收后的重建归[Store owner](../agent/src/storage/README.md#消息历史变更读取)，桌面消费与连续性归[Desktop](../../apps/desktop/README.md)。旧历史API及其他客户端路径不变。[SDK回归](test/client.test.ts)覆盖错配、分页和不推进ACK，[真实HTTP](../../apps/service/test/isolated/http.test.ts)核公开消息和分页。
 
 ## 文件上传

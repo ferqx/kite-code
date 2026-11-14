@@ -257,8 +257,8 @@ for (const background of [false, true])
               typeof result.content !== 'string'
             )
               throw Error('original_shell_result_unavailable');
-            const content = JSON.parse(result.content);
-            const handle = content.shell_id ?? content.shellId;
+            const details = result.details as Record<string, string>;
+            const handle = details.shell_id ?? details.shellId;
             expect(handle).toBe(`sh_${modelIdentifier(execution.id)}`);
             expect(handle).toHaveLength(26);
             return handle;

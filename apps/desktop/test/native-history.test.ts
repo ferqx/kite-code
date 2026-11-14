@@ -282,6 +282,36 @@ test('Native a streaming wakeup ahead of metadata cannot become a baseline or om
     reader.dispose();
   }
 });
+
+test('a refreshed View at the same cursor completes the history read already in flight', async () => {
+  const reply = Promise.withResolvers<unknown>();
+  const reads: Parameters<NativeBridge['request']>[0][] = [];
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      reads.push(request);
+      return reply.promise;
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  try {
+    reader.select(1, incrementalSelection(1));
+    reader.select(1, { ...incrementalSelection(1), viewGeneration: 2 });
+    expect(reader.state.phase).toBe('loading');
+    reply.resolve({
+      messages: [{ id: 'saved', sessionId: 's', seq: '1', content: 'first message' }],
+      highWaterSeq: '2',
+      nextAfterSeq: null,
+    });
+    await until(() => reader.state.phase === 'complete');
+    expect(reader.state.cursor).toBe('1');
+    expect(reader.state.messages[0]?.content).toBe('first message');
+    expect(reads).toHaveLength(1);
+  } finally {
+    reader.dispose();
+  }
+});
+
 test('Native automatically reads >4096 observed records and >8MiB multi-message history at one fixed high water without dropping the first page', async () => {
   const records = Array.from({ length: 5001 }, (_, i) => ({
     id: `m-${i + 1}`,
@@ -356,7 +386,7 @@ test('Native recalibration keeps the completed reading snapshot until its fixed 
     expect(value.messages).toEqual([original]);
     release();
     await until(() => value.phase === (failed ? 'unavailable' : 'complete'));
-    expect(value.messages).toEqual(failed ? [updated] : [updated, last]);
+    expect(value.messages).toEqual(failed ? [original] : [updated, last]);
     expect(value.error).toBe(failed ? 'owned_last_page_failed' : undefined);
     reader.close();
   }
@@ -764,7 +794,7 @@ test('Native close pauses only history and same-revision selection resumes full 
   reader.dispose();
 });
 
-test('Native same-high-water full calibration replaces vanished records only at EOF, while failure preserves prior reading beyond its prefix', async () => {
+test('Native same-high-water full calibration replaces existing records only at EOF', async () => {
   for (const change of ['revision', 'epoch'] as const) {
     for (const failed of [false, true]) {
       let failScan = failed;
@@ -808,7 +838,7 @@ test('Native same-high-water full calibration replaces vanished records only at 
       expect(reader.state.messages).toEqual([original, removed]);
       release();
       await until(() => reader.state.phase === (failed ? 'unavailable' : 'complete'));
-      expect(reader.state.messages).toEqual(failed ? [updated, removed] : [updated]);
+      expect(reader.state.messages).toEqual(failed ? [original, removed] : [updated]);
       if (failed) {
         failScan = false;
         reader.select(1, changed, epoch);
@@ -895,6 +925,7 @@ test('Native fixed-high-water EOF publishes saved messages while queued same-sco
       releases[revision - 1]!();
       await until(() => requests.length === revision + 1);
       expect(reader.state.phase).toBe('loading');
+      expect(reader.state.baselineReady).toBe(true);
       expect(reader.state.messages[0]?.content).toBe(`same-seq body revision ${revision}`);
     }
     releases[3]!();

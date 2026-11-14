@@ -21,28 +21,6 @@ const messages = (count: number): Message[] =>
 async function fixture(count = 220) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
   const original = new Map<string, PropertyDescriptor | undefined>();
-  const frames = new Map<number, FrameRequestCallback>();
-  const tasks = new Map<number, () => void>();
-  let serial = 0;
-  const requestFrame = (callback: FrameRequestCallback) => {
-    const id = ++serial;
-    frames.set(id, callback);
-    return id;
-  };
-  const cancelFrame = (id: number) => frames.delete(id);
-  const originalSchedule = dom.window.setTimeout.bind(dom.window);
-  const originalCancel = dom.window.clearTimeout.bind(dom.window);
-  dom.window.setTimeout = ((callback, delay, ...args) => {
-    if (delay !== 0 || typeof callback !== 'function')
-      return originalSchedule(callback, delay, ...args);
-    const id = ++serial;
-    tasks.set(id, () => callback(...args));
-    return id;
-  }) as typeof dom.window.setTimeout;
-  dom.window.clearTimeout = (id) => {
-    if (id !== undefined && tasks.delete(id)) return;
-    originalCancel(id);
-  };
   const resizeObservers = new Set<ResizeObserverStub>();
   class ResizeObserverStub {
     readonly callback: ResizeObserverCallback;
@@ -57,10 +35,6 @@ async function fixture(count = 220) {
       resizeObservers.delete(this);
     }
   }
-  Object.assign(dom.window, {
-    requestAnimationFrame: requestFrame,
-    cancelAnimationFrame: cancelFrame,
-  });
   for (const [key, value] of Object.entries({
     window: dom.window,
     document: dom.window.document,
@@ -68,8 +42,8 @@ async function fixture(count = 220) {
     HTMLElement: dom.window.HTMLElement,
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
     ResizeObserver: ResizeObserverStub,
-    requestAnimationFrame: requestFrame,
-    cancelAnimationFrame: cancelFrame,
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     original.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -77,6 +51,7 @@ async function fixture(count = 220) {
   }
   const host = dom.window.document.getElementById('root')!;
   const rows = () => [...host.querySelectorAll<HTMLElement>('[data-conversation-entry-key]')];
+  const rowHeight = () => 30;
   const isViewport = (node: HTMLElement) => node.classList.contains('conversation-viewport');
   const scrollPositions = new WeakMap<HTMLElement, number>();
   Object.defineProperties(dom.window.HTMLElement.prototype, {
@@ -89,9 +64,7 @@ async function fixture(count = 220) {
     scrollHeight: {
       configurable: true,
       get() {
-        return isViewport(this)
-          ? rows().length * 30 + host.querySelectorAll('.conversation-history-boundary').length * 20
-          : 0;
+        return isViewport(this) ? rows().length * rowHeight() : 0;
       },
     },
     scrollTop: {
@@ -111,11 +84,15 @@ async function fixture(count = 220) {
   });
   dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
     const viewport = host.querySelector<HTMLElement>('.conversation-viewport');
-    const index = rows().indexOf(this);
-    const preceding = host.querySelector('.reading-column')?.firstElementChild;
-    const header = preceding?.classList.contains('conversation-history-boundary') ? 20 : 0;
-    const top = index >= 0 ? header + index * 30 - (viewport?.scrollTop ?? 0) : 0;
-    const height = isViewport(this) ? 100 : index >= 0 ? 30 : 0;
+    const all = rows();
+    const index = all.indexOf(this);
+    const top =
+      index >= 0
+        ? index * rowHeight() - (viewport?.scrollTop ?? 0)
+        : this.classList.contains('reading-column')
+          ? -(viewport?.scrollTop ?? 0)
+          : 0;
+    const height = isViewport(this) ? 100 : index >= 0 ? rowHeight() : 0;
     return {
       x: 0,
       y: top,
@@ -137,7 +114,7 @@ async function fixture(count = 220) {
     loading: false,
     connected: true,
     selected: true,
-    lazyHistory: true,
+    preserveReadingAnchor: true,
     saveReading(value) {
       saved = structuredClone(value);
     },
@@ -148,29 +125,13 @@ async function fixture(count = 220) {
       Object.assign(props, update);
       root.render(<Conversation key={identity} {...props} />);
     });
-  const frame = () =>
-    act(async () => {
-      const work = [...frames.values()];
-      frames.clear();
-      for (const callback of work) callback(performance.now());
-    });
-  const task = () =>
-    act(async () => {
-      const work = [...tasks.values()];
-      tasks.clear();
-      for (const callback of work) callback();
-    });
   const viewport = () => host.querySelector<HTMLElement>('.conversation-viewport')!;
   return {
     dom,
     host,
     rows,
     render,
-    frame,
-    task,
     viewport,
-    frames,
-    tasks,
     resize() {
       for (const observer of resizeObservers)
         observer.callback([], observer as unknown as ResizeObserver);
@@ -197,15 +158,8 @@ async function fixture(count = 220) {
       );
       return dom.window.document.getSelection()!.toString();
     },
-    async step() {
-      await frame();
-      await task();
-    },
     async unmount() {
       await act(async () => root.render(null));
-    },
-    async other() {
-      await act(async () => root.render(<p data-other="">Other conversation</p>));
     },
     async reopen(initialReading = saved) {
       identity++;
@@ -222,7 +176,7 @@ async function fixture(count = 220) {
   };
 }
 
-test('message navigation uses mounted input identities across history expansion and delivery handoff', async () => {
+test('message navigation uses every input identity and preserves delivery handoff', async () => {
   const f = await fixture(140);
   const navigation = () => f.host.querySelector('nav[aria-label="会话消息导航"]');
   const markers = () => [...(navigation()?.querySelectorAll('button') ?? [])];
@@ -230,20 +184,20 @@ test('message navigation uses mounted input identities across history expansion 
   const click = (button: HTMLButtonElement) => act(async () => button.click());
   try {
     await f.render({ messageNavigation: true });
-    expect(markers()).toHaveLength(40);
+    expect(markers()).toHaveLength(140);
     expect(current()?.title).toContain('History #139 marker.');
-    const target = markers()[10]!;
+    const target = markers()[110]!;
     await click(target);
     expect(current()).toBe(target);
     expect(f.row('u-110')!.getBoundingClientRect().top).toBe(12);
     expect(f.host.querySelector('.jump-latest')).toBeTruthy();
     await f.scroll(0);
-    await f.step();
-    expect(markers()).toHaveLength(60);
-    expect(markers()[30]).toBe(target);
-    expect(current()?.title).toContain('History #99 marker.');
+
+    expect(markers()).toHaveLength(140);
+    expect(markers()[110]).toBe(target);
+    expect(current()?.title).toContain('History #0 marker.');
     await click(f.host.querySelector<HTMLButtonElement>('.jump-latest')!);
-    expect(markers()).toHaveLength(40);
+    expect(markers()).toHaveLength(140);
 
     const history = messages(140);
     const pending: Message = {
@@ -262,13 +216,13 @@ test('message navigation uses mounted input identities across history expansion 
       ],
     });
     const outgoing = markers().at(-1)!;
-    expect(markers()).toHaveLength(41);
+    expect(markers()).toHaveLength(141);
     expect(outgoing).not.toBe(markers().at(-2));
     await f.render({
       messages: [...history, { ...pending, id: 'saved', settled: true, delivery: undefined }],
     });
     expect(markers().at(-1)).toBe(outgoing);
-    expect(markers()).toHaveLength(41);
+    expect(markers()).toHaveLength(141);
     expect(current()).toBe(outgoing);
     f.resize();
     expect(f.viewport().scrollTop).toBe(f.viewport().scrollHeight - f.viewport().clientHeight);
@@ -315,15 +269,15 @@ test('paging through overflowing message markers keeps the transcript and highli
       });
     });
     await act(async () => f.resize());
-    expect(list.scrollTop).toBe(280);
+    expect(list.scrollTop).toBe(1280);
     expect(later().getAttribute('aria-disabled')).toBe('true');
     const transcriptTop = f.viewport().scrollTop;
     await act(async () => earlier().click());
-    expect(list.scrollTop).toBe(160);
+    expect(list.scrollTop).toBe(1160);
     expect(f.viewport().scrollTop).toBe(transcriptTop);
     expect(markers.at(-1)!.getAttribute('aria-current')).toBe('location');
     await act(async () => later().click());
-    expect(list.scrollTop).toBe(280);
+    expect(list.scrollTop).toBe(1280);
     await act(async () => {
       list.scrollTop = 0;
       list.dispatchEvent(new f.dom.window.Event('scroll'));
@@ -332,10 +286,10 @@ test('paging through overflowing message markers keeps the transcript and highli
     expect(f.viewport().scrollTop).toBe(transcriptTop);
     await act(async () => markers[1]!.click());
     expect(markers[1]!.getAttribute('aria-current')).toBe('location');
-    expect(f.row('u-101')!.getBoundingClientRect().top).toBe(12);
+    expect(f.row('u-1')!.getBoundingClientRect().top).toBe(12);
 
-    navigationHeight = 405;
-    listHeight = 377;
+    navigationHeight = 1505;
+    listHeight = 1477;
     await act(async () => f.resize());
     expect(earlier()).toBeNull();
     expect(later()).toBeNull();
@@ -344,169 +298,40 @@ test('paging through overflowing message markers keeps the transcript and highli
   }
 });
 
-test('native conversation applies its 100 entry threshold and initially renders the last forty whole messages', async () => {
-  for (const count of [100, 101, 220]) {
-    const f = await fixture(count);
-    try {
-      await f.render();
-      expect(f.rows()).toHaveLength(count <= 100 ? count : 40);
-      expect(f.rows()[0]!.dataset.conversationEntryKey).toBe(`u-${count <= 100 ? 0 : count - 40}`);
-      expect(f.rows().at(-1)!.dataset.conversationEntryKey).toBe(`u-${count - 1}`);
-      expect(f.host.querySelector('.conversation-loading')).toBeNull();
-      expect(f.viewport().tagName).toBe('SECTION');
-      expect(f.host.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
-      expect(f.viewport().scrollHeight - f.viewport().clientHeight - f.viewport().scrollTop).toBe(
-        0,
-      );
-    } finally {
-      await f.close();
-    }
-  }
-});
-
-test('scrolling up prepends twenty only after frame and task, preserving the previous DOM anchor and loaded selection', async () => {
-  const f = await fixture();
+test('the complete timeline keeps its visible anchor through an update and a reopen', async () => {
+  const f = await fixture(140);
   try {
     await f.render();
-    const first = f.row('u-180')!;
-    let selected = await f.selectAll();
-    expect(selected).toContain('History #180 marker.');
-    expect(selected).toContain('History #219 marker.');
-    expect(selected).not.toContain('History #179 marker.');
-    await f.scroll(0);
-    const top = first.getBoundingClientRect().top;
-    expect(f.rows()).toHaveLength(40);
-    await f.frame();
-    expect(f.rows()).toHaveLength(40);
-    await f.task();
-    expect(f.rows()).toHaveLength(60);
-    expect(f.row('u-180') === first).toBe(true);
-    expect(first.getBoundingClientRect().top).toBe(top);
-    expect(f.rows()[0]!.dataset.conversationEntryKey).toBe('u-160');
-    selected = await f.selectAll();
-    expect(selected).toContain('History #160 marker.');
-    expect(selected).not.toContain('History #159 marker.');
-    expect(selected).not.toContain('History #0 marker.');
-  } finally {
-    await f.close();
-  }
-});
-
-test('crossing one hundred live entries preserves the already loaded DOM and manual reading', async () => {
-  const f = await fixture(100);
-  try {
-    await f.render();
-    const first = f.row('u-0')!;
-    const last = f.row('u-99')!;
-    await f.scroll(300);
-    const anchor = f.rows().find((row) => row.getBoundingClientRect().bottom > 0)!;
-    const offset = anchor.getBoundingClientRect().top;
-    await f.render({ messages: messages(101) });
-    expect(f.rows()).toHaveLength(100);
-    expect(f.row('u-0') === first).toBe(true);
-    expect(f.row('u-99') === last).toBe(true);
-    expect(f.row('u-100')).toBeUndefined();
-    expect(f.viewport().scrollTop).toBe(300);
-    expect(anchor.getBoundingClientRect().top).toBe(offset);
-    expect(f.host.textContent).toContain('加载后续消息');
-  } finally {
-    await f.close();
-  }
-});
-
-test('tail updates follow only the latest reading, retain loaded prefix and restore a manual anchor on cold reopen', async () => {
-  const f = await fixture();
-  try {
-    await f.render();
-    const first = f.row('u-180');
-    await f.render({ messages: messages(221) });
-    f.resize();
-    expect(f.rows()).toHaveLength(41);
-    expect(f.row('u-180') === first).toBe(true);
-    expect(f.viewport().scrollHeight - f.viewport().clientHeight - f.viewport().scrollTop).toBe(0);
-    await f.scroll(300);
-    const anchor = f.rows().find((row) => row.getBoundingClientRect().bottom > 0)!;
-    const key = anchor.dataset.conversationEntryKey!;
-    const offset = anchor.getBoundingClientRect().top;
-    await f.render({ messages: messages(222) });
-    expect(f.rows()).toHaveLength(41);
-    expect(f.row('u-180') === first).toBe(true);
-    expect(f.viewport().scrollTop).toBe(300);
-    expect(f.row('u-221')).toBeUndefined();
-    expect(anchor.getBoundingClientRect().top).toBe(offset);
-    await f.unmount();
-    expect(f.saved?.anchor).toEqual({ entryKey: key, offset });
-    await f.reopen();
-    expect(f.rows().length).toBeLessThanOrEqual(40);
-    expect(f.row(key)!.getBoundingClientRect().top).toBe(offset);
-    const jump = f.host.querySelector<HTMLButtonElement>('.jump-latest')!;
-    await act(async () => jump.click());
-    expect(f.rows()).toHaveLength(40);
-    expect(f.rows().at(-1)!.dataset.conversationEntryKey).toBe('u-221');
-    expect(f.viewport().scrollHeight - f.viewport().clientHeight - f.viewport().scrollTop).toBe(0);
-    expect(f.host.querySelector('.jump-latest')).toBeNull();
-  } finally {
-    await f.close();
-  }
-});
-
-test('navigation cancels pending history frames and tasks, including callbacks delivered after cancellation', async () => {
-  const f = await fixture();
-  try {
-    await f.render();
-    const old = f.row('u-180')!;
-    await f.scroll(0);
-    const staleFrames = [...f.frames.values()];
-    await f.frame();
-    const staleTasks = [...f.tasks.values()];
-    await f.unmount();
-    await f.other();
-    await act(async () => {
-      for (const callback of staleFrames) callback(performance.now());
-      for (const callback of staleTasks) callback();
+    expect(f.rows()).toHaveLength(140);
+    expect(f.host.querySelector('[data-history-placeholder]')).toBeNull();
+    expect(f.viewport().scrollTop).toBe(f.viewport().scrollHeight - f.viewport().clientHeight);
+    await f.scroll(1507);
+    const anchor = f.row('u-50')!;
+    expect(anchor.getBoundingClientRect().top).toBe(-7);
+    await f.render({
+      messages: [
+        { id: 'inserted', role: 'assistant', text: 'Earlier message', settled: true },
+        ...messages(141),
+      ],
     });
-    expect(f.host.textContent).toBe('Other conversation');
-    expect(f.rows()).toHaveLength(0);
-    expect(f.frames.size).toBe(0);
-    expect(f.tasks.size).toBe(0);
-    expect(old.isConnected).toBe(false);
-    await f.reopen(undefined);
-    expect(f.row('u-180') === old).toBe(false);
-  } finally {
-    await f.close();
-  }
-});
-
-test('a cold manual reading loads newer entries at its local bottom without moving the old visible anchor', async () => {
-  const f = await fixture();
-  try {
-    await f.render();
-    await f.scroll(300);
+    expect(f.row('u-50')).toBe(anchor);
+    expect(anchor.getBoundingClientRect().top).toBe(-7);
+    expect(f.rows()).toHaveLength(142);
     await f.unmount();
+    expect(f.saved?.anchor).toEqual({ entryKey: 'u-50', offset: -7 });
     await f.reopen();
-    expect(f.rows()).toHaveLength(40);
-    expect(f.host.textContent).toContain('加载后续消息');
-    const first = f.rows()[0]!;
-    const oldLast = f.rows().at(-1)!;
-    const oldCount = f.rows().length;
-    await f.scroll(f.viewport().scrollHeight - f.viewport().clientHeight);
-    const top = oldLast.getBoundingClientRect().top;
-    await f.frame();
-    expect(f.rows()).toHaveLength(oldCount);
-    await f.task();
-    expect(f.rows().length).toBeGreaterThan(oldCount);
-    expect(f.rows()[0] === first).toBe(true);
-    expect(f.row(oldLast.dataset.conversationEntryKey!) === oldLast).toBe(true);
-    expect(oldLast.getBoundingClientRect().top).toBe(top);
-    expect(f.rows().at(-1)!.dataset.conversationEntryKey).toBe('u-219');
-    expect(f.host.textContent).not.toContain('加载后续消息');
-    expect(f.host.querySelector('.jump-latest')).not.toBeNull();
+    expect(f.rows()).toHaveLength(142);
+    expect(f.row('u-50')?.getBoundingClientRect().top).toBe(-7);
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.jump-latest')!.click());
+    expect(f.viewport().scrollTop).toBe(f.viewport().scrollHeight - f.viewport().clientHeight);
+    const selected = await f.selectAll();
+    expect(selected).toContain('History #0 marker.');
+    expect(selected).toContain('History #140 marker.');
   } finally {
     await f.close();
   }
 });
-
-test('windowing counts visible grouped entries, and closed turn tools are not projected until expansion', async () => {
+test('continuous history defers closed turn tools until expansion', async () => {
   const f = await fixture();
   let toolCalls = 0;
   const history = Array.from({ length: 20 }, (_, turn) => [

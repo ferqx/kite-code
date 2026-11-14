@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { BookOpen01Icon, BrainIcon, ListTreeIcon, TerminalIcon } from '@hugeicons/core-free-icons';
+import { readFileSync } from 'node:fs';
+import { BookOpen01Icon, BulbIcon, TerminalIcon, Wrench01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -88,7 +89,90 @@ test('active reasoning is an activity marker and never calls the host body rende
   expect(inferred.document.querySelector('.agent-turn button')).toBeNull();
 });
 
-test('conversation trace icons follow the current step and appear before completed reasoning and tool labels', () => {
+test('a created child keeps one standalone tool row in the original position among Trace steps', () => {
+  const tool = (id: string, toolName: string): Message => ({
+    id,
+    turnId: 'run',
+    role: 'tool',
+    toolName,
+    text: '',
+    settled: true,
+    status: 'completed',
+  });
+  const html = renderToStaticMarkup(
+    <Conversation
+      traceTurns
+      messages={[
+        tool('shell', 'shell_execute'),
+        tool('child', 'spawn_agent'),
+        tool('read', 'read_file'),
+      ]}
+      selected
+      connected
+      loading={false}
+      turnActivity={{ turnId: 'run', status: 'running' }}
+      saveReading={() => {}}
+      renderToolActivity={([message]) => <span data-tool={message?.id}>{message?.toolName}</span>}
+    />,
+  );
+  const document = new JSDOM(html).window.document;
+  expect(document.querySelectorAll('[data-tool="child"]')).toHaveLength(1);
+  expect(document.querySelector('[data-tool="child"]')?.closest('.conversation-trace')).toBeNull();
+  const summaries = [...document.querySelectorAll('.conversation-trace-trigger')];
+  expect(summaries).toHaveLength(2);
+  expect(summaries.every((node) => !node.textContent?.includes('创建子 Agent'))).toBe(true);
+});
+
+test('a single Agent wait shows one tool heading and opens directly to its result', () => {
+  const wait: Message = {
+    id: 'wait',
+    turnId: 'run',
+    role: 'tool',
+    toolName: 'wait_agent_events',
+    title: '等待 Agent 事件',
+    text: '等待期间暂无新事件',
+    agentWait: true,
+    status: 'completed',
+    settled: true,
+  };
+  const renderWait = (message: Message, open: boolean) =>
+    new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={[message]}
+          selected
+          connected
+          loading={false}
+          initialReading={{
+            top: 0,
+            follow: true,
+            expanded: { 'turn:run:complete': true, 'activity:wait': open },
+          }}
+          turnActivity={{ turnId: 'run', status: 'running' }}
+          saveReading={() => {}}
+        />,
+      ),
+    ).window.document;
+
+  for (const open of [false, true]) {
+    const document = renderWait(wait, open);
+    const headings = document.querySelectorAll('.conversation-trace [data-trace-line]');
+    expect(headings).toHaveLength(1);
+    expect(headings[0]?.textContent).toBe(wait.title!);
+    expect(headings[0]?.getAttribute('aria-expanded')).toBe(String(open));
+    expect(document.querySelector('.conversation-trace-steps')).toBeNull();
+    expect(document.querySelector('.tool-detail')?.textContent).toBe(open ? wait.text : undefined);
+  }
+
+  const pending = renderWait({ ...wait, text: '', status: 'running', settled: false }, false);
+  expect(pending.querySelector('.conversation-trace [aria-expanded]')).toBeNull();
+  expect(pending.querySelector('.conversation-trace [data-status="running"]')?.textContent).toBe(
+    wait.title!,
+  );
+});
+
+test('conversation trace keeps the first tool icon as the active title changes and uses a bulb for reasoning', () => {
   const thought = { ...thinking('run'), reasoningSource: 'original-thought' };
   const read: Message = {
     id: 'read',
@@ -123,13 +207,18 @@ test('conversation trace icons follow the current step and appear before complet
           initialReading={{
             top: 0,
             follow: true,
-            expanded: open ? { 'trace-turn:turn:run': true } : {},
+            expanded: {
+              'turn:run:complete': true,
+              'trace-turn:turn:run': open,
+              [thought.id]: open,
+              'activity:shell': open,
+            },
           }}
           turnActivity={{
             turnId: 'run',
             status: messages.some((message) => !message.settled) ? 'running' : 'completed',
           }}
-          renderReasoning={() => null}
+          renderReasoning={() => <p>已保存的思考摘要</p>}
           saveReading={() => {}}
         />,
       ),
@@ -137,7 +226,7 @@ test('conversation trace icons follow the current step and appear before complet
   const summary = '.conversation-trace > button > .conversation-trace-line';
   const paths = (node: ParentNode) =>
     [...node.querySelectorAll('path')].map((path) => path.getAttribute('d'));
-  const expectIcon = (line: Element, icon: typeof BrainIcon) => {
+  const expectIcon = (line: Element, icon: typeof BulbIcon) => {
     const marker = line.firstElementChild!;
     expect(line.hasAttribute('data-trace-line')).toBe(true);
     expect(marker.getAttribute('data-slot')).toBe('trace-icon');
@@ -148,20 +237,25 @@ test('conversation trace icons follow the current step and appear before complet
     );
   };
 
-  expectIcon(renderTrace([thought]).querySelector(summary)!, BrainIcon);
-  expectIcon(renderTrace([complete(thought)]).querySelector(summary)!, BrainIcon);
+  expectIcon(renderTrace([thought]).querySelector(summary)!, BulbIcon);
+  const completedThought = renderTrace([complete(thought)]).querySelector(summary)!;
+  expect(completedThought.textContent).toBe('已思考');
+  expectIcon(completedThought, BulbIcon);
   expectIcon(renderTrace([complete(read)]).querySelector(summary)!, BookOpen01Icon);
-  expectIcon(renderTrace([complete(thought), read, shell]).querySelector(summary)!, TerminalIcon);
+  const running = renderTrace([complete(thought), read, shell]).querySelector(summary)!;
+  expect(running.textContent).toBe('运行命令');
+  expect(running.getAttribute('data-status')).toBe('running');
+  expectIcon(running, BookOpen01Icon);
   expectIcon(
     renderTrace([complete(thought), read, complete(shell)]).querySelector(summary)!,
     BookOpen01Icon,
   );
 
   const grouped = renderTrace([complete(thought), complete(read), complete(shell)], true);
-  expectIcon(grouped.querySelector(summary)!, ListTreeIcon);
+  expectIcon(grouped.querySelector(summary)!, BookOpen01Icon);
   const reasoningLine = grouped.querySelector('.conversation-reasoning .conversation-trace-line')!;
-  expect(reasoningLine.textContent).toBe('思考完成');
-  expectIcon(reasoningLine, BrainIcon);
+  expect(reasoningLine.textContent).toBe('已思考');
+  expectIcon(reasoningLine, BulbIcon);
   expectIcon(
     grouped.querySelector('.conversation-trace-steps .tool-activity-step')!,
     BookOpen01Icon,
@@ -170,6 +264,20 @@ test('conversation trace icons follow the current step and appear before complet
     grouped.querySelector('.conversation-trace-steps .shell-activity .tool-activity-summary')!,
     TerminalIcon,
   );
+  const pending = renderTrace([{ ...thought, tracePending: 'tool' }]).querySelector(summary)!;
+  expectIcon(pending, Wrench01Icon);
+
+  const css = readFileSync(new URL('../src/desktop/style.css', import.meta.url), 'utf8');
+  const guideSelector = css.match(/([^{}]+)\{\s*--trace-guide-width:/)?.[1];
+  expect(guideSelector).toBeDefined();
+  const guides = (document: Document) => {
+    document.body.classList.add('kite-client');
+    return document.querySelectorAll(guideSelector!.replaceAll('::before', ''));
+  };
+  expect(guides(renderTrace([complete(thought)]))).toHaveLength(0);
+  expect(guides(renderTrace([complete(thought)], true))).toHaveLength(1);
+  expect(guides(renderTrace([complete(shell)], true))).toHaveLength(1);
+  expect(guides(grouped)).toHaveLength(3);
 });
 
 test('host-confirmed hidden non-tool records never create a row or invoke the body renderer', () => {

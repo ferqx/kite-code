@@ -2,6 +2,16 @@
 
 ## 执行观察与操作准入
 
+会话打开优先使用配套 Service 的 `session_state` 能力。[Controller](src/controller.ts)的执行观察、准入和选择协调共用轻量读取，保留原会话身份、持久水位、必要 Run／Execution 和首尾模型显示事实。普通历史和完整工具结果从独立读取进入 Renderer。原 4 MiB IPC 响应限制保持。读取超时沿原 scope 撤销资格，历史首屏或更新失败由同会话的后台读取恢复，同会话已显示的正文继续保留。
+
+[NativeHistory](src/native-history.ts)按固定序号水位分批读取历史，连续时间线由已核实记录组成。新消息按持久变更游标补齐；失败或游标过期后先保留可见正文及草稿，再自动重新核对当前作用域。恢复期间暂停相关操作准入，沿用原会话及原任务。支持轻量快照的服务为超大旧正文返回有界预览，阅读完整内容时用原消息、序号和摘要分块读取。
+
+[会话阅读回归](../../packages/ui/test/isolated/desktop-conversation-window-dom.test.tsx)核对连续时间线、刷新和重开后的阅读锚点。[原生 HTTP 回归](test/isolated/native-history-incremental-http.test.ts)用 SQLite 和实际 Service 核对 5,001 条连续历史、原正文分块及事件流中断后的同一记录接管。测试制品的执行记录从展开的原行按准确 resultRevision 读取结果。
+
+Windows 本机的[隔离浏览器回归](test/initial-render-performance-browser-runner.fixture.ts)实测 180 轮、360 条正文可直接从最新滚动到第一条。流式回复更新后注入历史读取失败，已显示的 368 条消息仍保留，恢复后新一轮自动进入时间线，阅读锚点位移为 0 CSS 像素。该次样本首次可读约 1.08 秒，最初最长主线程任务约 0.98 秒。报告保存在本机 `.cache/initial-render-prod-WWOeA4/report.json`，使用生产组件和隔离事实桥。
+
+此前的轮次占位版本在 2026-11-14 使用 Windows x64／Electron 44.3.0 本机开发构建验收。原「子代理等待时间」与独立的 5,001 条长历史均完成切换、退出应用后重新选择、断开和恢复实际本机 SSE。隔离探针只记录视口几何及请求类型，断开各自 Main 的事件流后暂缓重连，其余请求仍走配套 Service。两个会话离线时保留原文，恢复后提示消失，未观察到重复消息或任务重发。长历史冷开时从 40 条近期记录接到 5,001 个位置，最新消息相对视口顶部始终为 436 CSS 像素。中段 8 个占位自动补成原正文，首锚点始终为 −7 CSS 像素，切回与断线恢复期间保持该锚点和已读正文。早期构建曾在索引接管后离开尾部 114 CSS 像素，重连时已读轮次短暂退回占位。修复后复验通过。完整退出重开按现有行为从最新消息开始。本机几何及请求记录位于 `.cache/native-session-pages-win/`，范围为 Windows 开发构建及配套本机 Service。
+
 模型重连行由当前执行观察更新标题、次数、状态和失败详情，不继承等待中正文缓存的旧重连事实；新增行按当前投影插入原历史位置。终态过程仍沿原规则折叠。[完整 DOM 回归](test/isolated/native-transcript-dom.test.tsx)补失败、取消、连接成功、继续重试及新增行五种交接，核正文节点、单行和后续输入顺序；该文件32项／551断言通过。同机隔离Chrome沿实际投影／Conversation及生产CSS连续观察失败详情、恢复重试、取消与成功，33帧保原输入／草稿节点、焦点及阅读位置且无页面错误；本机`.cache/lifecycle-review-browser-process.json`保过程，夹具装配修正保留原失败，不代完整Native／Service或安装版资格。
 
 底层只读后台目录保留内部fallback／generate记录；普通[环境投影](src/native-environment.tsx)只接纳有准确Tool来源的后台Shell或真实child，命名不进入业务列表。通用后台面板的既有诊断入口差异归[原专题](#native-跨会话后台总览)。
@@ -789,6 +799,14 @@ Cookie导入仍未实现，也没有假可用菜单。本轮未读取、解密�
 
 [NativeOperationDiff](src/native-file-changes.tsx)通过共享 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 `renderFileChange` 懒读槽接到会话中已核实成功的 write/edit 工具行；独立箭头展开本次操作，文件名仍打开当前文件。元数据由原32项扫描取得，不为折叠的历史预读正文。Main `fileChanges.detail` 的 `view:diff` 只返回原 `fileChange`，`view:snapshot` 单独读取历史全文；两者同在时不再由 snapshot 盖过 diff。旧调用未传 view 仍保留原读取顺序。完整 Artifact 超过1 MiB时不整份读取，只返回明确不可展示原因；原完整快照与写入不变。关闭／换scope只释放阅读，失败／unknown不取得成功差异。共享 [FileDiff](../../packages/ui/src/desktop/FileChanges.tsx)另限制旧结果的正文字符数、400个DOM行和每行2048个UTF-16单元，保原ScrollArea、键盘与红绿语义。
 
+会话差异读取时保持折叠区高度，正文或失败反馈就绪后交给共享展开动画。收起工具或其上级过程即释放本次读取，忽略迟到响应。已核实的差异按 Main 签发的 `changeId` 和 generation 进入有界展示缓存，可供原工具再次展开。历史全文和右栏工作区差异沿各自读取流程。
+
+对于成功的 `files.edit`／`files.edit_path`，Main 从已验证的有界预览提取 `diffCounts` 随文件元数据发送。折叠行可显示文件名及增删数，差异正文仍由展开按需读取。单栏卡片复用共享差异模型和复制控件。统计范围仅为原回执留存的行，旧记录缺少可识别预览时省略数字。
+
+Windows Chrome 157 的[隔离浏览器夹具](test/file-diff-browser-runner.fixture.ts)用生产组件验证了 21 个检查点。展开前已有 `+396 -1`，差异到达后高度由 0 增至约 384 px。验证还覆盖单栏原行号、复制原预览、收起后复用、失败重试和右栏双栏／统一切换。真实编辑器进程和原用户会话未在本次夹具中打开。
+
+Windows 本机使用生产组件和受控读取验证：Electron 44.3.0 的短思考及超过 32 Ki 个 UTF-16 单元的长思考均从零高度展开，同一版本重开没有新增读取，启用减少动态效果后直接显示最终高度。已保存 Shell 展开同样没有新增读取。Chrome 157 的[文件差异浏览器夹具](test/file-diff-browser-runner.fixture.ts)观察到首个差异画面从零展开到约 412 px，并验证收起期间丢弃迟到结果、连续三次重开复用、失败提示与原位重试。差异与右栏回归的 22 个检查点均通过。以上使用独立组件夹具和测试记录。
+
 右侧“变更”由[NativeWorkspaceChanges](src/native-workspace-changes.tsx)和[Main Git reader](electron/workspace-changes.ts)独立负责整个仓库当前工作区相对HEAD的状态，不再把历史工具操作列表当作仓库总变更，也不将用户或Shell修改归因Agent。Main只从当前登记Workspace沿实际Git根取得路径；renderer传作用域和观察ID，不传任意路径。暂存区和工作区状态独立保留，HEAD到最终工作区差异抵消仍列出状态；无HEAD时按空树处理新增。仓库根覆盖受保护目录、根或父目录漂移、不支持的链接／子模块／冲突明确拒绝或省略。状态和差异命令使用Main私有临时Git目录、固定配置和HEAD、最多16 MiB的索引副本，并只读引用原对象库；不载入原仓库的可执行过滤器配置，禁用外部diff/textconv、hooks、fsmonitor与自动网络取回，源仓库无Git写入，每条命令10秒期限。原clean/process过滤器（含用户配置）、非空info／全局attributes、分离索引或过大索引明确不支持，不把未能读取当作干净仓库；worktree的.gitattributes继续作为数据使用，info／全局忽略规则只作有界副本。子模块内部不递归读取，侧栏明确说明这一范围。临时目录随观察释放并等待所属子进程关闭后清理；状态最多512 KiB／1000项，树每页仅挂载50个节点，最多保留一份选中正文。单文件工作区和HEAD对象各先核1 MiB上限，按需差异最多64 KiB，二进制与截断明确说明。可见标签的列表 lease 负责文件系统失效通知；工作区、linked worktree 的 index／HEAD 及共享 refs 分别观察，通知只含原作用域与读取ID。macOS／Windows优先递归事件；Linux为避免递归展开依赖树采用浅层通知与10秒后备核对，监听失败同样降为后备，不在隐藏窗口或关闭标签中保活。Main以500ms静默窗口／1秒最大等待合并事件，过滤对象库／日志噪声；一般忽略目录未按Git规则过滤。Renderer自动刷新最多1Hz，慢读取按耗时进一步降频至最多10秒冷却，一次在途最多一个后继。连续写入不反复取消正在读取的列表，手动刷新、focus与可见性恢复仍能核对。刷新保留同路径已验证正文、目录折叠、布局和滚动，接收新观察后重读选中正文；真实失败明确显示旧结果尚未更新并最多进行3次退避重试。切换／关闭／隐藏释放所属进程与监听，过期事件和响应不能回填新scope。暂存删除但磁盘仍有同路径未跟踪文件时合并为一个路径，保留两种状态；仅在Main私有索引副本恢复HEAD成员后计算当前字节，源索引不修改。相关设计取舍见[可见工作区同步](../../.agents/notes/implemented/architecture/2026-11-09-visible-workspace-diff-refresh.md)。
 
 2026-11-09，5a9e1d98 加未提交diff实现的后续同步修复：Linux x64／Bun1.4.4，7份完整回归共91项／911断言通过，含真实临时Git的创建、删除、重命名、index和linked-worktree refs通知，监听合并／后备／关闭，D＋未跟踪同路径比较且源索引不变，以及renderer连续失效单后继、隐藏／恢复、旧scope拒绝、正文／目录节点和滚动保留、新增／删除前序目录不串折叠与焦点、短暂失败自动恢复。九项目6647文件类型检查、生产renderer构建、定向Biome、边界、API、测试归属与文档检查通过。DOM测试不等于真实画面或帧率；既有Chromium宿主socket EPERM与Files native不可用的环境限制未解除，本轮未宣称实际Native窗口或平台体验验收通过。
@@ -904,7 +922,7 @@ Native 对 `web_fetch@1` 沿准确版本表投影“读取网页”及网页图�
 
 [NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；首次完整元数据未齐、明确不匹配或格式不支持的条目整条隐藏，不先显示只有标题的工具行，也不借原结果推断目标。曾完整核实的工具按原会话保留只读展示缓存；普通刷新或返回仍在8项非活动会话缓存内的页面时保留原行、展开正文及阅读位置，重新核实时不恢复操作资格。缓存边界绑定 bridge、generation 与 Store，明确冲突撤销对应旧行。只有用户逐项展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、读取失败、未知／未来版本及不支持格式的准入边界和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
 
-Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合标题只显示动作，运行与等待状态保留在各工具行。执行权观察继续约束忙碌与读取资格，普通界面不追加“执行状态待核实”；准确审批提示、停止请求和终态语义保持；确认未派发的审批拒绝／取消沿共享工具行只保留审批标签，不重复未执行或停止文字，Shell详情也不重复等待审批。自动审批未通过沿共享ToolApproval显示14px警告色盾牌图标，悬停或键盘聚焦只提示审批状态，完整拒绝原因仅在展开详情显示；其他工具行附属状态使用13px辅助色，独立的真实异常保留异常色与逐项展开详情，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
+Native 将 Tool 的 `planned` 映射为 UI `queued`，将 `dispatching` 与 `running` 映射为 UI `running`。各工具行只显示动作和描述，每条 Trace 的运行效果由链内最近启动且仍在执行的工具承接。状态沿无障碍标签和原位详情可读，审批状态使用共享盾牌图标提示。自动审批未通过保留警告色，真实失败保留异常色。Shell 展开区显示命令、原轮次的模型输出段和结果。新回执复用保存的 `content`，旧回执核原调用和模型预算后复用 Agent 的输出裁剪。Main 在 `toolMessages.list` 核验原执行、消息身份和 SHA-256 时一并准备延迟 Shell 输出。批次超出 IPC 预算时拆分批次，每条工具的输出全文一次交付。可核实的原失败原因显示在输出区下方，输出无法读取时显示「无法读取已保存的输出」。其他延迟正文继续沿 `messages.text` 读取。[回执 DOM 回归](test/isolated/native-tool-receipt-render-dom.test.tsx)覆盖空输出失败、已保存输出及不同工具的独立披露。
 
 Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 failed、`authorization.dispatched=false`、Core `adapterAttempted/dispatchCommitted=false` 且准确刷新 code 与 content 一致时投影只读 `decisionRefresh`。Native 适配为中性的 `not_executed`，显示上下文／工具信息已更新、此次未执行；聚合标题不追加状态计数，逐项状态仍区分此次未执行与真实失败。持久 ledger 不被改写，冷历史复用相同核验；缺证明、实际派发失败及伪造 details 均保原事实。[Main](test/native-tool-messages.test.ts)及[DOM](test/isolated/native-tool-messages-dom.test.tsx)验证四项重新评估与一项真实失败混合时保留各项准确状态。
 
@@ -986,7 +1004,7 @@ Chrome生产组件／编译CSS在浅1280／深780px核工具聚合200px、viewpo
 
 Native 主会话由 [desktopTranscript](src/native-transcript.ts) 按原 Run、Model 和工具 Execution 投影思考、正文与工具，再由 [ConversationTrace](../../packages/ui/src/desktop/ConversationTrace.tsx) 绘制。模型派发和工具回执交接可更新原 Trace 标题，其临时状态不占展开步骤。并行工具使用当前范围内观察到的启动顺序，已有步骤替换为保存结果时沿用展示身份。“正在回复…”消费准确当前 Model 的流式正文事实，终态或执行权无法核实时停止活动提示。用户引导、Agent 来信、重连与异常仍按原顺序出现在各自轮次。
 
-[思考详情](src/native-reasoning.tsx)仅在手动展开时读取原消息的公开模型输出，沿 [Main 的模型输出租约](electron/model-output-reads.ts) 核对原 Store、会话、Run、Execution 和正文完整性。切换或收起结束当前读取；已显示的同源思考在短暂校准期间保留。工具摘要按已核实的动作归纳，文件新建由原 `builtin.files` 结果确认，Shell 详情继续调用原 `ShellOutput`。只读子详情继续使用既有流程。
+[思考详情](src/native-reasoning.tsx)仅在手动展开时读取原消息的公开模型输出，沿 [Main 的模型输出租约](electron/model-output-reads.ts) 核对原 Store、会话、Run、Execution 和正文完整性。切换或收起结束当前读取；已显示的同源思考在短暂校准期间保留。思考正文复用回复正文的 `MessageContent` 排版。首次读取在正文就绪后启动收展动画，较长正文的 Markdown 解析复用后台 worker。已完成且核实的正文按原消息和版本缓存在有界展示缓存中。工具摘要按已核实的动作归纳，文件新建由原 `builtin.files` 结果确认，Shell 详情继续调用原 `ShellOutput`。只读子详情继续使用既有流程。
 
 Native 的侧栏打开入口对当前父会话及同一在途选择去重，重复鼠标点击和 Enter 不重新发起 `select`、撤销历史读取或重建消息。子详情通过右侧栏标签打开，点击当前父会话不会关闭详情或重新选择父会话；准备页及定时任务页仍恢复原会话；选择其他目标和显式恢复读取保持原流程。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)核重复点击的请求数量、消息节点、滚动和展开保持，以及在途目标复用。
 
@@ -1048,13 +1066,17 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ### 大会话首次构建
 
-Native 的页面缓存路径为[共享 Conversation](../../packages/ui/README.md#原桌面展示层)开启按消息加载。首次可见分组超过100条挂载末40条，上滚每次补20条；不超过100条完整显示。仅已加载内容参加全选，每条回复完整渲染。各段思维链在首次展开时才构造明细，Native 消息 EOF、首次轮次与工具事实、正文读取和操作资格仍由原 owner 核实。
+桌面会话在一个滚动区呈现完整时间线。Native 沿固定水位在后台读取，长正文使用原消息的有界预览和分块读取。思维链首次展开时才构造工具与思考明细，已读正文在后台读取恢复期间保留。旧窗口和轮次占位的性能数据保留为历史记录。
+
+[历史读取](src/native-history.ts)在固定水位完整读到后单独标记正文可展示。后续持久变更继续补入原时间线，发送、停止和审批仍等待原有完整校验。[延迟正文](src/native-message-text.tsx)在消息处于可视范围且原读取资格有效时后台重试临时读取失败，离开视区或失去资格时停止重试。替换预览前仍核对消息身份与正文摘要，并沿用原阅读锚点。回归覆盖[持续生成中的冷打开](test/isolated/native-history-presentation-dom.test.tsx)和[可见正文的后台恢复](test/isolated/native-message-text-dom.test.tsx)。
+
+2026-11-14，Windows x64 的隔离 Electron 夹具以 `--electron --turns=180 --churn` 核对 360 条消息。首个可读画面约 1.16 秒，随后看到流式正文原位更新，停止流式更新前完成三次增量读取。报告和过程帧在本机 `.cache/initial-render-prod-YzulKY/`。该样本使用合成传输，正文断点和旧读取迟到由上述 DOM 回归注入。
 
 [独立初始渲染夹具](test/initial-render-performance-browser-runner.fixture.ts)运行实际NativeDesktop与生产CSS、隔离NativeBridge，正文已随Message就绪；测量可信click到CDP PNG合成器首个可读帧，另记DOM就绪、loader退出、最长任务、可信输入往返及切走时序，不把DOM出现或RAF当作绘制。它不代表真实Main／SQLite、自动全文读取FIFO、完整安装版或跨平台性能。私有探针只存在于测试构建。
 
 本轮曾采用完整历史隐藏分批构建，保留其历史证据：[原决定](../../.agents/notes/archived/architecture/2026-10-26-desktop-initial-render-staging.md)。2026-10-26，macOS arm64／Apple M4 Pro14核、Bun1.4.2、React19.2.7、Chrome155.0.8059.86 Headless／1440×800，基线`2777f7b81`的production600轮首个可读帧1066ms、最长任务995ms；dev为1229／1120ms。首轮分批构建将峰值降至273／392ms，但首读增至3169／5519ms，高频更新dev样本约24秒；单条600章节后来曾达到13–14秒。用户随后确定改为消息级按需加载，本轮不再使用完整隐藏构建或正文根块分片。历史报告为本机`.cache/initial-render-prod-wAx4yZ`、`initial-render-dev-liUf3w`、`initial-render-prod-QkF0Jp`、`initial-render-dev-HgmjKJ`、`initial-render-dev-1vJ043`、`initial-render-prod-PR3MEc`与`initial-render-dev-FaNLSI`，不得作为当前窗口实现的性能资格。
 
-当前窗口策略、折叠工厂和原生滚动条取舍归[按消息加载Note](../../.agents/notes/implemented/architecture/2026-10-26-desktop-progressive-history.md)。单条回复仍可能形成同步大任务；此限制由用户选定的“每条完整显示”边界保留。
+旧窗口策略、仍适用的折叠工厂和原生滚动条取舍归[按消息加载Note](../../.agents/notes/implemented/architecture/2026-10-26-desktop-progressive-history.md)。单条回复仍可能形成同步大任务；此限制由用户选定的“每条完整显示”边界保留。
 
 2026-10-26最终消息窗口，环境与上述基线相同（macOS arm64／M4 Pro14核、Chrome155、1440×800、diagnostics=false）。以下为可信click到实际PNG首个可读画面的单次样本，历史EOF完整读取360／1200条，而初屏仅挂载40个entry、40条消息、1703个元素，不能把它等同于全历史已进入DOM：
 
@@ -1427,6 +1449,8 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 当前会话环境信息与子详情
 
+[环境信息卡](src/native-environment.tsx)按原 Store／子 Session 汇总子 Agent，依已核实目录的顺序用最新执行更新原行，状态、详情与停止操作绑定该执行。目录和消息详情仍使用准确的执行标识。[环境卡回归](test/native-background-panel.test.tsx)覆盖同一子 Agent 的后续执行更新、同名不同子 Agent 及准确详情打开。
+
 环境行将原 Store／子 Session 组合交给共享 `ChildAgentIcon`，与工具消息及审批使用相同稳定身份，不按标题、状态或本次 carrier 重新分配。恢复历史沿原 Store 保持外观；无法导航的已知子会话仍显示图标，缺身份时使用通用子 Agent 图标。显示、点击与停止资格仍分别由原 metadata 和回调决定。
 
 环境行、工具消息和子结果入口打开详情时，同步把该原身份交给共享SessionTabs的`childAgentIdentity`，标签图标使用同一分配；结果历史沿原消息Store，环境恢复历史沿原Execution Store。该装饰字段不参与Session／Execution去重或读取准入，标签改名仍保留同一图标节点，SVG沿共享14px尺寸。
@@ -1435,7 +1459,9 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 2026-10-26，macOS arm64／Bun1.4.2，环境行图标修复：[共享子Agent展示](../../packages/ui/test/isolated/desktop-agent-activity.test.tsx)3项／1266断言、[Native环境卡](test/native-background-panel.test.tsx)12项／288断言及UI／Desktop typecheck通过。生产组件、实际environmentDisplay与共享样式在本机Chrome隔离夹具中观察深浅主题×800／390px×运行／完成八组状态，重命名后图标和颜色仍与审批一致，SVG实测14×14px、无横向溢出，八次原详情点击正常；无导航目标时也保留图标。报告在本机 `.cache/environment-child-icon-GilZs4/report.json`。该范围不代证完整Electron或安装版。
 
-[NativeChildDetail](src/native-child-detail.tsx)直接显示共享 Conversation，顶部不再渲染“刷新子日志”按钮、只读说明或对应占位。日志更新与失败后的重读继续由原 environment reader 自动处理；子详情的只读权限、复制资格及标签关闭释放规则保持。共享标签模型按入口创建，首次点击子 Agent 消息只打开对应详情；关闭最后一页后重新点击子 Agent 也不预建空白网页，已有网页仍保留。
+[NativeChildDetail](src/native-child-detail.tsx)直接显示共享 Conversation，顶部不再渲染“刷新子日志”按钮、只读说明或对应占位。日志更新与失败后的重读由 [environment reader](src/native-environment.tsx) 自动处理。同一子会话已核实的输出内容和元数据相同、只有 Store 游标推进时，复用原输出对象。正文和展示事实都相同时保留原子详情，不重新发布。只读权限、复制资格及标签关闭释放规则保持。共享标签模型按入口创建，首次点击子 Agent 消息只打开对应详情；关闭最后一页后重新点击子 Agent 也不预建空白网页，已有网页仍保留。
+
+子详情快照向共享轮次投影提供准确子会话的顶层 Model 执行状态，用同一逻辑识别正在思考、正在回复及回执接管。右栏使用和主会话相同的阅读位置锚点。父会话例行刷新沿 Main 的子读取资格继续展示，真正撤销读取资格时禁用读取和复制。同一子页重新校准期间保留原正文节点，取得新快照后原位更新。[导航回归](test/isolated/native-session-navigation-dom.test.tsx)覆盖流式正文、父刷新、读权恢复和保留展开状态。
 
 2026-10-26，macOS arm64／Bun1.4.2，本次顶部移除工作树：[导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)定向1项／43断言与[自动恢复](test/isolated/native-environment-child-recovery-dom.test.tsx)3项／56断言通过。普通[Electron 子详情](test/isolated/native-child-stream-electron.test.ts)的 Responses 范围通过，实际观察首次打开、流式追加、完成重入三阶段；100次父／子导航记录630次DOM变化，零欢迎页／重复消息，reader峰值2、关闭后为0。截图与过程记录保存在本机 `dist/acceptance/child-detail-header-20261026/responses`。使用本机受控 Provider，不增加外部真实模型或安装包资格。[复制回归](test/isolated/native-child-copy-dom.test.tsx)2项通过、2项失败；两项失败以修改前组件和测试复现，未计为通过。
 
@@ -1477,7 +1503,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 共享 UI／Native DOM 两整文件15项／360断言、Service响应与生成Message validator整文件6项／18断言通过；Core Task业务26整文件132项／2538断言，以及输入／派发／child result／Runtime报告恢复四文件27项／375断言通过。八 workspace typecheck、同源 API、边界和测试归属检查通过。本次资格限本机普通候选、已配置真实模型与隔离读取工具／Full选择，不外推安装发布或其他平台；修复前的失败证据保持。
 
-子 Agent 工具消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start；已成功受理的原工具回执与目录吻合后，才在原消息行补充名称与准确详情目标。`childAgent` 仅含 identity／name；操作标题取原工具 Message，固定显示“创建子 Agent”“继续子 Agent”，不接收 carrier／child Run 的生命周期或新鲜度，不因子完成、失败、中断或后续任务改写标题、结果或动画。原工具本身的失败、取消与结果未知保持自身展示。整行点击沿原右侧标签交付准确 Session／Execution，不增加 mutation；没有折叠或独立详情按钮，旧展开缓存也不会把原始受理 JSON 或子 reader 挂回父会话。详情回调暂不可用时仅暂停该行点击。
+子 Agent 工具消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start。已成功受理的原工具回执与目录吻合后，消息补充名称和准确详情目标，创建行显示「名称 · 子agent开始工作」并应用同一身份配色。身份待核实时用通用图标和原操作标题，继续操作沿用原标签。`childAgent` 仅含 identity／name，工具行保留原操作事实。原工具本身的失败、取消与结果未知保持自身展示。整行点击沿原右侧标签交付准确 Session／Execution，详情回调暂不可用时仅暂停该行点击。该入口直接导航，原始受理 JSON 和子日志在各自原记录中读取。
 
 [环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称、原操作和详情目标；当前任务生命周期仍用于原环境卡、停止门禁和子详情，不投影为父历史工具行状态。图标按原 Store／child Session 稳定身份与审批卡共用。
 
@@ -2309,6 +2335,12 @@ macOS owned stdio 停止结果的新增观察字段已迁入[正式连接／重�
 
 
 ### 内部模型调用与子 Agent
+
+Native 主会话和右侧子详情共同使用 [Conversation／Trace](../../packages/ui/src/desktop/Conversation.tsx)、[工具行](src/native-tool-renderer.tsx)、[思考正文](src/native-reasoning.tsx)与 ModelOutput 组件。“创建子 Agent”在所属轮次独立显示，已核实的等待回执映射成事件数量或空等待摘要。子详情文件差异、交付快照、图片及延迟正文经 [Main 原子会话读取](electron/background.ts)绑定原载体、会话选择和消息身份，展开后交给同一展示组件。详情供阅读，父会话的编辑器和执行控制仍按原权限准入。
+
+Windows Electron 44.3.0 隔离窗口用同一历史核对主／子视图切换、折叠、重开及受控连接丢失与恢复。已展开工具行的高度、对齐和顺序一致。实际历史读失败、保留已显示内容及回执接管另由[子详情回归](test/isolated/native-environment-child-recovery-dom.test.tsx)与[导航回归](test/isolated/native-session-navigation-dom.test.tsx)覆盖。
+
+Shell 回执无法核实输出时，由共用工具行在展开卡片内展示提示，读取层继续只认原回执。原位提示及正常输出的展开由 [Shell 卡片回归](test/isolated/native-tool-receipt-render-dom.test.tsx)覆盖。
 
 自动审核 `authorization.check` 和标题生成 `session.title` 由 Agent 保存同会话内部 Model Execution，不创建子会话或子任务，后台目录自然不把它们投影为 child；没有为此增加 UI 隐藏规则。Native 继续共用主／子 Agent 的消息渲染，权限状态从 `execution.authorization.check` 读取，旧 `review` 观察仅兼容历史。实际检查与命名输入输出通过准确 Model Inspector 读取，不塞入父／子聊天。
 

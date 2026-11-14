@@ -53,7 +53,7 @@ test('image receipts show verified counts, retain thumbnails beside their disclo
   for (const [messages, label] of [
     [[image], '已查看 1 张图像'],
     [[image, { ...image, id: 'image-2' }], '已查看 2 张图像'],
-    [[{ ...image, status: 'running', settled: false }], '正在查看图像'],
+    [[{ ...image, status: 'running', settled: false }], '查看图像'],
     [[{ ...image, status: 'failed' }], '查看图像'],
     [[{ ...image, status: 'cancelled' }], '查看图像'],
   ] as const) {
@@ -487,7 +487,7 @@ test('failed Shell summaries retain the executed label, command, accessible fail
   });
 });
 
-test('approval rows omit redundant pre-dispatch results while preserving independent execution outcomes', () => {
+test('approval rows use icons and preserve independent execution outcomes', () => {
   const cases: {
     message: Partial<Message>;
     approval?: string;
@@ -520,6 +520,14 @@ test('approval rows omit redundant pre-dispatch results while preserving indepen
         approval: { source: 'user', state: 'awaiting_user' },
       },
       approval: '等待人工审批',
+    },
+    {
+      message: {
+        status: 'auto_checking',
+        settled: false,
+        approval: { source: 'auto', state: 'checking' },
+      },
+      approval: '正在自动审批',
     },
     ...(['running', 'failed', 'unknown', 'cancelled'] as const).map((status, index) => ({
       message: {
@@ -595,31 +603,22 @@ test('approval rows omit redundant pre-dispatch results while preserving indepen
         try {
           const root = dom.window.document;
           const approval = root.querySelector('.tool-approval');
-          expect(approval?.getAttribute('aria-label') ?? approval?.textContent).toBe(item.approval);
-          if (
-            message.approval?.state === 'approved' ||
-            (message.approval?.source === 'auto' && message.approval.state === 'rejected')
-          ) {
+          expect(approval?.getAttribute('aria-label')).toBe(item.approval);
+          if (item.approval) {
+            expect(approval?.getAttribute('role')).toBe('img');
             expect(approval?.textContent).toBe('');
             expect(approval?.querySelector('svg')).not.toBeNull();
+            expect(approval?.closest('[data-slot="trace-title"]')).toBeNull();
             expect(root.querySelector('button .tool-approval[tabindex]')).toBeNull();
+            expect(root.body.textContent).not.toContain(item.approval);
           }
-          if (root.querySelector('.shell-activity')) {
-            expect(root.querySelector('.tool-step-status,.tool-activity-state')).toBeNull();
-            if (item.result) {
-              const expected =
-                (
-                  { 执行中: '运行中', 失败: '已运行', 执行超时: '运行超时' } as Record<
-                    string,
-                    string
-                  >
-                )[item.result] ?? item.result;
-              expect(root.querySelector('.tool-activity-title')?.textContent).toBe(expected);
-            }
-          } else
-            expect(root.querySelector('.tool-step-status,.tool-activity-state')?.textContent).toBe(
-              item.result,
-            );
+          expect(root.querySelector('.tool-step-status,.tool-activity-state')).toBeNull();
+          if (item.result) {
+            expect(root.body.textContent).not.toContain(item.result);
+            expect(
+              root.querySelector('.tool-activity, .tool-activity-step')?.getAttribute('aria-label'),
+            ).toContain(item.result);
+          }
           if (!item.result) expect(root.body.textContent).not.toContain('未执行');
         } finally {
           dom.window.close();
@@ -639,8 +638,8 @@ test('approval rows omit redundant pre-dispatch results while preserving indepen
         try {
           expect(dom.window.document.querySelector('.shell-result')?.textContent).toBe(item.result);
           expect(
-            [...dom.window.document.querySelectorAll('.tool-approval')].map(
-              (element) => element.getAttribute('aria-label') ?? element.textContent,
+            [...dom.window.document.querySelectorAll('.tool-approval')].map((element) =>
+              element.getAttribute('aria-label'),
             ),
           ).toEqual(item.approval ? [item.approval] : []);
         } finally {
@@ -670,7 +669,8 @@ test('Shell cards retain the original command and output while the header stays 
     await click(summary(host));
     const button = host.querySelector('.shell-activity .tool-activity-summary')!;
     expect(button.textContent).toContain('运行旅程校验');
-    expect(button.querySelector('.tool-activity-title')?.textContent).toBe('运行中');
+    expect(button.querySelector('.tool-activity-title')?.textContent).toBe('运行命令');
+    expect(button.getAttribute('data-status')).toBe('running');
     expect(button.querySelector('.tool-command')?.textContent).not.toContain('\n');
     expect(button.querySelector('.tool-command')?.textContent?.length).toBeLessThanOrEqual(513);
     await click(button);
@@ -718,6 +718,7 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
     label: string;
     success?: boolean;
     body?: string;
+    reason?: string;
   }[] = [
     { shell: { operation: 'launch', accepted: true }, label: '已受理' },
     {
@@ -727,7 +728,7 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
         output: 'first\nerror\ndone\n',
         outputComplete: false,
       },
-      label: '执行中 · 部分输出',
+      label: '执行中',
       body: 'first\nerror\ndone\n',
     },
     {
@@ -742,13 +743,13 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
       shell: { operation: 'read', jobStatus: 'failed', outputComplete: false },
       text: 'ORIGINAL_JOB_FAILURE_DETAIL',
       label: '失败',
-      body: 'ORIGINAL_JOB_FAILURE_DETAIL',
+      reason: 'ORIGINAL_JOB_FAILURE_DETAIL',
     },
     {
       shell: { operation: 'read', jobStatus: 'outcome_unknown' },
       text: 'ORIGINAL_UNKNOWN_DETAIL',
       label: '结果未知',
-      body: 'ORIGINAL_UNKNOWN_DETAIL',
+      reason: 'ORIGINAL_UNKNOWN_DETAIL',
     },
     {
       shell: { operation: 'execute', jobStatus: 'cancelled', timedOut: true, exitCode: 143 },
@@ -759,7 +760,12 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
       shell: { operation: 'execute', jobStatus: 'cancelled', outputComplete: false },
       status: 'cancelled',
       label: '已停止',
-      body: '本次记录未包含完整输出。',
+    },
+    {
+      shell: { operation: 'execute', jobStatus: 'planned', command: 'Get-Location' },
+      status: 'cancelled',
+      text: 'tool_dispatch_cancelled',
+      label: '操作已取消',
     },
     {
       shell: { operation: 'launch' },
@@ -778,14 +784,16 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
       status: 'unknown',
       text: 'shell_owned_cleanup_unconfirmed: cleanupConfirmed=false',
       label: '结果未知',
-      body: 'partial\n\n\nshell_owned_cleanup_unconfirmed: cleanupConfirmed=false',
+      body: 'partial\n',
+      reason: 'shell_owned_cleanup_unconfirmed: cleanupConfirmed=false',
     },
     {
       shell: { operation: 'execute', jobStatus: 'failed', stderr: 'process output', exitCode: 7 },
       status: 'failed',
       text: 'supervisorFailure: supervisorErrno=5',
       label: '失败 · 退出码 7',
-      body: 'process output\n\nsupervisorFailure: supervisorErrno=5',
+      body: 'process output',
+      reason: 'supervisorFailure: supervisorErrno=5',
     },
     {
       shell: { operation: 'execute' },
@@ -827,10 +835,15 @@ test('Shell result cards distinguish process outcomes from acceptance, reads, wa
     );
     try {
       const root = dom.window.document;
+      expect(root.querySelector('.tool-activity-summary')?.textContent).not.toContain(item.label);
       expect(root.querySelector('.shell-result')?.textContent).toBe(item.label);
       expect(Boolean(root.querySelector('.shell-result-icon'))).toBe(!!item.success);
       if (item.body)
         expect(root.querySelector('.shell-console-output')?.textContent).toBe(item.body);
+      if (item.reason) {
+        expect(root.querySelector('.shell-failure-reason')?.textContent).toBe(item.reason);
+        expect(root.querySelector('.shell-console-output')?.textContent).not.toContain(item.reason);
+      }
       if (!item.success)
         expect(root.querySelector('.shell-console-output')?.textContent).not.toContain(
           '成功，无输出',
@@ -970,21 +983,23 @@ test('Web Fetch rows distinguish site paths, keep failed status accessible witho
     expect(line.textContent).not.toContain('web_fetch');
     expect(line.textContent).not.toContain('PRIVATE_');
     expect(line.getAttribute('data-status')).toBe('running');
+    const title = line.querySelector(':scope > [data-slot="trace-title"]');
+    expect(title?.querySelector('.tool-activity-title')?.textContent).toBe('读取网页');
+    expect(title?.querySelector('.tool-step-target')?.textContent).toContain('github.com');
+    expect(line.textContent).not.toContain('执行中');
     await render([{ ...web, status: 'failed', settled: true, text: 'web_timeout' }]);
     const failed = inner();
     expect(host.querySelector('.tool-activity-aggregate')).toBe(aggregate);
     expect(failed.getAttribute('data-status')).toBe('error');
     expect(summary(host).getAttribute('data-status')).not.toBe('error');
-    expect(failed.querySelector('.tool-activity-state')?.classList.contains('sr-only')).toBe(true);
+    expect(failed.textContent).not.toContain('失败');
     expect(failed.closest('article')?.getAttribute('aria-label')).toContain('失败');
     await click(failed);
     expect(host.textContent).toContain('网页读取超时');
     expect(host.textContent).toContain('web_timeout');
     await render([{ ...web, status: 'unknown', settled: true, text: 'ACTUAL_UNKNOWN' }]);
     expect(inner().getAttribute('data-status')).not.toBe('error');
-    expect(inner().querySelector('.tool-activity-state')?.classList.contains('sr-only')).toBe(
-      false,
-    );
+    expect(inner().textContent).not.toContain('结果未知');
     expect(host.textContent).toContain('结果未知');
     await render([{ ...web, status: 'completed', settled: true, text: 'COMPLETE_WEB_BODY' }]);
     expect(inner().getAttribute('data-status')).not.toBe('error');
@@ -1076,15 +1091,24 @@ test('each failed or refused tool exposes its complete error only through its ow
       expect(
         detail?.closest('[data-slot="scroll-area-viewport"]')?.classList.contains('scroll-fade-y'),
       ).toBe(true);
-      for (const text of expected) expect(detail?.textContent).toContain(text);
+      if (index === 2) {
+        expect(detail?.textContent).toBe('SHELL_STDOUT\nSHELL_STDERR');
+        const reason = item(index).querySelector('.shell-failure-reason');
+        expect(reason?.textContent).toContain('SHELL_FAILURE_TEXT');
+        expect(reason?.textContent).toContain('SHELL_DENIAL_REASON');
+      } else for (const text of expected) expect(detail?.textContent).toContain(text);
       if (index === 0) expect(detail?.textContent?.match(/READ_ERROR_BEGIN/g)).toHaveLength(1);
       if (index === 1) expect(detail?.textContent?.match(/AUTO_DENIAL_REASON/g)).toHaveLength(1);
       await click(itemButton(index));
       expect(item(index).querySelector('pre')).toBeNull();
       for (const text of expected) expect(item(index).textContent).not.toContain(text);
     }
-    expect(item(4).textContent).toContain('等待人工审批');
-    expect(item(5).textContent).toContain('结果未知');
+    expect(item(4).querySelector('.tool-approval')?.getAttribute('aria-label')).toBe(
+      '等待人工审批',
+    );
+    expect(item(4).textContent).not.toContain('等待人工审批');
+    expect(itemButton(5).textContent).not.toContain('结果未知');
+    expect(item(5).getAttribute('aria-label')).toContain('结果未知');
     await click(itemButton(0));
     await click(itemButton(3));
     await click(aggregate);
@@ -1120,16 +1144,14 @@ test('failed Shell details retain each progress stream omitted by the final resu
     await render(messages);
     await click(summary(host));
     const items = host.querySelectorAll('.tool-activity-steps > .tool-activity');
-    for (const [index, streams] of [
-      [0, ['SAVED_PROGRESS_STDOUT', 'FINAL_STDERR', 'FAILED_SHELL_REASON']],
-      [1, ['FINAL_STDOUT', 'SAVED_PROGRESS_STDERR', 'SECOND_FAILED_SHELL_REASON']],
+    for (const [index, output, reason] of [
+      [0, 'SAVED_PROGRESS_STDOUT\nFINAL_STDERR', 'FAILED_SHELL_REASON'],
+      [1, 'FINAL_STDOUT\nSAVED_PROGRESS_STDERR', 'SECOND_FAILED_SHELL_REASON'],
     ] as const) {
       expect(items[index]?.querySelector('pre')).toBeNull();
       await click(items[index]!.querySelector('.tool-activity-summary')!);
-      const output = items[index]!.querySelector('pre')?.textContent;
-      for (const stream of streams) expect(output).toContain(stream);
-      expect(output).not.toContain('OLD_STDOUT');
-      expect(output).not.toContain('OLD_STDERR');
+      expect(items[index]!.querySelector('.shell-console-output')?.textContent).toBe(output);
+      expect(items[index]!.querySelector('.shell-failure-reason')?.textContent).toBe(reason);
     }
   });
 });
@@ -1400,10 +1422,16 @@ test('unconfirmed unfinished tools preserve facts and stop queued, running and r
       const held = render([original]);
       try {
         expect(held.window.document.body.textContent).not.toContain('执行状态待核实');
-        if (status === 'queued')
-          expect(held.window.document.body.textContent).toContain('等待执行');
-        if (status === 'auto_checking' || status === 'auto_reviewing')
-          expect(held.window.document.body.textContent).toContain('正在自动审批');
+        if (status === 'queued') {
+          expect(held.window.document.body.textContent).not.toContain('等待执行');
+          expect(held.window.document.querySelector('[data-status="pending"]')).not.toBeNull();
+        }
+        if (status === 'auto_checking' || status === 'auto_reviewing') {
+          expect(held.window.document.body.textContent).not.toContain('正在自动审批');
+          expect(
+            held.window.document.querySelector('.tool-approval')?.getAttribute('aria-label'),
+          ).toBe('正在自动审批');
+        }
       } finally {
         held.window.close();
       }

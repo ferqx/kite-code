@@ -3,6 +3,8 @@ import { nativeToolRequestTarget } from './tool-request-target';
 
 /** Budget for added command fragments; existing metadata retains the original IPC response cap. */
 export const nativeToolMessagePageBytes = 524288;
+/** Shell bodies are budgeted separately from commands and other tool facts. */
+export const nativeShellOutputPageBytes = 2 * 1024 * 1024;
 export const nativeShellCommandChunkBytes = 8192;
 /** Display-only failure facts from the exact registered Git worktree receipt. */
 export type NativeWorktreeFailure = {
@@ -49,6 +51,7 @@ export type NativeToolMessageFact = Pick<
   fileCreated?: true;
   /** Exact builtin Task queue acknowledgment; display only, never proof of receipt or execution. */
   agentMessageAccepted?: true;
+  agentWait?: { reason: 'events' | 'completed' | 'input' | 'timeout'; events: number };
   /** Display only: verified original request fields, or its known version's directory default. */
   target?: string;
   /** Original request presentation is still being verified; never publish a partial tool row. */
@@ -60,6 +63,26 @@ export type NativeToolMessageFact = Pick<
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };
   /** Exact known Shell result content equals its saved structured details. */
   shellResultVerified?: boolean;
+  /** Host-verified status for a receipt whose message body is already the model output. */
+  shellOutputReceipt?: Pick<
+    NonNullable<import('@kite-ai/ui/desktop').Message['shell']>,
+    'jobStatus' | 'exitCode' | 'timedOut' | 'outputComplete' | 'failureReason'
+  >;
+  /** Original call and frozen model budget for a legacy Shell receipt. */
+  shellOutputLimit?: { requestedTokens?: number; modelTokenLimit?: number };
+  /** Deferred receipts carry only the verified output projection, never the raw receipt. */
+  shellDisplay?: Pick<
+    NonNullable<import('@kite-ai/ui/desktop').Message['shell']>,
+    | 'output'
+    | 'failureReason'
+    | 'jobStatus'
+    | 'exitCode'
+    | 'timedOut'
+    | 'outputComplete'
+    | 'accepted'
+    | 'cancelRequested'
+  >;
+  shellOutputError?: true;
   worktreeFailure?: NativeWorktreeFailure;
   /** Original image/PDF metadata, loaded through the same bounded image reader. */
   images?: { name: string; reference: { mediaType: string; size: string } }[];

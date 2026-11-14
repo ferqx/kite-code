@@ -399,6 +399,29 @@ test('the Main reader reports file creation only for a verified new file receipt
   expect((await f.list(['write'])).entries[0]).toMatchObject({ status: 'succeeded' });
 });
 
+test('the verified Task wait exposes a readable status without its cursor', async () => {
+  const f = fixture();
+  const details = { events: [], next_cursor: 'opaque-cursor', reason: 'timeout' };
+  const content = JSON.stringify(details);
+  f.add('wait', 'succeeded', 'wait-run', 'task.events');
+  f.messages.get('wait')!.content = content;
+  f.executions.get('execution-wait')!.result = { outcome: 'succeeded', content, details };
+  f.client.getRun = async () =>
+    ({
+      id: 'wait-run',
+      sessionId: 's',
+      originStoreId: 'store',
+      configuration: { tools: [{ id: 'task.events', version: '1', extensionId: 'builtin.task' }] },
+    }) as unknown as Run;
+  const [fact] = (await f.list(['wait'])).entries;
+  expect(fact?.agentWait).toEqual({ reason: 'timeout', events: 0 });
+  expect(desktopToolMessage(fact!, 'wait', content)).toMatchObject({
+    status: 'completed',
+    text: '等待期间暂无新事件',
+    agentWait: true,
+  });
+});
+
 test('only an exact builtin Task message acknowledgment is hidden through the original Main reader', async () => {
   const f = fixture();
   const content = '{"accepted":true,"delivery":"queued"}';
@@ -2189,8 +2212,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
     };
     const details: Record<string, unknown> = { ref, execution: job, ...extra };
-    const save = () => {
-      const content = JSON.stringify(details);
+    const save = (content = JSON.stringify(details)) => {
       f.messages.get(id)!.content = content;
       execution.result = { outcome: status, content, details } as Execution['result'];
     };
@@ -2219,16 +2241,59 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
         command: 'printf first\nprintf second\n',
         jobStatus: 'succeeded',
         exitCode: 0,
-        stdout: 'first\nsecond\n',
-        stderr: 'warning\n',
+        output: 'stdout:\nfirst\nsecond\n\nstderr:\nwarning\n',
         outputComplete: true,
       },
     });
     foreground.details.droppedBytes = '2';
     foreground.save();
     expect((await foreground.read()).message.shell).toMatchObject({
-      truncated: true,
       outputComplete: false,
+    });
+
+    const current = receipt('execute', 'succeeded', {
+      outputFormat: 'model-preview',
+      outputLimited: true,
+      truncated: false,
+    });
+    const modelOutput = 'stdout:\n可见输出 🪁\n[Model output preview omitted 123 retained bytes.]';
+    current.save(modelOutput);
+    expect((await current.read()).message).toMatchObject({
+      text: '',
+      shell: { output: modelOutput, jobStatus: 'succeeded', exitCode: 0, outputComplete: false },
+    });
+    const deferred = f.messages.get(current.id)!;
+    deferred.content = modelOutput.slice(0, 12);
+    deferred.deferredText = {
+      bytes: String(Buffer.byteLength(modelOutput)),
+      sha256: createHash('sha256').update(modelOutput).digest('hex'),
+    };
+    expect((await current.read()).fact.shellDisplay).toMatchObject({ output: modelOutput });
+    current.job.id = 'unrelated-job';
+    current.save(modelOutput);
+    expect((await current.read()).fact.shellOutputReceipt).toBeUndefined();
+    expect((await current.read()).fact.shellDisplay).toBeUndefined();
+    expect((await current.read()).fact.shellOutputError).toBe(true);
+
+    const refused = receipt('execute', 'failed', {
+      outputFormat: 'model-preview',
+      outputLimited: false,
+      truncated: false,
+    });
+    refused.details.execution = {
+      ...refused.job,
+      status: 'failed',
+      result: {
+        outcome: 'failed',
+        content: 'Shell failed',
+        details: { exitCode: 1, supervisorFailure: 'original shell startup failure' },
+      },
+    };
+    refused.save('');
+    expect((await refused.read()).message.shell).toMatchObject({
+      output: '',
+      jobStatus: 'failed',
+      failureReason: 'original shell startup failure',
     });
 
     const launch = receipt('launch', 'succeeded', { accepted: true, presentation: 'standalone' });
@@ -2302,7 +2367,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       shellId: keylessForeground.id,
       command: keylessInput.command,
       jobStatus: 'succeeded',
-      stdout: 'first\nsecond\n',
+      output: 'stdout:\nfirst\nsecond\n',
     });
     keylessForeground.details.shell_id = 'unrelated-handle';
     keylessForeground.save();
@@ -2346,9 +2411,8 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       shell: {
         operation: 'read',
         jobStatus: 'running',
-        stdout: 'one\nthree\n',
-        stderr: 'two\n',
-        output: 'one\ntwo\nthree\n',
+        output:
+          'stdout:\none\n\nOutput gap in stdout (byte count unavailable for this page).\nstderr:\ntwo\n\nOutput gap in stderr (byte count unavailable for this page).\nstdout:\nthree\n\nOutput gap in stdout (byte count unavailable for this page).',
         outputComplete: false,
       },
     });
@@ -2424,7 +2488,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
     unknown.save();
     expect((await unknown.read()).message).toMatchObject({
       status: 'unknown',
-      shell: { jobStatus: 'outcome_unknown', stdout: 'partial\n' },
+      shell: { jobStatus: 'outcome_unknown', output: 'stdout:\npartial\n' },
     });
     const malformed = receipt('execute', 'succeeded', {
       stdout: '',
@@ -2438,7 +2502,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
     const invalid = await malformed.read();
     expect(invalid.message.shell?.jobStatus).toBeUndefined();
     expect(invalid.message.shell?.outputComplete).toBeUndefined();
-    expect(invalid.message.text).toBe(f.messages.get(malformed.id)!.content);
+    expect(invalid.message.text).toBe('');
     (malformed.execution.result as { details: unknown }).details = { different: true };
     expect((await malformed.read()).fact.shellResultVerified).toBeUndefined();
 
@@ -2464,7 +2528,7 @@ test('Native Shell facts separate Tool acceptance, exact Job state, ordered outp
       const result = await foreground.read();
       expect(result.message.shell?.operation).toBe('execute');
       expect(result.message.shell?.jobStatus).toBeUndefined();
-      expect(result.message.text).toBe(f.messages.get(foreground.id)!.content);
+      expect(result.message.text).toBe('');
     }
     foreground.execution.definitionVersion = '9';
     foreground.save();

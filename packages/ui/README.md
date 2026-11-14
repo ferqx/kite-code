@@ -134,7 +134,7 @@ Native 提供 `retainedPresentation` 时，输入区的模型或审核标签可�
 
 同一组件的 `.response-status` 与 `.message-meta` 沿[共享 CSS](src/desktop/style.css)共用28px信息行高度并垂直居中。独立流式消息直接在原 `.message-meta` 中显示提示，完成后替换为原时间与具备资格的复制控件；回复期间不叠加第二行时间或额外占位。准确轮次的提示继续位于处理过程折叠区外；上方为展开过程的最后一条Agent正文时，与完成后的工具栏同样距正文2px，轮次底部保留8px，避免原24px轮次留白造成完成时下一条消息上移16px。上方为展开工具时仍使用原混合间距，收起过程或尚无正文时保留原正文块间距。显示提示时过程区不叠加底部padding。底部跟随继续由阅读内容高度驱动，复制资格、过程内无信息栏与活动状态的来源规则保持。
 
-“正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。思考／回复标签直接使用宿主已引入的 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer)，以行内块将流光范围限制在标签文字，使用语义前景色作为高光以跟随应用主题；通过库内置 `shimmer-spread-[16px]` 和 `shimmer-duration-1500` 将高光收窄为16px、每1.5秒扫过一次，避免默认宽光带在短状态文字上仅呈现整句轻微变色；沿库内置的减少动态效果规则恢复静态文字，不新增动画实现或依赖。读取与业务交互门禁保持。
+“正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。独立的思考／回复标签使用 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer) 的16px和1.5秒参数。思维链、工具和模型重连行将运行状态交给共享 `TraceLine`。思维链摘要的图标从第一条可见工具行取得，思考行使用同一灯泡图标。工具图标使用 `TraceIcon` 的统一尺寸。思维链中的图标和开合箭头按当前字体度量做视觉对齐，文字沿用原来的行高和间距。折叠箭头保持布局占位，只旋转内部 SVG，并遵循系统的减少动态效果设置。工具动作和描述共用一个 `TraceTitle`，由 shadcn 默认流光覆盖整段文字。启用减少动态效果时，标题显示为静态文字。
 
 该提示由 [Conversation](src/desktop/Conversation.tsx) 按准确 `turnActivity` 与终态 marker 在轮次底部呈现，位于过程折叠区外。普通活动过程入口固定为“处理过程”；准确的当前未结束思考且没有活动工具时，底部同一节点显示“正在思考…”，出现正文或活动工具后恢复“正在回复…”。底部状态只显示思考／回复文字，不附运行时长；`TurnElapsed` 仅在原 summary 展示可靠起止时间对应的终态耗时，不再启动活动计时器。没有可展开过程的普通活动轮次不显示空 summary，首条状态行不额外增加顶部留白；等待、停止、恢复和失败等真实轮次状态保留；观察失败不追加普通界面异常标签。
 
@@ -257,7 +257,7 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 [SessionTabs](src/desktop/SessionTabs.tsx)只在宿主fresh restore明确返回`reveal:true`且准确activeId存在于本次页面列表时，投影一次展示恢复意图。SessionPage等读取与恢复结算、准确browser tab仍存在且页面未被covered／其他详情面板替代后，才恢复原右栏并选择该页；普通restore不自动打开。按scope／page记录已处理意图，用户主动收起优先于迟到或重复reveal，A→B→A不复活旧请求；关闭原tab后也不展开另一页。该字段不保存截图或授予网页控制。[tab展示回归](test/isolated/desktop-session-page-render.test.tsx)、[标签生命周期](test/isolated/desktop-session-tabs.test.tsx)与[Native完整Root回归](../../apps/desktop/test/isolated/native-browser-restore-root-dom.test.tsx)在2026-10-30完整三文件24项449断言通过，覆盖selection暂不可见、fresh恢复、完整Root重挂载、旧请求与用户关闭；UI／Desktop类型通过。JSDOM和受控宿主证据不代替真实Electron连续画面，实机资格归上述Desktop owner。
 
-子详情标签通过 `SessionChildTabRequest.childAgentIdentity` 复用 `ChildAgentIcon`，与环境卡、工具消息和审批保持相同外观；名称变更与同一子会话的不同任务不重新分配图标。该字段只负责装饰，标签去重和reader仍按原Session／Execution处理，缺身份时保留通用图标。原生网页、变更及关闭按钮图标保持各自语义。
+子详情标签通过 `SessionChildTabRequest.childAgentIdentity` 与环境卡、工具消息和审批共用 `ChildAgentIcon`。已核实的创建消息用同一身份配色渲染图标和整行标题。身份配色的金色和灰蓝色与异常红色独立。后续操作行保留中性色。重命名和同一子会话的不同任务沿用原图标。标签去重及读取按原 Session／Execution 处理，缺身份时使用通用图标。
 
 `BackgroundExecutions` 的每个子 Agent 行在名称前复用 `ChildAgentIcon`；宿主通过 `childAgentIdentity` 交付稳定的原 Store／子 Session 身份，缺身份时使用通用图标，不以标题或任务状态分配外观。详情按钮只给右侧箭头应用辅助色，子 Agent 图标保留共享配色，文字继续单行省略；无详情回调时名称行也保留图标。原详情导航、停止和只读边界保持。
 
@@ -267,15 +267,17 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 [Conversation](src/desktop/Conversation.tsx)的主消息区采用可聚焦、具名的原生滚动section，保留原跟随／手动阅读／全选和缓存viewport身份，不再装配主消息区的Radix content包装、thumb轮询与scrollbar ResizeObserver。`SessionPage`在已有首次布局／窗口resize测量中按真实原生滚动条占位同步正文、输入区和准备页留白，overlay与传统滚动条不硬用同一宽度；只在值改变时写CSS变量，原工具详情的独立ScrollArea继续按各自reader规则工作。
 
-Native 的 SessionPage 在有页面缓存时开启 `lazyHistory`，共享默认调用关闭。[窗口策略](src/desktop/conversation-window.ts)按实际可见 entry 分组计数：首次不超过100条完整挂载，超过100条只挂载末40条；折叠 turn 内的工具记录不逐项计数。向上接近200px边界或点击“加载更早消息”，经RAF后的task补20条。窗口保留已经挂载的内容，后续流式跨100条不会突然裁掉旧消息；点击“回到最新消息”可重新选择末40条。每条回复仍沿完整Markdown pipeline显示，不做正文段落拆分。
+Native 的 SessionPage 传入 `preserveReadingAnchor`，让 Conversation 在一个滚动区显示已核实的全部消息。Ctrl/Cmd+A 选择会话中可见的正文。轮次索引、未读占位及滚动到边界时扩充窗口已移除。
 
-窗口只保留稳定entry keys及顺序，不缓存宿主投影闭包。补入前记录可见entry和相对viewport的偏移，提交后按该锚点恢复，避免以scrollHeight差值混入同时追加的消息高度。手动阅读及正文晚到的高度变化也保持锚点；冷重建时在原锚点附近挂载40条，允许向前／向后补入，旧版仅像素阅读记录完整挂载一次以保持其坐标。离开／Activity暂停取消所属frame与task，迟到回调不能接管新页面。Ctrl/Cmd+A只选择已加载的消息正文，保持即时响应；未挂载历史不进入DOM选择。
+消息元素沿稳定身份和相对视口偏移恢复阅读位置，覆盖同会话更新和缓存重开；折叠详情继续使用各自的按需读取。
 
 [DeferredProcessContent](src/desktop/DeferredProcessContent.tsx)使默认折叠的turn过程和[ToolActivity](src/desktop/ToolActivity.tsx)聚合明细在首次展开时才调用内部投影工厂。冷关闭不创建Content，展开后继续使用原Radix退出动画及卸载；关闭动画期间采用当前事实，不冻结旧身份或factory。原来关闭的Radix内容本就不挂载reader，本次减少的是提前构造明细和空Content的工作；不改变读取、审批、复制与恢复资格。
 
 主消息区使用上述原生viewport，会话中的嵌套详情由ScrollArea的原生分支承载。CodeBlock的header／footer间距选择器限定在同一个块内，避免外层`group:has()`使追加消息反复失效整棵turn样式树；默认及small尺寸的间距和现有Shell／Markdown覆盖规则保持。成本登记以不可变token区分同resource的新旧登记，迟到注销不能删除新登记或owner释放责任；DOM缓存预算和完整成本测量准入不变。缓存entry变更回调在渲染闭包外构造，只捕获原retire函数、准确key和entry，避免仍在缓存的entry经共享闭包保留旧entries Map及已退役的空portal；保留原成本扫描、暂停、释放与所属scope核验。
 
-[窗口策略](test/isolated/desktop-conversation-window.test.ts)、[真实Conversation DOM](test/isolated/desktop-conversation-window-dom.test.tsx)、[滚动](test/isolated/desktop-conversation-scroll.test.tsx)与[原展示](test/isolated/desktop-conversation-presentation.test.tsx)核阈值、尾部、双向补入、锚点、已加载全选、取消及展开恢复；[折叠工厂](test/isolated/desktop-deferred-process.test.tsx)、[工具聚合](test/isolated/desktop-tool-aggregation.test.tsx)、[成本](test/isolated/conversation-cache-cost.test.ts)和[缓存](test/isolated/desktop-conversation-cache.test.tsx)保留各自生命周期与身份断言。取舍归[按消息加载Note](../../.agents/notes/implemented/architecture/2026-10-26-desktop-progressive-history.md)，实际性能与限制归[Desktop owner](../../apps/desktop/README.md#大会话首次构建)。
+折叠内容共用尺寸过渡。异步详情没有正文时保持零高度，正文或失败反馈就绪后开始展开。只有一个可展开步骤的思维链由步骤自身完成展开。宿主的工具差异读取同时接收本行和上级过程的展开状态，以便收起时释放读取。
+
+[阅读锚点](test/isolated/desktop-conversation-window.test.ts)、[连续历史 DOM](test/isolated/desktop-conversation-window-dom.test.tsx)、[滚动](test/isolated/desktop-conversation-scroll.test.tsx)与[原展示](test/isolated/desktop-conversation-presentation.test.tsx)核对连续阅读、跟随、全选与恢复。[折叠工厂](test/isolated/desktop-deferred-process.test.tsx)、[工具聚合](test/isolated/desktop-tool-aggregation.test.tsx)和[缓存](test/isolated/desktop-conversation-cache.test.tsx)核各自生命周期与身份。
 
 [SessionPage](src/desktop/SessionPage.tsx)用共享 [NativeScrollbars](src/desktop/components/ui/scroll-area.tsx) 上下文统一普通会话的原生滚动：消息内详情、左右侧栏、宿主注入内容和 Portal 中的模型选择均继承；工作台和定时任务沿原模式。原生分支保留 viewport 的 ref、事件、双轴方向、具名 region 和渐隐，省去 Radix 内容包装及自绘轨道。会话内原生滚动条使用 `scrollbar-width: thin`，WebKit 回退轨道为8px；会话留白仍由真实占位测量。模型提供商的键盘定位改用共享 viewport 标记，不依赖 Radix 私有属性。原生 viewport 的 wheel 监听为 passive，只撤销待完成的键盘定位，不 `preventDefault` 或写祖先 `scrollTop`，边界交接与惯性交给浏览器；非原生分支保留原 wheel 接管。
 
@@ -450,6 +452,8 @@ ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Coll
 
 原工具组件允许宿主给 `Message.target` 传展示文本，不从文本取得文件或执行权限。Native 的已知工具行沿准确执行结果与当前视图适配；未来定义／版本不借旧同名分类解释，原文仍可展开。Shell 操作继续复用原工具图标，实际身份、目标、状态与限定证据归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
+`ToolActivity.renderChildren` 同时提供工具调用 ID、展开状态和原消息 ID。Shell 的延迟输出沿原详情区挂载，关闭时宿主可撤销在途读取，输出核验由 Native 负责。
+
 SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `unverified` 不推断缺少的执行状态，“状态待核对”仅在显式测试诊断中显示，已提供的真实执行状态仍优先；独立的 `Message.executionUnconfirmed` 使未结算的活动工具停止执行／审批／等待提示，保留原 status、settled 和已保存输出，普通界面不追加“执行状态待核实”。已结算成功、失败、取消及未知结果不被覆盖；混合聚合与空 Shell 输出由[工具回归](test/isolated/desktop-tool-aggregation.test.tsx)核对。这些标记仅控制展示，不建立执行结果。`openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
 
 [ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)默认在入口上方居中打开，靠近视口边界时沿原避让规则调整；复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。模型浮层统一使用400常规字重，提供商、模型名称与思考面板的模型按钮均继承该字重，选中、悬停或聚焦不加粗。双栏模型浮层默认宽320px，提供商列宽128px，模型列保持原可用宽度；思考面板与双栏切换时先测量当前及目标实际尺寸，以180ms宽高动画衔接，内容以140ms淡入并轻移4px；快速反向从当前动画尺寸继续，模型聚焦不滚动外层浮层。系统减少动态效果时直接切换尺寸并关闭该浮层的开合与内容动画。整体宽度仍不超过窗口宽度减32px。列表为13px／18px，两列容器共用4px外层留白与2px标题／列表间隔；标题使用与权限菜单Label一致的上下6px内边距，标题及条目的左右内边距统一8px。提供商和模型行高28px，与Composer内选择器高度一致，条目上下内边距4px；两列列表上下留白与项间距均为2px，首行、标题与条目文字对齐；仍保留288px默认高度及原Radix可用高度限制，两列各自滚动。内嵌Command使用 `rounded-none`，避免默认16px容器圆角裁切首项；浮层保持16px，提供商与模型项的四角均为8px。模型项默认沿用未选中提供商的 `--muted-foreground`，仅实际 `selected` 模型的 `data-current` 使用 `--foreground` 并显示勾选图标；不提供常驻选中底色，cmdk的第一项及导航态 `data-selected` 不改变文字颜色或产生背景。提供商与所有模型项均由各自的 `:hover` 沿用 `--control-hover`，移开后恢复透明背景。键盘导航在模型列获焦时保留独立细线焦点提示，Enter仍提交准确导航项。思考面板与选择器文字同为13px，采用12px外层留白，标题组内8px间隔、模型按钮至滑块操作区4px间隔，使模型文字上下两段可见间距一致。浮层内滑轨高24px且无边框，保留32px操作区域与22px白色按钮；按钮在悬停和拖动时通过变换放大25%，结束后恢复，不改变布局或档位映射。仅在允许动态效果时使用150ms过渡。选中模型且宿主提供变更回调时即可调整思考程度，不接收模型支持能力开关。六档「轻度、中、高、极高、Max、Ultar」分别回调 `low/medium/high/xhigh/max/ultar`，不提供配置默认或关闭思考按钮及回调。模型按钮、浮层顶部和滑块无障碍值显示同一档位；纯函数resolveThinkingEffort供选择器、Native宿主与定时任务表单共用：已有明确值优先，缺省为medium；稀疏目录不含medium时选择六档中最低的可选项。选中模型后标题、摘要和滑块直接显示同一具体默认值，不显示“未指定”；宿主发送或保存同一个解析结果，无需先调整滑块，也不在挂载时伪造用户变更回调。旧none/minimal等明确值不在六档位置时，GemSlider保留中性轨道；用户点选或键盘操作后才替换成六档值。档位变化只经onValueChange交付一次，不在松手时重复回调。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块映射宿主提供的六档子集；一档用按钮，零档不造滑块。旧 none/minimal 可作为已配置值显示，不生成额外选项。宿主可用纯文本 `modelSelectionHint` 在模型列表底部提供12px左对齐的辅助说明，不在思考档位面板常驻展示。说明占原288px列表布局的底行，两列继续在剩余高度内各自滚动，不增加浮层总高度；组件不据此锁模型或改变候选，协议过滤与后端校验由宿主负责。[浮层回归](test/isolated/model-effort.test.tsx)核无能力元数据的模型可调整、缺失路由及默认档位首次显示、键盘调节；[Native DOM](../../apps/desktop/test/isolated/native-model-picker-dom.test.tsx)核 Ultar 回调、稀疏档位、两按钮缺席、旧 none 配置及切换模型后清除临时值。
@@ -486,7 +490,7 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 自动权限审核的当前投影读取 `authorization.check`，展示状态使用 `checking`／`auto_checking`／`queued_auto_check`；旧 `authorization.review` 及其历史展示状态仅兼容读取。TUI 与 Desktop 的实际子 Agent 均沿通用类别和相同消息组件展示，`review` 类别不建立独立 Agent 引擎。自动权限审核和标题内部 Model 不进入子 Agent 投影、数量或步骤；目录边界来自 Core 的实际记录，不依靠 UI 隐藏。权限证明与原子派发仍归 Agent，UI 不从状态授予执行权。
 
-原 [Approval](src/desktop/Approval.tsx)经 `InteractionCard.renderApproval` 接入宿主，保留“批准一次”、拒绝和分体范围菜单；只有实际 `same_command` grant 才显示“本次会话批准”，辅助文字明确仅本次及本会话相同命令。工具类型与单行省略的等宽正文分层，悬停／聚焦沿现有 Radix Tooltip 展示全文，详情入口退役。[ApprovalHeader](src/desktop/ApprovalHeader.tsx)承载右上逐项分页、紧跟标题的子名称及固定彩色图标，主 Agent 不显示名称；图标仅按宿主交付的准确随机 Session identity 稳定分配，不依赖可改名称或渲染次数。`embedded` 去除重复标题和外框，独立按钮、grant 与 disabled 语义保持。slot 只接原卡、disabled、原完整附件正文与已获准的回答回调；紧凑模式自动读取并核对原完整附件，失败可重试，未验证时没有回答回调，换卡即失效。MCP／问题／计划仍沿独立表单。ToolActivity 的 `submitted`／`unavailable`／`cancelled` 与 `dispatchCommitted` 只表达宿主确认的审批和派发事实，不把批准当工具成功；准确来源、accepted decision 和原提交链归 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
+原 [Approval](src/desktop/Approval.tsx)经 `InteractionCard.renderApproval` 接入宿主，保留“批准一次”、拒绝和分体范围菜单；只有实际 `same_command` grant 才显示“本次会话批准”，辅助文字明确仅本次及本会话相同命令。工具类型与单行省略的等宽正文分层，悬停／聚焦沿现有 Radix Tooltip 展示全文，详情入口退役。[ApprovalHeader](src/desktop/ApprovalHeader.tsx)承载右上逐项分页、紧跟标题的子名称及固定彩色图标，主 Agent 不显示名称；图标仅按宿主交付的准确随机 Session identity 稳定分配，不依赖可改名称或渲染次数。`embedded` 去除重复标题和外框，独立按钮、grant 与 disabled 语义保持。slot 只接原卡、disabled、原完整附件正文与已获准的回答回调；紧凑模式自动读取并核对原完整附件，失败可重试，未验证时没有回答回调，换卡即失效。MCP／问题／计划仍沿独立表单。ToolActivity 的审批文案由盾牌图标的无障碍名称与提示提供，工具行的可见文字只显示动作和描述。执行结果沿无障碍名称及原位详情呈现，`dispatchCommitted` 继续表达宿主确认的派发事实；准确来源、accepted decision 和原提交链归 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
 [QueuedMessages](src/desktop/QueuedMessages.tsx)由 Composer 的可选 `queue` 接入，在同一外框顶部显示受控 pending 条目。真实 Markdown 经原 [MessageContent](src/desktop/MessageContent.tsx)安全解析；预览将块元素压为单行并省略，Tooltip 展示完整 Markdown，保持禁 HTML／远程图片获取的原合同。无序号或额外业务状态串；可折叠，常显手柄、编辑和删除。原生拖拽及手柄 Alt+↑／↓只交付当前完整 ID 排列，拖拽中成员变化拒绝旧操作；所有内容移除、变更和异步状态均由宿主确认，不维护乐观副本。`editable:false` 仅禁编辑，附件等条目保删除和调序。编辑成功后的普通 `draft` 仍由宿主 `onChange` 管理，`queueFocusKey` 只在同 scope 变更后聚焦并移 caret 至末尾，暂时 disabled 等待解锁，换 scope 不抢焦点；没有编辑模式或取消／恢复逻辑。[队列 DOM](test/isolated/desktop-queued-messages.test.tsx)核委托回调、完整 MD、Tooltip／Escape、折叠、迟到拖拽隔离、pending门禁与聚焦，服务撤回和未知结果归 [Native owner](../../apps/desktop/README.md#原运行中消息队列)。
 
@@ -561,7 +565,13 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
 
-Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。相邻的思考和工具复用同一标题与阅读 key，首条工具可以直接展开其结果，后来加入的步骤保持各自的阅读状态。工具标题复用 `ToolActivity` 的图标映射，思考行始终使用思考图标，多步工具摘要使用流程图标。展开后的 `TraceLine` 共用行内缩进、图标宽度和图文间距。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
+Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。相邻的思考和工具复用同一标题与阅读 key，首条工具可以直接展开其结果，后来加入的步骤保持各自的阅读状态。工具标题复用 `ToolActivity` 的图标映射，思考行始终使用思考图标，多步工具摘要使用流程图标。展开后的 `TraceLine` 共用行内缩进、图标宽度和图文间距。多步列表与各项展开详情分别绘制左侧竖线，详情竖线位于原折叠内容内，随原展开与收起过渡裁切。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
+
+Native 主会话最后一个轮次片段复用「用时」折叠控件与 `turn:<id>:complete` 阅读状态。折叠时延迟构造过程，过程中各段思维链仍沿原阅读 key 开合；独立消息保留原先顺序。流式末段和同一消息的最终回复复用正文节点。没有可展开过程时显示静态耗时。[Native 历史回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核对冷打开、展开及缓存恢复。
+
+单条 `wait_agent_events` 沿 `ToolActivity` 直接打开结果，多个相邻步骤仍由 `ConversationTrace` 聚合。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核对单条等待在折叠、展开和运行时只呈现一个工具标题。单条思考、单条工具和组内步骤的详情共同使用折叠内容内的竖线样式，和思维链外层竖线一样按 `--ui-icon-size` 对准各自图标中心。Native 准备回复和流式回复状态与同层工具行共用 `--conversation-line-height`，文字与正文共用 `--conversation-text-size`。
+
+主会话的「用时」标题下无分隔线。轮次摘要、思考与工具摘要、正文、压缩状态及停止提示共用 `--conversation-line-height` 和 `--conversation-block-gap`。该层的简短标题采用正文行高，默认段间距约 11.2 CSS px；工具详情收展时外侧间距保持一致。外层 Trace 的首图标与正文同起点，图标槽使用 `--ui-icon-size`，多步详情的缩进由步骤列表维护。
 
 桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。缺省切换仍卸载原消息DOM和effect；Native 通过可选 `conversationCache` 启用下述有界停用树，不保活全部会话；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。恢复时，各级折叠用 `data-restored-expanded` 跳过自己的展开动画；后续手动开合清除本层恢复标记。[轮次回归](test/desktop-reasoning-turns.test.tsx)与[Native 往返回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核恢复和手动选择。
 
@@ -622,7 +632,7 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 
 共享 [completeRunReplies](src/run-reply-copy.ts)仅对准确 completed 且非 active 的 Run 建立最终回复资格，排除带原压缩身份的 assistant 消息；Native 最终复制与 Web 整轮复制均不包含压缩摘要。完整模型消息仍可能是候选或维护输出，不能先于真实 Run 完成显示为最终结果。回归见[最终回复复制](test/run-reply-copy.test.ts)与[Native 实际链路](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)。
 
-桌面 [Conversation](src/desktop/Conversation.tsx)的压缩状态使用普通 `Marker`，按工具消息标题的字号、行高和上下留白左对齐显示，不绘制文字两侧的分隔线；进行中扫光、失败颜色和具体错误说明保留。
+桌面 [Conversation](src/desktop/Conversation.tsx) 的压缩状态复用工具行的 `TraceLine`、`TraceIcon` 和 `TraceTitle`。段落压缩图标和工具图标共用尺寸与左边线。「压缩上下文中」转为「已压缩上下文」时沿用同一行和图标。进行中扫光由 `TraceLine` 的运行状态触发，失败行继续显示对应颜色和具体说明。
 
 宿主可以为临时压缩行与对应持久消息提供相同 `presentationKey`，使原 MessageGroup 在状态接管时保留 DOM。它仅是渲染身份，真实消息、来源、正文读取和复制仍使用 `id`；每次压缩须独立标识，跨 Store／Session／Run 不复用。实际热进度与持久事实合并和回归归 [Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
 
@@ -647,6 +657,8 @@ Native宿主可给`useSessionTabs`提供只读保留页恢复回调：恢复期�
 上下文总量按1024换算为大写K／M显示，例如262144 tokens显示为256K；上下文估算数量也采用相同换算，比例计算和无障碍描述保留原始token数。
 
 ### 文件差异的按需与有界显示
+
+会话内确认成功的文件编辑使用 `FileDiff` 的行内单栏模式。工具行显示「已编辑」、文件名和宿主提供的有界预览统计，点击文件名使用完整路径。卡片标题显示文件名、增删数和复制按钮，正文用一列行号区分各行原始位置，并复用已有滚动窗口、增删颜色和语法高亮。复制使用宿主剪贴板入口和原预览文本。其余差异阅读入口沿用现有布局选择。
 
 共享 [ToolActivity](src/desktop/ToolActivity.tsx)允许宿主对已确认的文件变更提供 `renderFileChange`，只在该工具展开时挂载，聚合内沿同一槽传递；不为失败／未知工具建立成功diff。[FileDiff](src/desktop/FileChanges.tsx)默认双栏，可切换统一视图，使用真实行号、轻量语法色、低饱和增删底色与空侧纹理；[模型](src/desktop/file-diff-model.ts)只解析原操作预览或标准Git patch，不读磁盘、不重建缺失内容。操作上下文未提供旧侧行号时留空，未知格式保留原文。计数明确为预览增删，不能当作整个文件或仓库统计；已保留的连续上下文可折叠／展开，后端省略的行明确不可展开。
 

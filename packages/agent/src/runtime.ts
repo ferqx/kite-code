@@ -22,7 +22,8 @@ import {
 import {
   type ContextTokenBaseline,
   estimateModelContext,
-  modelInputCapacity,
+  frozenModelInputLimit,
+  frozenTokenModel,
   projectModelContext,
 } from './context-estimate';
 import {
@@ -986,6 +987,11 @@ export class AgentRuntime {
     this.listMessageChanges = this.accountEntry(this.listMessageChanges, 'observation');
     this.getChanges = this.accountEntry(this.getChanges, 'observation');
     this.getView = this.accountEntry(this.getView, 'observation');
+    this.getSessionState = this.accountEntry(this.getSessionState, 'observation');
+    this.listSessionHistoryEntries = this.accountEntry(
+      this.listSessionHistoryEntries,
+      'observation',
+    );
     this.getSession = this.accountEntry(this.getSession, 'observation');
     this.queryExtension = this.accountEntry(this.queryExtension, 'observation');
     this.waitForCommand = this.accountEntry(this.waitForCommand, 'observation');
@@ -4114,7 +4120,7 @@ export class AgentRuntime {
       undefined,
       definitions,
       recordedTools,
-      this.shellModelTokenLimit(run, saved.request.modelId),
+      frozenModelInputLimit(run.configuration, saved.request.modelId),
     );
     // Step-selected capabilities may add presentation beyond the initial Run
     // catalogue. Original sealed requests are the comparison evidence, not a
@@ -4170,7 +4176,7 @@ export class AgentRuntime {
         ...saved.request.messages.slice(split).filter(isSource),
       ],
     };
-    const config = this.frozenTokenModel(run, saved.request.modelId);
+    const config = frozenTokenModel(run.configuration, saved.request.modelId);
     const capabilities = config?.modelCapabilities;
     const capacity = estimateModelContext(
       { messages: [], tools: [] },
@@ -4209,24 +4215,6 @@ export class AgentRuntime {
         ? { utilization: projection.totalInputTokens / capacity.usableInputTokens }
         : {}),
     };
-  }
-  private frozenTokenModel(run: RunRecord, modelId: string): Record<string, Json> | undefined {
-    const frozen = run.configuration as {
-      configuration?: { models?: Record<string, Json>[] };
-      snapshot?: { configuration?: { models?: Record<string, Json>[] } };
-    } | null;
-    const config = frozen?.snapshot?.configuration ?? frozen?.configuration;
-    const matches = config?.models?.filter((model) => model.id === modelId);
-    return matches?.length === 1 ? matches[0] : undefined;
-  }
-  private shellModelTokenLimit(run: RunRecord, modelId: string): number | undefined {
-    const model = this.frozenTokenModel(run, modelId);
-    const capabilities = model?.modelCapabilities as
-      | { contextWindowTokens?: unknown; maxOutputTokens?: unknown }
-      | undefined;
-    const options = model?.options as { maxOutputTokens?: unknown } | undefined;
-    const capacity = modelInputCapacity(capabilities, options?.maxOutputTokens);
-    return capacity.usableInputTokens ?? capacity.contextWindowTokens;
   }
   private inputTokenBaseline(
     execution: ExecutionRecord,
@@ -4268,8 +4256,8 @@ export class AgentRuntime {
     const previousRun = execution.runId && (await this.options.store.getRun(execution.runId));
     if (!previousRun || previousRun.originStoreId !== run.originStoreId) return undefined;
     if (previousRun.id !== run.id) {
-      const current = this.frozenTokenModel(run, modelId),
-        previous = this.frozenTokenModel(previousRun, modelId);
+      const current = frozenTokenModel(run.configuration, modelId),
+        previous = frozenTokenModel(previousRun.configuration, modelId);
       if (!current || !previous || canonicalJson(current) !== canonicalJson(previous))
         return undefined;
     }
@@ -4677,14 +4665,32 @@ export class AgentRuntime {
         }),
       ),
     };
-    const progress = observedProgress ?? this.compressionProgress.get(id);
+    return this.withCompressionProgress(view, observedProgress ?? this.compressionProgress.get(id));
+  }
+  async getSessionState(id: string) {
+    const entering = this.compressionProgress.get(id);
+    const progress = entering && { ...entering };
+    const state = await this.options.store.getSessionState(id);
+    return this.withCompressionProgress(state, progress ?? this.compressionProgress.get(id));
+  }
+  listSessionHistoryEntries(id: string, upperSeq: string, afterSeq: string) {
+    return this.options.store.listSessionHistoryEntries(id, upperSeq, afterSeq);
+  }
+  private withCompressionProgress<
+    T extends { runs: readonly Pick<RunRecord, 'id' | 'originStoreId' | 'isActive'>[] },
+  >(
+    state: T,
+    progress: AgentRuntime['compressionProgress'] extends Map<string, infer V>
+      ? V | undefined
+      : never,
+  ) {
     return progress &&
-      view.runs.some(
+      state.runs.some(
         (run) =>
           run.id === progress.runId && run.originStoreId === progress.originStoreId && run.isActive,
       )
-      ? { ...view, compressionProgress: { ...progress } }
-      : view;
+      ? { ...state, compressionProgress: { ...progress } }
+      : state;
   }
   getSession(id: string) {
     return this.options.store.getSession(id);
@@ -7352,10 +7358,11 @@ export class AgentRuntime {
       const originalCarrier = await this.options.store.getExecution(
         (command.request as { executionId: string }).executionId,
       );
-      if (
-        !originalCarrier ||
-        (originalCarrier.afterTurn as { kind?: string } | null)?.kind !== 'agent_completion'
-      )
+      const subscription = originalCarrier?.afterTurn as
+        | { kind?: string; authorization?: unknown }
+        | null
+        | undefined;
+      if (!originalCarrier || subscription?.kind !== 'agent_completion')
         throw new AgentError('report_unverifiable');
       const carriedMessageIds = await this.carriedAgentMessageIds(
         command,
@@ -7379,6 +7386,9 @@ export class AgentRuntime {
           return;
         }
       }
+      // Queue-only results need no retained configuration or automatic wake.
+      // A later active Run consumes the durable mail through its regular checkpoint.
+      if (!retained?.binding.afterTurn && !subscription.authorization) return;
       if (!retained) {
         await this.options.store.rejectCommand({
           expectedStoreId: command.originStoreId,
@@ -8578,7 +8588,7 @@ export class AgentRuntime {
             compressionSummaryMessages,
             scope.bindings.tools,
             undefined,
-            this.shellModelTokenLimit(run, modelId),
+            frozenModelInputLimit(run.configuration, modelId),
           ),
         );
         if (
@@ -8600,7 +8610,7 @@ export class AgentRuntime {
               compressionSummaryMessages,
               scope.bindings.tools,
               undefined,
-              this.shellModelTokenLimit(run, modelId),
+              frozenModelInputLimit(run.configuration, modelId),
             ),
           );
         }
@@ -9170,7 +9180,7 @@ export class AgentRuntime {
             undefined,
             scope.bindings.tools,
             undefined,
-            this.shellModelTokenLimit(run, modelId),
+            frozenModelInputLimit(run.configuration, modelId),
           );
           if (
             !selectedCompressor?.validateExpanded ||
@@ -10742,6 +10752,8 @@ export class AgentRuntime {
                   'stderr',
                   'stdoutBytes',
                   'stderrBytes',
+                  'outputFormat',
+                  'outputLimited',
                   'truncated',
                   'droppedBytes',
                 ])
@@ -10749,13 +10761,21 @@ export class AgentRuntime {
               }
               const presented = formatShellResult({
                 execution: starter,
-                result: { outcome: execution.status, content: canonicalJson(details), details },
+                result: {
+                  outcome: execution.status,
+                  content:
+                    details.outputFormat === 'model-preview'
+                      ? started.content!
+                      : canonicalJson(details),
+                  details,
+                },
                 operation: execution,
                 starter,
                 modelTokenLimit: shellTokenLimit,
               });
               if (presented)
-                return typeof details.stdout === 'string'
+                return typeof details.stdout === 'string' ||
+                  details.outputFormat === 'model-preview'
                   ? presented
                   : `${presented}\nUse shell_read with this shell_id to read the retained output; do not rerun the command.`;
             }

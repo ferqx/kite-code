@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isManagedWorkingFilePath } from '@kite-ai/agent/files';
+import { fileChangePreviewCounts, isManagedWorkingFilePath } from '@kite-ai/agent/files';
 import {
   type AgentClient,
   ClientError,
@@ -51,7 +51,7 @@ function baseline(value: unknown) {
     ? item
     : undefined;
 }
-function resultFacts(execution: Execution) {
+export function nativeFileReceiptFacts(execution: Execution) {
   const result = object(execution.result);
   let content: Record<string, unknown> | undefined;
   try {
@@ -131,6 +131,30 @@ function resultFacts(execution: Execution) {
   return { path, preview, snapshot };
 }
 
+export function nativeFileOperationMetadata(
+  messageId: string,
+  changeId: string,
+  execution: Execution,
+  { path, preview, snapshot } = nativeFileReceiptFacts(execution),
+) {
+  const operation = execution.definitionId.slice('files.'.length).replace(/_path$/, '');
+  if (!['read', 'write', 'edit'].includes(operation)) return;
+  if (!path) return;
+  const diffCounts =
+    operation === 'edit' && preview ? fileChangePreviewCounts(preview.text) : undefined;
+  return {
+    changeId,
+    messageId,
+    path,
+    operation: operation as NativeFileChange['operation'],
+    preview: preview || snapshot ? 'available' : 'unavailable',
+    openable: false,
+    ...(preview ? { diff: true } : {}),
+    ...(snapshot ? { snapshot: true } : {}),
+    ...(diffCounts ? { diffCounts } : {}),
+  } satisfies NativeFileChange;
+}
+
 function sourceIdentity(execution: Execution, run: Run) {
   return JSON.stringify({
     execution: {
@@ -151,6 +175,57 @@ function sourceIdentity(execution: Execution, run: Run) {
       originCommandId: run.originCommandId,
     },
   });
+}
+
+/** Decode the same immutable receipt for the parent and child file cards. */
+export async function nativeFileReceiptDetail(
+  client: Pick<AgentClient, 'readArtifact'>,
+  options: {
+    facts: ReturnType<typeof nativeFileReceiptFacts>;
+    changeId: string;
+    storeId: string;
+    signal: AbortSignal;
+    offset: number;
+    view?: 'diff' | 'snapshot';
+    verify: (snapshot: boolean) => Promise<void>;
+  },
+): Promise<NativeFileChangeDetail> {
+  const { facts, changeId, storeId, signal, offset, view, verify } = options;
+  const detail = { kind: 'fileChanges.detail' as const, changeId };
+  const ref = view === 'diff' ? undefined : facts.snapshot;
+  if (!ref) {
+    await verify(false);
+    return { ...detail, ...(view === 'snapshot' ? {} : facts.preview) };
+  }
+  // The artifact transport materializes the full file before returning a page.
+  if (BigInt(ref.size) > 1024n * 1024n)
+    return { ...detail, unavailableReason: 'snapshot_too_large' };
+  const { content } = await client.readArtifact(
+    ref.sessionId,
+    { expectedStoreId: storeId, refId: ref.id, scope: ref.scope },
+    { signal, expectedReference: ref },
+  );
+  await verify(true);
+  if (
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    offset > content.length ||
+    (offset < content.length && (content[offset]! & 0xc0) === 0x80)
+  )
+    throw new ClientError('file_snapshot_offset_invalid');
+  let end = Math.min(offset + 65536, content.length);
+  while (end < content.length && (content[end]! & 0xc0) === 0x80) end--;
+  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+    content.subarray(offset, end),
+  );
+  return {
+    ...detail,
+    snapshot: true,
+    text,
+    offset,
+    nextOffset: end < content.length ? end : null,
+    truncated: false,
+  };
 }
 
 /** Read exact saved Tool receipts. An observed path is never renderer filesystem authority. */
@@ -369,8 +444,13 @@ export class NativeFileChanges {
         const receipt = await this.receipt(lease, message, includeRead);
         if (!receipt) continue;
         const { execution, source } = receipt;
-        const facts = resultFacts(execution),
+        const facts = nativeFileReceiptFacts(execution),
           changeId = randomUUID();
+        const operation = execution.definitionId.slice('files.'.length).replace(/_path$/, '') as
+          | 'read'
+          | 'write'
+          | 'edit';
+        const metadata = nativeFileOperationMetadata(message.id, changeId, execution, facts);
         const managed = await this.managedRoot(lease, facts.path);
         const entry: Entry = {
           public: {
@@ -380,6 +460,7 @@ export class NativeFileChanges {
             preview: facts.preview || facts.snapshot ? 'available' : 'unavailable',
             ...(facts.snapshot ? { snapshot: true } : {}),
             ...(facts.preview ? { diff: true } : {}),
+            ...(metadata?.diffCounts ? { diffCounts: metadata.diffCounts } : {}),
             // Reading Fork provenance does not bind another physical Workspace.
             openable:
               !!managed ||
@@ -387,10 +468,7 @@ export class NativeFileChanges {
                 !!root &&
                 !!facts.path &&
                 (await this.sameWorkspace(lease, message))),
-            operation: execution.definitionId.slice('files.'.length).replace(/_path$/, '') as
-              | 'read'
-              | 'write'
-              | 'edit',
+            operation,
           },
           scope: lease.scope,
           message: structuredClone(message),
@@ -465,7 +543,7 @@ export class NativeFileChanges {
       execution.resultRevision !== entry.resultRevision
     )
       throw new ClientError('file_change_observation_unavailable');
-    return resultFacts(execution);
+    return nativeFileReceiptFacts(execution);
   }
   async detail(
     changeId: string,
@@ -477,54 +555,20 @@ export class NativeFileChanges {
       lease = this.begin(readId, entry.scope);
     try {
       const facts = await this.original(lease, entry);
-      if (facts.snapshot && view !== 'diff') {
-        const ref = facts.snapshot;
-        // Artifact reads currently materialize a whole body. Do not fetch an unbounded
-        // historical file merely to display its first page. The saved artifact is unchanged.
-        if (BigInt(ref.size) > 1024n * 1024n)
-          return { kind: 'fileChanges.detail', changeId, unavailableReason: 'snapshot_too_large' };
-        const result = await this.client.readArtifact(
-          ref.sessionId,
-          {
-            expectedStoreId: lease.scope.storeId,
-            refId: ref.id,
-            scope: ref.scope,
-          },
-          { signal: lease.abort.signal, expectedReference: ref },
-        );
-        this.check(lease);
-        await this.original(lease, entry);
-        await this.client.verifyConnection({ signal: lease.abort.signal });
-        this.check(lease);
-        if (
-          !Number.isSafeInteger(offset) ||
-          offset < 0 ||
-          offset > result.content.length ||
-          (offset < result.content.length && (result.content[offset]! & 0xc0) === 0x80)
-        )
-          throw new ClientError('file_snapshot_offset_invalid');
-        let end = Math.min(offset + 65536, result.content.length);
-        while (end < result.content.length && (result.content[end]! & 0xc0) === 0x80) end--;
-        const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
-          result.content.subarray(offset, end),
-        );
-        return {
-          kind: 'fileChanges.detail',
-          changeId,
-          snapshot: true,
-          text,
-          offset,
-          nextOffset: end < result.content.length ? end : null,
-          truncated: false,
-        };
-      }
-      await this.client.verifyConnection({ signal: lease.abort.signal });
-      this.check(lease);
-      return {
-        kind: 'fileChanges.detail',
+      return await nativeFileReceiptDetail(this.client, {
+        facts,
         changeId,
-        ...(view === 'snapshot' ? {} : facts.preview),
-      };
+        offset,
+        view,
+        storeId: lease.scope.storeId,
+        signal: lease.abort.signal,
+        verify: async (snapshot) => {
+          this.check(lease);
+          if (snapshot) await this.original(lease, entry);
+          await this.client.verifyConnection({ signal: lease.abort.signal });
+          this.check(lease);
+        },
+      });
     } finally {
       this.close(readId);
     }

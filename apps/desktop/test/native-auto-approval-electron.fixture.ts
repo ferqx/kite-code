@@ -87,13 +87,10 @@ try {
       .locator('.tool-activity-aggregate > .tool-activity-summary')
       .all())
       if ((await group.getAttribute('aria-expanded')) === 'false') await group.click();
-    const heading =
-      text.startsWith('已') || text === '自动审批未通过'
-        ? page
-            .locator('.tool-activity')
-            .filter({ has: page.getByRole('img', { name: text, exact: true }) })
-            .first()
-        : page.locator('.tool-activity-summary').filter({ hasText: text }).first();
+    const heading = page
+      .locator('.tool-activity')
+      .filter({ has: page.getByRole('img', { name: text, exact: true }) })
+      .first();
     await heading.waitFor();
     await heading.scrollIntoViewIfNeeded();
     // A nonzero child box can still be clipped by the expanding Turn. Observe

@@ -208,15 +208,15 @@ test('closed history resumes and updates leaf read admission without reprojectin
   }
 });
 
-for (const [initiallyOpen, lazyHistory] of [
+for (const [initiallyOpen, preserveReadingAnchor] of [
   [false, false],
   [true, false],
   [false, true],
   [true, true],
 ] as const) {
-  test(`${initiallyOpen ? 'initial' : 'newly added'} default-open processes restore on the same cached DOM without reprojecting stable resumes (lazy history: ${lazyHistory})`, async () => {
+  test(`${initiallyOpen ? 'initial' : 'newly added'} default-open processes restore on the same cached DOM without reprojecting stable resumes (preserve anchor: ${preserveReadingAnchor})`, async () => {
     const initial: Message[] = [
-      ...(lazyHistory
+      ...(preserveReadingAnchor
         ? Array.from(
             { length: 220 },
             (_, index): Message => ({
@@ -254,13 +254,15 @@ for (const [initiallyOpen, lazyHistory] of [
       f.render({ cacheLoading: false, readActive: true, messages, turnActivity });
     try {
       await f.render({
-        lazyHistory,
+        preserveReadingAnchor,
         renderToolActivity,
         turnActivity: initiallyOpen ? turnActivity : undefined,
       });
-      if (lazyHistory) {
-        expect(f.host.querySelectorAll('[data-conversation-entry-key]').length).toBeLessThan(100);
-        expect(f.host.textContent).not.toContain('Earlier question 0');
+      if (preserveReadingAnchor) {
+        expect(f.host.querySelectorAll('[data-conversation-entry-key]').length).toBeGreaterThan(
+          220,
+        );
+        expect(f.host.textContent).toContain('Earlier question 0');
       }
       if (!initiallyOpen) await f.render({ messages, turnActivity });
       const process = f.host.querySelector('.agent-turn-process')!;

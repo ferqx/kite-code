@@ -256,7 +256,7 @@ Tool 的 `failed`、人工／自动拒绝、adapter 抛异常与 `outcome_unknow
 
 普通来源发现与旧依据变化分别处理。[文件工具工厂](src/tools/files-tools.ts)仅为 read/list/glob/search 提供可信 `ToolDefinition.contextDiscovery=read_only`；Core 冻结原 Model 的 source requests，各 Tool 用原请求集加本次准确输入复核，不混入同批兄弟刚引入的目标。只有宿主捕获的低权限项目指令新增、原模型全部来源仍不变时，合格只读调用可以继续；下一 Model 同时取得新指令与真实结果，不追溯改写旧 Model。未知工具、扩展自报同 kind 和不透明来源没有该资格。[混合批次回归](test/isolated/context/tool-batch-freshness.test.ts)验证正常四项各一次及旧来源改写／删除保守拒绝；[真实 SIGKILL 恢复](test/isolated/recovery/source-discovery-resume.test.ts)核原 response 和下一 Model planned 两个边界，四个读取不重放。
 
-[模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`，静态规则及可缓存工作区事实不混入动态计划状态。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，放在真实历史之后。`ContextSource.placement` 仅允许 user 的 `after_history` 或 `runtime`；最多一个 runtime 来源组成唯一尾部观察块，非法或冲突明确拒绝。无 placement 的既有来源保原前缀行为；原 source IDs、完整工具配对、摘要及派发前 freshness 不变。
+[模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，接在无 placement 的静态来源之后，再接唯一 runtime 观察块和原会话历史。`ContextSource.placement` 仍接收 user 的原 `after_history` 和 `runtime` 标签，非法或冲突明确拒绝。完整扩展历史按真实生成前缀的位置移除快照，保留同名原历史来源。[上下文与子结果决定](../../.agents/notes/implemented/architecture/2026-11-14-agent-context-and-completion-delivery.md)说明消息顺序及与自动子结果交付的关系。
 
 压缩后的实际 Model 上下文独立保留当前选中历史中已证明的人类原输入和父到子任务指示，按摘要 → 已覆盖原输入原序 → 未覆盖尾部组装；来源、附件和终态历史边界保持，不复制消息或新建授权。Agent 原任务、steer 和 followup 经原父子／carrier／sender 来源证明保留，其余邮件／结果不因 user role 被认成任务或人类指令。`CompressionInput.retainedMessages` 供可信算法预检完整保留成本；Core 与默认 Service 复用纯 `modelHistory`，按实际 Host 组装边界剥离上下文，不能仅凭 Source ID 排除合法历史。公开 HTTP／SelectedContext 和存储格式不变；准确证明、分页及回归归[压缩 owner](src/storage/sqlite/context/compression.README.md)。
 
@@ -319,7 +319,7 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 `executeRun` 的消息检查点与 idle pump 共用 `applyJobReport`。原 carrier/result revision/Store、目标 Session/selection、结果 Source、consume 和 ack 同事务核验；`agent_completion` 可接入同一父会话的后续活动 Run，不要求技术 rootWork 相同。实际 Source 保原执行出处并以低信任内容呈现。已有普通用户输入先于 idle 报告新建轮次；活动父 Run 仍接纳结果，避免等待 child 时被队列阻塞。历史 Tool results 按原 call 顺序配对，不因通知到达而使合法批次失效。
 
-提交后返回丢失只查回原已应用 Run/Source/resultAcceptance；报告暂缓等待持久相关变化，无关事件不反复调用 policy/Model。idle 自动执行仍核原配置、当前 after-turn 授权和期限；QueueOnly 不启动接收者。邮件携带问题只在准确 result 已被该 Run 消费且原 carrier/mail 来源成立时关联，不复制消息、不伪造 received/prepared。
+提交后返回丢失只查回原已应用 Run/Source/resultAcceptance。普通 Service 让空闲父会话的子结果入队，由下次活动 Run 接收。缺少续轮授权和原配置租约时，无授权的结果仍可等待原邮箱接收。可信宿主显式启用自动续轮时核原配置、当前 after-turn 授权和期限。邮件携带问题只在准确 result 已被该 Run 消费且原 carrier/mail 来源成立时关联。
 
 旧 `human.input/decision`、呈现去重证明及已封存业务链仅供历史读取和准确回执兼容。旧 queued processing 在 pump 中拒绝为 `input_processing_removed`，旧活动 processing 的恢复在原 scope/恢复校验后、加载模型配置前拒绝；读取不调用模型。历史控制不自动重算，普通新输入不被旧 unresolved/selected-work 阻塞。取舍及旧决定的部分替代见[直接会话输入](../../.agents/notes/implemented/architecture/2026-10-22-direct-conversation-input.md)。
 

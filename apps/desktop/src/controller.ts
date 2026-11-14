@@ -86,6 +86,7 @@ export interface DesktopOptions {
   readonly readContextOnSelect?: boolean;
   /** Native input binds the original active command before choosing steer or follow-up. */
   readonly readActiveCommandOnSelect?: boolean;
+  readonly lightweightSessionState?: boolean;
   readonly interactionAnswerJournal?: {
     prepare(submission: InteractionAnswerSubmission, view: SessionView): Promise<void>;
     finish(submission: InteractionAnswerSubmission): void;
@@ -273,7 +274,11 @@ export class DesktopController {
     if (this.client.serverInfo?.capabilities?.includes('session_reconciliation')) {
       try {
         reconciledView = await this.client.reconcileSessionState(sessionId, {
-          signal: activation.signal,
+          signal: this.readSignal(activation.signal),
+          ...(this.options.lightweightSessionState &&
+          this.client.serverInfo?.capabilities.includes('session_state')
+            ? { lightweight: true }
+            : {}),
         });
       } catch (error) {
         if (activation.signal.aborted || generation !== this.generation || this.disposed) return;
@@ -354,7 +359,7 @@ export class DesktopController {
   private readExecutionView(selection: NonNullable<typeof this.selected>): Promise<SessionView> {
     if (this.viewRead?.selection === selection) return this.viewRead.promise;
     const abort = new AbortController();
-    const promise = this.client.getView(selection.sessionId, { signal: abort.signal });
+    const promise = this.readView(selection.sessionId, abort.signal);
     const read = { selection, abort, promise };
     this.viewRead = read;
     void promise
@@ -363,6 +368,20 @@ export class DesktopController {
       })
       .catch(() => {});
     return promise;
+  }
+
+  private readView(sessionId: string, signal: AbortSignal): Promise<SessionView> {
+    const options = { signal: this.readSignal(signal) };
+    return this.options.lightweightSessionState &&
+      this.client.serverInfo?.capabilities.includes('session_state')
+      ? this.client.getSessionState(sessionId, options)
+      : this.client.getView(sessionId, options);
+  }
+
+  private readSignal(signal: AbortSignal): AbortSignal {
+    return this.options.lightweightSessionState
+      ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+      : signal;
   }
 
   private validateExecution(view: SessionView, sessionId: string): void {
@@ -384,7 +403,7 @@ export class DesktopController {
     this.selectionRead?.abort();
     const reading = new AbortController();
     this.selectionRead = reading;
-    const signal = reading.signal;
+    const signal = this.readSignal(reading.signal);
     const check = () => {
       signal.throwIfAborted();
       if (
@@ -608,7 +627,7 @@ export class DesktopController {
       this.validateInteractionPage(page, scope, afterId);
       if (page.snapshotCursor !== scope.snapshotCursor)
         throw new ClientError('interaction_page_observation_changed');
-      const current = await this.client.getView(original.sessionId, { signal: abort.signal });
+      const current = await this.readView(original.sessionId, abort.signal);
       abort.signal.throwIfAborted();
       if (
         this.disposed ||

@@ -121,6 +121,7 @@ export interface ShellReceipt {
   };
   stdout: { text: string; bytes: string | null; truncated: boolean; omitted: boolean };
   stderr: { text: string; bytes: string | null; truncated: boolean; omitted: boolean };
+  output?: { text: string; truncated: boolean };
 }
 const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'];
 const allowedKeys = (value: Record<string, unknown>, keys: string[]) =>
@@ -152,6 +153,7 @@ export function isShellReceipt(value: unknown): value is ShellReceipt {
       'job',
       'stdout',
       'stderr',
+      'output',
     ]) ||
     !['executionId', 'callId', 'definitionVersion'].every(
       (key) => typeof data[key] === 'string' && data[key],
@@ -190,6 +192,16 @@ export function isShellReceipt(value: unknown): value is ShellReceipt {
       !Object.keys(authorization).length ||
       !allowedKeys(authorization, ['tool', 'job']) ||
       !Object.values(authorization).every(isShellAuthorization)
+    )
+      return false;
+  }
+  if (data.output !== undefined) {
+    const output = object(data.output);
+    if (
+      !output ||
+      !allowedKeys(output, ['text', 'truncated']) ||
+      typeof output.text !== 'string' ||
+      typeof output.truncated !== 'boolean'
     )
       return false;
   }
@@ -328,6 +340,11 @@ async function recordedShellReceipt(
   const effectiveScope = job.authorization?.policy?.effectiveScope ?? null;
   const toolAuthorization = shellAuthorization(execution.authorization);
   const jobAuthorization = shellAuthorization(job.authorization);
+  const savedOutput =
+    details?.outputFormat === 'model-preview' && typeof result?.content === 'string'
+      ? result.content
+      : undefined;
+  const output = savedOutput === undefined ? undefined : preview(savedOutput, 4096);
   const stream = (key: 'stdout' | 'stderr') => {
     const original = typeof details?.[key] === 'string' ? (details[key] as string) : undefined;
     const text = original === undefined ? '' : preview(original, 4096);
@@ -376,6 +393,17 @@ async function recordedShellReceipt(
     },
     stdout: stream('stdout'),
     stderr: stream('stderr'),
+    ...(output === undefined
+      ? {}
+      : {
+          output: {
+            text: output,
+            truncated:
+              output !== savedOutput ||
+              details?.outputLimited === true ||
+              details?.truncated === true,
+          },
+        }),
   };
   return isShellReceipt(receipt) ? receipt : undefined;
 }

@@ -8,7 +8,7 @@ export interface ContextSource {
   content: string;
   /** Trusted host placement: executable evidence and remote content use user data. */
   role?: 'system' | 'user';
-  /** Trusted data placement; never an execution capability. Runtime fragments form one user block. */
+  /** Captured data slots. The legacy after_history label is projected before conversation history. */
   placement?: 'after_history' | 'runtime';
 }
 export interface SourceRequest {

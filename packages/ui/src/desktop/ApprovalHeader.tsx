@@ -22,13 +22,20 @@ export function childAgentAppearance(identity: string) {
 }
 
 /** Shared stable child identity decoration; presentation only. */
-export function ChildAgentIcon({ identity }: { identity: string }) {
+export function ChildAgentIcon({
+  identity,
+  neutral = false,
+}: {
+  identity: string;
+  neutral?: boolean;
+}) {
   const appearance = childAgentAppearance(identity);
   return (
     <span
       className="approval-child-icon"
       data-child-icon={appearance.icon}
       data-child-color={appearance.color}
+      data-neutral={neutral || undefined}
     >
       <HugeiconsIcon icon={childIcons[appearance.icon]!} aria-hidden="true" />
     </span>

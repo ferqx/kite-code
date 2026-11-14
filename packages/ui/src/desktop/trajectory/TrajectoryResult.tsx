@@ -227,7 +227,8 @@ function Presentation({ value }: { value: ToolResultPresentation }) {
               )}
             </section>
           ))}
-        {!value.stdout &&
+        {(value.stdout !== undefined || value.stderr !== undefined || value.output !== undefined) &&
+          !value.stdout &&
           !value.stderr &&
           !value.output?.some(
             (item) =>
@@ -454,6 +455,13 @@ export function TrajectoryResult({ data, fallback }: { data: unknown; fallback?:
     typeof body?.content === 'string' &&
     (!containsBody || body.content.length > 0) &&
     !containsExactText(value, body.content);
+  const shellOutput =
+    value?.kind === 'shell' &&
+    ['execute', 'read'].includes(value.operation) &&
+    value.status !== undefined &&
+    !containsBody &&
+    typeof body?.content === 'string' &&
+    !body.content.startsWith('{');
   return (
     <div className="trajectory-tool-result">
       {typeof body?.outcome === 'string' && (!value || body.outcome !== 'succeeded') && (
@@ -470,7 +478,14 @@ export function TrajectoryResult({ data, fallback }: { data: unknown; fallback?:
         </p>
       )}
       {presentation.success && <Presentation value={presentation.data} />}
-      {(exceptionalContent || !containsBody) &&
+      {shellOutput &&
+        (body.content ? (
+          <pre>{body.content as string}</pre>
+        ) : (
+          <p role="status">本次回执保存的命令输出为空。</p>
+        ))}
+      {!shellOutput &&
+        (exceptionalContent || !containsBody) &&
         (typeof body?.content === 'string' ? (
           value && value.kind !== 'web' && !exceptionalContent ? (
             <details className="trajectory-result-receipt">

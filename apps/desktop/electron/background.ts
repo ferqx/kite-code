@@ -4,6 +4,7 @@ import {
   type BackgroundExecutionItem,
   ClientError,
   type Command,
+  type Message,
 } from '@kite-ai/client';
 import {
   type NativeBackgroundChild,
@@ -12,6 +13,7 @@ import {
   type NativeBackgroundPage,
   nativeBackgroundPageBytes,
 } from '../src/background-bridge';
+import type { NativeFileChangeDetail } from '../src/file-changes-bridge';
 import type { NativeJobOutputScope } from '../src/job-output-bridge';
 import {
   type NativeToolMessageFact,
@@ -20,6 +22,12 @@ import {
   nativeToolMessagePageBytes,
   presentableRun,
 } from '../src/tool-messages-bridge';
+import {
+  nativeFileOperationMetadata,
+  nativeFileReceiptDetail,
+  nativeFileReceiptFacts,
+} from './file-changes';
+import { NativeInputImageReads } from './input-image-reads';
 import { NativeJobOutputReads } from './job-output-reads';
 import {
   nativeLiveShellInputFact,
@@ -50,6 +58,16 @@ type Detail = {
   observationId: number;
   bytes?: Uint8Array;
   offset: number;
+};
+type ChildReceipt = {
+  lease: Pick<Detail, 'scope' | 'item' | 'observationId'>;
+  childId: string;
+  selection: string;
+  messageId: string;
+  seq: string;
+  hash: string;
+  revision?: string;
+  kind: 'file' | 'text' | 'image';
 };
 const decimal = (value: string) => {
   if (!/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 9223372036854775807n)
@@ -134,6 +152,13 @@ export class NativeBackground {
   private observation = 0;
   private readonly outputs = new Map<string, Detail>();
   private readonly children = new Map<string, Detail>();
+  private readonly childReceipts = new Map<string, ChildReceipt>();
+  private readonly childTextReads = new Set<AbortController>();
+  private readonly childImageReads = new Map<
+    string,
+    { lease: Detail; reader?: NativeInputImageReads }
+  >();
+  private readonly childFileReads = new Map<string, Detail>();
   private readonly output: NativeJobOutputReads;
   private readonly client: AgentClient;
   private readonly current: () => Scope | undefined;
@@ -414,6 +439,28 @@ export class NativeBackground {
     this.outputs.get(readId)?.abort.abort();
     this.outputs.delete(readId);
   }
+  private childReceiptHandle(entry: ChildReceipt) {
+    const handle = createHash('sha256')
+      .update(
+        JSON.stringify([
+          entry.kind,
+          entry.lease.scope,
+          entry.lease.item.execution.id,
+          entry.childId,
+          entry.selection,
+          entry.messageId,
+          entry.seq,
+          entry.hash,
+          entry.revision,
+        ]),
+      )
+      .digest('hex');
+    this.childReceipts.delete(handle);
+    this.childReceipts.set(handle, entry);
+    while (this.childReceipts.size > 8192)
+      this.childReceipts.delete(this.childReceipts.keys().next().value!);
+    return handle;
+  }
   async childOpen(input: {
     observationId: number;
     executionId: string;
@@ -474,6 +521,11 @@ export class NativeBackground {
           afterSeq,
           upperSeq,
           limit: 200,
+          ...(lease.scope.rootSessionId &&
+          this.client.serverInfo?.capabilities.includes('session_state') &&
+          this.client.serverInfo.capabilities.includes('message_changes')
+            ? { previews: true }
+            : {}),
         });
         this.check(lease);
         for (const message of page) {
@@ -571,6 +623,45 @@ export class NativeBackground {
             .map((run) => [run.id, nativeRunFact(run)]),
         );
         const tools: NonNullable<NativeBackgroundChild['presentation']>['tools'] = [];
+        const fileTargets: NonNullable<
+          NonNullable<NativeBackgroundChild['presentation']>['fileTargets']
+        > = [];
+        const textHandles = messages.flatMap((message) =>
+          message.deferredText
+            ? [
+                {
+                  messageId: message.id,
+                  handle: this.childReceiptHandle({
+                    lease: {
+                      scope: lease.scope,
+                      item: lease.item,
+                      observationId: lease.observationId,
+                    },
+                    childId,
+                    selection: view.session.contextSelectionId,
+                    messageId: message.id,
+                    seq: message.seq,
+                    hash: message.deferredText.sha256,
+                    kind: 'text',
+                  }),
+                },
+              ]
+            : [],
+        );
+        const imageHandles: { messageId: string; handle: string }[] = [];
+        const imageHandle = (message: Message) =>
+          imageHandles.push({
+            messageId: message.id,
+            handle: this.childReceiptHandle({
+              lease: { scope: lease.scope, item: lease.item, observationId: lease.observationId },
+              childId,
+              selection: view.session.contextSelectionId,
+              messageId: message.id,
+              seq: message.seq,
+              hash: createHash('sha256').update(JSON.stringify(message)).digest('hex'),
+              kind: 'image',
+            }),
+          });
         let commandBytes = 0;
         let unavailable: true | undefined;
         try {
@@ -586,6 +677,8 @@ export class NativeBackground {
             }
           }
           for (const message of messages) {
+            if (message.role === 'user' && message.status === 'complete' && message.images?.length)
+              imageHandle(message);
             if (!nativeToolMessageEligible(message)) continue;
             const execution = await this.client.getExecution(message.sourceIds[0], { signal });
             this.check(lease);
@@ -611,6 +704,38 @@ export class NativeBackground {
                 nativeToolMessagePageBytes - commandBytes,
               );
               tools.push(fact);
+              if (fact.images?.length) imageHandle(message);
+              if (
+                fact.status === 'succeeded' &&
+                !message.originMessage &&
+                [
+                  'files.read',
+                  'files.edit',
+                  'files.write',
+                  'files.edit_path',
+                  'files.write_path',
+                ].includes(execution.definitionId)
+              ) {
+                const hash = createHash('sha256')
+                  .update(JSON.stringify(execution.result))
+                  .digest('hex');
+                const changeId = this.childReceiptHandle({
+                  lease: {
+                    scope: lease.scope,
+                    item: lease.item,
+                    observationId: lease.observationId,
+                  },
+                  childId,
+                  selection: view.session.contextSelectionId,
+                  messageId: message.id,
+                  seq: message.seq,
+                  hash,
+                  revision: execution.resultRevision,
+                  kind: 'file',
+                });
+                const metadata = nativeFileOperationMetadata(message.id, changeId, execution);
+                if (metadata) fileTargets.push(metadata);
+              }
             }
           }
         } catch (cause) {
@@ -661,21 +786,33 @@ export class NativeBackground {
           );
           liveTools.push(fact);
         }
+        const compression = final.compressionProgress;
+        const compressing = compression && runs.get(compression.runId);
         presentation = {
           ...(unavailable ? { unavailable } : {}),
+          ...(compressing?.isActive && compression?.originStoreId === compressing.originStoreId
+            ? { compressionProgress: compression }
+            : {}),
           runs: [...runs.values()],
           tools,
+          fileTargets,
+          textHandles,
+          imageHandles,
           liveTools,
           executions: final.executions
             .filter(
               (execution) =>
-                execution.kind === 'tool' &&
+                (execution.kind === 'tool' ||
+                  (execution.kind === 'model' && execution.parentExecutionId == null)) &&
                 execution.sessionId === childId &&
                 execution.originStoreId === lease.scope.storeId &&
                 execution.runId !== null &&
                 runs.has(execution.runId),
             )
-            .map(nativeToolExecution),
+            .map((execution) => ({
+              ...nativeToolExecution(execution),
+              parentExecutionId: execution.parentExecutionId ?? null,
+            })),
         };
       }
       for (const original of parents) {
@@ -818,6 +955,196 @@ export class NativeBackground {
     if (lease) lease.bytes = undefined;
     this.children.delete(readId);
   }
+  async childFile(
+    changeId: string,
+    readId: string,
+    offset = 0,
+    view: 'diff' | 'snapshot' = 'diff',
+  ): Promise<NativeFileChangeDetail> {
+    const entry = this.childReceipts.get(changeId);
+    if (entry?.kind !== 'file' || this.childFileReads.has(readId) || this.childFileReads.size >= 32)
+      throw new ClientError('background_child_file_unavailable');
+    const lease = { ...entry.lease, offset: 0, readId, abort: new AbortController() };
+    this.childFileReads.set(readId, lease);
+    const signal = lease.abort.signal;
+    const original = async () => {
+      await this.fresh(lease);
+      await this.checkChildReceiptView(lease, entry);
+      const [message] = await this.client.listMessages(entry.childId, {
+        afterSeq: String(decimal(entry.seq) - 1n),
+        upperSeq: entry.seq,
+        limit: 1,
+        signal,
+      });
+      if (
+        !message ||
+        message.id !== entry.messageId ||
+        message.seq !== entry.seq ||
+        message.sessionId !== entry.childId ||
+        message.originMessage ||
+        !nativeToolMessageEligible(message)
+      )
+        throw new ClientError('background_child_history_mismatch');
+      const execution = await this.client.getExecution(message.sourceIds[0], { signal });
+      const fact = nativeToolMessageFact({
+        execution,
+        message,
+        messages: [message],
+        sessionId: entry.childId,
+      });
+      const hash = createHash('sha256').update(JSON.stringify(execution.result)).digest('hex');
+      if (
+        fact?.status !== 'succeeded' ||
+        hash !== entry.hash ||
+        execution.resultRevision !== entry.revision ||
+        execution.originStoreId !== lease.scope.storeId
+      )
+        throw new ClientError('background_child_history_mismatch');
+      await this.checkChildReceiptView(lease, entry);
+      return nativeFileReceiptFacts(execution);
+    };
+    try {
+      const facts = await original();
+      return await nativeFileReceiptDetail(this.client, {
+        facts,
+        changeId,
+        offset,
+        view,
+        storeId: lease.scope.storeId,
+        signal,
+        verify: async (snapshot) => {
+          this.check(lease);
+          if (snapshot) await original();
+          await this.client.verifyConnection({ signal });
+          this.check(lease);
+        },
+      });
+    } finally {
+      this.childFileClose(readId);
+    }
+  }
+  async childImageOpen(handle: string, readId: string, index: number) {
+    const entry = this.childReceipts.get(handle);
+    if (
+      entry?.kind !== 'image' ||
+      this.childImageReads.has(readId) ||
+      this.childImageReads.size >= 4
+    )
+      throw new ClientError('background_child_image_unavailable');
+    const lease = { ...entry.lease, offset: 0, readId, abort: new AbortController() };
+    const operation: { lease: Detail; reader?: NativeInputImageReads } = { lease };
+    this.childImageReads.set(readId, operation);
+    const signal = lease.abort.signal;
+    try {
+      await this.fresh(lease);
+      await this.checkChildReceiptView(lease, entry);
+      const [message] = await this.client.listMessages(entry.childId, {
+        afterSeq: String(decimal(entry.seq) - 1n),
+        upperSeq: entry.seq,
+        limit: 1,
+        signal,
+        ...(this.client.serverInfo?.capabilities.includes('session_state') &&
+        this.client.serverInfo.capabilities.includes('message_changes')
+          ? { previews: true }
+          : {}),
+      });
+      this.check(lease);
+      if (
+        !message ||
+        message.id !== entry.messageId ||
+        message.seq !== entry.seq ||
+        message.sessionId !== entry.childId ||
+        createHash('sha256').update(JSON.stringify(message)).digest('hex') !== entry.hash
+      )
+        throw new ClientError('background_child_history_mismatch');
+      const scope = {
+        generation: lease.scope.generation,
+        viewSelection: lease.scope.viewSelection ?? 0,
+        historyEpoch: 0,
+        storeId: lease.scope.storeId,
+        sessionId: entry.childId,
+        workspaceId: lease.item.session.workspaceId,
+      };
+      const reader = new NativeInputImageReads(
+        this.client,
+        () => (this.valid(lease) ? scope : undefined),
+        () => new Map([[message.id, message]]),
+      );
+      operation.reader = reader;
+      const result = await reader.open({
+        method: 'input.image.open',
+        ...scope,
+        messageId: message.id,
+        index,
+        readId,
+      });
+      await this.checkChildReceiptView(lease, entry);
+      return result;
+    } catch (error) {
+      this.childImageClose(readId);
+      throw error;
+    }
+  }
+  childImageRead(readId: string, offset: number) {
+    const entry = this.childImageReads.get(readId);
+    if (!entry?.reader) throw new ClientError('background_child_image_unavailable');
+    return entry.reader.read(readId, offset);
+  }
+  childImageClose(readId: string) {
+    const entry = this.childImageReads.get(readId);
+    entry?.lease.abort.abort();
+    entry?.reader?.close(readId);
+    this.childImageReads.delete(readId);
+  }
+  childFileClose(readId: string) {
+    this.childFileReads.get(readId)?.abort.abort();
+    this.childFileReads.delete(readId);
+  }
+  private async checkChildReceiptView(lease: Detail, entry: ChildReceipt) {
+    const { storeId, session } = await this.client.getView(entry.childId, {
+      signal: lease.abort.signal,
+    });
+    this.check(lease);
+    if (
+      storeId !== lease.scope.storeId ||
+      session.id !== entry.childId ||
+      session.deletedAt !== null ||
+      session.parentSessionId !== lease.item.session.id ||
+      session.rootSessionId !== lease.item.rootSession.id ||
+      session.workspaceId !== lease.item.session.workspaceId ||
+      session.contextSelectionId !== entry.selection
+    )
+      throw new ClientError('background_child_binding_changed');
+  }
+  async childText(handle: string, offset: string) {
+    const entry = this.childReceipts.get(handle);
+    if (entry?.kind !== 'text' || this.childTextReads.size >= 16)
+      throw new ClientError('background_child_text_unavailable');
+    const timeout = AbortSignal.timeout(8_000);
+    const lease = { ...entry.lease, offset: 0, readId: '', abort: new AbortController() };
+    timeout.addEventListener('abort', () => lease.abort.abort(timeout.reason), { once: true });
+    const signal = lease.abort.signal;
+    this.childTextReads.add(lease.abort);
+    try {
+      await this.fresh(lease);
+      await this.checkChildReceiptView(lease, entry);
+      const chunk = await this.client.readMessageText(
+        entry.childId,
+        entry.messageId,
+        {
+          storeId: lease.scope.storeId,
+          seq: entry.seq,
+          sha256: entry.hash,
+          offset,
+        },
+        { signal },
+      );
+      await this.checkChildReceiptView(lease, entry);
+      return { kind: 'messages.text' as const, ...chunk };
+    } finally {
+      this.childTextReads.delete(lease.abort);
+    }
+  }
   release() {
     this.observed = undefined;
     this.previousChildObservation = undefined;
@@ -825,5 +1152,9 @@ export class NativeBackground {
     if (this.directory) this.close(this.directory.readId);
     for (const id of this.outputs.keys()) this.outputClose(id);
     for (const id of this.children.keys()) this.childClose(id);
+    for (const id of this.childFileReads.keys()) this.childFileClose(id);
+    for (const id of this.childImageReads.keys()) this.childImageClose(id);
+    for (const abort of this.childTextReads) abort.abort();
+    this.childReceipts.clear();
   }
 }

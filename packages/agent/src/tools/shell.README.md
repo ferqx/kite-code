@@ -10,7 +10,7 @@
 
 `shell_execute` 指导模型优先使用 `rg` 和 `rg --files`。普通 Shell 的 [输出采集](shell-output.ts) 共用 Store 的 1 MiB JSON／记录预算，在运行中发布稳定前缀，随后有界保留最近输出，在原终态前按顺序发布省略量和尾部。标准输出和错误输出共用预算；两个流的省略字节分别保存。Git 工作树的受信 worker 继续使用完整帧读取。Store 和旧记录合同见 [Jobs owner](../jobs/README.md)。
 
-`shell_execute` 和 `shell_read` 接受可选 `max_output_tokens`，它仅影响送入模型的输出预览，不进入 Shell Job 参数、命令授权摘要或运行时输出采集。默认 10,000，按每 token 4 个 UTF-8 字节估算，并与已知的所选模型输入容量取小。原回执、退出状态、Shell 引用、分页位置和采集省略量继续可读。已截断的读取页可用同一输入游标减小 `limit` 重新读取，读取操作不启动命令。验证见 [Shell 回归](../../test/isolated/tools/shell/unified-entry.test.ts)。
+`shell_execute` 和 `shell_read` 接受可选 `max_output_tokens`。默认 10,000，按每 token 4 个 UTF-8 字节估算，并与原 Run 中冻结的模型输入容量取小。工具在写入前形成输出段，写到 `content` 后由原 Run 的模型和桌面复用。后续模型请求的容量更小时，在构建该次请求时进一步限制历史 Shell 输出，保存的输出段仍供桌面读取。只有含内容的流才写入标题，读取页的缺口说明沿用输出预算。新回执的 `details` 保留退出状态、原 Shell 引用、游标和省略量等事实，不再复制原 stdout／stderr 或整页输出。旧回执仍按原参数和读取端的模型预算计算预览。接下来的 `shell_read` 通过原 Job 的有界输出记录续读。用同一输入游标减小 `limit` 可重新读取该页，无需重启命令。验证见 [Shell 回归](../../test/isolated/tools/shell/unified-entry.test.ts)。
 
 `shell_read({shell_id,cursor?,limit?})` 的 cursor 绑定原 Job 和流位置；`caught_up` 只表示读到当前水位，`terminal` 才表示原执行终态，暂时无输出不表示完成。`shell_stop({shell_id})` 由宿主按原取消 Tool 稳定派生 command 身份，结果同时保原启动 `execution_id` 和独立 `cancellation_execution_id`；请求取消不冒充进程已停止，也不重放命令。`shell_wait({shell_id,wait_ms?})` 仅观察，期限到达不取消业务。
 

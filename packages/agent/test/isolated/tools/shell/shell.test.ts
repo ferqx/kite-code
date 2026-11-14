@@ -102,7 +102,8 @@ for (const entry of [
         context,
       );
     expect(result.details).toMatchObject({ execution_id: executionId, shell_id: ref.key, ref });
-    expect(JSON.parse(result.content).execution_id).toBe(executionId);
+    if (entry.id === 'shell.execute' && !entry.background) expect(result.content).toBe('');
+    else expect(JSON.parse(result.content).execution_id).toBe(executionId);
     expect(executionId).not.toBe(ref.executionId);
     expect(executionId).not.toBe(ref.key);
     expect(calls).toEqual([

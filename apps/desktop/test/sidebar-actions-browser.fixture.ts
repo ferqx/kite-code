@@ -87,6 +87,21 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await page.getByText('Reply a', { exact: true }).waitFor();
       await editor.fill('Keep this draft');
       await page.mouse.move(700, 300);
+      const headerTitle = frame.locator('.breadcrumb strong');
+      const titleAppearance = () =>
+        headerTitle.evaluate((node) => {
+          const background = getComputedStyle(node.parentElement!.parentElement!).backgroundColor;
+          const { color } = getComputedStyle(node);
+          const { x, y, width, height } = node.getBoundingClientRect();
+          return { background, color, bounds: [x, y, width, height] };
+        });
+      const idleTitle = await titleAppearance();
+      await headerTitle.hover();
+      assert.deepEqual(await titleAppearance(), idleTitle);
+      await frame.locator('.breadcrumb').hover();
+      assert.deepEqual(await titleAppearance(), idleTitle);
+      await page.mouse.move(700, 300);
+      assert.deepEqual(await titleAppearance(), idleTitle);
       assert.equal(await menuOpacity('Session A'), 0);
       assert.equal(await menuOpacity('Session B'), 0);
       await row('Session B').hover();
@@ -159,9 +174,25 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       assert.equal(await rowElement('Session B').count(), 1);
       await page.keyboard.press('Escape');
       assert.equal(await rename.isVisible(), true);
+      await page.evaluate(() => {
+        const observer = new MutationObserver(() => {
+          if (document.querySelector('.native-toast-card'))
+            Reflect.set(window, 'sawRenameToast', true);
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        Reflect.set(window, 'finishRenameToastSample', () => {
+          observer.disconnect();
+          return Reflect.get(window, 'sawRenameToast');
+        });
+      });
       await release('session-mutation');
       await row('Renamed B').waitFor();
       await rename.waitFor({ state: 'hidden' });
+      assert.equal(await page.locator('.native-toast-card').count(), 0);
+      assert.equal(
+        await page.evaluate(() => Reflect.get(window, 'finishRenameToastSample')()),
+        undefined,
+      );
 
       await page.evaluate(() => window.sessionShellFixture.resume());
       await open('Renamed B', '删除');
@@ -195,6 +226,7 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await release('session-mutation');
       await remove.waitFor({ state: 'hidden' });
       await row('Renamed B').waitFor({ state: 'hidden' });
+      await page.locator('.native-toast-card').getByText('会话操作结果待确认。').waitFor();
       const lookup = row('查询会话操作结果');
       await lookup.waitFor();
       await lookup.click();
@@ -202,6 +234,7 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       await pending('session-lookup');
       await release('session-lookup');
       await lookup.waitFor({ state: 'hidden' });
+      await page.locator('.native-toast-card').getByText('已请求删除会话。').waitFor();
       const observed = await page.evaluate(() => {
         const sample = Reflect.get(window, 'sessionFrames');
         sample.done = true;
@@ -246,13 +279,25 @@ export async function verifySessionRowActions(browser: Browser, url: string, art
       assert.equal(await title.inputValue(), 'Discard while disconnected');
       await page.keyboard.press('Escape');
       assert.equal(await editor.inputValue(), 'Keep this draft');
-      await open('Session A', '删除');
+
+      await page.evaluate(() => window.sessionShellFixture.loseNextSessionReceipt());
+      await open('Session A', '重命名');
+      await title.fill('Renamed A');
+      await save.click();
+      await row('Renamed A').waitFor();
+      await rename.waitFor({ state: 'hidden' });
+      await page.locator('.native-toast-card').getByText('会话操作结果待确认。').waitFor();
+      await lookup.click();
+      await page.getByRole('menuitem', { name: '重命名 · Session A' }).click();
+      await lookup.waitFor({ state: 'hidden' });
+      assert.equal(await page.locator('.native-toast-card').count(), 0);
+      await open('Renamed A', '删除');
       await remove.getByRole('button', { name: '删除', exact: true }).waitFor();
       await page.screenshot({ path: path.join(artifact, `session-delete-${colorScheme}.png`) });
       await remove.getByRole('button', { name: '删除', exact: true }).click();
       await frame.getByText('新对话', { exact: true }).waitFor();
       await page.locator('.new-conversation-page').waitFor();
-      await row('Session A').waitFor({ state: 'hidden' });
+      await row('Renamed A').waitFor({ state: 'hidden' });
       assert.equal(await page.getByText('Reply a', { exact: true }).count(), 0);
       assert.deepEqual(errors, []);
     } finally {

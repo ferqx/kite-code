@@ -13,12 +13,14 @@ import {
   type NativeToolMessageRequest,
   type NativeToolMessageScope,
   type NativeToolRunPage,
+  nativeShellOutputPageBytes,
   nativeToolMessagePageBytes,
   presentableRun,
 } from '../src/tool-messages-bridge';
 import { NativeMcpToolLabelBudget, nativeMcpToolLabel } from './mcp-tool-label';
 import {
   nativeFileCreationCandidate,
+  nativeLegacyShellOutput,
   nativeLiveShellInputFact,
   nativeToolMessageEligible,
   nativeToolMessageFact,
@@ -369,6 +371,7 @@ export class NativeToolMessages {
       const entries: NativeToolMessagePage['entries'] = [];
       const labels = new Map<string, Promise<string | undefined>>();
       const receiptRuns = new Map<string, Run | undefined>();
+      let shellOutputBytes = 0;
       for (const id of input.executionIds ?? []) {
         const observed = this.liveExecutions().find((execution) => execution.id === id);
         if (
@@ -427,12 +430,15 @@ export class NativeToolMessages {
           execution.definitionVersion === '1' &&
           ['failed', 'outcome_unknown'].includes(execution.status);
         const creatingFile = nativeFileCreationCandidate(execution);
+        const legacyShellOutput = nativeLegacyShellOutput(execution);
         if (
           execution.runId &&
-          (worktreeIssue ||
+          (legacyShellOutput ||
+            worktreeIssue ||
             creatingFile ||
             (execution.status === 'succeeded' &&
-              ((execution.definitionId === 'task.message' && execution.definitionVersion === '1') ||
+              ((['task.message', 'task.events'].includes(execution.definitionId) &&
+                execution.definitionVersion === '1') ||
                 (execution.definitionId === 'files.read' &&
                   ['4', '5'].includes(execution.definitionVersion) &&
                   object(object(execution.result)?.details)?.exists === false))))
@@ -441,7 +447,7 @@ export class NativeToolMessages {
           if (
             !receiptRuns.has(execution.runId) ||
             (!receiptRun &&
-              execution.definitionId !== 'task.message' &&
+              !['task.message', 'task.events'].includes(execution.definitionId) &&
               !worktreeIssue &&
               !creatingFile)
           ) {
@@ -453,7 +459,12 @@ export class NativeToolMessages {
             } catch (cause) {
               this.check(lease);
               // Optional acknowledgment classification cannot withdraw the original Tool result.
-              if (execution.definitionId !== 'task.message' && !worktreeIssue && !creatingFile)
+              if (
+                !['task.message', 'task.events'].includes(execution.definitionId) &&
+                !worktreeIssue &&
+                !creatingFile &&
+                !legacyShellOutput
+              )
                 throw cause;
             }
             receiptRuns.set(execution.runId, receiptRun);
@@ -468,6 +479,12 @@ export class NativeToolMessages {
           commandOffset: input.commandOffsets?.[id] ?? 0,
         });
         if (fact) {
+          if (fact.shellDisplay?.output !== undefined) {
+            const bytes = Buffer.byteLength(JSON.stringify(fact.shellDisplay.output));
+            shellOutputBytes += bytes;
+            if (input.messageIds.length > 1 && shellOutputBytes > nativeShellOutputPageBytes)
+              throw new ClientError('tool_message_page_too_large');
+          }
           const key = JSON.stringify([
             execution.originStoreId,
             execution.sessionId,

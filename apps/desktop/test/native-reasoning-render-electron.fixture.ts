@@ -332,12 +332,32 @@ try {
   await checkReasoning('inline-reasoning', 0);
   await setPhase('reasoning-open');
   const thought = page.locator('.conversation-trace > .conversation-trace-trigger');
+  const arrow = thought.locator('.conversation-trace-chevron');
+  assert.equal(await arrow.evaluate((element) => getComputedStyle(element).opacity), '0');
+  await thought.hover();
+  assert.equal(await arrow.evaluate((element) => getComputedStyle(element).opacity), '1');
   await thought.click();
   await until(
     content,
     (value) => value.includes('PRIVATE_REASONING_SENTINEL_INITIAL'),
     'manually opened public reasoning',
   );
+  const reasoningBody = page.locator('.conversation-reasoning-body .typeset-chat');
+  await reasoningBody.locator('strong').getByText('PRIVATE_REASONING_SENTINEL_INITIAL').waitFor();
+  const paragraph = reasoningBody.getByText('核对原记录。', { exact: true });
+  const box = (await paragraph.boundingBox())!;
+  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  assert.equal(await arrow.evaluate((element) => getComputedStyle(element).opacity), '1');
+  const end = await paragraph.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    return range.getBoundingClientRect().right;
+  });
+  await page.mouse.down();
+  await page.mouse.move(end + 1, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  assert.equal(await page.evaluate(() => getSelection()?.toString()), '核对原记录。');
+  assert.equal(await thought.getAttribute('aria-expanded'), 'true');
   await thought.click();
   await until(
     content,
@@ -490,6 +510,10 @@ try {
   assert.ok((await counts()).toolObserved);
   assert.deepEqual(warm.closedFrames, [], 'completed collapsed trace must not paint tool details');
   await setPhase('manual-open');
+  const elapsed = page.getByRole('button', { name: /^用时 .*展开本轮处理过程$/ });
+  assert.equal(await elapsed.count(), 1);
+  assert.equal(await page.locator('.conversation .conversation-trace').count(), 0);
+  await elapsed.click();
   const readTrace = page.locator('.conversation-trace').filter({ hasText: '已读取文件' });
   const trigger = readTrace.locator(':scope > .conversation-trace-trigger');
   await trigger.click();
@@ -571,6 +595,8 @@ try {
     (await content()).includes('PUBLIC_STAGE_PROSE'),
     'stage prose keeps its original place',
   );
+  await page.getByRole('button', { name: /^用时 .*收起本轮处理过程$/ }).click();
+  await until(content, (value) => !value.includes('PUBLIC_STAGE_PROSE'), 'elapsed process closes');
 
   await setPhase('history');
   await select('Other Stream', 'other');
@@ -588,6 +614,7 @@ try {
   await page.waitForTimeout(400);
   const cold = await probe();
   assert.deepEqual(cold.violations, []);
+  assert.equal(await elapsed.count(), 1);
   assert.ok(!(await content()).includes('正在思考'));
   assert.equal((await counts()).calls, 3);
   const report = {

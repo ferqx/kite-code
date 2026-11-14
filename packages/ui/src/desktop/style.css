@@ -100,6 +100,8 @@ body {
   --info-background: color-mix(in srgb, var(--info-foreground) 12%, var(--card));
   --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
   --important-foreground: #765299;
+  --identity-gold: #795d12;
+  --identity-slate: #475c70;
   --identity-secondary: #236f78;
   --conversation-text-size: 14px;
   --markdown-code-background: color-mix(in srgb, var(--foreground) 5%, transparent);
@@ -151,6 +153,7 @@ body {
 .kite-client {
   & {
     --conversation-block-gap: calc(var(--conversation-text-size) * 0.8);
+    --conversation-line-height: 1.8;
     --conversation-control-padding: 4px;
     --conversation-mixed-gap: max(
       0px,
@@ -691,7 +694,7 @@ body {
     min-width: 0;
     background: var(--page-background);
   }
-  .session-heading {
+  .session-header-heading {
     display: flex;
     align-items: center;
     flex: 1;
@@ -721,17 +724,11 @@ body {
     align-items: center;
     flex: 1;
   }
-  .breadcrumb span:first-child,
   .breadcrumb strong {
     white-space: nowrap;
     text-overflow: ellipsis;
     overflow: hidden;
     min-width: 0;
-  }
-  .breadcrumb span {
-    color: var(--muted-foreground);
-  }
-  .breadcrumb strong {
     font-size: 14px;
     font-weight: var(--font-weight-semibold);
   }
@@ -806,12 +803,14 @@ body {
     border-right: var(--conversation-scrollbar-width) solid transparent;
   }
   .message,
+  .conversation-reasoning-body,
   input,
   textarea {
     -webkit-user-select: text;
     user-select: text;
   }
-  .message :is(button, summary, .message-label, .message-status, .message-meta) {
+  :is(.message, .conversation-reasoning-body)
+    :is(button, summary, .message-label, .message-status, .message-meta) {
     -webkit-user-select: none;
     user-select: none;
   }
@@ -906,11 +905,6 @@ body {
   .conversation-message-navigation button:focus-visible {
     outline: 1px solid currentColor;
     outline-offset: -1px;
-  }
-  .conversation-history-boundary {
-    display: flex;
-    justify-content: center;
-    padding-block: 8px;
   }
   .welcome {
     padding: clamp(24px, 8vh, 100px) 8px;
@@ -2301,6 +2295,8 @@ body {
   --info-background: color-mix(in srgb, var(--info-foreground) 12%, var(--card));
   --info-border: color-mix(in srgb, var(--info-foreground) 75%, var(--card));
   --important-foreground: #bda4d8;
+  --identity-gold: #d9bc66;
+  --identity-slate: #a2b6cc;
   --identity-secondary: #84c8d0;
   --scrollbar-thumb: color-mix(in srgb, var(--foreground) 10%, transparent);
   --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 18%, transparent);
@@ -2877,7 +2873,7 @@ body {
   min-width: 0;
   color: var(--foreground);
   font-size: var(--conversation-text-size);
-  line-height: 1.8;
+  line-height: var(--conversation-line-height);
   overflow-wrap: anywhere;
 }
 .kite-client .prompt-markdown {
@@ -3689,7 +3685,9 @@ body {
 }
 .kite-client .conversation-trace-line {
   min-height: 32px;
-  padding-inline: 4px;
+}
+.kite-client .conversation-trace-line,
+.kite-client .conversation-turn-notice {
   font-size: var(--conversation-text-size);
 }
 .kite-client .conversation-trace-line [data-slot="trace-title"] {
@@ -3703,36 +3701,47 @@ body {
 .kite-client .conversation-trace-line[data-status="error"] [data-slot="trace-title"] {
   color: var(--destructive);
 }
-.kite-client .conversation-trace-trigger[aria-expanded="true"] .conversation-trace-chevron {
-  transform: rotate(90deg);
+.kite-client [data-reasoning] > .conversation-trace-chevron {
+  opacity: 0;
+}
+.kite-client
+  .conversation-trace-trigger:is(:hover, :focus-visible, [aria-expanded="true"])
+  > [data-reasoning]
+  > .conversation-trace-chevron {
+  opacity: 1;
+}
+/* Center the icon closer to the glyphs with a font-relative margin. */
+.kite-client :where(.conversation-trace [data-trace-line])
+  > :is([data-slot="trace-icon"], .tool-activity-chevron, .tool-approval-icon, .tool-diff-toggle),
+.kite-client :where(.conversation-trace-turn .agent-turn-summary) > .agent-turn-chevron {
+  margin-block-start: calc((1em - 1cap) / 2.5);
 }
 .kite-client .conversation-trace-steps[data-grouped] {
-  margin-inline-start: 10px;
-  padding-inline-start: 10px;
-  border-inline-start: 1px solid var(--border);
+  position: relative;
+  padding-inline-start: 21px;
 }
 .kite-client .conversation-trace-steps[data-grouped] [data-trace-line] {
   padding-inline: 0;
   column-gap: 6px;
   line-height: 24px;
-
-  & > [data-slot="trace-icon"]:first-child {
-    inline-size: var(--ui-icon-size);
-    block-size: var(--ui-icon-size);
-  }
-}
-.kite-client .conversation-trace-steps .tool-activity {
-  margin-block: 0;
-}
-.kite-client .conversation-reasoning-body pre {
-  margin: 0;
-  padding: 0 4px 8px;
-  font: inherit;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .kite-client
-  .conversation-trace .tool-activity-summary[data-status="error"]
+  :is(.conversation-trace-line, .tool-activity-summary, .tool-activity-step)
+  > [data-slot="trace-icon"]:first-child {
+  inline-size: var(--ui-icon-size);
+  block-size: var(--ui-icon-size);
+}
+.kite-client .conversation-trace-steps .tool-activity,
+.kite-client .conversation-trace > .tool-activity {
+  margin-block: 0;
+}
+.kite-client .conversation-reasoning-body .typeset-chat {
+  padding: 0 4px 8px;
+  color: inherit;
+}
+.kite-client
+  .conversation-trace
+  .tool-activity-summary[data-status="error"]
   :is(.tool-activity-marker-content, .tool-agent-name, .tool-agent-operation) {
   color: var(--destructive);
 }
@@ -3838,6 +3847,55 @@ body {
 .kite-client .agent-turn-final .message.assistant {
   margin: var(--conversation-block-gap) 0 32px;
   transition: margin-top var(--collapsible-collapse-duration) var(--collapsible-collapse-easing);
+}
+.kite-client .conversation-trace-turn > .agent-turn-process > .agent-turn-summary-row,
+.kite-client .conversation-trace-turn > .agent-turn-summary-static {
+  box-shadow: none;
+}
+.kite-client .conversation-trace-turn {
+  & > .agent-turn-process > .agent-turn-summary-row > .agent-turn-summary,
+  & > .agent-turn-summary-static,
+  & > .conversation-turn-notice,
+  & .response-status,
+  & :where(.conversation-trace, .agent-turn-body) > :where(.tool-activity) > .tool-activity-summary,
+  & :where(.conversation-trace) > .conversation-trace-trigger > .conversation-trace-line {
+    min-height: 0;
+    padding-block: 0;
+    line-height: var(--conversation-line-height);
+  }
+
+  & > .conversation-turn-notice {
+    display: block;
+  }
+
+  & .response-status {
+    height: auto;
+  }
+}
+.kite-client .conversation-trace-process {
+  display: flex;
+  flex-direction: column;
+  gap: var(--conversation-block-gap);
+  padding-block-start: var(--conversation-block-gap);
+
+  & > :is(.agent-turn-body, .conversation-trace),
+  & > .agent-turn-body > .tool-activity,
+  & > .agent-turn-body > .message-group > .message:not(:has(> .message-meta)) {
+    margin-block: 0;
+  }
+}
+.kite-client
+  .conversation-trace-turn
+  > :is(.agent-turn-process, .agent-turn-summary-static)
+  + .agent-turn-body {
+  margin-block-start: var(--conversation-block-gap);
+
+  & .message.assistant {
+    margin-block-start: 0;
+  }
+}
+.kite-client .conversation-trace-turn > * + .conversation-turn-stopped {
+  margin-block-start: var(--conversation-block-gap);
 }
 .kite-client
   .agent-turn:has(> .agent-turn-process[data-state="open"])
@@ -3970,7 +4028,6 @@ body {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
   flex-shrink: 0;
-  /* A rotating icon needs space beyond its resting bounds. */
   margin-inline: 4px;
   color: inherit;
 }
@@ -3982,8 +4039,7 @@ body {
   overflow: hidden;
   white-space: nowrap;
 }
-.kite-client .tool-activity-marker-icon,
-.kite-client .tool-step-marker-icon {
+.kite-client [data-slot="marker-icon"].tool-activity-marker-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3991,19 +4047,15 @@ body {
   height: 1em;
   line-height: 1;
 }
-.kite-client
-  :is([data-slot="marker-icon"], [data-slot="trace-icon"])
-  > :is(.tool-activity-kind-icon, .tool-step-icon) {
+.kite-client .tool-activity-kind-icon,
+.kite-client .tool-step-icon {
+  flex-shrink: 0;
+  color: inherit;
+}
+.kite-client [data-slot="marker-icon"] > .tool-activity-kind-icon {
   display: block;
   width: 1em;
   height: 1em;
-}
-.kite-client .tool-activity-kind-icon,
-.kite-client .tool-step-icon {
-  width: 1em;
-  height: 1em;
-  flex-shrink: 0;
-  color: inherit;
 }
 .kite-client .tool-activity-title,
 .kite-client .tool-step-target,
@@ -4025,8 +4077,6 @@ body {
 .kite-client .tool-activity-steps > .tool-activity {
   margin: 0;
 }
-.kite-client .tool-activity-state,
-.kite-client .tool-step-status,
 .kite-client .tool-approval {
   flex: none;
   font-size: 13px;
@@ -4085,27 +4135,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.kite-client .tool-activity-state[data-status="issue"],
 .kite-client
-  .tool-step-status:is([data-status="failed"], [data-status="rejected"], [data-status="unknown"]) {
-  color: var(--destructive);
-}
-.kite-client :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]:not(
-  .conversation-trace *
-),
+  :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]:not(.conversation-trace *),
 .kite-client
   :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]:not(
     .conversation-trace *
-  ):is(
-    :hover,
-    :focus-visible,
-    [aria-expanded="true"]
-  ) {
+  ):is(:hover, :focus-visible, [aria-expanded="true"]) {
   color: var(--destructive);
 }
 .kite-client
   :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]
-  :is(.tool-approval:not(.tool-approval-rejected), .file-link, .managed-shell-summary) {
+  :is(.tool-approval:not(.tool-approval-rejected), .file-link) {
   color: inherit;
 }
 .kite-client .tool-activity-steps {
@@ -4196,10 +4236,39 @@ body {
   min-height: 0;
   overflow: hidden;
 }
+.kite-client
+  :is(.tool-activity-content, .conversation-reasoning-body)
+  > .collapsible-motion-reveal
+  > .collapsible-motion-reveal-inner {
+  position: relative;
+  padding-inline-start: 24px;
+}
+.kite-client .conversation-trace-steps[data-grouped]::before,
+.kite-client
+  :is(.tool-activity-content, .conversation-reasoning-body)
+  > .collapsible-motion-reveal
+  > .collapsible-motion-reveal-inner::before {
+  --trace-guide-width: 1px;
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc((var(--ui-icon-size) - var(--trace-guide-width)) / 2);
+  inline-size: var(--trace-guide-width);
+  background: var(--border);
+  pointer-events: none;
+}
 .kite-client .collapsible-motion-content[data-state="open"] > .collapsible-motion-reveal {
   grid-template-rows: 1fr;
   transition-duration: var(--collapsible-expand-duration);
   transition-timing-function: var(--collapsible-expand-easing);
+}
+/* A disclosure starts its height transition once it has something to reveal. */
+.kite-client .collapsible-motion-content[data-state="open"]
+  > .collapsible-motion-reveal:has(> .collapsible-motion-reveal-inner:empty) {
+  grid-template-rows: 0fr;
+}
+.kite-client [data-direct-step][data-state="open"] > .collapsible-motion-reveal {
+  transition: none;
 }
 @starting-style {
   .kite-client .collapsible-motion-content[data-state="open"] > .collapsible-motion-reveal {
@@ -4238,10 +4307,6 @@ body {
   color: inherit;
   min-width: 0;
   font-size: inherit;
-}
-.kite-client .tool-step-marker-icon {
-  align-self: flex-start;
-  margin-top: calc((24px - 1em) / 2);
 }
 .kite-client .tool-step-content {
   display: flex;
@@ -4315,6 +4380,12 @@ body {
   font: inherit;
   overflow: visible;
 }
+.kite-client .tool-detail-status {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 18px;
+}
 .kite-client .tool-detail-scroll {
   max-height: 320px;
   min-width: 0;
@@ -4374,7 +4445,7 @@ body {
   color: var(--destructive);
 }
 .kite-client .turn-failure-details {
-  margin: 4px 0 8px 22px;
+  margin: 4px 0 8px;
   color: var(--foreground);
   overflow-wrap: anywhere;
 }
@@ -4477,6 +4548,15 @@ body {
 .kite-client .shell-original-record > p {
   margin: 0;
 }
+.kite-client .shell-failure-reason {
+  margin: 0;
+  padding: 4px 12px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .kite-client .shell-prompt {
   color: var(--muted-foreground);
 }
@@ -4555,12 +4635,13 @@ body {
   line-height: 24px;
   color: var(--muted-foreground);
 }
-.kite-client .context-compacted > [data-slot="marker"] {
-  min-height: 32px;
-  padding: 4px 0;
-  font-size: inherit;
-  line-height: inherit;
+.kite-client .context-compacted > .conversation-trace-line {
   color: inherit;
+}
+.kite-client .conversation-trace-process .context-compacted > .conversation-trace-line {
+  min-height: 0;
+  padding-block: 0;
+  line-height: var(--conversation-line-height);
 }
 .kite-client .context-compacted p {
   margin: 8px 0 0;
@@ -4568,24 +4649,6 @@ body {
 .kite-client .context-compacted.failed {
   border: 0;
   color: var(--destructive);
-}
-.kite-client .is-running > .tool-activity-summary .tool-label,
-.kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,
-.kite-client .tool-activity-step.running .tool-label,
-.kite-client .context-compacted.running .tool-label {
-  background: linear-gradient(100deg, currentColor 35%, var(--background) 50%, currentColor 65%);
-  background-size: 240% 100%;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: tool-shimmer 2.8s linear infinite;
-}
-@keyframes tool-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .kite-client .agent-turn-final .message.assistant {
@@ -4596,14 +4659,6 @@ body {
   }
   .kite-client .collapsible-motion-reveal {
     transition: none;
-  }
-  .kite-client .is-running > .tool-activity-summary .tool-label,
-  .kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,
-  .kite-client .tool-activity-step.running .tool-label,
-  .kite-client .context-compacted.running .tool-label {
-    animation: none;
-    background: none;
-    -webkit-text-fill-color: currentColor;
   }
 }
 
@@ -4773,23 +4828,29 @@ body {
   display: inline-flex;
   flex-shrink: 0;
 }
-.kite-client .approval-child-icon[data-child-color="0"] {
-  color: var(--info-foreground);
+.kite-client [data-child-color="0"] {
+  --child-agent-color: var(--info-foreground);
 }
-.kite-client .approval-child-icon[data-child-color="1"] {
-  color: var(--important-foreground);
+.kite-client [data-child-color="1"] {
+  --child-agent-color: var(--important-foreground);
 }
-.kite-client .approval-child-icon[data-child-color="2"] {
-  color: var(--success);
+.kite-client [data-child-color="2"] {
+  --child-agent-color: var(--success);
 }
-.kite-client .approval-child-icon[data-child-color="3"] {
-  color: var(--attention-foreground);
+.kite-client [data-child-color="3"] {
+  --child-agent-color: var(--identity-gold);
 }
-.kite-client .approval-child-icon[data-child-color="4"] {
-  color: var(--destructive);
+.kite-client [data-child-color="4"] {
+  --child-agent-color: var(--identity-slate);
 }
-.kite-client .approval-child-icon[data-child-color="5"] {
-  color: var(--identity-secondary);
+.kite-client [data-child-color="5"] {
+  --child-agent-color: var(--identity-secondary);
+}
+.kite-client .approval-child-icon[data-child-color] {
+  color: var(--child-agent-color);
+}
+.kite-client .approval-child-icon[data-neutral] {
+  color: inherit;
 }
 .kite-client .approval-heading-label svg,
 .kite-client .approval-tool-label svg {
@@ -5190,21 +5251,25 @@ body {
 .kite-client .tool-diff-toggle[aria-expanded="true"] {
   opacity: 1;
 }
-.kite-client .tool-activity-chevron,
-.kite-client .agent-turn-chevron,
+.kite-client :is(.conversation-trace-chevron, .tool-activity-chevron, .agent-turn-chevron) > svg,
 .kite-client .tool-diff-toggle > svg {
   transform: rotate(-90deg);
+  transform-origin: center;
   transition: transform 120ms ease;
 }
-.kite-client .tool-activity-summary[aria-expanded="true"] .tool-activity-chevron,
-.kite-client .agent-turn-summary[aria-expanded="true"] .agent-turn-chevron,
+.kite-client
+  .conversation-trace-trigger[aria-expanded="true"]
+  > .conversation-trace-line
+  > .conversation-trace-chevron
+  > svg,
+.kite-client .tool-activity-summary[aria-expanded="true"] > .tool-activity-chevron > svg,
+.kite-client .agent-turn-summary[aria-expanded="true"] > .agent-turn-chevron > svg,
 .kite-client .tool-diff-toggle[aria-expanded="true"] > svg {
   transform: rotate(0);
 }
 @media (prefers-reduced-motion: reduce) {
-  .kite-client .tool-activity-chevron,
-  .kite-client .tool-diff-toggle > svg,
-  .kite-client .agent-turn-chevron {
+  .kite-client :is(.conversation-trace-chevron, .tool-activity-chevron, .agent-turn-chevron) > svg,
+  .kite-client .tool-diff-toggle > svg {
     transition: none;
   }
 }
@@ -6291,7 +6356,7 @@ body {
   width: 100%;
   min-width: 0;
   font-size: var(--conversation-text-size);
-  color: var(--muted-foreground);
+  color: var(--child-agent-color, var(--muted-foreground));
 }
 .kite-client .tool-agent-name {
   flex: 0 1 auto;

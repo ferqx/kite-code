@@ -44,7 +44,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.kite-client .file-diff .file-diff-counts {
+.kite-client :is(.file-diff, .tool-edit-heading) .file-diff-counts {
   flex: none;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
@@ -266,15 +266,65 @@
 .kite-client .file-diff .file-diff-token-comment {
   color: var(--file-diff-comment);
 }
+.kite-client .file-diff[data-inline] {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  --file-diff-card-header: color-mix(in oklch, var(--foreground) 5%, var(--background));
+}
+.kite-client .file-diff[data-inline] .file-diff-toolbar {
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding-inline: 11px;
+  background: var(--file-diff-card-header);
+  color: var(--muted-foreground);
+  font-size: var(--conversation-text-size);
+}
+.kite-client .file-diff[data-inline] .file-diff-path {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.kite-client .file-diff[data-inline] [data-slot="code-block-copy-button"] {
+  flex: none;
+  margin-inline-start: auto;
+}
+.kite-client .file-diff[data-inline] .diff-output {
+  font-size: 13px;
+}
+.kite-client .file-diff[data-inline] .file-diff-number {
+  flex: 0 0 calc(var(--file-diff-gutter, 6) * 1ch);
+  padding-inline: 0 10px;
+  border-inline-end: 1px solid var(--border);
+}
+.kite-client .file-diff[data-inline] .file-diff-code {
+  padding-inline: 8px;
+}
+@media (forced-colors: none) {
+  .kite-client .file-diff[data-inline] .diff-added {
+    background: color-mix(in oklch, var(--file-diff-add) 20%, var(--background));
+  }
+  .kite-client .file-diff[data-inline] .diff-removed {
+    background: color-mix(in oklch, var(--file-diff-remove) 20%, var(--background));
+  }
+}
+.kite-client .tool-edit-heading .file-link[data-short-file] {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--muted-foreground);
+  text-underline-offset: 3px;
+}
+.kite-client .tool-edit-heading .file-link[data-short-file]:hover,
+.kite-client .tool-edit-heading .file-link[data-short-file]:focus-visible {
+  text-decoration-style: solid;
+}
 @container file-diff (max-width: 380px) {
-  .kite-client .file-diff .file-diff-toolbar {
+  .kite-client .file-diff:not([data-inline]) .file-diff-toolbar {
     flex-wrap: wrap;
     gap: 4px;
   }
-  .kite-client .file-diff .file-diff-path {
+  .kite-client .file-diff:not([data-inline]) .file-diff-path {
     flex-basis: 100%;
   }
-  .kite-client .file-diff .file-diff-counts {
+  .kite-client .file-diff:not([data-inline]) .file-diff-counts {
     margin-right: auto;
   }
 }

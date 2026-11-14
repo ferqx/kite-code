@@ -2,9 +2,14 @@ import type { Message } from '@kite-ai/client';
 import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { NativeBridge, NativeSelection } from './native-bridge';
+import type { NativeBridge, NativeResult, NativeSelection } from './native-bridge';
 import { nativeModelConnections } from './native-model-connections';
-import { desktopMessages, nativeReasoningSource } from './native-presentation';
+import {
+  COMPRESSION_RUNNING_TITLE,
+  desktopMessages,
+  nativeReasoningSource,
+} from './native-presentation';
+import { nativeReadDeadline } from './native-read-deadline';
 import {
   desktopToolMessage,
   desktopToolPresentation,
@@ -194,14 +199,16 @@ export function useNativeRuns({
       for (let index = 0; index < pending.length; index += 32) {
         const batch = pending.slice(index, index + 32);
         readId = crypto.randomUUID();
-        const page = await bridge.request({
-          method: 'toolMessages.runs',
-          generation,
-          viewSelection,
-          historyEpoch,
-          readId,
-          messageIds: batch.map(([, id]) => id),
-        });
+        const page: NativeResult = await nativeReadDeadline(
+          bridge.request({
+            method: 'toolMessages.runs',
+            generation,
+            viewSelection,
+            historyEpoch,
+            readId,
+            messageIds: batch.map(([, id]) => id),
+          }),
+        );
         if (!active) return;
         if (
           !page ||
@@ -485,13 +492,20 @@ export function desktopTranscript({
         /* Preserve the original unverified record on a conflicting call. */
       }
     }
+    const factMessage = fact
+      ? desktopToolMessage(
+          fact,
+          message.id,
+          fact.shellInput && message.deferredText ? '' : message.content,
+        )
+      : undefined;
     const result: DesktopMessage = {
-      ...(fact ? desktopToolMessage(fact, message.id, message.content) : model),
+      ...(factMessage ?? model),
       ...(execution ? desktopToolPresentation(execution) : {}),
       ...(inputPresentation && inputCompatible && (!fact || fact.shellInput?.command === undefined)
         ? {
             shell: {
-              ...(fact ? desktopToolMessage(fact, message.id, message.content).shell : {}),
+              ...factMessage?.shell,
               ...inputPresentation,
             },
           }
@@ -523,6 +537,7 @@ export function desktopTranscript({
             copyText: replies.get(message.id)?.text ?? null,
           }
         : {}),
+      ...(message.deferredText ? { copyText: null } : {}),
     };
     if (run && result.role === 'tool')
       return {
@@ -549,7 +564,7 @@ export function desktopTranscript({
         const index = messages.indexOf(progressMessage);
         modeled[index] = {
           ...modeled[index]!,
-          title: '正在压缩上下文',
+          title: COMPRESSION_RUNNING_TITLE,
           status: 'running',
           settled: false,
         };
@@ -563,7 +578,7 @@ export function desktopTranscript({
         turnId: identity(compressing.id),
         role: 'system',
         systemKind: 'compaction',
-        title: '正在压缩上下文',
+        title: COMPRESSION_RUNNING_TITLE,
         text: '',
         status: 'running',
         settled: false,

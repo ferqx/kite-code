@@ -570,16 +570,22 @@ test('environment adapter keeps unknown and restored child facts distinct and ne
   });
 });
 
-test('two carriers in one stable child keep clicked and refreshed details pinned to the original execution', async () => {
+test('environment updates one row per child while exact historical details remain available', async () => {
   const first = backgroundItem(1, true),
-    second = backgroundItem(2, true);
+    second = backgroundItem(3, true),
+    sameTitle = backgroundItem(2, true);
+  for (const item of [first, second, sameTitle]) item.childSession!.title = '项目检查';
+  first.execution.status = 'succeeded';
+  sameTitle.execution.childSessionId = 'other-child';
+  sameTitle.childSession!.id = 'other-child';
+  sameTitle.childRun!.sessionId = 'other-child';
   second.childRun!.id = 'second-child-run';
   second.execution.rootWorkCommandId = 'second-work';
   second.execution.rootWorkSeq = '2';
   second.childRun!.rootWorkCommandId = 'second-work';
   second.childRun!.rootWorkSeq = '2';
   second.run = null;
-  const items = [first, second],
+  const items = [first, sameTitle],
     opens: string[] = [],
     reads = new Map<string, Buffer>();
   let completed = Promise.resolve(),
@@ -665,11 +671,12 @@ test('two carriers in one stable child keep clicked and refreshed details pinned
     },
   };
   function Surface() {
+    const [revision, setRevision] = useState(0);
     const environment = useNativeEnvironment({
       bridge,
       generation: 1,
       selection,
-      revision: 0,
+      revision,
       unavailable: false,
       onChanged: async () => undefined,
     });
@@ -685,27 +692,50 @@ test('two carriers in one stable child keep clicked and refreshed details pinned
         </button>
       </>
     ) : (
-      environment.card
+      <>
+        {environment.card}
+        <button type="button" onClick={() => setRevision((value) => value + 1)}>
+          刷新目录
+        </button>
+        <button type="button" onClick={() => void environment.openChild('child', 'job-1')}>
+          打开创建消息详情
+        </button>
+      </>
     );
   }
   await fixture(
     async (host, render) => {
       await render(bridge);
+      const group = host.querySelector('[aria-label="子智能体"]')!;
+      const originalRow = group.querySelector('[data-execution-id="job-1"]')!;
+      expect(group.querySelector('.background-execution-count')?.textContent).toBe('2');
+      expect(originalRow.querySelector('.background-execution-status')?.textContent).toBe('已完成');
+      (originalRow.querySelector('button') as HTMLButtonElement).focus();
+      items.push(second);
+      await click(host, '刷新目录');
+      expect(group.querySelector('.background-execution-count')?.textContent).toBe('2');
+      expect(originalRow.getAttribute('data-execution-id')).toBe('job-3');
+      expect(host.ownerDocument.activeElement === originalRow.querySelector('button')).toBe(true);
+      expect(
+        [...group.querySelectorAll('[data-execution-id]')].map((row) =>
+          row.getAttribute('data-execution-id'),
+        ),
+      ).toEqual(['job-3', 'job-2']);
+      expect(group.querySelectorAll('[title="项目检查"]')).toHaveLength(2);
+      expect(originalRow.querySelector('.background-execution-status')?.textContent).toBe('运行中');
       await act(async () =>
-        (host.querySelector('[data-execution-id="job-2"] button') as HTMLButtonElement).click(),
+        (host.querySelector('[data-execution-id="job-3"] button') as HTMLButtonElement).click(),
       );
       await act(async () => completed);
-      expect(opens).toEqual(['job-2']);
-      expect(host.textContent).toContain('job-2');
+      expect(opens).toEqual(['job-3']);
+      expect(host.textContent).toContain('job-3');
       await click(host, '刷新准确详情');
       await act(async () => completed);
-      expect(opens).toEqual(['job-2', 'job-2']);
+      expect(opens).toEqual(['job-3', 'job-3']);
       await click(host, '返回列表');
-      await act(async () =>
-        (host.querySelector('[data-execution-id="job-1"] button') as HTMLButtonElement).click(),
-      );
+      await click(host, '打开创建消息详情');
       await act(async () => completed);
-      expect(opens).toEqual(['job-2', 'job-2', 'job-1']);
+      expect(opens).toEqual(['job-3', 'job-3', 'job-1']);
       expect(host.textContent).toContain('job-1');
     },
     () => <Surface />,
@@ -1099,6 +1129,7 @@ test('live environment child coalesces revisions, closes held reads and immediat
   const calls: NativeRequest[] = [],
     bodies = new Map<string, Buffer>();
   let prefix = 'first prefix',
+    snapshotCursor = 0,
     hold = false,
     failNextChildOpen = true,
     release: (() => void) | undefined;
@@ -1128,6 +1159,26 @@ test('live environment child coalesces revisions, closes held reads and immediat
           failNextChildOpen = false;
           throw Error('background_child_unavailable');
         }
+        const output = { content: prefix, reasoning: '', toolCalls: [], complete: false };
+        const encoded = canonicalModelBody(output);
+        const snapshot: ModelOutputSnapshot = {
+          storeId: 'store',
+          sessionId: item.childSession!.id,
+          rootSessionId: item.rootSession.id,
+          runId: item.childRun!.id,
+          executionId: 'child-model',
+          originCommandId: item.childRun!.originCommandId,
+          rootWorkCommandId: item.childRun!.rootWorkCommandId,
+          rootWorkSeq: item.childRun!.rootWorkSeq,
+          attempt: 1,
+          status: 'running',
+          bodyHash: createHash('sha256').update(encoded).digest('hex'),
+          bodyBytes: String(Buffer.byteLength(encoded)),
+          contentBytes: String(Buffer.byteLength(prefix)),
+          reasoningBytes: '0',
+          snapshotCursor: String(++snapshotCursor),
+          output,
+        };
         const bytes = Buffer.from(
           JSON.stringify({
             item,
@@ -1143,9 +1194,17 @@ test('live environment child coalesces revisions, closes held reads and immediat
                 status: 'incomplete',
                 content: prefix,
                 runId: item.childRun!.id,
+                outputBody: {
+                  kind: 'model_output',
+                  executionId: snapshot.executionId,
+                  complete: false,
+                  contentBytes: snapshot.contentBytes,
+                  reasoningBytes: '0',
+                  toolCallCount: 0,
+                },
               },
             ],
-            modelOutputs: [],
+            modelOutputs: [{ messageId: 'active', snapshot }],
           }),
         );
         bodies.set(request.readId, bytes);
@@ -1187,6 +1246,7 @@ test('live environment child coalesces revisions, closes held reads and immediat
       throw Error('unexpected_operation');
     },
   };
+  let displayedChild: ReturnType<typeof useNativeEnvironment>['child'];
   function Surface() {
     const [revision, setRevision] = useState(0);
     const [unavailable, setUnavailable] = useState(false);
@@ -1198,6 +1258,7 @@ test('live environment child coalesces revisions, closes held reads and immediat
       unavailable,
       onChanged: async () => undefined,
     });
+    displayedChild = environment.child;
     return (
       <>
         <button type="button" onClick={() => setUnavailable((value) => !value)}>
@@ -1263,6 +1324,19 @@ test('live environment child coalesces revisions, closes held reads and immediat
           .slice(2)
           .every((call) => 'cursor' in call),
       ).toBe(true);
+      const verified = displayedChild;
+      const originalSnapshot = verified?.facts?.modelOutputs[0]?.snapshot;
+      expect(originalSnapshot?.output.content).toBe('latest prefix');
+      await click(host, 'revision');
+      await settle();
+      expect(count()).toBe(5);
+      expect(displayedChild === verified).toBe(true);
+      item.childSession!.title = 'Renamed while replying';
+      await click(host, 'revision');
+      await settle();
+      expect(displayedChild?.facts?.session.title).toBe('Renamed while replying');
+      expect(displayedChild?.facts?.messages === verified?.facts?.messages).toBe(true);
+      expect(displayedChild?.facts?.modelOutputs[0]?.snapshot === originalSnapshot).toBe(true);
       await click(host, 'close child');
       hold = true;
       prefix = 'late prefix';

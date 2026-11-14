@@ -280,6 +280,8 @@ export function nativeReasoningSource(message: Message): string | undefined {
   return message.firstOutput === 'reasoning' ? message.sourceIds[0] : undefined;
 }
 
+export const COMPRESSION_RUNNING_TITLE = '压缩上下文中';
+
 export function desktopMessages(
   messages: readonly Message[],
   includeRunningCompression = false,
@@ -348,13 +350,13 @@ export function desktopMessages(
             systemKind: 'compaction' as const,
             title:
               message.compression.status === 'completed'
-                ? '上下文压缩完成'
+                ? '已压缩上下文'
                 : message.compression.status === 'failed'
                   ? '上下文压缩失败'
                   : message.compression.status === 'cancelled'
                     ? '上下文压缩已取消'
                     : message.compression.status === 'running'
-                      ? '正在压缩上下文'
+                      ? COMPRESSION_RUNNING_TITLE
                       : '上下文压缩未发布',
             status:
               message.compression.status === 'unpublished' ||

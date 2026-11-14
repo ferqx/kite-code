@@ -1,5 +1,26 @@
 import type { FileChangePreview, FileSnapshot } from './files';
 
+/** Count only the rows retained in a built-in Files receipt. */
+export function fileChangePreviewCounts(text: string) {
+  const lines = text.split('\n', PREVIEW_LINES);
+  if (
+    !/^(?:Line diff \(bounded alignment; unchanged gaps omitted\)\r?$|Wrote \d+ lines to )/.test(
+      lines[0] ?? '',
+    )
+  )
+    return undefined;
+  let added = 0;
+  let removed = 0;
+  for (const line of lines) {
+    const row = /^ *(\d+) ([+-])/.exec(line);
+    if (!row || !Number.isSafeInteger(Number(row[1])) || Number(row[1]) <= 0) continue;
+    const marker = row[2];
+    if (marker === '+') added++;
+    if (marker === '-') removed++;
+  }
+  return { added, removed };
+}
+
 /** Retained desktop line diff: common prefix/suffix, not an LCS or Git diff. */
 export interface DiffLine {
   type: 'context' | 'removed' | 'added';

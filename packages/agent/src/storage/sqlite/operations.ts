@@ -25,6 +25,7 @@ import {
   type RequirementRef,
   type RunRecord,
   type SessionRecord,
+  type SessionStateExecution,
 } from '../types';
 import { markStorageTransactionUnconfirmed } from '../worker/error';
 import { acceptAgentInput, applyAgentCommand, interruptAgent } from './agent-input-operations';
@@ -36,7 +37,7 @@ import {
   receiveAgentMessages,
   settleAgentMessages,
 } from './agent-mail-operations';
-import { readPublicMessages } from './agent-result-display';
+import { readPublicMessageEntries, readPublicMessages } from './agent-result-display';
 import { callArtifact } from './artifact-operations';
 import {
   dispatchAuthorizationCheck,
@@ -838,8 +839,15 @@ export class SqliteOperations {
     const carrierExecutionId = carrierFor(row);
     return {
       ...(carrierExecutionId ? { carrierExecutionId } : {}),
-      contextSelectionId: String(row.context_selection_id),
+      ...this.runState(row),
+      configuration: parse(row.config_json),
+      requirements: parse(row.requirements_json) as unknown as RequirementRef[],
+    };
+  }
 
+  private runState(row: Row) {
+    return {
+      contextSelectionId: String(row.context_selection_id),
       id: String(row.id),
       sessionId: String(row.session_id),
       originCommandId: String(row.origin_command_id),
@@ -852,12 +860,102 @@ export class SqliteOperations {
         Boolean(row.cancel_requested),
       ),
       isActive: Boolean(row.is_active),
-      configuration: parse(row.config_json),
-      requirements: parse(row.requirements_json) as unknown as RequirementRef[],
       createdAt: Number(row.started_at),
       deadlineAt: row.deadline_at === null ? null : Number(row.deadline_at),
       finishedAt: row.finished_at === null ? null : Number(row.finished_at),
       reason: row.reason === null ? null : String(row.reason),
+    };
+  }
+  private runModelConfiguration(value: Row[string] | undefined): Json {
+    if (typeof value !== 'string') return null;
+    const manifest = parse(value);
+    if (
+      !manifest ||
+      typeof manifest !== 'object' ||
+      Array.isArray(manifest) ||
+      typeof manifest.modelId !== 'string'
+    )
+      return null;
+    const modelId = manifest.modelId;
+    const snapshot = manifest.snapshot;
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+    const original =
+      snapshot.kind === 'human_input_processing' ? snapshot.originalConfiguration : snapshot;
+    if (
+      !original ||
+      typeof original !== 'object' ||
+      Array.isArray(original) ||
+      original.version !== 1 ||
+      typeof original.digest !== 'string'
+    )
+      return null;
+    const configuration = original.configuration;
+    if (
+      !configuration ||
+      typeof configuration !== 'object' ||
+      Array.isArray(configuration) ||
+      !Array.isArray(configuration.models)
+    )
+      return null;
+    const models = configuration.models.flatMap((model) => {
+      if (!model || typeof model !== 'object' || Array.isArray(model) || model.id !== modelId)
+        return [];
+      const options = model.options;
+      const reasoningEffort =
+        options && typeof options === 'object' && !Array.isArray(options)
+          ? options.reasoningEffort
+          : undefined;
+      return [
+        {
+          id: modelId,
+          ...(typeof model.provider === 'string' ? { provider: model.provider } : {}),
+          ...(typeof model.protocol === 'string' ? { protocol: model.protocol } : {}),
+          ...(typeof reasoningEffort === 'string' ? { options: { reasoningEffort } } : {}),
+        },
+      ];
+    });
+    const projected = { version: 1, digest: original.digest, configuration: { models } };
+    return {
+      modelId,
+      snapshot:
+        snapshot.kind === 'human_input_processing'
+          ? { kind: 'human_input_processing', originalConfiguration: projected }
+          : projected,
+    };
+  }
+  private executionState(row: Row): SessionStateExecution {
+    return {
+      id: String(row.id),
+      sessionId: String(row.session_id),
+      runId: row.run_id === null ? null : String(row.run_id),
+      originStoreId: String(row.origin_store_id),
+      rootWorkCommandId: String(row.root_work_command_id),
+      rootWorkSeq: String(row.root_work_seq),
+      parentExecutionId: row.parent_execution_id === null ? null : String(row.parent_execution_id),
+      childSessionId: row.child_session_id === null ? null : String(row.child_session_id),
+      cancelWithParent: Boolean(row.cancel_with_parent),
+      callId: String(row.call_id),
+      kind: row.kind as ExecutionRecord['kind'],
+      definitionId: String(row.adapter_id),
+      definitionVersion: String(row.definition_version),
+      status: row.state as ExecutionRecord['status'],
+      cancelRequestedAt: row.cancel_requested_at === null ? null : Number(row.cancel_requested_at),
+      resultRevision: String(row.result_revision),
+      delivery: row.delivery as ExecutionRecord['delivery'],
+      deliveryReason: row.delivery_reason === null ? null : String(row.delivery_reason),
+      ...(row.kind === 'tool' ? { authorization: { dispatched: Boolean(row.dispatched) } } : {}),
+      ...(row.display_input != null ? { input: parse(row.display_input) } : {}),
+      decisionSource: row.retry == null ? null : { kind: 'model_request', retry: parse(row.retry) },
+      result:
+        row.model_failure_code == null
+          ? null
+          : {
+              code: String(row.model_failure_code),
+              incomplete: row.model_incomplete === 1 || row.model_incomplete === 1n,
+              ...(row.model_failure_detail == null
+                ? {}
+                : { modelFailure: { detail: String(row.model_failure_detail) } }),
+            },
     };
   }
   execution(row: Row): ExecutionRecord {
@@ -2347,23 +2445,17 @@ export class SqliteOperations {
         }
       }
       case 'listMessages': {
+        const options = args[1] as Parameters<Store['listMessages']>[1];
         this.db.run('BEGIN');
         try {
           const messages = readPublicMessages(
             this,
             String(args[0]),
-            String(
-              (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
-                ?.afterSeq ?? '0',
-            ),
-            String(
-              (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
-                ?.upperSeq ?? '9223372036854775807',
-            ),
-            limit(
-              (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
-                ?.limit,
-            ),
+            options?.afterSeq ?? '0',
+            options?.upperSeq ?? '9223372036854775807',
+            limit(options?.limit),
+            undefined,
+            options?.newestFirst,
           );
           this.db.run('COMMIT');
           return messages;
@@ -2371,6 +2463,9 @@ export class SqliteOperations {
           return this.rollback(error);
         }
       }
+      case 'listSessionHistoryEntries':
+        return readPublicMessageEntries(this, String(args[0]), String(args[2]), String(args[1]));
+      case 'getSessionState':
       case 'getView': {
         this.db.run('BEGIN');
         try {
@@ -2378,12 +2473,25 @@ export class SqliteOperations {
           const session = this.row('SELECT * FROM session WHERE id=?', id);
           if (!session) throw new AgentError('session_not_found');
           const meta = this.metadata();
+          const lightweight = method === 'getSessionState';
+          const active = "state IN ('planned','dispatching','running','outcome_unknown')";
           const value = {
             session: this.session(session),
             // Keep the original protocol anchor as well as current work after a long
             // conversation. Union identities once in the same reading transaction.
             runs: this.rows(
-              `SELECT * FROM run WHERE rowid IN (
+              `SELECT ${
+                lightweight
+                  ? `
+                id,session_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,
+                context_selection_id,status,is_active,cancel_requested,started_at,deadline_at,finished_at,reason,
+                CASE WHEN rowid IN (
+                  SELECT min(anchor.rowid) FROM run anchor WHERE anchor.session_id=run.session_id
+                  UNION SELECT max(anchor.rowid) FROM run anchor WHERE anchor.session_id=run.session_id
+                ) THEN config_json END AS model_config
+              `
+                  : '*'
+              } FROM run WHERE rowid IN (
                 SELECT rowid FROM run WHERE session_id=? AND is_active=1
                 UNION SELECT rowid FROM (
                   SELECT rowid FROM run WHERE session_id=? ORDER BY rowid LIMIT 1
@@ -2395,18 +2503,77 @@ export class SqliteOperations {
               id,
               id,
               id,
-            ).map((row) => this.runRecord(row)),
+            ).map((row) =>
+              lightweight
+                ? {
+                    ...this.runState(row),
+                    configuration: this.runModelConfiguration(row.model_config),
+                  }
+                : this.runRecord(row),
+            ),
             executions: this.rows(
-              `SELECT * FROM execution WHERE rowid IN (
-                SELECT rowid FROM execution WHERE session_id=? AND state IN ('planned','dispatching','running','outcome_unknown')
+              `SELECT ${
+                lightweight
+                  ? `
+                id, session_id, run_id, origin_store_id, root_work_command_id, root_work_seq,
+                parent_execution_id, child_session_id, cancel_with_parent, call_id, kind, adapter_id,
+                definition_version, state, cancel_requested_at, result_revision, delivery, delivery_reason, dispatched,
+                CASE WHEN kind='tool' AND ${active} AND adapter_id NOT LIKE 'shell.%'
+                  AND length(CAST(intent_json AS BLOB))<=2048 THEN intent_json END AS display_input,
+                CASE WHEN kind='model' AND json_valid(decision_source_json)
+                  AND json_extract(decision_source_json,'$.kind')='model_request'
+                  AND length(CAST(decision_source_json -> '$.retry' AS BLOB))<=1024
+                  THEN decision_source_json -> '$.retry' END AS retry,
+                CASE WHEN kind='model' AND state='failed' AND json_valid(result_json)
+                  AND length(json_extract(result_json,'$.code'))<=128
+                  THEN json_extract(result_json,'$.code') END AS model_failure_code,
+                CASE WHEN kind='model' AND state='failed' AND json_valid(result_json)
+                  THEN json_extract(result_json,'$.incomplete') END AS model_incomplete,
+                CASE WHEN kind='model' AND state='failed' AND json_valid(result_json)
+                  AND length(json_extract(result_json,'$.modelFailure.detail'))<=128
+                  THEN json_extract(result_json,'$.modelFailure.detail') END AS model_failure_detail
+              `
+                  : '*'
+              } FROM execution WHERE rowid IN (
+                SELECT rowid FROM execution WHERE session_id=? AND ${active}
                 UNION SELECT rowid FROM (
                   SELECT rowid FROM execution WHERE session_id=? ORDER BY rowid DESC LIMIT 200
                 )
               ) ORDER BY rowid`,
               id,
               id,
-            ).map((row) => this.execution(row)),
-            messages: readPublicMessages(this, id, '0', '9223372036854775807', 200),
+            ).map((row) => (lightweight ? this.executionState(row) : this.execution(row))),
+            messages: lightweight
+              ? this.rows(
+                  `SELECT m.id,m.session_id,m.run_id,m.seq,m.role,m.status,
+                      json_extract(m.source_json,'$.sourceIds[0]') AS execution_id
+                    FROM message m JOIN execution e ON e.id=json_extract(m.source_json,'$.sourceIds[0]')
+                    WHERE m.session_id=? AND m.role='assistant' AND e.kind='model'
+                      AND json_extract(e.decision_source_json,'$.compressionId') IS NOT NULL
+                    ORDER BY m.seq DESC LIMIT 32`,
+                  id,
+                )
+                  .reverse()
+                  .flatMap((row): MessageRecord[] => {
+                    const sourceIds = [String(row.execution_id)];
+                    const compression = compressionDisplay(this, row, { sourceIds });
+                    return compression
+                      ? [
+                          {
+                            id: String(row.id),
+                            sessionId: id,
+                            runId: String(row.run_id),
+                            seq: String(row.seq),
+                            role: 'assistant',
+                            status: row.status as MessageRecord['status'],
+                            content: '',
+                            sourceIds,
+                            compression,
+                          },
+                        ]
+                      : [];
+                  })
+              : readPublicMessages(this, id, '0', '9223372036854775807', 200),
             snapshotCursor: meta.lastChangeCursor,
             storeId: meta.storeId,
           };

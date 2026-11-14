@@ -62,8 +62,16 @@ export function toolResultPresentation(input: {
     version === '1' &&
     ['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(id)
   ) {
-    // The native receipt must agree byte-for-byte with the public receipt.
-    if (canonicalJson(content) !== canonicalJson(details)) return;
+    const modelOutput = details.outputFormat === 'model-preview';
+    if (modelOutput) {
+      if (
+        !['shell.execute', 'shell.read'].includes(id) ||
+        typeof result.content !== 'string' ||
+        typeof details.outputLimited !== 'boolean' ||
+        ['stdout', 'stderr', 'output'].some((key) => details[key] !== undefined)
+      )
+        return;
+    } else if (canonicalJson(content) !== canonicalJson(details)) return;
     const ref = object(details.ref),
       observed = object(details.execution),
       output = object(details.output);
@@ -91,10 +99,12 @@ export function toolResultPresentation(input: {
       ...(typeof observed?.status === 'string' ? { status: observed.status } : {}),
       ...pick(
         details,
-        ['accepted', 'cancelRequested', 'timedOut', 'truncated', 'terminal'],
+        modelOutput
+          ? ['accepted', 'cancelRequested', 'timedOut', 'terminal']
+          : ['accepted', 'cancelRequested', 'timedOut', 'truncated', 'terminal'],
         'boolean',
       ),
-      ...pick(details, ['stdout', 'stderr', 'droppedBytes'], 'string'),
+      ...(!modelOutput ? pick(details, ['stdout', 'stderr', 'droppedBytes'], 'string') : {}),
       ...(typeof operationDetails?.exitCode === 'number'
         ? { exitCode: operationDetails.exitCode }
         : {}),

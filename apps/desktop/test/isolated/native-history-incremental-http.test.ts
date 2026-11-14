@@ -1,4 +1,6 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -57,6 +59,7 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
       },
     },
   });
+
   const service = await startService({
     runtime,
     profile: { dataRoot: profile.dataRoot, name: profile.profile, accessKey: storeId },
@@ -225,6 +228,8 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     const identities = (messages: { id: string; seq: string; content: string; status: string }[]) =>
       messages.map(({ id, seq, content, status }) => ({ id, seq, content, status }));
     expect(identities(reader!.state.messages)).toEqual(identities(await runtime.listMessages('s')));
+    expect(requests.some(({ path }) => path === '/v1/sessions/s/state')).toBe(true);
+    expect(requests.some(({ path }) => path === '/v1/sessions/s/view')).toBe(false);
     expect(modelCalls).toBe(1);
     expect(
       requests.filter((request) => request.method === 'POST' && request.path.endsWith('/commands')),
@@ -238,3 +243,138 @@ test('real Desktop Main/SDK/Service stream applies same-seq changes, recovers a 
     await service.close();
   }
 }, 20000);
+
+test('real SQLite and Native HTTP reads a continuous long history and opens a legacy large body by original chunks', async () => {
+  const root = temporaryDirectory('kite-native-continuous-http-');
+  const profile = { dataRoot: join(root, 'data'), profile: 'isolated' };
+  let store = await openSqliteStore(profile);
+  const storeId = (await store.getMetadata()).storeId;
+  await store.createWorkspace({
+    expectedStoreId: storeId,
+    id: 'w',
+    name: 'test',
+    rootUri: pathToFileURL(root).href,
+  });
+  await store.createSession({
+    expectedStoreId: storeId,
+    subjectId: 'owner',
+    commandId: 'create',
+    sessionId: 'long',
+    workspaceId: 'w',
+    title: 'Long',
+  });
+  await store.close();
+  const db = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
+  const legacy = `${'长🙂\n'.repeat(720_000)}complete original tail`;
+  db.transaction(() => {
+    const insert = db.query(
+      "INSERT INTO message(id,session_id,seq,role,status,source_json) VALUES(?,'long',?,'user','complete',?)",
+    );
+    for (let index = 2; index <= 5002; index++)
+      insert.run(
+        `saved-${index}`,
+        index,
+        JSON.stringify({ content: index === 5001 ? legacy : `message ${index}` }),
+      );
+    db.query("UPDATE session SET next_seq=5002 WHERE id='long'").run();
+  })();
+  db.close();
+  store = await openSqliteStore(profile);
+  const runtime = createRuntime({
+    store,
+    modelId: 'unused',
+    permissions: {
+      async authorize() {
+        return { allowed: false, revision: 'read-only-fixture' };
+      },
+    },
+    model: {
+      stream() {
+        throw Error('Unexpected Model request');
+      },
+    },
+  });
+  const service = await startService({
+    runtime,
+    profile: { dataRoot: profile.dataRoot, name: profile.profile, accessKey: storeId },
+    buildId: 'native-continuous-http',
+    subjectId: 'owner',
+  });
+  let caller: NativeCaller | undefined;
+  let reader: NativeHistory | undefined;
+  try {
+    const client = createClient({
+      endpoint: service.endpoint,
+      token: service.bootstrap.token,
+      expected: {
+        profile: service.bootstrap.profile,
+        apiMajor: 1,
+        requiredCapabilities: ['session_state', 'message_changes'],
+      },
+    });
+    await client.connect();
+    caller = new NativeCaller(client, () => {});
+    await caller.invoke({ method: 'attach' });
+    const state = await caller.invoke({ method: 'select', generation: 1, sessionId: 'long' });
+    if (!state || !('generation' in state) || !state.selection) throw Error('Expected selection');
+    const selection = state.selection;
+    expect(selection.canReadHistoryPreviews).toBe(true);
+    const requested: string[] = [];
+    reader = new NativeHistory(
+      {
+        request(request) {
+          if (request.method === 'messages') {
+            requested.push(request.afterSeq!);
+            expect(request.previews).toBe(true);
+          }
+          return caller!.invoke(request);
+        },
+      } as NativeBridge,
+      () => {},
+    );
+    reader.select(1, selection, state.historyEpoch);
+    await until(() => reader!.state.phase === 'complete');
+    expect(reader.state.messages).toHaveLength(5_001);
+    expect(reader.state.messages[0]?.id).toBe('saved-2');
+    expect(reader.state.messages.at(-1)?.id).toBe('saved-5002');
+    expect(requested[0]).toBe('0');
+    expect(requested.length).toBeGreaterThan(25);
+    const large = reader.state.messages.find((message) => message.id === 'saved-5001')!;
+    expect(large.deferredText).toEqual({
+      bytes: String(Buffer.byteLength(legacy)),
+      sha256: createHash('sha256').update(legacy).digest('hex'),
+    });
+    expect(large.content.length).toBeLessThan(2049);
+    const chunks: Buffer[] = [];
+    let offset = '0';
+    do {
+      const chunk = await caller.invoke({
+        method: 'messages.text',
+        generation: 1,
+        viewSelection: selection.viewSelection!,
+        historyEpoch: state.historyEpoch ?? 0,
+        messageId: large.id,
+        offset,
+      });
+      if (!chunk || !('sha256' in chunk) || chunk.kind !== 'messages.text')
+        throw Error('Expected original text chunk');
+      chunks.push(Buffer.from(chunk.data, 'base64'));
+      offset = chunk.nextOffset;
+    } while (offset !== large.deferredText!.bytes);
+    expect(Buffer.concat(chunks).toString()).toBe(legacy);
+    expect((await client.getSessionState('long')).messages).toEqual([]);
+    const retained = reader.state.messages[0];
+    // Rebuild under a new epoch while keeping the full previous reading.
+    reader.close();
+    reader.select(1, selection, (state.historyEpoch ?? 0) + 1);
+    expect(reader.state.messages).toHaveLength(5_001);
+    expect(reader.state.messages[0]).toBe(retained);
+    await until(() => reader!.state.phase === 'complete');
+    expect(reader.state.messages).toHaveLength(5_001);
+    expect(reader.state.messages[0]).toBe(retained);
+  } finally {
+    reader?.dispose();
+    await caller?.close();
+    await service.close();
+  }
+}, 45_000);

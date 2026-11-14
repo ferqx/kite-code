@@ -18,6 +18,7 @@ import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { readContinuedReportOrigin } from '../../src/planning-configuration';
+import { defaultTaskRoles } from '../../src/task-configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function original(phase: 'request' | 'apply' = 'request'): DefaultAfterTurnInput {
@@ -273,7 +274,7 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
 }
 async function fixture(
-  idleAuthority: boolean,
+  idleAuthority: boolean | 'default',
   recurse = false,
   managed = false,
   planning = false,
@@ -395,7 +396,7 @@ async function fixture(
       afterTurn: { allowed: true, revision: 'json-forgery' },
     }),
   );
-  // Preserve actual default roles and after-turn registration; the fixture adds an explicit human ceiling below.
+  // Preserve the default roles. Exercise notification turns only with a trusted opt-in.
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
@@ -407,15 +408,19 @@ async function fixture(
         return 'owned-local-fixture-secret';
       },
     },
-    ...(!idleAuthority
-      ? {
+    ...(idleAuthority === 'default'
+      ? {}
+      : {
           afterTurn: {
-            async authorize() {
-              return { allowed: false, revision: 'fixture-no-idle-authority' };
-            },
+            authorize: createDefaultAfterTurnPolicy({
+              roles: defaultTaskRoles,
+              readCurrent: async () => ({
+                workspaceTrust: idleAuthority && trusted,
+                revision: currentRevision,
+              }),
+            }).authorize,
           },
-        }
-      : {}),
+        }),
     permissionPolicy: managed
       ? undefined
       : {
@@ -765,7 +770,7 @@ async function fixture(
     },
   };
 }
-test('default factory honors an explicit human ceiling independently for original Task/carrier and reports exactly once', async () => {
+test('an explicitly configured continuation honors the original human ceiling and reports exactly once', async () => {
   const f = await fixture(true, false, true);
   try {
     await f.start();
@@ -833,6 +838,54 @@ test('trusted denied idle completion authority preserves ordinary child work wit
     }
   }
 }, 30000);
+
+test('default Service keeps an idle child result queued for the next ordinary parent turn', async () => {
+  const f = await fixture('default');
+  try {
+    await f.start();
+    await f.approve('task.spawn');
+    await f.approve('agent/general');
+    await until(async () => (f.childCalls === 1 ? true : undefined));
+    await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
+    f.release();
+    const carrier = await until(async () =>
+      (await f.store.listExecutions('s')).find(
+        (execution) => execution.childSessionId && execution.status === 'succeeded',
+      ),
+    );
+    const queued = await until(async () => {
+      const command = await f.pendingResultReport(carrier.id);
+      return (command?.receipt as { reason?: string })?.reason === 'idle_authorization_required'
+        ? command
+        : undefined;
+    });
+    expect((await f.store.getView('s')).runs.map((run) => run.originCommandId)).toEqual(['work']);
+    const calls = f.calls.length;
+    await f.client.getView('s');
+    expect(f.calls).toHaveLength(calls);
+    await f.client.startRun('s', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'next-ordinary',
+      kind: 'run.start',
+      content: 'Continue after the child finishes',
+    });
+    await f.runtime.waitForCommand('next-ordinary', { timeoutMs: 8000 });
+    const view = await f.store.getView('s');
+    expect(view.runs.map((run) => run.originCommandId)).toEqual(['work', 'next-ordinary']);
+    expect((await f.store.getCommand(queued.id))?.receipt).toMatchObject({
+      runId: view.runs.at(-1)!.id,
+      mode: 'active',
+      outcome: 'report_received',
+    });
+    expect(f.calls.slice(calls)).toHaveLength(1);
+    const messages = f.calls.at(-1)!.messages as { content: string | null }[];
+    expect(
+      messages.filter((message) => message.content?.includes('ORIGINAL_CHILD_RESULT')),
+    ).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+}, 25000);
 test('default current policy/trust drift after parent completion defers original report without child replay', async () => {
   for (const trusted of [true, false]) {
     const f = await fixture(true);

@@ -17334,6 +17334,21 @@
         "type": "string",
         "const": "unsupported"
       },
+      "deferredText": {
+        "type": "object",
+        "properties": {
+          "bytes": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["bytes", "sha256"],
+        "additionalProperties": false
+      },
       "outputBody": {
         "type": "object",
         "properties": {
@@ -22095,6 +22110,21 @@
               "type": "string",
               "const": "unsupported"
             },
+            "deferredText": {
+              "type": "object",
+              "properties": {
+                "bytes": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": ["bytes", "sha256"],
+              "additionalProperties": false
+            },
             "outputBody": {
               "type": "object",
               "properties": {
@@ -24605,6 +24635,21 @@
           "type": "string",
           "const": "unsupported"
         },
+        "deferredText": {
+          "type": "object",
+          "properties": {
+            "bytes": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": ["bytes", "sha256"],
+          "additionalProperties": false
+        },
         "outputBody": {
           "type": "object",
           "properties": {
@@ -24701,10 +24746,217 @@
       "additionalProperties": false
     }
   },
+  "MessageTextQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "seq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "sha256": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "offset": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      }
+    },
+    "required": ["storeId", "seq", "sha256", "offset"],
+    "additionalProperties": false
+  },
+  "MessageTextChunk": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "sessionId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "messageId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "seq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "sha256": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "bytes": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "offset": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "nextOffset": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "data": {
+        "type": "string",
+        "maxLength": 87384
+      }
+    },
+    "required": [
+      "storeId",
+      "sessionId",
+      "messageId",
+      "seq",
+      "sha256",
+      "bytes",
+      "offset",
+      "nextOffset",
+      "data"
+    ],
+    "additionalProperties": false
+  },
+  "SessionHistoryEntriesQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "upperSeq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "afterSeq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      }
+    },
+    "required": ["storeId", "upperSeq", "afterSeq"],
+    "additionalProperties": false
+  },
+  "SessionHistoryEntries": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "sessionId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "upperSeq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "entries": {
+        "maxItems": 256,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "runId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "firstSeq": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "lastSeq": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "count": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["id", "runId", "firstSeq", "lastSeq", "count"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["storeId", "sessionId", "upperSeq", "entries"],
+    "additionalProperties": false
+  },
+  "MessageListQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 200
+      },
+      "afterSeq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "upperSeq": {
+        "type": "string",
+        "pattern": "^(0|[1-9][0-9]*)$"
+      },
+      "direction": {
+        "type": "string",
+        "const": "older"
+      },
+      "previews": {
+        "type": "string",
+        "const": "true"
+      }
+    },
+    "additionalProperties": false
+  },
   "MessageChangesQuery": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+      "previews": {
+        "type": "string",
+        "const": "true"
+      },
       "storeId": {
         "type": "string",
         "minLength": 1,
@@ -25192,6 +25444,21 @@
             "contentFormat": {
               "type": "string",
               "const": "unsupported"
+            },
+            "deferredText": {
+              "type": "object",
+              "properties": {
+                "bytes": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": ["bytes", "sha256"],
+              "additionalProperties": false
             },
             "outputBody": {
               "type": "object",
@@ -26305,6 +26572,21 @@
             "contentFormat": {
               "type": "string",
               "const": "unsupported"
+            },
+            "deferredText": {
+              "type": "object",
+              "properties": {
+                "bytes": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": ["bytes", "sha256"],
+              "additionalProperties": false
             },
             "outputBody": {
               "type": "object",

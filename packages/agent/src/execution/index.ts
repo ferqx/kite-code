@@ -1,5 +1,6 @@
 import { type ModelAdapter, ModelAttemptError, type ModelRequest } from '@kite-ai/ai';
 import type { ContextSource } from '../context';
+import { frozenModelInputLimit } from '../context-estimate';
 import type {
   ActionContext,
   ActionDefinition,
@@ -1678,6 +1679,8 @@ export class UnifiedExecution {
           resourceCapacity: this.options.resources.capacity,
           dispatchAuthorization,
           runId: work.runId,
+          modelInputTokenLimit:
+            'run' in scope ? frozenModelInputLimit(scope.run.configuration) : undefined,
           reportProgress: progress.report,
           requestInput: (request) => requestInteraction({ kind: 'question', request }),
           requestInteraction,

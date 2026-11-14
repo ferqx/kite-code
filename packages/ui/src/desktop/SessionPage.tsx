@@ -270,7 +270,6 @@ export interface SessionPageProps {
   browserTabRequest?: { requestId: number; createIfMissing: boolean };
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
-  historyError?: { title: string; detail: string; retry: () => void };
   /** Retain the page's layout and readers while a host view replaces its painted surface. */
   covered?: boolean;
   overlays?: ReactNode;
@@ -1243,7 +1242,6 @@ function SessionPageContent({
     props.synchronizePresentation &&
     historyVisible &&
     !welcoming &&
-    !props.historyError &&
     (presentation.identity !== presentationIdentity || !presentation.ready)
   );
   // Descendant transitions can keep inherited visibility painted after hiding.
@@ -1252,8 +1250,8 @@ function SessionPageContent({
     ? { visibility: 'hidden', opacity: 0 }
     : undefined;
   const hasComposer = !!props.composer;
-  const headerOverlay =
-    historyVisible && !welcoming && !props.historyError && !props.beforeConversation;
+  const headerSessionLabel = sessionHeaderLabel(props.sessionLabel);
+  const headerOverlay = historyVisible && !welcoming && !props.beforeConversation;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Scope and composer mounting change geometry before message layout effects resume.
   const prepareConversationLayout = useCallback(() => {
     const header = headerElement.current;
@@ -1290,7 +1288,7 @@ function SessionPageContent({
       traceTurns={props.traceTurns}
       renderReasoning={props.renderReasoning}
       turnActivity={props.turnActivity}
-      lazyHistory={keepAlive}
+      preserveReadingAnchor={keepAlive}
       messageNavigation
       loading={props.loading}
       initialPresentationPending={props.initialPresentationPending}
@@ -1439,7 +1437,7 @@ function SessionPageContent({
                     className="session-header"
                     onMouseDown={handleHeaderMouseDown}
                   >
-                    <div className="session-heading">
+                    <div className="session-header-heading">
                       <div
                         className="session-sidebar-toggle"
                         data-open={!sidebarOpen ? 'true' : undefined}
@@ -1451,9 +1449,12 @@ function SessionPageContent({
                           <strong>工作台</strong>
                         ) : props.newConversation ? (
                           <strong>新对话</strong>
+                        ) : headerSessionLabel === props.sessionLabel ? (
+                          <strong>{props.sessionLabel}</strong>
                         ) : (
-                          <strong title={props.sessionLabel}>
-                            {sessionHeaderLabel(props.sessionLabel)}
+                          <strong>
+                            <span aria-hidden="true">{headerSessionLabel}</span>
+                            <span className="sr-only">{props.sessionLabel}</span>
                           </strong>
                         )}
                       </div>
@@ -1567,12 +1568,6 @@ function SessionPageContent({
                           {historyVisible &&
                             (welcoming ? (
                               <NewConversationWelcome />
-                            ) : props.historyError ? (
-                              <section className="notice error" role="alert">
-                                <strong>{props.historyError.title}</strong>
-                                <p>{props.historyError.detail}</p>
-                                <Button onClick={props.historyError.retry}>重试</Button>
-                              </section>
                             ) : keepAlive ? null : (
                               conversation
                             ))}
@@ -1580,7 +1575,7 @@ function SessionPageContent({
                             <ConversationCache
                               identity={props.readingKey}
                               loading={props.loading}
-                              visible={historyVisible && !welcoming && !props.historyError}
+                              visible={historyVisible && !welcoming}
                               cache={props.conversationCache!}
                             >
                               {conversation}

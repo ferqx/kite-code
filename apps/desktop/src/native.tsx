@@ -28,12 +28,10 @@ import {
   SessionPage,
   type SessionPageProps,
   SettingsNavigationIcon,
-  ToolActivity,
   type TrajectoryViewState,
 } from '@kite-ai/ui/desktop';
 import {
   type CSSProperties,
-  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
@@ -55,7 +53,7 @@ import {
   composeBrowserDraft,
 } from './browser-annotation-content';
 import { BrowserAnnotationDrafts } from './browser-annotation-drafts';
-import type { DesktopEditor } from './file-changes-bridge';
+import type { DesktopEditor, NativeFileChangeDetail } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
@@ -120,6 +118,7 @@ import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
+import { NativeMessageText } from './native-message-text';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput, readNativeReasoning } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
@@ -138,9 +137,10 @@ import {
 } from './native-presentation';
 import { afterNativePresentation } from './native-presentation-frame';
 import { NativeProviderModelSettings } from './native-provider-model-settings';
-import { NativeReasoning } from './native-reasoning';
+import { nativeReadDeadline } from './native-read-deadline';
+import { type NativeReasoningBody, renderNativeReasoning } from './native-reasoning';
 import { NativeRecoveryView } from './native-recovery';
-import { NativeExecutionResult } from './native-result';
+import { NativeExecutionResult, NativeExecutionResultRead } from './native-result';
 import { useNativeScheduledTasks } from './native-scheduled-tasks';
 import { NativeSessionRecovery } from './native-session-recovery';
 import { NativeSessionPanel } from './native-sessions';
@@ -153,6 +153,7 @@ import {
   NativeToolPresentation,
   useNativeToolMessages,
 } from './native-tool-messages';
+import { type NativeToolRenderer, renderNativeToolGroup } from './native-tool-renderer';
 import { NativeTraceSettings } from './native-trace-settings';
 import { NativeTrajectory } from './native-trajectory';
 import {
@@ -487,6 +488,7 @@ function NativeDesktopContent({
   const [historyState, setHistoryState] = useState<HistoryState>({
     messages: [],
     phase: 'loading',
+    baselineReady: false,
   });
   const history = useRef<NativeHistory | undefined>(undefined);
   if (bridge && !history.current)
@@ -659,6 +661,8 @@ function NativeDesktopContent({
     queued?: QueuedStateRead;
   }>({});
   const verifiedReplyBodies = useRef(new Map<string, { identity: string; text: string }>());
+  const reasoningBodies = useRef(new NativeDisplayCache<NativeReasoningBody>());
+  const operationDiffs = useRef(new NativeDisplayCache<NativeFileChangeDetail>());
   const [verifiedReplyRevision, renderVerifiedReply] = useState(0);
   const transcriptDisplay = useRef(new NativeTranscriptDisplay());
   const questionDrafts = useRef(
@@ -925,7 +929,7 @@ function NativeDesktopContent({
       if (!bridge || !isCurrentRead(current, epoch, nonce)) return;
       let value: NativeResult;
       try {
-        value = await bridge.request({ method: 'state', generation: current });
+        value = await nativeReadDeadline(bridge.request({ method: 'state', generation: current }));
       } catch (cause) {
         if (!isCurrentRead(current, epoch, nonce)) return;
         setFailedReads((previous) => ({
@@ -1069,7 +1073,12 @@ function NativeDesktopContent({
     selected.current = sessionId;
     history.current?.close();
     // Revoke actions now; any retained target display remains presentation only.
-    setHistoryState((previous) => ({ ...previous, phase: 'loading', error: undefined }));
+    setHistoryState((previous) => ({
+      ...previous,
+      phase: 'loading',
+      baselineReady: false,
+      error: undefined,
+    }));
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
     await readSelection(sessionId, current, nonce, epoch, { freshPresentation, admitted });
@@ -1158,12 +1167,14 @@ function NativeDesktopContent({
       // Rebuild its readers without creating a second selection/reconciliation.
       let value: NativeResult =
         admitted ??
-        (await bridge.request({
-          method: 'select',
-          generation: current,
-          sessionId,
-          activationId: nonce,
-        }));
+        (await nativeReadDeadline(
+          bridge.request({
+            method: 'select',
+            generation: current,
+            sessionId,
+            activationId: nonce,
+          }),
+        ));
       if (!isCurrentRead(current, epoch, nonce)) return;
       if (value && 'generation' in value && value.selection?.session.id === sessionId) {
         const targetSelection = value.selection;
@@ -1175,7 +1186,10 @@ function NativeDesktopContent({
           String(settingsRevision),
         );
         original.latest = undefined;
-        if (freshPresentation || !state?.selection || !modelSnapshots.current.get(scope)) {
+        if (
+          !targetSelection.canReadHistoryPreviews &&
+          (freshPresentation || !state?.selection || !modelSnapshots.current.get(scope))
+        ) {
           const prepared = await modelSnapshots.current.prepare(
             bridge,
             current,
@@ -1195,7 +1209,9 @@ function NativeDesktopContent({
         ) {
           try {
             preparedDraft = {
-              value: await bridge.request({ method: 'draft.read', generation: current, sessionId }),
+              value: await nativeReadDeadline(
+                bridge.request({ method: 'draft.read', generation: current, sessionId }),
+              ),
             };
           } catch (error) {
             preparedDraft = { error };
@@ -1241,6 +1257,7 @@ function NativeDesktopContent({
           models: targetModels,
         };
       }
+      if (!preparedView) throw Error('native_selection_unavailable');
       apply(value, preparedView);
       if (
         value &&
@@ -1254,7 +1271,9 @@ function NativeDesktopContent({
         if (preparedDraft && 'error' in preparedDraft) throw preparedDraft.error;
         const saved = preparedDraft
           ? preparedDraft.value
-          : await bridge.request({ method: 'draft.read', generation: current, sessionId });
+          : await nativeReadDeadline(
+              bridge.request({ method: 'draft.read', generation: current, sessionId }),
+            );
         if (!isCurrentRead(current, epoch, nonce)) return;
         if (saved && 'content' in saved && 'revision' in saved) {
           setDraft(
@@ -1928,6 +1947,7 @@ function NativeDesktopContent({
       if (readingParent && selection && selection.session.id === sessionId) {
         if (
           historyState.phase === 'unavailable' ||
+          historyState.error === 'history_high_water_unavailable' ||
           selection.permissionUnavailable ||
           state?.callerUnavailable ||
           state?.backgroundUnavailable ||
@@ -2511,8 +2531,8 @@ function NativeDesktopContent({
   }
 
   function showSessionMutationResult(submission: NativeSessionSubmission) {
-    if (submission.phase === 'applied')
-      showOperationMessage(submission.kind === 'rename' ? '会话已重命名。' : '已请求删除会话。');
+    if (submission.phase === 'applied' && submission.kind === 'delete')
+      showOperationMessage('已请求删除会话。');
     else if (submission.phase === 'unknown')
       showOperationMessage('会话操作结果待确认。请从空间栏查询结果。');
     else if (submission.phase === 'failed')
@@ -2574,6 +2594,7 @@ function NativeDesktopContent({
       epoch = readLifecycle.current.epoch;
     sessionMutationFlight.current = true;
     setSessionMutationPending(true);
+    showOperationMessage();
     try {
       const result = await bridge.request({
         method: 'lookupSessionMutation',
@@ -3417,9 +3438,8 @@ function NativeDesktopContent({
       verifiedReplyBodies.current.get(JSON.stringify([replyDisplayScope, message.id])),
     ),
     transcript: freshTranscript,
-    loading: historyMetadataLoading,
+    loading: historyMetadataLoading || historyState.phase !== 'complete',
     unavailable:
-      historyState.phase === 'unavailable' ||
       !!runMessages.error ||
       !!toolMessages.error ||
       !!fileTargets.error ||
@@ -4226,10 +4246,27 @@ function NativeDesktopContent({
                       executionId={execution.id}
                     />
                   )}
-                <NativeExecutionResult
-                  result={execution.result}
-                  model={execution.kind === 'model'}
-                />
+                {selection.canReadHistoryPreviews ? (
+                  expandedExecutions.identity ===
+                    `${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${selection.storeId}/${selection.session.id}` &&
+                  expandedExecutions.ids.has(execution.id) && (
+                    <NativeExecutionResultRead
+                      key={execution.resultRevision}
+                      bridge={bridge}
+                      generation={state.generation}
+                      viewSelection={selection.viewSelection ?? selection.viewGeneration}
+                      historyEpoch={state.historyEpoch ?? 0}
+                      executionId={execution.id}
+                      resultRevision={execution.resultRevision}
+                      model={execution.kind === 'model'}
+                    />
+                  )
+                ) : (
+                  <NativeExecutionResult
+                    result={execution.result}
+                    model={execution.kind === 'model'}
+                  />
+                )}
               </details>
             ))}
           </section>
@@ -4614,7 +4651,10 @@ function NativeDesktopContent({
     selection && directory?.storeId === selection.storeId && !directory.unavailable
       ? directory.workspaces.find(({ id }) => id === selection.session.workspaceId)?.rootUri
       : undefined;
-  const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
+  const renderNativeMessage = (
+    model: Parameters<NonNullable<SessionPageProps['renderMessageContent']>>[0],
+    detailsOpen = true,
+  ): ReactNode => {
     const message = messagesById.get(model.id);
     const firstPending = firstVisible && !firstSaved && model.id === firstSubmission.commandId;
     const openable =
@@ -4622,6 +4662,23 @@ function NativeDesktopContent({
       !selection.viewLoading &&
       historyState.phase === 'complete' &&
       !directory?.unavailable;
+    if (message?.deferredText && selection && state) {
+      if (model.shell || model.toolName === 'shell_execute') return null;
+      return (
+        <NativeMessageText
+          key={JSON.stringify([replyDisplayScope, message.id, message.deferredText.sha256])}
+          bridge={bridge}
+          generation={state.generation}
+          viewSelection={selection.viewSelection ?? selection.viewGeneration}
+          historyEpoch={state.historyEpoch ?? 0}
+          storeId={selection.storeId}
+          message={message}
+          available={openable && !selection.permissionUnavailable}
+          automatic={message.role !== 'tool' && message.role !== 'user'}
+          active={detailsOpen}
+        />
+      );
+    }
     const openFile = (path: string, line?: number) => {
       if (
         !message ||
@@ -4767,313 +4824,114 @@ function NativeDesktopContent({
       />
     );
   };
-  const renderNativeTools = (
-    group: Parameters<NonNullable<SessionPageProps['renderToolActivity']>>[0],
-    controls: Parameters<NonNullable<SessionPageProps['renderToolActivity']>>[1],
-    ordinarySegment = false,
-  ): ReactNode => {
-    const aggregate = !!controls.aggregate;
-    const displayTools = group.flatMap((model) => {
-      const fact =
-        toolMessages.entries.find((entry) => entry.messageId === model.id) ??
-        toolPresentation.current.retainedFact(model);
-      return fact ? [fact] : [];
-    });
-    const displayTargets = fileTargets.entries;
-    const agentProps = (model: (typeof group)[number]) => {
-      const activity = nativeAgentActivityForTool(
-        environment.agentActivities,
-        messages.find((message) => message.id === model.id),
-        displayTools.find((entry) => entry.messageId === model.id),
-      );
-      return {
-        childAgent: activity?.childAgent,
-        childDetail:
-          activity &&
-          childReadAvailable &&
-          toolMessages.entries.some((entry) => entry.messageId === model.id)
-            ? {
-                label: activity.childAgent.name,
-                onOpen: () =>
-                  setChildTabRequest({
-                    parent: childParent,
-                    requestId: ++childTabSequence.current,
-                    sessionId: activity.sessionId,
-                    executionId: activity.executionId,
-                    title: activity.childAgent.name,
-                    childAgentIdentity: activity.childAgent.identity,
-                  }),
-              }
-            : undefined,
-      };
-    };
-    const childOperation = (model: (typeof group)[number]) =>
-      model.toolName === 'spawn_agent' || model.toolName === 'follow_up_agent';
-    const agentTool = (model: (typeof group)[number]) => {
-      const props = agentProps(model);
-      return childOperation(model) ? (
-        <ToolActivity
-          {...props}
-          inTrace={controls.inTrace}
-          childAgent={
-            props.childAgent ??
-            (model.status === 'completed'
-              ? {
-                  identity: JSON.stringify([
-                    'native-child-tool',
-                    model.presentationKey ?? model.id,
-                  ]),
-                  name: '子 Agent',
-                }
-              : undefined)
-          }
-          aggregate={false}
-          messages={[model]}
-          expanded={controls.expandedItems[model.presentationKey ?? model.id]}
-          onToggle={(open) => controls.onToggleItem(model.presentationKey ?? model.id, open)}
-          activityId={model.presentationKey ?? model.id}
-          restoredExpanded={controls.restoredExpanded}
-          renderChildren={() => null}
-        />
-      ) : undefined;
-    };
-    // A verified child operation is a direct navigation row. Keep it outside
-    // ordinary Tool disclosures, preserving the original tool order and the
-    // independent expansion identities of ordinary segments on either side.
-    // Establish segment owners before a child arrives, so ongoing rows never remount.
-    if (!ordinarySegment && controls.inTrace) {
-      const agent = group[0] && agentTool(group[0]);
-      if (agent) return agent;
-    } else if (!ordinarySegment) {
-      const rows: ReactNode[] = [];
-      let ordinary: (typeof group)[number][] = [];
-      let childBoundary: (typeof group)[number] | undefined;
-      let segmentIndex = 0;
-      const flush = () => {
-        if (!ordinary.length) return;
-        const segment = ordinary;
-        ordinary = [];
-        // Receipts may change the first item. The block and child boundaries own segments.
-        const key =
-          segmentIndex++ === 0
-            ? controls.activityId
-            : `activity:${childBoundary!.presentationKey ?? childBoundary!.id}`;
-        rows.push(
-          <Fragment key={key}>
-            {renderNativeTools(
-              segment,
-              {
-                ...controls,
-                activityId: key,
-                expanded:
-                  controls.expandedItems[key] ??
-                  (key === controls.activityId ? controls.expanded : undefined),
-                onToggle: (open) => controls.onToggleItem(key, open),
-              },
-              true,
-            )}
-          </Fragment>,
+  const renderNativeTools: NativeToolRenderer = (group, controls) =>
+    renderNativeToolGroup(group, controls, {
+      tools: toolMessages.entries,
+      retainedFact: (model) => toolPresentation.current.retainedFact(model),
+      targets: fileTargets.entries,
+      liveTools,
+      executionUnconfirmed,
+      observationUnavailable: !!(selection?.viewLoading || selection?.permissionUnavailable),
+      diagnostics,
+      metadataPending: toolMessages.pendingMessageIds,
+      renderOriginal: renderNativeMessage,
+      hasDeferredText: (model) => !!messagesById.get(model.id)?.deferredText,
+      agentProps: (model, fact) => {
+        const activity = nativeAgentActivityForTool(
+          environment.agentActivities,
+          messages.find((message) => message.id === model.id),
+          fact,
         );
-      };
-      for (const model of group) {
-        const row = agentTool(model);
-        if (row) {
-          flush();
-          rows.push(<Fragment key={model.presentationKey ?? model.id}>{row}</Fragment>);
-          childBoundary = model;
-        } else ordinary.push(model);
-      }
-      flush();
-      return <>{rows}</>;
-    }
-    const unverified = new Set(
-      group
-        .filter(
-          (model) =>
-            !displayTools.some((entry) => entry.messageId === model.id) &&
-            !displayTargets.some((entry) => entry.messageId === model.id) &&
-            !liveTools.some((entry) => entry.message.id === model.id),
-        )
-        .map((model) => model.id),
-    );
-    const liveNotices =
-      controls.inTrace && !diagnostics
-        ? []
-        : group.map((model) => {
-            const live = liveTools.find((entry) => entry.message.id === model.id);
-            const status =
-              !live || executionUnconfirmed
-                ? undefined
-                : live.execution.cancelRequestedAt !== null
-                  ? controls.inTrace
-                    ? undefined
-                    : '已请求停止，等待执行结果。'
-                  : diagnostics && (selection?.viewLoading || selection?.permissionUnavailable)
-                    ? '上次确认状态'
-                    : undefined;
-            return status ? (
-              <p key={model.id} role="status">
-                {status}
-              </p>
-            ) : null;
-          });
-    // Each receipt owns its verification and reader independently. An unknown
-    // sibling must not withdraw another tool's verified file actions or output.
-    const originalTool = (
-      model: (typeof group)[number],
-      expanded: boolean | undefined,
-      onToggle: (open: boolean) => void,
-    ) => (
-      <ToolActivity
-        aggregate={false}
-        inTrace={controls.inTrace}
-        directTraceDetails={controls.directTraceDetails}
-        unverified
-        metadataPending={toolMessages.pendingMessageIds.has(model.id)}
-        messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
-        expanded={expanded}
-        onToggle={onToggle}
-        activityId={
-          !aggregate && group.length === 1
-            ? controls.activityId
-            : (model.presentationKey ?? model.id)
-        }
-        restoredExpanded={controls.restoredExpanded}
-        renderChildren={() => renderNativeMessage(model)}
-      />
-    );
-    if (!aggregate && group.length === 1 && unverified.has(group[0]!.id))
-      return originalTool(group[0]!, controls.expanded, controls.onToggle);
-    const renderToolImages = (model: (typeof group)[number]) => {
-      const message = messagesById.get(model.id);
-      const images = displayTools.find((entry) => entry.messageId === model.id)?.images;
-      return message && images?.length && selection && state ? (
-        <NativeUserImages
-          key={model.id}
-          bridge={bridge}
-          previews={imageDrafts.previews}
-          generation={state.generation}
-          viewSelection={selection.viewSelection ?? selection.viewGeneration}
-          historyEpoch={state.historyEpoch ?? 0}
-          message={message}
-          images={images}
-          readAvailable={
-            !selection.viewLoading &&
-            historyState.phase === 'complete' &&
-            !directory?.unavailable &&
-            toolMessages.entries.some((entry) => entry.messageId === model.id) &&
-            !toolMessages.pendingMessageIds.has(model.id)
-          }
-        />
-      ) : null;
-    };
-    const models = group.map((model) => {
-      if (unverified.has(model.id)) return { ...model, title: model.title ?? '工具结果', text: '' };
-      const image = displayTools.find((entry) => entry.messageId === model.id);
-      if (image?.definitionId === 'files.view_images' && image.definitionVersion === '1')
         return {
-          ...model,
-          toolName: 'view_images',
-          toolImageCount: image.status === 'succeeded' ? (image.images?.length ?? 0) : 0,
+          childAgent: activity?.childAgent,
+          childDetail:
+            activity &&
+            childReadAvailable &&
+            toolMessages.entries.some((entry) => entry.messageId === model.id)
+              ? {
+                  label: activity.childAgent.name,
+                  onOpen: () =>
+                    setChildTabRequest({
+                      parent: childParent,
+                      requestId: ++childTabSequence.current,
+                      sessionId: activity.sessionId,
+                      executionId: activity.executionId,
+                      title: activity.childAgent.name,
+                      childAgentIdentity: activity.childAgent.identity,
+                    }),
+                }
+              : undefined,
         };
-      const target = displayTargets.find((entry) => entry.messageId === model.id);
-      return target?.path && target.operation
-        ? {
-            ...model,
-            toolName: { read: 'read_file', write: 'write_file', edit: 'edit_file' }[
-              target.operation
-            ],
-            target: target.path,
-            arguments: { path: target.path },
-            status: 'completed' as const,
-            settled: true,
-            changeConfirmed: target.operation !== 'read',
-          }
-        : model;
+      },
+      renderImages: (model, fact) => {
+        const message = messagesById.get(model.id);
+        const images = fact?.images;
+        return message && images?.length && selection && state ? (
+          <NativeUserImages
+            key={model.id}
+            bridge={bridge}
+            previews={imageDrafts.previews}
+            generation={state.generation}
+            viewSelection={selection.viewSelection ?? selection.viewGeneration}
+            historyEpoch={state.historyEpoch ?? 0}
+            message={message}
+            images={images}
+            readAvailable={
+              !selection.viewLoading &&
+              historyState.phase === 'complete' &&
+              !directory?.unavailable &&
+              toolMessages.entries.some((entry) => entry.messageId === model.id) &&
+              !toolMessages.pendingMessageIds.has(model.id)
+            }
+          />
+        ) : null;
+      },
+      renderFileChange: (entry, open) =>
+        state ? (
+          <NativeOperationDiff
+            key={entry.changeId}
+            bridge={bridge}
+            generation={state.generation}
+            entry={entry}
+            editor={editor}
+            open={open}
+            cache={operationDiffs.current}
+          />
+        ) : null,
+      renderDelivery: (entry) =>
+        state ? (
+          <NativeOutputFile
+            key={entry.changeId}
+            bridge={bridge}
+            generation={state.generation}
+            entry={entry}
+            editor={editor}
+          />
+        ) : null,
+      openFileForTarget: (target) => {
+        if (
+          !selection ||
+          !state ||
+          selection.viewLoading ||
+          historyState.phase !== 'complete' ||
+          directory?.unavailable ||
+          !target?.openable ||
+          !target.path
+        )
+          return;
+        return (path) => {
+          if (path !== target.path) return;
+          void report(() =>
+            bridge.request({
+              method: 'fileChanges.open',
+              generation: state.generation,
+              changeId: target.changeId,
+              editor,
+            }),
+          );
+        };
+      },
     });
-    return (
-      <>
-        <ToolActivity
-          {...controls}
-          {...(!aggregate && group[0] ? agentProps(group[0]) : {})}
-          aggregate={aggregate}
-          unverified={unverified.size > 0}
-          messages={models}
-          renderItem={
-            aggregate
-              ? (model) =>
-                  unverified.has(model.id)
-                    ? originalTool(
-                        group.find((original) => original.id === model.id)!,
-                        controls.expandedItems[model.presentationKey ?? model.id],
-                        (open) => controls.onToggleItem(model.presentationKey ?? model.id, open),
-                      )
-                    : agentTool(model)
-              : undefined
-          }
-          renderChildren={() => null}
-          renderImages={renderToolImages}
-          renderFileChange={(model) => {
-            const entry = displayTargets.find((entry) => entry.messageId === model.id);
-            return entry && state ? (
-              <NativeOperationDiff
-                key={entry.changeId}
-                bridge={bridge}
-                generation={state.generation}
-                entry={entry}
-                editor={editor}
-              />
-            ) : null;
-          }}
-          openFileForMessage={(model) => {
-            const target = displayTargets.find((entry) => entry.messageId === model.id);
-            if (
-              !selection ||
-              !state ||
-              selection.viewLoading ||
-              historyState.phase !== 'complete' ||
-              directory?.unavailable ||
-              !target?.openable ||
-              !target.path
-            )
-              return;
-            return (path) => {
-              if (path !== target.path) return;
-              void report(() =>
-                bridge.request({
-                  method: 'fileChanges.open',
-                  generation: state.generation,
-                  changeId: target.changeId,
-                  editor,
-                }),
-              );
-            };
-          }}
-        />
-        {state &&
-          displayTargets
-            .filter(
-              (entry) => entry.snapshot && group.some((model) => model.id === entry.messageId),
-            )
-            .map((entry) => (
-              <NativeOutputFile
-                key={entry.changeId}
-                bridge={bridge}
-                generation={state.generation}
-                entry={entry}
-                editor={editor}
-              />
-            ))}
-        {group.map((model) => {
-          const image = displayTools.find((entry) => entry.messageId === model.id);
-          return image?.definitionId === 'files.view_images' && image.definitionVersion === '1'
-            ? null
-            : renderToolImages(model);
-        })}
-        {liveNotices}
-      </>
-    );
-  };
   const windowFrame = (content: ReactNode) =>
     nativeWindow ? (
       <NativeWindowFrame
@@ -5212,7 +5070,7 @@ function NativeDesktopContent({
           !state?.backgroundUnavailable &&
           !directory?.unavailable &&
           historyState.phase === 'complete' &&
-          !historyMetadataLoading,
+          (!historyMetadataLoading || !!selection.canReadHistoryPreviews),
       }}
       messages={pendingReading && !(firstVisible && !firstSaved) ? [] : messageModels}
       initialPresentationPending={
@@ -5226,13 +5084,15 @@ function NativeDesktopContent({
         !runMessages.error &&
         !toolMessages.error &&
         !fileTargets.error &&
-        (historyState.phase === 'loading' ||
-          (canCompose &&
-            (resolvedChoice?.identity !== choiceIdentity || !resolvedChoice.settled)) ||
-          !!selection.viewLoading ||
-          runMessages.loading ||
-          toolMessages.loading ||
-          fileTargets.loading)
+        (historyState.phase === 'loading'
+          ? !historyState.baselineReady
+          : !selection.canReadHistoryPreviews &&
+            ((canCompose &&
+              (resolvedChoice?.identity !== choiceIdentity || !resolvedChoice.settled)) ||
+              !!selection.viewLoading ||
+              runMessages.loading ||
+              toolMessages.loading ||
+              fileTargets.loading))
       }
       synchronizePresentation={!preparing && !frame.preparation && !(firstVisible && !firstSaved)}
       retainedPresentation={!!cachedComposer}
@@ -5253,38 +5113,32 @@ function NativeDesktopContent({
           !directory?.unavailable &&
           historyState.phase !== 'unavailable' &&
           !selection.permissionUnavailable;
-        return (
-          <NativeReasoning
-            key={JSON.stringify([replyDisplayScope, executionId])}
-            open={open}
-            revision={JSON.stringify([
-              original.status,
-              original.outputBody?.reasoningBytes ??
-                (!model.settled ? historyState.cursor : undefined),
-              model.settled,
-            ])}
-            read={
-              readable
-                ? (signal) =>
-                    readNativeReasoning({
-                      bridge,
-                      generation: current,
-                      expectedStoreId: selection.storeId,
-                      sessionId: original.originMessage?.sessionId ?? original.sessionId,
-                      viewSessionId: selection.session.id,
-                      messageId: original.id,
-                      executionId,
-                      runId,
-                      signal,
-                      isCurrent: () =>
-                        generation.current === current &&
-                        viewIntent.current === nonce &&
-                        selected.current === selection.session.id,
-                    })
-                : undefined
-            }
-          />
-        );
+        return renderNativeReasoning({
+          scope: JSON.stringify([replyDisplayScope, state.historyEpoch]),
+          model,
+          original,
+          open,
+          cache: reasoningBodies.current,
+          revision: !model.settled && !original.outputBody ? historyState.cursor : undefined,
+          read: readable
+            ? (signal) =>
+                readNativeReasoning({
+                  bridge,
+                  generation: current,
+                  expectedStoreId: selection.storeId,
+                  sessionId: original.originMessage?.sessionId ?? original.sessionId,
+                  viewSessionId: selection.session.id,
+                  messageId: original.id,
+                  executionId,
+                  runId,
+                  signal,
+                  isCurrent: () =>
+                    generation.current === current &&
+                    viewIntent.current === nonce &&
+                    selected.current === selection.session.id,
+                })
+            : undefined,
+        });
       }}
       turnActivity={
         pendingFirstReply
@@ -5349,7 +5203,7 @@ function NativeDesktopContent({
         !(firstVisible && !firstSaved) &&
         (!!pendingReading ||
           (selectionHandoff && !messages.length) ||
-          (!!selection && historyState.phase === 'loading' && !messages.length))
+          (!!selection && historyState.phase !== 'complete' && !messages.length))
       }
       renderBrowser={(props) => (
         <NativeBrowserPane
@@ -5485,6 +5339,8 @@ function NativeDesktopContent({
       }
       renderChildSession={({ sessionId, executionId, onTitleChange }) => (
         <NativeChildDetail
+          bridge={bridge}
+          imagePreviews={imageDrafts.previews}
           child={environment.child}
           generation={state?.generation ?? generation.current}
           storeId={selection?.storeId ?? ''}
@@ -5495,7 +5351,6 @@ function NativeDesktopContent({
             childReadAvailable &&
             !!selection &&
             selected.current === selection.session.id &&
-            !selection.viewLoading &&
             !directory?.unavailable
           }
           onTitleChange={onTitleChange}
@@ -5684,21 +5539,13 @@ function NativeDesktopContent({
                   </DesktopButton>
                 </div>
               ))}
-              {((diagnostics && historyState.phase !== 'loading') ||
-                selection.session.historyPurgedAt !== undefined ||
-                historyState.phase === 'unavailable') && (
+              {((diagnostics && historyState.phase === 'complete') ||
+                selection.session.historyPurgedAt !== undefined) && (
                 <p role="status">
                   {selection.session.historyPurgedAt !== undefined
                     ? '此会话的历史正文已由离线维护清理；原操作回执和执行边界仍保留。'
-                    : historyState.phase === 'complete'
-                      ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
-                      : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
+                    : '历史已完整读取至固定高水位；当前执行事实仍须核实。'}
                 </p>
-              )}
-              {historyState.phase === 'unavailable' && (
-                <DesktopButton type="button" onClick={() => void report(refresh)}>
-                  重新加载会话
-                </DesktopButton>
               )}
               {selection.runs
                 .filter(() => diagnostics)
@@ -5833,7 +5680,7 @@ function NativeDesktopContent({
                 </>
               ),
             }
-          : frame.preparation && state && directory
+          : frame.preparation && !pendingReading && state && directory
             ? {
                 draft: newDraft,
                 scopeKey: newImageScope,

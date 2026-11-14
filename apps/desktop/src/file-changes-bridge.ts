@@ -16,6 +16,7 @@ export type NativeFileChange = {
   operation?: 'read' | 'write' | 'edit';
   snapshot?: boolean;
   diff?: boolean;
+  diffCounts?: { added: number; removed: number };
 };
 export type NativeFileChangePage = {
   kind: 'fileChanges.page';

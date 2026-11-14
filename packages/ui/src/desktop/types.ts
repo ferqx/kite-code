@@ -118,6 +118,8 @@ export interface Message {
   };
   readonly changedFile?: string;
   readonly changeConfirmed?: boolean;
+  readonly agentWait?: true;
+  readonly fileDiffCounts?: { readonly added: number; readonly removed: number };
   readonly toolResult?: {
     readonly ok: boolean;
     readonly stdout?: string;
@@ -149,8 +151,10 @@ export interface Message {
       | 'failed'
       | 'cancelled'
       | 'outcome_unknown';
-    /** Original ordered output when a Shell read provides sequenced chunks. */
+    /** The saved model output section for a completed Shell tool. */
     readonly output?: string;
+    /** Verified failure text, independent of the command output. */
+    readonly failureReason?: string;
     readonly stdout?: string;
     readonly stderr?: string;
     readonly exitCode?: number;

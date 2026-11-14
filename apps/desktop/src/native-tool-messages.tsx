@@ -6,8 +6,10 @@ import {
   useDesktopDiagnostics,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { NativeBridge, NativeSelection } from './native-bridge';
+import type { NativeBridge, NativeResult, NativeSelection } from './native-bridge';
 import { NativeDisplayCache } from './native-display-cache';
+import { nativeReadDeadline } from './native-read-deadline';
+import { desktopShell } from './native-shell-receipt';
 import type {
   NativeRunFact,
   NativeToolExecution,
@@ -148,6 +150,7 @@ const sameReceipt = (left: Message, right: Message) =>
   left.sessionId === right.sessionId &&
   left.seq === right.seq &&
   left.content === right.content &&
+  left.deferredText?.sha256 === right.deferredText?.sha256 &&
   left.runId === right.runId &&
   left.status === right.status &&
   left.contentFormat === right.contentFormat &&
@@ -173,6 +176,10 @@ function withoutToolInput(fact: NativeToolMessageFact): NativeToolMessageFact {
       ? {
           shellInput: { operation: fact.shellInput.operation },
           shellResultVerified: undefined,
+          shellOutputReceipt: undefined,
+          shellOutputLimit: undefined,
+          shellDisplay: undefined,
+          shellOutputError: undefined,
         }
       : {}),
   };
@@ -326,7 +333,11 @@ export function desktopToolMessage(
       | 'fileMissing'
       | 'fileCreated'
       | 'agentMessageAccepted'
+      | 'agentWait'
       | 'shellInput'
+      | 'shellDisplay'
+      | 'shellOutputLimit'
+      | 'shellOutputReceipt'
       | 'shellResultVerified'
       | 'worktreeFailure'
       | 'label'
@@ -336,10 +347,21 @@ export function desktopToolMessage(
 ): DesktopMessage {
   const shell = desktopShell(fact, text);
   const worktreeIssue = desktopWorktreeFailure(fact);
+  const waitText =
+    fact.agentWait &&
+    {
+      events: `收到 ${fact.agentWait.events} 条子 Agent 事件`,
+      completed: '所等待的子 Agent 工作已结束',
+      input: '收到新输入，已结束等待',
+      timeout: '等待期间暂无新事件',
+    }[fact.agentWait.reason];
   return {
     id,
     role: 'tool',
-    text,
+    text:
+      waitText ??
+      (shell && (fact.shellResultVerified || /^[\s\uFEFF]*[[{]/u.test(text)) ? '' : text),
+    ...(waitText ? { agentWait: true as const } : {}),
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
     ...desktopToolPresentation(fact),
     target: fact.target,
@@ -415,162 +437,8 @@ function desktopWorktreeFailure(
   return `${category}${failure.errno ? ` 系统错误：${failure.errno}。` : ''}${failure.cleanupUnconfirmed ? ' 相关进程或输出资源的清理尚未确认。' : ''}\n${effects}`;
 }
 
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-const decimal = (value: unknown): value is string =>
-  typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
-
-/** Display only: a Tool receipt never promotes acceptance to a completed Shell Job. */
-function desktopShell(
-  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status'> &
-    Pick<Partial<NativeToolMessageFact>, 'shellInput' | 'shellResultVerified' | 'target'>,
-  text: string,
-): DesktopMessage['shell'] {
-  const declaredOperation = fact.definitionId.slice('shell.'.length);
-  if (
-    fact.definitionVersion !== '1' ||
-    !fact.definitionId.startsWith('shell.') ||
-    !['execute', 'launch', 'read', 'wait', 'stop'].includes(declaredOperation)
-  )
-    return;
-  const input = fact.shellInput;
-  const operation =
-    declaredOperation === 'execute' && input?.operation === 'launch' ? 'launch' : declaredOperation;
-  const shell: NonNullable<DesktopMessage['shell']> = {
-    operation: operation as NonNullable<DesktopMessage['shell']>['operation'],
-    ...(input?.shellId ? { shellId: input.shellId } : {}),
-    ...(input?.command === undefined && fact.target && ['execute', 'launch'].includes(operation)
-      ? { commandPreview: fact.target }
-      : {}),
-    ...(input?.command !== undefined &&
-    input.commandOffset === 0 &&
-    input.commandNextOffset === null
-      ? { command: input.command }
-      : {}),
-  };
-  if (!fact.shellResultVerified) return shell;
-  let result: Record<string, unknown> | undefined;
-  try {
-    result = record(JSON.parse(text));
-  } catch {
-    return shell;
-  }
-  if (!result) return shell;
-  const ref = record(result.ref);
-  if (ref?.extensionId !== 'builtin.shell' || ref.key !== shell.shellId) return shell;
-  if (operation === 'launch')
-    return result.accepted === true && result.shellId === shell.shellId
-      ? { ...shell, accepted: true }
-      : shell;
-  const job = record(result.execution);
-  if (
-    !job ||
-    job.id !== ref.executionId ||
-    job.sessionId !== ref.sessionId ||
-    job.originStoreId !== ref.originStoreId ||
-    job.kind !== 'job' ||
-    job.definitionId !== 'shell.command' ||
-    job.definitionVersion !== '1' ||
-    ![
-      'planned',
-      'dispatching',
-      'running',
-      'succeeded',
-      'failed',
-      'cancelled',
-      'outcome_unknown',
-    ].includes(String(job.status))
-  )
-    return shell;
-  const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
-    String(job.status),
-  );
-  const jobResult = record(job.result);
-  if (
-    terminal &&
-    (!jobResult || jobResult.outcome !== job.status || typeof jobResult.content !== 'string')
-  )
-    return shell;
-  if (
-    operation === 'execute' &&
-    (!terminal ||
-      fact.status !==
-        (result.timedOut === true && job.status === 'cancelled' ? 'failed' : job.status))
-  )
-    return shell;
-  const details = record(jobResult?.details);
-  const status = job.status as NonNullable<DesktopMessage['shell']>['jobStatus'];
-  const verified = {
-    ...shell,
-    jobStatus: status,
-    ...(Number.isSafeInteger(details?.exitCode) ? { exitCode: details!.exitCode as number } : {}),
-    ...(typeof result.timedOut === 'boolean' ? { timedOut: result.timedOut } : {}),
-    ...(operation === 'stop' && result.cancelRequested === true ? { cancelRequested: true } : {}),
-  };
-  if (operation === 'execute') {
-    if (
-      typeof result.stdout !== 'string' ||
-      typeof result.stderr !== 'string' ||
-      typeof result.truncated !== 'boolean' ||
-      !decimal(result.droppedBytes) ||
-      !decimal(result.stdoutBytes) ||
-      !decimal(result.stderrBytes) ||
-      (!result.truncated &&
-        (BigInt(result.stdoutBytes) !== BigInt(new TextEncoder().encode(result.stdout).length) ||
-          BigInt(result.stderrBytes) !== BigInt(new TextEncoder().encode(result.stderr).length)))
-    )
-      return result.cancellationObserved === true ? { ...verified, outputComplete: false } : shell;
-    const truncated = result.truncated || BigInt(result.droppedBytes) > 0n;
-    return {
-      ...verified,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      truncated,
-      outputComplete: !truncated,
-    };
-  }
-  if (operation !== 'read') return { ...verified, outputComplete: false };
-  const output = record(result.output);
-  if (!output || !decimal(output.highWaterSeq) || !Array.isArray(output.items)) return shell;
-  let cursor = -1n,
-    orderedOutput = '',
-    stdout = '',
-    stderr = '',
-    dropped = false;
-  for (const value of output.items) {
-    const item = record(value);
-    if (
-      !item ||
-      item.executionId !== ref.executionId ||
-      !decimal(item.seq) ||
-      !decimal(item.throughSeq) ||
-      BigInt(item.seq) <= cursor ||
-      BigInt(item.throughSeq) < BigInt(item.seq) ||
-      BigInt(item.throughSeq) > BigInt(output.highWaterSeq) ||
-      !['stdout', 'stderr', 'progress'].includes(String(item.stream)) ||
-      typeof item.content !== 'string' ||
-      (item.droppedBytes !== null && !decimal(item.droppedBytes))
-    )
-      return shell;
-    cursor = BigInt(item.throughSeq);
-    if (item.stream === 'stdout') stdout += item.content;
-    if (item.stream === 'stderr') stderr += item.content;
-    if (item.stream === 'stdout' || item.stream === 'stderr') orderedOutput += item.content;
-    if (decimal(item.droppedBytes) && BigInt(item.droppedBytes) > 0n) dropped = true;
-  }
-  return {
-    ...verified,
-    stdout,
-    stderr,
-    output: orderedOutput,
-    truncated: dropped,
-    outputComplete: false,
-  };
-}
 export function nativeShellInputPresentation(fact: NativeToolMessageFact) {
-  return desktopShell({ ...fact, shellResultVerified: false }, '');
+  return desktopShell({ ...fact, shellDisplay: undefined, shellResultVerified: false }, '');
 }
 export function NativeToolMessage({ message }: { message: DesktopMessage }) {
   const [expanded, setExpanded] = useState(false);
@@ -1022,16 +890,18 @@ function useNativeLiveShellInputs({
         try {
           do {
             readId = crypto.randomUUID();
-            const page = await bridge.request({
-              method: 'toolMessages.list',
-              generation,
-              viewSelection,
-              historyEpoch,
-              readId,
-              messageIds: [],
-              executionIds: batch.map((item) => item.execution.id),
-              ...(commandOffsets ? { commandOffsets } : {}),
-            });
+            const page: NativeResult = await nativeReadDeadline(
+              bridge.request({
+                method: 'toolMessages.list',
+                generation,
+                viewSelection,
+                historyEpoch,
+                readId,
+                messageIds: [],
+                executionIds: batch.map((item) => item.execution.id),
+                ...(commandOffsets ? { commandOffsets } : {}),
+              }),
+            );
             if (!active) return;
             if (
               !page ||
@@ -1279,22 +1149,27 @@ export function useNativeToolMessages({
     publish();
     void (async () => {
       let readError = false;
-      for (let index = 0; index < pending.length; index += 32) {
-        let batch = pending.slice(index, index + 32);
+      const batches: Message[][] = [];
+      for (let index = 0; index < pending.length; index += 32)
+        batches.push(pending.slice(index, index + 32));
+      for (const messages of batches) {
+        let batch = messages;
         const assembled = new Map<string, { command: string; fact: NativeToolMessageFact }>();
         let commandOffsets: Record<string, number> | undefined;
         try {
           do {
             readId = crypto.randomUUID();
-            const page = await bridge.request({
-              method: 'toolMessages.list',
-              generation,
-              viewSelection,
-              historyEpoch,
-              readId,
-              messageIds: batch.map((message) => message.id),
-              ...(commandOffsets ? { commandOffsets } : {}),
-            });
+            const page: NativeResult = await nativeReadDeadline(
+              bridge.request({
+                method: 'toolMessages.list',
+                generation,
+                viewSelection,
+                historyEpoch,
+                readId,
+                messageIds: batch.map((message) => message.id),
+                ...(commandOffsets ? { commandOffsets } : {}),
+              }),
+            );
             if (!active) return;
             if (
               !page ||
@@ -1347,6 +1222,12 @@ export function useNativeToolMessages({
                     throw Error('tool_message_command_offset_invalid');
                   const command = (previous?.command ?? '') + input.command;
                   if (command.length > 524288) throw Error('tool_message_command_offset_invalid');
+                  if (previous)
+                    fact = {
+                      ...fact!,
+                      shellDisplay: previous.fact.shellDisplay,
+                      shellOutputError: previous.fact.shellOutputError,
+                    };
                   assembled.set(message.id, { command, fact: fact! });
                   if (input.commandNextOffset !== null) {
                     next[message.id] = input.commandNextOffset!;
@@ -1391,8 +1272,18 @@ export function useNativeToolMessages({
             commandOffsets = next;
             batch = batch.filter((message) => Object.hasOwn(next, message.id));
           } while (batch.length && active);
-        } catch {
+        } catch (error) {
           if (!active) return;
+          if (
+            !commandOffsets &&
+            batch.length > 1 &&
+            error instanceof Error &&
+            ['tool_message_page_too_large', 'native_response_too_large'].includes(error.message)
+          ) {
+            const middle = Math.ceil(batch.length / 2);
+            batches.push(batch.slice(0, middle), batch.slice(middle));
+            continue;
+          }
           readError = true;
           // A command continuation cannot invalidate metadata already checked on its first page.
           for (const message of batch) {

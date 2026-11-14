@@ -23,8 +23,6 @@ const now = () => performance.timeOrigin + performance.now();
 const base = backgroundItem();
 let liveTurns = turns;
 const count = (id: string) => (id === 'large' ? liveTurns : 1);
-const INITIAL_ENTRY_THRESHOLD = 100;
-const INITIAL_ENTRY_WINDOW = 40;
 const sessions = ['large', 'small'].map((id) => ({
   ...base.session,
   id,
@@ -155,11 +153,13 @@ const toolEntries = new Map(
 let selected = 'small';
 let view = 1;
 let revision = 1;
+let activationId: number | undefined;
 let historyVersion = 1;
 let historyBaseline = 1;
 const historySnapshots = new Map<number, readonly Message[]>([[1, histories.get('large')!]]);
 const historyChanges = new Map<number, readonly string[]>();
 let holdLargeHistory = false;
+let failLargeHistory = false;
 const heldHistory: (() => void)[] = [];
 let streamBase: string | undefined;
 let churnTimer: ReturnType<typeof setInterval> | undefined;
@@ -265,9 +265,10 @@ const bridge: NativeBridge = {
           workspaces: [{ id: 'workspace', name: 'Fixture workspace', rootUri: 'file:///fixture' }],
         };
       case 'select':
+        if (selected !== request.sessionId || activationId !== request.activationId) view++;
         selected = request.sessionId;
+        activationId = request.activationId;
         if (selected === 'large') historyBaseline = historyVersion;
-        view++;
         revision++;
         return state();
       case 'draft.read':
@@ -280,6 +281,10 @@ const bridge: NativeBridge = {
           content: `Draft ${request.sessionId}`,
         };
       case 'messages': {
+        if (failLargeHistory && request.sessionId === 'large') {
+          events.push({ kind: 'history:failed', at: now(), sessionId: request.sessionId });
+          throw Error('history_read_failed');
+        }
         const version = request.changes ? Number(request.changes.upperCursor) : historyBaseline;
         const snapshot =
           request.sessionId === 'large'
@@ -606,7 +611,7 @@ let currentStage = 0;
 const sample = (frameTick = false) => {
   const viewport = document.querySelector<HTMLElement>('.conversation-viewport');
   const heading = document.querySelector('.breadcrumb strong');
-  const title = heading?.getAttribute('title') ?? heading?.textContent;
+  const title = heading?.querySelector('.sr-only')?.textContent ?? heading?.textContent;
   const id = title === 'Large history' ? 'large' : title === 'Small target' ? 'small' : undefined;
   const tail = id
     ? viewport?.querySelector<HTMLElement>(
@@ -623,8 +628,7 @@ const sample = (frameTick = false) => {
   const entryKeys = entryNodes.map((entry) => entry.dataset.conversationEntryKey!);
   const entryKinds = entryNodes.map((entry) => entry.dataset.entryKind!);
   const entrySignature = entryKeys.join('\u0000');
-  const expectedInitialEntries =
-    turns * 2 > INITIAL_ENTRY_THRESHOLD ? INITIAL_ENTRY_WINDOW : turns * 2;
+  const expectedInitialEntries = turns * 2;
   const loader = !!document.querySelector('.conversation-loading');
   const hidden = column?.getAttribute('aria-hidden') === 'true';
   const inert = !!column && (column.inert || column.hasAttribute('inert'));
@@ -715,8 +719,6 @@ const api = {
   turns,
   blocks,
   toolsPerTurn,
-  initialEntryThreshold: INITIAL_ENTRY_THRESHOLD,
-  initialEntryWindow: INITIAL_ENTRY_WINDOW,
   currentTurns: () => liveTurns,
   sourceMessages: () => histories.get('large')!.map((message) => message.id),
   currentVersion: () => historyVersion,
@@ -799,20 +801,6 @@ const api = {
     observeAnchor();
     return { key: anchorWatch.key, baseline: anchorWatch.baseline, entries: entries.length };
   },
-  beginEarlierWatch() {
-    if (anchorWatch) throw new Error('an anchor observation is already active');
-    const { viewport, entries } = readWindow();
-    const node = entries[0]!;
-    viewport.scrollTop = 0;
-    anchorWatch = {
-      node,
-      key: node.dataset.conversationEntryKey!,
-      baseline: node.getBoundingClientRect().top,
-      frames: [],
-    };
-    observeAnchor();
-    return { key: anchorWatch.key, baseline: anchorWatch.baseline, entries: entries.length };
-  },
   endEarlierWatch() {
     if (!anchorWatch) throw new Error('no anchor observation');
     observeAnchor();
@@ -858,6 +846,9 @@ const api = {
   holdHistory() {
     if (heldHistory.length) throw new Error('an old history response is still held');
     holdLargeHistory = true;
+  },
+  interruptHistory(value: boolean) {
+    failLargeHistory = value;
   },
   pendingHistory: () => heldHistory.length,
   releaseHistory() {

@@ -1,14 +1,18 @@
 import type { Message } from '@kite-ai/client';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { NativeHistoryCache } from './native-history-cache';
+import { nativeReadDeadline } from './native-read-deadline';
 
 export type HistoryState = {
   messages: Message[];
   phase: 'loading' | 'complete' | 'unavailable';
+  /** The fixed snapshot is readable while newer durable changes are still arriving. */
+  baselineReady: boolean;
   highWaterSeq?: string;
   cursor?: string;
   error?: string;
 };
+type HistoryTarget = { upperSeq: string; cursor?: string; baselineCursor?: string };
 /** Full baselines seal placement; subsequent reads cover durable changes, including same-seq edits. */
 export class NativeHistory {
   private scope?: {
@@ -17,15 +21,17 @@ export class NativeHistory {
     sessionId: string;
     selection: number;
     epoch: number;
+    previews?: boolean;
   };
-  private run?: { readId: string; canceled: boolean };
-  private wanted?: { upperSeq: string; cursor?: string; baselineCursor?: string };
+  private run?: { readId: string; canceled: boolean; target: HistoryTarget };
+  private wanted?: HistoryTarget;
   private cursor?: string;
   private revision?: number;
+  private baselineReady = false;
   private entries = new Map<string, Message>();
   private cached = new NativeHistoryCache();
   private disposed = false;
-  state: HistoryState = { messages: [], phase: 'loading' };
+  state: HistoryState = { messages: [], phase: 'loading', baselineReady: false };
   private bridge: NativeBridge;
   private changed: (value: HistoryState) => void;
   constructor(bridge: NativeBridge, changed: (value: HistoryState) => void) {
@@ -36,6 +42,7 @@ export class NativeHistory {
     this.state = {
       messages: [...this.entries.values()].sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1)),
       phase,
+      baselineReady: this.baselineReady,
       highWaterSeq,
       cursor: this.cursor,
       error,
@@ -46,6 +53,7 @@ export class NativeHistory {
     // Returning to an unchanged selection still requires a fresh reading after a pause.
     this.revision = undefined;
     this.cursor = undefined;
+    this.baselineReady = false;
     if (this.run && this.scope) {
       this.run.canceled = true;
       void this.bridge
@@ -106,18 +114,25 @@ export class NativeHistory {
       sessionId: selection.session.id,
       selection: selection.viewSelection ?? selection.viewGeneration,
       epoch,
+      ...(selection.canReadHistoryPreviews === true ? { previews: true } : {}),
     };
     const sameScope = JSON.stringify(scope) === JSON.stringify(this.scope);
+    const target = {
+      upperSeq: selection.session.nextSeq,
+      cursor: selection.historyTargetCursor ?? selection.historyCursor,
+      baselineCursor: selection.historyCursor,
+    };
     if (
       sameScope &&
       this.revision === selection.viewGeneration &&
-      (selection.historyTargetCursor === undefined ||
-        selection.historyTargetCursor === this.cursor ||
-        selection.historyTargetCursor === this.wanted?.cursor) &&
+      (target.cursor === undefined ||
+        target.cursor === this.cursor ||
+        target.cursor === this.wanted?.cursor ||
+        target.cursor === this.run?.target.cursor) &&
       this.state.phase !== 'unavailable'
     )
       return;
-    if (JSON.stringify(scope) !== JSON.stringify(this.scope)) {
+    if (!sameScope) {
       const previous = this.scope;
       this.close();
       const sameObservation = previous?.generation === generation && previous.epoch === epoch;
@@ -142,19 +157,18 @@ export class NativeHistory {
       this.publish('loading');
     }
     this.revision = selection.viewGeneration;
-    this.wanted = {
-      upperSeq: selection.session.nextSeq,
-      cursor: selection.historyTargetCursor ?? selection.historyCursor,
-      baselineCursor: selection.historyCursor,
-    };
+    this.wanted = target;
     void this.drain();
+  }
+  private closeRead(generation: number, readId: string) {
+    void this.bridge.request({ method: 'messages.close', generation, readId }).catch(() => {});
   }
   private async drain() {
     if (this.run || !this.scope || !this.wanted) return;
     const scope = this.scope,
       target = this.wanted,
       upperSeq = target.upperSeq,
-      run = { readId: crypto.randomUUID(), canceled: false };
+      run = { readId: crypto.randomUUID(), canceled: false, target };
     this.wanted = undefined;
     const incremental =
       this.cursor !== undefined &&
@@ -165,11 +179,11 @@ export class NativeHistory {
       // A retained View can lag the message stream after reconnect. Its earlier
       // boundary cannot replace messages already read from the same session.
       this.revision = undefined;
-      this.publish('loading', this.state.highWaterSeq);
+      this.publish('loading', this.state.highWaterSeq, 'history_high_water_unavailable');
       return;
     }
     this.run = run;
-    if (!incremental) this.publish('loading');
+    if (!incremental) this.publish('loading', this.state.highWaterSeq);
     const scanned = new Map<string, Message>();
     let afterSeq = '0';
     try {
@@ -178,40 +192,53 @@ export class NativeHistory {
         return;
       }
       for (;;) {
-        const page = await this.bridge.request({
-          method: 'messages',
-          generation: scope.generation,
-          sessionId: scope.sessionId,
-          expectedStoreId: scope.storeId,
-          readId: run.readId,
-          afterSeq,
-          upperSeq,
-          limit: 200,
-        });
+        const page = await nativeReadDeadline(
+          this.bridge.request({
+            method: 'messages',
+            generation: scope.generation,
+            sessionId: scope.sessionId,
+            expectedStoreId: scope.storeId,
+            readId: run.readId,
+            afterSeq,
+            upperSeq,
+            limit: 200,
+            ...(scope.previews ? { previews: true } : {}),
+          }),
+        );
         if (run.canceled || this.scope !== scope) return;
         if (!page || !('messages' in page) || page.highWaterSeq !== upperSeq)
           throw Error('history_page_identity_mismatch');
         let last = BigInt(afterSeq);
+        const upper = BigInt(upperSeq);
+        const pageIds = new Set<string>();
         for (const message of page.messages) {
+          const sequence = BigInt(message.seq);
           if (
             message.sessionId !== scope.sessionId ||
-            BigInt(message.seq) <= last ||
-            BigInt(message.seq) > BigInt(upperSeq)
+            scanned.has(message.id) ||
+            pageIds.has(message.id) ||
+            sequence <= last ||
+            sequence > upper
           )
             throw Error('history_page_sequence_mismatch');
-          last = BigInt(message.seq);
+          pageIds.add(message.id);
+          last = sequence;
         }
+        if (
+          page.nextAfterSeq !== null &&
+          (!page.messages.length || page.nextAfterSeq !== page.messages.at(-1)!.seq)
+        )
+          throw Error('history_page_cursor_mismatch');
         for (const message of page.messages) scanned.set(message.id, message);
         if (page.nextAfterSeq === null) break;
-        if (!page.messages.length || page.nextAfterSeq !== page.messages.at(-1)!.seq)
-          throw Error('history_page_cursor_mismatch');
         afterSeq = page.nextAfterSeq;
       }
       // EOF proves the complete reading, including removal or replacement of older records.
       this.replace(scanned);
+      this.baselineReady = true;
       this.cursor = target.baselineCursor;
       if (target.cursor !== target.baselineCursor) this.wanted ??= target;
-      this.publish(this.wanted && target.cursor === undefined ? 'loading' : 'complete', upperSeq);
+      this.publish(this.wanted ? 'loading' : 'complete', upperSeq);
     } catch (error) {
       if (!run.canceled && this.scope === scope) {
         this.cursor = undefined;
@@ -221,19 +248,21 @@ export class NativeHistory {
             (error as Error).message === 'cursor_expired')
         ) {
           // The retained reading stays visible; only a full baseline may resume coverage.
+          this.baselineReady = false;
           this.wanted ??= target;
           this.publish('loading', this.state.highWaterSeq);
           return;
         }
         // A failed scan proves only its legal prefix; retain the last reading beyond it.
-        for (const [id, message] of scanned) this.entries.set(id, message);
-        this.publish('unavailable', this.state.highWaterSeq, (error as Error).message);
+        // Failed recalibration must not replace a newer, already visible version.
+        for (const [id, message] of scanned)
+          if (!this.entries.has(id)) this.entries.set(id, message);
+        const code = (error as { code?: string })?.code ?? (error as Error)?.message;
+        this.publish('unavailable', this.state.highWaterSeq, code);
       }
     } finally {
       if (this.run === run) this.run = undefined;
-      await this.bridge
-        .request({ method: 'messages.close', generation: scope.generation, readId: run.readId })
-        .catch(() => {});
+      this.closeRead(scope.generation, run.readId);
       if (!run.canceled && this.scope === scope && this.wanted) void this.drain();
     }
   }
@@ -250,6 +279,10 @@ export class NativeHistory {
     run: NonNullable<NativeHistory['run']>,
     target: { upperSeq: string; cursor: string },
   ) {
+    if (this.cursor === target.cursor) {
+      if (this.state.phase !== 'complete') this.publish('complete', this.state.highWaterSeq);
+      return;
+    }
     while (this.cursor !== target.cursor) {
       const afterCursor = this.cursor!;
       const updates = new Map<string, Message>(),
@@ -258,17 +291,19 @@ export class NativeHistory {
         nextCursor: string | undefined,
         upperSeq: string | undefined;
       for (;;) {
-        const page = await this.bridge.request({
-          method: 'messages',
-          generation: scope.generation,
-          sessionId: scope.sessionId,
-          expectedStoreId: scope.storeId,
-          readId: run.readId,
-          upperSeq,
-          afterSeq,
-          limit: 200,
-          changes: { afterCursor, upperCursor: target.cursor },
-        });
+        const page = await nativeReadDeadline(
+          this.bridge.request({
+            method: 'messages',
+            generation: scope.generation,
+            sessionId: scope.sessionId,
+            expectedStoreId: scope.storeId,
+            readId: run.readId,
+            upperSeq,
+            afterSeq,
+            limit: 200,
+            changes: { afterCursor, upperCursor: target.cursor },
+          }),
+        );
         if (run.canceled || this.scope !== scope) return;
         if (
           !page ||
@@ -316,7 +351,12 @@ export class NativeHistory {
       for (const [id, message] of updates) merged.set(id, message);
       this.replace(merged);
       this.cursor = nextCursor;
-      this.publish('complete', upperSeq);
+      this.publish(
+        this.state.phase !== 'complete' && (this.cursor !== target.cursor || this.wanted)
+          ? 'loading'
+          : 'complete',
+        upperSeq,
+      );
     }
   }
 }

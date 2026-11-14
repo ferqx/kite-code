@@ -35,6 +35,7 @@ bootstrap.window.close();
 const final = '项目包含 Core、Desktop 与共享 UI。';
 const summary = 'PRIVATE_COMPRESSION_SUMMARY';
 const raw = 'ORIGINAL_TOOL_RECEIPT';
+const elapsedTrigger = 'button.agent-turn-summary';
 type Reader = 'runs' | 'tools';
 function fixture(
   failTools = false,
@@ -45,6 +46,7 @@ function fixture(
     missingRuns?: boolean;
     missingTools?: boolean;
     lateChild?: boolean;
+    historyCatchup?: boolean;
   } = {},
 ) {
   const restoreWorker = withImage ? installImagePreviewWorker() : () => {};
@@ -72,6 +74,8 @@ function fixture(
     viewSelection = 1,
     historyEpoch = 0,
     holdSelection = false;
+  const historyReads: (() => void)[] = [];
+  let historyTarget = 1;
   let releaseSelection: (() => void) | undefined;
   let failHistory = false;
   let connectionUnavailable = false;
@@ -121,6 +125,13 @@ function fixture(
       viewGeneration: revision,
       viewSelection,
       canReadModelOutput: false,
+      ...(options.historyCatchup && selected === 'root'
+        ? {
+            canReadHistoryPreviews: true,
+            historyCursor: '1',
+            historyTargetCursor: String(historyTarget),
+          }
+        : {}),
       permissionUnavailable: connectionUnavailable || options.permissionUnavailable,
       session: {
         ...session,
@@ -241,6 +252,23 @@ function fixture(
           };
         case 'messages': {
           if (failHistory) throw Error('history_unavailable');
+          if (options.historyCatchup && request.sessionId === 'root') {
+            const changes = request.changes;
+            return new Promise((resolve) => {
+              historyReads.push(() =>
+                resolve({
+                  messages: changes
+                    ? [{ ...messages.at(-1)!, content: `streamed reply ${changes.upperCursor}` }]
+                    : messages,
+                  nextAfterSeq: null,
+                  highWaterSeq: '6',
+                  ...(changes
+                    ? { changes: { ...changes, nextCursor: changes.upperCursor, removedIds: [] } }
+                    : {}),
+                }),
+              );
+            });
+          }
           const page = {
             messages:
               selected === 'root'
@@ -446,6 +474,17 @@ function fixture(
       });
     },
     pending: (reader: Reader) => pending[reader].length,
+    async advanceHistoryTarget() {
+      const reads = requests.filter((request) => request.method === 'state').length;
+      await act(async () => {
+        historyTarget++;
+        revision++;
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+      await until(() => requests.filter((request) => request.method === 'state').length > reads);
+    },
+    releaseHistoryRead: () => act(async () => historyReads.shift()?.()),
+    pendingHistoryReads: () => historyReads.length,
     fail(reader: Reader, value = true) {
       if (reader === 'runs') failRuns = value;
       else failTools = value;
@@ -498,6 +537,7 @@ function fixture(
       await act(async () => root.unmount());
       releaseSelection?.();
       releaseMessages?.();
+      for (const release of historyReads.splice(0)) release();
       for (const reader of ['runs', 'tools'] as const)
         for (const resolve of pending[reader].splice(0)) resolve();
       for (const resolve of pendingChildren.splice(0)) resolve();
@@ -673,9 +713,8 @@ for (const first of ['runs', 'tools'] as const) {
       await f.until(() => !!f.host.querySelector('[data-turn-status="completed"]'));
       expect(f.host.querySelector('.conversation-loading')).toBeNull();
       expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(1);
-      expect(
-        f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded'),
-      ).toBe('false');
+      expect(f.host.querySelector(elapsedTrigger)?.getAttribute('aria-expanded')).toBe('false');
+      expect(f.host.querySelector(elapsedTrigger)?.textContent).toBe('用时 2 秒');
       expect(f.host.textContent).toContain(final);
       const reply = f.host.querySelector('.agent-turn-final')!;
       const viewport = f.host.querySelector('.conversation-viewport')!;
@@ -684,12 +723,16 @@ for (const first of ['runs', 'tools'] as const) {
       });
       expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
       expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
-      expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
+      expect(f.host.querySelector('.context-compacted')).toBeNull();
       expect(f.host.textContent).not.toContain('状态待核对');
-      expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('已读取文件');
+      expect(f.host.querySelector('.conversation-trace-trigger')).toBeNull();
       expect(f.host.querySelector('.conversation-trace-steps')).toBeNull();
       expect(f.host.textContent).not.toContain(summary);
       expect(f.host.textContent).not.toContain(raw);
+      await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
+      expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
+      expect(f.host.querySelector('.context-compacted')?.textContent).toBe('已压缩上下文');
+      expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('已读取文件');
       await act(async () =>
         f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
       );
@@ -773,6 +816,39 @@ test('ordinary Native connection loss is visible while saved reading stays in pl
   }
 });
 
+test('a cold Native view shows the verified baseline while newer streaming reads remain pending', async () => {
+  const f = fixture(false, false, false, { historyCatchup: true });
+  try {
+    await f.render(false);
+    await f.until(() => f.pendingHistoryReads() === 1);
+    expect(f.host.textContent).not.toContain(final);
+    await f.advanceHistoryTarget();
+    await f.releaseHistoryRead();
+    await f.until(() => f.pendingHistoryReads() === 1);
+    await f.until(() => !!f.host.textContent?.includes(final));
+    const viewport = f.host.querySelector('.conversation-viewport');
+    expect(viewport).not.toBeNull();
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    expect(
+      f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
+    ).toBe(true);
+    await f.advanceHistoryTarget();
+    await f.releaseHistoryRead();
+    await f.until(() => f.pendingHistoryReads() === 1);
+    expect(f.host.textContent).toContain('streamed reply 2');
+    expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    await f.select('Other session');
+    await f.releaseHistoryRead();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.textContent?.includes('Other ready'));
+    expect(f.host.textContent).not.toContain('streamed reply 3');
+  } finally {
+    await f.close();
+  }
+});
+
 test('a history scan failure ends cold structural waiting and preserves the saved original messages', async () => {
   const f = fixture();
   try {
@@ -800,7 +876,8 @@ test('a failed cold historical tool check keeps history readable and publishes e
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
     expect(f.host.textContent).not.toContain('部分工具状态尚无法核实');
-    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
+    await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
+    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('已压缩上下文');
     expect(f.host.textContent).not.toContain(raw);
     // No complete Tool metadata has ever been admitted in this cold scope.
     // Keep ordinary history readable without inventing a partial Tool card.
@@ -844,7 +921,7 @@ test('a failed historical Run check retains readable messages and reconciles aut
     expect(f.host.textContent).not.toContain('重新核对本轮状态');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
-    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
+    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('已压缩上下文');
     expect(f.host.textContent).not.toContain('无法核对本轮状态，已保留原消息');
     expect(f.host.textContent).not.toContain(summary);
     expect(f.host.textContent).not.toContain(raw);
@@ -863,6 +940,7 @@ test('reentering cached history restores the original DOM before fresh ownership
     await f.render();
     await f.release('runs');
     await f.release('tools');
+    await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
     await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     await act(async () =>
       f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
@@ -931,7 +1009,7 @@ test('reentering cached history restores the original DOM before fresh ownership
     expect(
       f.host.querySelector('.conversation-trace')?.getAttribute('data-restored-expanded'),
     ).toBeNull();
-    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
+    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('已压缩上下文');
     expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain(summary);
     expect(f.host.textContent).not.toContain(raw);
@@ -1005,23 +1083,19 @@ test('same-session history epoch recalibration keeps admitted readable content v
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
+    await f.until(() => !!f.host.querySelector(elapsedTrigger));
     expect(f.host.textContent).toContain(final);
     await f.recalibrateHistory();
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
-    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
-      'false',
-    );
+    expect(f.host.querySelector(elapsedTrigger)?.getAttribute('aria-expanded')).toBe('false');
     await f.release('tools');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
     await f.release('runs');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
-    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
-      'false',
-    );
+    expect(f.host.querySelector(elapsedTrigger)?.getAttribute('aria-expanded')).toBe('false');
   } finally {
     await f.close();
   }
@@ -1033,6 +1107,7 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     await f.render();
     await f.release('runs');
     await f.release('tools');
+    await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
     await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     await act(async () =>
       f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
@@ -1080,7 +1155,7 @@ test('reopening the same history while metadata loads does not restart its pendi
     expectInitialStructurePending(f.host);
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
+    await f.until(() => !!f.host.querySelector(elapsedTrigger));
     expect(f.host.textContent).toContain(final);
   } finally {
     await f.close();
@@ -1093,6 +1168,7 @@ test('repeatedly selecting an in-flight target reuses the original selection req
     await f.render();
     await f.release('runs');
     await f.release('tools');
+    await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
     await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     await act(async () =>
       f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
@@ -1277,12 +1353,16 @@ test('late verified child directory updates its direct row without replacing exp
     await f.render();
     await f.release('runs');
     await f.release('tools');
+    await act(async () => f.host.querySelector<HTMLButtonElement>(elapsedTrigger)!.click());
     await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
-    await act(async () =>
-      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
-    );
+    const traceTriggers = [
+      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-trace-trigger'),
+    ];
+    expect(traceTriggers).toHaveLength(2);
+    for (const trigger of traceTriggers) await act(async () => trigger.click());
     await f.until(() => !!f.host.querySelector('.child-agent-activity'));
     const child = f.host.querySelector('.child-agent-activity')!;
+    expect(child.closest('.conversation-trace')).toBeNull();
     expect(child.textContent).toContain('子 Agent');
     expect(child.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
     expect(child.querySelector('[aria-expanded]')).toBeNull();
@@ -1293,12 +1373,8 @@ test('late verified child directory updates its direct row without replacing exp
       ),
     ];
     expect(ordinary()).toHaveLength(2);
-    for (const row of ordinary()) {
-      await act(async () =>
-        row.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
-      );
-    }
     const rows = ordinary();
+    await f.until(() => rows.every((row) => !!row.querySelector('.tool-activity-content')));
     const bodies = rows.map((row) => row.querySelector('.tool-activity-content'));
     expect(bodies.every(Boolean)).toBe(true);
     const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!;

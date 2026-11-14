@@ -57,8 +57,10 @@ import type {
   SessionExportPage,
   SessionExportSection,
   SessionExportTextPage,
+  SessionHistoryEntry,
   SessionLogPage,
   SessionRecord,
+  SessionState,
   SessionView,
   StoredModelInput,
   StoreMetadata,
@@ -777,7 +779,7 @@ export interface Store {
   ): Promise<void>;
   listMessages(
     sessionId: string,
-    options?: { limit?: number; afterSeq?: string; upperSeq?: string },
+    options?: { limit?: number; afterSeq?: string; upperSeq?: string; newestFirst?: boolean },
   ): Promise<MessageRecord[]>;
   /** Durable change cursor, independent of Message.seq (which does not advance for partials). */
   listMessageChanges(input: {
@@ -800,6 +802,12 @@ export interface Store {
     removedIds: string[];
   }>;
   getView(sessionId: string): Promise<SessionView>;
+  getSessionState(sessionId: string): Promise<SessionState>;
+  listSessionHistoryEntries(
+    sessionId: string,
+    upperSeq: string,
+    afterSeq: string,
+  ): Promise<SessionHistoryEntry[]>;
   getExtensionRecord(input: RecordScope & { key: string }): Promise<ExtensionRecord | null>;
   listExtensionRecords(
     input: RecordScope & { afterKey?: string; limit?: number; contentType?: string },

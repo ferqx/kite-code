@@ -45,7 +45,9 @@ Host 准备 queued 引导后若最终事务发现目标已结束，返回 target
 
 父级发现原范围内可纠正的具体剩余工作时，可对同一 child 明确 follow-up，传准确差异与待修部分，保留已成功效果和一次性限制，不重启整项任务。idle 普通消息仍只排队；需继续工作才明确 follow-up。本次当前工作和完整结果核验后即可正常结束；真实拒绝、未知效果和缺授权时保留实际未完成事实。此指导不新增自动续作循环、完成闸门或业务格式校验器。
 
-普通消息持久排队。活动 Run 在安全 checkpoint 接收准确邮件；idle 邮件保存 targetRunId:null，零新 Run／Model。明确 follow-up 按原 predecessor 和双水位接纳当时已确认邮件；同请求重试不扩大集合，晚确认或晚发送的邮件留队。完整正文以原 source IDs 进入模型，发送、接收和 prepared 是不同事实。
+普通消息持久排队。使用 `send_agent_message` 发给父级时，Store 在入队事务内记录实际活动父轮，已确认且未收的邮件可由同一选择下的后继父轮接收。父向子发送的邮件由准确子轮或明确 follow-up 的原 predecessor 和双水位接纳。普通消息只入队，完整正文以原 source IDs 进入模型。
+
+协作者用最终回复交付报告。工作中需要对方处理的信息使用普通消息。原 carrier 生成结果邮件，父会话在当前或后继活动 Run 的安全检查点接收。[Agent 模型合同](../../model-context.ts)指导父模型沿用返回游标并静默处理空超时。
 
 子 Agent 的 [Worktree Tool](../../tools/git-worktree/README.md)在原创建稳定成功后，用同一通用持久消息操作通知 parent，正文带准确路径、HEAD、分支及原 Tool/Job 出处。父收到后向原任务中需要路径的直接 child 转发；运行中用现有消息，idle 且确需续作时用 follow-up。就绪邮件不同于整项 child 完成，不等整项任务结束才发送；入队不表示父已读，也不自动全员广播。`general` 指导说明使用准确路径，通知不改变 cwd 或编辑范围，多个可写 child 的原并行能力保持。
 
@@ -53,7 +55,7 @@ child Run 结束后，carrier 仍须等待该 child 范围的 Model、Tool 和 a
 
 ## 完成通知与观察
 
-spawn 和 idle follow-up 封存 agent_completion 订阅，不建立旧 required-result 义务。父活动时结果沿当前邮箱接纳；父 idle 时只有可信 AfterTurnPolicy 允许，才可从原配置启动通知轮。通知资格与自动执行授权分开，未知结果、停止、选择变化和当前权限仍检查。没有显式 after_turn 意图或旧报告回退执行。
+spawn 和 idle follow-up 封存 agent_completion 订阅。普通宿主默认为仅当父会话运行时接收，空闲时保留持久结果。可信嵌入宿主显式注册 AfterTurnPolicy 时可以授权从原配置启动通知轮。未知结果、停止、选择变化和当前权限仍沿原边界检查。
 
 accepted/state/mode 是受理时事实，不是完成证明。`wait_agent_events({work_refs?,cursor?,wait_ms?})` 返回 `next_cursor`；游标只封装原邮箱位置，过滤无关事件也继续推进。没有目标且未显式等待时立即取快照；准确活动目标默认最多观察30000ms，目标已结束或没有活动工作时立即返回，显式0始终只取快照。timeout 保位置且不停止 child，游标缺口返回 cursor_expired 和恢复边界。事件附原工作的 work_ref，观察不消费结果或标记已读。 无目标的显式等待沿固定目录上界分页检查全部协作者，发现活动工作即停止扫描，不能把前100项均 idle 当作全体完成。[Host 分页回归](../../../test/isolated/extensions/agent-events-pagination.test.ts)覆盖第101项仍运行及全体 idle 的分支。
 

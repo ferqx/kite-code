@@ -617,12 +617,13 @@ function fixture(
       }),
     edit: (text: string) =>
       act(async () => {
-        const input = host.querySelector('[role="textbox"][contenteditable]')!;
+        const input = host.querySelector('textarea.prompt-editor')!;
         await setPromptText(input, text);
       }),
     unavailable: async (value: boolean) => {
       viewLoading = false;
       permissionUnavailable = value;
+      if (environmentReadUnavailable !== undefined) environmentReadUnavailable = value;
       revision++;
       await act(async () => {
         for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
@@ -768,11 +769,11 @@ test('closing or collapsing a running child preserves saved parent messages befo
       expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
         true,
       );
-      expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
         'Original private draft',
       );
       await f.edit('Draft while child and metadata remain pending');
-      expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
         'Draft while child and metadata remain pending',
       );
       await f.releaseParent();
@@ -819,7 +820,9 @@ test('explicit test diagnostics retain scoped background counts and child read i
     const aggregate = () => f.host.querySelector('[aria-label="当前会话后台状态"]');
     expect(aggregate()?.textContent).toBe('后台状态：2 项未结束，1 项未知');
     await f.backgroundUnavailable(true);
-    expect(aggregate()?.textContent).toBe('后台状态：2 项未结束，1 项未知 · 上次确认状态');
+    expect(aggregate()?.textContent).toBe(
+      '后台状态：2 项未结束，1 项未知 · 执行状态待核实 · 上次确认状态',
+    );
     await f.backgroundUnavailable(false);
     await f.open();
     await f.waitForText('Child prefix');
@@ -866,17 +869,68 @@ test('a renderer compiled without diagnostics cannot expose aggregates or child 
 
 test('live child tabs retain the parent title, transcript, draft and active history reader', async () => {
   const f = fixture();
+  const childRunId = 'original-child-run';
+  const childModelId = 'live-child-model';
+  const childBody = (content: string): Parameters<typeof f.childBody>[0] => ({
+    upperSeq: '1',
+    messages: [
+      {
+        id: 'child-message',
+        sessionId: 'child',
+        seq: '1',
+        role: 'assistant',
+        runId: childRunId,
+        sourceIds: [childModelId],
+        firstOutput: 'content',
+        status: 'incomplete',
+        content,
+      },
+    ],
+    modelOutputs: [],
+    presentation: {
+      runs: [
+        {
+          id: childRunId,
+          sessionId: 'child',
+          originStoreId: 'store',
+          status: 'running',
+          isActive: true,
+          createdAt: 1000,
+          finishedAt: null,
+          reason: null,
+        },
+      ],
+      tools: [],
+      executions: [
+        {
+          id: childModelId,
+          sessionId: 'child',
+          runId: childRunId,
+          originStoreId: 'store',
+          kind: 'model',
+          definitionId: 'model',
+          definitionVersion: '1',
+          status: 'running',
+          resultRevision: '0',
+          parentExecutionId: null,
+          cancelRequestedAt: null,
+        },
+      ],
+    },
+  });
+  f.childBody(childBody('Child prefix'));
+  f.scopedEnvironment();
   try {
     await f.render();
     await f.click('Original');
     expect(f.listeners.size).toBe(1);
     expect(f.host.textContent).toContain('Parent transcript');
-    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+    expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
       'Original private draft',
     );
     const parentHeader = f.host.querySelector('.session-header')!,
       parentViewport = f.host.querySelector('.conversation-viewport')!,
-      parentInput = f.host.querySelector('[role="textbox"][contenteditable]')!;
+      parentInput = f.host.querySelector('textarea.prompt-editor')!;
     await f.edit('Parent draft while child streams 雪🙂');
     const beforeOpening = f.requests.length;
     await f.open();
@@ -888,7 +942,7 @@ test('live child tabs retain the parent title, transcript, draft and active hist
     expect(f.host.querySelector('.session-header')).toBe(parentHeader);
     expect(parentHeader.textContent).toContain('Original');
     expect(f.host.querySelector('.conversation-viewport')).toBe(parentViewport);
-    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBe(parentInput);
+    expect(f.host.querySelector('textarea.prompt-editor')).toBe(parentInput);
     expect(promptValue(parentInput)).toBe('Parent draft while child streams 雪🙂');
     expect(
       f.requests.slice(beforeOpening).some((request) => request.method === 'messages.close'),
@@ -897,8 +951,17 @@ test('live child tabs retain the parent title, transcript, draft and active hist
       [...f.host.querySelectorAll('button')].some((button) => button.textContent === '返回主会话'),
     ).toBe(false);
     const parentReads = f.requests.filter((request) => request.method === 'messages').length;
+    const childPane = f.host.querySelector('.session-tab-child')!;
+    const response = childPane.querySelector('.response-status')!;
+    expect(response.textContent).toBe('正在回复…');
+    await f.refreshing(true);
+    expect(childPane.querySelector('.response-status') === response).toBe(true);
+    f.childBody(childBody('Child prefix with live tail 雪🙂'));
     await f.update('Child prefix with live tail 雪🙂');
     await f.waitForText('Child prefix with live tail 雪🙂');
+    expect(childPane.querySelector('.response-status') === response).toBe(true);
+    expect(childPane.querySelector('.conversation-loading')).toBeNull();
+    await f.refreshing(false);
     expect(f.host.textContent).toContain('Child prefix with live tail 雪🙂');
     expect(f.requests.filter((request) => request.method === 'messages').length).toBeGreaterThan(
       parentReads,
@@ -916,7 +979,7 @@ test('live child tabs retain the parent title, transcript, draft and active hist
     await f.click('关闭标签页：Live child');
     expect(f.host.textContent).toContain('Parent updated while child stays open');
     expect(f.host.textContent).not.toContain('Child prefix with live tail');
-    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+    expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
       'Parent draft while child streams 雪🙂',
     );
     expect(f.requests.filter((request) => request.method === 'messages').length).toBeGreaterThan(
@@ -1036,7 +1099,7 @@ test('opening the selected parent preserves its child tab without selecting agai
     await f.waitForText('Parent transcript');
     expect(f.host.textContent).toContain('Parent transcript');
     expect(f.host.querySelector('.session-tab-child')!.textContent).toContain('Child prefix');
-    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+    expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
       'Original private draft',
     );
     expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(selections);
@@ -1053,11 +1116,11 @@ test('same-selection refresh retains the hot compression DOM and label; true per
     await until(() => !!f.host.querySelector('.context-compacted'));
     const row = f.host.querySelector('.context-compacted')!;
     const turn = row.closest('.agent-turn');
-    expect(row.textContent).toBe('正在压缩上下文');
+    expect(row.textContent).toBe('压缩上下文中');
     for (let index = 0; index < 3; index++) {
       await f.refreshing(true);
       expect(f.host.querySelector('.context-compacted') === row).toBe(true);
-      expect(row.textContent).toBe('正在压缩上下文');
+      expect(row.textContent).toBe('压缩上下文中');
       expect(row.classList.contains('running')).toBe(true);
       await f.refreshing(false);
       expect(f.host.querySelector('.context-compacted') === row).toBe(true);
@@ -1069,7 +1132,7 @@ test('same-selection refresh retains the hot compression DOM and label; true per
     expect(f.host.textContent).toContain('Parent transcript');
     await f.unavailable(false);
     await until(() => !!f.host.querySelector('.context-compacted'));
-    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('正在压缩上下文');
+    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('压缩上下文中');
   } finally {
     await f.close();
   }
@@ -1082,7 +1145,7 @@ test('repeated reply calibrations retain controls and transcript while history f
     await f.click('Original');
     const viewport = f.host.querySelector('.conversation-viewport'),
       message = f.host.querySelector('.message.assistant'),
-      input = f.host.querySelector('[role="textbox"][contenteditable]'),
+      input = f.host.querySelector('textarea.prompt-editor'),
       permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]');
     expect(permission).not.toBeNull();
     expect(permission!.disabled).toBe(false);
@@ -1093,7 +1156,7 @@ test('repeated reply calibrations retain controls and transcript while history f
       await f.updateParent(text);
       expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
       expect(f.host.querySelector('.message.assistant') === message).toBe(true);
-      expect(f.host.querySelector('[role="textbox"][contenteditable]') === input).toBe(true);
+      expect(f.host.querySelector('textarea.prompt-editor') === input).toBe(true);
       expect(f.host.querySelector('[data-permission-trigger]') === permission).toBe(true);
       expect(permission!.disabled).toBe(true);
       expect(message!.textContent).not.toContain(text);
@@ -1144,7 +1207,7 @@ test('ordinary history and View refreshes retain actual streaming reply status w
     const status = f.host.querySelector('.response-status')!,
       label = status.querySelector('.shimmer'),
       permission = f.host.querySelector('[data-permission-trigger]')!,
-      input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
+      input = f.host.querySelector('.composer textarea.prompt-editor');
     expect(status.textContent).toBe('正在回复…');
     expect(label).not.toBeNull();
     expect(f.host.querySelector('.conversation-trace')).toBeNull();
@@ -1161,7 +1224,7 @@ test('ordinary history and View refreshes retain actual streaming reply status w
       expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
       expect((permission as HTMLButtonElement).disabled).toBe(true);
-      expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
+      expect(f.host.querySelector('.composer textarea.prompt-editor')).toBe(input);
       await f.refreshing(false);
       expect(status.textContent).toBe('正在回复…');
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
@@ -1177,18 +1240,27 @@ test('ordinary history and View refreshes retain actual streaming reply status w
     expect(status.textContent).toBe('正在回复…');
     f.failParent();
     await f.updateParent('held after failure');
+    const updatesAtFailure = f.requests.filter(({ method }) => method === 'messages').length;
     expect(f.host.querySelector('.response-status')).toBe(status);
     expect(status.textContent).toBe('正在回复…');
     expect(status.querySelector('.shimmer')).toBe(label);
     expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe('上次确认状态');
     expect(f.host.textContent).not.toContain('历史尚未完整校准');
     expect(f.host.textContent).not.toContain('重新加载会话');
+    expect(f.host.querySelector('main > .notice.error')).toBeNull();
+    expect(f.host.textContent).not.toContain('无法读取此会话的最新记录');
+    expect(f.host.textContent).not.toContain('重试');
+    expect(f.host.textContent).not.toContain('held after failure');
     f.failParent(false);
     await until(
       () =>
         f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled === false,
     );
     expect(status.textContent).toBe('正在回复…');
+    expect(f.host.textContent).toContain('held after failure');
+    expect(f.requests.filter(({ method }) => method === 'messages').length).toBeGreaterThan(
+      updatesAtFailure,
+    );
   } finally {
     await f.close();
   }
@@ -1214,7 +1286,7 @@ test('closing a held child tab closes its own reader and ignores late EOF; remou
       await f.release();
       expect(f.host.textContent).toContain('Parent transcript');
       expect(f.host.textContent).not.toContain('Child prefix');
-      expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
         'Original private draft',
       );
       await f.unmount();
@@ -1258,13 +1330,12 @@ test('parent history refresh stays active during a child tab and gates writes un
     await f.updateParent('Parent transcript refreshed while child is open');
     expect(f.host.querySelector('.session-tab-child')!.textContent).toContain('Child prefix');
     expect(f.host.textContent).toContain('Parent transcript');
-    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+    expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
       'Original private draft',
     );
-    expect(
-      f.host.querySelector('[role="textbox"][contenteditable]')!.getAttribute('contenteditable') !==
-        'true',
-    ).toBe(false);
+    expect(f.host.querySelector<HTMLTextAreaElement>('textarea.prompt-editor')!.readOnly).toBe(
+      false,
+    );
     expect(action('排队后续输入').disabled).toBe(true);
     await f.click('排队后续输入');
     const permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]');
@@ -1299,6 +1370,9 @@ test('same-scope permission loss closes a held child read, preserves stale text 
     await f.click('Original');
     await f.open();
     await f.waitForText('Child prefix');
+    const childViewport = f.host.querySelector('.session-tab-child .conversation-viewport')!;
+    const readingEntry = childViewport.querySelector('[data-conversation-entry-key]');
+    expect(readingEntry).not.toBeNull();
     f.hold();
     await f.update('Unverified held child tail');
     // Directory publication queues its child reader after the React commit.
@@ -1320,7 +1394,15 @@ test('same-scope permission loss closes a held child read, preserves stale text 
     const opensBeforeRecovery = f.requests.filter(
       (request) => request.method === 'background.child.open',
     ).length;
+    f.hold();
     await f.unavailable(false);
+    await until(() => f.heldId() !== readId);
+    expect(childViewport.textContent).toContain('Child prefix');
+    expect(childViewport.querySelector('[data-conversation-entry-key]') === readingEntry).toBe(
+      true,
+    );
+    expect(f.host.querySelector('.session-tab-child .conversation-loading')).toBeNull();
+    await f.release();
     await f.waitForText('Unverified held child tail');
     expect(f.host.textContent).toContain('Unverified held child tail');
     const resumed = f.requests.filter((request) => request.method === 'background.child.open')[
@@ -1561,7 +1643,7 @@ test('Main readonly qualification keeps child EOF alive during ordinary metadata
       (request) => request.method === 'background.open',
     ).length;
     // A global refresh changes the raw metadata gate, but Main explicitly retains read authority.
-    await f.unavailable(true);
+    await f.refreshing(true);
     expect(f.requests.filter((request) => request.method === 'background.open')).toHaveLength(
       directoryReads,
     );
@@ -1847,21 +1929,19 @@ for (const diagnostics of [false, true])
           },
         ],
         tools: [],
-        executions: [
-          {
-            id: 'child-wait',
-            kind: 'tool',
-            originStoreId: 'store',
-            sessionId: 'child',
-            runId: 'original-child-run',
-            definitionId: 'task.events',
-            definitionVersion: '1',
-            status: 'planned',
-            inputReady: true,
-            resultRevision: '0',
-            cancelRequestedAt: null,
-          },
-        ],
+        executions: ['child-wait-a', 'child-wait-b'].map((id) => ({
+          id,
+          kind: 'tool',
+          originStoreId: 'store',
+          sessionId: 'child',
+          runId: 'original-child-run',
+          definitionId: 'task.events',
+          definitionVersion: '1',
+          status: 'planned',
+          inputReady: true,
+          resultRevision: '0',
+          cancelRequestedAt: null,
+        })),
       },
     };
     f.childBody(body);
@@ -1872,11 +1952,12 @@ for (const diagnostics of [false, true])
       await f.open();
       await f.waitForText('Saved child progress');
       const child = () => f.host.querySelector('.session-tab-child')!;
-      const tools = child().querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+      const tools = child().querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
       expect(tools.getAttribute('aria-expanded')).toBe('false');
       await act(async () => tools.click());
-      expect(child().querySelectorAll('.response-status')).toHaveLength(1);
-      expect(child().textContent).toContain('等待执行');
+      expect(tools.getAttribute('aria-expanded')).toBe('true');
+      expect(child().textContent).toContain('等待 Agent 事件');
+      expect(child().textContent).not.toContain('等待执行');
       expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
       const originalRun = f.observedRun();
       for (const owner of ['unheld', 'unknown'] as const) {
@@ -1884,7 +1965,7 @@ for (const diagnostics of [false, true])
         expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
         expect(child().querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
         expect(child().textContent).toContain('Saved child progress');
-        expect(child().textContent?.includes('执行状态待核实')).toBe(diagnostics);
+        expect(child().querySelector('.conversation-trace-trigger')).not.toBeNull();
         expect(child().textContent).not.toContain('等待执行');
         expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
           diagnostics ? '执行状态待核实' : '运行中',
@@ -1893,8 +1974,10 @@ for (const diagnostics of [false, true])
         expect(f.observedRun()).toEqual(originalRun);
       }
       await f.observeExecutionOwner('held');
-      expect(child().querySelectorAll('.response-status')).toHaveLength(1);
-      expect(child().textContent).toContain('等待执行');
+      expect(
+        child().querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded'),
+      ).toBe('true');
+      expect(child().textContent).toContain('等待 Agent 事件');
       expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
       expect(
         f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
@@ -1904,7 +1987,7 @@ for (const diagnostics of [false, true])
     }
   });
 
-test('a child carrier inside a mixed tool activity still opens its exact read-only detail', async () => {
+test('a standalone child creation among ordinary tools opens its exact read-only detail', async () => {
   const f = fixture(true, true);
   f.groupedParentCarrier();
   try {
@@ -1921,7 +2004,8 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
     expect(child).not.toBeNull();
     expect(child.disabled).toBe(false);
     expect(child.getAttribute('aria-expanded')).toBeNull();
-    expect(child.closest('.conversation-trace-steps')).not.toBeNull();
+    expect(child.closest('.conversation-trace')).toBeNull();
+    expect(child.querySelector('.tool-agent-operation')?.textContent).toBe('子agent开始工作');
     const ordinary = f.host.querySelector<HTMLElement>(
       '.conversation-trace-steps > .tool-activity:not(.child-agent-activity)',
     )!;
@@ -1943,8 +2027,11 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
     expect(tabIcon.getAttribute('data-child-color')).toBe(
       messageIcon.getAttribute('data-child-color'),
     );
+    expect(child.closest('article')?.getAttribute('data-child-color')).toBe(
+      tabIcon.getAttribute('data-child-color'),
+    );
     expect(f.host.querySelector('.session-tab-child')?.textContent).toContain('Child prefix');
-    expect(f.host.querySelector('.session-tab-child [contenteditable]')).toBeNull();
+    expect(f.host.querySelector('.session-tab-child textarea.prompt-editor')).toBeNull();
     expect(trace.getAttribute('aria-expanded')).toBe('true');
     expect(
       f.requests.filter((request) => request.method === 'background.child.open'),
@@ -2079,21 +2166,24 @@ test('a completed child uses the shared collapsed process, concise exploration a
     expect(final!.textContent).not.toContain('Child process explanation');
     expect(f.host.textContent).not.toContain('CHILD_REPLY_PREVIEW');
     expect(f.host.textContent).toContain('Parent transcript');
-    expect(f.host.querySelector('[role="textbox"][contenteditable]')).not.toBeNull();
+    expect(f.host.querySelector('textarea.prompt-editor')).not.toBeNull();
     const process = child.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
     expect(process.getAttribute('aria-expanded')).toBe('false');
-    expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).not.toBeNull();
+    const copy = final!.querySelector<HTMLButtonElement>('.message-copy')!;
+    expect(copy.getAttribute('aria-label')).toBe('复制本轮Agent回复');
     await f.click('复制本轮Agent回复');
     expect(f.copied).toEqual([reply]);
     await act(async () => process.click());
     expect(f.host.textContent).toContain('Child process explanation');
-    const exploration = child.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    const exploration = child.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
     expect(exploration).not.toBeNull();
-    expect(exploration.textContent).toContain('读取文件搜索内容');
+    expect(exploration.textContent).toContain('已读取文件');
+    expect(exploration.textContent).toContain('已搜索内容');
     expect(exploration.textContent).not.toContain('已完成 2 项');
     expect(child.textContent).not.toContain('files.search · 3');
     await act(async () => exploration.click());
-    expect(child.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);
+    await f.waitForText('child-b.txt');
+    expect(child.querySelectorAll('.conversation-trace-steps .tool-activity')).toHaveLength(2);
     expect(f.host.textContent).toContain('child-a.txt');
     expect(f.host.textContent).toContain('child-b.txt');
     expect(f.host.textContent).toContain('读取');
@@ -2102,6 +2192,13 @@ test('a completed child uses the shared collapsed process, concise exploration a
     expect(f.host.textContent).not.toContain('RAW_CHILD_RECEIPT_B');
     expect(child.querySelectorAll('button.file-link')).toHaveLength(0);
     expect(child.querySelectorAll('.composer-attachments')).toHaveLength(0);
+    f.scopedEnvironment();
+    await f.refreshing(true);
+    expect(child.querySelector('.agent-turn-final') === final).toBe(true);
+    expect(final!.querySelector('.message-copy') === copy).toBe(true);
+    expect(copy.getAttribute('aria-disabled')).toBeNull();
+    expect(copy.getAttribute('data-copy-state')).toBe('copied');
+    await f.refreshing(false);
     const childRequests = f.requests.slice(beforeChild);
     expect(
       childRequests.filter(
@@ -2161,7 +2258,7 @@ test('a completed child uses the shared collapsed process, concise exploration a
     await f.click('关闭标签页：Live child');
     await f.waitForText('Parent transcript');
     expect(f.host.contains(parentNode!)).toBe(true);
-    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+    expect(promptValue(f.host.querySelector('textarea.prompt-editor'))).toBe(
       'Keep the parent draft exactly 雪🙂',
     );
   } finally {

@@ -1,17 +1,15 @@
-import type { MessageRecord } from '../types';
+import type { MessageRecord, SessionHistoryEntry } from '../types';
 import type { SqliteOperations } from './operations';
 
-/** Only an accepted result that created a continuation Run becomes a readable bubble.
- * Raw history keeps that admission fact; later Run/selection changes do not reclassify it.
- */
-export function readPublicMessages(
-  db: SqliteOperations,
+/** Only an accepted result that created a continuation Run becomes a readable bubble. */
+function publicMessagePositions(
   sessionId: string,
   afterSeq: string,
   upperSeq: string,
   limit: number,
   ids?: string[],
-): MessageRecord[] {
+  newestFirst = false,
+) {
   // Proof rows can be damaged independently of ordinary transcript messages.
   // Guard each JSON operation itself: SQL predicate evaluation order is not a
   // guarantee that json_valid runs before json_extract/json_type.
@@ -25,7 +23,7 @@ export function readPublicMessages(
     "CASE WHEN json_valid(report.request_json) THEN report.request_json ELSE '{}' END";
   const reportReceipt =
     "CASE WHEN json_valid(report.receipt_json) THEN report.receipt_json ELSE '{}' END";
-  const rows = db.rows(
+  return [
     `WITH accepted AS (
       SELECT DISTINCT s.id,s.seq
       FROM context_snapshot s
@@ -75,10 +73,10 @@ export function readPublicMessages(
         AND COALESCE(json_extract(${sourceRequest},'$.diagnostic'),0)=0
         AND json_type(${executionResult},'$.content')='text'
         AND json_extract(${executionResult},'$.outcome')=e.state
-    ) SELECT id,seq,'message' AS display_kind FROM message
+    ) SELECT id,seq,run_id,'message' AS display_kind FROM message
       WHERE session_id=? AND seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
-    UNION ALL SELECT id,seq,'agent_result' AS display_kind FROM accepted WHERE seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
-    ORDER BY seq LIMIT ?`,
+    UNION ALL SELECT id,seq,NULL AS run_id,'agent_result' AS display_kind FROM accepted WHERE seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
+    ORDER BY seq ${newestFirst ? 'DESC' : 'ASC'} LIMIT ?`,
     sessionId,
     sessionId,
     afterSeq,
@@ -88,6 +86,52 @@ export function readPublicMessages(
     upperSeq,
     ...(ids ?? []),
     limit,
+  ] as const;
+}
+
+/** Group adjacent physical messages of the same Run. Other public events have their own slot. */
+export function readPublicMessageEntries(
+  db: SqliteOperations,
+  sessionId: string,
+  afterSeq: string,
+  upperSeq: string,
+) {
+  const [sql, ...args] = publicMessagePositions(sessionId, afterSeq, upperSeq, -1);
+  const positions = db.db.prepare<ReturnType<SqliteOperations['rows']>[number], typeof args>(sql);
+  (positions as typeof positions & { safeIntegers(value: boolean): typeof positions }).safeIntegers(
+    true,
+  );
+  const entries: SessionHistoryEntry[] = [];
+  try {
+    for (const row of positions.iterate(...args)) {
+      const runId = row.run_id == null ? null : String(row.run_id);
+      const seq = String(row.seq);
+      const previous = entries.at(-1);
+      if (previous && runId !== null && previous.runId === runId) {
+        previous.lastSeq = seq;
+        previous.count++;
+      } else {
+        if (entries.length === 256) break;
+        entries.push({ id: String(row.id), runId, firstSeq: seq, lastSeq: seq, count: 1 });
+      }
+    }
+    return entries;
+  } finally {
+    positions.finalize();
+  }
+}
+
+export function readPublicMessages(
+  db: SqliteOperations,
+  sessionId: string,
+  afterSeq: string,
+  upperSeq: string,
+  limit: number,
+  ids?: string[],
+  newestFirst = false,
+): MessageRecord[] {
+  const rows = db.rows(
+    ...publicMessagePositions(sessionId, afterSeq, upperSeq, limit, ids, newestFirst),
   );
   const messages = new Map(
     db

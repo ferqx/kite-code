@@ -250,6 +250,8 @@ glob/search 的原生操作仍绑定原根及 FD 链；遍历每64项或累计8m
 
 [Tool wrapper](../files-tools.ts)使用 write 版本3／edit 版本2及原 Model 的 `path/baseline` 字段，将可选中立 `FileChangePreview` 放入 `ToolResult.details.fileChange`：version1、format、path、before/after 完整 baseline、text 和 truncated。预览最多65536 UTF-8 bytes／400行，每个源行最多2048个UTF-16单元，截在完整字符边界；省略的未变间隔与截断分别说明，末尾换行变化保留。这个额度只限制展示 receipt，不限制文件 IO、完整 baseline、Model 读写正文或 Artifact。before/after capture 最后保存失败和派发后确认失败仍 unknown，不发布可用成功预览；read/search/glob、字节恢复及未装配该预览的工具不伪造记录。消费者须核原 succeeded Execution/Run/结果 revision，旧或未知格式明确不可读。
 
+[有界预览统计](../files-diff.ts)只计算内置 Files 原预览保留的增删行，供桌面已核实回执的折叠行使用。统计在消费时计算，原回执形状及工具版本保持一致。
+
 read/write/edit 的 Model JSON 结果另带当前真实 `executionId/runId`，供计划 receipt 等消费者定位准确保存记录；ID 本身不证明成功、授权、验证结果或 Workspace checkpoint。消费者仍须读取并核准确原定义、Run／Session／Store、终态和结果 revision，不能用同名 call 或最新执行替换。
 
 没有新增 SQL 表、Store major、维护资产或 Model 工具权限。恢复检查点保首 preimage 与末 postimage，只服务准确恢复，不能冒充每次操作的差异。长期边界见[迁移决定](../../../../../.agents/notes/implemented/architecture/2026-10-08-native-file-change-receipts.md)。[真实预览与 Core receipt 测试](../../../test/isolated/files/change-preview.test.ts)核完整 BOM/CRLF pre/post、外部后改不改变历史、数 MiB 完整写入与 UTF-8 截断、失败/unknown 不保存成功预览，以及跨 Run 重复 call ID 的唯一原 source；各客户端实际资格由 owner 和进度维护。

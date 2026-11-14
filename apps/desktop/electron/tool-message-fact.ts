@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { frozenModelInputLimit } from '@kite-ai/agent/context-estimate';
 import { ClientError, type Execution, type Message, type Run } from '@kite-ai/client';
+import { desktopShell, desktopShellFailure } from '../src/native-shell-receipt';
 import {
   type NativeShellInput,
   type NativeToolMessageFact,
@@ -349,6 +352,17 @@ export function nativeFileCreationCandidate(execution: Execution): boolean {
   return fileCreation(execution) !== undefined;
 }
 
+export function nativeLegacyShellOutput(execution: Execution) {
+  const details = object(object(execution.result)?.details);
+  return (
+    execution.definitionVersion === '1' &&
+    ['shell.execute', 'shell.read'].includes(execution.definitionId) &&
+    !!details &&
+    details.outputFormat !== 'model-preview' &&
+    (typeof details.stdout === 'string' || typeof details.stderr === 'string' || !!details.output)
+  );
+}
+
 /** Pure presentation facts from the exact saved tool Execution and its receipt. */
 export function nativeToolMessageFact({
   execution,
@@ -380,7 +394,11 @@ export function nativeToolMessageFact({
     execution.kind !== 'tool' ||
     !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status) ||
     result?.outcome !== execution.status ||
-    result.content !== message.content
+    typeof result.content !== 'string' ||
+    (message.deferredText
+      ? Buffer.byteLength(result.content) !== Number(message.deferredText.bytes) ||
+        createHash('sha256').update(result.content).digest('hex') !== message.deferredText.sha256
+      : result.content !== message.content)
   )
     return undefined;
   const history = [...messages];
@@ -450,8 +468,24 @@ export function nativeToolMessageFact({
     isDeepStrictEqual(details, { accepted: true, delivery: 'queued' }) &&
     Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
     result.content === '{"accepted":true,"delivery":"queued"}';
+  const reason = details?.reason;
+  const agentWait: NativeToolMessageFact['agentWait'] =
+    execution.definitionId === 'task.events' &&
+    execution.definitionVersion === '1' &&
+    execution.status === 'succeeded' &&
+    run?.id === execution.runId &&
+    run.sessionId === execution.sessionId &&
+    run.originStoreId === execution.originStoreId &&
+    registered.length === 1 &&
+    registered[0]?.extensionId === 'builtin.task' &&
+    (reason === 'events' || reason === 'completed' || reason === 'input' || reason === 'timeout') &&
+    Array.isArray(details?.events) &&
+    details.events.length <= 200
+      ? { reason, events: details.events.length }
+      : undefined;
   let shell = shellInput(execution, call, commandOffset);
   let shellResultVerified = false;
+  let shellOutputReceipt: NativeToolMessageFact['shellOutputReceipt'];
   if (shell && details) {
     try {
       const ref = object(details.ref);
@@ -466,8 +500,8 @@ export function nativeToolMessageFact({
           ? details.shell_id
           : undefined;
       const shellId = shell.shellId ?? returnedShellId;
+      const savedPreview = details.outputFormat === 'model-preview';
       shellResultVerified =
-        isDeepStrictEqual(JSON.parse(message.content), details) &&
         !!shellId &&
         ref?.key === shellId &&
         ref.extensionId === 'builtin.shell' &&
@@ -476,7 +510,60 @@ export function nativeToolMessageFact({
         typeof ref.commandId === 'string' &&
         !!ref.commandId &&
         typeof ref.executionId === 'string' &&
-        !!ref.executionId;
+        !!ref.executionId &&
+        (savedPreview || isDeepStrictEqual(JSON.parse(result.content), details));
+      if (savedPreview && shellResultVerified) {
+        const job = object(details.execution);
+        const jobResult = object(job?.result);
+        const jobDetails = object(jobResult?.details);
+        const status = job?.status as NonNullable<
+          NativeToolMessageFact['shellOutputReceipt']
+        >['jobStatus'];
+        const isTerminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+          String(status),
+        );
+        shellResultVerified =
+          ['execute', 'read'].includes(shell.operation) &&
+          [
+            'planned',
+            'dispatching',
+            'running',
+            'succeeded',
+            'failed',
+            'cancelled',
+            'outcome_unknown',
+          ].includes(String(status)) &&
+          job?.id === ref?.executionId &&
+          job?.sessionId === ref?.sessionId &&
+          job?.originStoreId === ref?.originStoreId &&
+          job?.kind === 'job' &&
+          job.definitionId === 'shell.command' &&
+          job.definitionVersion === '1' &&
+          (!isTerminal ||
+            (jobResult?.outcome === status && typeof jobResult?.content === 'string')) &&
+          typeof details.outputLimited === 'boolean' &&
+          ['stdout', 'stderr', 'output'].every((key) => details[key] === undefined) &&
+          (shell.operation === 'execute'
+            ? isTerminal &&
+              execution.status ===
+                (details.timedOut === true && status === 'cancelled' ? 'failed' : status)
+            : typeof details.next_cursor === 'string' &&
+              typeof details.caught_up === 'boolean' &&
+              typeof details.terminal === 'boolean');
+        if (shellResultVerified)
+          shellOutputReceipt = {
+            jobStatus: status,
+            failureReason: desktopShellFailure(status, jobResult),
+            ...(Number.isSafeInteger(jobDetails?.exitCode)
+              ? { exitCode: Number(jobDetails?.exitCode) }
+              : {}),
+            ...(typeof details.timedOut === 'boolean' ? { timedOut: details.timedOut } : {}),
+            outputComplete:
+              shell.operation === 'execute' &&
+              details.truncated === false &&
+              details.outputLimited === false,
+          };
+      }
       if (shellResultVerified && !shell.shellId) shell = { ...shell, shellId };
     } catch {
       // Original non-JSON failures retain their existing body reader and error text.
@@ -491,6 +578,14 @@ export function nativeToolMessageFact({
     result.content === details.code
       ? (details.code as 'context_refresh_required' | 'capability_refresh_required')
       : undefined;
+  const requestedTokens = (object(execution.toolInput) ?? call)?.max_output_tokens;
+  const modelTokenLimit =
+    run?.id === execution.runId &&
+    run.sessionId === execution.sessionId &&
+    run.originStoreId === execution.originStoreId
+      ? frozenModelInputLimit(run.configuration)
+      : undefined;
+  const legacyShellOutput = shellResultVerified && nativeLegacyShellOutput(execution);
   const requestTarget = nativeToolRequestTarget(
     shell && ['execute', 'launch'].includes(shell.operation) && shell.command === undefined
       ? undefined
@@ -503,7 +598,7 @@ export function nativeToolMessageFact({
     execution.definitionId,
     execution.definitionVersion,
   );
-  return {
+  const fact: NativeToolMessageFact = {
     messageId: message.id,
     executionId: execution.id,
     definitionId: execution.definitionId,
@@ -515,6 +610,7 @@ export function nativeToolMessageFact({
     ...(fileMissing ? { fileMissing: true } : {}),
     ...(fileCreated ? { fileCreated: true } : {}),
     ...(agentMessageAccepted ? { agentMessageAccepted: true } : {}),
+    ...(agentWait ? { agentWait } : {}),
     target: requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),
     ...(shell ? { shellInput: shell } : {}),
@@ -532,6 +628,15 @@ export function nativeToolMessageFact({
         }
       : {}),
     ...(shellResultVerified ? { shellResultVerified: true } : {}),
+    ...(shellOutputReceipt ? { shellOutputReceipt } : {}),
+    ...(legacyShellOutput
+      ? {
+          shellOutputLimit: {
+            ...(typeof requestedTokens === 'number' ? { requestedTokens } : {}),
+            ...(modelTokenLimit === undefined ? {} : { modelTokenLimit }),
+          },
+        }
+      : {}),
     ...(worktreeIssue ? { worktreeFailure: worktreeIssue } : {}),
     ...(!message.originMessage && execution.authorization
       ? { authorization: execution.authorization }
@@ -542,4 +647,31 @@ export function nativeToolMessageFact({
       ? { ask: ask(call, message.content) }
       : {}),
   };
+  if (message.deferredText && shell && commandOffset === 0) {
+    const projected = desktopShell(fact, result.content);
+    if (
+      projected &&
+      (projected.output !== undefined || projected.jobStatus || projected.accepted)
+    ) {
+      fact.shellDisplay = {
+        output: projected.output ?? '',
+        failureReason: projected.failureReason,
+        jobStatus: projected.jobStatus,
+        exitCode: projected.exitCode,
+        timedOut: projected.timedOut,
+        outputComplete: projected.outputComplete,
+        accepted: projected.accepted,
+        cancelRequested: projected.cancelRequested,
+      };
+    } else if (
+      !shellResultVerified &&
+      execution.status !== 'succeeded' &&
+      !/^[\s\uFEFF]*[[{]/u.test(result.content)
+    ) {
+      fact.shellDisplay = { output: '', failureReason: result.content };
+    } else {
+      fact.shellOutputError = true;
+    }
+  }
+  return fact;
 }

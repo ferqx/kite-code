@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AgentError, type AgentRuntime } from '@kite-ai/agent';
 import { Hono } from 'hono';
 import type { z } from 'zod';
@@ -153,6 +154,21 @@ function sequence(value: string | undefined): string {
   if (!value || !/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 9223372036854775807n)
     throw new HttpFailure('invalid_cursor', 400);
   return value;
+}
+
+function deferredHistoryText<T extends { content: string; outputBody?: unknown }>(message: T) {
+  const bytes = Buffer.byteLength(message.content);
+  if (message.outputBody || bytes <= 64 * 1024) return message;
+  let preview = message.content.slice(0, 2048);
+  if (/[\uD800-\uDBFF]$/.test(preview)) preview = preview.slice(0, -1);
+  return {
+    ...message,
+    content: preview,
+    deferredText: {
+      bytes: String(bytes),
+      sha256: createHash('sha256').update(message.content).digest('hex'),
+    },
+  };
 }
 
 function sessionExportQuery<T>(queries: Record<string, string[]>, schema: z.ZodType<T>): T {
@@ -326,6 +342,7 @@ export async function startService(options: ServiceOptions) {
         'run_resume',
         'session_recovery',
         'session_reconciliation',
+        'session_state',
         'pending_input_queue',
         'session_logs',
         'file_recovery',
@@ -341,6 +358,7 @@ export async function startService(options: ServiceOptions) {
     capabilities.push('session_recovery');
   if (options.runtime && typeof options.runtime.reconcileSession === 'function')
     capabilities.push('session_reconciliation');
+  if (typeof options.runtime?.getSessionState === 'function') capabilities.push('session_state');
   if (
     options.runtime &&
     typeof options.runtime.getPendingInputQueue === 'function' &&
@@ -1868,21 +1886,107 @@ export async function startService(options: ServiceOptions) {
       }),
     );
   });
+  app.get('/v1/sessions/:id/state', async (context) => {
+    const state = await runtime.getSessionState(context.req.param('id'));
+    return context.json(
+      SessionViewSchema.parse({
+        ...state,
+        executions: state.executions.map(executionResponse),
+      }),
+    );
+  });
+  app.get('/v1/sessions/:id/history-entries', async (context) => {
+    const values = context.req.queries();
+    if (Object.values(values).some((items) => items.length !== 1))
+      throw new HttpFailure('invalid_request', 400);
+    const query = apiSchemas.SessionHistoryEntriesQuery.safeParse(
+      Object.fromEntries(Object.entries(values).map(([key, items]) => [key, items[0]])),
+    );
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    const { storeId, upperSeq, afterSeq } = query.data;
+    if (storeId !== (await runtime.getMetadata()).storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    const sessionId = context.req.param('id');
+    return context.json(
+      apiSchemas.SessionHistoryEntries.parse({
+        storeId,
+        sessionId,
+        upperSeq,
+        entries: await runtime.listSessionHistoryEntries(sessionId, upperSeq, afterSeq),
+      }),
+    );
+  });
   app.get('/v1/sessions/:id/messages', async (context) => {
     const limit = Number(context.req.query('limit') ?? '100');
     if (!Number.isInteger(limit) || limit < 1 || limit > 200)
       throw new HttpFailure('invalid_page', 400);
     const afterSeq = sequence(context.req.query('afterSeq') ?? '0');
     const upper = context.req.query('upperSeq');
+    const direction = context.req.query('direction');
+    const previews = context.req.query('previews');
+    if (direction !== undefined && direction !== 'older')
+      throw new HttpFailure('invalid_page', 400);
     const messages = await runtime.listMessages(context.req.param('id'), {
       limit,
       afterSeq,
       ...(upper ? { upperSeq: sequence(upper) } : {}),
+      ...(direction === 'older' ? { newestFirst: true } : {}),
     });
     return context.json(
       (
         await messageResponses(runtime, messages, (await runtime.getMetadata()).storeId, subjectId)
-      ).map((message) => schemas.Message.parse(message)),
+      ).map((message) =>
+        schemas.Message.parse(
+          direction === 'older' || previews === 'true' ? deferredHistoryText(message) : message,
+        ),
+      ),
+    );
+  });
+  app.get('/v1/sessions/:id/messages/:messageId/text', async (context) => {
+    const raw = context.req.queries();
+    if (Object.values(raw).some((values) => values.length !== 1))
+      throw new HttpFailure('invalid_request', 400);
+    const parsed = apiSchemas.MessageTextQuery.safeParse(
+      Object.fromEntries(Object.entries(raw).map(([key, values]) => [key, values[0]])),
+    );
+    if (!parsed.success) throw new HttpFailure('invalid_request', 400);
+    const { storeId, seq, sha256, offset } = parsed.data;
+    if (storeId !== (await runtime.getMetadata()).storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    const sessionId = context.req.param('id');
+    const messageId = context.req.param('messageId');
+    if (seq === '0') throw new HttpFailure('invalid_cursor', 400);
+    const messages = await runtime.listMessages(sessionId, {
+      afterSeq: String(BigInt(seq) - 1n),
+      upperSeq: seq,
+      limit: 1,
+    });
+    const [message] = (await messageResponses(runtime, messages, storeId, subjectId)).map((row) =>
+      schemas.Message.parse(row),
+    );
+    if (message?.id !== messageId || message.seq !== seq || message.contentFormat === 'unsupported')
+      throw new HttpFailure('message_not_found', 404);
+    const bytes = Buffer.from(message.content);
+    if (
+      createHash('sha256').update(bytes).digest('hex') !== sha256 ||
+      BigInt(offset) >= BigInt(bytes.length)
+    )
+      throw new HttpFailure('message_text_changed', 409);
+    const start = Number(offset);
+    const end = Math.min(start + 64 * 1024, bytes.length);
+    context.header('cache-control', 'no-store');
+    return context.json(
+      apiSchemas.MessageTextChunk.parse({
+        storeId,
+        sessionId,
+        messageId,
+        seq,
+        sha256,
+        bytes: String(bytes.length),
+        offset,
+        nextOffset: String(end),
+        data: bytes.subarray(start, end).toString('base64'),
+      }),
     );
   });
   app.get('/v1/sessions/:id/message-changes', async (context) => {
@@ -1898,7 +2002,7 @@ export async function startService(options: ServiceOptions) {
       ),
     );
     if (!query.success) throw new HttpFailure('invalid_request', 400);
-    const { storeId, ...pagination } = query.data;
+    const { storeId, previews, ...pagination } = query.data;
     const page = await runtime.listMessageChanges({
       expectedStoreId: storeId,
       sessionId: context.req.param('id'),
@@ -1907,7 +2011,9 @@ export async function startService(options: ServiceOptions) {
     return context.json(
       apiSchemas.MessageChangesPage.parse({
         ...page,
-        messages: await messageResponses(runtime, page.messages, storeId, subjectId),
+        messages: (await messageResponses(runtime, page.messages, storeId, subjectId)).map(
+          (message) => (previews ? deferredHistoryText(message) : message),
+        ),
       }),
     );
   });

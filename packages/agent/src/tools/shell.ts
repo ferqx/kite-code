@@ -1,5 +1,6 @@
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { shellOutputPreview } from '@kite-ai/trajectory';
 import type {
   Extension,
   JobDefinition,
@@ -57,6 +58,31 @@ function text(input: Record<string, Json>, key: string): string {
 }
 function result(details: Json): ToolResult {
   return { outcome: 'succeeded', content: canonicalJson(details), details };
+}
+function savedOutput(
+  outcome: ToolResult['outcome'],
+  details: Record<string, Json>,
+  ref: OperationRef,
+  input: Json,
+  context: ToolContext,
+): ToolResult {
+  if (!ref.executionId) throw new AgentError('shell_output_conflict');
+  const preview = shellOutputPreview(
+    details,
+    ref.executionId,
+    args(input).max_output_tokens,
+    context.modelInputTokenLimit,
+  );
+  if (!preview) throw new AgentError('shell_output_conflict');
+  const receipt = { ...details };
+  delete receipt.stdout;
+  delete receipt.stderr;
+  delete receipt.output;
+  return {
+    outcome,
+    content: preview.text,
+    details: { ...receipt, outputFormat: 'model-preview', outputLimited: preview.limited },
+  };
 }
 function missingReference(shellId: string): ToolResult {
   return {
@@ -302,25 +328,27 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           const launched = await launch(input, context, 'execute');
           if ('outcome' in launched) return launched;
           if (parsed.background) return result(launched);
+          const ref = launched.ref as unknown as OperationRef;
           const completed = await completeForegroundShell(
-            launched.ref as unknown as OperationRef,
+            ref,
             context,
             parsed.timeoutMs ?? undefined,
             launched.presentation,
           );
-          const details = {
+          const details: Record<string, Json> = {
             ...args(completed.details ?? {}),
             shell_id: launched.shell_id,
             execution_id: launched.execution_id,
           };
-          return {
-            ...completed,
-            content:
-              completed.details && completed.content === canonicalJson(completed.details)
-                ? canonicalJson(details)
-                : `${completed.content}\nShell handle: ${canonicalJson({ shell_id: launched.shell_id, execution_id: launched.execution_id })}`,
-            details,
-          };
+          if (completed.content !== canonicalJson(completed.details ?? null))
+            return {
+              ...completed,
+              content: `${completed.content}\nShell handle: ${canonicalJson({ shell_id: launched.shell_id, execution_id: launched.execution_id })}`,
+              details,
+            };
+          if (typeof details.stdout === 'string')
+            return savedOutput(completed.outcome, details, ref, input, context);
+          return { ...completed, content: canonicalJson(details), details };
         },
       },
       {
@@ -381,7 +409,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
           );
           const upperSeq = String(position.upperSeq ?? output.highWaterSeq);
           const caughtUp = BigInt(afterSeq) >= BigInt(upperSeq);
-          return result({
+          const details = {
             ref: ref as unknown as Json,
             execution: execution as unknown as Json,
             output: output as unknown as Json,
@@ -390,7 +418,8 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
             terminal: ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
               execution.status,
             ),
-          });
+          };
+          return savedOutput('succeeded', details, ref, input, context);
         },
       },
       {

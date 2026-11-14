@@ -37,6 +37,16 @@
 
 required 子 Agent 等待展示已实施；当前行为见[桌面手册](../handbook/clients/desktop/README.md)和[会话界面 owner](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/conversation-ui.md#消息与交互)，打包 Electron 的定向证据见[原生验收](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md)。
 
+## 会话打开与恢复
+
+2026-11-14 完成轻量快照和详情按需读取。该日曾在 Windows 开发版验收轮次占位，随后按用户要求撤下分页与占位，桌面端连续展示历史。会话读取失败由后台自动恢复，已读正文和草稿保持可见，写入仍核当前会话及操作资格。当前实现见 [Desktop owner](../../apps/desktop/README.md#执行观察与操作准入)。
+
+1. SQLite、Service、Client、Electron Main 使用轻量会话快照，保留原 Store、会话、观察水位与必要执行状态。单次详情读取及选择失败独立处理，恢复只核实原申请。
+2. 从最新消息展示首批历史，在同一滚动区为远离视口的轮次保留位置。占位进入视口才读取原轮次正文，工具、思考和长正文沿原身份补齐。已读范围与位置索引分别维护。
+3. 在 Windows 原生桌面用原卡住的会话和长历史实测切换、冷重开和断线恢复。观察首屏、输入准入、消息交接与阅读锚点，核历史完整性及零业务重放。
+
+产品入口见[桌面手册](../handbook/clients/desktop/README.md)，实际实现及验收归[Desktop owner](../../apps/desktop/README.md)。现有完整 View 调用者及 Shell 采集合同保持原边界。
+
 ## 迁移前首版记录
 
 Tauri/Rust 宿主曾完成 macOS 阶段 0–2 的本机接入、交互和稳定性验收，随后被 Electron 替代。原始选型理由保留在[归档 Agent Note](../../.agents/notes/archived/feature/2026-09-06-tauri-desktop-client.md)，当时的原生结果和限制保留在[原生验收记录](https://github.com/ferqx/kite-code/blob/d5407cfe4319c5a84d530f63b1d0a0123218ad34/apps/kite-desktop/docs/native-validation.md)。这些结果不授予 Electron 制品、签名包或其他平台资格；当前客户端行为由桌面手册与 owner 文档说明。迁移前方案正文由 Git 历史追溯，不再作为实施步骤。

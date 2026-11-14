@@ -139,6 +139,19 @@ function defaultPrepare(text: string, signal: AbortSignal) {
   return preparation.prepare(text, signal);
 }
 
+export async function prepareNativeMarkdown(
+  text: string,
+  signal: AbortSignal,
+  parse = defaultPrepare,
+): Promise<PreparedDesktopMarkdown> {
+  signal.throwIfAborted();
+  const cached = getDesktopMarkdownParse(text);
+  const tree = cached ?? (await parse(text, signal));
+  signal.throwIfAborted();
+  if (!cached) rememberDesktopMarkdownParse(text, tree);
+  return { text, tree };
+}
+
 /** One active display batch owns trees; inactive facts retain only verified source data. */
 export class NativeMarkdownOwner {
   private readonly snapshots = new Set<ModelOutputSnapshot>();
@@ -157,11 +170,9 @@ export class NativeMarkdownOwner {
     const text = snapshot.output.content;
     if (text.length < 32768 || (typeof Worker === 'undefined' && this.parse === defaultPrepare))
       return;
-    const cached = getDesktopMarkdownParse(text);
-    const tree = cached ?? (await this.parse(text, this.signal));
+    const value = await prepareNativeMarkdown(text, this.signal, this.parse);
     this.check();
-    if (!cached) rememberDesktopMarkdownParse(text, tree);
-    prepared.set(snapshot, { owner: this, value: { text, tree } });
+    prepared.set(snapshot, { owner: this, value });
     this.snapshots.add(snapshot);
   }
   private check() {

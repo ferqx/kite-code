@@ -220,14 +220,25 @@ function carrierPredicate(binding: Row) {
 function runPredicate(db: SqliteOperations, runId: string, sessionId: string) {
   const binding = adoption(db, runId, sessionId);
   const carrier = binding && carrierPredicate(binding);
+  // Stable child-to-parent communication follows the mailbox, including when
+  // the original active turn ends before the sender confirms its tool receipt.
+  const parentMailbox = `(json_extract(CASE WHEN json_valid(c.request_json) THEN c.request_json ELSE '{}' END,'$.stableTarget')='parent'
+    AND EXISTS(SELECT 1 FROM run r JOIN command o ON o.id=r.origin_command_id
+      JOIN session child ON child.id=c.session_id AND child.parent_id=r.session_id
+      WHERE r.id=? AND r.session_id=c.mail_target_session_id
+        AND (c.mail_received_run_id=r.id OR
+          (c.mail_received_run_id IS NULL AND r.is_active=1 AND r.cancel_requested=0))
+        AND r.context_selection_id=c.mail_selection_id
+        AND r.origin_store_id=c.origin_store_id AND o.subject_id=c.subject_id))`;
   // An explicit child follow-up adopts its exact predecessor's sealed mailbox,
   // even when the parent sent that mail in a different ordinary conversation turn.
   // Parent-report adoption and cancelled-before-first-activation keep their work scope.
   const work = binding && (binding.kind === 'child.start' || binding.parent_mail_run_id);
   return binding
     ? {
-        sql: `(c.mail_target_run_id=? OR (c.mail_target_run_id IS NULL AND c.rowid<=? AND e.completed_cursor IS NOT NULL AND e.completed_cursor<=? AND c.mail_selection_id=? AND c.origin_store_id=? ${work ? 'AND c.root_work_command_id=? AND c.root_work_seq=?' : ''} AND ${carrier!.sql}))`,
+        sql: `(c.mail_target_run_id=? OR ${parentMailbox} OR (c.mail_target_run_id IS NULL AND c.rowid<=? AND e.completed_cursor IS NOT NULL AND e.completed_cursor<=? AND c.mail_selection_id=? AND c.origin_store_id=? ${work ? 'AND c.root_work_command_id=? AND c.root_work_seq=?' : ''} AND ${carrier!.sql}))`,
         args: [
+          runId,
           runId,
           binding.mail_adoption_upper_seq!,
           binding.mail_adoption_cursor!,
@@ -237,7 +248,7 @@ function runPredicate(db: SqliteOperations, runId: string, sessionId: string) {
           ...carrier!.args,
         ],
       }
-    : { sql: 'c.mail_target_run_id=?', args: [runId] };
+    : { sql: `(c.mail_target_run_id=? OR ${parentMailbox})`, args: [runId, runId] };
 }
 /** Called inside an already authorized successor activation transaction. */
 export function sealParentAgentMailAdoption(
@@ -718,6 +729,19 @@ export function queueAgentMessage(
     const targetCreator = reader(db, input.targetSessionId, String(origin.subject_id));
     if (targetCreator.context_selection_id !== input.contextSelectionId || target.delete_requested)
       throw new AgentError('context_selection_changed');
+    const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
+    const current = db.row('SELECT * FROM run WHERE session_id=? AND is_active=1', target.id!);
+    if (input.stableTarget === 'parent') {
+      const targetRunId = prior
+        ? prior.mail_target_run_id
+        : current &&
+            !current.cancel_requested &&
+            current.origin_store_id === input.expectedStoreId &&
+            current.context_selection_id === input.contextSelectionId
+          ? current.id
+          : null;
+      input = { ...input, targetRunId: targetRunId == null ? undefined : String(targetRunId) };
+    }
     const body = input.body;
     if (
       !body ||
@@ -758,7 +782,6 @@ export function queueAgentMessage(
       body: body as unknown as Json,
     };
     const digest = hash(request);
-    const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
     if (prior) {
       if (
         prior.request_digest !== digest ||
@@ -775,7 +798,6 @@ export function queueAgentMessage(
     verifyNamespace(db, input.extensionId, origin, input.sourceExecutionId);
     if (!['dispatching', 'running'].includes(String(execution.state)))
       throw new AgentError('invalid_operation_parent');
-    const current = db.row('SELECT * FROM run WHERE session_id=? AND is_active=1', target.id!);
     if (input.targetRunId !== undefined) {
       if (
         !current ||
@@ -887,7 +909,8 @@ export function receiveAgentMessages(
       if (
         mail.mail_target_session_id !== target.id ||
         (mail.mail_target_run_id !== run.id &&
-          (!eligibleAdoption(mail, frozen) ||
+          ((parse(mail.request_json).stableTarget !== 'parent' &&
+            !eligibleAdoption(mail, frozen)) ||
             !db.row(
               `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND ${runFilter.sql}`,
               id,

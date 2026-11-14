@@ -609,6 +609,44 @@ export interface SessionView {
   snapshotCursor: string;
   storeId: string;
 }
+export type SessionStateExecution = Pick<
+  ExecutionRecord,
+  | 'id'
+  | 'sessionId'
+  | 'runId'
+  | 'originStoreId'
+  | 'rootWorkCommandId'
+  | 'rootWorkSeq'
+  | 'parentExecutionId'
+  | 'childSessionId'
+  | 'cancelWithParent'
+  | 'callId'
+  | 'kind'
+  | 'definitionId'
+  | 'definitionVersion'
+  | 'status'
+  | 'cancelRequestedAt'
+  | 'resultRevision'
+  | 'delivery'
+  | 'deliveryReason'
+  | 'decisionSource'
+  | 'result'
+> & {
+  input?: Json;
+  authorization?: Pick<ExecutionAuthorizationObservation, 'dispatched'>;
+};
+
+export type SessionState = Omit<SessionView, 'runs' | 'executions'> & {
+  runs: Omit<RunRecord, 'requirements'>[];
+  executions: SessionStateExecution[];
+};
+export type SessionHistoryEntry = {
+  id: string;
+  runId: string | null;
+  firstSeq: string;
+  lastSeq: string;
+  count: number;
+};
 export class AgentError extends Error {
   readonly code: string;
   readonly retryable: boolean;

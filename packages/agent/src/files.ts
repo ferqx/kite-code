@@ -33,6 +33,7 @@ export {
   type WorkspaceFiles,
 } from './tools/files';
 export { createFileToolBehaviors } from './tools/files-approval';
+export { fileChangePreviewCounts } from './tools/files-diff';
 export type { FileMutationCapture } from './tools/files-tools';
 export { createFileTools } from './tools/files-tools';
 export { withFullAccessFiles } from './tools/full-access-files';

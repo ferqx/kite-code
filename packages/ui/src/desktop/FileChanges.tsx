@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useId, useMemo, useRef, useState } from 'react';
+import { CodeBlockCopyButton } from './components/ui/code-block';
 import { ScrollArea } from './components/ui/scroll-area';
 import {
   clipDiffLine,
@@ -9,6 +10,26 @@ import {
 } from './file-diff-model';
 import type { Message } from './types';
 import { Button } from './ui';
+
+export const diffFileName = (path: string) => path.split(/[/\\]/).at(-1) || path;
+
+export function FileDiffCounts({
+  added,
+  removed,
+  preview,
+}: {
+  added: number;
+  removed: number;
+  preview?: boolean;
+}) {
+  return (
+    <span className="file-diff-counts" title={`预览新增 ${added} 行，删除 ${removed} 行`}>
+      {preview && '预览 '}
+      <span className="file-diff-added-count">+{added}</span>{' '}
+      <span className="file-diff-removed-count">-{removed}</span>
+    </span>
+  );
+}
 
 export function FileChanges({
   messages,
@@ -83,12 +104,14 @@ export function FileDiff({
   scope = 'operation',
   layout,
   onLayoutChange,
+  inline = false,
 }: {
   message: Message;
   path?: string;
   scope?: 'operation' | 'workspace';
   layout?: 'split' | 'unified';
   onLayoutChange?: (layout: 'split' | 'unified') => void;
+  inline?: boolean;
 }) {
   const source =
     message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。';
@@ -101,6 +124,7 @@ export function FileDiff({
       scope={scope}
       layout={layout}
       onLayoutChange={onLayoutChange}
+      copyText={inline ? source : undefined}
     />
   );
 }
@@ -126,11 +150,13 @@ function DiffCell({
   change,
   side,
   showNumber = true,
+  showSign = true,
 }: {
   line?: DiffLine;
   change: boolean;
   side: 'before' | 'after';
   showNumber?: boolean;
+  showSign?: boolean;
 }) {
   if (!line) return <div className="file-diff-cell file-diff-empty" aria-hidden="true" />;
   const marker = !change ? ' ' : side === 'before' ? '-' : '+';
@@ -145,7 +171,7 @@ function DiffCell({
         {showNumber ? (line.number ?? '') : ''}
       </span>{' '}
       <span
-        className="file-diff-sign"
+        className={showSign ? 'file-diff-sign' : 'sr-only'}
         role="img"
         aria-label={!change ? '未变更行' : side === 'before' ? '删除行' : '新增行'}
       >
@@ -162,15 +188,18 @@ function DiffReader({
   scope,
   layout: controlledLayout,
   onLayoutChange,
+  copyText,
 }: {
   model: DiffModel;
   path?: string;
   scope: 'operation' | 'workspace';
   layout?: 'split' | 'unified';
   onLayoutChange?: (layout: 'split' | 'unified') => void;
+  copyText?: string;
 }) {
+  const inline = copyText !== undefined;
   const [localLayout, setLayout] = useState<'split' | 'unified'>('split');
-  const layout = controlledLayout ?? localLayout;
+  const layout = inline ? 'unified' : (controlledLayout ?? localLayout);
   const [folds, setFolds] = useState<{ model: DiffModel; expanded: Set<number> }>({
     model,
     expanded: new Set(),
@@ -178,7 +207,12 @@ function DiffReader({
   // Clear changed body state during render, not in an effect after an old frame was shown.
   if (folds.model !== model) setFolds({ model, expanded: new Set() });
   const expanded = folds.model === model ? folds.expanded : new Set<number>();
-  const rows = useMemo(() => fileDiffRows(model[layout], expanded), [model, layout, expanded]);
+  const rows = useMemo(() => {
+    const result = fileDiffRows(model[layout], expanded);
+    return inline && model.format !== 'plain'
+      ? result.filter((row) => row.kind !== 'meta' || row.text === '\\ No newline at end of file')
+      : result;
+  }, [model, layout, expanded, inline]);
   const viewport = useRef<HTMLDivElement>(null);
   const bodyId = useId();
   const hasContext = model.split.some(
@@ -213,10 +247,10 @@ function DiffReader({
       gutter,
       columns: Math.max(
         metadata + 2,
-        layout === 'split' ? (max + gutter + 4) * 2 : max + gutter * 2 + 4,
+        layout === 'split' ? (max + gutter + 4) * 2 : max + (inline ? gutter : gutter * 2) + 4,
       ),
     };
-  }, [model, layout]);
+  }, [model, layout, inline]);
   const chooseLayout = (next: 'split' | 'unified') => {
     if (next === layout) return;
     setLayout(next);
@@ -225,37 +259,45 @@ function DiffReader({
     if (viewport.current) viewport.current.scrollLeft = 0;
   };
   return (
-    <div className="file-diff" data-layout={layout} data-scope={scope} data-format={model.format}>
+    <div
+      className="file-diff"
+      data-layout={layout}
+      data-scope={scope}
+      data-format={model.format}
+      data-inline={inline || undefined}
+    >
       <div className="file-diff-toolbar">
         <span className="file-diff-path" title={path ? clipDiffLine(path) : undefined}>
-          {path ? clipDiffLine(path) : scope === 'workspace' ? '文件差异' : '本次操作差异'}
+          {path
+            ? clipDiffLine(inline ? diffFileName(path) : path)
+            : scope === 'workspace'
+              ? '文件差异'
+              : '本次操作差异'}
         </span>
         {model.format !== 'plain' && (
-          <span
-            className="file-diff-counts"
-            title={`预览新增 ${model.added} 行，删除 ${model.removed} 行`}
-          >
-            预览 <span className="file-diff-added-count">+{model.added}</span>{' '}
-            <span className="file-diff-removed-count">-{model.removed}</span>
-          </span>
+          <FileDiffCounts added={model.added} removed={model.removed} preview={!inline} />
         )}
-        <fieldset className="file-diff-layout" aria-label="差异布局">
-          <button
-            type="button"
-            aria-pressed={layout === 'split'}
-            onClick={() => chooseLayout('split')}
-          >
-            双栏
-          </button>
-          <button
-            type="button"
-            aria-pressed={layout === 'unified'}
-            onClick={() => chooseLayout('unified')}
-          >
-            统一
-          </button>
-        </fieldset>
-        {hasContext && (
+        {inline ? (
+          <CodeBlockCopyButton value={copyText} contentLabel="差异" />
+        ) : (
+          <fieldset className="file-diff-layout" aria-label="差异布局">
+            <button
+              type="button"
+              aria-pressed={layout === 'split'}
+              onClick={() => chooseLayout('split')}
+            >
+              双栏
+            </button>
+            <button
+              type="button"
+              aria-pressed={layout === 'unified'}
+              onClick={() => chooseLayout('unified')}
+            >
+              统一
+            </button>
+          </fieldset>
+        )}
+        {!inline && hasContext && (
           <button
             type="button"
             className="file-diff-collapse"
@@ -279,20 +321,27 @@ function DiffReader({
       {model.format === 'plain' ? (
         <p className="file-diff-notice">原始输出：未识别的差异格式，不推断行号或修改前后内容。</p>
       ) : (
-        <div className="file-diff-sides">
-          {layout === 'unified' ? (
-            <span>
-              统一差异 · 旧行 / 新行 ·{' '}
-              {scope === 'workspace' ? 'HEAD → 当前文件' : '本次操作前 → 操作后'}
-            </span>
-          ) : (
-            <>
-              <span>{scope === 'workspace' ? '修改前 · HEAD' : '修改前 · 本次操作前'}</span>
-              <span>{scope === 'workspace' ? '修改后 · 当前文件' : '修改后 · 本次操作后'}</span>
-            </>
-          )}
-        </div>
+        !inline && (
+          <div className="file-diff-sides">
+            {layout === 'unified' ? (
+              <span>
+                统一差异 · 旧行 / 新行 ·{' '}
+                {scope === 'workspace' ? 'HEAD → 当前文件' : '本次操作前 → 操作后'}
+              </span>
+            ) : (
+              <>
+                <span>{scope === 'workspace' ? '修改前 · HEAD' : '修改前 · 本次操作前'}</span>
+                <span>{scope === 'workspace' ? '修改后 · 当前文件' : '修改后 · 本次操作后'}</span>
+              </>
+            )}
+          </div>
+        )
       )}
+      {inline &&
+        model.format !== 'plain' &&
+        model.added === 0 &&
+        model.removed === 0 &&
+        !model.truncated && <p className="file-diff-notice">内容未变更</p>}
       <ScrollArea
         orientation="both"
         fade="y"
@@ -332,17 +381,22 @@ function DiffReader({
             if (row.kind !== 'context' && row.kind !== 'change')
               return (
                 <div key={index} className={`file-diff-row file-diff-${row.kind}`}>
-                  {row.text}
+                  {inline && row.text === '\\ No newline at end of file'
+                    ? '文件末尾没有换行'
+                    : row.text}
                 </div>
               );
             if (layout === 'unified')
               return (
                 <div key={index} className="file-diff-row file-diff-unified-row">
-                  <span className="file-diff-old-number">{row.before?.number ?? ''}</span>
+                  {!inline && (
+                    <span className="file-diff-old-number">{row.before?.number ?? ''}</span>
+                  )}
                   <DiffCell
                     line={row.after ?? row.before}
                     side={row.after ? 'after' : 'before'}
-                    showNumber={!!row.after}
+                    showNumber={inline || !!row.after}
+                    showSign={!inline}
                     change={row.kind === 'change'}
                   />
                 </div>

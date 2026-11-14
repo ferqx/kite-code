@@ -89,6 +89,8 @@ export interface Responses {
   WorkspaceList: API.WorkspaceList;
   SessionList: API.SessionList;
   MessageList: API.MessageList;
+  MessageTextChunk: API.MessageTextChunk;
+  SessionHistoryEntries: API.SessionHistoryEntries;
   MessageChangesPage: API.MessageChangesPage;
   StreamReady: API.StreamReady;
   StreamCheckpoint: API.StreamCheckpoint;
@@ -126,6 +128,8 @@ export function validateRequest(
     | 'TraceCredentialBind'
     | 'TraceCredentialRevoke'
     | 'MessageChangesQuery'
+    | 'MessageTextQuery'
+    | 'SessionHistoryEntriesQuery'
     | 'FileCheckpointListQuery'
     | 'SessionLogQuery'
     | 'BrowserSessionLogQuery'

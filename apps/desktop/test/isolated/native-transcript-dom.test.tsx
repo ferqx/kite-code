@@ -241,7 +241,7 @@ test('a saved prompt takes over its submission DOM without changing Markdown, se
           connected
           saveReading={() => {}}
           messages={messages}
-          lazyHistory
+          preserveReadingAnchor
         />,
       ),
     );
@@ -2238,7 +2238,7 @@ test('automatic compression is a live separator only for the matching active Run
   try {
     for (const phase of ['preparing', 'summarizing', 'validating'] as const) {
       const transcript = await render({ ...progress, phase });
-      expect(f.host.querySelector('.context-compacted')?.textContent).toBe('正在压缩上下文');
+      expect(f.host.querySelector('.context-compacted')?.textContent).toBe('压缩上下文中');
       expect(transcript.messages.some((model) => model.finalReply)).toBe(false);
     }
     await render({ ...progress, originStoreId: 'other-store' });
@@ -2301,9 +2301,14 @@ test('compression keeps its DOM row and order when the hot View hands over befor
   try {
     await render({ compressionProgress: progress });
     const row = f.host.querySelector('.context-compacted')!;
+    const line = row.querySelector('[data-slot="trace-line"][role="status"]');
+    const title = line?.querySelector('[data-slot="trace-title"]');
+    const icon = row.querySelector('[data-slot="trace-icon"][aria-hidden="true"] > svg');
     const turn = row.closest('.agent-turn');
     const response = turn?.querySelector('.response-status');
-    expect(row.textContent).toBe('正在压缩上下文');
+    expect(icon?.tagName).toBe('svg');
+    expect(line?.getAttribute('data-status')).toBe('running');
+    expect(title?.textContent).toBe('压缩上下文中');
     for (const phase of ['summarizing', 'validating'] as const) {
       await render({ compressionProgress: { ...progress, phase } });
       expect(f.host.querySelector('.context-compacted') === row).toBe(true);
@@ -2311,7 +2316,9 @@ test('compression keeps its DOM row and order when the hot View hands over befor
     // The same View confirms publication, but the independent history GET is held.
     await render({ compressionMessages: [{ ...summary, content: '' }] });
     expect(f.host.querySelector('.context-compacted') === row).toBe(true);
-    expect(row.textContent).toBe('上下文压缩完成');
+    expect(title?.textContent).toBe('已压缩上下文');
+    expect(line?.hasAttribute('data-status')).toBe(false);
+    expect(row.querySelector('[data-slot="trace-icon"] > svg')).toBe(icon);
     expect(row.closest('.agent-turn') === turn).toBe(true);
     expect(turn?.querySelector('.response-status') === response).toBe(true);
     // A newer streamed message can arrive before that history GET as well.
@@ -2337,7 +2344,7 @@ test('compression keeps its DOM row and order when the hot View hands over befor
       compression: { ...summary.compression!, status: 'running' },
     };
     await render({ messages: [initial, before, summary, after], compressionMessages: [oldView] });
-    expect(row.textContent).toBe('上下文压缩完成');
+    expect(row.textContent).toBe('已压缩上下文');
     expect(f.host.querySelector('.context-compacted') === row).toBe(true);
   } finally {
     await f.close();
@@ -2640,7 +2647,7 @@ test('real Core compression, later tool work and completion remain distinct thro
     expect(middle.transcript.messages.find((entry) => entry.id === summary.id)).toMatchObject({
       role: 'system',
       systemKind: 'compaction',
-      title: '上下文压缩完成',
+      title: '已压缩上下文',
     });
     expect(middle.transcript.messages.some((entry) => entry.finalReply)).toBe(false);
     toolGate.release();
@@ -2691,7 +2698,7 @@ test('cold compression outcomes stay separators without summary prose or final-c
   const f = fixture();
   const labels = {
     running: null,
-    completed: '上下文压缩完成',
+    completed: '已压缩上下文',
     failed: '上下文压缩失败',
     cancelled: '上下文压缩已取消',
     unpublished: '上下文压缩未发布',
@@ -2755,7 +2762,7 @@ test('cold compression outcomes stay separators without summary prose or final-c
     });
     expect(live.messages.filter((entry) => entry.systemKind === 'compaction')).toHaveLength(1);
     expect(live.messages.find((entry) => entry.id === 'summary-status')).toMatchObject({
-      title: '正在压缩上下文',
+      title: '压缩上下文中',
       status: 'running',
       settled: false,
     });
@@ -2778,7 +2785,7 @@ test('cold compression outcomes stay separators without summary prose or final-c
     expect(validating.messages.find((entry) => entry.id === 'summary-status')).toMatchObject({
       status: 'running',
       settled: false,
-      title: '正在压缩上下文',
+      title: '压缩上下文中',
     });
     for (const status of ['completed', 'failed', 'cancelled'] as const) {
       const terminal = project(status, {

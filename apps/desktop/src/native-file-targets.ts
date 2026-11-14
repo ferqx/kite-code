@@ -1,7 +1,8 @@
 import type { Message } from '@kite-ai/client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeFileChange } from './file-changes-bridge';
-import type { NativeBridge, NativeSelection } from './native-bridge';
+import type { NativeBridge, NativeResult, NativeSelection } from './native-bridge';
+import { nativeReadDeadline } from './native-read-deadline';
 
 /** Both retained file consumers read the same exact metadata; bodies remain lazy. */
 export function useNativeFileTargets({
@@ -90,14 +91,16 @@ export function useNativeFileTargets({
       for (let index = 0; index < pending.length; index += 32) {
         const batch = pending.slice(index, index + 32);
         readId = crypto.randomUUID();
-        const page = await bridge.request({
-          method: includeRead ? 'fileTargets.list' : 'fileChanges.list',
-          generation,
-          viewSelection,
-          historyEpoch,
-          readId,
-          messageIds: batch,
-        });
+        const page: NativeResult = await nativeReadDeadline(
+          bridge.request({
+            method: includeRead ? 'fileTargets.list' : 'fileChanges.list',
+            generation,
+            viewSelection,
+            historyEpoch,
+            readId,
+            messageIds: batch,
+          }),
+        );
         if (!active) return;
         if (
           !page ||

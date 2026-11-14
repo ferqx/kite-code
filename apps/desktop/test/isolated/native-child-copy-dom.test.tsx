@@ -181,7 +181,9 @@ test('child automatically shows the verified body and rejected replacement revok
     rejected.modelOutputs[0]!.snapshot.executionId = 'wrong-execution';
     await f.render(rejected);
     expect(f.host.querySelector('pre code')?.textContent).toBe('const complete = tr\n');
-    expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === null).toBe(true);
+    expect(
+      f.host.querySelector('[data-slot="code-block-copy-button"]')?.getAttribute('aria-disabled'),
+    ).toBe('true');
     expect(f.host.querySelector('.message-copy') === null).toBe(true);
     await act(async () => oldCode.click());
     expect(f.writes).toEqual([code]);
@@ -240,7 +242,9 @@ test('child copy eligibility does not survive a rejected replacement snapshot or
         generation: target === 'generation' ? 2 : 1,
       });
       expect(f.host.querySelector('pre code')?.textContent).toBe('const complete = tr\n');
-      expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === null).toBe(true);
+      expect(
+        f.host.querySelector('[data-slot="code-block-copy-button"]')?.getAttribute('aria-disabled'),
+      ).toBe('true');
       expect(f.host.querySelector('.message-copy') === null).toBe(true);
     }
     expect(f.writes).toEqual([]);

@@ -472,12 +472,12 @@ test('Native follows the last started running tool even in a different request o
     await f.start([a, b]);
     collapsed(f.host);
     const title = f.host.querySelector('.conversation-trace-line [data-slot="trace-title"]');
-    expect(title?.textContent).toBe('正在读取 file-execution-2.ts');
+    expect(title?.textContent).toBe('读取 file-execution-2.ts');
     await f.start([{ ...a, status: 'running' }, b]);
-    expect(title?.textContent).toBe('正在读取 file-execution-1.ts');
+    expect(title?.textContent).toBe('读取 file-execution-1.ts');
     await f.complete(1);
     await f.flush();
-    expect(title?.textContent).toBe('正在读取 file-execution-2.ts');
+    expect(title?.textContent).toBe('读取 file-execution-2.ts');
     await f.complete(2);
     await f.flush();
     expect(title?.textContent).toBe('已读取文件');
@@ -531,7 +531,7 @@ test('Native mixed tool activity keeps its first shell through receipt eviction 
 });
 
 for (const expanded of [false, true])
-  test(`Native keeps ongoing tool nodes and expansion when child operations join ${expanded ? 'an expanded' : 'a collapsed'} group`, async () => {
+  test(`Native retains ${expanded ? 'an expanded' : 'a collapsed'} Trace beside a standalone child operation`, async () => {
     const f = fixture();
     try {
       await f.render();
@@ -545,39 +545,51 @@ for (const expanded of [false, true])
       expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
       expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
       if (expanded) expect(firstRow).not.toBeNull();
-      const items = [
-        first,
-        tool(2, {
-          definitionId: 'task.spawn',
-          definitionVersion: '1',
-          status: 'running',
-          toolInput: { title: 'Child', prompt: 'Inspect the ongoing tools' },
-        }),
-        tool(3, { status: 'running' }),
-      ];
-      await f.start(items);
+      const child = tool(2, {
+        definitionId: 'task.spawn',
+        definitionVersion: '1',
+        status: 'running',
+        toolInput: { title: 'Child', prompt: 'Inspect the ongoing tools' },
+      });
+      await f.start([first, child]);
       expect(topActivities(f.host)).toHaveLength(1);
       expect(topActivities(f.host)[0] === activity).toBe(true);
+      expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
+      const items = [first, child, tool(3, { status: 'running' })];
+      await f.start(items);
+      expect(topActivities(f.host)).toHaveLength(2);
+      expect(topActivities(f.host)[0] === activity).toBe(true);
+      const nextTrace = topActivities(f.host)[1]!;
+      const nextSummary = nextTrace.querySelector('.conversation-trace-trigger')!;
+      const childRow = activity.nextElementSibling;
+      expect(!!childRow?.querySelector('.tool-activity')).toBe(true);
+      expect(childRow?.querySelector('.conversation-trace') === null).toBe(true);
+      expect(childRow?.nextElementSibling === nextTrace).toBe(true);
       expect(activity.querySelector('.conversation-trace-trigger') === summary).toBe(true);
       expect(summary.querySelector('[data-slot="trace-title"]') === label).toBe(true);
       expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
       expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
-      const trailing = activity.querySelector('.conversation-trace-steps > :last-child');
+      expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
       if (expanded) {
         expect(activity.querySelector('.conversation-trace-steps > :first-child')).toBe(firstRow);
-        expect(activity.querySelector('.conversation-trace-steps')?.children).toHaveLength(3);
-      } else expect(trailing).toBeNull();
+        expect(activity.querySelector('.conversation-trace-steps')?.children).toHaveLength(1);
+      } else expect(activity.querySelector('.conversation-trace-steps')).toBeNull();
       for (const refresh of [() => f.start(items), () => f.complete(2), () => f.flush()]) {
         await refresh();
         expect(f.host.contains(activity)).toBe(true);
         expect(summary.querySelector('[data-slot="trace-title"]') === label).toBe(true);
         expect(summary.getAttribute('aria-expanded')).toBe(String(expanded));
         expect(summary.querySelector('[data-status="running"]')).not.toBeNull();
+        expect(topActivities(f.host)[1] === nextTrace).toBe(true);
+        expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
         if (expanded) {
           expect(activity.querySelector('.conversation-trace-steps > :first-child')).toBe(firstRow);
-          expect(activity.querySelector('.conversation-trace-steps > :last-child')).toBe(trailing);
         }
       }
+      await f.complete(1);
+      await f.flush();
+      expect(summary.querySelector('[data-status="running"]')).toBeNull();
+      expect(nextSummary.querySelector('[data-status="running"]')).not.toBeNull();
     } finally {
       await f.close();
     }
@@ -601,7 +613,7 @@ test('a tool-call-only Model remains inside one Native activity while its histor
     // still retains its source Model as an incomplete empty assistant message.
     collapsed(f.host);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
-    expect(summary?.textContent).toBe('正在读取 file-execution-2.ts');
+    expect(summary?.textContent).toBe('读取 file-execution-2.ts');
     await f.releaseHistory();
     collapsed(f.host);
     expect(f.host.querySelector('.conversation-trace-trigger')).toBe(summary);
@@ -635,7 +647,7 @@ test.each([
     ]);
     collapsed(f.host);
     const summary = f.host.querySelector('.conversation-trace-trigger');
-    expect(summary?.textContent).toContain('正在搜索内容');
+    expect(summary?.textContent).toContain('搜索内容');
     expect(f.host.textContent).not.toContain(`files.search · ${version}`);
     await f.toggle();
     expect(f.host.querySelector('.conversation-trace-steps')?.children).toHaveLength(2);
@@ -676,7 +688,7 @@ test('Native owner reconciliation stops live tool activity while retaining confi
     await f.observeExecutionOwner('held');
     await f.toggle();
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
-    expect(f.host.textContent).toContain('等待执行');
+    expect(f.host.querySelector('[data-status="pending"]')).not.toBeNull();
     expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
     const original = f.facts();
     for (const owner of ['unheld', 'unknown'] as const) {
@@ -697,7 +709,7 @@ test('Native owner reconciliation stops live tool activity while retaining confi
     }
     await f.observeExecutionOwner('held');
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
-    expect(f.host.textContent).toContain('等待执行');
+    expect(f.host.querySelector('[data-status="pending"]')).not.toBeNull();
     expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
     expect(f.host.textContent).not.toContain('执行状态待核实');
     expect(f.facts()).toEqual(original);
@@ -846,7 +858,12 @@ test('Native tools aggregate future versions with stable names and retain Run an
       '结果未知',
     );
     await f.toggle();
-    expect(f.host.querySelector('.conversation-trace-steps')?.textContent).toContain('结果未知');
+    expect(f.host.querySelector('.conversation-trace-steps')?.textContent).not.toContain(
+      '结果未知',
+    );
+    expect(
+      f.host.querySelector('.conversation-trace-steps [aria-label*="结果未知"]'),
+    ).not.toBeNull();
     expect(f.host.textContent).not.toContain(raw);
   } finally {
     await f.close();

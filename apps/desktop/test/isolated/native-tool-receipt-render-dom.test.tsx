@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Message } from '@kite-ai/client';
+import { shellOutputPreview } from '@kite-ai/trajectory';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type {
@@ -45,6 +46,8 @@ type Mode =
   | 'known'
   | 'empty'
   | 'failed'
+  | 'shell-deferred'
+  | 'shell-saved-preview'
   | 'future'
   | 'future-unknown'
   | 'unsupported'
@@ -58,10 +61,51 @@ type Mode =
 function fixture(mode: Mode, testDiagnostics = false) {
   const isDiff = mode.endsWith('-diff');
   const groupedDiff = mode === 'group-diff';
+  const inTurn = groupedDiff || mode === 'edit-diff' || mode === 'mixed';
   const diffIds = groupedDiff ? ['receipt', 'receipt-edit'] : ['receipt'];
   const confirmedDiff = isDiff && !['failed-diff', 'unknown-diff'].includes(mode);
   const isMail = mode.startsWith('mail');
-  const receiptContent = isMail ? '{"accepted":true,"delivery":"queued"}' : original;
+  const savedShell = mode === 'shell-saved-preview';
+  const deferredShell = mode === 'shell-deferred' || savedShell;
+  const shellOutput = `首段输出\n${'output head\n'.repeat(4000)}${sentinel}\n${'output tail\n'.repeat(4000)}尾段输出\n`;
+  const shellDetails = {
+    rawReceiptMarker: sentinel,
+    ref: {
+      extensionId: 'builtin.shell',
+      key: 'shell-fixture',
+      sessionId: 'root',
+      originStoreId: 'store',
+      executionId: 'job',
+    },
+    execution: {
+      id: 'job',
+      sessionId: 'root',
+      originStoreId: 'store',
+      kind: 'job',
+      definitionId: 'shell.command',
+      definitionVersion: '1',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
+    },
+    stdout: shellOutput,
+    stderr: '',
+    stdoutBytes: String(Buffer.byteLength(shellOutput)),
+    stderrBytes: '0',
+    truncated: true,
+    droppedBytes: '123',
+  };
+  const expectedShellOutput = shellOutputPreview(
+    shellDetails,
+    'job',
+    savedShell ? 20000 : undefined,
+  )!.text;
+  const shellReceipt = Buffer.from(savedShell ? expectedShellOutput : JSON.stringify(shellDetails));
+  const shellHash = new Bun.CryptoHasher('sha256').update(shellReceipt).digest('hex');
+  const receiptContent = deferredShell
+    ? shellReceipt.toString('utf8', 0, 2048)
+    : isMail
+      ? '{"accepted":true,"delivery":"queued"}'
+      : original;
   const isImage = mode === 'image' || mode === 'image-batch';
   const imageCount = mode === 'image-batch' ? 10 : 1;
   const restoreWorker = isImage ? installImagePreviewWorker() : () => {};
@@ -92,6 +136,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
   let selected = 'root',
     revision = 1,
     published = false;
+  let shellOutputUnavailable = false;
+  let shellFailure: { output: string; reason: string } | undefined;
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
   const pending: (() => void)[] = [];
@@ -140,15 +186,29 @@ function fixture(mode: Mode, testDiagnostics = false) {
             seq: '1',
             role: 'assistant',
             status: 'complete',
-            runId: null,
+            runId: inTurn ? 'grouped-run' : null,
             content: isMail ? receiptContent : '',
             firstOutput: 'tool_calls',
             toolCalls: [
               {
                 id: 'call',
-                name: isMail ? 'task.message' : isImage ? 'files.view_images' : 'files.read',
+                name: deferredShell
+                  ? 'shell.execute'
+                  : isMail
+                    ? 'task.message'
+                    : isImage
+                      ? 'files.view_images'
+                      : mode === 'mixed'
+                        ? 'files.write'
+                        : 'files.read',
                 arguments: JSON.stringify({ path: 'MODEL_ARGS_SENTINEL' }),
               },
+              ...(mode === 'mixed'
+                ? [
+                    { id: 'failed-call', name: 'files.read', arguments: '{"path":"failed.txt"}' },
+                    { id: 'unknown-call', name: 'foreign_tool', arguments: '{}' },
+                  ]
+                : []),
             ],
           },
           {
@@ -157,10 +217,13 @@ function fixture(mode: Mode, testDiagnostics = false) {
             seq: '2',
             role: 'tool',
             status: 'complete',
-            runId: null,
+            runId: inTurn ? 'grouped-run' : null,
             sourceIds: ['execution'],
             toolCallId: 'call',
             content: receiptContent,
+            ...(deferredShell
+              ? { deferredText: { bytes: String(shellReceipt.length), sha256: shellHash } }
+              : {}),
             ...(mode === 'unsupported' ? { contentFormat: 'unsupported' as const } : {}),
           },
           ...(groupedDiff
@@ -171,7 +234,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
                   seq: '3',
                   role: 'tool' as const,
                   status: 'complete' as const,
-                  runId: null,
+                  runId: 'grouped-run',
                   sourceIds: ['execution-edit'],
                   content: original,
                 },
@@ -185,7 +248,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
                   seq: '3',
                   role: 'tool',
                   status: 'complete',
-                  runId: null,
+                  runId: 'grouped-run',
+                  toolCallId: 'failed-call',
                   sourceIds: ['failed-execution'],
                   content: JSON.stringify({ path: 'failed.txt', error: 'file_not_found' }),
                 },
@@ -195,7 +259,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
                   seq: '4',
                   role: 'tool',
                   status: 'complete',
-                  runId: null,
+                  runId: 'grouped-run',
+                  toolCallId: 'unknown-call',
                   sourceIds: ['unknown-execution'],
                   content: 'PERMANENTLY_UNVERIFIED_ORIGINAL',
                 },
@@ -232,6 +297,36 @@ function fixture(mode: Mode, testDiagnostics = false) {
             messages: selected === 'root' && !published ? [] : messages(),
             nextAfterSeq: null,
             highWaterSeq: request.upperSeq,
+          };
+        case 'messages.text':
+          throw Error('unexpected_shell_read');
+        case 'toolMessages.runs':
+          return {
+            kind: 'toolMessages.runs',
+            readId: request.readId,
+            scope: {
+              generation: 1,
+              viewSelection: request.viewSelection,
+              historyEpoch: request.historyEpoch,
+              storeId: 'store',
+              sessionId: selected,
+              workspaceId: 'w',
+            },
+            runs:
+              inTurn && selected === 'root'
+                ? [
+                    {
+                      id: 'grouped-run',
+                      originStoreId: 'store',
+                      sessionId: 'root',
+                      status: 'completed',
+                      isActive: false,
+                      createdAt: 1000,
+                      finishedAt: 3000,
+                      reason: null,
+                    },
+                  ]
+                : [],
           };
         case 'draft.read':
           return {
@@ -281,7 +376,8 @@ function fixture(mode: Mode, testDiagnostics = false) {
                   ? diffIds.map((messageId, index) => ({
                       messageId,
                       executionId: index ? 'execution-edit' : 'execution',
-                      definitionId: index || mode === 'edit-diff' ? 'files.edit' : 'files.write',
+                      definitionId:
+                        groupedDiff || mode === 'edit-diff' ? 'files.edit' : 'files.write',
                       definitionVersion: '2',
                       status:
                         mode === 'failed-diff'
@@ -293,15 +389,18 @@ function fixture(mode: Mode, testDiagnostics = false) {
                       target: 'same.txt',
                     }))
                   : request.method === 'fileTargets.list' && confirmedDiff
-                    ? diffIds.map((messageId, index) => ({
+                    ? diffIds.map((messageId) => ({
                         messageId,
                         changeId: `change-${messageId}`,
                         path: 'same.txt',
                         preview: 'available',
                         openable: true,
-                        operation: index || mode === 'edit-diff' ? 'edit' : 'write',
+                        operation: groupedDiff || mode === 'edit-diff' ? 'edit' : 'write',
                         snapshot: true,
                         diff: true,
+                        ...(groupedDiff || mode === 'edit-diff'
+                          ? { diffCounts: { added: 1, removed: 1 } }
+                          : {}),
                       }))
                     : []
                 : mode === 'mixed'
@@ -339,47 +438,78 @@ function fixture(mode: Mode, testDiagnostics = false) {
                           },
                         ]
                       : []
-                  : request.method === 'toolMessages.list' &&
-                      (isMail ||
-                        ['known', 'future', 'future-unknown', 'image', 'image-batch'].includes(
-                          mode,
-                        ))
+                  : request.method === 'toolMessages.list' && deferredShell
                     ? [
                         {
                           messageId: 'receipt',
                           executionId: 'execution',
-                          definitionId: isMail
-                            ? 'task.message'
-                            : isImage
-                              ? 'files.view_images'
-                              : mode === 'known'
-                                ? 'files.read'
-                                : 'future.tool',
-                          definitionVersion:
-                            isMail || isImage ? '1' : mode === 'known' ? '4' : '99',
-                          status:
-                            mode === 'mail-failed'
-                              ? ('failed' as const)
-                              : mode === 'future-unknown' || mode === 'mail-unknown'
-                                ? ('outcome_unknown' as const)
-                                : ('succeeded' as const),
+                          definitionId: 'shell.execute',
+                          definitionVersion: '1',
+                          status: shellFailure ? 'failed' : 'succeeded',
                           resultRevision: '1',
-                          ...(mode === 'mail' ? { agentMessageAccepted: true as const } : {}),
-                          target: 'README.md',
-                          ...(isImage
-                            ? {
-                                images: Array.from({ length: imageCount }, (_, i) => ({
-                                  name: `scan-${i}.png`,
-                                  reference: {
-                                    mediaType: 'image/png',
-                                    size: String(imageBytes.length),
-                                  },
-                                })),
-                              }
-                            : {}),
+                          target: '命令描述',
+                          shellResultVerified: true,
+                          ...(shellOutputUnavailable
+                            ? { shellOutputError: true }
+                            : {
+                                shellDisplay: {
+                                  jobStatus: shellFailure ? 'failed' : 'succeeded',
+                                  exitCode: shellFailure ? 1 : 0,
+                                  outputComplete: false,
+                                  output: shellFailure?.output ?? expectedShellOutput,
+                                  failureReason: shellFailure?.reason,
+                                },
+                              }),
+                          shellInput: {
+                            operation: 'execute',
+                            shellId: 'shell-fixture',
+                            command: 'Get-Location',
+                            commandOffset: 0,
+                            commandNextOffset: null,
+                          },
                         },
                       ]
-                    : [];
+                    : request.method === 'toolMessages.list' &&
+                        (isMail ||
+                          ['known', 'future', 'future-unknown', 'image', 'image-batch'].includes(
+                            mode,
+                          ))
+                      ? [
+                          {
+                            messageId: 'receipt',
+                            executionId: 'execution',
+                            definitionId: isMail
+                              ? 'task.message'
+                              : isImage
+                                ? 'files.view_images'
+                                : mode === 'known'
+                                  ? 'files.read'
+                                  : 'future.tool',
+                            definitionVersion:
+                              isMail || isImage ? '1' : mode === 'known' ? '4' : '99',
+                            status:
+                              mode === 'mail-failed'
+                                ? ('failed' as const)
+                                : mode === 'future-unknown' || mode === 'mail-unknown'
+                                  ? ('outcome_unknown' as const)
+                                  : ('succeeded' as const),
+                            resultRevision: '1',
+                            ...(mode === 'mail' ? { agentMessageAccepted: true as const } : {}),
+                            target: 'README.md',
+                            ...(isImage
+                              ? {
+                                  images: Array.from({ length: imageCount }, (_, i) => ({
+                                    name: `scan-${i}.png`,
+                                    reference: {
+                                      mediaType: 'image/png',
+                                      size: String(imageBytes.length),
+                                    },
+                                  })),
+                                }
+                              : {}),
+                          },
+                        ]
+                      : [];
               resolve({
                 kind:
                   request.method === 'toolMessages.list'
@@ -460,7 +590,22 @@ function fixture(mode: Mode, testDiagnostics = false) {
     host,
     until,
     requests,
+    expectedShellOutput,
+    setShellOutputUnavailable: (unavailable: boolean) => {
+      shellOutputUnavailable = unavailable;
+    },
+    setShellFailure: (output: string, reason: string) => {
+      shellFailure = { output, reason };
+    },
     settlePresentation: () => act(async () => nextDesktopPresentation(dom)),
+    openTurn: async () => {
+      const elapsed = () =>
+        [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+          button.textContent?.startsWith('用时'),
+        );
+      await until(() => !!elapsed());
+      await act(async () => elapsed()!.click());
+    },
     render: async () => {
       await act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />));
       await act(async () => {
@@ -526,7 +671,9 @@ function fixture(mode: Mode, testDiagnostics = false) {
         expect(!!button).toBe(true);
         button!.click();
       });
-      await until(() => !!host.querySelector('.conversation .tool-activity'));
+      await until(
+        () => !!host.querySelector('.conversation :is(.tool-activity,.conversation-trace)'),
+      );
     },
     async close() {
       for (const release of [
@@ -608,10 +755,14 @@ for (const mode of ['known', 'mixed', 'image'] as const)
       await f.flush();
       if (mode === 'image')
         await f.until(() => !!f.host.querySelector('.tool-image-thumbnails img'));
-      if (mode === 'mixed') await f.toggle();
+      if (mode === 'mixed') {
+        await f.openTurn();
+        const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+        await act(async () => trace.click());
+      }
       await f.settlePresentation();
       const iconSelector =
-        '.conversation .tool-activity :is(.tool-step-icon,.tool-activity-kind-icon)';
+        '.conversation .tool-activity :is(.tool-step-icon,.tool-activity-kind-icon), .conversation-trace-trigger [data-slot="trace-icon"]:not(.conversation-trace-chevron)';
       const icons = [...f.host.querySelectorAll(iconSelector)];
       expect(icons.length).toBe(mode === 'mixed' ? 3 : 1);
       const drawings = icons.map((icon) => icon.innerHTML);
@@ -722,6 +873,97 @@ for (const mode of ['future'] as const) {
   });
 }
 
+for (const mode of ['shell-deferred', 'shell-saved-preview'] as const)
+  test(`expanded ${mode} shows the complete model output without a body request`, async () => {
+    const f = fixture(mode);
+    const bodyReads = () => f.requests.filter((request) => request.method === 'messages.text');
+    const output = () => f.host.querySelector('.shell-output');
+    const retry = () =>
+      [...(output()?.querySelectorAll('button') ?? [])].find(
+        (button) => button.textContent === '重试',
+      );
+    const expectNoReceipt = () => {
+      expect(f.host.textContent).not.toContain(sentinel);
+      expect(f.host.textContent).not.toContain('正在读取输出');
+      expect(f.host.textContent).not.toContain('读取完整记录');
+      expect(f.host.textContent).not.toContain('上一段');
+      expect(f.host.textContent).not.toContain('下一段');
+      expect(f.host.textContent).not.toContain('输出已截断');
+    };
+    try {
+      await f.render();
+      await f.flush();
+      expect(bodyReads()).toEqual([]);
+      expectNoReceipt();
+      expect(f.host.textContent).not.toContain('首段输出');
+      const metadataReads = f.requests.filter(
+        (request) => request.method === 'toolMessages.list',
+      ).length;
+
+      await f.toggle();
+      expect(output()?.querySelector('.shell-command-text')?.textContent).toBe('Get-Location');
+      expect(output()?.querySelector('.shell-console-output')?.textContent).toBe(
+        f.expectedShellOutput,
+      );
+      expect(retry()).toBeUndefined();
+      expectNoReceipt();
+      await f.toggle();
+      await f.settlePresentation();
+      await f.toggle();
+      expect(output()?.querySelector('.shell-console-output')?.textContent).toBe(
+        f.expectedShellOutput,
+      );
+      expect(bodyReads()).toEqual([]);
+      expect(f.requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(
+        metadataReads,
+      );
+    } finally {
+      await f.close();
+    }
+  });
+
+test('an unavailable saved Shell receipt shows its original card without a retry action', async () => {
+  const f = fixture('shell-saved-preview');
+  f.setShellOutputUnavailable(true);
+  try {
+    await f.render();
+    await f.flush();
+    await f.toggle();
+    const card = f.host.querySelector('.shell-output');
+    expect(card).not.toBeNull();
+    expect(
+      [...card!.querySelectorAll('button')].some((button) => button.textContent === '重试'),
+    ).toBe(false);
+    expect(card?.textContent).toContain('无法读取已保存的输出');
+    expect(card?.textContent).not.toContain(sentinel);
+    expect(card?.querySelector('.shell-console-output')?.textContent).toBeFalsy();
+    expect(f.requests.filter((request) => request.method === 'messages.text')).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const output of ['', 'stderr:\ncommand output\n'])
+  test(`a failed saved Shell receipt keeps its reason separate from ${output ? 'the original output' : 'empty output'}`, async () => {
+    const f = fixture('shell-saved-preview');
+    f.setShellFailure(output, '原 Shell 启动失败');
+    try {
+      await f.render();
+      await f.flush();
+      expect(f.host.textContent).not.toContain('原 Shell 启动失败');
+      await f.toggle();
+      const card = f.host.querySelector('.shell-output');
+      expect(card?.querySelector('.shell-console-output')?.textContent).toBe(output);
+      expect(card?.querySelector('.shell-failure-reason')?.textContent).toBe('原 Shell 启动失败');
+      expect(card?.textContent).not.toContain('重试');
+      expect(f.requests.filter((request) => request.method === 'messages.text')).toEqual([]);
+      await f.toggle();
+      expect(f.host.textContent).not.toContain('原 Shell 启动失败');
+    } finally {
+      await f.close();
+    }
+  });
+
 test('actual NativeDesktop preserves a verified future tool outcome_unknown instead of the unverified metadata hint', async () => {
   const f = fixture('future-unknown');
   try {
@@ -732,14 +974,15 @@ test('actual NativeDesktop preserves a verified future tool outcome_unknown inst
     await f.flush();
     expect(f.host.textContent).toContain('future.tool');
     expect(f.host.textContent).not.toContain('future.tool · 99');
-    expect(f.host.textContent).toContain('结果未知');
+    expect(f.host.textContent).not.toContain('结果未知');
     expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain(sentinel);
     await f.toggle();
     expect(f.host.textContent).toContain(original);
+    expect(f.host.querySelector('.tool-detail-status')?.textContent).toBe('结果未知');
     await f.toggle();
     expect(f.host.textContent).not.toContain(sentinel);
-    expect(f.host.textContent).toContain('结果未知');
+    expect(f.host.textContent).not.toContain('结果未知');
   } finally {
     await f.close();
   }
@@ -771,13 +1014,15 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
     await f.render();
     expect(f.host.querySelector('.tool-activity')).toBeNull();
     await f.flush();
-    const aggregate = f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
-    expect(aggregate.textContent).toContain('编辑文件');
-    expect(aggregate.textContent).toContain('读取文件');
-    await f.toggle();
+    await f.openTurn();
+    const aggregate = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+    expect(aggregate.textContent).toBe('已写入文件');
+    await act(async () => aggregate.click());
     await f.flushTargets();
-    expect(f.host.querySelector('.tool-activity-summary')).toBe(aggregate);
-    const file = f.host.querySelector<HTMLButtonElement>('.tool-activity-steps button.file-link')!;
+    expect(f.host.querySelector('.conversation-trace-trigger') === aggregate).toBe(true);
+    const file = f.host.querySelector<HTMLButtonElement>(
+      '.conversation-trace-steps button.file-link',
+    )!;
     expect(file.textContent).toBe('delivered.txt');
     const delivery = [...f.host.querySelectorAll<HTMLDetailsElement>('details')].find(
       (element) => element.querySelector('summary')?.textContent === '查看本次交付的文件',
@@ -791,24 +1036,22 @@ test('a permanently unverified mixed tool preserves its verified sibling file ac
     const body = delivery.querySelector('pre');
     expect(body).not.toBeNull();
     await f.flush();
-    expect(f.host.querySelector('.tool-activity-summary')).toBe(aggregate);
-    expect(f.host.querySelector('.tool-activity-steps button.file-link')).toBe(file);
+    expect(f.host.querySelector('.conversation-trace-trigger') === aggregate).toBe(true);
+    expect(f.host.querySelector('.conversation-trace-steps button.file-link') === file).toBe(true);
     expect(delivery.isConnected).toBe(true);
     expect(delivery.querySelector('pre')).toBe(body);
     expect(delivery.open).toBe(true);
-    expect(f.host.querySelectorAll('.tool-activity-steps button.file-link')).toHaveLength(1);
-    const failed = [...f.host.querySelectorAll('.tool-activity-steps > .tool-activity')].find(
+    const links = [...f.host.querySelectorAll('.conversation-trace-steps button.file-link')];
+    expect(links).toHaveLength(2);
+    expect(links.filter((link) => !delivery.contains(link))[0] === file).toBe(true);
+    expect(links.filter((link) => delivery.contains(link))).toHaveLength(1);
+    const failed = [...f.host.querySelectorAll('.conversation-trace-steps .tool-activity')].find(
       (node) => node.textContent?.includes('failed.txt'),
     );
     expect(failed?.textContent).toContain('failed.txt');
     expect(failed?.querySelector('button.file-link')).toBeNull();
     expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
-    const originalReader = [
-      ...f.host.querySelectorAll<HTMLButtonElement>(
-        '.tool-activity-steps button.tool-activity-summary',
-      ),
-    ].find((button) => button.textContent?.includes('工具结果'))!;
-    expect(originalReader).toBeUndefined();
+    expect(f.host.querySelectorAll('.conversation-trace-steps > .tool-activity')).toHaveLength(2);
     expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
     expect(delivery.querySelector('pre')).toBe(body);
     await act(async () => file.click());
@@ -828,15 +1071,29 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
       await f.render();
       expect(bodies()).toHaveLength(0);
       await f.flush();
+      if (mode === 'edit-diff') {
+        const elapsed = f.host.querySelector<HTMLButtonElement>('button.agent-turn-summary');
+        expect(elapsed).not.toBeNull();
+        await act(async () => elapsed!.click());
+        expect(f.host.querySelector('.conversation-trace > button')).toBeNull();
+      }
       expect(f.host.textContent).toContain('same.txt');
+      if (mode === 'edit-diff') {
+        expect(f.host.querySelector('.tool-edit-heading .tool-label')?.textContent).toBe('已编辑');
+        expect(f.host.querySelector('.tool-edit-heading .file-diff-counts')?.textContent).toBe(
+          '+1 -1',
+        );
+      }
       expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
       expect(bodies()).toHaveLength(0);
       await f.toggle();
       expect(bodies()).toHaveLength(1);
       expect(bodies()[0]).toMatchObject({ changeId: 'change-receipt', view: 'diff' });
-      expect(f.host.textContent).toContain('正在读取本次差异');
+      expect(f.host.textContent).not.toContain('正在读取本次差异');
+      expect(f.host.textContent).not.toContain('new-change-receipt');
       await f.flushBodies();
       expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
+      expect(!!f.host.querySelector('.file-diff[data-inline]')).toBe(mode === 'edit-diff');
       expect(f.host.textContent).not.toContain('SNAPSHOT_');
       const disclosure = [...f.host.querySelectorAll('details')].find(
         (node) => node.querySelector('summary')?.textContent === '查看本次交付的文件',
@@ -864,6 +1121,7 @@ for (const mode of ['write-diff', 'edit-diff'] as const) {
         expect(f.host.querySelector('.tool-activity')?.textContent).toContain('new-change-receipt');
         expect(disclosure!.textContent).toContain('SNAPSHOT_change-receipt');
       }
+      expect(bodies().filter((request) => request.view === 'diff')).toHaveLength(1);
       expect(bodies().filter((request) => request.view === 'snapshot')).toHaveLength(1);
       expect(f.requests.some((request) => request.method === 'fileChanges.open')).toBe(false);
     } finally {
@@ -879,10 +1137,16 @@ test('actual NativeDesktop grouped operations on the same path read distinct rec
     await f.render();
     await f.flush();
     expect(bodies()).toHaveLength(0);
-    await f.toggle();
+    const elapsed = f.host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!;
+    expect(elapsed).not.toBeNull();
+    await act(async () => elapsed.click());
+    const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace > button')!;
+    expect(trace).not.toBeNull();
+    expect(trace.textContent).toBe('已编辑的文件');
+    await act(async () => trace.click());
     expect(bodies()).toHaveLength(0);
     const items = [
-      ...f.host.querySelectorAll<HTMLButtonElement>('.tool-activity-steps .tool-diff-toggle'),
+      ...f.host.querySelectorAll<HTMLButtonElement>('.conversation-trace-steps .tool-diff-toggle'),
     ];
     expect(items).toHaveLength(2);
     await act(async () => items[0]!.click());
@@ -894,9 +1158,20 @@ test('actual NativeDesktop grouped operations on the same path read distinct rec
     await act(async () => items[1]!.click());
     expect(bodies()).toHaveLength(2);
     expect(bodies()[1]).toMatchObject({ changeId: 'change-receipt-edit', view: 'diff' });
+    await act(async () => elapsed.click());
+    expect(f.requests).toContainEqual({
+      method: 'fileChanges.close',
+      generation: 1,
+      readId: bodies()[1]!.readId,
+    });
     await f.flushBodies();
-    expect(items[0]!.closest('.tool-activity')?.textContent).toContain('new-change-receipt');
-    expect(items[1]!.closest('.tool-activity')?.textContent).toContain('new-change-receipt-edit');
+    expect(f.host.textContent).not.toContain('new-change-receipt-edit');
+    await act(async () => elapsed.click());
+    expect(bodies()).toHaveLength(3);
+    await f.flushBodies();
+    const reopened = f.host.querySelectorAll('.conversation-trace-steps .tool-activity');
+    expect(reopened[0]?.textContent).toContain('new-change-receipt');
+    expect(reopened[1]?.textContent).toContain('new-change-receipt-edit');
   } finally {
     await f.close();
   }

@@ -5,6 +5,7 @@ import {
   FileChanges,
   FileDiff,
   ScrollArea,
+  useConversationReadActive,
 } from '@kite-ai/ui/desktop';
 import { useEffect, useState } from 'react';
 import type {
@@ -13,7 +14,9 @@ import type {
   NativeFileChangeDetail,
 } from './file-changes-bridge';
 import type { NativeBridge, NativeSelection } from './native-bridge';
+import type { NativeDisplayCache } from './native-display-cache';
 import { useNativeFileTargets } from './native-file-targets';
+import { nativeReadDeadline } from './native-read-deadline';
 
 function ChangeDetail({
   bridge,
@@ -21,33 +24,73 @@ function ChangeDetail({
   entry,
   editor,
   view = 'diff',
+  disclosure,
+  child = false,
 }: {
   bridge: NativeBridge;
   generation: number;
   entry: NativeFileChange;
   editor: DesktopEditor;
   view?: 'diff' | 'snapshot';
+  disclosure?: { open: boolean; cache: NativeDisplayCache<NativeFileChangeDetail> };
+  child?: boolean;
 }) {
-  const [body, setBody] = useState<NativeFileChangeDetail>();
+  const conversationReadActive = useConversationReadActive();
+  const readActive = !disclosure || (disclosure.open && conversationReadActive);
+  const diffCache = disclosure?.cache;
+  const inlineEdit = !!disclosure && entry.operation === 'edit';
+  // Main issues a fresh change ID whenever it verifies a file target for a new scope.
+  const cacheKey = JSON.stringify([generation, entry.changeId]);
+  const [body, setBody] = useState<NativeFileChangeDetail | undefined>(() =>
+    readActive && entry.preview === 'available' ? diffCache?.get(cacheKey) : undefined,
+  );
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [opening, setOpening] = useState(false);
   const [offset, setOffset] = useState(0);
   useEffect(() => {
-    if (entry.preview === 'unavailable') return;
+    if (!readActive || entry.preview === 'unavailable') return;
+    const cached = diffCache?.get(cacheKey);
+    if (cached) {
+      setBody(cached);
+      return;
+    }
     const readId = `${revision}-${crypto.randomUUID()}`;
     let active = true;
+    const close = () => {
+      if (!active) return;
+      active = false;
+      void bridge
+        .request(
+          child
+            ? { method: 'background.child.file.close', surface: 'environment', generation, readId }
+            : { method: 'fileChanges.close', generation, readId },
+        )
+        .catch(() => {});
+    };
     setError('');
     setBody(undefined);
-    void bridge
-      .request({
-        method: 'fileChanges.detail',
-        generation,
-        changeId: entry.changeId,
-        readId,
-        offset,
-        view,
-      })
+    const request = bridge.request(
+      child
+        ? {
+            method: 'background.child.file',
+            surface: 'environment',
+            generation,
+            changeId: entry.changeId,
+            readId,
+            offset,
+            view,
+          }
+        : {
+            method: 'fileChanges.detail',
+            generation,
+            changeId: entry.changeId,
+            readId,
+            offset,
+            view,
+          },
+    );
+    void (diffCache ? nativeReadDeadline(request) : request)
       .then((value) => {
         if (!active) return;
         if (
@@ -58,16 +101,27 @@ function ChangeDetail({
           value.changeId !== entry.changeId
         )
           throw Error('file_change_identity_mismatch');
+        if (value.text !== undefined) diffCache?.set(cacheKey, value);
         setBody(value);
       })
       .catch(() => {
         if (active) setError('文件操作的原记录目前不可读，请重新读取。');
-      });
-    return () => {
-      active = false;
-      void bridge.request({ method: 'fileChanges.close', generation, readId }).catch(() => {});
-    };
-  }, [bridge, generation, entry.changeId, entry.preview, revision, offset, view]);
+      })
+      .finally(close);
+    return close;
+  }, [
+    bridge,
+    generation,
+    entry.changeId,
+    entry.preview,
+    revision,
+    offset,
+    view,
+    readActive,
+    diffCache,
+    cacheKey,
+    child,
+  ]);
   async function open() {
     setOpening(true);
     setError('');
@@ -98,16 +152,24 @@ function ChangeDetail({
       ? { toolResult: { ok: true, stdout: body.text, status: 'success' } as const }
       : {}),
   };
+  if (disclosure && entry.preview === 'available' && !body && !error) return null;
   return (
     <>
-      {entry.path && entry.openable && (
+      {!inlineEdit && entry.path && entry.openable && (
         <Button className="file-link" disabled={opening} onClick={() => void open()}>
           打开当前文件：{entry.path}
         </Button>
       )}
       {error && <p role="alert">{error}</p>}
       {error && entry.preview === 'available' && (
-        <Button onClick={() => setRevision((value) => value + 1)}>重新读取历史内容</Button>
+        <Button
+          onClick={() => {
+            diffCache?.delete(cacheKey);
+            setRevision((value) => value + 1);
+          }}
+        >
+          重新读取历史内容
+        </Button>
       )}
       {body?.unavailableReason === 'snapshot_too_large' ? (
         <p role="status">
@@ -142,12 +204,12 @@ function ChangeDetail({
               )}
             </>
           ) : (
-            <FileDiff message={message} path={entry.path} scope="operation" />
+            <FileDiff message={message} path={entry.path} scope="operation" inline={inlineEdit} />
           )}
         </>
-      ) : (
+      ) : !disclosure && !error ? (
         <p role="status">正在读取本次{view === 'diff' ? '差异' : '历史版本'}…</p>
-      )}
+      ) : null}
     </>
   );
 }
@@ -158,6 +220,7 @@ export function NativeOutputFile(props: {
   generation: number;
   entry: NativeFileChange;
   editor: DesktopEditor;
+  child?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -169,13 +232,20 @@ export function NativeOutputFile(props: {
 }
 
 /** Mounted only by the confirmed tool's expanded disclosure. */
-export function NativeOperationDiff(props: {
+export function NativeOperationDiff({
+  open,
+  cache,
+  ...props
+}: {
   bridge: NativeBridge;
   generation: number;
   entry: NativeFileChange;
   editor: DesktopEditor;
+  open: boolean;
+  cache: NativeDisplayCache<NativeFileChangeDetail>;
+  child?: boolean;
 }) {
-  return <ChangeDetail {...props} view="diff" />;
+  return <ChangeDetail {...props} view="diff" disclosure={{ open, cache }} />;
 }
 
 /** Original FileChanges presentation; metadata scans and expanded bodies own only GETs. */
