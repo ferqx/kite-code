@@ -533,6 +533,28 @@ try {
         .map((animation) => animation.finished.catch(() => {})),
     );
   });
+  const stepColumns = await readTrace
+    .locator('.conversation-trace-steps [data-trace-line]')
+    .evaluateAll((rows) =>
+      rows.map((row) => ({
+        icon: row.querySelector(':scope > [data-slot="trace-icon"]')!.getBoundingClientRect().left,
+        label: row.querySelector(':scope > [data-slot="trace-title"]')!.getBoundingClientRect()
+          .left,
+      })),
+    );
+  assert.equal(
+    stepColumns.length,
+    4,
+    'reasoning and the three expanded tool rows share the trace layout',
+  );
+  assert.ok(
+    stepColumns.every(
+      ({ icon, label }) =>
+        Math.abs(icon - stepColumns[0]!.icon) < 0.5 &&
+        Math.abs(label - stepColumns[0]!.label) < 0.5,
+    ),
+    'reasoning and tool columns line up',
+  );
   await page.evaluate(() => {
     (
       globalThis as unknown as { reasoningRenderProbe: { closedFrames: unknown[] } }

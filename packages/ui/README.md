@@ -561,7 +561,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
 
-Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。相邻的思考和工具复用同一标题与阅读 key，首条工具可以直接展开其结果，后来加入的步骤保持各自的阅读状态。工具标题复用 `ToolActivity` 的图标映射，思考行始终使用思考图标，多步工具摘要使用流程图标。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
+Native 主会话启用 [ConversationTrace](src/desktop/ConversationTrace.tsx)，共享 Trace 的折叠根、标题和内容。宿主提供准确的轮次、流式正文、公开思考来源和工具事实。相邻的思考和工具复用同一标题与阅读 key，首条工具可以直接展开其结果，后来加入的步骤保持各自的阅读状态。工具标题复用 `ToolActivity` 的图标映射，思考行始终使用思考图标，多步工具摘要使用流程图标。展开后的 `TraceLine` 共用行内缩进、图标宽度和图文间距。首次展开前不构造步骤内容；整条思维链与思考正文随会话滚动，单项工具沿各自输出组件处理溢出。[Native 工具回归](../../apps/desktop/test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖并行顺序、元数据延迟和回执接管。
 
 桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。缺省切换仍卸载原消息DOM和effect；Native 通过可选 `conversationCache` 启用下述有界停用树，不保活全部会话；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。恢复时，各级折叠用 `data-restored-expanded` 跳过自己的展开动画；后续手动开合清除本层恢复标记。[轮次回归](test/desktop-reasoning-turns.test.tsx)与[Native 往返回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核恢复和手动选择。
 

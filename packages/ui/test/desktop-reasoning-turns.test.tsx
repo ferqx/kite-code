@@ -139,6 +139,7 @@ test('conversation trace icons follow the current step and appear before complet
     [...node.querySelectorAll('path')].map((path) => path.getAttribute('d'));
   const expectIcon = (line: Element, icon: typeof BrainIcon) => {
     const marker = line.firstElementChild!;
+    expect(line.hasAttribute('data-trace-line')).toBe(true);
     expect(marker.getAttribute('data-slot')).toBe('trace-icon');
     expect(marker.getAttribute('aria-hidden')).toBe('true');
     expect(marker.querySelector('svg')).not.toBeNull();

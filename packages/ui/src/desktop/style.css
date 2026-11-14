@@ -3711,6 +3711,16 @@ body {
   padding-inline-start: 10px;
   border-inline-start: 1px solid var(--border);
 }
+.kite-client .conversation-trace-steps[data-grouped] [data-trace-line] {
+  padding-inline: 0;
+  column-gap: 6px;
+  line-height: 24px;
+
+  & > [data-slot="trace-icon"]:first-child {
+    inline-size: var(--ui-icon-size);
+    block-size: var(--ui-icon-size);
+  }
+}
 .kite-client .conversation-trace-steps .tool-activity {
   margin-block: 0;
 }
