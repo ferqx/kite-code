@@ -35,6 +35,7 @@ async function fixture(
     denyCollector?: boolean;
     denyAfterAttempt?: number;
   },
+  producer: 'bash' | 'bun' = 'bash',
 ) {
   // Match the production coordination root: macOS tmpdir may use the /var alias.
   const root = await realpath(await mkdtemp(join(tmpdir(), 'kite-output-real-')));
@@ -58,10 +59,14 @@ async function fixture(
         await launchIdentityAsync(path),
       );
       const task = new Promise<number>((resolve, reject) => {
-        const child = spawn('/bin/bash', ['-c', (input as { command: string }).command], {
-          env: { ...process.env, ...allocated.env },
-          stdio: 'ignore',
-        });
+        const child = spawn(
+          producer === 'bun' ? process.execPath : '/bin/bash',
+          [producer === 'bun' ? '-e' : '-c', (input as { command: string }).command],
+          {
+            env: { ...process.env, ...allocated.env },
+            stdio: 'ignore',
+          },
+        );
         child.once('error', reject);
         child.once('exit', (code) => resolve(code ?? 1));
       });
@@ -267,6 +272,74 @@ test('real Shell delivers two immutable files without another model call and cle
     await f.close();
   }
 }, 20000);
+test('background pagination advances through hidden real output collectors', async () => {
+  const f = await fixture(
+    "await Bun.write(process.env.KITE_OUTPUT_DIR + '/report.txt', 'delivered')",
+    undefined,
+    'bun',
+  );
+  try {
+    for (const commandId of ['first', 'second']) {
+      await f.run(commandId);
+      await f.runtime.waitForCommand(commandId, { timeoutMs: 10000 });
+      const outputs = await f.wait(
+        (page) =>
+          page.collections.length === (commandId === 'first' ? 1 : 2) &&
+          page.collections.every((collection) => collection.state === 'ready'),
+      );
+      for (const summary of outputs.collections) {
+        const collection = await f.store.getOutputCollection({
+          ...f.base,
+          collectionId: summary.collectionId,
+        });
+        const deadline = Date.now() + 10000;
+        while (
+          (await f.store.getExecution(collection!.collectorExecutionId!))?.status !== 'succeeded'
+        ) {
+          if (Date.now() >= deadline) throw Error('collector_did_not_finish');
+          await Bun.sleep(10);
+        }
+      }
+    }
+    const scope = {
+      expectedStoreId: f.base.expectedStoreId,
+      subjectId: f.base.subjectId,
+      rootSessionId: 's',
+    };
+    const all = await f.runtime.listBackgroundExecutions(scope);
+    expect(all.items.map((item) => item.execution.definitionId)).toEqual([
+      'shell.command',
+      'shell.command',
+    ]);
+    for (const limit of [1, 2]) {
+      let afterSeq = '0';
+      const ids: string[] = [];
+      let emptyPage = false;
+      let pages = 0;
+      for (;;) {
+        const page = await f.runtime.listBackgroundExecutions({
+          ...scope,
+          limit,
+          afterSeq,
+          upperSeq: all.upperSeq,
+          snapshotCursor: all.snapshotCursor,
+        });
+        expect(++pages).toBeLessThanOrEqual(6);
+        ids.push(...page.items.map((item) => item.execution.id));
+        if (!page.items.length) emptyPage = true;
+        if (page.nextAfterSeq === null) break;
+        expect(BigInt(page.nextAfterSeq)).toBeGreaterThan(BigInt(afterSeq));
+        afterSeq = page.nextAfterSeq;
+      }
+      expect(emptyPage).toBe(true);
+      expect(ids).toEqual(all.items.map((item) => item.execution.id));
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  } finally {
+    await f.close();
+  }
+}, 30000);
+
 test('empty out produces no visible collection or files', async () => {
   const f = await fixture('true');
   try {

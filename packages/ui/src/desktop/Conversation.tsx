@@ -1271,6 +1271,16 @@ export function Conversation({
         openTurns.push(id);
         if (restore.current) restoredExpanded.current.add(id);
       };
+      const turnOutputs =
+        ((finalGroup && finalGroup[0]?.id === finalReplyByTurn.get(entry.turnId)?.id) ||
+          (!finalReplyByTurn.has(entry.turnId) &&
+            lastTurnEntry &&
+            (ended || failureGroups.length > 0))) &&
+        renderTurnOutputs?.({
+          turnId: entry.turnId,
+          finalMessageId: finalGroup?.[0]?.id,
+          terminalStatus,
+        });
       if (traceTurns) {
         const messages = processGroups.flat();
         const lastMessage = messages.at(-1);
@@ -1455,6 +1465,7 @@ export function Conversation({
             }
           >
             {content}
+            {turnOutputs}
             {waitingLabel && (
               <small
                 className={cn('conversation-turn-notice', cancelled && 'conversation-turn-stopped')}
@@ -1590,15 +1601,7 @@ export function Conversation({
           {finalGroup && (
             <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>
           )}
-          {((finalGroup && finalGroup[0]?.id === finalReplyByTurn.get(entry.turnId)?.id) ||
-            (!finalReplyByTurn.has(entry.turnId) &&
-              lastTurnEntry &&
-              (ended || failureGroups.length > 0))) &&
-            renderTurnOutputs?.({
-              turnId: entry.turnId,
-              finalMessageId: finalGroup?.[0]?.id,
-              terminalStatus,
-            })}
+          {turnOutputs}
           {responding && (
             <small className="response-status" role="status">
               <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">

@@ -59,10 +59,14 @@ async function fixture(mode: PermissionMode, fault?: Fault) {
       tasks.set(
         handle,
         new Promise((resolve, reject) => {
-          const process = spawn('/bin/bash', ['-c', (input as { command: string }).command], {
-            env: { ...globalThis.process.env, ...allocation.env },
-            stdio: 'ignore',
-          });
+          const process = spawn(
+            globalThis.process.execPath,
+            ['-e', (input as { command: string }).command],
+            {
+              env: { ...globalThis.process.env, ...allocation.env },
+              stdio: 'ignore',
+            },
+          );
           process.once('error', reject);
           process.once('exit', (code) => resolve(code ?? 1));
         }),
@@ -154,7 +158,9 @@ async function fixture(mode: PermissionMode, fault?: Fault) {
         type: 'tool_call',
         name: 'shell_execute',
         id: 'produce',
-        arguments: JSON.stringify({ command: 'printf report > "$KITE_OUTPUT_DIR/report.txt"' }),
+        arguments: JSON.stringify({
+          command: 'await Bun.write(process.env.KITE_OUTPUT_DIR + "/report.txt", "report")',
+        }),
       },
       { ...finish, reason: 'tool_calls' },
     ],

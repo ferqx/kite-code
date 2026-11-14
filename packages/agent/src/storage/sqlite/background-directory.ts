@@ -128,8 +128,8 @@ export function readBackgroundExecutions(
       } = db.runRecord(row);
       return run;
     };
-    const items = rows
-      .slice(0, limit)
+    const scanned = rows.slice(0, limit);
+    const items = scanned
       .filter((row) => !outputCollectorEffect(db, row) && !outputCollectionActionEffect(db, row))
       .map((row) => {
         const nullable = (name: string) => (row[name] === null ? null : String(row[name]));
@@ -313,7 +313,8 @@ export function readBackgroundExecutions(
       items,
       highWaterSeq,
       upperSeq,
-      nextAfterSeq: rows.length > limit ? items.at(-1)!.seq : null,
+      // Hidden host jobs still consume the scan window, including an entirely hidden page.
+      nextAfterSeq: rows.length > limit ? String(scanned.at(-1)!.directory_seq) : null,
       snapshotCursor,
     };
     db.db.run('COMMIT');

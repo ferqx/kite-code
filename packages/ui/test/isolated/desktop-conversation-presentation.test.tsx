@@ -469,7 +469,10 @@ test('a loading round trip restores an explicitly open process marker and manual
   }
 });
 
-test('output footer uses the canonical final once and the failed terminal when no final exists', async () => {
+test.each([
+  false,
+  true,
+])('output footer uses the canonical final once and the failed terminal when no final exists (trace=%s)', async (traceTurns) => {
   const view = await fixture(
     [
       { id: 'user', role: 'user', text: 'create', settled: true },
@@ -494,6 +497,7 @@ test('output footer uses the canonical final once and the failed terminal when n
   );
   try {
     await view.render({
+      traceTurns,
       renderTurnOutputs: ({ turnId, finalMessageId }) => (
         <aside data-output-turn={turnId} data-final={finalMessageId}>
           Saved attachment
@@ -506,7 +510,7 @@ test('output footer uses the canonical final once and the failed terminal when n
     );
     expect(
       document.querySelector('[data-output-turn="run"]')?.previousElementSibling?.className,
-    ).toBe('agent-turn-final');
+    ).toContain('agent-turn-final');
     await view.render({
       messages: [
         { id: 'failed-user', role: 'user', text: 'create', settled: true },
@@ -534,6 +538,35 @@ test('output footer uses the canonical final once and the failed terminal when n
     expect(
       document.querySelector('[data-output-turn="failed"]')?.getAttribute('data-final'),
     ).toBeNull();
+    for (const status of ['completed', 'cancelled', 'aborted', 'failed'] as const) {
+      await view.render({
+        messages: [
+          { id: 'user', role: 'user', text: 'create', settled: true },
+          {
+            id: `terminal:${status}`,
+            role: 'system',
+            turnId: status,
+            text: '',
+            systemKind: 'turn_terminal',
+            turnTerminalStatus: status,
+            settled: true,
+          },
+        ],
+      });
+      expect(document.querySelectorAll('[data-output-turn]')).toHaveLength(1);
+      expect(document.querySelector('[data-output-turn]')?.getAttribute('data-output-turn')).toBe(
+        status,
+      );
+      expect(document.querySelector('[data-output-turn]')?.getAttribute('data-final')).toBeNull();
+    }
+    await view.render({
+      turnActivity: { turnId: 'active', status: 'running' },
+      messages: [
+        { id: 'user', role: 'user', text: 'create', settled: true },
+        { id: 'working', role: 'assistant', turnId: 'active', text: 'working', settled: false },
+      ],
+    });
+    expect(document.querySelectorAll('[data-output-turn]')).toHaveLength(0);
   } finally {
     await view.close();
   }

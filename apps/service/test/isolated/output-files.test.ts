@@ -43,10 +43,14 @@ test('real HTTP output stream and input preparation preserve exact source and ed
       tasks.set(
         handle,
         new Promise((resolve, reject) => {
-          const process = spawn('/bin/bash', ['-c', (input as { command: string }).command], {
-            env: { ...globalThis.process.env, ...allocation.env },
-            stdio: 'ignore',
-          });
+          const process = spawn(
+            globalThis.process.execPath,
+            ['-e', (input as { command: string }).command],
+            {
+              env: { ...globalThis.process.env, ...allocation.env },
+              stdio: 'ignore',
+            },
+          );
           process.once('error', reject);
           process.once('exit', (code) => resolve(code ?? 1));
         }),
@@ -82,7 +86,7 @@ test('real HTTP output stream and input preparation preserve exact source and ed
         name: 'shell_execute',
         id: 'create',
         arguments: JSON.stringify({
-          command: 'printf "original report" > "$KITE_OUTPUT_DIR/报告.txt"',
+          command: 'await Bun.write(process.env.KITE_OUTPUT_DIR + "/报告.txt", "original report")',
         }),
       },
       { ...finish, reason: 'tool_calls' },

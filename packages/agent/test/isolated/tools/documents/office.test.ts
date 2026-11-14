@@ -77,20 +77,29 @@ test('office skill scopes shell portability and recovery to confirmed delivery',
   expect(loaded.body).toContain('Do not repeat mutations blindly');
   expect(loaded.body).toContain('If recovery or collection cannot be confirmed');
   expect(loaded.body).toContain('no new tool is required');
-  for (const resource of loaded.resources) {
-    const { body } = await source.readResource({
-      skillId: entry.id,
-      version: entry.version,
-      path: resource.path,
-    });
-    for (const match of body.matchAll(/```sh\n([\s\S]*?)```/g)) {
-      // Parse examples without executing helpers, modifying files or using credentials.
-      const parsed = Bun.spawnSync(['/bin/sh', '-n'], { stdin: Buffer.from(match[1]!) });
-      expect(parsed.exitCode).toBe(0);
-    }
-  }
   await source.dispose();
 });
+test.skipIf(process.platform === 'win32')(
+  'office skill POSIX snippets parse without execution',
+  async () => {
+    const source = createBuiltinOfficeSkillSource();
+    const entry = (await source.list()).entries[0]!;
+    const loaded = await source.load({ id: entry.id });
+    for (const resource of loaded.resources) {
+      const { body } = await source.readResource({
+        skillId: entry.id,
+        version: entry.version,
+        path: resource.path,
+      });
+      for (const match of body.matchAll(/```sh\n([\s\S]*?)```/g)) {
+        // Parse examples without executing helpers, modifying files or using credentials.
+        const parsed = Bun.spawnSync(['/bin/sh', '-n'], { stdin: Buffer.from(match[1]!) });
+        expect(parsed.exitCode).toBe(0);
+      }
+    }
+    await source.dispose();
+  },
+);
 test('applied LaTeX warning is accepted only with explicit successful results', () => {
   const data = { results: [{ index: 0, success: true }] };
   expect(inspectOfficeBatch(result(data, 2, [{ code: 'unrecognized_latex_command' }]), 1)).toEqual([
