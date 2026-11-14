@@ -98,7 +98,7 @@ HTTP `SteerCommandRequest` 的可选 `queuedInputCommandId` 原样进入 Core �
 
 Planning 仅为计划模式。 默认 Planning 的原人答 deny 会保存简短 Tool 结果并直接停止当前 root work，不再续答模型；revise 仍交模型按反馈修订，普通权限拒绝不改变语义。三模式和新输入恢复由[按 Run 配置回归](test/isolated/per-run-planning-configuration.test.ts)核验。默认装配提供准确原 Run 的计划批准要求与当前计划，不给 Agent 定义 planning/building 阶段；批准仍按原 Run、版本、digest 与 accepted Interaction，工具权限独立核验。步骤进度通过 `read_plan` 查询，不参与稳定计划来源摘要；当前任务的旧 Tool／Job 则由[执行证据扩展](../../packages/agent/src/business/execution-evidence/README.md)按需读取。`read_execution_evidence` 复用同 Store 的真实执行记录与固定范围 SQL 分页，列表不给任意其他 Session／Run，详情不开放私有 Model／Provider 正文；Files 目标与可绑定 checkpoint 只是原证据，不能把 Shell 当前文件或累计 diff 归为本 Agent 改动。
 
-[审核模型装配](src/authorization-check-model.ts)复用当前选定模型的同一次凭据和传输绑定，创建独立 low reasoning preset；compatible 仅在模型已经显式配置 reasoningEffort 时独立降为 low，未配置时省略，避免给不支持该参数的端点新增字段；已声明支持 reasoning 的登录 adapter 保持 low。支持输出上限的接口采用 `maxOutputTokens=min(原设置,256)`，不支持时省略；业务、摘要与标题保持原 preset，注入自定义 checker 不改写。默认总预算8000ms，显式配置优先；预算是上限，提前完成立即继续，取消与模式切换不等待上限。checker identity 按实际 checkOptions 摘要计算，`snapshot.authorizationCheckPreset` 封存真实设置与预算；新版恢复缺该绑定或实际不一致明确失败，不从旧缺省推断，也不重发完成检查。[Auto回归](test/isolated/auto-configuration.test.ts)核 wire、设置隔离、不支持能力省略和输出不足零派发。
+[审核模型装配](src/authorization-check-model.ts)复用当前选定模型的凭据和传输绑定，创建独立 low reasoning preset。普通 compatible 连接在模型已选用 reasoningEffort 时使用 low，已支持 reasoning 的登录 adapter 同样使用 low。默认 Shell 风险审核省略 `maxOutputTokens`。通用内置 checker 在接口支持时使用 `min(原设置,256)`。注入的自定义 checker 使用其自有设置。默认总期限 8000ms，显式配置优先。checker identity 按实际 checkOptions 与 Shell 风险合同摘要计算，`snapshot.authorizationCheckPreset` 封存真实设置与期限。活动旧 Run 如果无法重建原绑定，恢复明确失败。[Auto 回归](test/isolated/auto-configuration.test.ts)核通用设置与失败路径。[Windows Shell 回归](test/isolated/windows-shell-auto.test.ts)核默认审核省略输出上限、超时零派发和迟到结果。
 
 工具包导出实际定义及[可信行为工厂](../../packages/agent/src/tool-behavior.ts)，`forRun` 按实际定义对象、kind／id／version 静态登记；普通 Extension／MCP 元数据和配置文本不能自签行为。Shell／Files／worktree owner 提供范围与领域审核，Service 只选择当前产品默认和全局上限。默认策略明确绑定 `check.behavior`，AND 只有所有检查选择同一行为才保留；混合独立检查沿通用 checker，不借 Shell 风险解释器替代。Run 保存准确行为 contractRef／configurationDigest；CLI/TUI/Native 同步使用 `options/optionId`，公开路由保持 `/v1`，不保留旧答案解析。范围与最终事务归[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)。
 
@@ -605,6 +605,8 @@ Plan 文件编辑委派到 `planning.write` 后，FileCheckpoint 只从准确父
 现有 Execution／View 响应的可选 `authorization` 直接来自同一 Store 读取，只含原 reviewer 的有限状态／决定／原因、原人工答案的保存／accepted revision 和原派发事实，不增加路由或写操作。[HTTP schema](src/http/schema/index.ts)与生成 API 保持同形，原因上限8192与原 reviewer 答案一致；私有请求、主体、owner、审查全文和上下文不进入响应。停止后读取原决定与当前执行授权分别处理，准确资格归 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。[真实 Client 测试](../../tests/isolated/unified-agent/client-interactions.test.ts)核 pending 与迟到保存／未受理，原审批提交和最终派发门禁保持。
 
 ## 默认 Shell 装配
+
+Windows 的真实 Service 按会话绑定 PowerShell 或 Git Bash。Auto 对可核实的只读调用直接派发，其他通过准入的 Shell 调用走同一风险审核，高风险才出现原人工卡。 [权限 owner](../../packages/agent/src/permissions/README.md) · [两个后端的原生 Service 回归](test/isolated/windows-shell-auto.test.ts)
 
 `git.worktree@1` 通过同一 builtin.shell 装配，默认目录新增模型名 `git_worktree`。只选该工具时仍提供内部 Shell Job 和封存资产，不开放模型 Shell。[Worktree owner](../../packages/agent/src/tools/git-worktree/README.md)定义三个 action 和安全/恢复契约；[configuration](src/configuration.ts)从既有 policyRuntime 注入独立 worktreeHost 闭包，不把回调放入结构化克隆的 options。删除首次派发前，[根查询](src/worktree-host.ts)完整分页读取同 Store Workspace Directory、逐条核 getWorkspace 和物理路径，再核最终 cursor/高水位；任何读失败、漂移或不能解释的根都拒绝。登记根不依赖活跃状态。当前 Tool 的 Run safety 由既有 Context读取且必须准确排除自身，不能以整个活动 Run 的 quiescent 代替。
 

@@ -1396,6 +1396,7 @@ export class AgentRuntime {
   ): Promise<ReadAuthorizationCheckInput | AutoAuthorizationEvidence | null> {
     const checker = scope.bindings?.authorizationCheck ?? this.defaultChecker;
     if (!checker || !decision.check) return null;
+    const { stopOnTimeout } = decision.check;
     const deadlineAt = startedAt + (checker.timeoutMs ?? 8000);
     const timingState: AuthorizationTimingState = { startedAt, budgetMs: deadlineAt - startedAt };
     const identity = { id: checker.id, version: checker.version, modelId: checker.modelId };
@@ -1516,6 +1517,7 @@ export class AgentRuntime {
       } catch (error) {
         if (!(error instanceof AgentError) || error.code !== 'terminal_conflict') throw error;
       }
+      if (stopOnTimeout) return reference;
       const evidence = await this.options.store.resolveAutoAuthorization({
         ...evidenceInput,
         timedOutCheckId: reference.checkExecutionId,
@@ -1534,13 +1536,16 @@ export class AgentRuntime {
       } catch (error) {
         if (
           !scope.signal.aborted &&
-          controller.signal.reason instanceof AgentError &&
-          controller.signal.reason.code === 'authorization_check_timeout'
+          ((controller.signal.reason instanceof AgentError &&
+            controller.signal.reason.code === 'authorization_check_timeout') ||
+            (stopOnTimeout &&
+              error instanceof AgentError &&
+              error.code === 'authorization_check_timeout'))
         )
           reviewed = await (expired ?? waiting);
         else throw error;
       }
-      if (reviewed && !('policyEvidenceId' in reviewed)) {
+      if (!stopOnTimeout && reviewed && !('policyEvidenceId' in reviewed)) {
         const saved = await this.options.store.getExecution(reviewed.checkExecutionId);
         if (
           saved?.status === 'failed' &&
@@ -1684,6 +1689,7 @@ export class AgentRuntime {
       behavior: this.reviewBinding(timing.behavior),
       ...(usesBehavior ? { review: timing.review ?? null } : {}),
       ...(timing.parentProof ? { parentProof: timing.parentProof } : {}),
+      ...(decision.check.stopOnTimeout ? { stopOnTimeout: true as const } : {}),
       timeout: { startedAt: timing.startedAt, deadlineAt: timing.deadlineAt },
     });
     if (canonicalJson(fact.source) !== canonicalJson(source))
@@ -1871,7 +1877,11 @@ export class AgentRuntime {
                 },
               })
               .catch(() => {});
-          if (scope.signal.aborted) throw error;
+          if (
+            scope.signal.aborted ||
+            (error instanceof AgentError && error.code === 'authorization_check_timeout')
+          )
+            throw error;
         }
       })();
       this.authorizationCheckTasks.set(reference.checkExecutionId, task);

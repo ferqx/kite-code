@@ -56,7 +56,7 @@ Service 的最终 listener 关闭位于 Runtime、已接纳 HTTP 资源、正文
 
 自动权限检查沿[权限 owner](../../packages/agent/src/permissions/README.md)与 Core 的 `authorization.check`／`authorizationCheck` 执行，只记录原 Session 内无 Run Model，不创建子 Agent。工具包导出实际执行定义和可信行为，宿主静态登记并封存准确 kind／id／version、contractRef／configurationDigest；Tool.execute/resume 与 Job 生命周期不变。默认 policy 明确选择 check.behavior，独立 checker／人工上限保留，Loop 不按工具名选择审核算法。
 
-[统一 v1 回执](../../packages/agent/src/authorization-check-output.ts)在完整 EOF、stop、零 ToolCall 后由选中解释器产生；Worker 仅核目标／attempt／inputDigest、Run 冻结行为、sealed input、完整 ModelOutput 和私有 owner 来源后消费通用 answer，不装配函数或重新解析领域输出。内联与 Artifact 同一合同，冷读不解释或调用 Provider；缺回执、错合同、不完整或迟到结果不能批准。准确父 Tool→自身 Job 的通用 parent proof 只复用原依据，不向独立 Job 授权；timeout_continue 不伪造模型批准或材料审核事实。
+[统一 v1 回执](../../packages/agent/src/authorization-check-output.ts)在完整 EOF、stop、零 ToolCall 后由选中解释器产生。Worker 核目标／attempt／inputDigest、Run 冻结行为、sealed input、完整 ModelOutput 和私有 owner 来源，再消费通用 answer。默认 Shell 的超时停止要求进入原检查，截止后禁止成功结算、人工兜底或派发依据。准确父 Tool→自身 Job 复用原审核或有效批准。旧超时依据仍可按原合同读取。具体边界归 [Store owner](../../packages/agent/src/storage/README.md#只读授权观察)。
 
 统一 options／optionId 和结构化 grant 复用原 Interaction 接纳、Session epoch 和 markDispatching 事务，领域范围由 Shell／Files／worktree owner 提供，所有参与策略精确 AND 稳定绑定。当前硬限制、独立 checker、必要条件、控制、owner 与每次真实文件／Git 条件继续核；worktree 固定 commit／父锚点失配零 mutation且不能降级单次。当前 Store major=1 与本轮独立 reviewed baseline 在 preflight 拒绝不匹配的历史结构，不转换或改写旧用户库；公开 API 保持 `/v1` 原位替换审批字段，旧格式 reader／双答案不进入新版路径。原通用执行、取消和 unknown 零重放合同保持。验证归[非内置格式](../../packages/agent/test/isolated/execution/tool-behavior-review.test.ts)、[grant owner](../../packages/agent/src/storage/sqlite/permission-grants.README.md)与[worktree 实际桥](../../packages/agent/test/isolated/execution/worktree-authorization.test.ts)。
 

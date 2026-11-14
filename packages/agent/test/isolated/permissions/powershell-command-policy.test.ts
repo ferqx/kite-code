@@ -8,6 +8,7 @@ import {
   rmdirSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -38,8 +39,9 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       const read = await policy.assess(
         "Get-ChildItem -Name; Get-Content -LiteralPath '中文文件.txt' | rg.exe --no-config '你好'",
       );
-      expect(read).toEqual({
+      expect(read).toMatchObject({
         readOnly: true,
+        pinRipgrep: true,
         network: false,
         uncertain: false,
         outsideWrite: false,
@@ -60,6 +62,25 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
           readOnly: false,
           uncertain: true,
         });
+      for (const command of [
+        'rg.exe --files --glob "*.txt"',
+        'rg.exe -n needle -l input.txt',
+        'rg.exe -n -g "*.txt" needle . | Select-Object -First 40',
+        "Get-Content -LiteralPath 'input.txt' -TotalCount 40",
+      ])
+        expect(await policy.assess(command), command).toMatchObject({
+          readOnly: true,
+          uncertain: false,
+        });
+      for (const command of [
+        'rg.exe -e -- --pre helper input.txt',
+        'rg.exe -e -- --search-zip input.txt',
+        'rg.exe --hostname-bin helper needle input.txt',
+        'rg.exe needle input.txt 2> output.txt',
+        '#Requires -Modules SomeModule\nGet-Location',
+        'Get-Content -LiteralPath "input.txt" | Select-Object -Property @{Expression={Get-Item x}}',
+      ])
+        expect((await policy.assess(command)).readOnly, command).toBeFalse();
       for (const option of ['-f', '--file']) {
         expect(await policy.assess(`rg.exe ${option} 'patterns.txt' input.txt`)).toMatchObject({
           readOnly: true,
@@ -110,6 +131,18 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
         "$target = 'marker.txt'; Get-Content $target",
       ])
         expect((await policy.assess(script)).uncertain).toBeTrue();
+      expect(await policy.assess("& './with space.ps1' -Count 3")).toMatchObject({
+        uncertain: true,
+        entryScript: './with space.ps1',
+      });
+      for (const script of [
+        '& $script',
+        ". './script.ps1'",
+        "& './script.ps1' | Out-String",
+        "& './script.ps1'; Get-Location",
+        "#Requires -Modules SomeModule\n& './script.ps1'",
+      ])
+        expect((await policy.assess(script)).entryScript, script).toBeUndefined();
       expect((await policy.assess("Write-Output 'one' && Write-Output 'two'")).denial).toBe(
         'shell_command_syntax_invalid',
       );
@@ -128,7 +161,7 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
 );
 
 test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
-  'PowerShell Job rejects a changed path assessment after final authorization',
+  'PowerShell Job rejects changed reviewed script bytes and path assessments before launch',
   async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-powershell-dispatch-'));
     const workspace = join(root, 'workspace');
@@ -200,10 +233,62 @@ test.skipIf(process.platform !== 'win32' || process.arch !== 'x64')(
       const accepted = await policy.authorize(request);
       expect(accepted.allowed).toBeTrue();
 
+      const script = join(path, 'entry.ps1');
+      const scriptInput = { command: "& './entry.ps1'", workdir: 'docs' };
+      const scriptRequest = { ...request, executionId: 'powershell-script', input: scriptInput };
+      const scriptText = "Write-Output 'reviewed'\n";
+      writeFileSync(script, scriptText);
+      const toolReview = await configuration.prepareRiskReview({
+        ...scriptRequest,
+        kind: 'tool',
+        definitionId: 'shell.execute',
+        executionId: 'powershell-script-tool',
+      });
+      const jobReview = await configuration.prepareRiskReview(scriptRequest);
+      expect(toolReview?.fingerprint).toBe(jobReview?.fingerprint);
+      expect(jobReview?.material.directScripts).toMatchObject([
+        { path: './entry.ps1', resolvedPath: script, text: scriptText, complete: true },
+      ]);
+      writeFileSync(join(outside, 'entry.ps1'), "Write-Output 'outside the workspace'\n");
+      const outsideReview = await configuration.prepareRiskReview({
+        ...scriptRequest,
+        kind: 'tool',
+        definitionId: 'shell.execute',
+        executionId: 'powershell-outside-script',
+        input: { ...scriptInput, workdir: outside },
+      });
+      expect(outsideReview?.material.directScripts).toEqual([
+        {
+          path: './entry.ps1',
+          availability: 'unavailable',
+          reason: 'entry_bytes_unavailable',
+          complete: false,
+        },
+      ]);
+      writeFileSync(script, "Write-Output 'changed'\n");
+      await expect(
+        job.start(scriptInput, {
+          sessionId: request.sessionId,
+          executionId: scriptRequest.executionId,
+          signal: request.signal,
+          dispatchAuthorization: { revision: 'fixture', materialReviewed: true },
+        }),
+      ).rejects.toThrow('shell_review_entry_changed');
+      rmSync(script);
+
       rmdirSync(path);
       symlinkSync(outside, path, 'junction');
       const changed = await configuration.describeRequest(request);
       expect(changed).toMatchObject({ requiresApproval: true, hardAllowed: true });
+      const auto = await configuration.describeRequest(request, {
+        mode: 'auto',
+        revision: 'fixture',
+        workspaceTrust: true,
+        allowed: [],
+      });
+      expect(auto?.hardAllowed).toBeTrue();
+      expect(auto?.safeRead).toBeUndefined();
+      expect(auto?.requiresApproval).toBeUndefined();
       expect(changed?.commandDigest).not.toBe(descriptor.commandDigest);
       const result = await job
         .start(input, {

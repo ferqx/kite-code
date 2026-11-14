@@ -30,7 +30,7 @@ Job 只有在 READY 核验与 GO 写入确认后进入 running。失败准入仍
 
 当前执行宿主为 Windows x64 的 Bun Service；正式 Terminal／Native 客户端使用该宿主。Node 嵌入不宣告这一依赖 Bun FFI 的 Shell 能力，避免先提供定义再在派发时失败。工作区加联网范围仍保持受限令牌；依赖系统 Schannel 的工具可能保留该令牌的兼容性限制，不能自动升为完整文件范围。
 
-全部命令的统一环境路径、后台隐藏窗口、可取消的工作区准备及未完成权限传播恢复归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。取消准备不能把部分继承标为完成，也不能忽略本次临时 ACL 撤销失败。已有业务进程继续核原完整 Job。业务审批和未知结果沿用原合同。
+统一环境路径、后台隐藏窗口、可取消的工作区准备及未完成权限传播恢复归 [Shell owner](../../packages/agent/src/jobs/README.md#默认-windows-git-bash)。PowerShell 与 Git Bash 的已核实只读调用使用现有 Runner V7 的 `read_only`，不加入可写工作区 capability。Git 查询还以原 Job 的活动进程上限阻止第三个进程。可写准备取消不能把部分继承标为完成，也不能忽略本次临时 ACL 撤销失败。已有业务进程继续核原完整 Job。
 
 业务允许／拒绝只由统一权限与计划／角色上限决定。Tool 和真实 Job 按各自原身份授权；runner 只消费最终 markDispatching 接纳的父／子范围交集，不按默认范围覆盖批准，也不再安装独立命令拒绝脚本。范围外的 OS 访问失败、坏协议／资产身份及清理未知仍按执行事实报告，不构成新的业务审批。批准外部写入后，完整文件范围可实际执行；不因它位于 Workspace 外在 Shell 层再拒一次。
 
@@ -39,6 +39,20 @@ Job 只有在 READY 核验与 GO 写入确认后进入 running。失败准入仍
 生命周期与其他平台共用普通 Job：准备／READY 后由原 owner 放行 GO，READY 最多等待5秒，超时后的迟到 READY 不再放行。持续排空双流，取消作用于原 Job；根退出后清理剩余后代。正常 ended 须原 runner 回执、外层 Job 空树、进程 wait、句柄关闭和 temp 清理均确认。GO 前取消有原空树和未派发证明；关闭未知继续保原 owner 和 binding，不回收成成功。宿主 EOF／强杀由 kill-on-close 清整个嵌套 Job；冷读取只保原结果，不用 PID 重建控制或重放。
 
 [实际 Windows Shell](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)已核空 ambient PATH 的内置 rg、中文／空格文件、fork／管道、Git 子 Shell、受限与 Full 并发、写范围收窄、环境离线与准确联网范围、启动取消、后台后代取消、宿主 EOF／强杀与原 HANDLE 死亡。[真实 Service／SQLite](../../apps/service/test/isolated/shell-search-configuration.test.ts)核只读子 Agent、计划前检索和原审批卡、外部写入批准前零效果／批准后实际写入、重复命令及冷只读零重放。原 [Job owner 回归](../../packages/agent/test/isolated/jobs/windows-owned-child.test.ts)保关闭失败／unknown 合同。此范围是本机 Windows 开发验证，不代表完整安装、签名或全部平台发布资格。
+
+2026-11-14 在 Windows x64／Bun 1.4.4 用 5,001 个文件的隔离工作区对照 `04807430e` 与本轮。每个后端和范围取三次首输出中位数。首次可核实检索从可写范围改用只读范围后，PowerShell 由 1,329ms 降至 464ms，Git Bash 由 1,602ms 降至 730ms，且无工作区权限账本。随后首次可写分别为 1,291ms 与 1,587ms，同范围热执行为 418ms 与 706ms。计时从原生 Job 工厂完成后的 start 开始。实际权限与调用结果另由 [Auto Service 回归](../../apps/service/test/isolated/windows-shell-auto.test.ts)验证。
+
+同机使用真实 Electron 开发窗口、独立 Profile 和固定审核结果，逐步观察两种 Shell 的检索、普通脚本、高风险批准、高风险拒绝、严重风险拒绝和再次检索。两种后端的可见审批卡数均为 0、0、1、1、0、0。四次脚本请求各只审核一次，审核材料含对应脚本正文。等待高风险确认期间尚未写入，普通脚本和批准的脚本实际写入，两种拒绝均无写入，随后输入和检索恢复。过程记录位于本机 `.cache/native-windows-auto-risk-result.json`，原生计时位于 `.cache/windows-auto-timing-results.json`。
+
+修复前，同日以本机已配置的 OpenAI Responses 连接在独立 Kite 桌面开发 Profile 实测 `gpt-6-luna`。业务请求使用 high，实际审核请求使用 low，当时的审核预算为 256 输出 token 和 8 秒。两种后端的可核实检索均无审核请求，普通脚本由模型判为 ordinary 后写入。两种后端均观察到 high 样本出现一张卡并在拒绝后零派发。另一个 PowerShell high 样本获批后仅派发一次，原 Job 继承原审核，回环端点收到一次合成数据。已完成审核的端到端耗时为 1,996～5,370ms。
+
+两份修复前冷读记录共查到四次审核触及输出上限，均以技术失败结算，零卡、零派发。补测中一次预期为 critical 的 Git Bash 合成样本耗尽 8 秒，按当时的超时放行规则启动原 Job，回环端点收到一次合成数据。该次未取得风险分类。两个后端随后都在原会话完成检索，Git Bash 的该轮还保留了一次业务模型失败。该轮未通过严重风险分类及拒绝验收。原始观察保存在本机 `.cache/windows-shell-openai-luna-high-42c2a32a-85d3-4f8d-b28c-fd1500320c27.json` 与 `.cache/windows-shell-openai-luna-high-b76d8566-ad5b-4ac3-9f93-ccd9f4482737.json`。
+
+修复后，以同一 Kite OpenAI 连接复测。封存业务请求为 `gpt-6-luna`／high，审核为同模型／low，未传输出 token 上限，实际期限为 8 秒。PowerShell 与 Git Bash 的四个 high 样本各出现一张卡，两次批准各派发一个自身 Job 并只向回环接收端交付一次合成数据，两次人工拒绝均无 Job 或流量。首轮 Git Bash 的严重风险样本获得 `critical` 并直接拒绝。PowerShell 的同类样本一次 8,002ms 超时后零卡、零派发、零流量，另一次只从待发送文件名和注释推断凭据类型，被模型归为 high 并由测试操作员拒绝。保留这两项原结果。
+
+在相同代码和期限下，将凭据用途明确表达为脚本执行时的认证头，载荷仍为合成数据，目标仍为本机回环。两个后端均由模型判为 `critical` 并直接拒绝，审核分别为 1,712ms 与 1,938ms，零卡、零派发、零流量，之后均在原会话完成检索。原生回归另核两个后端在审核超时后收到迟到分类，原检查终态保持，后续只读调用完成。[Windows Shell 回归](../../apps/service/test/isolated/windows-shell-auto.test.ts)
+
+修复后的桌面报告位于本机 `.cache/windows-shell-openai-luna-uncapped-f2e125f7-4509-477d-bb54-bf32e9520fca.json`、`.cache/windows-shell-openai-luna-uncapped-f28df665-3f29-46c3-805d-d1a03bb9c9d2.json` 与 `.cache/windows-shell-openai-luna-uncapped-24c501dc-8549-4725-b1dc-891262126006.json`。上述证据覆盖指定模型与隔离桌面样本，保留模型分类仍取决于可见材料的实际观察。
 
 2026-11-12 在 Windows x64／Bun 1.4.4，以同一正式桌面候选的包内 Service 和 Runner V7 核实三组进程 PATH。完整 Git Bash 组使用 Bash，无 Git 组用 PowerShell，只有独立 Git 时 PowerShell 与工作树列表均可用。模型工具收到实际方言，三组实际使用内置 rg 返回中文。两组有 Git 的工作树列表返回测试仓库的 `refs/heads/main`。包内 Runner 直接启动 PowerShell 的复验覆盖只读临时写、工作区写、联网许可不扩大写范围、批准外部写、中文双流、大脚本、原后代取消与超时、摘要变化和 V6 请求拒绝。日志在本机 `.cache/powershell-fallback-a45ca81cf/` 的 `packaged-service-v7.log` 和 `direct-v7-final.log`。目录联接及工作目录与写范围分离由 [Windows Job 回归](../../packages/agent/test/isolated/jobs/windows-shell.test.ts)核对，别名与已知效果由 [真实 AST 回归](../../packages/agent/test/isolated/permissions/powershell-command-policy.test.ts)核对。
 

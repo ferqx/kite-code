@@ -156,6 +156,7 @@ function bound(
     payload.purpose !== 'authorization_check' ||
     payload.instructions !== (review?.instructions ?? instructions) ||
     typeof payload.requireApproval !== 'boolean' ||
+    (payload.stopOnTimeout !== undefined && (payload.stopOnTimeout !== true || !payload.timeout)) ||
     !payload.policyRevision ||
     request.kind !== 'authorization.check' ||
     request.parentExecutionId !== target.id ||
@@ -302,6 +303,7 @@ export function ensureAuthorizationCheck(
       throw new AgentError('authorization_check_binding_invalid');
     if (
       (input.operationKey !== undefined && !/^[a-f0-9]{64}$/.test(input.operationKey)) ||
+      (input.stopOnTimeout !== undefined && (input.stopOnTimeout !== true || !input.timeout)) ||
       (input.timeout !== undefined &&
         (!Number.isSafeInteger(input.timeout.startedAt) ||
           !Number.isSafeInteger(input.timeout.deadlineAt) ||
@@ -335,6 +337,7 @@ export function ensureAuthorizationCheck(
         ? { operationKey: input.operationKey, autoContext: autoAuthorizationContext(db, target) }
         : {}),
       ...(input.timeout ? { timeout: { ...input.timeout } } : {}),
+      ...(input.stopOnTimeout ? { stopOnTimeout: true } : {}),
       request: input.request,
       ...(input.requestBody ? { requestBody: input.requestBody as unknown as Json } : {}),
       originCommandRequest:
@@ -801,7 +804,7 @@ export function finishAuthorizationCheck(
       };
     }
     if (input.status === 'succeeded') {
-      bound(db, check);
+      const { payload } = bound(db, check);
       db.ancestors(input.owner, input.executionId);
       if (!check.dispatched || !authorizationCheckSourceTarget(db, check))
         throw new AgentError('execution_not_dispatched');
@@ -818,6 +821,11 @@ export function finishAuthorizationCheck(
           throw new AgentError('model_output_conflict');
       }
       answerFromResult(db, check, result);
+      if (
+        payload.stopOnTimeout === true &&
+        Date.now() >= Number(object(payload.timeout).deadlineAt)
+      )
+        throw new AgentError('authorization_check_timeout');
       const command = db.row(
         'SELECT receipt_json FROM command WHERE id=?',
         check.origin_command_id!,
@@ -982,6 +990,7 @@ export function verifyAuthorizationCheckDispatch(db: SqliteOperations, input: Di
       const result =
         value.execution.result_json && object(JSON.parse(String(value.execution.result_json)));
       if (
+        value.payload.stopOnTimeout === true ||
         value.execution.state !== 'failed' ||
         !result ||
         result.code !== 'authorization_check_timeout' ||

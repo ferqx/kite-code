@@ -10,7 +10,7 @@ Windows 桌面即使在普通目录运行文件检索，也会因为启动时找
 
 桌面 Service 在启动时优先固定完整 Git Bash。只有发现阶段确认缺少该入口时才定位系统 Windows PowerShell 5.1，并将选择的方言交给模型。每条命令固定原解释器、资产、工作目录和权限，已派发命令留在原 Job。Service 和原生 Runner 在同一制品同步使用内部 V7，沿用现有模型工具和持久记录。
 
-PowerShell 使用独立 AST 分析、受限令牌、目录 ACL 和 Job Object。已知联网与外部写入分别要求对应范围。无法确定效果时申请本次人工批准，已识别且无法纳入原 Job 的委托在准入阶段拒绝。当前离线范围沿 Windows 环境约束，系统级断网作为单独的 AppContainer 兼容与隔离工作。
+PowerShell 使用独立 AST 分析、受限令牌、目录 ACL 和 Job Object。已知联网与外部写入分别要求对应范围。首版在无法确定效果时申请本次人工批准。已识别且无法纳入原 Job 的委托在准入阶段拒绝。当前离线范围沿 Windows 环境约束，系统级断网作为单独的 AppContainer 兼容与隔离工作。
 
 ## Alternatives considered
 
@@ -26,3 +26,5 @@ PowerShell 使用独立 AST 分析、受限令牌、目录 ACL 和 Job Object。
 [按会话选择 Shell](2026-11-12-windows-desktop-shell-preference.md)取代全桌面 Service 固定一个解释器的选择方式。启动时的自动发现顺序、两种后端的安全边界和 Runner V7 继续适用。
 
 Git Bash 的随附命令和运行时资产取舍见[使用 Git Bash 随附命令](../simplification/2026-11-12-use-git-bash-utilities.md)。
+
+[Windows Shell Auto 审批](../bug-fix/2026-11-14-windows-shell-auto-read-and-approval.md)取代了 Auto 中无法确定效果时直接转人工的规则。原系统委托拒绝、受限执行及其他审批模式继续适用。

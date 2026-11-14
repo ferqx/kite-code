@@ -658,6 +658,8 @@ export class InteractionGate {
       }
       // Review/human waits are confined to the resource-free authorization phase.
       if (!reference && scope.final) throw new AgentError('authorization_refresh_required');
+      if (!reference && decision.check.stopOnTimeout && !execution.interactionBinding)
+        throw new AgentError('authorization_check_unavailable');
       if (reference) {
         const checkedDecision = decision;
         decision = await this.permissions.authorize(request);
@@ -708,7 +710,7 @@ export class InteractionGate {
             typeof check.result === 'object' &&
             !Array.isArray(check.result) &&
             check.result.code === 'authorization_check_timeout';
-          if (!timedOut || !decision.check.requireApproval)
+          if (decision.check.stopOnTimeout || !timedOut || !decision.check.requireApproval)
             throw new AuthorizationCheckUnavailableError(
               checked.checkExecutionId,
               checked.reason,

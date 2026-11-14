@@ -235,6 +235,9 @@ function revision(policy: PermissionPolicySnapshot, description: CapabilityDescr
           description.internalRecordOnly ?? null,
           ...(description.approvalExempt ? [description.approvalExempt] : []),
           ...(description.autoReview ? [description.autoReview] : []),
+          ...(description.autoReview === 'check' && description.reviewBehavior
+            ? ['stop_on_timeout']
+            : []),
           ...(description.requiresApproval ? ['requires_approval'] : []),
           ...(description.worktreeAuthorization ? [description.worktreeAuthorization] : []),
         ],
@@ -440,17 +443,17 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
             : undefined;
         request.signal.throwIfAborted();
         const { signal: _signal, ...invocation } = request;
+        const behavior = riskOnly ? description.reviewBehavior : undefined;
         return {
           ...offerProof,
           allowed: false,
           revision: boundRevision,
           reason: 'auto_check_required',
           check: {
-            ...(description.autoReview === 'check' && description.reviewBehavior
-              ? { behavior: description.reviewBehavior }
-              : {}),
             ...(description.autoReviewKey ? { operationKey: description.autoReviewKey } : {}),
-            timeoutScope: description.autoTimeoutScope ?? 'governed',
+            ...(behavior
+              ? { behavior, stopOnTimeout: true }
+              : { timeoutScope: description.autoTimeoutScope ?? 'governed' }),
             request: {
               mode: policy.mode,
               effects: [...description.effects],

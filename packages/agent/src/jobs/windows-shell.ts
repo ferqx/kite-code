@@ -142,6 +142,12 @@ export type WindowsShellOptions = WindowsShellBackend & {
         network: 'none';
       };
   maxQueuedBytes?: number;
+  /** Host-verified read execution details, never taken from Job input. */
+  readOnlyLaunch?: (
+    context: JobContext,
+  ) =>
+    | { pinRipgrep?: true; git?: { path: string; digest: string; argv?: readonly string[] } }
+    | undefined;
   trustedWorkerLaunch?: (
     command: string,
     context: JobContext,
@@ -215,7 +221,7 @@ export async function createWindowsShellJob(
       additionalProperties: false,
     },
     async start(value, context: JobContext) {
-      const { scope, shell, command, trusted } = await (async () => {
+      const { scope, shell, command, trusted, readOnly } = await (async () => {
         try {
           context.signal.throwIfAborted();
           if (
@@ -237,14 +243,22 @@ export async function createWindowsShellJob(
             context.signal,
           );
           const scope = options.executionScope(context);
+          const readOnly =
+            scope.filesystem === 'read_only' ? options.readOnlyLaunch?.(context) : undefined;
           await verifyRuntime?.(scope.filesystem === 'full_access', context.signal);
+          if (readOnly?.git) {
+            const git = readOnly.git;
+            const current = await launchIdentityAsync(git.path, true, context.signal);
+            if (current.canonical !== git.path || current.digest !== git.digest)
+              throw Error('shell_asset_changed');
+          }
           context.signal.throwIfAborted();
           const fullBash = !powerShell && scope.filesystem === 'full_access';
           const shell = fullBash ? assets[2]! : assets[1]!;
           if (!powerShell && basename(shell.canonical).toLowerCase() !== 'bash.exe')
             throw Error('windows_git_bash_required');
           const trusted = options.trustedWorkerLaunch?.(value.command, context);
-          return { scope, shell, command: value.command, trusted };
+          return { scope, shell, command: value.command, trusted, readOnly };
         } catch (error) {
           throw new JobStartError(
             undefined,
@@ -294,6 +308,17 @@ export async function createWindowsShellJob(
           TMPDIR: temp,
         });
       else env.TMPDIR = temp.replaceAll('\\', '/');
+      const git = readOnly?.git;
+      if (git) {
+        for (const key of Object.keys(env)) {
+          if (/^(?:GIT_|GNUPGHOME$|MSYS2_ARG_CONV_EXCL$)/iu.test(key)) delete env[key];
+        }
+        Object.assign(env, {
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_ALLOW_PROTOCOL: '',
+          MSYS2_ARG_CONV_EXCL: '*',
+        });
+      }
       if (scope.network === 'none') {
         // The approved offline scope supplies conventional application hints.
         // Commands are never replaced by failing stubs or a second policy.
@@ -313,6 +338,20 @@ export async function createWindowsShellJob(
           if (powerShell || !inherited) env[key] = value;
         }
       }
+      const shellLiteral = (value: string) => `'${value.replaceAll("'", "''")}'`;
+      const gitCommand =
+        git?.argv && powerShell
+          ? [
+              `& ${shellLiteral(git.path)} ${git.argv.map(shellLiteral).join(' ')}`,
+              'exit $LASTEXITCODE',
+            ].join('\n')
+          : undefined;
+      const powerShellCommand = readOnly?.pinRipgrep
+        ? ['rg', 'rg.exe']
+            .map((name) => `Set-Alias -Name ${name} -Value ${shellLiteral(search)}`)
+            .concat(command)
+            .join('\n')
+        : command;
       const request = {
         version: protocol,
         directWorkspace: {
@@ -322,7 +361,9 @@ export async function createWindowsShellJob(
             : {}),
         },
         invocationName: invocation,
-        commandLine: powerShell ? (trusted?.powerShellCommand ?? command) : command,
+        commandLine: powerShell
+          ? (gitCommand ?? trusted?.powerShellCommand ?? powerShellCommand)
+          : command,
         cwd: options.cwd,
         env,
         filesystemScope: scope.filesystem,
@@ -331,7 +372,9 @@ export async function createWindowsShellJob(
         shellRuntime: powerShell ? 'powershell' : 'bash',
         shellRuntimeDigest: `sha256:${shell.digest}`,
         ...(!powerShell ? { shellRuntimeRoot: dirname(shell.canonical) } : {}),
-        maxProcesses: 64,
+        // PowerShell and Windows MSYS exec both retain the interpreter while
+        // the pinned Git runs. Its configured helpers have no third slot.
+        maxProcesses: git ? 2 : 64,
         timeoutMs: null,
         networkMode: scope.network === 'none' ? 'off' : 'allow_all',
       };

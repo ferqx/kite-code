@@ -28,6 +28,7 @@ export interface ShellRiskScope {
 
 /** Byte capture is confined to this Workspace, even for a full_access command. */
 export function createShellRiskPreparer(input: {
+  workspaceRoot: string;
   cwd: string;
   env: Readonly<Record<string, string>>;
   rgPath: string;
@@ -35,10 +36,18 @@ export function createShellRiskPreparer(input: {
   protectedPaths: readonly string[];
   binding: Json;
   sanitizedEnvironment: boolean;
-  classify(command: string): Promise<{ plainCommands: readonly (readonly string[])[] | null }>;
+  classify(
+    command: string,
+    signal: AbortSignal,
+    cwd: string,
+  ): Promise<{
+    plainCommands: readonly (readonly string[])[] | null;
+    powerShell?: { readonly entryScript?: string };
+  }>;
   rewritten(command: string): Promise<boolean>;
 }) {
   const limit = 64 * 1024;
+  const workspace = input.workspaceRoot;
   async function read(path: string, signal: AbortSignal) {
     signal.throwIfAborted();
     // Host paths and the Workspace may use different filesystem aliases. Keep
@@ -49,18 +58,18 @@ export function createShellRiskPreparer(input: {
     signal.throwIfAborted();
     const denied = [...input.protectedPaths, ...aliases];
     const rootProtected = denied.some((value) => {
-      const local = relative(resolve(value), input.cwd);
+      const local = relative(resolve(value), workspace);
       return !local || (local !== '..' && !local.startsWith(`..${sep}`) && !isAbsolute(local));
     });
     if (rootProtected) throw new AgentError('shell_review_protected_path');
     const protectedPaths = denied.flatMap((value) => {
-      const local = relative(input.cwd, resolve(value));
+      const local = relative(workspace, resolve(value));
       return local && local !== '..' && !local.startsWith(`..${sep}`) && !isAbsolute(local)
         ? [local.replaceAll('\\', '/')]
         : [];
     });
     const files = createWorkspaceFiles({
-      root: input.cwd,
+      root: workspace,
       strictReads: true,
       protectedPaths,
       protectReads: true,
@@ -74,7 +83,7 @@ export function createShellRiskPreparer(input: {
       return {
         material: {
           path,
-          resolvedPath: resolve(input.cwd, local),
+          resolvedPath: resolve(workspace, local),
           availability: 'available',
           hash: value.baseline.hash,
           byteLength: value.bytes.byteLength,
@@ -112,13 +121,16 @@ export function createShellRiskPreparer(input: {
   return {
     async prepare(command: string, scope: ShellRiskScope, signal: AbortSignal) {
       signal.throwIfAborted();
-      const classified = await input.classify(command);
+      const classified = await input.classify(command, signal, input.cwd);
       signal.throwIfAborted();
       const commands = classified.plainCommands;
       const directScripts: Record<string, Json>[] = [];
       const snapshots: ShellRiskSnapshot[] = [];
       let facts: Record<string, Json> = unavailable('not_single_literal_invocation');
       let reusable = false;
+      const entryScript = classified.powerShell?.entryScript;
+      let paths: string[] = entryScript ? [entryScript] : [];
+      let bundledRg = false;
       if (commands?.length === 1) {
         const argv = commands[0]!;
         const name = argv[0]!;
@@ -127,10 +139,9 @@ export function createShellRiskPreparer(input: {
         const environmentKnown =
           input.sanitizedEnvironment ||
           !Object.keys(input.env).some((key) => /^(?:BASH_ENV|ENV|ZDOTDIR|BASH_FUNC_)/.test(key));
-        const bundledRg =
+        bundledRg =
           (name === 'rg' || name === 'rg.exe' || name === input.rgPath) &&
           resolved === input.rgPath;
-        let paths: string[] = [];
         if (bundledRg && environmentKnown && (rewritten || !input.env.RIPGREP_CONFIG_PATH)) {
           const parsed = ripgrepRiskFacts(argv);
           facts = {
@@ -167,28 +178,28 @@ export function createShellRiskPreparer(input: {
             paths = [argv[1]!];
           else if (name.includes('/') || name.includes('\\')) paths = [name];
         }
-        for (const path of paths) {
-          // rg's --pre may itself name a PATH command. Do not invent a cwd file.
-          if (!path.includes('/') && !path.includes('\\') && bundledRg) {
-            directScripts.push({
-              path,
-              ...unavailable('preprocessor_path_unresolved'),
-              complete: false,
-            });
-            continue;
-          }
-          try {
-            const captured = await read(path, signal);
-            directScripts.push(captured.material);
-            snapshots.push(captured.snapshot);
-          } catch {
-            signal.throwIfAborted();
-            directScripts.push({
-              path,
-              ...unavailable('entry_bytes_unavailable'),
-              complete: false,
-            });
-          }
+      }
+      for (const path of paths) {
+        // rg's --pre may itself name a PATH command. Do not invent a cwd file.
+        if (!path.includes('/') && !path.includes('\\') && bundledRg) {
+          directScripts.push({
+            path,
+            ...unavailable('preprocessor_path_unresolved'),
+            complete: false,
+          });
+          continue;
+        }
+        try {
+          const captured = await read(path, signal);
+          directScripts.push(captured.material);
+          snapshots.push(captured.snapshot);
+        } catch {
+          signal.throwIfAborted();
+          directScripts.push({
+            path,
+            ...unavailable('entry_bytes_unavailable'),
+            complete: false,
+          });
         }
       }
       signal.throwIfAborted();

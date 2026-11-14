@@ -24,7 +24,11 @@ AND 与真实子 Agent 组合按本次返回的完整 `PermissionDecision` 对�
 
 [风险合同](../shell-risk-review.ts)只接收完整 operation、实际 cwd／scope 和 material，不读取任务／计划／委派／历史模型窗口。模型严格输出 risk／reason，Shell owner 的可信解释器映射 ordinary→approve_once、high→ask_user、critical→reject，原始风险文本与派生决定分别保真。已识别的私钥、认证 token、密码或会话凭据外发优先归 critical，不能落入 high 的非凭据私有数据上传；公钥不等于私密凭据。只有缺少未知程序正文而没有其他具体高危迹象时为 ordinary；已知删除目标或外发载荷的重要不确定性为 high。已识别的本地文件外发在缺少载荷正文且没有非敏感证据时仍属载荷未核明，不要求另证私密性质；这不等于只有未知程序正文、且未识别外发效果的 ordinary 例外。普通本地窄写、接收 GET 及能力上限标签本身不构成高危。critical 不能借人工 interaction 绕过。输入准备、JSON／finish、完整输出和材料绑定失败分别保原技术错误，不冒充风险拒绝。
 
-Auto 材料指纹进入原 operation key 和批准证据。脚本正文完整不证明动态依赖完整，因此脚本及其他未确定程序不扩大跨独立调用缓存；当前准确 Tool→自身 Job 仍可沿实际模型／人工／有效 grant 依据避免重复审核。grant 只在新默认 Auto 的准确父链及当前有效授权下继承，不改变手动模式原分层合同。Job 启动仅对真实材料批准标记及本 Job 已捕获入口做 hash／对象身份复核，变化在启动前失败；该检查不能消除最终 OS 打开前所有竞态。timeout 及其自身 Job 继承不伪造材料批准，不增加超时专属范围或该材料限制。
+Auto 材料指纹进入原 operation key 和批准证据。脚本及其他依赖未确认的程序不扩大跨独立调用缓存。准确自身 Job 可沿实际模型／人工／有效 grant 依据避免重复审核。Job 启动对真实材料批准标记及本 Job 已捕获入口做 hash／对象身份复核，变化在启动前失败。该检查与 OS 最终打开文件之间仍有竞态。
+
+Windows [Shell 权限装配](shell.ts)从实际 PowerShell AST 或 Bash 字面量命令、管道和 `&&` 组合识别可执行的只读调用。`rg` 复用同一有界 argv 语法，预处理、外部解压、未知参数和重定向退出免审路径。PowerShell 用固定 `rg` 别名和清理后的配置环境执行，Git Bash 固定读取程序并保留管道运算。有限 [Git 查询](windows-git-read.ts)使用原生只读令牌和进程上限，详见 [Jobs owner](../jobs/README.md#默认-windows-git-bash)。判定参与命令派发摘要，工作目录、资产或范围漂移在启动前失败。
+
+Windows Auto 将未能静态确认效果的 PowerShell 交给同一 Shell 风险审核。单一字面量路径的 PowerShell 脚本调用可提供有界正文。原 Tool 与准确自身 Job 共用经核实的风险审核与高风险人答，派发时复核工作目录、范围和已审核文件。 [Windows 原生 Service 回归](../../../../apps/service/test/isolated/windows-shell-auto.test.ts)
 
 AND 合成后若领域解释器未被共同选择，沿独立 generic checker 的合同检查；注册工具原有领域材料限制仍保留，不能因此取得跨调用 `reused_approval` 资格。准确 Auto 父链与明确超时继续按各自原证明核验，不用风险解释器替代独立 checker。
 
@@ -36,13 +40,13 @@ AND 合成后若领域解释器未被共同选择，沿独立 generic checker �
 
 准确注册的builtin.browser@1操作由可信[builtinCapability](capabilities.ts)提供approvalExempt标记，policy再次核固定Tool／Job／Action定义与版本；三种模式均不生成check或approval。真实network／process／unknown／input效果保留，allowed注册、hardAllowed、工作区信任和现有硬约束仍先核，任意前缀、伪造扩展或未来版本不能借此免审。Service的实际Tool／Job及Workflow投影也保该标记和minimumApproval:none，不用伪装read复用审核。页面／任务／控制代次、取消与未知不重放继续在原派发链核实。
 
-已配置审核器的空／无效答案或传输失败保存为原check失败。InteractionGate在准确绑定核对后将不可用结果结算为未派发的执行技术失败，Tool、Action 与 Job 均返回可读原因，交给原调用者，不生成额外审批；Tool 结果继续交给下一 Model。有效ask_user、明确reject和真正未配置审核器的既有fallback分别处理。浏览器本身不调用该审核器。
+已配置审核器的空／无效答案或传输失败保存为原 check 失败。InteractionGate 在准确绑定核对后将不可用结果结算为未派发的执行技术失败，Tool、Action 与 Job 均返回可读原因。默认 Shell 仅在有效 `ask_user` 时创建审批卡，缺少审核器时结束本次调用。
 
-产品 Auto 策略默认给正常已注册、选中且通过硬权限检查的调用设置超时继续合同，不按工具名称另设放行名单。审核超时默认放行语义审核，由工具原有执行策略兜底；Shell 的文件和网络请求仍逐维取原父子／宿主上限交集，不额外收窄超时范围。未显式请求仍为 `workspace_write/none`，显式 `full_access/internet` 可在原策略下执行。准确记录 `timeout_continue`，不伪造模型批准，也不缓存为批准；独立人工、硬拒绝、保护资源、取消和未知效果限制保持。自定义 Permissions 明确只要求检查、未声明超时继续时，Core 不推断它具有产品 Auto 的默认放行语义。仅靠模型和语义审核表达的业务要求不因此取得沙箱保证。
+默认 Shell 风险合同在可信策略选择实际审核行为时要求超时停止。父子和独立策略取交集时，任何一方要求停止即保留此要求。超时终止原调用，原检查保存失败，Tool、Job 或 Action 向调用者返回超时和未派发事实。SQLite 拒绝超过封存期限的审核结果及超时派发依据。其他授权策略的超时继续仍要求每个相关检查提供一致的 `timeoutScope`，已有 `timeout_continue` 记录可按原证明读回。
 
 [交集选项](auto-check.ts)按有限范围字段比较超时继续能力，不按 JSON 属性顺序区分相同范围；任一策略缺省或范围不同仍不继承。配置和 Runtime 宿主绑定共用[审核期限上限](../execution/authorization-timing.ts)，在启动审核前拒绝定时器无法兑现的期限，实际范围见[配置手册](../../../../docs/handbook/features/models-and-configuration.md#生效与限制)。
 
-已拒绝的准确原调用不能通过迟到输出或其超时变成批准；本次不引入跨工具业务效果等价的硬拒绝索引。新调用的超时继续可能执行与先前语义拒绝类似的效果，原拒绝记录仍保留，模型仍不得借换工具绕过拒绝。Cache 的拒绝上下文只负责失效旧批准，不等于新增任务级 deny；这些语义规则不能误称为工具沙箱已强制保证。
+原调用的拒绝终态不能被迟到输出改写。新调用独立判断权限。缓存中的拒绝上下文用于使旧批准失效，跨工具的等效操作仍由业务模型遵守原任务限制及明确拒绝。
 
 新审核请求由 Runtime 在封存前加入独立 system 指引，[authorization-check-feedback](../execution/authorization-check-feedback.ts)明确区分技术失败和真实拒绝：原用户请求是任务范围证据，不能覆盖现行 policy；先前 checker 不可用、缺少先前批准和失败次数不能单独成为 reject／ask_user 的依据。后续准确调用独立审核，真实用户或策略拒绝仍须遵守。技术失败正文说明未执行、未形成批准或拒绝以及已知原因；details.authorizationCheck 保存准确检查 executionId 和有限 failureCode，只映射已知 Core 错误，不复制私有 adapter 消息或不完整输出。已封存检查的原请求、instructions、摘要、输出和结果不改写，冷读取不重新审核。[主回归](../../test/isolated/execution/authorization-check.test.ts)核技术失败后独立批准／拒绝、嵌套 Job 的同类失败、零未授权效果和 Loop 正常完成；[反馈回归](../../test/isolated/execution/authorization-check-feedback.test.ts)核私有正文与未知错误码不外泄。受控模型测试核实请求和执行边界，不保证任意真实模型始终作出正确语义判断。
 
@@ -54,7 +58,7 @@ AND 合成后若领域解释器未被共同选择，沿独立 generic checker �
 
 显式自定义任务授权合同的[相关读取材料](../storage/sqlite/authorization-check-reads.ts)只选择当前Session、同任务、准确内置Files读结果，且路径须被原任务或当前操作字面引用；保最新已读baseline及其真实分页，不按文件正文递归扩候选。选择首次封存时已完成的读取，不以执行意图的创建次序代替完成次序；内置Shell冻结的工作区实际根可对应原工作区相对路径，未知cwd不推导同根。原选段Artifact复用既有subject／scope／完整性校验，展开后走原request body封存。同一原检查的读取与先前效果观察保持首次封存快照，后续读取或效果结算不重开审核；任务、来源、现行权限与准确目标仍严格核验。无法重建新版绑定时明确恢复失败，不推断旧缺省值。材料是低信任历史数据，不是当前磁盘状态、当前Model接收证明或新授权；Shell stdout、无baseline外部读与不兼容附件不自动补入。
 
-system要求 `reason` 一句、最多30词，Shell 输出为 `risk/reason` 并由工具解释器派生通用决定，显式自定义 checker 的默认格式为 `decision/reason`，不为长度新增评分或批准值。模型接口硬上限由Service按实际支持装配；Core将真实 `finishReason:length` 保存为 `authorization_check_output_limit`，即使已有完整批准JSON仍不生成批准，准确技术原因交原调用及下一Model。该技术失败不冒充超时默认放行或明确拒绝。
+system 要求 `reason` 一句、最多 30 词。Shell 输出 `risk/reason`，由工具解释器派生通用决定。显式自定义 checker 的默认格式为 `decision/reason`。Service 为默认 Shell 审核省略输出 token 上限。若提供商返回 `finishReason:length`，Core 将原检查保存为 `authorization_check_output_limit`，向原调用及下一 Model 返回技术原因。
 
 内部审核与普通模型调用一致，仅保留 SDK 已去敏的 `ModelAttemptError` 三类固定原因：服务不可用、连接失败和流不完整。准确原因从原 checker 结果进入 Tool 的可读正文和 `failureCode`，再以原 call／source 身份完整交给下一模型，不再统一降成 `model_failed`。任意私有异常及伪造 name／message 仍使用通用失败，不复制 cause、Provider 正文或凭据；此修复不增加审核重试或人工审批。主回归的真实 SDK／内存 HTTP200 `response.failed` 整链用例核上述传播、单次请求与零效果，三类受控失败和伪造负例另核原正文完整保留；模型呈现同时补上 Core 已核未派发及本次 Tool 无作用事实，避免把已知未执行误述为效果未知。
 
@@ -84,7 +88,7 @@ Service 的[权限装配](../../../../apps/service/src/permission-configuration.
 
 [check-context.ts](check-context.ts) 的 `createPermissionCheckContextReader` 通过只读 Runtime 接口核实际 Execution／Run／Command／Session／Workspace、主体、root work 和真实 carrier 父子链，形成 `rootUserTask/parentUserTask/isChild/role` 及准确计划观察。身份或来源不完整时返回 unknown，不按同名任务、客户端标签或 fixture 元数据推导。读取前后核取消；审阅材料只保存稳定 Run 身份，不把自身审批等待进度纳入请求绑定；Core 仍独立核当前 active／取消／fencing。历史拒绝只取同范围中其他执行的已保存拒绝，不将当前被审核执行的结果反向加入自身请求，保证完成后的绑定复核仍是同一审阅材料。task、plan 和历史拒绝原因始终是低信任审阅材料，不是授权或派发命令。
 
-父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。准确 Worktree 的完整决策封存也经此真实 child 合成器核来源后重新绑定；它与普通 Host 权限组合是不同接缝，不能只在后者保留原批准证明。自动审核策略同时提供 check 和审核不可用时的人工 fallback；fallback 不表示每次审核成功后还必须人工批准。只有某一方明确 `approval` 且没有 check，或 check 明确 `requireApproval=true`，才形成强制人工 ceiling，与原 [constraints](constraints.ts) 的组合规则一致。真实 checker 的 `approve_once` 仍不能覆盖硬拒绝、父人工要求或 Workflow minimum；已配置审核器的技术失败交回工具结果；有效ask_user或真正未配置审核器才沿原人工fallback，不制造自动成功。
+父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。准确 Worktree 的完整决策封存也经此 child 合成器核来源后重新绑定。某一方明确提供 `approval` 且没有 check，或 check 明确 `requireApproval=true`，即形成独立人工要求。真实 checker 的 `approve_once` 仍须满足硬拒绝、父人工要求及 Workflow minimum。默认 Shell 审核成功后按实际分类和独立授权约束处理，超时或审核器不可用则结束本次 Shell 调用。通用策略可沿各自合同处理缺少审核器或独立人工要求。
 
 后续授权统一为 `GrantCandidate → GrantOffer → ApprovalOption`。候选含 rule/contract、规范 scope、完整能力 bindings 与同范围展示；策略用真实快照为每个消费能力生成 `reuseRevision`，单次正文、baseline 和完整 inputDigest 不进入稳定绑定。当前调用的完整 revision、输入与原批准出处仍各自保存；真实 mode/trust/control、效果上限、规则和行为配置变化使稳定绑定失配。文件 edit/write 分别使用两个真实定义，没有假 write 请求。
 
@@ -146,7 +150,7 @@ Shell 与私有文件适配器的最终证明共用内部 [dispatch-scope](dispa
 
 [原策略测试](../../test/isolated/permissions/policy.test.ts)、[独立解析与资产篡改测试](../../test/isolated/permissions/shell-command-policy.test.ts)、[独立范围测试](../../test/isolated/permissions/shell-scoped-permissions.test.ts)从原 Service owner 迁入，原用例及断言保持；策略测试另通过真实 Core 核同名扩展不能借只读权限、Workflow Job 不降格。实际 macOS [Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[网络审批](../../../../apps/service/test/isolated/web-permissions.test.ts)继续验证正式调用链。边界检查沿公开导出和 barrel 拒绝本模块反向依赖 Service、Service 直接解析依赖或重新实现原工厂。
 
-Windows 桌面回退使用[系统 5.1 AST 分析](powershell-command-policy.ts)。解析器只接收脚本文本，识别默认别名、字面命令与路径、输出重定向和已知网络操作。只有不带路径的名称和对应系统模块限定的 cmdlet 可按已知 PowerShell 命令分析；`rg` 识别不带路径的 `rg`／`rg.exe` 或固定的包内路径，`-f` 与 `--file` 的模式文件也参与范围检查。未确认的作用范围进入本次人工审批，已识别的系统委托无法通过 Shell 准入。字面联网和工作区外写入必须有各自范围。一次审批的效果判定和命令摘要使用同一份分析和目录身份。批准绑定当前解释器、分析资产、命令、目录与请求范围，派发时独立复核，并与最终批准的身份及父子范围核对。实际执行、审批与取消证据归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
+Windows 桌面回退使用[系统 5.1 AST 分析](powershell-command-policy.ts)。解析器只接收脚本文本，识别默认别名、字面命令与路径、输出重定向和已知网络操作。只有不带路径的名称和对应系统模块限定的 cmdlet 可按已知 PowerShell 命令分析；`rg` 识别不带路径的 `rg`／`rg.exe` 或固定的包内路径，`-f` 与 `--file` 的模式文件也参与范围检查。已识别的系统委托无法通过 Shell 准入。字面联网和工作区外写入必须有各自范围。请求批准和 Full 对未确认的作用范围要求本次人工审批。效果判定和命令摘要使用同一份分析和目录身份。批准绑定当前解释器、分析资产、命令、目录与请求范围，派发时独立复核，并与最终批准的身份及父子范围核对。实际执行、审批与取消证据归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
 
 [真实 pending approval SIGKILL 回归](../../test/isolated/recovery/live-approval-crash.test.ts)在审批卡和原 planned Tool 已耐久后杀死自有进程（核 SIGKILL/137），只读重开保持原卡/Run/执行和 cursor、模型 ledger 不增长。随后持久根模式由请求批准改为 Full，冷 Runtime 观察仍不准备 Provider；错误主体显式恢复被拒，准确原 Run 显式恢复才读取当前 applied control revision、同事务失效旧卡并派发原 Tool。外置 ledger 核原效果一次、已成功原 Model 不重放、重复同一恢复不增效果；原 request/source 不变、answer 仍 null，唯一失效回执保准确原revision/当前controls。该 fixture只验证这一实际进程丢失与模式变化边界，不替代其他平台或所有自动审核崩溃场景。
 

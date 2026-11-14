@@ -15,6 +15,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { withBundledRipgrep } from '@kite-ai/agent/jobs/shell';
 import { createShellCommandPolicy, readOnlySearchCommand } from '@kite-ai/agent/permissions/shell';
+import { windowsBashRead } from '../../../src/permissions/shell-search';
 
 test('literal search uses bundled rg through Bash with quoted arguments and no ambient rg configuration', async () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-shell-search-')));
@@ -321,6 +322,36 @@ test('loads the real packaged Bash WASM and accepts only literal argv sequences'
     'cat "unterminated',
   ])
     expect((await policy.classify(command)).plainCommands).toBeNull();
+});
+
+test('Windows Bash read path excludes mutations, external helpers and altered argv', async () => {
+  const shell = 'C:/fixture/bash.exe';
+  const git = 'C:/fixture/git.exe';
+  const policy = await createShellCommandPolicy({
+    cwd: 'C:/workspace',
+    shellExecutable: shell,
+    windowsRead: { gitAvailable: true },
+  });
+  const read = async (source: string) => {
+    const { windowsRead } = await policy.classify(source);
+    return windowsRead && windowsBashRead(windowsRead, shell, git);
+  };
+  expect(await read('rg -n needle input.txt | head -40')).toBeDefined();
+  expect(await read('git diff --stat')).toMatchObject({ gitQuery: true });
+  for (const command of [
+    'git diff --output=report.txt',
+    'git diff --ext-diff',
+    'git show --textconv HEAD:input.txt',
+    'git -c core.fsmonitor=helper status',
+    'git branch new-branch',
+    'git status && git add input.txt',
+    'rg -e -- --pre=helper input.txt | head -1',
+    'rg -e -- --search-zip input.txt',
+    'rg needle input.txt | head -1 > report.txt',
+    'rg needle input.txt | head "$(cat count.txt)"',
+    "rg --ignore-file='//server/share/.ignore' needle input.txt",
+  ])
+    expect(await read(command), command).toBeUndefined();
 });
 
 test('retains fixed critical-system denial through literal wrappers and complex AST', async () => {

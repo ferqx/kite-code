@@ -92,6 +92,8 @@ Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authori
 
 观察复核原 Store／Session／Run／attempt／定义／输入／purpose、完整模型结果与原 Artifact proof，不公开原请求、主体、owner、私有上下文或审查全文。历史展示仅跳过当前可变取消标记与重新计算的当前 decision context，以保停止或后续上下文改变后可核对的原决定；这项例外只由只读 observer 显式使用。原 `fact` 授权路径默认仍检查全部当前条件，`getAuthorizationCheck`、受理和最终派发不消费观察字段作为资格。
 
+默认 Shell 风险检查将超时停止要求和期限绑定在原审核记录。SQLite 在同一终态事务拒绝截止后的成功结果，并拒绝用该检查的超时记录签发执行依据或通过人工派发。当前严格策略也拒绝继承旧超时放行。历史记录按各自绑定读取。[存储回归](../../test/isolated/storage/authorization-policy-evidence.test.ts)
+
 [原授权回归](../../test/isolated/execution/authorization-check.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
 准确 Worktree 内部 Job 复用原业务来源时，沿现有 `authorization.policy` 返回 `parent_review`、原 Tool 的 `sourceExecutionId`。真实 Auto 免审来源不伪造 `checkExecutionId`；旧模型审核及人工批准继续保留各自原证明。[专用边界](sqlite/worktree-authorization.ts)从实际原行、冻结步骤和完整 prepare 输出核资格，并在最终派发事务复核，公开观察字段本身不授予权限。普通 Shell 及旧记录解释不变，完整规则归[权限 owner](../permissions/README.md#git-worktree-的准确权限)。

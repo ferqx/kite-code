@@ -7,21 +7,25 @@ export function createRunModelAdapters(options: {
   modelId: string;
   models: Parameters<typeof createSdkModelAdapter>[0]['models'];
   preset: SdkModelPreset;
-  supportsCheckOutputLimit: boolean;
+  limitCheckOutput: boolean;
   supportsCheckReasoning: boolean;
 }) {
   const model = createSdkModelAdapter({
     models: options.models,
     presets: new Map([[options.modelId, options.preset]]),
   });
-  const { reasoningEffort: _businessReasoning, ...baseOptions } = options.preset;
+  const {
+    reasoningEffort: _businessReasoning,
+    maxOutputTokens: businessOutputTokens,
+    ...baseOptions
+  } = options.preset;
   const checkOptions: SdkModelPreset = {
     ...baseOptions,
     ...(options.supportsCheckReasoning ? { reasoningEffort: 'low' as const } : {}),
-    ...(options.supportsCheckOutputLimit
+    ...(options.limitCheckOutput
       ? {
           maxOutputTokens: Math.min(
-            options.preset.maxOutputTokens ?? authorizationCheckOutputTokens,
+            businessOutputTokens ?? authorizationCheckOutputTokens,
             authorizationCheckOutputTokens,
           ),
         }

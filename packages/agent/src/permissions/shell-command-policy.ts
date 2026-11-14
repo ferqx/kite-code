@@ -10,7 +10,7 @@ import { desktopAsset } from '../platform/desktop-assets';
 import { AgentError } from '../storage/types';
 import {
   createPowerShellCommandPolicy,
-  type PowerShellAssessment,
+  type PowerShellClassification,
 } from './powershell-command-policy';
 
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -82,7 +82,27 @@ function invocation(node: Node, partial: boolean): readonly string[] | null {
   return words;
 }
 
-/** Preserve the only compound form that can be safely rewritten as an argv chain. */
+type LiteralRead =
+  | { readonly argv: readonly string[] }
+  | {
+      readonly operator: '&&' | '|';
+      readonly left: LiteralRead;
+      readonly right: LiteralRead;
+    };
+function literalRead(node: Node, remaining = 64): LiteralRead | null {
+  if (!remaining) return null;
+  if (node.type === 'command') {
+    const argv = invocation(node, false);
+    return argv && { argv };
+  }
+  const operator = node.type === 'pipeline' ? '|' : node.type === 'list' ? '&&' : undefined;
+  if (!operator || node.children.length !== 3 || node.children[1]?.type !== operator) return null;
+  const left = literalRead(node.children[0]!, remaining - 1);
+  const right = literalRead(node.children[2]!, remaining - 1);
+  return left && right ? { operator, left, right } : null;
+}
+
+/** Preserve the only compound form used by the existing POSIX search rewrite. */
 function readOnlyCommands(root: Node): readonly (readonly string[])[] | null {
   if (root.hasError || root.children.length !== 1) return null;
   const leaves: (readonly string[])[] = [];
@@ -310,6 +330,7 @@ export async function createShellCommandPolicy(input: {
   cwd: string;
   shellExecutable: string;
   powerShell?: WindowsPowerShell;
+  windowsRead?: { gitAvailable: boolean };
   signal?: AbortSignal;
 }): Promise<{
   assets: readonly { path: string; digest: string }[];
@@ -321,11 +342,17 @@ export async function createShellCommandPolicy(input: {
     plainCommands: readonly (readonly string[])[] | null;
     readOnlyCommands: readonly (readonly string[])[] | null;
     hardDenied: string | null;
-    powerShell?: PowerShellAssessment;
+    powerShell?: PowerShellClassification;
+    windowsRead?: LiteralRead;
   }>;
 }> {
   if (input.powerShell) {
-    const policy = createPowerShellCommandPolicy(input.powerShell, input.cwd, ripgrepAsset());
+    const policy = createPowerShellCommandPolicy(
+      input.powerShell,
+      input.cwd,
+      ripgrepAsset(),
+      input.windowsRead?.gitAvailable,
+    );
     return {
       assets: policy.assets,
       async classify(command, signal, cwd) {
@@ -428,6 +455,10 @@ export async function createShellCommandPolicy(input: {
           commands.sort((left, right) => left.startIndex - right.startIndex);
           const exact = commands.map((node) => invocation(node, false));
           const hardDenied = scanTree(tree.rootNode, cwd, parser, 0);
+          const windowsRead =
+            input.windowsRead && plain && tree.rootNode.children.length === 1
+              ? literalRead(tree.rootNode.firstChild!)
+              : null;
           return {
             plainCommands:
               plain && exact.every((words) => words !== null)
@@ -435,6 +466,7 @@ export async function createShellCommandPolicy(input: {
                 : null,
             readOnlyCommands: plain ? readOnlyCommands(tree.rootNode) : null,
             hardDenied,
+            ...(windowsRead ? { windowsRead } : {}),
           };
         } finally {
           tree.delete();
@@ -445,3 +477,5 @@ export async function createShellCommandPolicy(input: {
     },
   };
 }
+
+export type { LiteralRead };

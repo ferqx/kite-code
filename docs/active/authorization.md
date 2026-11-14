@@ -27,11 +27,11 @@ Shell 只读证明按固定 rg 的实际参数取值消费，执行 hooks、外�
 
 默认 Shell 风险行为与实际 Tool／Job 对象及准确 kind／id／version 在可信宿主登记，其他工具只能使用自身已登记行为；普通 Extension／MCP 元数据和配置文本不能注册。Run 冻结实际 reviewer preset、预算、checker 与行为 contractRef／configurationDigest。新版恢复缺失或无法重建时明确失败，不推断旧 Run 缺省；完整结果只读原封存回执，不调用当前解释器或 Provider。工具行为的 prepareReview／interpretReview 负责领域材料与映射，Core 不按工具名选择算法；check.behavior 由策略明确选择，混合独立检查不能借 Shell 解释器替代。
 
-当前 Auto 审核采用独立 low reasoning preset 与默认8000毫秒总期限，覆盖同操作等待、准备、队列与 Provider；`autoApproval.timeoutMs` 可显式配置。超时默认放行语义审核，由工具原有执行策略兜底。Shell 文件和网络范围采用本次请求与父子／宿主硬上限交集，不增加超时专属收窄；显式 `full_access/internet` 请求可按原策略执行，省略请求仍为 `workspace_write/none`。记录 `timeout_continue` 而非审核模型批准，受保护资源和原独立人工要求保持；无可兑现边界时返回明确超时和未执行事实。仅由模型和语义审核表达的任务要求不因此获得沙箱保证。传输、空输出及无效答案仍为独立技术失败；超时、技术失败和真实拒绝不能互相冒充。独立人工批准义务继续等待准确原卡与 accepted 回答。
+默认 Shell 风险审核采用独立 low reasoning preset，不发送输出 token 上限。默认总期限 8000 毫秒，覆盖同操作等待、准备、队列与 Provider，由 `autoApproval.timeoutMs` 配置。超时保存 `authorization_check_timeout`，原 Shell 无派发、无人工卡，业务模型收到该次未执行的结果。任一参与策略要求停止时，组合策略也停止。SQLite 按原检查截止时间拒绝迟到的完整决定，也拒绝该检查签发、继承或通过人工消费超时执行依据。模型传输、空输出、无效答案和提供商截断仍各自保存准确原因。
 
-Windows 桌面选择 PowerShell 时，真实 AST 分析提供已知的写入、联网、委托和无法确认的效果。无法确认的命令需要准确本次人工批准，三种模式均适用。审批绑定解释器与分析资产、命令、工作目录和独立文件／联网范围。已识别的系统委托在 Shell 准入时拒绝。派发复核当前身份及父子范围，实际监督和证据归 [Windows Shell 沙箱](windows-shell-sandbox.md)。
+Windows 桌面选择 PowerShell 时，真实 AST 分析提供已知的写入、联网、委托和无法确认的效果。Auto 将准入通过且效果未明的调用交给同一 Shell 风险审核，只有 high 产生人工卡。请求批准和 Full 对这类调用继续要求准确的本次人工批准。审批绑定解释器与分析资产、命令、工作目录和独立文件／联网范围。已识别的系统委托在 Shell 准入时拒绝。派发复核当前身份及父子范围，实际监督和证据归 [Windows Shell 沙箱](windows-shell-sandbox.md)。
 
-上述拒绝保留指准确原调用与原审核终态不被改写。新调用单独求当前权限；本合同没有新增跨工具业务效果等价的硬拒绝索引，不能把超时分支描述为任务级语义拒绝不可绕过的技术保证。模型继续受原任务和拒绝指导，执行链继续检查真正的硬拒绝、原人工义务及当前派发证明。
+原审核终态绑定准确调用。新调用单独求当前权限，执行链检查硬拒绝、独立人工义务及当前派发证明。
 
 Auto 复用沿既有 Command／policy evidence，不新增授权账本。已有许可及有效人工范围先处理，工具行为与策略显式声明允许覆盖默认检查时不再调用该 reviewer；未被满足的独立 checker／人工条件继续执行。有限 `pwd`／`ls`／bundled rg 的单命令或纯字面量 `&&` 链共用分类／可信重写，保持失败短路；未知语法回原审核。风险材料 fingerprint 与当前策略／范围共同绑定复用，脚本动态依赖不扩大跨调用资格。
 

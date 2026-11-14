@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+[默认 Shell 风险审核超时停止](2026-11-14-shell-risk-review-timeout-stops.md)替代了默认 Shell 审核的输出上限和超时放行。原时间预算、审核材料与执行证据继续适用。
+
 本记录的默认任务授权材料及 recordedReads 选择已被[Shell 风险事实与审批策略分工](2026-11-04-shell-risk-review-facts.md)部分替代：新默认可信 Shell 仅评动作风险，其他可信内置能力跳过该项语义审核；下文最小授权材料继续适用于旧 Run／自定义合同。独立预算、超时策略、准确派发证明、压缩恢复与未知效果的理由继续适用。新合同缓存身份与材料复用以新记录和当前权限 owner 为准。
 
 用户确认 Kite Agent 没有运行阶段定义，Planning 仅表示计划模式。保留准确原 Run 的计划批准要求、版本和成功 receipt，不再投影 planning/building 阶段；可变 progress 不混入稳定计划批准来源。

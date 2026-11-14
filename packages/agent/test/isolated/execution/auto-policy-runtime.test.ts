@@ -1,7 +1,4 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   createFixedModel,
@@ -9,6 +6,10 @@ import {
   type ModelEvent,
   type ModelRequest,
 } from '@kite-ai/ai';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createPermissionPolicy } from '../../../src/permissions';
@@ -32,7 +33,7 @@ async function fixture(options: {
   human?: boolean;
   parallel?: boolean;
 }) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-auto-policy-')));
+  const root = temporaryDirectory('kite-auto-policy-');
   const profile = { dataRoot: root, profile: 'test' };
   const store = await openSqliteStore(profile);
   let effects = 0,
@@ -180,7 +181,7 @@ async function fixture(options: {
     async close() {
       await runtime.close();
       await store.close();
-      rmSync(root, { recursive: true, force: true });
+      removeTemporaryDirectory(root);
     },
   };
 }

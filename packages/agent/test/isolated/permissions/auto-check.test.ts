@@ -66,6 +66,25 @@ test('missing or different AND scopes cannot inherit another policy timeout capa
   expect(autoCheckOptions([])).toEqual({});
 });
 
+test('a fail-closed timeout survives mixed policy checks in either order', async () => {
+  const stop: Permissions = {
+    authorize: async () => ({
+      allowed: false,
+      revision: 'required-risk-review',
+      check: { request: null, stopOnTimeout: true },
+    }),
+  };
+  for (const [left, right] of [
+    [stop, policy(scope)],
+    [policy(scope), stop],
+  ] as const) {
+    const result = await intersectPermissionPolicies(left, right).authorize(request);
+    expect(result.allowed).toBe(false);
+    expect(result.check?.stopOnTimeout).toBe(true);
+    expect(result.check?.timeoutScope).toBeUndefined();
+  }
+});
+
 test('a domain interpreter is preserved only when every actual checker selects the same complete binding', async () => {
   const behavior = {
     capability: { kind: 'tool' as const, definitionId: 'fixture.tool', definitionVersion: '1' },

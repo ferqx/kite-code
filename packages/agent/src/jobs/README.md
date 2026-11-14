@@ -50,7 +50,9 @@ Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等�
 
 [原 Job owner](../platform/process/windows-owned-child.ts)与原生 runner 的受限／完整文件启动均使用 `CREATE_NO_WINDOW` 和隐藏窗口的 `STARTUPINFO`，标准流仍走原管道。Windows 可能保留不可见的 console host，它也必须纳入原 Job 的完整成员观察与停止证明，不能因没有可见窗口而省略回收。[真实 Windows 回归](../../test/isolated/jobs/windows-owned-child.test.ts)核隐藏启动、输出、成员身份和完整关闭。
 
-全部命令共用同一启动与权限准备链路，不按命令名称绕开工作区范围。Windows `Path`／`PATH` 在附加固定工具路径前合并为一个 `PATH`，避免大小写重复键让 Bash 丢失工具目录。原生 runner 在准备 ACL 前开始监听取消，工作区锁等待也可取消；普通调用等待现有初始化完成，不再因固定30秒锁期限失败，显式 repair 保留原有限等待。工作区授权使用 [Windows 可回调的继承传播](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-treesetnamedsecurityinfow)，保留现有继承与显式 ACL 语义，准备中取消停止遍历。持久账本先保存未完成标记；根 ACE 已存在也不能代替后代准备完成，下一次须沿同一 SID 补全传播后才执行命令。取消时未创建业务进程且本次临时 ACL 已撤销，才返回原协议的已取消／清理确认回执；撤销不确定仍保 unknown。首次完整传播仍随文件数增长，完成后复用原账本，不自动重放已取消命令。
+全部命令共用原生启动和监督链路。适配器把权限层已核实的默认范围只读调用映射到 `read_only`，只准备本次临时权限，不进入工作区 ACL 账本或互斥锁。Windows `Path`／`PATH` 在附加固定工具路径前合并为一个 `PATH`，避免大小写重复键让 Bash 丢失工具目录。
+
+可写工作区范围仍由 [原生准备层](../../../../native/windows-sandbox-runner/src/direct_workspace.rs) 使用 [Windows 可回调的继承传播](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-treesetnamedsecurityinfow)。工作区锁等待和传播均可取消。首次在同一工作区锁内持久写入一次未完成账本，传播后再写完成标记。涉及保护路径快照的修改仍先持久保存快照，根 ACE 已存在也不能代替后代准备完成。取消时未创建业务进程且本次临时 ACL 已撤销，才返回原协议的已取消／清理确认回执，撤销不确定仍保 unknown。首次完整传播随文件数增长，完成后复用原账本，下一条命令补全准备时只运行自身。
 
 [准备层](windows-git-bash.ts)固定本机 Git 的私有运行时闭包。仓库 [IPC 兼容层](../../../../native/windows-msys-compat/README.md)修复 MSYS 对象 ACL；Full／完整文件范围保另一份未修改映像，避免并发共享区冲突，不修改安装 Git。两份映像共用复制与校验流程，[准备层回归](../../test/isolated/jobs/windows-git-bash.test.ts)核冷创建、复用、缺失文件恢复和变更文件保留。Windows Shell 构建携带 runner、兼容 DLL 与内置 rg。Git Bash 启动时依次查找内置 rg、所选副本的 `usr/bin` 和 `mingw64/bin`，然后才查找继承路径。未知关闭保 owner，冷读取不从 PID 重建或重跑。
 
@@ -71,6 +73,8 @@ Windows 在原 Job 停止、runner 回执和原 HANDLE 关闭均确认后，等�
 Windows 桌面明确选择 PowerShell，或自动选项明确未发现 Git Bash 时，[系统 PowerShell 探测](windows-powershell.ts)从 `GetSystemDirectoryW` 定位 Windows PowerShell 5.1，固定实际 EXE 和 AST 引擎身份。每个命令由 [Windows Job 适配器](windows-shell.ts)固定解释器、范围和资产，再由 [原生 Runner](../../../../native/windows-sandbox-runner/src/main.rs)校验系统路径和 EXE 摘要，保持原读句柄直到进程创建。只有 Git Bash 请求携带运行时目录。按会话装配归 [Service owner](../../../../apps/service/README.md#默认-shell-装配)。
 
 Runner 以非交互、无 Profile 方式直接启动 PowerShell。脚本经所属 stdin 管道按 UTF-8 与长度传递，双流继续由原 Job 收集。可证明的只读命令在受限范围下使用 `read_only`，工作区与完整文件写入使用各自令牌。取消、有限超时、父退出和清理复用原监督与回执。网络约束、审批和安装证据归 [Windows active](../../../../docs/active/windows-shell-sandbox.md)。
+
+两个后端的独立 Git 查询均固定 Git 可执行文件，并沿原 Runner 请求把活动进程数限制为解释器和一个 Git 进程。Git Bash 使用同一 staged 资产闭包，PowerShell 优先使用已发现 Git for Windows 的真实程序，避免 PATH 包装器引入额外进程。适配器移除继承的 Git 环境选项，再关闭 Git 协议和交互提示。项目配置要求运行外部 clean filter 等助手时，Git 可能报告助手启动失败。原 stdout、stderr 和退出码照常保存。
 
 ## 默认 macOS 宿主 Shell
 

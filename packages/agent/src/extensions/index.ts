@@ -562,6 +562,8 @@ export interface PermissionDecision {
     requireApproval?: boolean;
     /** Host-derived equivalent operation, independent of logical call IDs. */
     operationKey?: string;
+    /** An expired or unavailable check cannot authorize or become a human fallback. */
+    stopOnTimeout?: true;
     /** Existing execution mechanism can enforce this Auto timeout ceiling. */
     timeoutScope?:
       | { filesystem: 'workspace_write' | 'full_access'; network: 'none' | 'internet' }

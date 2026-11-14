@@ -542,6 +542,7 @@ function evidence(
         timeout = obj(checked.payload.timeout);
       if (
         sourceTarget.id !== target.id ||
+        checked.payload.stopOnTimeout === true ||
         checked.check.state !== 'failed' ||
         result.code !== 'authorization_check_timeout' ||
         result.deadlineAt !== timeout.deadlineAt ||
@@ -844,6 +845,8 @@ export function resolveAutoAuthorization(
         let candidateSnapshot = decision.snapshot;
         if (typeof accepted.policyEvidenceId === 'string') {
           const prior = evidence(db, accepted.policyEvidenceId);
+          if (prior.payload.reason === 'timeout_continue' && decision.check.stopOnTimeout === true)
+            throw new AgentError('authorization_policy_changed');
           if (prior.payload.reason === 'timeout_continue') {
             const fallback = obj(prior.payload.timeoutScope);
             if (
@@ -1004,13 +1007,14 @@ export function resolveAutoAuthorization(
         }
       }
     }
-    if (!source && input.timedOutCheckId) {
+    if (!source && input.timedOutCheckId && !decision.check.stopOnTimeout) {
       const checked = checkSource(db, target, input.timedOutCheckId);
       const result = parsed(checked.check.result_json),
         timeout = obj(checked.payload.timeout);
       const fallback = decision.check.timeoutScope;
       if (
         checked.check.state !== 'failed' ||
+        checked.payload.stopOnTimeout === true ||
         result.code !== 'authorization_check_timeout' ||
         result.deadlineAt !== timeout.deadlineAt ||
         typeof timeout.deadlineAt !== 'number' ||

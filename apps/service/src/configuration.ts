@@ -731,6 +731,7 @@ export function createDefaultProcessConfiguration(options: {
     selected: ModelConfiguration,
     transport: Awaited<ReturnType<typeof resolveModelTransport>>,
     sessionId: string,
+    defaultShellReview: boolean,
   ) => {
     if (selected.provider === 'codex') {
       if (!localCodex) throw new ConfigurationError('codex_auth_required');
@@ -751,7 +752,7 @@ export function createDefaultProcessConfiguration(options: {
         modelId: selected.id,
         models: new Map([[selected.id, binding]]),
         preset,
-        supportsCheckOutputLimit: false,
+        limitCheckOutput: false,
         supportsCheckReasoning: true,
       });
     }
@@ -772,7 +773,7 @@ export function createDefaultProcessConfiguration(options: {
       modelId: selected.id,
       models: new Map([[selected.id, binding]]),
       preset,
-      supportsCheckOutputLimit: true,
+      limitCheckOutput: !defaultShellReview,
       supportsCheckReasoning: preset.reasoningEffort !== undefined,
     });
   };
@@ -955,7 +956,12 @@ export function createDefaultProcessConfiguration(options: {
           )
             throw new AgentError('session_title_configuration_changed');
         }
-        const resolved = await resolveModel(selected, modelTransport, session.id);
+        const resolved = await resolveModel(
+          selected,
+          modelTransport,
+          session.id,
+          defaultAutoReview === 'shell_risk',
+        );
         signal?.throwIfAborted();
         return {
           model: resolved.model,
@@ -1315,6 +1321,7 @@ export function createDefaultProcessConfiguration(options: {
           selected,
           modelTransport,
           session.id,
+          defaultAutoReview === 'shell_risk',
         );
         const authorizationCheck = {
           ...(options.authorizationCheck ?? {

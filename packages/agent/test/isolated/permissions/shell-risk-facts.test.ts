@@ -38,6 +38,7 @@ async function preparer(
 ) {
   const policy = await createShellCommandPolicy({ cwd: f.root, shellExecutable: f.shell });
   return createShellRiskPreparer({
+    workspaceRoot: f.root,
     cwd: f.root,
     rgPath: f.rg,
     interpreterPaths: [await realpath(f.shell)],

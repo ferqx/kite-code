@@ -86,6 +86,7 @@ export const shellRiskReviewContractDigest = createHash('sha256')
     JSON.stringify({
       instructions: shellRiskInstructions,
       decisions: { ordinary: 'approve_once', high: 'ask_user', critical: 'reject' },
+      timeout: 'stop',
     }),
   )
   .digest('hex');

@@ -3,12 +3,13 @@ import type { PermissionDecision } from '../extensions';
 import { canonicalJson } from '../json';
 import type { Json } from '../storage/types';
 
-/** Intersections preserve only the Auto options supported by every challenged policy. */
+/** Continuing on timeout requires every challenged policy's agreement. */
 export function autoCheckOptions(checks: readonly NonNullable<PermissionDecision['check']>[]) {
   const keys = checks.map((check) => check.operationKey);
   const scopes = checks.map((check) => check.timeoutScope);
   const scope = scopes[0];
   const behavior = checks[0]?.behavior;
+  const stopOnTimeout = checks.some((check) => check.stopOnTimeout);
   return {
     ...(behavior &&
     checks.every(
@@ -27,7 +28,9 @@ export function autoCheckOptions(checks: readonly NonNullable<PermissionDecision
               : createHash('sha256').update(JSON.stringify(keys)).digest('hex'),
         }
       : {}),
-    ...(scopes.length &&
+    ...(stopOnTimeout ? { stopOnTimeout: true as const } : {}),
+    ...(!stopOnTimeout &&
+    scopes.length &&
     scopes.every(
       (candidate) =>
         candidate &&

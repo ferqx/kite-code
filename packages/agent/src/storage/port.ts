@@ -226,6 +226,7 @@ export interface EnsureAuthorizationCheckInput extends OwnedWrite {
   behavior: import('../tool-behavior').ToolBehaviorBinding;
   review?: import('../tool-behavior').ReviewPreparation | null;
   parentProof?: Json;
+  stopOnTimeout?: true;
   timeout?: { startedAt: number; deadlineAt: number };
 }
 export interface ResolveAutoAuthorizationInput extends OwnedWrite {

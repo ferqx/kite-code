@@ -169,6 +169,15 @@ export class WindowsGitBashUnavailable extends Error {
   }
 }
 
+/** Git for Windows also ships small PATH launchers which spawn the actual Git. */
+export function windowsGitProgram(executable: string): string {
+  const selected = realpathSync.native(executable);
+  if (/[\\/]mingw64[\\/]bin[\\/]git\.exe$/iu.test(selected)) return selected;
+  const install = dirname(dirname(selected));
+  const program = join(install, 'mingw64/bin/git.exe');
+  return existsSync(program) && existsSync(join(install, 'usr/bin/bash.exe')) ? program : selected;
+}
+
 /** Copy Git for Windows to an immutable, content-addressed runtime. */
 export async function stageWindowsGitBash(stateRoot: string, compatibility: string) {
   if (process.platform !== 'win32' || process.arch !== 'x64' || !isAbsolute(stateRoot))

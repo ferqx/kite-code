@@ -266,7 +266,11 @@ export async function runInternalModelCall(options: {
     };
   } catch (error) {
     const timedOut =
-      signal.reason instanceof AgentError && signal.reason.code === 'authorization_check_timeout';
+      (signal.reason instanceof AgentError &&
+        signal.reason.code === 'authorization_check_timeout') ||
+      (permissionCheck &&
+        error instanceof AgentError &&
+        error.code === 'authorization_check_timeout');
     const settled = await finish({
       ...base,
       status: timedOut ? 'failed' : signal.aborted ? 'cancelled' : 'failed',
@@ -296,7 +300,7 @@ export async function runInternalModelCall(options: {
       if (!observed || !['succeeded', 'failed', 'cancelled'].includes(observed.status))
         throw new AgentError('internal_model_stop_unconfirmed');
     }
-    if (signal.aborted || !permissionCheck) throw error;
+    if (signal.aborted || timedOut || !permissionCheck) throw error;
     return null;
   } finally {
     release?.();

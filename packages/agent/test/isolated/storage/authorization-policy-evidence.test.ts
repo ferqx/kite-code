@@ -1,9 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fixtureGrant as basicFixtureGrant } from '../../../../../tests/fixtures/permission-grant';
-import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import {
+  removeTemporaryDirectory,
+  temporaryDirectory,
+} from '../../../../../tests/fixtures/test-filesystem';
 import { authorizationCheckInput } from '../../../src/authorization-check-input';
 import { InteractionGate } from '../../../src/execution/interactions';
 import type { PermissionDecision } from '../../../src/extensions';
@@ -98,7 +101,7 @@ async function fixture(
   await store.createWorkspace({
     expectedStoreId,
     id: 'w',
-    rootUri: 'file:///fixture',
+    rootUri: pathToFileURL(root).href,
     name: 'Fixture',
   });
   await store.createSession({
@@ -176,9 +179,10 @@ async function fixture(
     answer: 'approve_once' | 'reject' | 'ask_user' | 'timeout' | 'pending' | 'technical',
     future = false,
     requireApproval = false,
+    stopOnTimeout = false,
+    now = Date.now(),
   ) {
-    const now = Date.now(),
-      timeout = { startedAt: now - 50, deadlineAt: future ? now + 60000 : now - 1 };
+    const timeout = { startedAt: now - 50, deadlineAt: future ? now + 60000 : now - 1 };
     const fact = await ensureFixtureAuthorizationCheck(store, {
       ...owned,
       targetExecutionId: ids.get(id) ?? id,
@@ -189,6 +193,7 @@ async function fixture(
       ...(options.risk ? { review: preparation } : {}),
       timeout,
       requireApproval,
+      ...(stopOnTimeout ? { stopOnTimeout: true as const } : {}),
     });
     if (answer === 'technical') {
       await store.finishAuthorizationCheck({
@@ -396,7 +401,7 @@ async function fixture(
     },
     close: async () => {
       await store.close();
-      rmSync(root, { recursive: true, force: true });
+      removeTemporaryDirectory(root);
     },
   };
 }
@@ -1339,6 +1344,26 @@ test('an early timer or a prior real decision cannot be converted to timeout aut
         'terminal_conflict',
       );
     }
+  } finally {
+    await f.close();
+  }
+});
+
+test('an expired fail-closed check cannot publish a completed decision or grant timeout authority', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('strict-timeout');
+    const now = Date.now();
+    // The original deadline has already elapsed, but the timeout writer has not settled it.
+    await rejects(
+      f.check('strict-timeout', 'approve_once', false, false, true, now),
+      'authorization_check_timeout',
+    );
+    const fact = await f.check('strict-timeout', 'timeout', false, false, true, now);
+    expect((await f.store.getExecution(fact.execution.id))?.result).toMatchObject({
+      code: 'authorization_check_timeout',
+    });
+    expect(await f.resolve('strict-timeout', decision(), fact.execution.id)).toBeNull();
   } finally {
     await f.close();
   }

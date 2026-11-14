@@ -3,13 +3,16 @@ import { win32 } from 'node:path';
 import { verifyLaunchIdentitiesAsync } from '../jobs/launch-identity';
 import { runWindowsPowerShellInspection, type WindowsPowerShell } from '../jobs/windows-powershell';
 import { AgentError } from '../storage/types';
-import { ripgrepRiskFacts } from './shell-rg-facts';
+import { readOnlyRipgrepPaths } from './shell-search';
+import { windowsGitQuery } from './windows-git-read';
 
 // ParseInput is the 5.1 parser from the selected system executable. The helper
 // projects syntax only. It never resolves a model-supplied name by importing a module.
 const inspectAst = `
-function Get-Literal($node) {
+function Get-Literal($node, $allowNumber = $false) {
     if ($node -is [System.Management.Automation.Language.StringConstantExpressionAst]) { return $node.Value }
+    if ($allowNumber -and $node -is [System.Management.Automation.Language.ConstantExpressionAst] -and
+        ($node.Value -is [int] -or $node.Value -is [long]) -and $node.Extent.Text -match '^(?:0|-?[1-9][0-9]*)$') { return $node.Extent.Text }
     return $null
 }
 $tokens = $null
@@ -17,9 +20,26 @@ $errors = $null
 $root = [System.Management.Automation.Language.Parser]::ParseInput([Console]::In.ReadToEnd(), [ref]$tokens, [ref]$errors)
 $nodes = $root.FindAll({ param($node) $true }, $true)
 if ($nodes.Count -gt 4096) { throw 'AST node limit' }
+$entryScript = $null
+if ($errors.Count -eq 0 -and $null -eq $root.ScriptRequirements -and
+    $null -eq $root.ParamBlock -and $null -eq $root.BeginBlock -and $null -eq $root.ProcessBlock -and
+    $root.UsingStatements.Count -eq 0 -and $root.EndBlock.Unnamed -and
+    $root.EndBlock.Statements.Count -eq 1 -and $root.EndBlock.Traps.Count -eq 0) {
+    $statement = $root.EndBlock.Statements[0]
+    if ($statement -is [System.Management.Automation.Language.PipelineAst] -and $statement.PipelineElements.Count -eq 1) {
+        $invocation = $statement.PipelineElements[0]
+        if ($invocation -is [System.Management.Automation.Language.CommandAst] -and $invocation.Redirections.Count -eq 0 -and
+            $invocation.InvocationOperator.ToString() -in 'Unknown','Ampersand') {
+            $name = $invocation.GetCommandName()
+            if ($name -match '[.]ps1$' -and ($name.Contains('\\') -or $name.Contains('/'))) {
+                $entryScript = $name
+            }
+        }
+    }
+}
 $commands = [System.Collections.Generic.List[object]]::new()
 $redirects = [System.Collections.Generic.List[object]]::new()
-$simple = $errors.Count -eq 0
+$simple = $errors.Count -eq 0 -and $null -eq $root.ScriptRequirements
 foreach ($node in $nodes) {
     switch ($node.GetType().Name) {
         'CommandAst' {
@@ -27,29 +47,47 @@ foreach ($node in $nodes) {
                 for ($index = 1; $index -lt $node.CommandElements.Count; $index++) {
                     $element = $node.CommandElements[$index]
                     if ($element -is [System.Management.Automation.Language.CommandParameterAst]) {
-                        @{ parameter = $element.ParameterName; value = (Get-Literal $element.Argument); attached = $null -ne $element.Argument }
+                        @{ parameter = $element.ParameterName; value = (Get-Literal $element.Argument $true); attached = $null -ne $element.Argument }
                     } else {
-                        @{ value = (Get-Literal $element) }
+                        @{ value = (Get-Literal $element $true) }
                     }
                 }
             )
             $commands.Add(@{ name = $node.GetCommandName(); arguments = $arguments;
+                bareStatement = $node.Parent -is [System.Management.Automation.Language.PipelineAst] -and
+                    $node.Parent.PipelineElements.Count -eq 1 -and $node.Redirections.Count -eq 0;
                 piped = $node.Parent -is [System.Management.Automation.Language.PipelineAst] -and $node.Parent.PipelineElements[0] -ne $node })
             if ($node.InvocationOperator.ToString() -ne 'Unknown') { $simple = $false }
         }
         'FileRedirectionAst' { $redirects.Add(@{ value = (Get-Literal $node.Location) }) }
+        'ConstantExpressionAst' {
+            if (($node.Parent -isnot [System.Management.Automation.Language.CommandAst] -and
+                 $node.Parent -isnot [System.Management.Automation.Language.CommandParameterAst]) -or
+                 $null -eq (Get-Literal $node $true)) { $simple = $false }
+        }
         { $_ -in 'ScriptBlockAst','NamedBlockAst','PipelineAst','StringConstantExpressionAst','CommandParameterAst','MergingRedirectionAst' } { }
         default { $simple = $false }
     }
 }
 if ($tokens.Text -contains '--%') { $simple = $false }
 [Console]::WriteLine((ConvertTo-Json -Depth 6 -Compress -InputObject @{
-    valid = $errors.Count -eq 0; simple = $simple; commands = $commands.ToArray(); redirects = $redirects.ToArray()
+    valid = $errors.Count -eq 0; simple = $simple; commands = $commands.ToArray(); redirects = $redirects.ToArray(); entryScript = $entryScript
 }))`;
 
 type Argument = { value: string | null; parameter?: string; attached?: boolean };
-type Invocation = { name: string | null; arguments: Argument[]; piped: boolean };
-type Syntax = { valid: boolean; simple: boolean; commands: Invocation[]; redirects: Argument[] };
+type Invocation = {
+  name: string | null;
+  arguments: Argument[];
+  piped: boolean;
+  bareStatement: boolean;
+};
+type Syntax = {
+  valid: boolean;
+  simple: boolean;
+  commands: Invocation[];
+  redirects: Argument[];
+  entryScript: string | null;
+};
 type PathUse = 'read' | 'write' | 'remove';
 type PathInput = { value: string; use: PathUse };
 type Parameter = PathUse | 'text' | 'switch';
@@ -75,6 +113,8 @@ const commands: Readonly<Record<string, Command>> = {
       directory: 'switch',
       force: 'switch',
       filter: 'text',
+      recurse: 'switch',
+      depth: 'text',
     },
   },
   'get-item': {
@@ -104,6 +144,24 @@ const commands: Readonly<Record<string, Command>> = {
       quiet: 'switch',
       encoding: 'text',
     },
+  },
+  'select-object': {
+    module: 'utility',
+    parameters: {
+      first: 'text',
+      last: 'text',
+      skip: 'text',
+      unique: 'switch',
+      property: 'text',
+    },
+  },
+  'measure-object': {
+    module: 'utility',
+    parameters: { line: 'switch', word: 'switch', character: 'switch' },
+  },
+  'out-string': {
+    module: 'utility',
+    parameters: { stream: 'switch', width: 'text' },
   },
   'write-output': {
     module: 'utility',
@@ -195,6 +253,8 @@ const aliases: Readonly<Record<string, string>> = {
   type: 'get-content',
   gc: 'get-content',
   sls: 'select-string',
+  select: 'select-object',
+  measure: 'measure-object',
   echo: 'write-output',
   write: 'write-output',
   sc: 'set-content',
@@ -328,27 +388,22 @@ function argumentPaths(invocation: Invocation, command: Command, paths: PathInpu
   return known;
 }
 
-function rgPaths(invocation: Invocation, paths: PathInput[]) {
+function nativeArguments(invocation: Invocation) {
   const args: string[] = [];
   for (const argument of invocation.arguments) {
-    const value =
-      argument.parameter && !argument.attached ? `-${argument.parameter}` : argument.value;
+    if (argument.attached) return;
+    const value = argument.parameter ? `-${argument.parameter}` : argument.value;
     if (
       value === null ||
       value.includes('"') ||
       value === '--%' ||
+      (value.endsWith('\\') && /\s/u.test(value)) ||
       Array.from(value).some((character) => character.charCodeAt(0) < 32)
     )
-      return false;
+      return;
     args.push(value);
   }
-  if (args.length === 1 && args[0] === '--files') return true;
-  const facts = ripgrepRiskFacts(['rg', ...args]);
-  if (facts.availability !== 'available' || facts.configuredPreprocessors.length) return false;
-  for (const value of facts.literalPathArguments) paths.push({ value, use: 'read' });
-  for (const { value, valueKind } of facts.consumedOptionValues)
-    if (valueKind === 'pattern_file') paths.push({ value, use: 'read' });
-  return true;
+  return args;
 }
 
 function within(root: string, path: string) {
@@ -382,10 +437,17 @@ export interface PowerShellAssessment {
   readonly denial: string | null;
 }
 
+export interface PowerShellClassification extends PowerShellAssessment {
+  readonly entryScript?: string;
+  readonly pinRipgrep?: true;
+  readonly gitQuery?: readonly string[];
+}
+
 export function createPowerShellCommandPolicy(
   shell: WindowsPowerShell,
   workspace: string,
   rg: string,
+  gitAvailable = false,
 ) {
   const identities = [shell.executable, shell.engine];
   const cache = new Map<string, Syntax>();
@@ -397,7 +459,7 @@ export function createPowerShellCommandPolicy(
       source: string,
       cwd = workspace,
       signal?: AbortSignal,
-    ): Promise<PowerShellAssessment> {
+    ): Promise<PowerShellClassification> {
       if (source.includes('\0') || Buffer.from(source).toString('utf8') !== source)
         throw new AgentError('invalid_shell_arguments');
       let syntax = cache.get(source);
@@ -417,12 +479,17 @@ export function createPowerShellCommandPolicy(
             throw new AgentError('shell_parser_asset_changed');
           throw new AgentError('shell_parser_failed');
         }
-      } else await verifyLaunchIdentitiesAsync(identities, signal);
+      } else {
+        await verifyLaunchIdentitiesAsync(identities, signal);
+      }
+      signal?.throwIfAborted();
       let uncertain = !syntax.simple || !within(workspace, cwd);
       let network = networkPath(cwd);
       let outsideWrite = false;
       let denial = syntax.valid ? null : 'shell_command_syntax_invalid';
       const paths: PathInput[] = [];
+      let pinRipgrep = false;
+      let gitQuery: readonly string[] | undefined;
       for (const invocation of syntax.commands) {
         if (!invocation.name) {
           uncertain = true;
@@ -449,7 +516,26 @@ export function createPowerShellCommandPolicy(
           invocation.name.toLowerCase().replaceAll('/', '\\') === bundledRg ||
           (bare && ['rg', 'rg.exe'].includes(name))
         ) {
-          if (!rgPaths(invocation, paths)) uncertain = true;
+          const args = nativeArguments(invocation);
+          const operands = args && readOnlyRipgrepPaths(args);
+          if (!operands) uncertain = true;
+          else {
+            for (const value of operands) if (value !== '-') paths.push({ value, use: 'read' });
+            pinRipgrep ||= bare;
+          }
+        } else if (gitAvailable && bare && ['git', 'git.exe'].includes(name)) {
+          const args = nativeArguments(invocation);
+          const query = args && windowsGitQuery(args);
+          if (
+            !query ||
+            syntax.commands.length !== 1 ||
+            !invocation.bareStatement ||
+            args?.some(networkPath)
+          )
+            uncertain = true;
+          else {
+            gitQuery = query;
+          }
         } else if (specification) {
           if (!bare && module !== specification.module) uncertain = true;
           if (!argumentPaths(invocation, specification, paths)) uncertain = true;
@@ -504,12 +590,16 @@ export function createPowerShellCommandPolicy(
           if (!writing) uncertain = true;
         } else if (!(await ordinaryWorkspacePath(workspace, resolved, signal))) uncertain = true;
       }
+      const readOnly = !denial && !uncertain && !network && !writes;
       return {
         uncertain,
         network,
         outsideWrite,
         denial,
-        readOnly: !denial && !uncertain && !network && !writes,
+        readOnly,
+        ...(syntax.entryScript ? { entryScript: syntax.entryScript } : {}),
+        ...(readOnly && pinRipgrep ? { pinRipgrep: true } : {}),
+        ...(readOnly && gitQuery ? { gitQuery } : {}),
       };
     },
   };

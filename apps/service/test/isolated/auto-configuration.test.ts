@@ -35,12 +35,12 @@ test('an opaque SDK binding without reasoning support omits the checker effort a
   const opaque = createOpenAICompatible({ name: 'fixture', baseURL: 'http://127.0.0.1:9/v1' })(
     'opaque',
   );
-  const preset = { temperature: 0.25 };
+  const preset = { temperature: 0.25, maxOutputTokens: 32 };
   const adapters = createRunModelAdapters({
     modelId: 'opaque',
     models: new Map([['opaque', opaque]]),
     preset,
-    supportsCheckOutputLimit: false,
+    limitCheckOutput: false,
     supportsCheckReasoning: false,
   });
   const request = { modelId: 'opaque', requestId: 'fixture', messages: [], tools: [] };
@@ -53,10 +53,8 @@ test('an opaque SDK binding without reasoning support omits the checker effort a
   expect(adapters.checkModel.describeRequest?.(request).settings).not.toHaveProperty(
     'maxOutputTokens',
   );
-  expect(adapters.model.describeRequest?.(request)).toEqual(
-    adapters.checkModel.describeRequest?.(request),
-  );
-  expect(preset).toEqual({ temperature: 0.25 });
+  expect(adapters.model.describeRequest?.(request).settings).toMatchObject(preset);
+  expect(preset).toEqual({ temperature: 0.25, maxOutputTokens: 32 });
 });
 
 async function until<T>(read: () => Promise<T | null>) {

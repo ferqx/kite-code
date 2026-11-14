@@ -2045,7 +2045,7 @@ nativeTest(
 
 for (const expanded of [false, true])
   nativeTest(
-    `Auto reviewer timeout defaults to allow within normal tool scope (expanded request: ${expanded})`,
+    `Auto reviewer timeout stops before dispatch without asking for approval (expanded request: ${expanded})`,
     async () => {
       let connections = 0;
       const remote = Bun.serve({
@@ -2077,28 +2077,26 @@ for (const expanded of [false, true])
         await f.done();
         const rows = await f.store.listExecutions('s');
         const launch = rows.find((e) => e.definitionId === 'shell.execute')!;
-        const job = rows.find((e) => e.definitionId === 'shell.command')!;
-        expect(launch.status).toBe('succeeded');
-        expect(launch.authorization?.policy?.reason).toBe('timeout_continue');
-        expect(job.authorization?.policy?.reason).toBe('parent_review');
-        expect(job.authorization?.policy?.effectiveScope).toEqual({
-          filesystem: expanded ? 'full_access' : 'workspace_write',
-          network: expanded ? 'internet' : 'none',
+        expect(rows.some((e) => e.definitionId === 'shell.command')).toBe(false);
+        expect(launch).toMatchObject({
+          status: 'failed',
+          authorization: { dispatched: false, check: { decision: 'unavailable' } },
+          result: {
+            details: {
+              code: 'authorization_check_timeout',
+              dispatchCommitted: false,
+              adapterAttempted: false,
+              authorizationCheck: { decision: 'timeout' },
+            },
+          },
         });
         expect(f.a.reviews).toHaveLength(1);
-        expect(readFileSync(join(f.workspace, 'timeout-local.txt'), 'utf8')).toBe('continued');
-        expect(existsSync(outside)).toBe(expanded);
-        if (expanded) expect(readFileSync(outside, 'utf8')).toBe('allowed');
-        expect(existsSync(join(f.profile.profilePath, 'timeout-protected.txt'))).toBe(expanded);
-        if (expanded)
-          expect(readFileSync(join(f.profile.profilePath, 'timeout-protected.txt'), 'utf8')).toBe(
-            'forbidden',
-          );
-        expect(connections).toBe(expanded ? 1 : 0);
+        expect(existsSync(join(f.workspace, 'timeout-local.txt'))).toBe(false);
+        expect(existsSync(outside)).toBe(false);
+        expect(existsSync(join(f.profile.profilePath, 'timeout-protected.txt'))).toBe(false);
+        expect(connections).toBe(0);
         expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
-        expect(
-          (await f.runtime.listInteractions({ ...f.base, state: 'pending' })).interactions,
-        ).toHaveLength(0);
+        expect((await f.runtime.listInteractions(f.base)).interactions).toHaveLength(0);
       } finally {
         await f.close();
         remote.stop(true);

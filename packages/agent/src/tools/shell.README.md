@@ -24,7 +24,7 @@
 
 新默认 Auto 的调用事实和直接脚本读取复用[权限 owner](../permissions/README.md)的 Shell 领域实现；[Shell 行为工厂](shell-approval.ts)随准确执行定义提供审核材料、指引、风险输出解释和同命令候选，再由可信宿主登记。材料保完整命令与执行事实，模型 description 不成为风险依据。ordinary/high/critical 由 Shell owner 映射为统一 approve_once/ask_user/reject；核心和 SQLite 不重新解析领域风险文本。显式自定义 checker 不被替换为该风险解释器。
 
-同命令 scope 原样包装现有完整可信 commandDigest，不引入 trim、前缀、别名或脚本等价。默认行为明确允许有效同命令授权满足默认审核；独立 checker、固定危险拒绝和当前权限继续核验。准确自身 Job 的 parentProof 由 Shell owner 的独立准备钩子比对真实父定义、命令与规范化范围后产生，绑定原父 Execution/inputDigest；一次审核准备中由 Runtime 调用该钩子一次，并以顶层证明交给原父桥，Shell 风险材料不再重复构造和嵌套保存同一证明。Tool 的执行期限与 cancellation 保留原完整调用和 ensure 来源。模型风险通过、人工批准、timeout 继续与实际执行成功分别保存；grant 和超时不伪装为脚本材料已审核，启动前材料重核只消费通用 materialReviewed 事实。
+同命令 scope 原样包装现有完整可信 commandDigest，不引入 trim、前缀、别名或脚本等价。有效同命令授权可以满足默认审核，独立 checker、固定危险拒绝和当前权限继续核验。Shell owner 比对真实父定义、命令与规范化范围后构造自身 Job 的 parentProof，并绑定原父 Execution/inputDigest。Tool 的执行期限与 cancellation 保留原完整调用和 ensure 来源。默认风险审核超时结束本次调用，原 Tool 无派发和后续 Job。启动前材料复核只消费已接受的 materialReviewed 事实。
 
 `createShellExtension({job})` is a pure factory containing five ordinary Tools and one trusted `shell.command` Job. `shell.execute` 的前后台及内部旧 `shell.launch` 共用普通 `operations.ensure` 和不可变 own-record OperationRef，不嵌套调用另一个 Tool。 Only the registered Job's `start` may start a process. Import/factory/read/wait never create another manager or restart a cold reference. JSON input contains no cwd, environment, executable or guardian authority.
 

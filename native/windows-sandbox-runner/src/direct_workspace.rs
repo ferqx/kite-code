@@ -357,6 +357,7 @@ fn ensure_persistent_workspace_capability_at(
         // ledger: repair intentionally refuses to trust out-of-scope targets.
         let existing_paths = existing_workspace_protected_paths(workspace_root, protected_paths);
         let paths_digest = protected_paths_digest(&existing_paths);
+        let mut incomplete_on_disk = false;
         let mut ledger = if path.exists() {
             load_ledger(&path, workspace_root)?
         } else {
@@ -378,6 +379,7 @@ fn ensure_persistent_workspace_capability_at(
             // crash after this point is recovered by idempotently applying the
             // same grant on the next prepare rather than inventing a new SID.
             write_ledger(&path, &ledger)?;
+            incomplete_on_disk = true;
             ledger
         };
         let setup_matches = ledger_setup_matches(&ledger, &paths_digest);
@@ -388,7 +390,7 @@ fn ensure_persistent_workspace_capability_at(
                 .iter()
                 .any(|path| path_equal(path, &stored.path))
         });
-        if !setup_matches || obsolete_snapshots {
+        if (!setup_matches || obsolete_snapshots) && !incomplete_on_disk {
             // Persist an incomplete marker before any ACL mutation. A crash leaves
             // the next invocation with an unambiguous instruction to revalidate
             // and finish setup under the same per-Workspace mutex.
@@ -396,6 +398,7 @@ fn ensure_persistent_workspace_capability_at(
             ledger.protected_paths_digest = paths_digest.clone();
             ledger.setup_complete = false;
             write_ledger(&path, &ledger)?;
+            incomplete_on_disk = true;
         }
 
         if obsolete_snapshots {
@@ -446,8 +449,10 @@ fn ensure_persistent_workspace_capability_at(
         // A root ACE can survive an interrupted propagation. It is not proof
         // that existing descendants inherited it; replay every incomplete setup.
         if !workspace_grant_present || !ledger.setup_complete {
-            ledger.setup_complete = false;
-            write_ledger(&path, &ledger)?;
+            if !incomplete_on_disk {
+                ledger.setup_complete = false;
+                write_ledger(&path, &ledger)?;
+            }
             let granted = acl::grant_access_cancellable(
                 workspace_root,
                 capability.as_psid(),
