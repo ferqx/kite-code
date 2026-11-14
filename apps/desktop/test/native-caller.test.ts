@@ -2177,6 +2177,110 @@ test('formal Native reads an observed restored Fork with a missing workspace thr
     await caller.close();
   }
 });
+test('Native admits public inline reasoning only for its observed exact original Model', async () => {
+  const connection = client();
+  const originalView = connection.getView.bind(connection);
+  connection.getView = async (id) => {
+    const view = await originalView(id);
+    return { ...view, session: { ...view.session, nextSeq: '2' } };
+  };
+  const message: Message = {
+    id: 'original-reasoning',
+    sessionId: 's',
+    runId: 'r',
+    seq: '1',
+    status: 'incomplete',
+    role: 'assistant',
+    firstOutput: 'reasoning',
+    content: 'public ',
+    sourceIds: ['e'],
+  };
+  connection.listMessages = async () => [
+    message,
+    { ...message, id: 'unrelated-content', seq: '2', firstOutput: 'content' },
+  ];
+  const output = {
+    complete: false,
+    content: 'public preview',
+    reasoning: 'saved reasoning',
+    toolCalls: [],
+  };
+  const body = JSON.stringify(output);
+  const snapshot: ModelOutputSnapshot = {
+    storeId: 'store',
+    sessionId: 's',
+    rootSessionId: 's',
+    runId: 'r',
+    executionId: 'e',
+    originCommandId: 'cmd',
+    rootWorkCommandId: 'cmd',
+    rootWorkSeq: '1',
+    attempt: 1,
+    status: 'running',
+    snapshotCursor: '2',
+    output,
+    bodyBytes: String(Buffer.byteLength(body)),
+    bodyHash: createHash('sha256').update(body).digest('hex'),
+    contentBytes: String(Buffer.byteLength(output.content)),
+    reasoningBytes: String(Buffer.byteLength(output.reasoning)),
+  };
+  Object.assign(connection.serverInfo!, { capabilities: ['model_outputs'] });
+  connection.verifyConnection = async () => connection.serverInfo!;
+  let outputReads = 0;
+  let scopedRun = 'r';
+  connection.getModelOutput = async (sessionId, executionId, options) => {
+    expect([sessionId, executionId, options!.expectedStoreId]).toEqual(['s', 'e', 'store']);
+    outputReads++;
+    return { ...snapshot, runId: scopedRun };
+  };
+  const caller = new NativeCaller(connection, () => {}, memoryPrivateData());
+  const request = {
+    method: 'modelOutput.open' as const,
+    generation: 1,
+    readId: 'reasoning',
+    sessionId: 's',
+    expectedStoreId: 'store',
+    executionId: 'e',
+    messageId: message.id,
+  };
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    await expect(caller.invoke(request)).rejects.toMatchObject({
+      code: 'model_output_message_unavailable',
+    });
+    await caller.invoke({
+      method: 'messages',
+      generation: 1,
+      sessionId: 's',
+      expectedStoreId: 'store',
+      readId: 'history',
+      afterSeq: '0',
+      upperSeq: '2',
+      limit: 32,
+    });
+    for (const invalid of [{ messageId: 'unrelated-content' }, { executionId: 'other-model' }]) {
+      await expect(caller.invoke({ ...request, ...invalid })).rejects.toMatchObject({
+        code: 'model_output_message_unavailable',
+      });
+    }
+    expect(outputReads).toBe(0);
+    scopedRun = 'wrong-run';
+    await expect(caller.invoke(request)).rejects.toMatchObject({
+      code: 'model_output_identity_mismatch',
+    });
+    scopedRun = 'r';
+    expect(await caller.invoke(request)).toMatchObject({
+      kind: 'modelOutput.opened',
+      bodyHash: snapshot.bodyHash,
+    });
+    await caller.invoke({ method: 'modelOutput.close', generation: 1, readId: request.readId });
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
 test('formal Native metadata port reads only messages observed through the current original history', async () => {
   const connection = client();
   const message: Message = {

@@ -6,6 +6,7 @@ export type HistoryState = {
   messages: Message[];
   phase: 'loading' | 'complete' | 'unavailable';
   highWaterSeq?: string;
+  cursor?: string;
   error?: string;
 };
 /** Full baselines seal placement; subsequent reads cover durable changes, including same-seq edits. */
@@ -36,6 +37,7 @@ export class NativeHistory {
       messages: [...this.entries.values()].sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : 1)),
       phase,
       highWaterSeq,
+      cursor: this.cursor,
       error,
     };
     this.changed(this.state);

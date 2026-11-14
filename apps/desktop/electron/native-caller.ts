@@ -2577,12 +2577,22 @@ export class NativeCaller {
         const message = request.messageId
           ? this.observedMessages.get(request.messageId)
           : undefined;
+        const inline =
+          message?.role === 'assistant' &&
+          !message.outputBody &&
+          !message.compression &&
+          !message.agentMessage &&
+          !message.agentResult &&
+          message.firstOutput === 'reasoning' &&
+          message.sourceIds?.length === 1 &&
+          message.sourceIds[0] === request.executionId;
         if (
           request.messageId &&
           (!message ||
             message.sessionId !== this.selected ||
-            message.outputBody?.executionId !== request.executionId ||
-            message.outputBody.readAvailability === 'unsupported')
+            message.contentFormat === 'unsupported' ||
+            (!inline && message.outputBody?.executionId !== request.executionId) ||
+            message.outputBody?.readAvailability === 'unsupported')
         )
           throw new ClientError('model_output_message_unavailable');
         const origin = message?.originMessage;
@@ -2597,7 +2607,10 @@ export class NativeCaller {
                 sessionId: origin?.sessionId ?? message.sessionId,
                 ...(origin ? { originStoreId: origin.storeId } : {}),
                 runId: runId!,
-                body: message.outputBody!,
+                body: message.outputBody,
+                ...(inline
+                  ? { inlineMessage: { status: message.status, content: message.content } }
+                  : {}),
                 ...(!origin && message.status === 'incomplete' && !message.toolCalls?.length
                   ? { livePreview: message.content }
                   : {}),

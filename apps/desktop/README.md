@@ -323,7 +323,7 @@ ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px
 
 轮次摘要沿[共享Conversation](../../packages/ui/src/desktop/Conversation.tsx)统一使用中性进度／耗时：运行中保留原阶段文字，结束后只显示已核实用时，无可靠时间时显示“用时未知”，不附失败／停止／中断标签或状态颜色；展开后的真实失败和重连原因继续保留。
 
-普通客户端的[异常提示](../../packages/ui/src/desktop/TurnFailure.tsx)使用公共Alert，只显示详细原因与检查建议，不显示可见标题，使用中性信息图标、圆角细边框容器和灰色正文，不创建聊天正文或伪造工具记录。Native在原因未知时明确说明记录不足，已知项目说明读取失败保留准确说明，已中断轮次只说明已确认中断，不推断根因。没有最终回复的失败／中断过程默认展开，外层高度不受限，显式阅读选择优先；摘要仍只显示中性用时。有准确轮次身份的通用失败说明与工具、压缩、引导、Agent 来信和重连一起保留在原处理过程中，随原过程展开／收起，不在结果区域另画失败正文。原输入拒绝尚无 Run 时继续保留未启动事实，不能为隐藏提示而丢弃失败或猜补 Run。原失败码及恢复诊断仍仅在隔离诊断制品中展开，正文保存和重新发送授权不变。
+普通客户端的[异常提示](../../packages/ui/src/desktop/TurnFailure.tsx)使用公共 Alert，以中性信息图标、圆角细边框和灰色正文显示详细原因与检查建议。Native 在原因未知时说明记录不足，已知项目说明读取失败时保留准确说明。主会话按原轮次顺序保留异常提示，思维链维持用户的展开选择。原输入拒绝尚无 Run 时继续保留未启动事实。原失败码及恢复诊断限于隔离诊断制品，重发仍由用户操作。
 
 2026-11-03，进一步审查 Native 主／子会话投影、系统消息 producer、共享 Conversation 及页面提示入口，发现通用 `turn_failure` 原被排除在过程组外并重复作为结果渲染，现归入准确原 Turn。过程／响应、Native 轮次、阅读滚动与复制共5个完整文件61项／1911断言通过，UI／Desktop 类型检查通过。Windows 隔离生产组件页面沿真实 `desktopTranscript` 转换受控历史，逐步观察执行中→失败收起→展开过程及工具→后续完成回复→冷重挂：中间说明、引导、压缩和失败均在原过程内，收起／冷读后只留下原输入、本轮失败摘要、后续用户输入和真实标记的最终回复，没有过程外失败副本、压缩摘要正文或重复消息；未将模型上下文的系统指令作为会话消息。原 Agent 来信／独立结果、ask、重连、取消及压缩交接由同一 Native 整文件复验。截图与 DOM 观察在本机`.cache/turn-process-audit`，临时入口为`.cache/turn-process-audit.ts`；该页面使用受控业务数据，未重验真实远端模型、完整 Electron 安装包或其他平台。此前真实窗口的网络／预算／停止证据保持其原范围。
 
@@ -978,13 +978,15 @@ Chrome生产组件／编译CSS在浅1280／深780px核工具聚合200px、viewpo
 
 同日完整父子场景 `dist/acceptance/parent-child-compaction-live-window-20261023-f601c98d.json` 通过，非 Markdown 输入 4591 个，工作树 SHA-256 为 `88a36b91c5897a416abae6f07524be1068e338be168323e94498f81160a112cd`。16 次真实 HTTP 均为 200、37 张阶段截图及 359 帧覆盖父结束后的条件续跑、本轮原邮箱接入、子真实自动压缩与一次完整读取、两条原 UI 引导、父真实自动压缩、最终折叠／展开及冷开。父压缩的逐帧／DOM 监视四项检查无错误，原节点从 running 到真实 completed 保持 32px，无重复、缺行或旧文案回退；最终仅一段“用时37秒”。子最终保留独立初始指示码并完成待发邮件，未将内部维护说明变成新任务，也未因原回执退出窗口重复读取。父后继请求独立保留两条完整原引导，最终中文保全部码并采用 Blue；冷开零新增 Provider／Run／Execution／Command／Source／control，两个普通窗口正常退出、所属进程无残留。上述候选均关闭诊断，真实响应只经透明时序门延迟，未改写内容；资格限本机 macOS 和这次真实模型响应，不外推任意模型或完整发布。
 
-当前原消息的 `inputKind:input.steer` 与准确 Run 一起投影给 Conversation，使本轮用户引导保留原 MessageItem、完整正文和发送顺序，进入原处理过程，随“处理过程／用时”共同折叠。首条输入、后继轮首条输入和缺少原类别的历史消息保留独立展示，封存 `originMessage` 不猜当前 Run。原 [Native 提交](src/native.tsx)沿准确本地 steer intent／targetRunId 保留发送占位的过程归属，原 `savedNativeInput` 接管保存后的消息，避免外部气泡与过程内消息之间跳动或重复；failed／unknown 的恢复入口继续可见。这里只调整展示归组，原 Command、接收检查点、模型输入、正文／附件和授权保持原合同。
+当前原消息的 `inputKind:input.steer` 与准确 Run 一起投影给 Conversation，使本轮用户引导保留原 MessageItem、完整正文和定位顺序。引导正文在思维链之间按原位置展示。首条输入、后继轮首条输入和缺少原类别的历史消息保留独立展示。原 [Native 提交](src/native.tsx)沿准确本地 steer intent／targetRunId 保留发送占位的轮次归属，由 `savedNativeInput` 接管已保存的消息；failed／unknown 的恢复入口继续可见。
 
 压缩后的引导保留由共享 [Context owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)负责，Native 不另存指令。2026-10-23，同一 macOS arm64／Bun 1.4.2、`8a8458800` 加本次工作树，普通 Native／真实 `deepseek-v4-flash`／chat-completions／medium 验证通过：两条 UI 引导后完整读取 182 行材料，生产 24000-token 阈值在同一父 Run 自动压缩；覆盖上界 19 包含引导序号 16、17。压缩后实际 ModelInput 独立保留两原 Command 的完整正文各一次，最终中文回复保留两核验码并按后条要求采用 Blue。15 次真实 HTTP 均为 200，35 张阶段截图与309帧保存在 `dist/acceptance/steer-compaction-live-window-20261023-c21e94a7.json.workspace`，报告为同名去掉 `.workspace` 的 JSON。实际检查受理／原消息接管、压缩进行中、后继请求、完成和冷开；149 个含引导的过程帧始终同一段、无过程外引导或重复。冷开零新增 Provider／Run／Execution／Command／Source／control，两次窗口正常退出且所属进程无残留。此前一次窗口驱动未提交 active 原任务，只执行6次 idle 请求，未取得压缩资格；修正普通 Enter 单次提交及实际受理检查后才取得上述通过结果。此证据限该本机候选和真实模型。
 
 2026-10-23，macOS arm64／Bun 1.4.2，`8a8458800` 加本次工作树：[普通真实窗口 runner](../../tests/e2e/live/model/collaboration-unified-native-window.live.ts)使用 `testDiagnostics:false`、现有 `deepseek-v4-flash`／chat-completions／medium／4096，通过13次实际HTTP 200。两条多段引导从普通输入框发送，先受理再由原检查点应用；原 Command／Message／Run／selection、完整正文和准确来源逐项核对，下一份真实 ModelInput 及 Provider 请求各包含两条原文一次，原父 Run 的最终回复含两条核验码。28张阶段截图、174帧、canonical正文与回执保存在 `dist/acceptance/steer-process-live-window-20261023-3a9e5d9f.json.workspace`，报告为同名去掉 `.workspace` 的JSON。发送、接管、后续模型、完成与冷开相关41帧始终只有原父一段过程，无过程外引导或重复；实际检查了草稿清空、发送占位接管、终态默认折叠、展开原序全文及再次收起。`16-complete-steer-collapsed.png` 显示单个“用时10秒”和过程外最终回复，`17-cold-steer-1-expanded.png` 保留重开后的完整引导。冷开零新增Provider／Run／Execution／Command／Source／control，两个窗口正常退出，准确所属进程无残留。UI／Native及原首条输入接管七整文件117项／3007断言、八workspace typecheck、同源API、边界、测试归属、Biome与文档检查通过。该结果限本机普通候选与上述真实模型；时序门只延迟真实响应，不生成或改写模型内容。
 
-轮次底部回复状态行消费同一已核实 Run 的 `turnActivity` 和 terminal marker，不按单条 Message 的 complete／模型正文是否已出现判断。思考阶段在同一底部节点显示“正在思考…”，出现正文或活动工具后显示“正在回复…”，底部行不附运行时长；普通活动过程入口固定为“处理过程”，无可展开内容时不显示空入口。主会话与子详情均沿此交接，工具或模型完成但 Run 仍活动时保留，观察暂不可用继续保留上次准确活动状态及原警示；准确 Run 完成、失败、取消或 interrupted 后移除。[思考 DOM 回归](test/isolated/native-reasoning-dom.test.tsx)核正文出现前及单段模型结束，[工具聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)核全部回执 complete 但 Run 仍活动的情况；[会话导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)核有可靠 Run 起点时底部仍只显示状态文字、普通校准节点保持及未知状态提示。
+Native 主会话由 [desktopTranscript](src/native-transcript.ts) 按原 Run、Model 和工具 Execution 投影思考、正文与工具，再由 [ConversationTrace](../../packages/ui/src/desktop/ConversationTrace.tsx) 绘制。模型派发和工具回执交接可更新原 Trace 标题，其临时状态不占展开步骤。并行工具使用当前范围内观察到的启动顺序，已有步骤替换为保存结果时沿用展示身份。“正在回复…”消费准确当前 Model 的流式正文事实，终态或执行权无法核实时停止活动提示。用户引导、Agent 来信、重连与异常仍按原顺序出现在各自轮次。
+
+[思考详情](src/native-reasoning.tsx)仅在手动展开时读取原消息的公开模型输出，沿 [Main 的模型输出租约](electron/model-output-reads.ts) 核对原 Store、会话、Run、Execution 和正文完整性。切换或收起结束当前读取；已显示的同源思考在短暂校准期间保留。工具摘要按已核实的动作归纳，文件新建由原 `builtin.files` 结果确认，Shell 详情继续调用原 `ShellOutput`。只读子详情继续使用既有流程。
 
 Native 的侧栏打开入口对当前父会话及同一在途选择去重，重复鼠标点击和 Enter 不重新发起 `select`、撤销历史读取或重建消息。子详情通过右侧栏标签打开，点击当前父会话不会关闭详情或重新选择父会话；准备页及定时任务页仍恢复原会话；选择其他目标和显式恢复读取保持原流程。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)核重复点击的请求数量、消息节点、滚动和展开保持，以及在途目标复用。
 
@@ -1018,6 +1020,10 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 会话消息渲染验证
 
+2026-11-14，Windows x64／普通 Electron 44.3.0，使用隔离 Profile、配对 Service、真实 SQLite、Files 和 Git Bash，模型流由本机 Provider 控制。两轮依次覆盖先思考后工具、先工具再思考再工具、Shell 非零退出、实际创建文件、正文接管、切回及冷重开。159 次有效画面或 DOM 变化和 12 张节点截图保留在本机 `.cache/turn-trace-window-8b50ac07-2643-4a8b-b123-f3fcf07a9144/conversation-observations.json` 及同目录。两条 Trace 的标题在各自运行周期保持原节点和 32px 高度；接近一万像素的已展开思考保住原视口；Shell 保留同一个 256px 输出视口、退出码 7、stdout、stderr 和手动滚动位置。流式与完成共用原 28px 信息栏；冷开两条折叠记录，Provider 调用数仍为 5。这是本机受控模型的实际窗口记录。
+
+同环境复验图标时，逐段核对思考、文件读取和 Shell 的行首图标，以及多步完成摘要的流程图标。标题随工具切换仍保留原节点和 32px 高度。过程记录及截图在本机 `.cache/turn-trace-window-5db81347-0280-47a3-bdbc-14fced9d2424/`。
+
 主会话正文左侧的消息导航与正文共用当前会话的阅读窗口及输入展示身份。界面与滚动集成由 [UI owner](../../packages/ui/README.md) 维护，用户操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#会话与操作)。
 
 2026-11-13 在 Windows 11 x64 的 Electron 44.3.0 安装候选 `f436bd3ca3e574a2ae629e9d24d71ee928fe3eddc98c53951b555532f6541a69` 上，以独立安装登记与 Profile 打开八轮已保存对话。实际点击第 4 和第 1 条刻度均跳到对应输入；滚轮越过第 5 条输入的顶部阅读位置时高亮从 4 变为 5，反向滚动恢复到 4，点击“回到最新消息”高亮第 8 条。窗口与配套 Service 正常退出，隔离安装已卸载。本机证据位于验证工作树 `.cache/message-markers-installed/`。
@@ -1040,7 +1046,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ### 大会话首次构建
 
-Native 的页面缓存路径为[共享Conversation](../../packages/ui/README.md#原桌面展示层)开启按消息加载：首次可见分组超过100条挂载末40条，上滚每次补20条；不超过100条完整显示。仅已加载内容参加全选，每条回复完整渲染。已完成turn默认折叠的过程及工具聚合明细延迟到首次展开构造；Native消息EOF、Run／Tool首次结构事实、正文读取和操作资格仍由原owner核实，不因窗口化跳过历史或获得权限。Web／TUI默认行为保持，没有增加普通dev／prod调试入口。
+Native 的页面缓存路径为[共享 Conversation](../../packages/ui/README.md#原桌面展示层)开启按消息加载。首次可见分组超过100条挂载末40条，上滚每次补20条；不超过100条完整显示。仅已加载内容参加全选，每条回复完整渲染。各段思维链在首次展开时才构造明细，Native 消息 EOF、首次轮次与工具事实、正文读取和操作资格仍由原 owner 核实。
 
 [独立初始渲染夹具](test/initial-render-performance-browser-runner.fixture.ts)运行实际NativeDesktop与生产CSS、隔离NativeBridge，正文已随Message就绪；测量可信click到CDP PNG合成器首个可读帧，另记DOM就绪、loader退出、最长任务、可信输入往返及切走时序，不把DOM出现或RAF当作绘制。它不代表真实Main／SQLite、自动全文读取FIFO、完整安装版或跨平台性能。私有探针只存在于测试构建。
 

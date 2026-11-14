@@ -28,6 +28,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'files.glob': [['2', '3'], '查找文件'],
   'files.search': [['2', '3', '4', '5'], '搜索内容'],
   'files.list': [['1'], '列出目录'],
+  'files.view_images': [['1'], '查看图像'],
   'shell.launch': [['1'], '启动后台 Shell'],
   'shell.execute': [['1'], '运行命令'],
   'shell.read': [['1'], '读取后台 Shell'],
@@ -83,6 +84,7 @@ export function desktopToolPresentation(
             'files.search': 'search_content',
             'files.write': 'write_file',
             'files.edit': 'edit_file',
+            'files.view_images': 'view_images',
             'shell.execute': 'shell_execute',
             'task.spawn': 'spawn_agent',
             'task.follow_up': 'follow_up_agent',
@@ -322,6 +324,7 @@ export function desktopToolMessage(
       | 'authorization'
       | 'decisionRefresh'
       | 'fileMissing'
+      | 'fileCreated'
       | 'agentMessageAccepted'
       | 'shellInput'
       | 'shellResultVerified'
@@ -344,6 +347,7 @@ export function desktopToolMessage(
     ...(worktreeIssue ? { toolResult: { ok: false, stderr: worktreeIssue } } : {}),
     ...(fact.ask ? { ask: fact.ask } : {}),
     ...(fact.fileMissing && fact.status === 'succeeded' ? { fileMissing: true } : {}),
+    ...(fact.fileCreated && fact.status === 'succeeded' ? { fileCreated: true } : {}),
     ...(fact.agentMessageAccepted &&
     fact.definitionId === 'task.message' &&
     fact.definitionVersion === '1' &&
@@ -678,6 +682,7 @@ export function liveToolMessages(
             execution.id,
           ),
           executionUnconfirmed,
+          toolStopping: !executionUnconfirmed && execution.cancelRequestedAt !== null,
           ...(run
             ? {
                 turnId: JSON.stringify([
@@ -747,9 +752,12 @@ export class NativeToolPresentation {
   private complete = new Map<string, CompleteToolPresentation>();
   private order = new Map<string, number>();
   private nextOrder = 0;
+  private started = new Map<string, number>();
+  private nextStart = 0;
   private readonly cached = new NativeDisplayCache<{
     complete: readonly [string, CompleteToolPresentation][];
     order: readonly string[];
+    started: readonly [string, number][];
   }>();
   private boundary: string | undefined;
   private bridge: unknown;
@@ -784,11 +792,19 @@ export class NativeToolPresentation {
       this.complete = new Map(saved?.complete);
       this.order = new Map(saved?.order.map((key, index) => [key, index]));
       this.nextOrder = this.order.size;
+      this.started = new Map(saved?.started);
+      this.nextStart = 0;
+      for (const order of this.started.values()) this.nextStart = Math.max(this.nextStart, order);
     }
     const completeIds = new Set(
       completeNativeToolMessages(messages, facts).map((message) => message.id),
     );
     const liveById = new Map(live.map((entry) => [entry.message.id, entry]));
+    for (const { message, execution } of live) {
+      if (execution.status !== 'running' || execution.authorization?.dispatched === false) continue;
+      const key = message.presentationKey ?? message.id;
+      if (!this.started.has(key)) this.started.set(key, ++this.nextStart);
+    }
     const keep = new Set<string>();
     const result = [...messages, ...live.map((entry) => entry.message)].flatMap((message) => {
       if (message.role !== 'tool') return [message];
@@ -804,7 +820,8 @@ export class NativeToolPresentation {
           message,
           fact: facts.find((fact) => fact.messageId === message.id && !fact.inputPending),
         });
-        return [message];
+        const started = this.started.get(key);
+        return [started === undefined ? message : { ...message, toolStartOrder: started }];
       }
       const pending = facts.some(
         (fact) =>
@@ -844,6 +861,7 @@ export class NativeToolPresentation {
     });
     for (const key of this.complete.keys()) if (!keep.has(key)) this.complete.delete(key);
     for (const key of this.order.keys()) if (!keep.has(key)) this.order.delete(key);
+    for (const key of this.started.keys()) if (!keep.has(key)) this.started.delete(key);
     // History receipts can arrive ahead of still-running View entries. Replace
     // tools in their first observed order inside each original readable block,
     // without moving tools across narration, guidance, or Run boundaries.
@@ -866,7 +884,11 @@ export class NativeToolPresentation {
         result[index] = tools[offset]!;
       });
     }
-    this.cached.set(scope, { complete: [...this.complete], order: [...this.order.keys()] });
+    this.cached.set(scope, {
+      complete: [...this.complete],
+      order: [...this.order.keys()],
+      started: [...this.started],
+    });
     return result;
   }
 }

@@ -333,6 +333,22 @@ export function nativeToolMessageEligible(
   );
 }
 
+function fileCreation(execution: Execution): string | undefined {
+  if (
+    execution.status !== 'succeeded' ||
+    !['files.write', 'files.write_path'].includes(execution.definitionId)
+  )
+    return;
+  const change = object(object(object(execution.result)?.details)?.fileChange);
+  if (change?.version === 1 && change.before === null && typeof change.path === 'string')
+    return change.path;
+  return undefined;
+}
+
+export function nativeFileCreationCandidate(execution: Execution): boolean {
+  return fileCreation(execution) !== undefined;
+}
+
 /** Pure presentation facts from the exact saved tool Execution and its receipt. */
 export function nativeToolMessageFact({
   execution,
@@ -413,6 +429,15 @@ export function nativeToolMessageFact({
     ) &&
     Object.keys(result).every((key) => ['outcome', 'content', 'details'].includes(key)) &&
     result.content === `File does not exist: ${JSON.stringify(call.path)}.`;
+  const createdPath = fileCreation(execution);
+  const fileCreated =
+    createdPath !== undefined &&
+    run?.id === execution.runId &&
+    run.sessionId === execution.sessionId &&
+    run.originStoreId === execution.originStoreId &&
+    registered.length === 1 &&
+    registered[0]?.extensionId === 'builtin.files' &&
+    createdPath === call?.path;
   const agentMessageAccepted =
     execution.definitionId === 'task.message' &&
     execution.definitionVersion === '1' &&
@@ -488,6 +513,7 @@ export function nativeToolMessageFact({
     ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
     ...(decisionRefresh ? { decisionRefresh } : {}),
     ...(fileMissing ? { fileMissing: true } : {}),
+    ...(fileCreated ? { fileCreated: true } : {}),
     ...(agentMessageAccepted ? { agentMessageAccepted: true } : {}),
     target: requestTarget,
     ...(expectedTarget !== undefined && requestTarget === undefined ? { inputPending: true } : {}),

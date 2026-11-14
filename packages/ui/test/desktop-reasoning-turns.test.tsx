@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { BookOpen01Icon, BrainIcon, ListTreeIcon, TerminalIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -84,6 +86,89 @@ test('active reasoning is an activity marker and never calls the host body rende
     '正在思考',
   );
   expect(inferred.document.querySelector('.agent-turn button')).toBeNull();
+});
+
+test('conversation trace icons follow the current step and appear before completed reasoning and tool labels', () => {
+  const thought = { ...thinking('run'), reasoningSource: 'original-thought' };
+  const read: Message = {
+    id: 'read',
+    turnId: 'run',
+    role: 'tool',
+    text: '',
+    toolName: 'read_file',
+    status: 'running',
+    settled: false,
+    toolStartOrder: 1,
+  };
+  const shell: Message = {
+    ...read,
+    id: 'shell',
+    toolName: 'shell_execute',
+    toolStartOrder: 2,
+  };
+  const complete = (message: Message): Message => ({
+    ...message,
+    settled: true,
+    status: 'completed',
+  });
+  const renderTrace = (messages: Message[], open = false) =>
+    new JSDOM(
+      renderToStaticMarkup(
+        <Conversation
+          traceTurns
+          messages={messages}
+          loading={false}
+          selected
+          connected
+          initialReading={{
+            top: 0,
+            follow: true,
+            expanded: open ? { 'trace-turn:turn:run': true } : {},
+          }}
+          turnActivity={{
+            turnId: 'run',
+            status: messages.some((message) => !message.settled) ? 'running' : 'completed',
+          }}
+          renderReasoning={() => null}
+          saveReading={() => {}}
+        />,
+      ),
+    ).window.document;
+  const summary = '.conversation-trace > button > .conversation-trace-line';
+  const paths = (node: ParentNode) =>
+    [...node.querySelectorAll('path')].map((path) => path.getAttribute('d'));
+  const expectIcon = (line: Element, icon: typeof BrainIcon) => {
+    const marker = line.firstElementChild!;
+    expect(marker.getAttribute('data-slot')).toBe('trace-icon');
+    expect(marker.getAttribute('aria-hidden')).toBe('true');
+    expect(marker.querySelector('svg')).not.toBeNull();
+    expect(paths(marker)).toEqual(
+      paths(new JSDOM(renderToStaticMarkup(<HugeiconsIcon icon={icon} />)).window.document),
+    );
+  };
+
+  expectIcon(renderTrace([thought]).querySelector(summary)!, BrainIcon);
+  expectIcon(renderTrace([complete(thought)]).querySelector(summary)!, BrainIcon);
+  expectIcon(renderTrace([complete(read)]).querySelector(summary)!, BookOpen01Icon);
+  expectIcon(renderTrace([complete(thought), read, shell]).querySelector(summary)!, TerminalIcon);
+  expectIcon(
+    renderTrace([complete(thought), read, complete(shell)]).querySelector(summary)!,
+    BookOpen01Icon,
+  );
+
+  const grouped = renderTrace([complete(thought), complete(read), complete(shell)], true);
+  expectIcon(grouped.querySelector(summary)!, ListTreeIcon);
+  const reasoningLine = grouped.querySelector('.conversation-reasoning .conversation-trace-line')!;
+  expect(reasoningLine.textContent).toBe('思考完成');
+  expectIcon(reasoningLine, BrainIcon);
+  expectIcon(
+    grouped.querySelector('.conversation-trace-steps .tool-activity-step')!,
+    BookOpen01Icon,
+  );
+  expectIcon(
+    grouped.querySelector('.conversation-trace-steps .shell-activity .tool-activity-summary')!,
+    TerminalIcon,
+  );
 });
 
 test('host-confirmed hidden non-tool records never create a row or invoke the body renderer', () => {

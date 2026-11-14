@@ -172,12 +172,12 @@ try {
       const visible = (conversation as HTMLElement).innerText;
       if (/ACTUAL_READ_ONLY_TOOL_RESULT|"baseline"|"executionId"/.test(text))
         probe.violations.push(`${kind}:${probe.phase}:raw_tool_json`);
-      if (text.includes('PRIVATE_REASONING_SENTINEL'))
-        probe.violations.push(`${kind}:${probe.phase}:private_reasoning`);
-      if (!['manual-open', 'manual-close', 'history'].includes(probe.phase)) {
-        if (conversation.querySelector('.tool-activity-summary[aria-expanded="true"]'))
+      if (text.includes('PRIVATE_REASONING_SENTINEL') && probe.phase !== 'reasoning-open')
+        probe.violations.push(`${kind}:${probe.phase}:reasoning_disclosed_without_user`);
+      if (!['manual-open', 'manual-close', 'history', 'reasoning-open'].includes(probe.phase)) {
+        if (conversation.querySelector('.conversation-trace-trigger[aria-expanded="true"]'))
           probe.violations.push(`${kind}:${probe.phase}:tool_opened_without_user`);
-        if (conversation.querySelector('.tool-activity-steps'))
+        if (conversation.querySelector('.conversation-trace-steps'))
           probe.violations.push(`${kind}:${probe.phase}:tool_items_mounted_without_user`);
       }
       const assistants = conversation.querySelectorAll('.message.assistant').length;
@@ -205,18 +205,15 @@ try {
         probe.samples.push(value);
         last = signature;
       }
-      const collapsed = conversation.querySelector(
-        '.agent-turn-process:has(.agent-turn-summary[aria-expanded="false"])',
-      );
-      if (collapsed && final) {
+      for (const collapsed of conversation.querySelectorAll(
+        '.conversation-trace:has(> .conversation-trace-trigger[aria-expanded="false"])',
+      )) {
         const viewport = conversation.getBoundingClientRect();
         const clipping = collapsed
           .querySelector('.collapsible-motion-content')
           ?.getBoundingClientRect();
-        const prose = [...collapsed.querySelectorAll('.message.assistant')].find((node) =>
-          node.textContent?.includes('PUBLIC_STAGE_PROSE'),
-        );
-        const rect = prose?.getBoundingClientRect();
+        const step = collapsed.querySelector('.conversation-trace-steps > .tool-activity');
+        const rect = step?.getBoundingClientRect();
         if (
           rect &&
           clipping &&
@@ -226,7 +223,7 @@ try {
           probe.closedFrames.push({
             at: performance.now(),
             height: clipping.height,
-            text: prose!.textContent!.slice(0, 100),
+            text: step!.textContent!.slice(0, 100),
           });
       }
     };
@@ -333,6 +330,21 @@ try {
   await until(content, (value) => value.includes('正在思考'), 'first reasoning painted');
   await page.waitForTimeout(300);
   await checkReasoning('inline-reasoning', 0);
+  await setPhase('reasoning-open');
+  const thought = page.locator('.conversation-trace > .conversation-trace-trigger');
+  await thought.click();
+  await until(
+    content,
+    (value) => value.includes('PRIVATE_REASONING_SENTINEL_INITIAL'),
+    'manually opened public reasoning',
+  );
+  await thought.click();
+  await until(
+    content,
+    (value) => !value.includes('PRIVATE_REASONING_SENTINEL_INITIAL'),
+    'public reasoning closed',
+  );
+  await setPhase('first-reasoning');
   await step('long');
   await until(
     messages,
@@ -407,13 +419,16 @@ try {
   await until(content, (value) => value.includes('正在思考'), 'third Model thinking indicator');
   await page.waitForTimeout(300);
   await checkReasoning('second-reasoning', 1);
-  await until(content, (value) => value.includes('读取文件'), 'actual reads aggregated');
+  const toolTrace = page
+    .locator('.conversation-trace')
+    .filter({ hasText: /正在思考|已读取文件/ })
+    .last();
   assert.equal(
-    await page.locator('.conversation .tool-activity-summary').getAttribute('aria-expanded'),
+    await toolTrace.locator(':scope > .conversation-trace-trigger').getAttribute('aria-expanded'),
     'false',
     'tool aggregation starts collapsed while the Model continues',
   );
-  assert.equal(await page.locator('.conversation .tool-activity-steps').count(), 0);
+  assert.equal(await page.locator('.conversation .conversation-trace-steps').count(), 0);
   assert.ok((await content()).includes('PUBLIC_STAGE_PROSE'), 'actual stage prose preserved');
   const secondMessage = (await messages())
     .filter((message) => message.role === 'assistant')
@@ -430,7 +445,7 @@ try {
   await step('later-reasoning');
   await page.waitForTimeout(400);
   assert.equal(
-    await page.locator('.conversation .tool-activity-summary').getAttribute('aria-expanded'),
+    await toolTrace.locator(':scope > .conversation-trace-trigger').getAttribute('aria-expanded'),
     'false',
     'later Model output does not open tool aggregation',
   );
@@ -473,26 +488,18 @@ try {
   assert.equal(actualReadTools, 3);
   assert.equal((await counts()).calls, 3);
   assert.ok((await counts()).toolObserved);
-  assert.deepEqual(
-    warm.closedFrames,
-    [],
-    'completed default-collapsed process must not paint former phase prose',
-  );
+  assert.deepEqual(warm.closedFrames, [], 'completed collapsed trace must not paint tool details');
   await setPhase('manual-open');
-  await page.locator('.agent-turn-summary[aria-expanded="false"]').click();
-  await until(
-    content,
-    (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('读取文件'),
-    'user opens original phase prose and read group',
-  );
-  await page.locator('.tool-activity-summary[aria-expanded="false"]').click();
+  const readTrace = page.locator('.conversation-trace').filter({ hasText: '已读取文件' });
+  const trigger = readTrace.locator(':scope > .conversation-trace-trigger');
+  await trigger.click();
   await until(
     content,
     (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('read-only.txt'),
     'user opens original phase prose and actual read record',
   );
   assert.equal(
-    await page.locator('.tool-activity-steps > .tool-activity-step').count(),
+    await readTrace.locator('.conversation-trace-steps > .tool-activity').count(),
     3,
     'the actual aggregate retains all three original read receipts',
   );
@@ -500,7 +507,7 @@ try {
   console.log(
     'native_reasoning_animation_state',
     JSON.stringify(
-      await page.locator('.agent-turn-content').evaluate((element) =>
+      await readTrace.locator('.conversation-trace-steps').evaluate((element) =>
         element.getAnimations({ subtree: true }).map((animation) => ({
           playState: animation.playState,
           currentTime: animation.currentTime,
@@ -511,7 +518,7 @@ try {
       ),
     ),
   );
-  await page.locator('.agent-turn-content').evaluate(async (element) => {
+  await readTrace.evaluate(async (element) => {
     // Scroll-linked edge fades do not finish while stationary; wait only real time-based disclosure transitions.
     await Promise.all(
       element
@@ -532,12 +539,16 @@ try {
     ).reasoningRenderProbe.closedFrames = [];
   });
   await setPhase('manual-close');
-  await page.locator('.agent-turn-summary[aria-expanded="true"]').click();
+  await trigger.click();
   await page.waitForTimeout(100);
   const manual = await probe();
   assert.ok(manual.closedFrames.length > 0, 'explicit user close retains the existing animation');
   await page.waitForTimeout(350);
-  assert.ok(!(await content()).includes('PUBLIC_STAGE_PROSE'), 'explicit process close finishes');
+  assert.ok(!(await content()).includes('read-only.txt'), 'explicit trace close finishes');
+  assert.ok(
+    (await content()).includes('PUBLIC_STAGE_PROSE'),
+    'stage prose keeps its original place',
+  );
 
   await setPhase('history');
   await select('Other Stream', 'other');

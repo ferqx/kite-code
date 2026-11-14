@@ -18,6 +18,12 @@ import {
   conversationMessageNavigationTop,
   currentConversationMessage,
 } from './ConversationMessageNavigation';
+import {
+  ConversationTrace,
+  isConversationTraceStep,
+  latestRunningTraceTool,
+  traceKey,
+} from './ConversationTrace';
 import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
 import { Collapsible, CollapsibleTrigger } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
@@ -44,7 +50,7 @@ import { formatMessageTime } from './message-time';
 import { PromptMarkdown } from './PromptMarkdown';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
-import { ToolActivity } from './ToolActivity';
+import { completedToolActions, ToolActivity, toolTextFailed, toolTraceTitle } from './ToolActivity';
 import { TurnFailure } from './TurnFailure';
 import type { Message, TurnActivity } from './types';
 import { Button } from './ui';
@@ -58,6 +64,8 @@ export interface ReadingState {
 
 export interface ToolActivityState {
   aggregate?: boolean;
+  inTrace?: boolean;
+  directTraceDetails?: boolean;
   expanded?: boolean;
   activityId: string;
   restoredExpanded: ReadonlySet<string>;
@@ -524,6 +532,8 @@ export function Conversation({
   renderMessageContent,
   renderMessageAttachments,
   renderToolActivity,
+  traceTurns = false,
+  renderReasoning,
 }: {
   messages: readonly Message[];
   loading: boolean;
@@ -553,6 +563,9 @@ export function Conversation({
   renderMessageAttachments?: (message: Message) => ReactNode;
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
+  /** Native conversation: group consecutive reasoning and tools around public prose. */
+  traceTurns?: boolean;
+  renderReasoning?: (message: Message, open: boolean) => ReactNode;
 }) {
   const presented = useRef(false);
   useLayoutEffect(() => {
@@ -571,6 +584,8 @@ export function Conversation({
   const viewport = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
+  // A manual disclosure may grow later when its body reader finishes.
+  const traceDisclosure = useRef(false);
   const writtenScrollTop = useRef<number | undefined>(undefined);
   const markerTargets = useRef<HTMLElement[]>([]);
   const jumpedMarker = useRef<string | undefined>(undefined);
@@ -660,6 +675,7 @@ export function Conversation({
   const committedOpenTurns = useRef<readonly string[]>([]);
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
+    traceDisclosure.current = false;
     restore.current = true;
     for (const [id, open] of Object.entries(expanded)) if (open) restoredExpanded.current.add(id);
     // Default-open live processes have no explicit expanded entry. Restore their
@@ -755,6 +771,17 @@ export function Conversation({
     const observer = new ResizeObserver(() => {
       // Child-local body reads and collapse animations do not commit Conversation.
       // ResizeObserver runs before paint; delaying this write exposes the old tail for a frame.
+      if (
+        traceDisclosure.current &&
+        reading.current.follow &&
+        element.scrollHeight - element.clientHeight - element.scrollTop > 1
+      ) {
+        traceDisclosure.current = false;
+        reading.current.follow = false;
+        reading.current.top = element.scrollTop;
+        reading.current.anchor = lazyHistory ? captureConversationScrollAnchor(element) : undefined;
+        setFollowing(false);
+      }
       if (reading.current.follow && !rangeRef.current?.hasAfter)
         writeScroll(element, element.scrollHeight);
       else if (
@@ -809,6 +836,10 @@ export function Conversation({
   const onToggle = useRef((id: string, open: boolean) => {
     restoredExpanded.current.delete(id);
     setExpanded((values) => (values[id] === open ? values : { ...values, [id]: open }));
+  }).current;
+  const onTraceToggle = useRef((id: string, open: boolean) => {
+    traceDisclosure.current = open && reading.current.follow;
+    onToggle(id, open);
   }).current;
   const restoredMarkerSignature = JSON.stringify([...restoredExpanded.current].sort());
   // biome-ignore lint/correctness/useExhaustiveDependencies: Marker ref contents and the loading-driven restore lifecycle both invalidate the retained projection.
@@ -870,13 +901,14 @@ export function Conversation({
         .filter(Boolean),
     );
     const structural = (message: Message) =>
-      message.role === 'thinking' ||
+      (message.role === 'thinking' && !traceTurns) ||
       message.systemKind === 'turn_timing' ||
       message.systemKind === 'turn_terminal';
     const visible = new Set(
       messages.filter((message) => {
         if (structural(message)) return false;
         if (message.role !== 'tool' && message.presentation === 'hidden') return false;
+        if (message.role === 'thinking') return !!message.turnId;
         if (renderMessage) return true;
         if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
         if (message.role === 'system')
@@ -989,6 +1021,7 @@ export function Conversation({
     for (const message of shown) {
       const previous = groups.at(-1);
       if (
+        !traceTurns &&
         !renderMessage &&
         message.role === 'tool' &&
         previous?.[0]?.role === 'tool' &&
@@ -1056,7 +1089,9 @@ export function Conversation({
     );
     const renderGroup = (
       group: Message[],
-      placement: 'standalone' | 'process' | 'result' = 'standalone',
+      placement: 'standalone' | 'process' | 'result' | 'trace' = 'standalone',
+      directTraceDetails = false,
+      showTraceReply = false,
     ) => {
       const message = group[0]!;
       if (structural(message)) return null;
@@ -1070,7 +1105,8 @@ export function Conversation({
         );
       // A host-provided group starts with its first tool, before metadata arrives.
       // Its disclosure and DOM survive subsequent receipts and additional tools.
-      const aggregate = group.length > 1 || !!message.presentationGroupId;
+      const inTrace = placement === 'trace';
+      const aggregate = !inTrace && (group.length > 1 || !!message.presentationGroupId);
       const activityKey = aggregate
         ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
         : `activity:${message.presentationKey ?? message.id}`;
@@ -1080,11 +1116,13 @@ export function Conversation({
             {renderToolActivity(group, {
               aggregate,
               expanded: expanded[activityKey],
+              inTrace,
+              directTraceDetails,
               activityId: activityKey,
               restoredExpanded: restoredExpanded.current,
               expandedItems: expanded,
-              onToggle: (open) => onToggle(activityKey, open),
-              onToggleItem: onToggle,
+              onToggle: (open) => (inTrace ? onTraceToggle : onToggle)(activityKey, open),
+              onToggleItem: inTrace ? onTraceToggle : onToggle,
             })}
           </Fragment>
         );
@@ -1093,6 +1131,8 @@ export function Conversation({
           key={activityKey}
           messages={group}
           aggregate={aggregate}
+          inTrace={inTrace}
+          directTraceDetails={directTraceDetails}
           suppressGenericFailure={
             message.toolName === 'task' &&
             (children.get(message.id.slice(5)) ?? []).some(
@@ -1107,7 +1147,7 @@ export function Conversation({
           restoredExpanded={restoredExpanded.current}
           expandedItems={expanded}
           onToggleItem={onToggle}
-          onToggle={(open) => onToggle(activityKey, open)}
+          onToggle={(open) => (inTrace ? onTraceToggle : onToggle)(activityKey, open)}
           openFile={openFile}
           childDetail={parentTaskDetail(message, group.length)}
           childDetailForMessage={(item) => parentTaskDetail(item, 1)}
@@ -1148,7 +1188,7 @@ export function Conversation({
             writeClipboardText={writeClipboardText}
             renderContent={renderMessageContent}
             renderAttachments={renderMessageAttachments}
-            showResponseStatus={placement === 'standalone'}
+            showResponseStatus={traceTurns ? showTraceReply : placement === 'standalone'}
             showMetadata={placement !== 'process' || message.role === 'user'}
             copyText={
               message.role === 'user' && message.settled && !message.delivery && message.text
@@ -1227,6 +1267,152 @@ export function Conversation({
         lastTurnEntry && ended
           ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
           : undefined;
+      if (traceTurns) {
+        const messages = entry.groups.flat().filter((message) => !structural(message));
+        const blocks: Message[][] = [];
+        for (const message of messages) {
+          const previous = blocks.at(-1);
+          if (
+            isConversationTraceStep(message) &&
+            previous?.[0] &&
+            isConversationTraceStep(previous[0])
+          )
+            previous.push(message);
+          else blocks.push([message]);
+        }
+        const lastMessage = messages.at(-1);
+        const streaming =
+          lastTurnEntry &&
+          !ended &&
+          !activity?.executionUnconfirmed &&
+          (!activity || activity.status === 'running') &&
+          lastMessage?.role === 'assistant' &&
+          lastMessage.streaming === true;
+        const waitingLabel = lastTurnEntry
+          ? failed && !failureGroups.length
+            ? '本轮异常结束'
+            : aborted && !failureGroups.length
+              ? '本轮执行已中断'
+              : cancelled
+                ? '已停止'
+                : activity?.status === 'recovery_required'
+                  ? '需要恢复'
+                  : activity?.status === 'cancelling'
+                    ? '正在停止'
+                    : activity?.status === 'queued'
+                      ? '等待处理'
+                      : activity?.status === 'waiting' &&
+                          !activity.executionUnconfirmed &&
+                          !messages.some((message) => message.role === 'tool' && !message.settled)
+                        ? '正在等待'
+                        : activity?.responsePhase === 'preparing' && blocks.length === 0
+                          ? '正在准备回复…'
+                          : undefined
+          : undefined;
+        const lastBlock = blocks.at(-1);
+        return (
+          <section
+            key={entry.key}
+            className="agent-turn conversation-trace-turn"
+            data-turn-status={
+              terminalStatus ?? activity?.status ?? (completed ? 'completed' : 'unknown')
+            }
+          >
+            {blocks.map((block, index) => {
+              const first = block[0]!;
+              if (!isConversationTraceStep(first)) {
+                return (
+                  <Fragment key={first.presentationKey ?? first.id}>
+                    <div className={cn('agent-turn-body', first.finalReply && 'agent-turn-final')}>
+                      {renderGroup(
+                        block,
+                        first.finalReply || (first === lastMessage && first.role === 'assistant')
+                          ? 'result'
+                          : 'process',
+                        false,
+                        streaming && first === lastMessage,
+                      )}
+                    </div>
+                  </Fragment>
+                );
+              }
+              const phaseActive =
+                !ended &&
+                lastTurnEntry &&
+                !activity?.executionUnconfirmed &&
+                block === lastBlock &&
+                (!activity || activity.status === 'running' || activity.status === 'waiting');
+              const tool = phaseActive ? latestRunningTraceTool(block) : undefined;
+              const trailing = block.at(-1);
+              const thinking =
+                phaseActive &&
+                !tool &&
+                (!activity || activity.status === 'running') &&
+                trailing?.role === 'thinking' &&
+                !trailing.settled &&
+                trailing.tracePending !== 'tool';
+              const working = tool
+                ? toolTraceTitle(tool, true)
+                : thinking
+                  ? '正在思考…'
+                  : undefined;
+              const steps = block.filter((item) => !item.tracePending);
+              const singleTool =
+                steps.length === 1 && steps[0]?.role === 'tool' ? steps[0] : undefined;
+              const summaryStep = tool ?? (thinking || !steps.length ? trailing : singleTool);
+              const summary =
+                working ??
+                ((singleTool ? toolTraceTitle(singleTool) : completedToolActions(steps)) ||
+                  (phaseActive && trailing?.tracePending === 'tool'
+                    ? '等待工具执行'
+                    : block.some((item) => item.role === 'tool')
+                      ? '工具执行'
+                      : '思考完成'));
+              const boundary = blocks[index - 1]?.[0];
+              const id = boundary ? traceKey(boundary) : `trace-turn:${entry.key}`;
+              if (expanded[id] === true) {
+                openTurns.push(id);
+                if (
+                  restore.current ||
+                  (lazyHistory &&
+                    knownEntries.current.has(entry.key) &&
+                    !mountedEntries.current.has(entry.key))
+                )
+                  restoredExpanded.current.add(id);
+              }
+              return (
+                <ConversationTrace
+                  key={id}
+                  id={id}
+                  steps={steps}
+                  summaryStep={summaryStep}
+                  label={summary}
+                  running={!!working}
+                  failed={!!singleTool && toolTextFailed(singleTool)}
+                  notice={
+                    phaseActive &&
+                    block.some((item) => item.toolStopping && !item.executionUnconfirmed) && (
+                      <p className="conversation-turn-notice" role="status">
+                        已请求停止，等待执行结果。
+                      </p>
+                    )
+                  }
+                  expanded={expanded}
+                  restoredExpanded={restoredExpanded.current}
+                  onToggle={onTraceToggle}
+                  renderTool={(item, open) => renderGroup([item], 'trace', open)}
+                  renderReasoning={renderReasoning}
+                />
+              );
+            })}
+            {waitingLabel && (
+              <small className="conversation-turn-notice" role="status">
+                {waitingLabel}
+              </small>
+            )}
+          </section>
+        );
+      }
       const responseLabel =
         active && thinking && !runningTool && (!activity || activity.status === 'running')
           ? '正在思考…'
@@ -1411,6 +1597,8 @@ export function Conversation({
     renderMessageContent,
     renderMessageAttachments,
     renderToolActivity,
+    traceTurns,
+    renderReasoning,
     childSessionIdsByTaskId,
     onOpenChildSession,
     openFile,
@@ -1515,6 +1703,7 @@ export function Conversation({
       pendingLoad.current = undefined;
       reading.current.follow = false;
       jumpedMarker.current = key;
+      traceDisclosure.current = false;
       writeScroll(element, top);
       reading.current.anchor = lazyHistory
         ? {
@@ -1547,6 +1736,7 @@ export function Conversation({
                 return;
               writtenScrollTop.current = undefined;
               jumpedMarker.current = undefined;
+              traceDisclosure.current = false;
               // Resume only at the actual bottom. A wider near-bottom zone
               // makes the following-state commit snap a manual scroll to the tail.
               // scrollTop is fractional while the two heights are rounded.
@@ -1629,6 +1819,7 @@ export function Conversation({
                 pendingLoad.current?.cancel();
                 pendingLoad.current = undefined;
                 reading.current.follow = true;
+                traceDisclosure.current = false;
                 reading.current.anchor = undefined;
                 jumpedMarker.current = undefined;
                 if (lazyHistory) {

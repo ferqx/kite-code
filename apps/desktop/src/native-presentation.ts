@@ -261,6 +261,25 @@ export function desktopConversationMessages(messages: readonly Message[]): Messa
   });
 }
 
+export function nativeReasoningSource(message: Message): string | undefined {
+  if (
+    message.role !== 'assistant' ||
+    message.compression ||
+    message.agentMessage ||
+    message.agentResult ||
+    message.contentFormat === 'unsupported' ||
+    message.outputBody?.readAvailability === 'unsupported' ||
+    message.sourceIds?.length !== 1
+  )
+    return;
+  if (message.outputBody)
+    return message.outputBody.reasoningBytes !== '0' &&
+      message.outputBody.executionId === message.sourceIds[0]
+      ? message.sourceIds[0]
+      : undefined;
+  return message.firstOutput === 'reasoning' ? message.sourceIds[0] : undefined;
+}
+
 export function desktopMessages(
   messages: readonly Message[],
   includeRunningCompression = false,

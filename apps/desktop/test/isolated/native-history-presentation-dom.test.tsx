@@ -673,9 +673,9 @@ for (const first of ['runs', 'tools'] as const) {
       await f.until(() => !!f.host.querySelector('[data-turn-status="completed"]'));
       expect(f.host.querySelector('.conversation-loading')).toBeNull();
       expect(f.host.querySelectorAll('.agent-turn')).toHaveLength(1);
-      expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
-        'false',
-      );
+      expect(
+        f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded'),
+      ).toBe('false');
       expect(f.host.textContent).toContain(final);
       const reply = f.host.querySelector('.agent-turn-final')!;
       const viewport = f.host.querySelector('.conversation-viewport')!;
@@ -684,22 +684,14 @@ for (const first of ['runs', 'tools'] as const) {
       });
       expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
       expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
-      expect(f.host.querySelector('.context-compacted')).toBeNull();
-      expect(f.host.textContent).not.toContain('状态待核对');
-      await act(async () =>
-        f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click(),
-      );
       expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
-      expect(f.host.querySelectorAll('.tool-activity-summary')).toHaveLength(1);
-      expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
-        'false',
-      );
-      expect(f.host.querySelector('.tool-activity')?.textContent).toContain('读取');
-      expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件');
+      expect(f.host.textContent).not.toContain('状态待核对');
+      expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('已读取文件');
+      expect(f.host.querySelector('.conversation-trace-steps')).toBeNull();
       expect(f.host.textContent).not.toContain(summary);
       expect(f.host.textContent).not.toContain(raw);
       await act(async () =>
-        f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+        f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
       );
       expect(
         [...f.host.querySelectorAll('.tool-step-target')].map((node) => node.textContent),
@@ -808,7 +800,6 @@ test('a failed cold historical tool check keeps history readable and publishes e
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
     expect(f.host.textContent).not.toContain('部分工具状态尚无法核实');
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
     expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
     expect(f.host.textContent).not.toContain(raw);
     // No complete Tool metadata has ever been admitted in this cold scope.
@@ -827,10 +818,10 @@ test('a failed cold historical tool check keeps history readable and publishes e
     );
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.tool-activity-summary'));
-    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toBe('读取文件');
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
+    expect(f.host.querySelector('.conversation-trace-trigger')?.textContent).toBe('已读取文件');
     await act(async () =>
-      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
     );
     expect(
       [...f.host.querySelectorAll('.tool-step-target')].map((node) => node.textContent),
@@ -872,13 +863,11 @@ test('reentering cached history restores the original DOM before fresh ownership
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     await act(async () =>
-      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
     );
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
-    expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
       'true',
     );
     const originalViewport = f.host.querySelector('.conversation-viewport')!,
@@ -896,11 +885,8 @@ test('reentering cached history restores the original DOM before fresh ownership
     expect(f.host.querySelector('.agent-turn-final') === originalReply).toBe(true);
     expect(f.host.querySelector('.tool-activity') === originalTools).toBe(true);
     expect(
-      f.host.querySelector('.agent-turn-process')?.getAttribute('data-restored-expanded'),
+      f.host.querySelector('.conversation-trace')?.getAttribute('data-restored-expanded'),
     ).toBe('true');
-    expect(f.host.querySelector('.tool-activity')?.getAttribute('data-restored-expanded')).toBe(
-      'true',
-    );
     expect(
       f.host.querySelector('fieldset.conversation-cache-entry')?.hasAttribute('aria-disabled'),
     ).toBe(false);
@@ -908,12 +894,18 @@ test('reentering cached history restores the original DOM before fresh ownership
     expect(copy.getAttribute('aria-disabled')).toBe('true');
     const beforeLocalActions = f.requests.length;
     await act(async () => copy.click());
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
+    );
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
+    );
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
     expect(f.requests.slice(beforeLocalActions)).toEqual([]);
     expect(f.host.querySelector('.agent-turn-final')).toBe(originalReply);
     expect(f.host.textContent).toContain(final);
@@ -923,21 +915,21 @@ test('reentering cached history restores the original DOM before fresh ownership
     await f.release('runs');
     expect(f.host.querySelector('.conversation-viewport') === originalViewport).toBe(true);
     expect(f.host.querySelector('.agent-turn-final') === originalReply).toBe(true);
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
-    expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
       'true',
     );
     expect(
-      f.host.querySelector('.agent-turn-process')?.getAttribute('data-restored-expanded'),
+      f.host.querySelector('.conversation-trace')?.getAttribute('data-restored-expanded'),
     ).toBeNull();
-    expect(f.host.querySelector('.tool-activity')?.getAttribute('data-restored-expanded')).toBe(
-      'true',
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
     );
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
+    );
     expect(
-      f.host.querySelector('.agent-turn-process')?.getAttribute('data-restored-expanded'),
+      f.host.querySelector('.conversation-trace')?.getAttribute('data-restored-expanded'),
     ).toBeNull();
     expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
     expect(f.host.textContent).not.toContain('状态待核对');
@@ -1013,12 +1005,12 @@ test('same-session history epoch recalibration keeps admitted readable content v
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     expect(f.host.textContent).toContain(final);
     await f.recalibrateHistory();
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
     await f.release('tools');
@@ -1027,7 +1019,7 @@ test('same-session history epoch recalibration keeps admitted readable content v
     await f.release('runs');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
       'false',
     );
   } finally {
@@ -1041,10 +1033,9 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     await act(async () =>
-      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
     );
     const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!,
       reply = f.host.querySelector('.message.assistant[data-final-reply="true"]'),
@@ -1068,8 +1059,7 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     expect(f.host.querySelector('.context-compacted')).toBe(compression);
     expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBe(input);
     expect(viewport.scrollTop).toBe(23);
-    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
-    expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
       'true',
     );
   } finally {
@@ -1090,7 +1080,7 @@ test('reopening the same history while metadata loads does not restart its pendi
     expectInitialStructurePending(f.host);
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
     expect(f.host.textContent).toContain(final);
   } finally {
     await f.close();
@@ -1103,10 +1093,12 @@ test('repeatedly selecting an in-flight target reuses the original selection req
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
+    );
     const reply = f.host.querySelector('.agent-turn-final')!,
-      process = f.host.querySelector('.agent-turn-process')!;
+      process = f.host.querySelector('.conversation-trace')!;
     f.holdNextSelection();
     await f.select('Other session');
     expectInitialStructurePending(f.host);
@@ -1285,30 +1277,29 @@ test('late verified child directory updates its direct row without replacing exp
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
-    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await f.until(() => !!f.host.querySelector('.conversation-trace-trigger'));
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!.click(),
+    );
     await f.until(() => !!f.host.querySelector('.child-agent-activity'));
     const child = f.host.querySelector('.child-agent-activity')!;
     expect(child.textContent).toContain('子 Agent');
     expect(child.querySelector<HTMLButtonElement>('button')!.disabled).toBe(true);
     expect(child.querySelector('[aria-expanded]')).toBeNull();
     expect(f.host.textContent).not.toContain('CHILD_RECEIPT_MUST_STAY_HIDDEN');
-    const ordinary = () => [...f.host.querySelectorAll<HTMLElement>('.tool-activity-aggregate')];
+    const ordinary = () => [
+      ...f.host.querySelectorAll<HTMLElement>(
+        '.conversation-trace-steps > .tool-activity:not(.child-agent-activity)',
+      ),
+    ];
     expect(ordinary()).toHaveLength(2);
     for (const row of ordinary()) {
       await act(async () =>
         row.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
       );
-      await act(async () =>
-        row
-          .querySelector<HTMLButtonElement>('.tool-activity-steps .tool-activity-summary')!
-          .click(),
-      );
     }
     const rows = ordinary();
-    const bodies = rows.map((row) =>
-      row.querySelector('.tool-activity-steps .tool-activity-content'),
-    );
+    const bodies = rows.map((row) => row.querySelector('.tool-activity-content'));
     expect(bodies.every(Boolean)).toBe(true);
     const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!;
     Object.defineProperties(viewport, {
@@ -1323,9 +1314,7 @@ test('late verified child directory updates its direct row without replacing exp
     await f.until(() => !!child.textContent?.includes('Verified child'));
     expect(f.host.querySelector('.child-agent-activity')).toBe(child);
     expect(ordinary()).toEqual(rows);
-    expect(
-      rows.map((row) => row.querySelector('.tool-activity-steps .tool-activity-content')),
-    ).toEqual(bodies);
+    expect(rows.map((row) => row.querySelector('.tool-activity-content'))).toEqual(bodies);
     expect(viewport.scrollTop).toBe(71);
     expect(f.host.textContent).not.toContain('CHILD_RECEIPT_MUST_STAY_HIDDEN');
   } finally {

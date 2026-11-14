@@ -1,4 +1,5 @@
 import type { ReadingState } from './Conversation';
+import { traceKey } from './ConversationTrace';
 import type { Message } from './types';
 
 const MAX_ENTRIES = 32;
@@ -47,9 +48,13 @@ export function pruneReadingState(
   const addTurn = (id: string) => {
     valid.add(`turn:${id}:complete`);
     valid.add(`turn:${id}:process`);
+    valid.add(`trace-turn:turn:${id}`);
   };
   if (activeTurnId) addTurn(activeTurnId);
   for (const message of messages) {
+    valid.add(traceKey(message));
+    if (message.systemKind === 'turn_timing' && message.presentationKey)
+      valid.add(`trace-turn:turn:submission:${JSON.stringify(message.presentationKey)}`);
     valid.add(message.id);
     valid.add(`activity:${message.id}`);
     valid.add(`activity-group:${message.id}`);

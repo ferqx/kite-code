@@ -550,6 +550,23 @@ function fixture(
       item.run!.createdAt = Date.now() - 10000;
       parentMessage.runId = item.run!.id;
     },
+    streamingParent: () => {
+      parentMessage.status = 'incomplete';
+      parentMessage.sourceIds = ['parent-model'];
+      parentMessage.firstOutput = 'content';
+      executions = [
+        {
+          ...item.execution,
+          id: 'parent-model',
+          kind: 'model',
+          definitionId: 'model',
+          parentExecutionId: null,
+          runId: item.run!.id,
+          status: 'running',
+          result: null,
+        },
+      ];
+    },
     render: (testDiagnostics = false) =>
       act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
     unmount: () => act(async () => root.render(null)),
@@ -1117,9 +1134,10 @@ test('repeated reply calibrations retain controls and transcript while history f
   }
 });
 
-test('ordinary history and View refreshes retain reply status while actual read failures retry in the background', async () => {
+test('ordinary history and View refreshes retain actual streaming reply status while read failures retry', async () => {
   const f = fixture(true);
   f.runningParent();
+  f.streamingParent();
   try {
     await f.render();
     await f.click('Original');
@@ -1129,15 +1147,7 @@ test('ordinary history and View refreshes retain reply status while actual read 
       input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
     expect(status.textContent).toBe('正在回复…');
     expect(label).not.toBeNull();
-    const processSummary = f.host.querySelector('.agent-turn-summary-static');
-    expect(processSummary?.tagName).toBe('DIV');
-    expect(processSummary?.getAttribute('role')).toBe('status');
-    expect(processSummary?.textContent).toMatch(/^处理过程/);
-    expect(processSummary?.querySelector('button')).toBeNull();
-    expect(processSummary?.getAttribute('aria-expanded')).toBeNull();
-    expect(f.host.querySelector('.agent-turn-summary')?.textContent ?? '').not.toMatch(
-      /正在进行中|正在处理|正在思考|已处理/,
-    );
+    expect(f.host.querySelector('.conversation-trace')).toBeNull();
     for (let index = 0; index < 8; index++) {
       f.holdParent();
       await f.updateParent(`running reply ${index}`);
@@ -1679,7 +1689,9 @@ test('Native live tool observation failures stay silent outside explicit diagnos
     try {
       await f.render(diagnostics);
       await f.click('Original');
-      expect(f.host.querySelector('.tool-activity')).not.toBeNull();
+      const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+      expect(trace.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => trace.click());
       await f.refreshing(true);
       const toolObservationNotices = () =>
         Array.from(f.host.querySelectorAll('.agent-turn p[role="status"]')).filter(
@@ -1742,21 +1754,11 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       await f.observeExecutionOwner('held');
       expect(warning()).toBeNull();
       expect(sidebarSpinner()).not.toBeNull();
-      expect(f.host.querySelector('.response-status')?.textContent).toBe('正在回复…');
+      expect(f.host.querySelector('.response-status')).toBeNull();
       expect(f.host.querySelector('button[aria-label="停止任务"]')).not.toBeNull();
       if (waiting)
-        expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('正在等待');
-      else {
-        const processSummary = f.host.querySelector('.agent-turn-summary-static');
-        expect(processSummary?.tagName).toBe('DIV');
-        expect(processSummary?.getAttribute('role')).toBe('status');
-        expect(processSummary?.textContent).toMatch(/^处理过程/);
-        expect(processSummary?.querySelector('button')).toBeNull();
-        expect(processSummary?.getAttribute('aria-expanded')).toBeNull();
-        expect(f.host.querySelector('.agent-turn-summary')?.textContent ?? '').not.toMatch(
-          /正在进行中|正在处理|正在思考|已处理/,
-        );
-      }
+        expect(f.host.querySelector('.conversation-turn-notice')?.textContent).toBe('正在等待');
+      else expect(f.host.querySelector('.conversation-trace')).toBeNull();
       expect(f.observedRun()?.status).toBe(waiting ? 'waiting_execution' : 'running');
       expect(f.host.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
         waiting ? 'waiting' : 'running',
@@ -1909,20 +1911,22 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
     await f.releaseMetadata();
     await f.render();
     await f.click('Original');
-    await f.waitForText('创建子 Agent读取文件');
+    await f.waitForText('已创建子 Agent · 已读取文件');
+    const trace = f.host.querySelector<HTMLButtonElement>('.conversation-trace-trigger')!;
+    expect(trace.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => trace.click());
     const child = f.host.querySelector<HTMLButtonElement>(
       '.conversation .child-agent-activity button[aria-label="查看子 Agent 详情：Live child"]',
     )!;
     expect(child).not.toBeNull();
     expect(child.disabled).toBe(false);
     expect(child.getAttribute('aria-expanded')).toBeNull();
-    expect(child.closest('.tool-activity-steps')).toBeNull();
-    const ordinary = f.host.querySelector<HTMLButtonElement>(
-      '.conversation .tool-activity-aggregate button.tool-activity-summary',
+    expect(child.closest('.conversation-trace-steps')).not.toBeNull();
+    const ordinary = f.host.querySelector<HTMLElement>(
+      '.conversation-trace-steps > .tool-activity:not(.child-agent-activity)',
     )!;
     expect(ordinary).not.toBeNull();
-    expect(ordinary.textContent).toContain('读取文件');
-    expect(ordinary.getAttribute('aria-expanded')).toBe('false');
+    expect(ordinary.textContent).toContain('已读取');
     expect(
       child.compareDocumentPosition(ordinary) &
         child.ownerDocument.defaultView!.Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1941,7 +1945,7 @@ test('a child carrier inside a mixed tool activity still opens its exact read-on
     );
     expect(f.host.querySelector('.session-tab-child')?.textContent).toContain('Child prefix');
     expect(f.host.querySelector('.session-tab-child [contenteditable]')).toBeNull();
-    expect(ordinary.getAttribute('aria-expanded')).toBe('false');
+    expect(trace.getAttribute('aria-expanded')).toBe('true');
     expect(
       f.requests.filter((request) => request.method === 'background.child.open'),
     ).toMatchObject([{ method: 'background.child.open', generation: 1, executionId: 'job-1' }]);
@@ -2246,29 +2250,14 @@ for (const diagnostics of [false, true])
         expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('已取消');
         expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
         const message = () => f.host.querySelector('[data-message-id="parent-message"]');
-        const summary = () => f.host.querySelector('.agent-turn-summary');
         const messageReads = () =>
           f.requests.filter((request) => request.method === 'messages').length;
         const readsBeforeToggle = messageReads();
         expect(message()?.textContent).toContain('Saved parent content after reconciliation');
-        if (status === 'interrupted') {
-          expect(summary()?.tagName).toBe('BUTTON');
-          expect(summary()?.getAttribute('aria-expanded')).toBe('true');
-          await act(async () =>
-            f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
-          );
-          expect(summary()?.getAttribute('aria-expanded')).toBe('false');
-          expect(message()).toBeNull();
-          await act(async () =>
-            f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
-          );
-          expect(summary()?.getAttribute('aria-expanded')).toBe('true');
-          expect(message()?.textContent).toContain('Saved parent content after reconciliation');
-        } else {
-          expect(summary()?.tagName).toBe('DIV');
-          expect(summary()?.getAttribute('aria-expanded')).toBeNull();
-          expect(summary()?.querySelector('button')).toBeNull();
-        }
+        expect(f.host.querySelector('.conversation-trace')).toBeNull();
+        expect(f.host.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe(
+          status === 'interrupted' ? 'aborted' : 'completed',
+        );
         expect(messageReads()).toBe(readsBeforeToggle);
         expect(
           f.requests.some((request) =>
@@ -2293,9 +2282,13 @@ test('an owner observation for an earlier Run cannot mark a later active Run unc
     expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
     f.replaceParentRun('later-parent-run');
     f.runningParent();
+    f.streamingParent();
     await f.updateParent('Later active parent content');
     expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
-    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(f.host.querySelector('.conversation .message.assistant')?.textContent).toContain(
+      'Later active parent content',
+    );
+    expect(f.host.querySelector('button[aria-label="停止任务"]')).not.toBeNull();
     expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
     await f.observeExecutionOwner('unknown');
     expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);

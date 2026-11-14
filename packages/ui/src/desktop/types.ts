@@ -13,6 +13,12 @@ export interface Message {
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
   readonly settled: boolean;
+  /** Host-observed text streaming from the exact current model execution. */
+  readonly streaming?: boolean;
+  /** Original assistant message whose public reasoning can be read on disclosure. */
+  readonly reasoningSource?: string;
+  /** Handoff status shown in the title until the original Model or Tool step arrives. */
+  readonly tracePending?: 'reasoning' | 'tool';
   /** Client-observed reasoning segment timing, in epoch milliseconds. */
   readonly thinkingStartedAt?: number;
   readonly thinkingEndedAt?: number;
@@ -155,6 +161,11 @@ export interface Message {
     readonly cancelRequested?: boolean;
   };
   readonly toolName?: string;
+  /** A verified write receipt establishes creation of a new file. */
+  readonly fileCreated?: true;
+  readonly toolStopping?: boolean;
+  /** Order in which this reading first observed the tools start executing. */
+  readonly toolStartOrder?: number;
   /** Count from a verified successful original image Tool receipt, never model-authored text. */
   readonly toolImageCount?: number;
   /** Host-confirmed display classification; tool aggregation does not require it. */

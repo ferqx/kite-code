@@ -7,6 +7,7 @@ type Reply = { identity: string; text: string } | undefined;
 
 function executionMetadata(previous: Transcript, current: Transcript): Transcript['messages'] {
   const lifecycle = (message: Transcript['messages'][number]) =>
+    message.tracePending ||
     ['turn_timing', 'turn_terminal', 'turn_failure', 'model_connection'].includes(
       message.systemKind ?? '',
     );
@@ -23,9 +24,15 @@ function executionMetadata(previous: Transcript, current: Transcript): Transcrip
     if (lifecycle(message)) return next ? [next] : [];
     if (!next) return [message];
     // Preserve verified tool grouping while the metadata/body readers are held.
-    // Only the same-message Run-dependent completion/copy facts are replaced.
+    // Keep the observed model phase current independently of tool metadata.
     return [
-      { ...message, settled: next.settled, finalReply: next.finalReply, copyText: next.copyText },
+      {
+        ...message,
+        settled: next.settled,
+        streaming: next.streaming,
+        finalReply: next.finalReply,
+        copyText: next.copyText,
+      },
     ];
   });
   const ids = new Set(messages.map((message) => message.id));

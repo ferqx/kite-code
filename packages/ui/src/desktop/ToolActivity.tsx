@@ -6,6 +6,7 @@ import {
   File01Icon,
   FileSearchIcon,
   Folder01Icon,
+  GitBranchIcon,
   Globe02Icon,
   Image02Icon,
   Search01Icon,
@@ -371,28 +372,25 @@ function toolDetailText(message: Message, includeProgress = false): string {
     : content;
 }
 
-function toolIcon(message: Message) {
+export function toolIcon(message: Message) {
+  if (isShellMessage(message)) return TerminalIcon;
   switch (message.toolName) {
     case 'view_images':
       return Image02Icon;
     case 'read_file':
     case 'read_mcp_resource':
+    case 'mcp.resources.read':
     case 'load_skill':
     case 'read_skill_resource':
       return BookOpen01Icon;
     case 'search_content':
     case 'tool_search':
     case 'list_mcp_tools':
+    case 'mcp.tools.search':
       return Search01Icon;
     case 'search_files':
     case 'glob':
       return FileSearchIcon;
-    case 'shell_execute':
-    case 'shell.launch':
-    case 'shell.read':
-    case 'shell.wait':
-    case 'shell.stop':
-      return TerminalIcon;
     case 'edit_file':
     case 'write_file':
     case 'files.write_path':
@@ -402,12 +400,21 @@ function toolIcon(message: Message) {
     case 'web_fetch':
       return Globe02Icon;
     case 'task':
+    case 'spawn_agent':
+    case 'follow_up_agent':
+    case 'send_agent_message':
+    case 'wait_agent_events':
+    case 'list_agents':
+    case 'interrupt_agent':
       return BotIcon;
     case 'ask_user':
       return UserQuestion01Icon;
     case 'list_mcp_resources':
     case 'mcp.resources.list':
+    case 'files.list':
       return Folder01Icon;
+    case 'git.worktree':
+      return GitBranchIcon;
     case 'write_plan':
     case 'update_plan':
     case 'request_plan_review':
@@ -427,12 +434,25 @@ function toolIcon(message: Message) {
   }
 }
 
-function activityAction(message: Message): string {
+function activityAction(message: Message, trace = false): string {
+  if (trace && isShellMessage(message))
+    return {
+      execute: '运行命令',
+      launch: '启动后台 Shell',
+      read: '查看命令输出',
+      wait: '等待命令',
+      stop: '请求停止命令',
+    }[shellOperation(message)];
+  if (trace && message.fileCreated) return '创建文件';
   switch (message.toolName) {
     case 'view_images':
       return '查看图像';
     case 'write_file':
+    case 'files.write_path':
+      if (trace) return '写入文件';
+      return '编辑文件';
     case 'edit_file':
+    case 'files.edit_path':
       return '编辑文件';
     case 'read_file':
       return '读取文件';
@@ -486,12 +506,51 @@ function activityAction(message: Message): string {
     case 'request_plan_review':
       return '请求计划审阅';
     default:
-      return '使用工具';
+      return (trace && (message.title || message.toolName)) || '使用工具';
   }
 }
 
 function activityLabel(messages: readonly Message[]): string {
-  return [...new Set(messages.map(activityAction))].join('');
+  return [...new Set(messages.map((message) => activityAction(message)))].join('');
+}
+
+function toolTraceLabel(message: Message, running = false): string {
+  const shell = isShellMessage(message);
+  if (running) return `正在${shell ? activityAction(message, true) : toolActionTitle(message)}`;
+  if (message.fileCreated) return '已创建文件';
+  if (toolTextFailed(message)) {
+    if (!shell) return toolActionTitle(message);
+    if (shellOperation(message) === 'execute' && message.shell?.jobStatus === 'failed')
+      return '已运行命令';
+    return activityAction(message, true);
+  }
+  return shell ? shellTitle(message) : toolTitle(message);
+}
+
+export function toolTraceTitle(message: Message, running = false): string {
+  const shell = isShellMessage(message);
+  const target = toolTarget(message) ?? (shell ? shellCommand(message) : undefined);
+  return [toolTraceLabel(message, running), target?.replace(/\s+/g, ' ').trim().slice(0, 512)]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function toolTextFailed(message: Message): boolean {
+  return traceStatus(message) === 'error' || message.shell?.jobStatus === 'failed';
+}
+
+export function completedToolActions(messages: readonly Message[]): string {
+  const actions = new Set<string>();
+  for (const message of messages) {
+    // A finite Shell process can exit unsuccessfully and still have run.
+    const ran =
+      isShellMessage(message) &&
+      shellOperation(message) === 'execute' &&
+      message.shell?.jobStatus === 'failed';
+    if ((message.status === 'completed' || ran) && message.dispatchCommitted !== false)
+      actions.add(`已${activityAction(message, true)}`);
+  }
+  return [...actions].join(' · ');
 }
 
 /** New adapters emit checking; saved UI snapshots may still carry reviewing. */
@@ -971,9 +1030,14 @@ export function ToolActivity({
   unverified,
   metadataPending,
   aggregate = false,
+  inTrace = false,
+  directTraceDetails = false,
 }: {
   /** Stable outer activity, including its first tool before more calls arrive. */
   aggregate?: boolean;
+  /** The conversation Trace owns grouping and disclosure defaults. */
+  inTrace?: boolean;
+  directTraceDetails?: boolean;
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
   messages: readonly Message[];
@@ -1062,7 +1126,7 @@ export function ToolActivity({
   const detailLabel = itemIssue ? '工具异常详情' : '工具详情';
   // A failed original Tool receipt always keeps its own failure presentation.
   const agent = !grouped && !itemIssue && message.status !== 'cancelled' ? childAgent : undefined;
-  const open = expanded ?? (imageOnly || imageDefaultOpen);
+  const open = directTraceDetails || (expanded ?? (!inTrace && (imageOnly || imageDefaultOpen)));
   const imageThumbnails = () =>
     renderImages && (
       <div className="tool-image-thumbnails">
@@ -1086,7 +1150,7 @@ export function ToolActivity({
   const summaryTraceStatus =
     running || pendingReview
       ? 'running'
-      : !grouped && messages.some((item) => traceStatus(item) === 'error')
+      : !grouped && (inTrace ? toolTextFailed(message) : traceStatus(message) === 'error')
         ? 'error'
         : messages.some((item) => traceStatus(item) === 'pending')
           ? 'pending'
@@ -1121,9 +1185,11 @@ export function ToolActivity({
         ? askMultiple
           ? `询问用户 · ${message.status === 'completed' && !ask.cancelled ? '已回答 ' : ''}${ask.questions.length} 项`
           : '询问用户'
-        : shell
-          ? shellTitle(message)
-          : toolTitle(message);
+        : inTrace
+          ? toolTraceLabel(message)
+          : shell
+            ? shellTitle(message)
+            : toolTitle(message);
   const target = imageOnly
     ? undefined
     : ask
@@ -1241,7 +1307,7 @@ export function ToolActivity({
             : `${label}${!grouped && accessibleStatus ? ` · ${accessibleStatus}` : ''}`
         }
       >
-        {agent ? (
+        {directTraceDetails && canExpand ? null : agent ? (
           <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
             <Button
               variant="ghost"

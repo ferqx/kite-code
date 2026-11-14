@@ -226,6 +226,8 @@ export interface SessionPageProps {
   renderMessageContent?: (message: Message) => ReactNode;
   renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
+  traceTurns?: boolean;
+  renderReasoning?: (message: Message, open: boolean) => ReactNode;
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
   turnActivity?: TurnActivity;
   loading: boolean;
@@ -1285,6 +1287,8 @@ function SessionPageContent({
       renderMessageContent={props.renderMessageContent}
       renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
+      traceTurns={props.traceTurns}
+      renderReasoning={props.renderReasoning}
       turnActivity={props.turnActivity}
       lazyHistory={keepAlive}
       messageNavigation

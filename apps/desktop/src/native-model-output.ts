@@ -70,6 +70,15 @@ export async function readNativeModelOutput(
     throw cause;
   }
 }
+
+/** Inline public Model output uses the same scoped reader as artifact-backed bodies. */
+export async function readNativeReasoning(
+  input: NativeModelBodyRead & { runId: string },
+): Promise<string> {
+  const snapshot = await readNativeModelBody(input, 'modelOutput', verifyModelOutputSnapshot);
+  if (snapshot.runId !== input.runId) throw new ClientError('model_output_identity_mismatch');
+  return snapshot.output.reasoning;
+}
 export async function readNativeModelBody<
   S extends {
     storeId: string;

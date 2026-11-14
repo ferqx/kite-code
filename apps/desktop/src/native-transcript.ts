@@ -4,7 +4,7 @@ import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/deskto
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { nativeModelConnections } from './native-model-connections';
-import { desktopMessages } from './native-presentation';
+import { desktopMessages, nativeReasoningSource } from './native-presentation';
 import {
   desktopToolMessage,
   desktopToolPresentation,
@@ -318,6 +318,7 @@ export function desktopTranscript({
   fullReply,
   compressionProgress,
   compressionMessages = [],
+  traceTurns = false,
 }: {
   messages: readonly Message[];
   runs: readonly NativeRunFact[];
@@ -328,6 +329,7 @@ export function desktopTranscript({
   fullReply?: (message: Message) => string | undefined;
   compressionProgress?: NativeSelection['compressionProgress'];
   compressionMessages?: NativeSelection['compressionMessages'];
+  traceTurns?: boolean;
 }): { messages: DesktopMessage[]; turnActivity?: TurnActivity } {
   const observed = new Map(
     runs.filter((run) => presentableRun(run, storeId, sessionId)).map((run) => [run.id, run]),
@@ -567,6 +569,102 @@ export function desktopTranscript({
         settled: false,
       });
   }
+  const active = [...observed.values()].find((run) => run.isActive);
+  if (traceTurns) {
+    const byId = new Map(executions.map((execution) => [execution.id, execution]));
+    const activeTurn = active && identity(active.id);
+    const reasoningKey = (turnId: string, executionId: string) =>
+      JSON.stringify(['native-reasoning', turnId, executionId]);
+    const lastModel =
+      active &&
+      executions
+        .filter(
+          (execution) =>
+            execution.kind === 'model' &&
+            execution.parentExecutionId == null &&
+            execution.runId === active.id &&
+            execution.sessionId === sessionId &&
+            execution.originStoreId === active.originStoreId &&
+            execution.id !== compressionProgress?.executionId,
+        )
+        .at(-1);
+    const currentModel =
+      lastModel && ['dispatching', 'running'].includes(lastModel.status) ? lastModel : undefined;
+    let lastModelSeen = false;
+    const lastAction =
+      active &&
+      messages
+        .filter(
+          (message) =>
+            !message.originMessage &&
+            !message.compression &&
+            !message.agentMessage &&
+            !message.agentResult &&
+            message.sessionId === sessionId &&
+            message.runId === active.id,
+        )
+        .at(-1);
+    const projected = modeled.flatMap((model, index): DesktopMessage[] => {
+      const message = messages[index];
+      if (!message || model.systemKind || message.role !== 'assistant' || !model.turnId)
+        return [model];
+      const source = message.sourceIds?.length === 1 ? message.sourceIds[0] : undefined;
+      const running = !!currentModel && currentModel.id === source && model.turnId === activeTurn;
+      const execution = source && byId.get(source);
+      const visibleText =
+        !!message.content || !!(message.outputBody && message.outputBody.contentBytes !== '0');
+      if (lastModel?.id === source && model.turnId === activeTurn) lastModelSeen = true;
+      const reasoning = nativeReasoningSource(message);
+      const thought: DesktopMessage | undefined = reasoning
+        ? {
+            id: `${message.id}:reasoning`,
+            presentationKey: reasoningKey(model.turnId, reasoning),
+            turnId: model.turnId,
+            role: 'thinking',
+            text: '',
+            reasoningSource: message.id,
+            settled:
+              visibleText ||
+              model.settled ||
+              (!running && (model.turnId !== activeTurn || !!execution || !!currentModel)),
+          }
+        : undefined;
+      if (!visibleText && model.role === 'thinking') return thought ? [thought] : [];
+      if (model.presentation === 'hidden' || (!visibleText && model.settled && !model.finalReply))
+        return thought ? [thought] : [model];
+      if (
+        !visibleText &&
+        !model.hasAttachments &&
+        !model.finalReply &&
+        message.contentFormat !== 'unsupported' &&
+        message.outputBody?.readAvailability !== 'unsupported'
+      )
+        return thought ? [thought] : [];
+      const streaming = !!visibleText && !model.settled && running;
+      return [...(thought ? [thought] : []), { ...model, streaming }];
+    });
+    const waitingForTool =
+      lastAction?.role === 'assistant' &&
+      (lastAction.firstOutput === 'tool_calls' ||
+        !!lastAction.toolCalls?.length ||
+        !!lastAction.outputBody?.toolCallCount);
+    const waitingForModelMessage =
+      lastModel && !lastModelSeen && (currentModel || lastModel.status === 'succeeded');
+    if (activeTurn && (waitingForModelMessage || waitingForTool)) {
+      const source =
+        (waitingForModelMessage ? lastModel?.id : lastAction?.sourceIds?.[0]) ?? activeTurn;
+      projected.push({
+        id: `${source}:trace-pending`,
+        presentationKey: reasoningKey(activeTurn, source),
+        turnId: activeTurn,
+        role: 'thinking',
+        text: '',
+        settled: false,
+        tracePending: waitingForModelMessage ? 'reasoning' : 'tool',
+      });
+    }
+    modeled.splice(0, modeled.length, ...projected);
+  }
   for (const run of observed.values()) {
     const turnId = identity(run.id);
     modeled.push({
@@ -648,7 +746,6 @@ export function desktopTranscript({
   const failedConnections = new Set(
     modeled.filter((message) => message.modelConnectionFailure).map((message) => message.turnId),
   );
-  const active = [...observed.values()].find((run) => run.isActive);
   return {
     // An old SQL running record cannot establish current execution. Only the
     // matching hot observation above may make that attempt a visible live row.

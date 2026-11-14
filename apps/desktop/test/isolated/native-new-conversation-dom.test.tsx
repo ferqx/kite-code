@@ -4198,7 +4198,7 @@ for (const body of [
 test('the first reply status follows the original submission into the dispatched model and visible stream', async () => {
   const executions: Execution[] = [];
   const f = fixture(true, true, 'accept_edits', { deferFirstRun: true, executions });
-  const statuses = () => [...f.host.querySelectorAll('.agent-turn > .response-status')];
+  const statuses = () => [...f.host.querySelectorAll('.agent-turn .response-status')];
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
@@ -4206,9 +4206,10 @@ test('the first reply status follows the original submission into the dispatched
     await f.chooseModel();
     await f.click('发送首条消息');
     const user = f.host.querySelector('.message.user')!;
-    const status = statuses()[0]!;
+    const status = f.host.querySelector('.conversation-turn-notice')!;
     const expectStatus = (label: string) => {
-      expect(statuses()).toEqual([status]);
+      expect(f.host.querySelector('.conversation-turn-notice')).toBe(status);
+      expect(statuses()).toHaveLength(0);
       expect(status.textContent).toBe(label);
       expect([...f.host.querySelectorAll('.message.user')]).toEqual([user]);
       expect(
@@ -4260,7 +4261,9 @@ test('the first reply status follows the original submission into the dispatched
       cancelRequestedAt: null,
     });
     await f.refreshFacts();
-    expectStatus('正在思考…');
+    const thinking = f.host.querySelector('.conversation-trace-line');
+    expect(thinking?.textContent).toBe('正在思考…');
+    expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant')).toBeNull();
     const reply: Message = {
       id: 'first-reply',
@@ -4270,9 +4273,14 @@ test('the first reply status follows the original submission into the dispatched
       role: 'assistant',
       status: 'incomplete',
       content: '首段正文',
+      firstOutput: 'reasoning',
+      sourceIds: ['first-model'],
     };
     await f.publishMessages([input, reply], [run]);
-    expectStatus('正在回复…');
+    expect(statuses().map((entry) => entry.textContent)).toEqual(['正在回复…']);
+    const info = statuses()[0]!.closest('.message-meta');
+    expect(info).not.toBeNull();
+    expect(f.host.querySelector('.conversation-trace-line')).toBe(thinking);
     const visibleReply = f.host.querySelector('.message.assistant .typeset-chat');
     expect(visibleReply?.textContent).toBe('首段正文');
     const terminal: Run = { ...run, status: 'completed', isActive: false, finishedAt: 2 };
@@ -4280,9 +4288,12 @@ test('the first reply status follows the original submission into the dispatched
     await f.publishMessages([input, reply], [terminal]);
     expect(statuses()).toHaveLength(0);
     expect(f.host.querySelector('.message.assistant .typeset-chat')).toBe(visibleReply);
-    expect(f.host.querySelector('.agent-turn-process')?.getAttribute('data-state')).toBe('open');
+    expect(f.host.querySelector('.conversation-trace-trigger')?.getAttribute('aria-expanded')).toBe(
+      'false',
+    );
     await f.publishMessages([input, { ...reply, status: 'complete' }], [terminal]);
     expect(statuses()).toHaveLength(0);
+    expect(f.host.querySelector('.agent-turn .message.assistant .message-meta')).toBe(info);
     expect(f.host.querySelectorAll('.agent-turn-final .message.assistant')).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
   } finally {

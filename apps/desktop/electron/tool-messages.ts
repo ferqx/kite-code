@@ -18,6 +18,7 @@ import {
 } from '../src/tool-messages-bridge';
 import { NativeMcpToolLabelBudget, nativeMcpToolLabel } from './mcp-tool-label';
 import {
+  nativeFileCreationCandidate,
   nativeLiveShellInputFact,
   nativeToolMessageEligible,
   nativeToolMessageFact,
@@ -425,9 +426,11 @@ export class NativeToolMessages {
           execution.definitionId === 'git.worktree' &&
           execution.definitionVersion === '1' &&
           ['failed', 'outcome_unknown'].includes(execution.status);
+        const creatingFile = nativeFileCreationCandidate(execution);
         if (
           execution.runId &&
           (worktreeIssue ||
+            creatingFile ||
             (execution.status === 'succeeded' &&
               ((execution.definitionId === 'task.message' && execution.definitionVersion === '1') ||
                 (execution.definitionId === 'files.read' &&
@@ -437,7 +440,10 @@ export class NativeToolMessages {
           receiptRun = receiptRuns.get(execution.runId);
           if (
             !receiptRuns.has(execution.runId) ||
-            (!receiptRun && execution.definitionId !== 'task.message' && !worktreeIssue)
+            (!receiptRun &&
+              execution.definitionId !== 'task.message' &&
+              !worktreeIssue &&
+              !creatingFile)
           ) {
             try {
               receiptRun = await this.client.getRun(execution.runId, {
@@ -447,7 +453,8 @@ export class NativeToolMessages {
             } catch (cause) {
               this.check(lease);
               // Optional acknowledgment classification cannot withdraw the original Tool result.
-              if (execution.definitionId !== 'task.message' && !worktreeIssue) throw cause;
+              if (execution.definitionId !== 'task.message' && !worktreeIssue && !creatingFile)
+                throw cause;
             }
             receiptRuns.set(execution.runId, receiptRun);
           }

@@ -121,7 +121,7 @@ import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
 import { createNativeModelInputPort } from './native-model-input';
-import { readNativeModelOutput } from './native-model-output';
+import { readNativeModelOutput, readNativeReasoning } from './native-model-output';
 import { NativeModelOutputMessage } from './native-model-output-message';
 import {
   type NativeModelChoice,
@@ -138,6 +138,7 @@ import {
 } from './native-presentation';
 import { afterNativePresentation } from './native-presentation-frame';
 import { NativeProviderModelSettings } from './native-provider-model-settings';
+import { NativeReasoning } from './native-reasoning';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult } from './native-result';
 import { useNativeScheduledTasks } from './native-scheduled-tasks';
@@ -3377,6 +3378,7 @@ function NativeDesktopContent({
         : selection.compressionProgress,
       storeId: selection.storeId,
       sessionId: selection.session.id,
+      traceTurns: true,
       fullReply: (message) => {
         const body = verifiedReplyBodies.current.get(
           JSON.stringify([replyDisplayScope, message.id]),
@@ -4770,7 +4772,7 @@ function NativeDesktopContent({
     controls: Parameters<NonNullable<SessionPageProps['renderToolActivity']>>[1],
     ordinarySegment = false,
   ): ReactNode => {
-    const aggregate = !!group[0]?.presentationGroupId || group.length > 1;
+    const aggregate = !!controls.aggregate;
     const displayTools = group.flatMap((model) => {
       const fact =
         toolMessages.entries.find((entry) => entry.messageId === model.id) ??
@@ -4812,6 +4814,7 @@ function NativeDesktopContent({
       return childOperation(model) ? (
         <ToolActivity
           {...props}
+          inTrace={controls.inTrace}
           childAgent={
             props.childAgent ??
             (model.status === 'completed'
@@ -4838,7 +4841,10 @@ function NativeDesktopContent({
     // ordinary Tool disclosures, preserving the original tool order and the
     // independent expansion identities of ordinary segments on either side.
     // Establish segment owners before a child arrives, so ongoing rows never remount.
-    if (!ordinarySegment) {
+    if (!ordinarySegment && controls.inTrace) {
+      const agent = group[0] && agentTool(group[0]);
+      if (agent) return agent;
+    } else if (!ordinarySegment) {
       const rows: ReactNode[] = [];
       let ordinary: (typeof group)[number][] = [];
       let childBoundary: (typeof group)[number] | undefined;
@@ -4890,22 +4896,27 @@ function NativeDesktopContent({
         )
         .map((model) => model.id),
     );
-    const liveNotices = group.map((model) => {
-      const live = liveTools.find((entry) => entry.message.id === model.id);
-      const status =
-        !live || executionUnconfirmed
-          ? undefined
-          : live.execution.cancelRequestedAt !== null
-            ? '已请求停止，等待执行结果。'
-            : diagnostics && (selection?.viewLoading || selection?.permissionUnavailable)
-              ? '上次确认状态'
-              : undefined;
-      return status ? (
-        <p key={model.id} role="status">
-          {status}
-        </p>
-      ) : null;
-    });
+    const liveNotices =
+      controls.inTrace && !diagnostics
+        ? []
+        : group.map((model) => {
+            const live = liveTools.find((entry) => entry.message.id === model.id);
+            const status =
+              !live || executionUnconfirmed
+                ? undefined
+                : live.execution.cancelRequestedAt !== null
+                  ? controls.inTrace
+                    ? undefined
+                    : '已请求停止，等待执行结果。'
+                  : diagnostics && (selection?.viewLoading || selection?.permissionUnavailable)
+                    ? '上次确认状态'
+                    : undefined;
+            return status ? (
+              <p key={model.id} role="status">
+                {status}
+              </p>
+            ) : null;
+          });
     // Each receipt owns its verification and reader independently. An unknown
     // sibling must not withdraw another tool's verified file actions or output.
     const originalTool = (
@@ -4915,6 +4926,8 @@ function NativeDesktopContent({
     ) => (
       <ToolActivity
         aggregate={false}
+        inTrace={controls.inTrace}
+        directTraceDetails={controls.directTraceDetails}
         unverified
         metadataPending={toolMessages.pendingMessageIds.has(model.id)}
         messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
@@ -4986,14 +4999,17 @@ function NativeDesktopContent({
           aggregate={aggregate}
           unverified={unverified.size > 0}
           messages={models}
-          renderItem={(model) =>
-            unverified.has(model.id)
-              ? originalTool(
-                  group.find((original) => original.id === model.id)!,
-                  controls.expandedItems[model.presentationKey ?? model.id],
-                  (open) => controls.onToggleItem(model.presentationKey ?? model.id, open),
-                )
-              : agentTool(model)
+          renderItem={
+            aggregate
+              ? (model) =>
+                  unverified.has(model.id)
+                    ? originalTool(
+                        group.find((original) => original.id === model.id)!,
+                        controls.expandedItems[model.presentationKey ?? model.id],
+                        (open) => controls.onToggleItem(model.presentationKey ?? model.id, open),
+                      )
+                    : agentTool(model)
+              : undefined
           }
           renderChildren={() => null}
           renderImages={renderToolImages}
@@ -5223,6 +5239,53 @@ function NativeDesktopContent({
       renderMessageContent={renderNativeMessage}
       renderMessageAttachments={renderNativeAttachments}
       renderToolActivity={renderNativeTools}
+      traceTurns
+      renderReasoning={(model, open) => {
+        const message = model.reasoningSource && messagesById.get(model.reasoningSource);
+        const original = message || undefined;
+        const executionId = original?.sourceIds?.[0];
+        const runId = original?.originMessage?.runId ?? original?.runId;
+        if (!original || !executionId || !runId || !selection || !state) return null;
+        const current = state.generation;
+        const nonce = viewIntent.current;
+        const readable =
+          selection.canReadModelOutput &&
+          !directory?.unavailable &&
+          historyState.phase !== 'unavailable' &&
+          !selection.permissionUnavailable;
+        return (
+          <NativeReasoning
+            key={JSON.stringify([replyDisplayScope, executionId])}
+            open={open}
+            revision={JSON.stringify([
+              original.status,
+              original.outputBody?.reasoningBytes ??
+                (!model.settled ? historyState.cursor : undefined),
+              model.settled,
+            ])}
+            read={
+              readable
+                ? (signal) =>
+                    readNativeReasoning({
+                      bridge,
+                      generation: current,
+                      expectedStoreId: selection.storeId,
+                      sessionId: original.originMessage?.sessionId ?? original.sessionId,
+                      viewSessionId: selection.session.id,
+                      messageId: original.id,
+                      executionId,
+                      runId,
+                      signal,
+                      isCurrent: () =>
+                        generation.current === current &&
+                        viewIntent.current === nonce &&
+                        selected.current === selection.session.id,
+                    })
+                : undefined
+            }
+          />
+        );
+      }}
       turnActivity={
         pendingFirstReply
           ? {

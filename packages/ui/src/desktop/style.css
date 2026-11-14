@@ -3669,6 +3669,63 @@ body {
   min-width: 0;
   margin: 8px 0 24px;
 }
+.kite-client .conversation-turn-notice,
+.kite-client .conversation-reasoning-body {
+  color: var(--muted-foreground);
+}
+.kite-client .conversation-trace {
+  margin-block: 8px;
+}
+.kite-client .conversation-trace-trigger {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--button-radius);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+.kite-client .conversation-trace-line {
+  min-height: 32px;
+  padding-inline: 4px;
+  font-size: var(--conversation-text-size);
+}
+.kite-client .conversation-trace-line [data-slot="trace-title"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .conversation-trace-trigger:not(:disabled):hover .conversation-trace-line {
+  color: var(--foreground);
+}
+.kite-client .conversation-trace-line[data-status="error"] [data-slot="trace-title"] {
+  color: var(--destructive);
+}
+.kite-client .conversation-trace-trigger[aria-expanded="true"] .conversation-trace-chevron {
+  transform: rotate(90deg);
+}
+.kite-client .conversation-trace-steps[data-grouped] {
+  margin-inline-start: 10px;
+  padding-inline-start: 10px;
+  border-inline-start: 1px solid var(--border);
+}
+.kite-client .conversation-trace-steps .tool-activity {
+  margin-block: 0;
+}
+.kite-client .conversation-reasoning-body pre {
+  margin: 0;
+  padding: 0 4px 8px;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kite-client
+  .conversation-trace .tool-activity-summary[data-status="error"]
+  :is(.tool-activity-marker-content, .tool-agent-name, .tool-agent-operation) {
+  color: var(--destructive);
+}
 .kite-client .agent-turn > .response-status {
   margin-top: var(--conversation-block-gap);
   line-height: 24px;
@@ -4023,9 +4080,13 @@ body {
   .tool-step-status:is([data-status="failed"], [data-status="rejected"], [data-status="unknown"]) {
   color: var(--destructive);
 }
-.kite-client :is(.tool-activity-summary, .tool-activity-step)[data-status="error"],
+.kite-client :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]:not(
+  .conversation-trace *
+),
 .kite-client
-  :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]:is(
+  :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]:not(
+    .conversation-trace *
+  ):is(
     :hover,
     :focus-visible,
     [aria-expanded="true"]
@@ -4136,7 +4197,7 @@ body {
   }
 }
 .kite-client
-  :is(.tool-activity, .agent-turn-process)[data-restored-expanded="true"]
+  :is(.tool-activity, .agent-turn-process, .conversation-trace)[data-restored-expanded="true"]
   > .collapsible-motion-content[data-state="open"]
   > .collapsible-motion-reveal,
 .kite-client

@@ -22,6 +22,8 @@ Production Model Artifact 或任何未来实验输入，也不能把 Runtime res
 
 闭合 Evidence enum 增加 `tool_input` 不扩大既有 manifest 或已存 grant：新种类必须先声明并显式重新授权，原 batch／lease 继续核当前种类许可和 epoch。第一方轨迹的闭合 display（含有界公开消息／操作摘要）、完整公开参数、typed 工具结果及压缩 accounting 不自动变成 Trace metadata；display 在第三方 schema 与 Service 投影中排除，timing、usage 与原身份仍各自通过原 allowlist／grant。工作台的筛选、展开、原始内容或含材料导出也不授予外发，私有 binding／reasoning／transport 不因页面命名为“原始”开放。[负向与兼容回归](../../apps/service/test/isolated/trajectory-workbench-compat.test.ts)覆盖旧授权不扩种类及压缩 metadata 不旁路。
 
+Kite 桌面会话手动展开思考时，读取已观察到的原会话消息及其 Model Execution 对应的公开 `output.reasoning`，用于当前窗口阅读。原模型输出授权与读取租约仍生效，私有 continuation、凭据、压缩内部思考与观测和第三方 Trace 通道各自保有原数据边界。实现归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
+
 可靠消费库只复制已获准安全 envelope；原 Store／GC 删除只影响尚未复制事实和未取得材料，不撤回已复制队列／自包含 OTel spool，也不回退旧 ACK。取消任务／撤权仍停止未发送项，未知在途结果保留。OTel 私有持久接受与远端 full／partial／permanent／transient／unconfirmed 分开报告；任何状态都不授予 Runtime 重放权。当前参考集成、官方版本／映射锁定和本机接收端证据归 [OTel owner](../../apps/service/src/trace-integrations/opentelemetry/README.md)。下文运营 metric／health／reporter 的无正文、默认关闭及无远程 transport 约束继续独立适用。
 
 ## 数据与启用边界

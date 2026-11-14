@@ -356,6 +356,49 @@ test('a missing-file read keeps its original successful receipt and exact builti
   expect(execution).toEqual(before);
 });
 
+test('the Main reader reports file creation only for a verified new file receipt', async () => {
+  const f = fixture();
+  const path = 'new.txt';
+  f.add('write', 'succeeded', 'write', 'files.write');
+  const original = f.executions.get('execution-write')!;
+  const receipt = f.messages.get('write')!;
+  const change = { version: 1, path, before: null };
+  f.messages.get('call-write')!.toolCalls![0]!.arguments = JSON.stringify({ path });
+  const execution: Execution = {
+    ...original,
+    definitionVersion: '3',
+    toolInput: { path },
+    result: { outcome: 'succeeded', content: receipt.content, details: { fileChange: change } },
+  };
+  f.executions.set(execution.id, execution);
+  const run = {
+    id: 'write',
+    sessionId: 's',
+    originStoreId: 'store',
+    configuration: { tools: [{ id: 'files.write', version: '3', extensionId: 'builtin.files' }] },
+  } as unknown as Run;
+  f.client.getRun = async () => run;
+  const fact = (await f.list(['write'])).entries[0]!;
+  expect(fact.fileCreated).toBe(true);
+  expect(desktopToolMessage(fact, receipt.id, receipt.content).fileCreated).toBe(true);
+  f.executions.set(execution.id, {
+    ...execution,
+    result: {
+      outcome: 'succeeded',
+      content: receipt.content,
+      details: { fileChange: { ...change, before: {} } },
+    },
+  });
+  expect((await f.list(['write'])).entries[0]?.fileCreated).toBeUndefined();
+  f.executions.set(execution.id, execution);
+  f.client.getRun = async () => ({ ...run, originStoreId: 'foreign' });
+  expect((await f.list(['write'])).entries[0]?.fileCreated).toBeUndefined();
+  f.client.getRun = async () => {
+    throw Error('optional_run_unavailable');
+  };
+  expect((await f.list(['write'])).entries[0]).toMatchObject({ status: 'succeeded' });
+});
+
 test('only an exact builtin Task message acknowledgment is hidden through the original Main reader', async () => {
   const f = fixture();
   const content = '{"accepted":true,"delivery":"queued"}';

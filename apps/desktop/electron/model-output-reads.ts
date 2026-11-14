@@ -57,7 +57,8 @@ export class NativeModelOutputReads<K extends 'modelOutput' | 'modelInput' = 'mo
       sessionId: string;
       runId: string;
       originStoreId?: string;
-      body: NonNullable<Message['outputBody']>;
+      body?: NonNullable<Message['outputBody']>;
+      inlineMessage?: Pick<Message, 'status' | 'content'>;
       livePreview?: string;
     },
   ): Promise<NativeModelBodyOpen<K>> {
@@ -113,33 +114,43 @@ export class NativeModelOutputReads<K extends 'modelOutput' | 'modelInput' = 'mo
       )
         throw new ClientError(this.code('model_output_identity_mismatch'));
       if (source) {
+        const body = source.body;
         const exactBody =
+          body &&
           'output' in snapshot &&
-          snapshot.output.complete === source.body.complete &&
-          snapshot.contentBytes === source.body.contentBytes &&
-          snapshot.reasoningBytes === source.body.reasoningBytes &&
-          (!source.body.complete ||
+          snapshot.output.complete === body.complete &&
+          snapshot.contentBytes === body.contentBytes &&
+          snapshot.reasoningBytes === body.reasoningBytes &&
+          (!body.complete ||
             (snapshot.status === 'succeeded' &&
-              snapshot.output.toolCalls.length === source.body.toolCallCount));
+              snapshot.output.toolCalls.length === body.toolCallCount));
         const advancedBody =
+          body &&
           'output' in snapshot &&
           source.originStoreId === undefined &&
           source.livePreview !== undefined &&
-          !source.body.complete &&
-          source.body.toolCallCount === 0 &&
-          BigInt(snapshot.contentBytes) >= BigInt(source.body.contentBytes) &&
-          BigInt(snapshot.reasoningBytes) >= BigInt(source.body.reasoningBytes) &&
+          !body.complete &&
+          body.toolCallCount === 0 &&
+          BigInt(snapshot.contentBytes) >= BigInt(body.contentBytes) &&
+          BigInt(snapshot.reasoningBytes) >= BigInt(body.reasoningBytes) &&
           snapshot.output.content.startsWith(source.livePreview) &&
           (snapshot.output.complete ||
-            BigInt(snapshot.contentBytes) > BigInt(source.body.contentBytes) ||
-            BigInt(snapshot.reasoningBytes) > BigInt(source.body.reasoningBytes)) &&
+            BigInt(snapshot.contentBytes) > BigInt(body.contentBytes) ||
+            BigInt(snapshot.reasoningBytes) > BigInt(body.reasoningBytes)) &&
           (snapshot.output.complete
             ? snapshot.status === 'succeeded'
             : snapshot.output.toolCalls.length === 0);
+        const inline = source.inlineMessage;
+        const inlineBody =
+          inline &&
+          'output' in snapshot &&
+          (inline.status === 'complete'
+            ? snapshot.output.complete && snapshot.output.content === inline.content
+            : snapshot.output.content.startsWith(inline.content));
         if (
           !('output' in snapshot) ||
           snapshot.runId !== source.runId ||
-          (!exactBody && !advancedBody)
+          (!exactBody && !advancedBody && !inlineBody)
         )
           throw new ClientError('model_output_identity_mismatch');
       }
