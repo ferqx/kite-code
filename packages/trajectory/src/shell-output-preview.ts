@@ -3,6 +3,18 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
     ? (value as Record<string, unknown>)
     : undefined;
 
+export interface ShellOutputGap {
+  readonly stream: 'stdout' | 'stderr';
+  readonly droppedBytes: string | null;
+}
+
+/** Structured collection facts, never inferred from arbitrary command output. */
+export function shellOutputGapMessage(gap: ShellOutputGap): string {
+  return gap.droppedBytes === null
+    ? `Output gap in ${gap.stream} (byte count unavailable for this page).`
+    : `Output bytes unavailable: ${gap.droppedBytes} (${gap.stream}).`;
+}
+
 /** UTF-8 output section for Shell receipts, model feedback and historical display. */
 export function shellOutputPreview(
   details: Record<string, unknown>,
@@ -11,7 +23,7 @@ export function shellOutputPreview(
   modelTokenLimit?: number,
 ) {
   const lines: string[] = [];
-  const gaps: string[] = [];
+  const gaps: ShellOutputGap[] = [];
   for (const stream of ['stdout', 'stderr']) {
     const content = details[stream];
     if (typeof content === 'string' && content.length) lines.push(`${stream}:\n${content}`);
@@ -29,12 +41,14 @@ export function shellOutputPreview(
       )
         return;
       if (item.content.length) lines.push(`${item.stream}:\n${item.content}`);
-      if (item.droppedBytes === null) {
-        gaps.push(`Output gap in ${item.stream} (byte count unavailable for this page).`);
-      } else if (item.droppedBytes && item.droppedBytes !== '0') {
-        gaps.push(`Output bytes unavailable: ${item.droppedBytes} (${item.stream}).`);
-      } else continue;
-      lines.push(gaps.at(-1)!);
+      if (
+        item.droppedBytes === null ||
+        (typeof item.droppedBytes === 'string' && /^[1-9]\d*$/.test(item.droppedBytes))
+      ) {
+        const gap: ShellOutputGap = { stream: item.stream, droppedBytes: item.droppedBytes };
+        gaps.push(gap);
+        lines.push(shellOutputGapMessage(gap));
+      }
     }
   }
   const limit = Math.min(
@@ -45,7 +59,7 @@ export function shellOutputPreview(
       : 10_000,
     modelTokenLimit ?? Number.POSITIVE_INFINITY,
   );
-  return limitShellOutput(lines.join('\n'), limit, gaps);
+  return { ...limitShellOutput(lines.join('\n'), limit, gaps.map(shellOutputGapMessage)), gaps };
 }
 
 /** Reuse the saved output section as-is unless the receiving model has less room. */

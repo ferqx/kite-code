@@ -81,7 +81,12 @@ function savedOutput(
   return {
     outcome,
     content: preview.text,
-    details: { ...receipt, outputFormat: 'model-preview', outputLimited: preview.limited },
+    details: {
+      ...receipt,
+      outputFormat: 'model-preview',
+      outputLimited: preview.limited,
+      outputGaps: preview.gaps.map(({ stream, droppedBytes }) => ({ stream, droppedBytes })),
+    },
   };
 }
 function missingReference(shellId: string): ToolResult {

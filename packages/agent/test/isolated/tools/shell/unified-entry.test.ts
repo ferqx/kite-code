@@ -19,6 +19,7 @@ import type {
   ToolContext,
 } from '../../../../src/extensions';
 import { createModelToolSurface } from '../../../../src/model-tools';
+import { formatShellResult } from '../../../../src/shell-result-presentation';
 import { openSqliteStore } from '../../../../src/sqlite';
 import type { ToolCall } from '../../../../src/storage/types';
 import { createShellExtension } from '../../../../src/tools/shell';
@@ -490,7 +491,7 @@ test('large Shell output keeps the supervised cursor and saves only the output s
   const f = await fixture(
     [
       calls(['shell_execute', { command: 'emit output', max_output_tokens: 50000 }]),
-      calls(['shell_read', { shell_id: 'original', limit: 1, max_output_tokens: 64 }]),
+      calls(['shell_read', { shell_id: 'original', limit: 200, max_output_tokens: 64 }]),
       [finish],
     ],
     false,
@@ -538,10 +539,22 @@ test('large Shell output keeps the supervised cursor and saves only the output s
     const storedRead = view.executions.find((entry) => entry.definitionId === 'shell.read')!
       .result as { content: string; details: Record<string, Json> };
     expect(storedRead.details).not.toHaveProperty('output');
+    expect(storedRead.details.outputGaps).toEqual([
+      { stream: 'stdout', droppedBytes: omitted[0]!.droppedBytes },
+    ]);
     expect(storedRead.details).toMatchObject({
       outputFormat: 'model-preview',
       outputLimited: true,
     });
+    const smaller = formatShellResult({
+      execution: view.executions.find((entry) => entry.definitionId === 'shell.read')!,
+      result: storedRead,
+      operation: job,
+      starter: tool,
+      modelTokenLimit: 32,
+    });
+    expect(smaller).toContain(`Output bytes unavailable: ${omitted[0]!.droppedBytes} (stdout).`);
+    expect(smaller).toContain('Model output preview omitted');
     expect(read).toContain(storedRead.content);
     expect(Buffer.byteLength(storedRead.content)).toBeLessThanOrEqual(256);
     expect(read).toContain('Output cursor:');

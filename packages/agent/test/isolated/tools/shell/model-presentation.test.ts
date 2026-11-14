@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { shellOutputPreview } from '@kite-ai/trajectory';
 import { canonicalJson } from '../../../../src/json';
 import { modelCursor } from '../../../../src/model-cursor';
 import { modelExecutionId } from '../../../../src/model-identifier';
@@ -497,3 +498,58 @@ test('an original command rejection preserves its verified review reason without
   expect(body).not.toMatch(/\bjob\b/i);
   expect(f.operation.result).toMatchObject({ content: expect.stringContaining('this job') });
 });
+
+for (const droppedBytes of ['9', null])
+  test(`saved paged output preserves structured gap ${droppedBytes} when re-trimmed`, () => {
+    const f = lifecycle(fixture(), 'shell.read');
+    const original = shellOutputPreview(
+      {
+        output: {
+          items: [
+            {
+              executionId: f.operation.id,
+              stream: 'stdout',
+              content: 'a'.repeat(1000),
+              droppedBytes: '0',
+            },
+            { executionId: f.operation.id, stream: 'stderr', content: '', droppedBytes },
+            {
+              executionId: f.operation.id,
+              stream: 'stdout',
+              content: 'z'.repeat(1000),
+              droppedBytes: '0',
+            },
+          ],
+        },
+      },
+      f.operation.id,
+      10000,
+    )!;
+    for (const key of ['stdout', 'stderr', 'droppedBytes', 'truncated']) delete f.details[key];
+    Object.assign(f.details, {
+      outputFormat: 'model-preview',
+      outputLimited: false,
+      outputGaps: original.gaps,
+      next_cursor: 'next',
+      caught_up: true,
+      terminal: true,
+    });
+    f.result.content = original.text;
+    const before = canonicalJson(f.result);
+    const smaller = formatShellResult({ ...f, modelTokenLimit: 100 })!;
+    const warning =
+      droppedBytes === null
+        ? 'Output gap in stderr (byte count unavailable for this page).'
+        : 'Output bytes unavailable: 9 (stderr).';
+    expect(smaller).toContain(warning);
+    expect(smaller).toContain('Model output preview omitted');
+    expect(smaller).toContain('Output cursor:');
+    expect(smaller).toContain('same input cursor');
+    expect(canonicalJson(f.result)).toBe(before);
+    const output = smaller.slice(smaller.indexOf('stdout:'), smaller.indexOf('\nUse the same'));
+    expect(Buffer.byteLength(output)).toBeLessThanOrEqual(400);
+    f.details.outputGaps = [];
+    expect(formatShellResult({ ...f, modelTokenLimit: 100 })).not.toContain(warning);
+    f.details.outputGaps = [{ stream: 'stderr', droppedBytes: 'not-a-count' }];
+    expect(formatShellResult({ ...f, modelTokenLimit: 100 })).toBeUndefined();
+  });

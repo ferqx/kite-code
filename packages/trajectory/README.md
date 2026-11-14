@@ -26,7 +26,7 @@ Decimal64 是不超过 `9223372036854775807` 的规范非负十进制字符串�
 
 `tool_input` 只描述原 Tool 已公开的执行请求 JSON，实际值由原请求事务封存和 typed reader 返回，不进入事件 attributes；Model 请求、Job 程序和恢复清单不能借此公开。`tool_result` 可包含按原定义／版本验证的闭合 `ToolResultPresentation`，覆盖 Files、Shell、网页／浏览器、协作、计划、Git、技能、MCP 与正式媒体的有限只读展示；未验证类型使用公开文本／JSON 回退，不透传任意 `details`、执行句柄或 transport。闭合材料定义见[presentation](src/presentation.ts)。
 
-[Shell 输出投影](src/shell-output-preview.ts)按调用预算和模型输入容量计算 UTF-8 头尾输出段。Agent 用它形成原轮次保存的输出，并在后续模型容量更小时限制请求里的历史输出。桌面使用保存的输出，读取旧回执时复用相同的投影。它只处理调用方已核验的输出数据。
+[Shell 输出投影](src/shell-output-preview.ts)按调用预算和模型输入容量计算 UTF-8 头尾输出段。Agent 用它形成原轮次保存的输出，并在后续模型容量更小时限制请求里的历史输出。桌面使用保存的输出，读取旧回执时复用相同的投影。分页输出的缺口以 `stream/droppedBytes` 结构化事实随保存回执保留，后续缩小预算时继续作为缺口提示参与裁剪，不从命令正文解析缺口；预算过小时仍按原有有界省略规则处理。它只处理调用方已核验的输出数据。
 
 本轮保持事件、Evidence 接口、Projector 与 bundle 的原版本号。现读端继续接纳缺少新增可选字段的旧 V1 事实，旧事件未封存的参数保持缺失；新增材料种类不表示所有旧闭合 schema 读端自动理解。Trace manifest／grant 仍逐项声明种类，既有授权数组不会因 `tool_input` 新成员扩大，重新授权与 epoch 由独立消费者 owner 核验。未知 major 的 canonical 事件只提供安全 envelope，未知 V1 字段／材料种类按闭合校验拒绝，不解释未知正文。
 

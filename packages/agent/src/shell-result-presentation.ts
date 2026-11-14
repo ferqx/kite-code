@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { limitShellOutput, shellOutputPreview } from '@kite-ai/trajectory';
+import { limitShellOutput, shellOutputGapMessage, shellOutputPreview } from '@kite-ai/trajectory';
 import { modelExecutionId } from './model-identifier';
 import { parseShellCommandInput, shellOperationKey } from './shell-input';
 import type { ExecutionRecord, Json } from './storage/types';
@@ -222,8 +222,29 @@ export function formatShellResult(input: {
       return;
     cursorLine = `Output cursor: ${JSON.stringify({ cursor: details.next_cursor, caught_up: details.caught_up, terminal: details.terminal })}`;
   }
+  const gaps: string[] = [];
+  if (savedPreview && details.outputGaps !== undefined) {
+    if (!Array.isArray(details.outputGaps)) return;
+    for (const raw of details.outputGaps) {
+      const gap = object(raw);
+      if (
+        !gap ||
+        (gap.stream !== 'stdout' && gap.stream !== 'stderr') ||
+        !(
+          gap.droppedBytes === null ||
+          (typeof gap.droppedBytes === 'string' && /^[1-9]\d*$/.test(gap.droppedBytes))
+        )
+      )
+        return;
+      gaps.push(shellOutputGapMessage({ stream: gap.stream, droppedBytes: gap.droppedBytes }));
+    }
+  }
   const preview = savedPreview
-    ? limitShellOutput(String(result.content), input.modelTokenLimit ?? Number.POSITIVE_INFINITY)
+    ? limitShellOutput(
+        String(result.content),
+        input.modelTokenLimit ?? Number.POSITIVE_INFINITY,
+        gaps,
+      )
     : shellOutputPreview(
         details,
         operation.id,
