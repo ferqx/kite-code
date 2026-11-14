@@ -110,3 +110,113 @@ test('local preview owns no write action; hide closes view, late reads cannot re
       else Reflect.deleteProperty(globalThis, key);
   }
 });
+
+test('local PDF Enter dispatches each frozen request once while only receipts retry', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const keys = [
+    'window',
+    'document',
+    'navigator',
+    'HTMLElement',
+    'MutationObserver',
+    'ResizeObserver',
+    'IS_REACT_ACT_ENVIRONMENT',
+  ] as const;
+  const old = keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  for (const key of keys)
+    Object.defineProperty(globalThis, key, {
+      configurable: true,
+      value:
+        key === 'IS_REACT_ACT_ENVIRONMENT'
+          ? true
+          : key === 'ResizeObserver'
+            ? class {
+                observe() {}
+                disconnect() {}
+              }
+            : Reflect.get(dom.window, key),
+    });
+  const { createRoot } = await import('react-dom/client');
+  const { NativeLocalFilePreview } = await import('../../src/native-local-file-preview');
+  const root = createRoot(document.getElementById('root')!);
+  let edits = 0;
+  let receipts = 0;
+  const bridge = {
+    request: async (request: NativeRequest): Promise<NativeResult> => {
+      if (request.method === 'localPreview.open')
+        return { kind: 'outputs.preview', status: 'ready' };
+      if (request.method === 'localPreview.interaction')
+        return {
+          kind: 'localPreview.interaction',
+          interaction: {
+            generation: 1,
+            previewId: request.previewId,
+            handleId: 'handle',
+            selection: null,
+            sourceHash: 'a'.repeat(64),
+            inlineRequest: {
+              requestId: 'request',
+              prompt: '解释这段',
+              context: {
+                sourceHash: 'a'.repeat(64),
+                selection: {
+                  kind: 'pdf',
+                  page: 1,
+                  pageBasis: 'pdf-rendered',
+                  scope: 'page',
+                  rects: [],
+                },
+              },
+            },
+          },
+        };
+      if (request.method === 'localPreview.request.result') {
+        receipts++;
+        throw Error('receipt_lost');
+      }
+      return null;
+    },
+  } as NativeBridge;
+  const target = {
+    kind: 'local-preview' as const,
+    storeId: 'store',
+    sessionId: 'session',
+    handleId: 'handle',
+    name: 'document.pdf',
+    mediaType: 'application/pdf',
+  };
+  try {
+    await act(async () =>
+      root.render(
+        <NativeLocalFilePreview
+          bridge={bridge}
+          generation={1}
+          target={target}
+          onRequestEdit={async () => {
+            edits++;
+            return { status: 'unknown' };
+          }}
+        />,
+      ),
+    );
+    expect(document.querySelector('[aria-label="请求修改"]')).not.toBeNull();
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 1150));
+    });
+    expect(edits).toBe(1);
+    expect(receipts).toBe(3);
+    expect(document.body.textContent).toContain('不会重复发送');
+    await act(async () => root.render(null));
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 300));
+    });
+    expect(edits).toBe(1);
+    expect(receipts).toBe(3);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of old)
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+  }
+});

@@ -1,4 +1,6 @@
-type PdfPage = { data: string; totalPages: number };
+import type { PdfTextLayer } from './pdf-preview';
+
+type PdfPage = { data: string; totalPages: number; textLayer?: PdfTextLayer };
 /** One preview owner, one verified buffer per page. Failures never become cached successes. */
 export function createPdfPageCache(
   initial: PdfPage,
@@ -6,6 +8,7 @@ export function createPdfPageCache(
   signal: AbortSignal,
   current: () => void,
   limits = { page: 8 * 1024 * 1024, total: 256 * 1024 * 1024 },
+  onPage?: (page: number, layer: PdfTextLayer | undefined) => void,
 ) {
   const count = initial.totalPages;
   let first: PdfPage | undefined = initial;
@@ -39,7 +42,25 @@ export function createPdfPageCache(
         bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
       )
         throw Error('preview_pdf_budget');
-      total += bytes.length;
+      let layer = result.textLayer;
+      let layerBytes = layer ? Buffer.byteLength(JSON.stringify(layer)) : 0;
+      if (
+        layer &&
+        (bytes.length + layerBytes > limits.page ||
+          total + bytes.length + layerBytes > limits.total)
+      ) {
+        layer = { ...layer, status: 'unavailable', items: [] };
+        layerBytes = Buffer.byteLength(JSON.stringify(layer));
+        if (
+          bytes.length + layerBytes > limits.page ||
+          total + bytes.length + layerBytes > limits.total
+        ) {
+          layer = undefined;
+          layerBytes = 0;
+        }
+      }
+      total += bytes.length + layerBytes;
+      onPage?.(page, layer);
       if (page === 1) first = undefined;
       return bytes;
     });

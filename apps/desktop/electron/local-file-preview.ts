@@ -113,6 +113,13 @@ export class LocalFilePreview {
     if (!bytes) throw Error('local_preview_unavailable');
     return bytes;
   }
+  /** Main-only original reference: no upload, delivery identity, or write capability. */
+  async reference(expectedHash: string) {
+    const bytes = await this.read();
+    const sourceHash = createHash('sha256').update(bytes).digest('hex');
+    if (sourceHash !== expectedHash) throw Error('local_preview_changed');
+    return { path: this.path, name: this.name, sourceHash };
+  }
   async materialize(destination: string) {
     const bytes = await this.read();
     await writeFile(destination, bytes, { flag: 'wx', mode: 0o600 });

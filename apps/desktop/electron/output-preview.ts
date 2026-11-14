@@ -35,7 +35,7 @@ import {
 import { type OfficePreviewKind, readOfficeDescription } from './office-preview-trust';
 import { NativeOfficeRequestView } from './office-request-view';
 import { createPdfPageCache } from './pdf-page-cache';
-import { pdfPreviewHtml, pdfPreviewInstallScript } from './pdf-preview';
+import { type PdfTextLayer, pdfPreviewHtml, pdfPreviewInstallScript } from './pdf-preview';
 import {
   escapePreviewText,
   markdownPreview,
@@ -76,10 +76,13 @@ export class NativeOutputPreview {
     id: string;
     generation: number;
     target?: OutputFileTarget;
+    localHandleId?: string;
     bounds: Bounds;
     nativeBounds?: Bounds;
     sourceHash?: string;
     pdf?: boolean;
+    pdfPageCount?: number;
+    pdfLayers?: Map<number, PdfTextLayer>;
     check?: () => void;
     officeKind?: OfficePreviewKind;
     abort: AbortController;
@@ -107,6 +110,7 @@ export class NativeOutputPreview {
     id: string;
     generation: number;
     target?: OutputFileTarget;
+    localHandleId?: string;
     bounds: Bounds;
     initialControls?: OfficePreviewControl[];
     window: NativeRootWindow;
@@ -115,7 +119,7 @@ export class NativeOutputPreview {
     renderPdfPage?: (
       page: number,
       signal: AbortSignal,
-    ) => Promise<{ data: string; totalPages: number }>;
+    ) => Promise<{ data: string; totalPages: number; textLayer?: PdfTextLayer }>;
     materialize: (
       destination: string,
     ) => Promise<Pick<OutputFileSummary, 'name' | 'mediaType' | 'size'> & { sourceHash?: string }>;
@@ -128,6 +132,7 @@ export class NativeOutputPreview {
       bounds: { ...input.bounds },
       abort: new AbortController(),
       window: input.window,
+      localHandleId: input.localHandleId,
       pending: true,
       check: input.check,
     } as NonNullable<NativeOutputPreview['active']>;
@@ -242,10 +247,14 @@ export class NativeOutputPreview {
       } else if (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name)) {
         if (!input.renderPdfPage) throw Error('preview_pdf_unavailable');
         const render = input.renderPdfPage;
+        let textBytes = 0;
+        active.pdfLayers = new Map();
         const first = await render(1, active.abort.signal);
         current();
         const html = Buffer.from(pdfPreviewHtml(first.totalPages));
         active.pdf = true;
+        active.pdfPageCount = first.totalPages;
+        active.officeKind = 'pdf';
         const path = join(active.directory, 'index.html');
         await writeFile(path, html, { flag: 'wx' });
         files = [
@@ -257,7 +266,28 @@ export class NativeOutputPreview {
             sha256: digest(html),
           },
         ];
-        const loadPage = createPdfPageCache(first, render, active.abort.signal, current);
+        const loadPage = createPdfPageCache(
+          first,
+          render,
+          active.abort.signal,
+          current,
+          undefined,
+          (page, value) => {
+            const source = value ?? {
+              status: 'unavailable' as const,
+              width: 1,
+              height: 1,
+              items: [],
+            };
+            const bytes = Buffer.byteLength(JSON.stringify(source));
+            const layer =
+              textBytes + bytes <= 16 * 1024 * 1024
+                ? source
+                : { ...source, status: 'unavailable' as const, items: [] };
+            textBytes += Buffer.byteLength(JSON.stringify(layer));
+            active.pdfLayers!.set(page, layer);
+          },
+        );
         for (let page = 1; page <= first.totalPages; page++) {
           files.push({
             path: `page-${page}.png`,
@@ -468,7 +498,7 @@ export class NativeOutputPreview {
           { code: pdfPreviewInstallScript() },
         ]);
       const officeKind = active.officeKind;
-      if (officeKind) {
+      if (officeKind && officeKind !== 'pdf') {
         await view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
           { code: officeInteractionInstallScript(officeKind) },
         ]);
@@ -541,8 +571,28 @@ export class NativeOutputPreview {
     return request.retiring;
   }
   async readInteraction(id: string, generation: number, consumeRequest = true) {
+    if (!this.active?.target) throw Error('local_preview_readonly');
+    return this.readInteractionState(id, generation, consumeRequest);
+  }
+  async readLocalInteraction(
+    id: string,
+    generation: number,
+    handleId: string,
+    consumeRequest = true,
+  ) {
     const active = this.active;
-    if (active && !active.target) throw Error('local_preview_readonly');
+    if (!active?.pdf || active.target || active.localHandleId !== handleId)
+      throw Error('local_preview_readonly');
+    const { target: _target, ...result } = await this.readInteractionState(
+      id,
+      generation,
+      consumeRequest,
+    );
+    if (this.active !== active) throw Error('preview_replaced');
+    return { ...result, handleId };
+  }
+  private async readInteractionState(id: string, generation: number, consumeRequest = true) {
+    const active = this.active;
     if (
       !active ||
       active.id !== id ||
@@ -551,12 +601,56 @@ export class NativeOutputPreview {
       active.pending
     )
       throw Error('preview_replaced');
+    let pdfPage: number | undefined;
+    if (active.pdf) {
+      const page = await active.view.webContents.executeJavaScriptInIsolatedWorld(
+        officeInteractionWorld,
+        [{ code: 'globalThis.kitePdfPreview?.page()' }],
+      );
+      if (!Number.isSafeInteger(page) || page < 1 || page > (active.pdfPageCount ?? 500))
+        throw Error('preview_selection_replaced');
+      pdfPage = page;
+      const layer = active.pdfLayers?.get(page);
+      if (layer)
+        await active.view.webContents.executeJavaScriptInIsolatedWorld(officeInteractionWorld, [
+          {
+            code: `globalThis.kitePdfPreview?.setLayer(${JSON.stringify(page)},${JSON.stringify(layer)})`,
+          },
+        ]);
+    }
     const evidence = await active.view.webContents.executeJavaScriptInIsolatedWorld(
       officeInteractionWorld,
       [{ code: consumeRequest ? officeInteractionReadScript : officeInteractionPeekScript }],
     );
     if (this.active !== active || active.abort.signal.aborted) throw Error('preview_replaced');
     const result = readOfficeDescription(evidence, active.officeKind, active.sourceHash);
+    for (const selection of [result.selection, result.floatingSelection]) {
+      if (selection?.kind !== 'pdf') continue;
+      if (selection.page !== pdfPage) throw Error('preview_selection_replaced');
+      if (selection.scope !== 'text') continue;
+      const items = active.pdfLayers?.get(selection.page)?.items;
+      const start = selection.start!,
+        end = selection.end!;
+      if (
+        !items ||
+        start.item > end.item ||
+        !items[start.item] ||
+        !items[end.item] ||
+        start.offset > items[start.item]!.text.length ||
+        end.offset > items[end.item]!.text.length ||
+        (start.item === end.item && start.offset >= end.offset) ||
+        items
+          .slice(start.item, end.item + 1)
+          .map((item, i) =>
+            item.text.slice(
+              i === 0 ? start.offset : 0,
+              i === end.item - start.item ? end.offset : undefined,
+            ),
+          )
+          .join('') !== selection.text
+      )
+        throw Error('preview_selection_replaced');
+    }
     if (result.requestInvalidated !== undefined) {
       const request = active.request;
       if (request?.documentRequestSerial === result.requestInvalidated)
@@ -733,8 +827,10 @@ export class NativeOutputPreview {
     )
       throw Error('preview_replaced');
     active.check?.();
-    if (!active.target && command.kind !== 'zoom') throw Error('local_preview_readonly');
-    if (active.pdf && command.kind !== 'zoom') throw Error('preview_control_invalid');
+    if (!active.target && !(active.pdf && active.localHandleId) && command.kind !== 'zoom')
+      throw Error('local_preview_readonly');
+    if (active.pdf && !['zoom', 'request-edit'].includes(command.kind))
+      throw Error('preview_control_invalid');
     if (active.request) {
       if (command.kind === 'request-edit') return;
       throw Error('preview_request_active');

@@ -32,7 +32,7 @@ const errors: string[] = [];
 page.on('pageerror', (error) => errors.push(String(error)));
 const checks: unknown[] = [];
 try {
-  for (const kind of ['docx', 'xlsx', 'pptx']) {
+  for (const kind of ['docx', 'xlsx', 'pptx', 'pdf']) {
     await page.goto(`file://${join(root, 'index.html')}?kind=${kind}`);
     await page.getByRole('button', { name: '请求修改', exact: true }).waitFor();
     for (const width of [240, 280, 320, 480, 640]) {
@@ -69,9 +69,19 @@ try {
           width: innerWidth,
           scrollWidth: document.documentElement.scrollWidth,
           toolbarHeight: rect.height,
+          toolbarWidth: rect.width,
+          toolbarBottom: rect.bottom,
+          contentTop: document.querySelector('[data-fixture-document]')!.getBoundingClientRect()
+            .top,
           controls,
         };
       });
+      assert.ok(
+        geometry.contentTop >= geometry.toolbarBottom,
+        'toolbar must reserve content space',
+      );
+      if (width >= 320)
+        assert.ok(geometry.toolbarWidth < width - 40, 'floating controls do not span the pane');
       assert.ok(geometry.scrollWidth <= width, JSON.stringify({ kind, geometry }));
       for (const control of geometry.controls) {
         assert.ok(
@@ -93,8 +103,15 @@ try {
       if (width === 240 || width === 640)
         await page.screenshot({ path: join(root, `${kind}-${width}.png`) });
     }
+    const beforeZoom = await page.locator('.native-office-toolbar').boundingBox();
+    await page.getByRole('button', { name: '请求修改', exact: true }).hover();
     await page.getByRole('button', { name: '请求修改', exact: true }).click();
     await page.getByLabel('预览缩放').selectOption('2');
+    assert.deepEqual(
+      await page.locator('.native-office-toolbar').boundingBox(),
+      beforeZoom,
+      'document zoom does not scale toolbar',
+    );
     await page.getByRole('button', { name: '另存为', exact: true }).focus();
     await page.keyboard.press('Enter');
     if (kind === 'pptx') {
@@ -117,7 +134,7 @@ try {
     join(root, 'result.json'),
     JSON.stringify({ passed: true, checks, errors }, null, 2),
   );
-  console.log(root, '15 layout cases passed');
+  console.log(root, '20 layout cases passed');
 } finally {
   await app.close();
 }

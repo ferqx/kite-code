@@ -42,7 +42,7 @@ export function createOutputPreviews(
         temporary = await mkdtemp(join(await realpath(tmpdir()), 'kite-pdf-snapshot-'));
         const result = await readCachedPdf(
           bytes,
-          { pages: String(input.page), mode: 'image' },
+          { pages: String(input.page), mode: 'image', textLayer: true },
           { profilePath: temporary, storeId: input.expectedStoreId, sourceHash: input.sourceHash },
           signal,
         );
@@ -56,6 +56,7 @@ export function createOutputPreviews(
           totalPages: result.totalPages,
           mediaType: 'image/png' as const,
           data: Buffer.from(image.image).toString('base64'),
+          ...(image.textLayer ? { textLayer: image.textLayer } : {}),
         };
       } finally {
         snapshots--;
@@ -81,7 +82,7 @@ export function createOutputPreviews(
       });
       const result = await readCachedPdf(
         read.content,
-        { pages: String(page), mode: 'image' },
+        { pages: String(page), mode: 'image', textLayer: true },
         { profilePath, storeId: target.storeId, sourceHash: record.reference.hash },
         signal,
       );
@@ -92,6 +93,7 @@ export function createOutputPreviews(
         totalPages: result.totalPages,
         mediaType: 'image/png' as const,
         data: Buffer.from(image.image).toString('base64'),
+        ...(image.textLayer ? { textLayer: image.textLayer } : {}),
       };
     },
   };

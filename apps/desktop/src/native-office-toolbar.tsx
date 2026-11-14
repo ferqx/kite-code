@@ -23,8 +23,25 @@ export function NativeOfficeToolbar(props: {
     >
       {props.onEdit && (
         <div className="native-office-pill native-office-edit-actions">
-          <button type="button" onClick={props.onEdit}>
-            请求修改
+          <button
+            type="button"
+            className="native-office-icon-button"
+            aria-label="请求修改"
+            title="请求修改"
+            onClick={props.onEdit}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m15 5 4 4M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15v5Z" />
+            </svg>
+            <span className="native-office-button-label">请求修改</span>
           </button>
         </div>
       )}

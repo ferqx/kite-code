@@ -2038,6 +2038,23 @@ export type OutputPdfPageRequest = {
   page: number;
 };
 export type OutputPdfPage = {
+  textLayer?: {
+    status: 'available' | 'empty' | 'unavailable';
+    width: number;
+    height: number;
+    items: Array<{
+      text: string;
+      transform: Array<number>;
+      width: number;
+      height: number;
+      ascent: number | null;
+      descent: number | null;
+      vertical: boolean;
+      dir: 'ltr' | 'rtl' | 'ttb';
+      fontFamily: 'sans-serif' | 'serif' | 'monospace';
+      hasEOL: boolean;
+    }>;
+  };
   page: number;
   totalPages: number;
   mediaType: 'image/png';

@@ -51,6 +51,7 @@ import {
   isSkillMarketplaceUninstallSelection,
 } from '../src/skill-marketplace-contract';
 import { LocalFilePreview } from './local-file-preview';
+import { LocalPreviewSubmissions, localPdfRequestContent } from './local-preview-submit';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { nativeModelPreferences } from './model-preference';
 import type { NativeCaller } from './native-caller';
@@ -67,6 +68,9 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'localPreview.open': ['handleId', 'previewId', 'bounds'],
   'localPreview.release': ['handleId'],
   'localPreview.check': ['handleId'],
+  'localPreview.interaction': ['handleId', 'previewId', 'consumeRequest'],
+  'localPreview.request.result': ['handleId', 'previewId', 'requestId', 'outcome'],
+  'localPreview.submit': ['handleId', 'previewId', 'requestId', 'sessionId', 'intent'],
   'outputs.office.preview': [
     'target',
     'editorId',
@@ -390,12 +394,12 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   )
     throw Error('invalid_native_request');
   if (
-    method === 'outputs.preview.interaction' &&
+    (method === 'outputs.preview.interaction' || method === 'localPreview.interaction') &&
     input.consumeRequest !== undefined &&
     typeof input.consumeRequest !== 'boolean'
   )
     throw Error('invalid_native_request');
-  if (method === 'outputs.preview.request.result') {
+  if (method === 'outputs.preview.request.result' || method === 'localPreview.request.result') {
     if (typeof input.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.requestId))
       throw Error('invalid_native_request');
     const outcome = record(input.outcome);
@@ -463,7 +467,12 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   if (
     (method.startsWith('outputs.preview.') ||
       method === 'outputs.office.preview' ||
-      method === 'localPreview.open') &&
+      [
+        'localPreview.open',
+        'localPreview.interaction',
+        'localPreview.request.result',
+        'localPreview.submit',
+      ].includes(method)) &&
     (typeof input.previewId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.previewId))
   )
     throw Error('invalid_native_request');
@@ -1227,7 +1236,22 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
   }
-  if (method === 'submit' || method === 'caller.prepare' || method === 'conversation.send') {
+  if (method === 'localPreview.submit') {
+    const intent = record(input.intent);
+    if (
+      typeof input.requestId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(input.requestId) ||
+      intent.files !== undefined ||
+      intent.images !== undefined
+    )
+      throw Error('invalid_native_request');
+  }
+  if (
+    method === 'submit' ||
+    method === 'localPreview.submit' ||
+    method === 'caller.prepare' ||
+    method === 'conversation.send'
+  ) {
     const intent = record(input.intent);
     if (
       ['input.steer', 'input.follow_up'].includes(String(intent.kind)) &&
@@ -1266,7 +1290,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
     }
     if (
-      method === 'submit' &&
+      (method === 'submit' || method === 'localPreview.submit') &&
       !['run.start', 'input.steer', 'input.follow_up'].includes(String(intent.kind))
     )
       throw Error('invalid_native_request');
@@ -1575,9 +1599,11 @@ export function registerNativeIpc(options: {
 }) {
   let preview: NativeOutputPreview | undefined;
   const localFiles = new Map<string, LocalFilePreview>();
+  const localSubmissions = new LocalPreviewSubmissions<NativeResult>();
   const releaseLocalFiles = () => {
     for (const file of localFiles.values()) file.release();
     localFiles.clear();
+    localSubmissions.clear();
   };
   const closePreview = () => {
     releaseLocalFiles();
@@ -1633,6 +1659,7 @@ export function registerNativeIpc(options: {
         value = await preview.open({
           id: request.previewId,
           generation: request.generation,
+          localHandleId: file.id,
           bounds: request.bounds,
           window,
           check: () => {
@@ -1736,6 +1763,80 @@ export function registerNativeIpc(options: {
           options.officeAssetsRoot,
           () => assertNativeSender(event, options.window(), options.rendererUrl),
         );
+      } else if (
+        request.method === 'localPreview.interaction' ||
+        request.method === 'localPreview.request.result' ||
+        request.method === 'localPreview.submit'
+      ) {
+        caller.checkOutputGeneration(request.generation);
+        const file = localFiles.get(request.handleId);
+        if (!file || !preview) throw Error('local_preview_released');
+        await file.verifyAccess();
+        const interaction = await preview.readLocalInteraction(
+          request.previewId,
+          request.generation,
+          request.handleId,
+          request.method === 'localPreview.interaction' && request.consumeRequest !== false,
+        );
+        if (request.method === 'localPreview.interaction') {
+          value = { kind: 'localPreview.interaction', interaction };
+        } else if (request.method === 'localPreview.request.result') {
+          await preview.settleRequest(
+            request.previewId,
+            request.generation,
+            request.requestId,
+            request.outcome,
+          );
+          value = null;
+        } else {
+          const inline = interaction.inlineRequest;
+          if (
+            !inline ||
+            inline.requestId !== request.requestId ||
+            inline.context.sourceHash !== interaction.sourceHash ||
+            inline.context.selection?.kind !== 'pdf'
+          )
+            throw Error('local_preview_request_replaced');
+          const scope = caller.messagePreviewScope(request.generation);
+          if (
+            scope.sessionId !== request.sessionId ||
+            scope.storeId !== request.intent.expectedStoreId
+          )
+            throw Error('local_preview_replaced');
+          const source = await file.reference(interaction.sourceHash);
+          const frozen = JSON.stringify(inline);
+          const check = async () => {
+            assertNativeSender(event, options.window(), options.rendererUrl);
+            caller.checkOutputGeneration(request.generation);
+            const current = await preview!.readLocalInteraction(
+              request.previewId,
+              request.generation,
+              request.handleId,
+              false,
+            );
+            if (
+              JSON.stringify(current.inlineRequest) !== frozen ||
+              current.sourceHash !== source.sourceHash
+            )
+              throw Error('local_preview_request_replaced');
+            await file.reference(source.sourceHash);
+          };
+          value = await localSubmissions.run(
+            JSON.stringify([
+              request.generation,
+              request.handleId,
+              request.previewId,
+              request.requestId,
+            ]),
+            request.intent.commandId,
+            () =>
+              caller.submitLocalPreview(
+                request,
+                localPdfRequestContent(inline.prompt, source, inline.context),
+                check,
+              ),
+          );
+        }
       } else if (request.method === 'outputs.preview.interaction') {
         caller.checkOutputGeneration(request.generation);
         if (!preview) throw Error('preview_replaced');
@@ -1767,7 +1868,8 @@ export function registerNativeIpc(options: {
         caller.checkOutputGeneration(request.generation);
         if (!preview) throw Error('preview_replaced');
         if (preview.isLocal(request.previewId, request.generation)) {
-          if (request.control.kind !== 'zoom') throw Error('local_preview_readonly');
+          if (!['zoom', 'request-edit'].includes(request.control.kind))
+            throw Error('local_preview_readonly');
           await preview.control(request.previewId, request.generation, request.control);
           return { ok: true, value: null };
         }

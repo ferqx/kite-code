@@ -513,6 +513,29 @@ const legacyHostMutation = z.object({
   ]),
 });
 
+const pdfTextNumber = z.number().finite().min(-10_000_000).max(10_000_000);
+const PdfTextLayerSchema = z.strictObject({
+  status: z.enum(['available', 'empty', 'unavailable']),
+  width: z.number().int().min(1).max(4096),
+  height: z.number().int().min(1).max(4096),
+  items: z
+    .array(
+      z.strictObject({
+        text: z.string().max(16384),
+        transform: z.array(pdfTextNumber).length(6),
+        width: z.number().finite().min(0).max(10_000_000),
+        height: z.number().finite().min(0).max(10_000_000),
+        ascent: z.number().finite().min(-4).max(4).nullable(),
+        descent: z.number().finite().min(-4).max(4).nullable(),
+        vertical: z.boolean(),
+        dir: z.enum(['ltr', 'rtl', 'ttb']),
+        fontFamily: z.enum(['sans-serif', 'serif', 'monospace']),
+        hasEOL: z.boolean(),
+      }),
+    )
+    .max(10000),
+});
+
 export const schemas = {
   OutputFileTarget: OutputFileTargetSchema,
   OutputPdfPageRequest: z.strictObject({
@@ -521,6 +544,7 @@ export const schemas = {
     page: z.number().int().min(1).max(100000),
   }),
   OutputPdfPage: z.strictObject({
+    textLayer: PdfTextLayerSchema.optional(),
     page: z.number().int().min(1),
     totalPages: z.number().int().min(1),
     mediaType: z.literal('image/png'),

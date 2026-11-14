@@ -106,6 +106,8 @@ Blob 去重不等于所有模型请求零复制：现有完整 ModelInput 封存
 
 ## 会话文件与 PDF
 
+可信客户端的 PDF 页图可附有界文本层：复用同一 PDF.js 页面 viewport（含旋转与裁剪）的真实文字、变换和方向，不提供 HTML、任意字体 CSS 或 OCR。每页最多 10,000 项、单项 16,384 字符、文字合计 1 MiB，序列化几何也计入原 16 MiB 结果预算；文字不可用或超限时不发布截断选文。无文本与提取不可用分别标记，客户端可退回页／区域定位。此内部选项不改变公开 Files 图像模式；缓存区分带层／不带层，恢复时重新验证有界结构。多栏阅读顺序与复杂字体的字形精度仍不能由单个固定样本保证。
+
 普通 Workspace 与明确外部路径的文本写入／编辑通过原 [文件工具](../files-tools.ts)封存完整 postimage，结果 `details.fileOutput` 与 `artifactRefs` 绑定原 Execution。为避免靠文件名或模型自然语言猜测“交付”，每次具备 Artifact port 的成功文本变更均保留该快照；没有另建外部工作文件登记数据库。当前目标仍在原路径，原权限与 Workspace 检查点保持。快照发布失败返回 `outcome_unknown`，不重做实际已发生的写入。外部路径的未封存修改不进入 Profile 备份，恢复只保历史快照，绝不回写外部目标。此范围由 [完整快照与失败窗口回归](../../../test/isolated/files/change-preview.test.ts)验证。
 
 [默认 Service 文件联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)另在会话输出物理写后分别注入 Artifact 登记失败与 saved record 写失败，真实两分支67断言通过：当前与原 operation 保留 pending，原 Execution 为 unknown，无成功交付卡；原 Command 重复提交与冷查询都不改文件、不增加模型或效果。现有 `session.recover interrupt` 仍报告该已尝试的未知副作用，不能据此解锁后继工作；未取得可靠结果证明时保留 `recovery_required`，不自动重放写入。这与正常已成功输出的后续编辑、备份恢复后新授权读写是不同边界。

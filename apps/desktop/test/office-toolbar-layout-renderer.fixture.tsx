@@ -57,7 +57,10 @@ function Fixture() {
             <p>只读备注内容</p>
           </details>
         )}
-        <div style={{ padding: 16, minHeight: 240, color: 'var(--muted-foreground)' }}>
+        <div
+          data-fixture-document
+          style={{ padding: 16, minHeight: 240, color: 'var(--muted-foreground)' }}
+        >
           工具栏布局回归 · {kind.toUpperCase()}
         </div>
       </section>

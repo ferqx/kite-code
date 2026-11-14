@@ -67,3 +67,40 @@ test('closing during render cannot cache or return late page content', async () 
   await expect(pending).rejects.toThrow();
   expect(() => load(2)).toThrow();
 });
+
+test('text metadata is charged with PNG and over-budget layers degrade without losing image', async () => {
+  const owner = new AbortController();
+  const layer = {
+    status: 'available' as const,
+    width: 10,
+    height: 10,
+    items: [
+      {
+        text: 'x'.repeat(1000),
+        transform: [1, 0, 0, 1, 0, 0],
+        width: 1,
+        height: 1,
+        ascent: 0.8,
+        descent: -0.2,
+        vertical: false,
+        dir: 'ltr',
+        fontFamily: 'serif',
+        hasEOL: false,
+      },
+    ],
+  };
+  const seen: unknown[] = [];
+  const load = createPdfPageCache(
+    { ...page, textLayer: layer },
+    async () => ({ ...page, textLayer: layer }),
+    owner.signal,
+    () => {},
+    { page: 200, total: 400 },
+    (_page, value) => seen.push(value),
+  );
+  expect(await load(1)).toEqual(bytes);
+  expect(seen[0]).toEqual({ ...layer, status: 'unavailable', items: [] });
+  expect(await load(1)).toEqual(bytes);
+  expect(seen).toHaveLength(1);
+  owner.abort();
+});

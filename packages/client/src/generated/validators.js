@@ -242927,6 +242927,65 @@ function validate204(
 }
 validate204.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var response_OutputPdfPage = validate205;
+var schema532 = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  properties: {
+    textLayer: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['available', 'empty', 'unavailable'] },
+        width: { type: 'integer', minimum: 1, maximum: 4096 },
+        height: { type: 'integer', minimum: 1, maximum: 4096 },
+        items: {
+          maxItems: 1e4,
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', maxLength: 16384 },
+              transform: {
+                minItems: 6,
+                maxItems: 6,
+                type: 'array',
+                items: { type: 'number', minimum: -1e7, maximum: 1e7 },
+              },
+              width: { type: 'number', minimum: 0, maximum: 1e7 },
+              height: { type: 'number', minimum: 0, maximum: 1e7 },
+              ascent: { anyOf: [{ type: 'number', minimum: -4, maximum: 4 }, { type: 'null' }] },
+              descent: { anyOf: [{ type: 'number', minimum: -4, maximum: 4 }, { type: 'null' }] },
+              vertical: { type: 'boolean' },
+              dir: { type: 'string', enum: ['ltr', 'rtl', 'ttb'] },
+              fontFamily: { type: 'string', enum: ['sans-serif', 'serif', 'monospace'] },
+              hasEOL: { type: 'boolean' },
+            },
+            required: [
+              'text',
+              'transform',
+              'width',
+              'height',
+              'ascent',
+              'descent',
+              'vertical',
+              'dir',
+              'fontFamily',
+              'hasEOL',
+            ],
+            additionalProperties: true,
+          },
+        },
+      },
+      required: ['status', 'width', 'height', 'items'],
+      additionalProperties: true,
+    },
+    page: { type: 'integer', minimum: 1, maximum: 9007199254740991 },
+    totalPages: { type: 'integer', minimum: 1, maximum: 9007199254740991 },
+    mediaType: { type: 'string', const: 'image/png' },
+    data: { type: 'string', minLength: 8, maxLength: 25165824, pattern: '^[A-Za-z0-9+/]*={0,2}$' },
+  },
+  required: ['page', 'totalPages', 'mediaType', 'data'],
+  additionalProperties: true,
+};
 var pattern1183 = new RegExp('^[A-Za-z0-9+/]*={0,2}$', 'u');
 function validate205(
   data,
@@ -242961,48 +243020,1020 @@ function validate205(
         ];
         return false;
       } else {
-        if (data.page !== undefined) {
-          let data0 = data.page;
+        if (data.textLayer !== undefined) {
+          let data0 = data.textLayer;
           const _errs2 = errors;
-          if (!(typeof data0 == 'number' && !(data0 % 1) && !isNaN(data0) && isFinite(data0))) {
-            validate205.errors = [
-              {
-                instancePath: instancePath + '/page',
-                schemaPath: '#/properties/page/type',
-                keyword: 'type',
-                params: { type: 'integer' },
-                message: 'must be integer',
-              },
-            ];
-            return false;
-          }
           if (errors === _errs2) {
-            if (typeof data0 == 'number' && isFinite(data0)) {
-              if (data0 > 9007199254740991 || isNaN(data0)) {
+            if (data0 && typeof data0 == 'object' && !Array.isArray(data0)) {
+              let missing1;
+              if (
+                (data0.status === undefined && (missing1 = 'status')) ||
+                (data0.width === undefined && (missing1 = 'width')) ||
+                (data0.height === undefined && (missing1 = 'height')) ||
+                (data0.items === undefined && (missing1 = 'items'))
+              ) {
                 validate205.errors = [
                   {
-                    instancePath: instancePath + '/page',
-                    schemaPath: '#/properties/page/maximum',
-                    keyword: 'maximum',
-                    params: { comparison: '<=', limit: 9007199254740991 },
-                    message: 'must be <= 9007199254740991',
+                    instancePath: instancePath + '/textLayer',
+                    schemaPath: '#/properties/textLayer/required',
+                    keyword: 'required',
+                    params: { missingProperty: missing1 },
+                    message: "must have required property '" + missing1 + "'",
                   },
                 ];
                 return false;
               } else {
-                if (data0 < 1 || isNaN(data0)) {
-                  validate205.errors = [
-                    {
-                      instancePath: instancePath + '/page',
-                      schemaPath: '#/properties/page/minimum',
-                      keyword: 'minimum',
-                      params: { comparison: '>=', limit: 1 },
-                      message: 'must be >= 1',
-                    },
-                  ];
-                  return false;
+                if (data0.status !== undefined) {
+                  let data1 = data0.status;
+                  const _errs5 = errors;
+                  if (typeof data1 !== 'string') {
+                    validate205.errors = [
+                      {
+                        instancePath: instancePath + '/textLayer/status',
+                        schemaPath: '#/properties/textLayer/properties/status/type',
+                        keyword: 'type',
+                        params: { type: 'string' },
+                        message: 'must be string',
+                      },
+                    ];
+                    return false;
+                  }
+                  if (!(data1 === 'available' || data1 === 'empty' || data1 === 'unavailable')) {
+                    validate205.errors = [
+                      {
+                        instancePath: instancePath + '/textLayer/status',
+                        schemaPath: '#/properties/textLayer/properties/status/enum',
+                        keyword: 'enum',
+                        params: {
+                          allowedValues: schema532.properties.textLayer.properties.status.enum,
+                        },
+                        message: 'must be equal to one of the allowed values',
+                      },
+                    ];
+                    return false;
+                  }
+                  var valid1 = _errs5 === errors;
+                } else {
+                  var valid1 = true;
+                }
+                if (valid1) {
+                  if (data0.width !== undefined) {
+                    let data2 = data0.width;
+                    const _errs7 = errors;
+                    if (
+                      !(
+                        typeof data2 == 'number' &&
+                        !(data2 % 1) &&
+                        !isNaN(data2) &&
+                        isFinite(data2)
+                      )
+                    ) {
+                      validate205.errors = [
+                        {
+                          instancePath: instancePath + '/textLayer/width',
+                          schemaPath: '#/properties/textLayer/properties/width/type',
+                          keyword: 'type',
+                          params: { type: 'integer' },
+                          message: 'must be integer',
+                        },
+                      ];
+                      return false;
+                    }
+                    if (errors === _errs7) {
+                      if (typeof data2 == 'number' && isFinite(data2)) {
+                        if (data2 > 4096 || isNaN(data2)) {
+                          validate205.errors = [
+                            {
+                              instancePath: instancePath + '/textLayer/width',
+                              schemaPath: '#/properties/textLayer/properties/width/maximum',
+                              keyword: 'maximum',
+                              params: { comparison: '<=', limit: 4096 },
+                              message: 'must be <= 4096',
+                            },
+                          ];
+                          return false;
+                        } else {
+                          if (data2 < 1 || isNaN(data2)) {
+                            validate205.errors = [
+                              {
+                                instancePath: instancePath + '/textLayer/width',
+                                schemaPath: '#/properties/textLayer/properties/width/minimum',
+                                keyword: 'minimum',
+                                params: { comparison: '>=', limit: 1 },
+                                message: 'must be >= 1',
+                              },
+                            ];
+                            return false;
+                          }
+                        }
+                      }
+                    }
+                    var valid1 = _errs7 === errors;
+                  } else {
+                    var valid1 = true;
+                  }
+                  if (valid1) {
+                    if (data0.height !== undefined) {
+                      let data3 = data0.height;
+                      const _errs9 = errors;
+                      if (
+                        !(
+                          typeof data3 == 'number' &&
+                          !(data3 % 1) &&
+                          !isNaN(data3) &&
+                          isFinite(data3)
+                        )
+                      ) {
+                        validate205.errors = [
+                          {
+                            instancePath: instancePath + '/textLayer/height',
+                            schemaPath: '#/properties/textLayer/properties/height/type',
+                            keyword: 'type',
+                            params: { type: 'integer' },
+                            message: 'must be integer',
+                          },
+                        ];
+                        return false;
+                      }
+                      if (errors === _errs9) {
+                        if (typeof data3 == 'number' && isFinite(data3)) {
+                          if (data3 > 4096 || isNaN(data3)) {
+                            validate205.errors = [
+                              {
+                                instancePath: instancePath + '/textLayer/height',
+                                schemaPath: '#/properties/textLayer/properties/height/maximum',
+                                keyword: 'maximum',
+                                params: { comparison: '<=', limit: 4096 },
+                                message: 'must be <= 4096',
+                              },
+                            ];
+                            return false;
+                          } else {
+                            if (data3 < 1 || isNaN(data3)) {
+                              validate205.errors = [
+                                {
+                                  instancePath: instancePath + '/textLayer/height',
+                                  schemaPath: '#/properties/textLayer/properties/height/minimum',
+                                  keyword: 'minimum',
+                                  params: { comparison: '>=', limit: 1 },
+                                  message: 'must be >= 1',
+                                },
+                              ];
+                              return false;
+                            }
+                          }
+                        }
+                      }
+                      var valid1 = _errs9 === errors;
+                    } else {
+                      var valid1 = true;
+                    }
+                    if (valid1) {
+                      if (data0.items !== undefined) {
+                        let data4 = data0.items;
+                        const _errs11 = errors;
+                        if (errors === _errs11) {
+                          if (Array.isArray(data4)) {
+                            if (data4.length > 1e4) {
+                              validate205.errors = [
+                                {
+                                  instancePath: instancePath + '/textLayer/items',
+                                  schemaPath: '#/properties/textLayer/properties/items/maxItems',
+                                  keyword: 'maxItems',
+                                  params: { limit: 1e4 },
+                                  message: 'must NOT have more than 10000 items',
+                                },
+                              ];
+                              return false;
+                            } else {
+                              var valid2 = true;
+                              const len0 = data4.length;
+                              for (let i0 = 0; i0 < len0; i0++) {
+                                let data5 = data4[i0];
+                                const _errs13 = errors;
+                                if (errors === _errs13) {
+                                  if (data5 && typeof data5 == 'object' && !Array.isArray(data5)) {
+                                    let missing2;
+                                    if (
+                                      (data5.text === undefined && (missing2 = 'text')) ||
+                                      (data5.transform === undefined && (missing2 = 'transform')) ||
+                                      (data5.width === undefined && (missing2 = 'width')) ||
+                                      (data5.height === undefined && (missing2 = 'height')) ||
+                                      (data5.ascent === undefined && (missing2 = 'ascent')) ||
+                                      (data5.descent === undefined && (missing2 = 'descent')) ||
+                                      (data5.vertical === undefined && (missing2 = 'vertical')) ||
+                                      (data5.dir === undefined && (missing2 = 'dir')) ||
+                                      (data5.fontFamily === undefined &&
+                                        (missing2 = 'fontFamily')) ||
+                                      (data5.hasEOL === undefined && (missing2 = 'hasEOL'))
+                                    ) {
+                                      validate205.errors = [
+                                        {
+                                          instancePath: instancePath + '/textLayer/items/' + i0,
+                                          schemaPath:
+                                            '#/properties/textLayer/properties/items/items/required',
+                                          keyword: 'required',
+                                          params: { missingProperty: missing2 },
+                                          message: "must have required property '" + missing2 + "'",
+                                        },
+                                      ];
+                                      return false;
+                                    } else {
+                                      if (data5.text !== undefined) {
+                                        let data6 = data5.text;
+                                        const _errs16 = errors;
+                                        if (errors === _errs16) {
+                                          if (typeof data6 === 'string') {
+                                            if (func1(data6) > 16384) {
+                                              validate205.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/textLayer/items/' +
+                                                    i0 +
+                                                    '/text',
+                                                  schemaPath:
+                                                    '#/properties/textLayer/properties/items/items/properties/text/maxLength',
+                                                  keyword: 'maxLength',
+                                                  params: { limit: 16384 },
+                                                  message:
+                                                    'must NOT have more than 16384 characters',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          } else {
+                                            validate205.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/textLayer/items/' + i0 + '/text',
+                                                schemaPath:
+                                                  '#/properties/textLayer/properties/items/items/properties/text/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                        }
+                                        var valid3 = _errs16 === errors;
+                                      } else {
+                                        var valid3 = true;
+                                      }
+                                      if (valid3) {
+                                        if (data5.transform !== undefined) {
+                                          let data7 = data5.transform;
+                                          const _errs18 = errors;
+                                          if (errors === _errs18) {
+                                            if (Array.isArray(data7)) {
+                                              if (data7.length > 6) {
+                                                validate205.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/textLayer/items/' +
+                                                      i0 +
+                                                      '/transform',
+                                                    schemaPath:
+                                                      '#/properties/textLayer/properties/items/items/properties/transform/maxItems',
+                                                    keyword: 'maxItems',
+                                                    params: { limit: 6 },
+                                                    message: 'must NOT have more than 6 items',
+                                                  },
+                                                ];
+                                                return false;
+                                              } else {
+                                                if (data7.length < 6) {
+                                                  validate205.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/textLayer/items/' +
+                                                        i0 +
+                                                        '/transform',
+                                                      schemaPath:
+                                                        '#/properties/textLayer/properties/items/items/properties/transform/minItems',
+                                                      keyword: 'minItems',
+                                                      params: { limit: 6 },
+                                                      message: 'must NOT have fewer than 6 items',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                } else {
+                                                  var valid4 = true;
+                                                  const len1 = data7.length;
+                                                  for (let i1 = 0; i1 < len1; i1++) {
+                                                    let data8 = data7[i1];
+                                                    const _errs20 = errors;
+                                                    if (errors === _errs20) {
+                                                      if (
+                                                        typeof data8 == 'number' &&
+                                                        isFinite(data8)
+                                                      ) {
+                                                        if (data8 > 1e7 || isNaN(data8)) {
+                                                          validate205.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/textLayer/items/' +
+                                                                i0 +
+                                                                '/transform/' +
+                                                                i1,
+                                                              schemaPath:
+                                                                '#/properties/textLayer/properties/items/items/properties/transform/items/maximum',
+                                                              keyword: 'maximum',
+                                                              params: {
+                                                                comparison: '<=',
+                                                                limit: 1e7,
+                                                              },
+                                                              message: 'must be <= 10000000',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        } else {
+                                                          if (data8 < -1e7 || isNaN(data8)) {
+                                                            validate205.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/textLayer/items/' +
+                                                                  i0 +
+                                                                  '/transform/' +
+                                                                  i1,
+                                                                schemaPath:
+                                                                  '#/properties/textLayer/properties/items/items/properties/transform/items/minimum',
+                                                                keyword: 'minimum',
+                                                                params: {
+                                                                  comparison: '>=',
+                                                                  limit: -1e7,
+                                                                },
+                                                                message: 'must be >= -10000000',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                        }
+                                                      } else {
+                                                        validate205.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/textLayer/items/' +
+                                                              i0 +
+                                                              '/transform/' +
+                                                              i1,
+                                                            schemaPath:
+                                                              '#/properties/textLayer/properties/items/items/properties/transform/items/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'number' },
+                                                            message: 'must be number',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                    }
+                                                    var valid4 = _errs20 === errors;
+                                                    if (!valid4) {
+                                                      break;
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            } else {
+                                              validate205.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/textLayer/items/' +
+                                                    i0 +
+                                                    '/transform',
+                                                  schemaPath:
+                                                    '#/properties/textLayer/properties/items/items/properties/transform/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'array' },
+                                                  message: 'must be array',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          }
+                                          var valid3 = _errs18 === errors;
+                                        } else {
+                                          var valid3 = true;
+                                        }
+                                        if (valid3) {
+                                          if (data5.width !== undefined) {
+                                            let data9 = data5.width;
+                                            const _errs22 = errors;
+                                            if (errors === _errs22) {
+                                              if (typeof data9 == 'number' && isFinite(data9)) {
+                                                if (data9 > 1e7 || isNaN(data9)) {
+                                                  validate205.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/textLayer/items/' +
+                                                        i0 +
+                                                        '/width',
+                                                      schemaPath:
+                                                        '#/properties/textLayer/properties/items/items/properties/width/maximum',
+                                                      keyword: 'maximum',
+                                                      params: { comparison: '<=', limit: 1e7 },
+                                                      message: 'must be <= 10000000',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                } else {
+                                                  if (data9 < 0 || isNaN(data9)) {
+                                                    validate205.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/textLayer/items/' +
+                                                          i0 +
+                                                          '/width',
+                                                        schemaPath:
+                                                          '#/properties/textLayer/properties/items/items/properties/width/minimum',
+                                                        keyword: 'minimum',
+                                                        params: { comparison: '>=', limit: 0 },
+                                                        message: 'must be >= 0',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                }
+                                              } else {
+                                                validate205.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/textLayer/items/' +
+                                                      i0 +
+                                                      '/width',
+                                                    schemaPath:
+                                                      '#/properties/textLayer/properties/items/items/properties/width/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'number' },
+                                                    message: 'must be number',
+                                                  },
+                                                ];
+                                                return false;
+                                              }
+                                            }
+                                            var valid3 = _errs22 === errors;
+                                          } else {
+                                            var valid3 = true;
+                                          }
+                                          if (valid3) {
+                                            if (data5.height !== undefined) {
+                                              let data10 = data5.height;
+                                              const _errs24 = errors;
+                                              if (errors === _errs24) {
+                                                if (typeof data10 == 'number' && isFinite(data10)) {
+                                                  if (data10 > 1e7 || isNaN(data10)) {
+                                                    validate205.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/textLayer/items/' +
+                                                          i0 +
+                                                          '/height',
+                                                        schemaPath:
+                                                          '#/properties/textLayer/properties/items/items/properties/height/maximum',
+                                                        keyword: 'maximum',
+                                                        params: { comparison: '<=', limit: 1e7 },
+                                                        message: 'must be <= 10000000',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  } else {
+                                                    if (data10 < 0 || isNaN(data10)) {
+                                                      validate205.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/textLayer/items/' +
+                                                            i0 +
+                                                            '/height',
+                                                          schemaPath:
+                                                            '#/properties/textLayer/properties/items/items/properties/height/minimum',
+                                                          keyword: 'minimum',
+                                                          params: { comparison: '>=', limit: 0 },
+                                                          message: 'must be >= 0',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    }
+                                                  }
+                                                } else {
+                                                  validate205.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/textLayer/items/' +
+                                                        i0 +
+                                                        '/height',
+                                                      schemaPath:
+                                                        '#/properties/textLayer/properties/items/items/properties/height/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'number' },
+                                                      message: 'must be number',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                              }
+                                              var valid3 = _errs24 === errors;
+                                            } else {
+                                              var valid3 = true;
+                                            }
+                                            if (valid3) {
+                                              if (data5.ascent !== undefined) {
+                                                let data11 = data5.ascent;
+                                                const _errs26 = errors;
+                                                const _errs27 = errors;
+                                                let valid5 = false;
+                                                const _errs28 = errors;
+                                                if (errors === _errs28) {
+                                                  if (
+                                                    typeof data11 == 'number' &&
+                                                    isFinite(data11)
+                                                  ) {
+                                                    if (data11 > 4 || isNaN(data11)) {
+                                                      const err0 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/textLayer/items/' +
+                                                          i0 +
+                                                          '/ascent',
+                                                        schemaPath:
+                                                          '#/properties/textLayer/properties/items/items/properties/ascent/anyOf/0/maximum',
+                                                        keyword: 'maximum',
+                                                        params: { comparison: '<=', limit: 4 },
+                                                        message: 'must be <= 4',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err0];
+                                                      } else {
+                                                        vErrors.push(err0);
+                                                      }
+                                                      errors++;
+                                                    } else {
+                                                      if (data11 < -4 || isNaN(data11)) {
+                                                        const err1 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/textLayer/items/' +
+                                                            i0 +
+                                                            '/ascent',
+                                                          schemaPath:
+                                                            '#/properties/textLayer/properties/items/items/properties/ascent/anyOf/0/minimum',
+                                                          keyword: 'minimum',
+                                                          params: { comparison: '>=', limit: -4 },
+                                                          message: 'must be >= -4',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err1];
+                                                        } else {
+                                                          vErrors.push(err1);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                    }
+                                                  } else {
+                                                    const err2 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/textLayer/items/' +
+                                                        i0 +
+                                                        '/ascent',
+                                                      schemaPath:
+                                                        '#/properties/textLayer/properties/items/items/properties/ascent/anyOf/0/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'number' },
+                                                      message: 'must be number',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err2];
+                                                    } else {
+                                                      vErrors.push(err2);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                                var _valid0 = _errs28 === errors;
+                                                valid5 = valid5 || _valid0;
+                                                const _errs30 = errors;
+                                                if (data11 !== null) {
+                                                  const err3 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/textLayer/items/' +
+                                                      i0 +
+                                                      '/ascent',
+                                                    schemaPath:
+                                                      '#/properties/textLayer/properties/items/items/properties/ascent/anyOf/1/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'null' },
+                                                    message: 'must be null',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err3];
+                                                  } else {
+                                                    vErrors.push(err3);
+                                                  }
+                                                  errors++;
+                                                }
+                                                var _valid0 = _errs30 === errors;
+                                                valid5 = valid5 || _valid0;
+                                                if (!valid5) {
+                                                  const err4 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/textLayer/items/' +
+                                                      i0 +
+                                                      '/ascent',
+                                                    schemaPath:
+                                                      '#/properties/textLayer/properties/items/items/properties/ascent/anyOf',
+                                                    keyword: 'anyOf',
+                                                    params: {},
+                                                    message: 'must match a schema in anyOf',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err4];
+                                                  } else {
+                                                    vErrors.push(err4);
+                                                  }
+                                                  errors++;
+                                                  validate205.errors = vErrors;
+                                                  return false;
+                                                } else {
+                                                  errors = _errs27;
+                                                  if (vErrors !== null) {
+                                                    if (_errs27) {
+                                                      vErrors.length = _errs27;
+                                                    } else {
+                                                      vErrors = null;
+                                                    }
+                                                  }
+                                                }
+                                                var valid3 = _errs26 === errors;
+                                              } else {
+                                                var valid3 = true;
+                                              }
+                                              if (valid3) {
+                                                if (data5.descent !== undefined) {
+                                                  let data12 = data5.descent;
+                                                  const _errs32 = errors;
+                                                  const _errs33 = errors;
+                                                  let valid6 = false;
+                                                  const _errs34 = errors;
+                                                  if (errors === _errs34) {
+                                                    if (
+                                                      typeof data12 == 'number' &&
+                                                      isFinite(data12)
+                                                    ) {
+                                                      if (data12 > 4 || isNaN(data12)) {
+                                                        const err5 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/textLayer/items/' +
+                                                            i0 +
+                                                            '/descent',
+                                                          schemaPath:
+                                                            '#/properties/textLayer/properties/items/items/properties/descent/anyOf/0/maximum',
+                                                          keyword: 'maximum',
+                                                          params: { comparison: '<=', limit: 4 },
+                                                          message: 'must be <= 4',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err5];
+                                                        } else {
+                                                          vErrors.push(err5);
+                                                        }
+                                                        errors++;
+                                                      } else {
+                                                        if (data12 < -4 || isNaN(data12)) {
+                                                          const err6 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/textLayer/items/' +
+                                                              i0 +
+                                                              '/descent',
+                                                            schemaPath:
+                                                              '#/properties/textLayer/properties/items/items/properties/descent/anyOf/0/minimum',
+                                                            keyword: 'minimum',
+                                                            params: { comparison: '>=', limit: -4 },
+                                                            message: 'must be >= -4',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err6];
+                                                          } else {
+                                                            vErrors.push(err6);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                      }
+                                                    } else {
+                                                      const err7 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/textLayer/items/' +
+                                                          i0 +
+                                                          '/descent',
+                                                        schemaPath:
+                                                          '#/properties/textLayer/properties/items/items/properties/descent/anyOf/0/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'number' },
+                                                        message: 'must be number',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err7];
+                                                      } else {
+                                                        vErrors.push(err7);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  }
+                                                  var _valid1 = _errs34 === errors;
+                                                  valid6 = valid6 || _valid1;
+                                                  const _errs36 = errors;
+                                                  if (data12 !== null) {
+                                                    const err8 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/textLayer/items/' +
+                                                        i0 +
+                                                        '/descent',
+                                                      schemaPath:
+                                                        '#/properties/textLayer/properties/items/items/properties/descent/anyOf/1/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'null' },
+                                                      message: 'must be null',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err8];
+                                                    } else {
+                                                      vErrors.push(err8);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  var _valid1 = _errs36 === errors;
+                                                  valid6 = valid6 || _valid1;
+                                                  if (!valid6) {
+                                                    const err9 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/textLayer/items/' +
+                                                        i0 +
+                                                        '/descent',
+                                                      schemaPath:
+                                                        '#/properties/textLayer/properties/items/items/properties/descent/anyOf',
+                                                      keyword: 'anyOf',
+                                                      params: {},
+                                                      message: 'must match a schema in anyOf',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err9];
+                                                    } else {
+                                                      vErrors.push(err9);
+                                                    }
+                                                    errors++;
+                                                    validate205.errors = vErrors;
+                                                    return false;
+                                                  } else {
+                                                    errors = _errs33;
+                                                    if (vErrors !== null) {
+                                                      if (_errs33) {
+                                                        vErrors.length = _errs33;
+                                                      } else {
+                                                        vErrors = null;
+                                                      }
+                                                    }
+                                                  }
+                                                  var valid3 = _errs32 === errors;
+                                                } else {
+                                                  var valid3 = true;
+                                                }
+                                                if (valid3) {
+                                                  if (data5.vertical !== undefined) {
+                                                    const _errs38 = errors;
+                                                    if (typeof data5.vertical !== 'boolean') {
+                                                      validate205.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/textLayer/items/' +
+                                                            i0 +
+                                                            '/vertical',
+                                                          schemaPath:
+                                                            '#/properties/textLayer/properties/items/items/properties/vertical/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'boolean' },
+                                                          message: 'must be boolean',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    }
+                                                    var valid3 = _errs38 === errors;
+                                                  } else {
+                                                    var valid3 = true;
+                                                  }
+                                                  if (valid3) {
+                                                    if (data5.dir !== undefined) {
+                                                      let data14 = data5.dir;
+                                                      const _errs40 = errors;
+                                                      if (typeof data14 !== 'string') {
+                                                        validate205.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/textLayer/items/' +
+                                                              i0 +
+                                                              '/dir',
+                                                            schemaPath:
+                                                              '#/properties/textLayer/properties/items/items/properties/dir/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                      if (
+                                                        !(
+                                                          data14 === 'ltr' ||
+                                                          data14 === 'rtl' ||
+                                                          data14 === 'ttb'
+                                                        )
+                                                      ) {
+                                                        validate205.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/textLayer/items/' +
+                                                              i0 +
+                                                              '/dir',
+                                                            schemaPath:
+                                                              '#/properties/textLayer/properties/items/items/properties/dir/enum',
+                                                            keyword: 'enum',
+                                                            params: {
+                                                              allowedValues:
+                                                                schema532.properties.textLayer
+                                                                  .properties.items.items.properties
+                                                                  .dir.enum,
+                                                            },
+                                                            message:
+                                                              'must be equal to one of the allowed values',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                      var valid3 = _errs40 === errors;
+                                                    } else {
+                                                      var valid3 = true;
+                                                    }
+                                                    if (valid3) {
+                                                      if (data5.fontFamily !== undefined) {
+                                                        let data15 = data5.fontFamily;
+                                                        const _errs42 = errors;
+                                                        if (typeof data15 !== 'string') {
+                                                          validate205.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/textLayer/items/' +
+                                                                i0 +
+                                                                '/fontFamily',
+                                                              schemaPath:
+                                                                '#/properties/textLayer/properties/items/items/properties/fontFamily/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'string' },
+                                                              message: 'must be string',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        if (
+                                                          !(
+                                                            data15 === 'sans-serif' ||
+                                                            data15 === 'serif' ||
+                                                            data15 === 'monospace'
+                                                          )
+                                                        ) {
+                                                          validate205.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/textLayer/items/' +
+                                                                i0 +
+                                                                '/fontFamily',
+                                                              schemaPath:
+                                                                '#/properties/textLayer/properties/items/items/properties/fontFamily/enum',
+                                                              keyword: 'enum',
+                                                              params: {
+                                                                allowedValues:
+                                                                  schema532.properties.textLayer
+                                                                    .properties.items.items
+                                                                    .properties.fontFamily.enum,
+                                                              },
+                                                              message:
+                                                                'must be equal to one of the allowed values',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        var valid3 = _errs42 === errors;
+                                                      } else {
+                                                        var valid3 = true;
+                                                      }
+                                                      if (valid3) {
+                                                        if (data5.hasEOL !== undefined) {
+                                                          const _errs44 = errors;
+                                                          if (typeof data5.hasEOL !== 'boolean') {
+                                                            validate205.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/textLayer/items/' +
+                                                                  i0 +
+                                                                  '/hasEOL',
+                                                                schemaPath:
+                                                                  '#/properties/textLayer/properties/items/items/properties/hasEOL/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'boolean' },
+                                                                message: 'must be boolean',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          var valid3 = _errs44 === errors;
+                                                        } else {
+                                                          var valid3 = true;
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  } else {
+                                    validate205.errors = [
+                                      {
+                                        instancePath: instancePath + '/textLayer/items/' + i0,
+                                        schemaPath:
+                                          '#/properties/textLayer/properties/items/items/type',
+                                        keyword: 'type',
+                                        params: { type: 'object' },
+                                        message: 'must be object',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                }
+                                var valid2 = _errs13 === errors;
+                                if (!valid2) {
+                                  break;
+                                }
+                              }
+                            }
+                          } else {
+                            validate205.errors = [
+                              {
+                                instancePath: instancePath + '/textLayer/items',
+                                schemaPath: '#/properties/textLayer/properties/items/type',
+                                keyword: 'type',
+                                params: { type: 'array' },
+                                message: 'must be array',
+                              },
+                            ];
+                            return false;
+                          }
+                        }
+                        var valid1 = _errs11 === errors;
+                      } else {
+                        var valid1 = true;
+                      }
+                    }
+                  }
                 }
               }
+            } else {
+              validate205.errors = [
+                {
+                  instancePath: instancePath + '/textLayer',
+                  schemaPath: '#/properties/textLayer/type',
+                  keyword: 'type',
+                  params: { type: 'object' },
+                  message: 'must be object',
+                },
+              ];
+              return false;
             }
           }
           var valid0 = _errs2 === errors;
@@ -243010,14 +244041,16 @@ function validate205(
           var valid0 = true;
         }
         if (valid0) {
-          if (data.totalPages !== undefined) {
-            let data1 = data.totalPages;
-            const _errs4 = errors;
-            if (!(typeof data1 == 'number' && !(data1 % 1) && !isNaN(data1) && isFinite(data1))) {
+          if (data.page !== undefined) {
+            let data17 = data.page;
+            const _errs46 = errors;
+            if (
+              !(typeof data17 == 'number' && !(data17 % 1) && !isNaN(data17) && isFinite(data17))
+            ) {
               validate205.errors = [
                 {
-                  instancePath: instancePath + '/totalPages',
-                  schemaPath: '#/properties/totalPages/type',
+                  instancePath: instancePath + '/page',
+                  schemaPath: '#/properties/page/type',
                   keyword: 'type',
                   params: { type: 'integer' },
                   message: 'must be integer',
@@ -243025,13 +244058,13 @@ function validate205(
               ];
               return false;
             }
-            if (errors === _errs4) {
-              if (typeof data1 == 'number' && isFinite(data1)) {
-                if (data1 > 9007199254740991 || isNaN(data1)) {
+            if (errors === _errs46) {
+              if (typeof data17 == 'number' && isFinite(data17)) {
+                if (data17 > 9007199254740991 || isNaN(data17)) {
                   validate205.errors = [
                     {
-                      instancePath: instancePath + '/totalPages',
-                      schemaPath: '#/properties/totalPages/maximum',
+                      instancePath: instancePath + '/page',
+                      schemaPath: '#/properties/page/maximum',
                       keyword: 'maximum',
                       params: { comparison: '<=', limit: 9007199254740991 },
                       message: 'must be <= 9007199254740991',
@@ -243039,11 +244072,11 @@ function validate205(
                   ];
                   return false;
                 } else {
-                  if (data1 < 1 || isNaN(data1)) {
+                  if (data17 < 1 || isNaN(data17)) {
                     validate205.errors = [
                       {
-                        instancePath: instancePath + '/totalPages',
-                        schemaPath: '#/properties/totalPages/minimum',
+                        instancePath: instancePath + '/page',
+                        schemaPath: '#/properties/page/minimum',
                         keyword: 'minimum',
                         params: { comparison: '>=', limit: 1 },
                         message: 'must be >= 1',
@@ -243054,102 +244087,154 @@ function validate205(
                 }
               }
             }
-            var valid0 = _errs4 === errors;
+            var valid0 = _errs46 === errors;
           } else {
             var valid0 = true;
           }
           if (valid0) {
-            if (data.mediaType !== undefined) {
-              let data2 = data.mediaType;
-              const _errs6 = errors;
-              if (typeof data2 !== 'string') {
+            if (data.totalPages !== undefined) {
+              let data18 = data.totalPages;
+              const _errs48 = errors;
+              if (
+                !(typeof data18 == 'number' && !(data18 % 1) && !isNaN(data18) && isFinite(data18))
+              ) {
                 validate205.errors = [
                   {
-                    instancePath: instancePath + '/mediaType',
-                    schemaPath: '#/properties/mediaType/type',
+                    instancePath: instancePath + '/totalPages',
+                    schemaPath: '#/properties/totalPages/type',
                     keyword: 'type',
-                    params: { type: 'string' },
-                    message: 'must be string',
+                    params: { type: 'integer' },
+                    message: 'must be integer',
                   },
                 ];
                 return false;
               }
-              if (data2 !== 'image/png') {
-                validate205.errors = [
-                  {
-                    instancePath: instancePath + '/mediaType',
-                    schemaPath: '#/properties/mediaType/const',
-                    keyword: 'const',
-                    params: { allowedValue: 'image/png' },
-                    message: 'must be equal to constant',
-                  },
-                ];
-                return false;
+              if (errors === _errs48) {
+                if (typeof data18 == 'number' && isFinite(data18)) {
+                  if (data18 > 9007199254740991 || isNaN(data18)) {
+                    validate205.errors = [
+                      {
+                        instancePath: instancePath + '/totalPages',
+                        schemaPath: '#/properties/totalPages/maximum',
+                        keyword: 'maximum',
+                        params: { comparison: '<=', limit: 9007199254740991 },
+                        message: 'must be <= 9007199254740991',
+                      },
+                    ];
+                    return false;
+                  } else {
+                    if (data18 < 1 || isNaN(data18)) {
+                      validate205.errors = [
+                        {
+                          instancePath: instancePath + '/totalPages',
+                          schemaPath: '#/properties/totalPages/minimum',
+                          keyword: 'minimum',
+                          params: { comparison: '>=', limit: 1 },
+                          message: 'must be >= 1',
+                        },
+                      ];
+                      return false;
+                    }
+                  }
+                }
               }
-              var valid0 = _errs6 === errors;
+              var valid0 = _errs48 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.data !== undefined) {
-                let data3 = data.data;
-                const _errs8 = errors;
-                if (errors === _errs8) {
-                  if (typeof data3 === 'string') {
-                    if (func1(data3) > 25165824) {
-                      validate205.errors = [
-                        {
-                          instancePath: instancePath + '/data',
-                          schemaPath: '#/properties/data/maxLength',
-                          keyword: 'maxLength',
-                          params: { limit: 25165824 },
-                          message: 'must NOT have more than 25165824 characters',
-                        },
-                      ];
-                      return false;
-                    } else {
-                      if (func1(data3) < 8) {
+              if (data.mediaType !== undefined) {
+                let data19 = data.mediaType;
+                const _errs50 = errors;
+                if (typeof data19 !== 'string') {
+                  validate205.errors = [
+                    {
+                      instancePath: instancePath + '/mediaType',
+                      schemaPath: '#/properties/mediaType/type',
+                      keyword: 'type',
+                      params: { type: 'string' },
+                      message: 'must be string',
+                    },
+                  ];
+                  return false;
+                }
+                if (data19 !== 'image/png') {
+                  validate205.errors = [
+                    {
+                      instancePath: instancePath + '/mediaType',
+                      schemaPath: '#/properties/mediaType/const',
+                      keyword: 'const',
+                      params: { allowedValue: 'image/png' },
+                      message: 'must be equal to constant',
+                    },
+                  ];
+                  return false;
+                }
+                var valid0 = _errs50 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.data !== undefined) {
+                  let data20 = data.data;
+                  const _errs52 = errors;
+                  if (errors === _errs52) {
+                    if (typeof data20 === 'string') {
+                      if (func1(data20) > 25165824) {
                         validate205.errors = [
                           {
                             instancePath: instancePath + '/data',
-                            schemaPath: '#/properties/data/minLength',
-                            keyword: 'minLength',
-                            params: { limit: 8 },
-                            message: 'must NOT have fewer than 8 characters',
+                            schemaPath: '#/properties/data/maxLength',
+                            keyword: 'maxLength',
+                            params: { limit: 25165824 },
+                            message: 'must NOT have more than 25165824 characters',
                           },
                         ];
                         return false;
                       } else {
-                        if (!pattern1183.test(data3)) {
+                        if (func1(data20) < 8) {
                           validate205.errors = [
                             {
                               instancePath: instancePath + '/data',
-                              schemaPath: '#/properties/data/pattern',
-                              keyword: 'pattern',
-                              params: { pattern: '^[A-Za-z0-9+/]*={0,2}$' },
-                              message: 'must match pattern "' + '^[A-Za-z0-9+/]*={0,2}$' + '"',
+                              schemaPath: '#/properties/data/minLength',
+                              keyword: 'minLength',
+                              params: { limit: 8 },
+                              message: 'must NOT have fewer than 8 characters',
                             },
                           ];
                           return false;
+                        } else {
+                          if (!pattern1183.test(data20)) {
+                            validate205.errors = [
+                              {
+                                instancePath: instancePath + '/data',
+                                schemaPath: '#/properties/data/pattern',
+                                keyword: 'pattern',
+                                params: { pattern: '^[A-Za-z0-9+/]*={0,2}$' },
+                                message: 'must match pattern "' + '^[A-Za-z0-9+/]*={0,2}$' + '"',
+                              },
+                            ];
+                            return false;
+                          }
                         }
                       }
+                    } else {
+                      validate205.errors = [
+                        {
+                          instancePath: instancePath + '/data',
+                          schemaPath: '#/properties/data/type',
+                          keyword: 'type',
+                          params: { type: 'string' },
+                          message: 'must be string',
+                        },
+                      ];
+                      return false;
                     }
-                  } else {
-                    validate205.errors = [
-                      {
-                        instancePath: instancePath + '/data',
-                        schemaPath: '#/properties/data/type',
-                        keyword: 'type',
-                        params: { type: 'string' },
-                        message: 'must be string',
-                      },
-                    ];
-                    return false;
                   }
+                  var valid0 = _errs52 === errors;
+                } else {
+                  var valid0 = true;
                 }
-                var valid0 = _errs8 === errors;
-              } else {
-                var valid0 = true;
               }
             }
           }

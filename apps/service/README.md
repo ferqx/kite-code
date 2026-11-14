@@ -1125,7 +1125,7 @@ owned navigate沿原35秒默认／既有配置请求预算，不再被普通私�
 
 默认权限装配只接纳宿主实际 Files collector Job，并用 Store 的原 Action/operation/producer/allocation 完整链及当前 attempt/startCommand/intent 请求证明动态描述。其已绑定自有暂存到私有 Artifact 的归档属于 `read`＋`record_write` 内部持久化，不是 safeRead 或用户任意外部文件写；三种模式沿原 policy 自动归档，当前 trust 与注入 ceiling 不放宽。模型 Run 不增加此 Job 能力。adapter 前权限拒绝以可见失败收口，禁普通重试、冷 owner 不重放，原执行事实保留；私有暂存独立保留7天后才可清理，未知执行仍保留。对应[默认权限回归](test/isolated/output-collection.test.ts)覆盖三种模式、伪造来源/attempt、trust 撤销和注入拒绝。
 
-具备流式 Artifact port 的 Service 宣告 `output_files`。同源 schema 定义 `/output-files` 列表、`/resolve`、`/retry` 与 `/pdf-page`；全部按认证主体及准确 Store/Session/locator 解析。PDF 页图由现有 PDF.js worker按需生成，只返回指定页PNG；原始文件可独立下载。Artifact GET 为有背压的二进制流，完整EOF验证原字节，关闭和取消等待原迭代器释放。Main必须在临时落盘完成SHA/size核实后才发布保存文件，HTTP头不单独证明完整文件。
+具备流式 Artifact port 的 Service 宣告 `output_files`。同源 schema 定义 `/output-files` 列表、`/resolve`、`/retry` 与 `/pdf-page`；全部按认证主体及准确 Store/Session/locator 解析。PDF 页图由现有 PDF.js worker按需生成，返回指定页 PNG 及可选的有界真实文本层；原始文件可独立下载。文本层使用与 PNG 相同的 viewport，保留文本顺序、方向和变换，字体仅允许通用白名单；缺文本与不可用明确区分，不执行 OCR、不接受任意 HTML，也不扩大原文件权限。Artifact GET 为有背压的二进制流，完整EOF验证原字节，关闭和取消等待原迭代器释放。Main必须在临时落盘完成SHA/size核实后才发布保存文件，HTTP头不单独证明完整文件。
 
 `input-files/from-output` 将精确来源导入目标 Session 的合法 input ref；`input-files/prepare-working` 在原 command ID 提交前创建工作区 `.kite-inputs` 副本。映射由Store持久保存并与原输入绑定同事务落定，模型只收到工作路径，不收到私有Blob路径或交付catalog。ACK重入不会覆盖已绑定命令的编辑；祖先symlink、hardlink、来源中断或hash不符均拒绝；生产装配额外拒绝Profile、协调目录和Runtime资产内的Workspace，逐4MiB核验让出事件循环以响应取消。路径/复制事实归[工作副本实现](../../packages/agent/src/tools/input-working-files.ts)。
 

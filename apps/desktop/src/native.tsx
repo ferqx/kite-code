@@ -115,6 +115,7 @@ import { useNativeInputQueue } from './native-input-queue';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
+import { submitLocalOfficeRequest } from './native-local-request-submit';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { humanReadableOperationError, NativeToast, type NativeToastProps } from './native-message';
 import { createNativeModelInputPort } from './native-model-input';
@@ -1741,6 +1742,45 @@ function NativeDesktopContent({
     sessionId: selection?.session.id,
     revision: state?.outputFilesRevision ?? state?.historyEpoch ?? 0,
     turnLabel: (runId) => `来源轮次 ${runId.slice(0, 8)}`,
+    onRequestLocalEdit: async (file, request) => {
+      if (
+        !bridge ||
+        !selection ||
+        executionUnconfirmed ||
+        writing.current ||
+        worktreeExitRead.current ||
+        historyState.phase !== 'complete' ||
+        file.storeId !== selection.storeId ||
+        file.sessionId !== selection.session.id
+      )
+        return { status: 'failed' as const, message: '会话尚未就绪，请稍后重试。' };
+      const current = state?.generation ?? generation.current;
+      const nonce = viewIntent.current;
+      const sessionId = selection.session.id;
+      writing.current = true;
+      setPending(true);
+      setSending(true);
+      try {
+        return await submitLocalOfficeRequest({
+          bridge,
+          generation: current,
+          selection,
+          request,
+          isCurrent: () =>
+            current === generation.current &&
+            nonce === viewIntent.current &&
+            selected.current === sessionId,
+          modelReady: nextModelReady,
+          modelChoice:
+            resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
+        });
+      } finally {
+        writing.current = false;
+        setPending(false);
+        setSending(false);
+        await refresh().catch(() => {});
+      }
+    },
     onRequestEdit: async (file, context, prompt) => {
       if (
         !bridge ||

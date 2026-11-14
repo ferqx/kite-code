@@ -6,7 +6,11 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { _electron, type ElectronApplication, type Page } from 'playwright';
 import { selectNativeFixtureModel } from './native-model-selection.fixture';
-import { officeFormats } from './office-journey.fixture';
+import {
+  officeFormats,
+  officePreviewObservation,
+  readOfficePreviewHost,
+} from './office-journey.fixture';
 import { officePreviewDiagnosticEntry } from './office-preview-diagnostics.fixture';
 
 /** Only UI actions dispatch work. A fixed model exercises production Main/Service/Shell/collector. */
@@ -84,8 +88,29 @@ export async function runOfficeJourney(options: {
         .getByRole('button', { name: `打开 ${name}`, exact: true })
         .click();
       let surface: Page | undefined;
+      let sawPreparing = false;
+      let contentSeen = false;
+      const fail = (code: string) => {
+        writeFileSync(
+          join(evidence, 'preview-observation.json'),
+          JSON.stringify({ stage, code, sawPreparing, contentSeen }),
+        );
+        throw Error(code);
+      };
       const deadline = Date.now() + 60_000;
       while (!surface && Date.now() < deadline) {
+        const { targetMatches, preparing, failed } = await readOfficePreviewHost(page!, name);
+        const host = officePreviewObservation({
+          targetMatches,
+          preparing,
+          failed,
+          sawPreparing,
+          contentVisible: false,
+          word: false,
+          pagination: null,
+        });
+        sawPreparing = host.sawPreparing;
+        if (host.outcome === 'failed') fail('preview_host_failed');
         for (const candidate of app!.windows()) {
           if (
             !existing.has(candidate) &&
@@ -96,13 +121,31 @@ export async function runOfficeJourney(options: {
               .isVisible()
               .catch(() => false))
           ) {
-            surface = candidate;
-            break;
+            contentSeen = true;
+            const pagination = await candidate
+              .locator('html')
+              .getAttribute('data-kite-word-pagination-state');
+            const observed = officePreviewObservation({
+              targetMatches,
+              preparing,
+              failed,
+              sawPreparing,
+              contentVisible: true,
+              word: name.endsWith('.docx'),
+              pagination,
+            });
+            if (observed.outcome === 'pagination-unavailable')
+              fail('preview_pagination_unavailable');
+            if (observed.outcome === 'ready') {
+              surface = candidate;
+              break;
+            }
           }
         }
         if (!surface) await Bun.sleep(50);
       }
-      if (!surface) throw Error(`preview_content_not_visible: ${name}`);
+      if (!surface)
+        return fail(contentSeen ? 'preview_pagination_timeout' : 'preview_content_not_visible');
       await surface.screenshot({ path: join(evidence, `${stage}-preview.png`) });
       // WebContentsView is not included in renderer screenshots. Retain each surface separately.
       await page!.screenshot({ path: join(evidence, `${stage}-client.png`) });

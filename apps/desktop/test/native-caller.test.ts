@@ -4425,3 +4425,132 @@ test('isolated Office submit rejects forged metadata, preserves composer and jou
     await caller.close();
   }
 });
+
+test('local PDF source guard rejects during prepare before persistence and cold recovery cannot dispatch it', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let valid = true,
+    sends = 0;
+  const getView = port.getView.bind(port);
+  port.getView = async (...args) => {
+    const result = await getView(...args);
+    valid = false;
+    return result;
+  };
+  port.startRun = async () => {
+    sends++;
+    throw Error('must_not_dispatch');
+  };
+  const journal = new NativeCallerJournal(port, data);
+  const intent = {
+    kind: 'run.start' as const,
+    commandId: 'local-pdf',
+    expectedStoreId: 'store',
+    content: 'Main original reference',
+  };
+  await expect(
+    journal.prepare('s', intent, undefined, async () => {
+      if (!valid) throw Error('local_preview_changed');
+    }),
+  ).rejects.toThrow('local_preview_changed');
+  expect(data.callers()).toEqual([]);
+  const cold = new NativeCallerJournal(port, data);
+  expect(() => cold.submit(intent.commandId)).toThrow('caller_intent_missing');
+  expect(sends).toBe(0);
+});
+
+test('local PDF prepare guard throws without a row and cannot replace an existing unknown intent', async () => {
+  const port = client(),
+    data = memoryPrivateData(),
+    journal = new NativeCallerJournal(port, data);
+  const intent = {
+    kind: 'run.start' as const,
+    commandId: 'local-pdf-guard',
+    expectedStoreId: 'store',
+    content: 'Main original reference',
+  };
+  await expect(
+    journal.prepare('s', intent, undefined, () => {
+      throw Error('scope_revoked');
+    }),
+  ).rejects.toThrow('scope_revoked');
+  expect(data.callers()).toEqual([]);
+  let checks = 0;
+  await journal.prepare('s', intent, undefined, async () => {
+    checks++;
+  });
+  expect(checks).toBe(1);
+  let sends = 0;
+  port.startRun = async () => {
+    sends++;
+    throw new ClientError('network_error');
+  };
+  await expect(journal.submit(intent.commandId)).rejects.toThrow();
+  const previous = structuredClone(data.callers());
+  expect(previous[0]?.phase).toBe('unknown');
+  await expect(
+    journal.prepare('s', intent, undefined, async () => {
+      throw Error('source_changed');
+    }),
+  ).rejects.toThrow('source_changed');
+  expect(data.callers()).toEqual(previous);
+  expect(sends).toBe(1);
+});
+
+test('local PDF submit uses Main content and original journal without uploading or consuming composer', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let sends = 0,
+    guards = 0;
+  port.startRun = async () => {
+    sends++;
+    throw new ClientError('network_error');
+  };
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 's',
+      revision: 0,
+      content: 'Unrelated composer',
+    });
+    const before = await caller.invoke({ method: 'draft.read', generation, sessionId: 's' });
+    const request = {
+      method: 'localPreview.submit' as const,
+      generation,
+      sessionId: 's',
+      handleId: 'handle',
+      previewId: 'preview',
+      requestId: 'request',
+      intent: {
+        kind: 'run.start' as const,
+        commandId: 'local-pdf-once',
+        expectedStoreId: 'store',
+        content: 'renderer-forged-path',
+      },
+    };
+    expect(
+      await caller.submitLocalPreview(request, 'Main trusted original reference', async () => {
+        guards++;
+      }),
+    ).toMatchObject({ phase: 'unknown' });
+    expect(guards).toBe(2);
+    expect(sends).toBe(1);
+    expect(data.callers()[0]?.intent.request).toMatchObject({
+      content: 'Main trusted original reference',
+    });
+    expect(data.callers()[0]?.intent.request).not.toHaveProperty('files');
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toEqual(
+      before,
+    );
+    await expect(
+      caller.submitLocalPreview(request, 'Main trusted original reference', async () => {}),
+    ).rejects.toThrow('caller_clear_unconfirmed');
+    expect(sends).toBe(1);
+  } finally {
+    await caller.close();
+  }
+});

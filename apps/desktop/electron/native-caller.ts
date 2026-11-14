@@ -1639,7 +1639,28 @@ export class NativeCaller {
     await this.fileChanges.openMessageFile(request, perform);
     this.assertGeneration(request.generation);
   }
-  async invoke(request: NativeRequest): Promise<NativeResult> {
+  /** Only Main may supply this source check; it is not part of the renderer request schema. */
+  async submitLocalPreview(
+    request: Extract<NativeRequest, { method: 'localPreview.submit' }>,
+    content: string,
+    check: () => Promise<void>,
+  ): Promise<NativeResult> {
+    if (request.intent.files?.length || request.intent.images?.length)
+      throw new ClientError('local_preview_request_invalid');
+    return this.invoke(
+      {
+        method: 'submit',
+        generation: request.generation,
+        sessionId: request.sessionId,
+        intent: { ...request.intent, content },
+      },
+      check,
+    );
+  }
+  async invoke(
+    request: NativeRequest,
+    localSourceCheck?: () => Promise<void>,
+  ): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
       const previousSelection =
@@ -1949,6 +1970,9 @@ export class NativeCaller {
       case 'localPreview.open':
       case 'localPreview.release':
       case 'localPreview.check':
+      case 'localPreview.interaction':
+      case 'localPreview.request.result':
+      case 'localPreview.submit':
       case 'outputs.preview.open':
       case 'outputs.preview.close':
       case 'outputs.preview.request.result':
@@ -3024,7 +3048,7 @@ export class NativeCaller {
         break;
       case 'submit': {
         if (
-          request.officeDocument &&
+          (request.officeDocument || localSourceCheck) &&
           this.requireCaller()
             .records()
             .some(
@@ -3081,6 +3105,7 @@ export class NativeCaller {
           )
             throw new ClientError('output_draft_mismatch');
         }
+        if (localSourceCheck) await localSourceCheck();
         let intent = request.intent;
         if (request.imageIds?.length) {
           const images = await this.images.publish(
@@ -3116,7 +3141,7 @@ export class NativeCaller {
           intent = { ...intent, files: [...(intent.files ?? []), ...files] };
         }
         let draftProof = request.draft;
-        if (!request.officeDocument) {
+        if (!request.officeDocument && !localSourceCheck) {
           const savedOutputDraft = this.requirePrivateData().read({
             storeId: snapshot.view.storeId,
             workspaceId: snapshot.view.session.workspaceId,
@@ -3139,7 +3164,12 @@ export class NativeCaller {
               draftProof = nativeDraftProof(saved);
           }
         }
-        const prepared = await this.requireCaller().prepare(request.sessionId, intent, draftProof);
+        const prepared = await this.requireCaller().prepare(
+          request.sessionId,
+          intent,
+          draftProof,
+          localSourceCheck,
+        );
         if (intent.kind !== 'input.steer' && intent.modelId)
           this.requirePrivateData().rememberModelRoute(
             intent.expectedStoreId,

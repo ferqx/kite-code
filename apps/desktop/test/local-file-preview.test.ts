@@ -113,3 +113,17 @@ test('PDF receives only authorized bytes and rechecks revoked access after rende
       }),
     ).rejects.toThrow('permission_revoked');
   }));
+
+test('Main-only original reference verifies source hash and never creates output identity', async () =>
+  fixture(async (_root, path) => {
+    const { createHash } = await import('node:crypto');
+    const handle = await LocalFilePreview.create(
+      async (consume) => consume(path),
+      () => {},
+    );
+    const hash = createHash('sha256').update('original').digest('hex');
+    expect(await handle.reference(hash)).toEqual({ path, name: 'source.md', sourceHash: hash });
+    await expect(handle.reference('0'.repeat(64))).rejects.toThrow('local_preview_changed');
+    handle.release();
+    await expect(handle.reference(hash)).rejects.toThrow('local_preview_released');
+  }));

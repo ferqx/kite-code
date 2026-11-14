@@ -44,7 +44,7 @@ function FilePreview(props: Props) {
   onRequestEdit.current = props.onRequestEdit;
   const isPdf = !!file && (file.mediaType === 'application/pdf' || /\.pdf$/i.test(file.name));
   const isPpt = !!file && /\.pptx$/i.test(file.name);
-  const isOffice = !!file && /\.(pptx|docx|xlsx)$/i.test(file.name);
+  const isOffice = !!file && /\.(pptx|docx|xlsx|pdf)$/i.test(file.name);
   useEffect(() => {
     alive.current = true;
     return () => {

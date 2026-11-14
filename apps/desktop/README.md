@@ -3340,10 +3340,28 @@ Word 页导航与修改范围校验分离：原页身份、分页代际、顺序
 
 浏览器与文件预览共用 `native-content-observer` 的宿主布局观察/清理和 `native-content-layout` 的 CSS→原生坐标投影、向内裁剪与窗口/root resize、zoom、隐藏/恢复监听。零尺寸只隐藏预览及请求输入窗，不结束 pending 请求；关闭后迟到事件不能复活视图。浏览器导航、paint/lease 与侧栏预测布局仍独立，预览未接入侧栏 projection metadata，使用共享观察器的位置跟踪。预览独立 session、manifest 资源和权限拒绝策略不变。
 
-PDF 文件预览沿受校验的输出页图接口按需读取，在独立 `kite-preview` WebContentsView 中显示；不用浏览器 PDF 插件。Word、PPT、PDF 共用受信页栏布局：宽屏常显、窄屏细线 hover/focus 浮层，正文缩放不改变页栏尺寸。PDF 无 Office 选区或备注修改上下文；页图请求串行、可取消，最多500页，单页8MiB、当前预览累计256MiB页图预算，失败保留页内错误而不伪造空白成功。
+PDF 文件预览沿受校验的逐页接口按需读取，在独立 `kite-preview` WebContentsView 中显示；不用浏览器 PDF 插件。Word、PPT、PDF 共用受信页栏布局：宽屏常显、窄屏细线 hover/focus 浮层，正文缩放不改变页栏尺寸。PDF 使用独立选区描述与可信备注输入，不伪装 Office 原生文字路径或直接编辑 PDF；具体提交与验证边界见下文“PDF 标注候选”。页请求串行、可取消，最多500页，PNG与文字层共同受单页8MiB、当前预览累计256MiB预算约束，失败保留页内错误而不伪造空白成功。
 
-消息中的本地文件链接沿原 message/run、工作区或受管理目录与保护根授权检查。非代码文件通过有界只读 handle 在右侧预览，不注册为输出产物，不附加另存/修改权限；代码仍走原编辑器。handle 绑定当前会话与代际及文件身份，每次读取、PDF 分页前后重新校验授权与源文件，关闭标签或切会话释放；当前显示另有周期权限复核。原文件替换、内容变更或权限撤销时失效，不静默转读新文件。PDF 使用安全快照和现有 PNG 渲染器，不启用浏览器 PDF 插件。
+消息中的本地文件链接沿原 message/run、工作区或受管理目录与保护根授权检查。非代码文件通过有界只读 handle 在右侧预览，不注册为输出产物，不附加另存或原文件写入权限；代码仍走原编辑器。本地 PDF 可以提交标注要求，Main 从原 handle 构造原路径及准确选区上下文，而不是伪造产物 target。handle 绑定当前会话与代际及文件身份，每次读取、PDF 分页前后重新校验授权与源文件，关闭标签或切会话释放；当前显示另有周期权限复核。原文件替换、内容变更或权限撤销时失效，不静默转读新文件。PDF 使用安全快照和现有 PNG 渲染器，不启用浏览器 PDF 插件。
 
 本地 PDF 读取授权仍由 Main 持有，只把已校验的有限快照字节交给经过连接身份核验的回环 Service（拒绝远程 endpoint 与 HTTP 重定向）。PDF 页解析复用 Bun 的原有隔离 worker/严格缓存 IO，不在 Electron 中加载 Bun 原生运行依赖；Service 不接受源路径、不登记输出或 Artifact。返回页面前再次核原句柄授权及文件身份。Word 只读导航监听转换器分页状态/代际，不依赖编辑交互轮询后才显示缩略图。
 
 选中会话的 run.started／run.finished 事件递增文件列表观察 revision，以同步运行中与终态产物投影。文件列表刷新时按已加载窗口重读同一存储 revision 的连续页，再原子替换，不将旧尾页拼回而复活已替代产物；分页期间 revision 改变时重新读取，途中失败保留旧快照并提示读取失败。renderer 不按名称、时间合并，服务保留的并发或不同路径产物均照实展示；点击始终绑定该卡准确 fileId，已有打开的历史快照不暗中换成新文件。
+
+Office journey 的单次预览等待只在精确目标工具栏下观察到本次“正在准备预览”后，才将明确失败立即归类为 preview_host_failed；其他目标或未证实属于本次的旧错误不触发提前失败。未观察到短暂 loading 时仍保留原有界超时，不猜测请求身份。DOCX 内容出现后还须现有 pagination marker settled 才截图；unavailable 与60秒未稳定分别报告，不把 IPC ready 当分页完成。安全 preview-observation.json 只存固定阶段／分类与布尔观察，不存路径、内容或凭据；既有 IPC／生命周期诊断继续保留。此为测试诊断改进，不新增产品重试，也不证明历史 processed.docx 失败已修复。
+
+该等待逻辑另用独立 Electron 合成 DOM 实测同一 `readOfficePreviewHost` selector：其他目标和本次loading前的旧错误不触发失败；当前目标loading后失败约4ms内分类；Word marker pending保持等待、settled才ready。此为无Provider、零模型的DOM绑定验证，不是完整生产预览、真实分页计算或旧DOCX间歇故障复现；脚本及安全结果保留在该阶段证据中。
+
+办公预览工具栏共用小型居中胶囊：请求修改改图标并保留aria-label/title，缩放、PPT放映及另存回调和安全校验不变。主renderer不跨WebContentsView伪装overlay；胶囊正常流只占必需顶部空间，正文bounds继续由原observer测量，无全宽分隔线或新增footer。窄栏紧凑／必要换行，hover和focus反馈保持。独立冷构建Electron组件布局回归覆盖DOCX/XLSX/PPTX/PDF各240、280、320、480、640像素，核边界、内容无覆盖、缩放不改变按钮几何、键盘保存及PPT放映；此合成组件证据不代替全客户端正文预览。
+
+### PDF 标注候选
+
+现有 Office／PDF 选区上下文仍随完整用户正文显示，尚无可信的独立展示元数据；不能靠文本模式猜测并隐藏，简洁展示需另行设计。
+
+PDF.js 固定资产提供与 PNG 同视口的有界文字几何。Desktop 用透明文字层与真实浏览器选区，缺少文字或超出预算时明确降为页／区域定位，不伪造 OCR。PDF 选区包含独立 kind、1 基页码、旋转后归一化矩形及原文字 item/offset；Main 复核当前页与源文字，再复用可信输入与单次提交／unknown 处理。产物 target 与本地只读 handle 始终区分，标注不写入原文件或扩大访问权限。
+
+文字层不可用不影响可读页图，预览文字元数据另受每次预览16MiB上限约束。固定 Electron 布局回归已覆盖拉丁、中文、90度中文、两栏及无文字区域选择；RTL／竖排尚未取得视觉资格。
+
+2026-11-14，独立客户端与正式 Service 的回环 mock 验收已完成两条入口：本地中文文字选区与真正 image-only 扫描 PDF 区域经 Enter 提交后各自 completed；源文件变更使预览和输入自动关闭，未新增 run，100%→200% 缩放及切页清除旧选区。另经正式 Shell 与 collector 生成的产物 PDF，文字和区域请求分别经 Enter 提交并 completed，fileId、源 SHA-256 与附件摘要一致。最新冷构建确认扫描页 empty 文案及空占位行已移除，区域请求仍可打开并取消而不产生新 run。证据为本阶段 `pdf-local-mock-v29/safe-summary.json` 与后续 `pdf-output-mock-final/safe-summary.json`；后者补齐前者当时未完成的产物入口和新提示版本。外部模型请求为0，这证明提交链与上述交互，不证明 PDF 编辑正确率或真实模型成功率；unknown 结果与切会话尚未在这次 GUI 中实测，完整结构化上下文的消息展示限制继续保留。
+
+本地 PDF 提交在 journal 准备读取结束、持久化之前再次核对 Main 持有的源权限与摘要；校验失败不产生 journal 行或派发，冷重开不会重放该拒绝请求。已有 unknown 行仍保留且不自动重试。PDF 图片加载与文字层抵达共用状态计算，两种顺序都对 empty 隐藏无文字占位文案及空占位行，保留页／区域操作；unavailable 仍显示简短限制提示，图片读取失败独立显示。

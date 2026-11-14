@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { getDocument, VerbosityLevel, version } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { desktopAsset } from '../../platform/desktop-assets';
+import { createPdfTextLayer, type PdfTextLayer } from './pdf-text-layer';
 
 // Only trusted local package assets and transferred source bytes are accepted.
 const assets =
@@ -17,9 +18,15 @@ globalThis.fetch = Object.assign(
 );
 declare const self: Worker;
 self.onmessage = async (
-  event: MessageEvent<{ bytes: Uint8Array; start: number; count: number; mode: 'text' | 'image' }>,
+  event: MessageEvent<{
+    bytes: Uint8Array;
+    start: number;
+    count: number;
+    mode: 'text' | 'image';
+    textLayer?: boolean;
+  }>,
 ) => {
-  const { bytes, start, count, mode } = event.data;
+  const { bytes, start, count, mode, textLayer: includeTextLayer } = event.data;
   if (version !== '6.4.299') {
     self.postMessage({ error: 'pdf_assets_invalid' });
     return;
@@ -66,6 +73,7 @@ self.onmessage = async (
       const page = await pdf.getPage(number);
       let text = '',
         image: Uint8Array | undefined;
+      let textLayer: PdfTextLayer | undefined;
       if (mode === 'text') {
         const content = await page.getTextContent();
         let lastY: number | undefined;
@@ -113,6 +121,27 @@ self.onmessage = async (
           factory.destroy(canvas);
         }
       }
+      if (mode === 'image' && includeTextLayer) {
+        const original = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({
+          scale: Math.min(1.5, 2048 / Math.max(original.width, original.height)),
+        });
+        try {
+          textLayer = createPdfTextLayer(await page.getTextContent(), viewport);
+        } catch {
+          textLayer = {
+            status: 'unavailable',
+            width: Math.ceil(viewport.width),
+            height: Math.ceil(viewport.height),
+            items: [],
+          };
+        }
+        // Optional selection data must not turn an otherwise usable page into a failure.
+        if (total + Buffer.byteLength(JSON.stringify(textLayer)) > 16 * 1024 * 1024) {
+          textLayer = { ...textLayer, status: 'unavailable', items: [] };
+        }
+        total += Buffer.byteLength(JSON.stringify(textLayer));
+      }
       if (parsingFailure) throw new Error(parsingFailure);
       if (total > 16 * 1024 * 1024) throw new Error('pdf_result_too_large');
       pages.push({
@@ -120,6 +149,7 @@ self.onmessage = async (
         label: labels?.[number - 1] ?? null,
         text,
         ...(image ? { image } : {}),
+        ...(textLayer ? { textLayer } : {}),
       });
       page.cleanup();
     }

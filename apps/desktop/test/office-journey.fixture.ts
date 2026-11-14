@@ -87,3 +87,42 @@ export function officeJourneyDecision(
     command: `${create} && ${edit}`,
   };
 }
+
+/** Per-open observation, never a product retry policy. Fail only after this target's fresh loading state. */
+export function officePreviewObservation(input: {
+  targetMatches: boolean;
+  preparing: boolean;
+  failed: boolean;
+  sawPreparing: boolean;
+  contentVisible: boolean;
+  word: boolean;
+  pagination: string | null;
+}): { sawPreparing: boolean; outcome: 'waiting' | 'failed' | 'ready' | 'pagination-unavailable' } {
+  if (!input.targetMatches) return { sawPreparing: false, outcome: 'waiting' };
+  const sawPreparing = input.sawPreparing || input.preparing;
+  if (sawPreparing && input.failed) return { sawPreparing, outcome: 'failed' };
+  if (!input.contentVisible || input.preparing || input.failed)
+    return { sawPreparing, outcome: 'waiting' };
+  if (input.word && input.pagination === 'unavailable')
+    return { sawPreparing, outcome: 'pagination-unavailable' };
+  return {
+    sawPreparing,
+    outcome: input.word && input.pagination !== 'settled' ? 'waiting' : 'ready',
+  };
+}
+
+/** Exact visible preview panel; never inspect a global error belonging to another tab. */
+export async function readOfficePreviewHost(page: import('playwright').Page, name: string) {
+  const panel = page.locator('.native-file-preview').filter({
+    has: page.getByRole('group', { name: `${name} 预览工具栏`, exact: true }),
+  });
+  const targetMatches = (await panel.count()) === 1 && (await panel.isVisible());
+  return {
+    targetMatches,
+    preparing:
+      targetMatches && (await panel.getByText('正在准备预览…', { exact: true }).isVisible()),
+    failed:
+      targetMatches &&
+      (await panel.getByText('文件已保存，暂时无法预览', { exact: true }).isVisible()),
+  };
+}

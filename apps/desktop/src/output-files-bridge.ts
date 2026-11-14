@@ -1,5 +1,17 @@
 import type { OutputFileSummary, OutputFilesPage, OutputFileTarget } from '@kite-ai/client';
+import type { InputRequest } from './input';
+export type PdfSelection = {
+  kind: 'pdf';
+  page: number;
+  pageBasis: 'pdf-rendered';
+  scope: 'page' | 'region' | 'text';
+  rects: { x: number; y: number; width: number; height: number }[];
+  text?: string;
+  start?: { item: number; offset: number };
+  end?: { item: number; offset: number };
+};
 export type OfficeSelection =
+  | PdfSelection
   | {
       kind: 'word';
       start: { path: string; offset: number };
@@ -49,6 +61,10 @@ export type OfficePreviewInteraction = {
   presentation?: boolean;
   zoom?: number | 'fit';
 };
+export type LocalOfficePreviewInteraction = Omit<OfficePreviewInteraction, 'target'> & {
+  handleId: string;
+};
+export type LocalOfficeRequest = { handleId: string; previewId: string; requestId: string };
 export type OfficePreviewControl =
   | { kind: 'request-edit' }
   | { kind: 'locate-selection'; selectionSerial: number }
@@ -56,6 +72,24 @@ export type OfficePreviewControl =
   | { kind: 'slide'; value: number }
   | { kind: 'presentation'; value: boolean };
 export type NativeOutputRequest =
+  | ({
+      method: 'localPreview.submit';
+      generation: number;
+      sessionId: string;
+      intent: InputRequest;
+    } & LocalOfficeRequest)
+  | {
+      method: 'localPreview.interaction';
+      generation: number;
+      handleId: string;
+      previewId: string;
+      consumeRequest?: boolean;
+    }
+  | ({
+      method: 'localPreview.request.result';
+      generation: number;
+      outcome: OfficeRequestOutcome;
+    } & LocalOfficeRequest)
   | {
       method: 'localPreview.open';
       generation: number;
@@ -141,6 +175,7 @@ export type NativeOutputRequest =
       context?: OfficeEditContext;
     };
 export type NativeOutputResult =
+  | { kind: 'localPreview.interaction'; interaction: LocalOfficePreviewInteraction }
   | {
       kind: 'messageFile.preview';
       handleId: string;
@@ -292,6 +327,51 @@ export function isOfficeEditContext(value: unknown): value is OfficeEditContext 
   const path = (x: unknown) => str(x, 512) && (x as string).startsWith('/');
   if (!q || typeof q !== 'object' || Array.isArray(q) || JSON.stringify(q).length > 32768)
     return false;
+  if (q.kind === 'pdf') {
+    const point = (v: unknown) => {
+      const p = v as Record<string, unknown>;
+      return (
+        !!p &&
+        typeof p === 'object' &&
+        Object.keys(p).sort().join(',') === 'item,offset' &&
+        Number.isSafeInteger(p.item) &&
+        Number(p.item) >= 0 &&
+        Number(p.item) < 10000 &&
+        Number.isSafeInteger(p.offset) &&
+        Number(p.offset) >= 0 &&
+        Number(p.offset) <= 16000
+      );
+    };
+    return (
+      v.editor === undefined &&
+      q.pageBasis === 'pdf-rendered' &&
+      Number.isSafeInteger(q.page) &&
+      Number(q.page) >= 1 &&
+      Number(q.page) <= 500 &&
+      ['page', 'region', 'text'].includes(String(q.scope)) &&
+      Object.keys(q).sort().join(',') ===
+        (q.scope === 'text'
+          ? 'end,kind,page,pageBasis,rects,scope,start,text'
+          : 'kind,page,pageBasis,rects,scope') &&
+      Array.isArray(q.rects) &&
+      q.rects.length <= 256 &&
+      (q.scope === 'page' ? q.rects.length === 0 : q.rects.length > 0) &&
+      q.rects.every(
+        (r) =>
+          r &&
+          typeof r === 'object' &&
+          Object.keys(r).sort().join(',') === 'height,width,x,y' &&
+          Object.values(r).every(
+            (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1,
+          ) &&
+          r.width > 0 &&
+          r.height > 0 &&
+          r.x + r.width <= 1.000001 &&
+          r.y + r.height <= 1.000001,
+      ) &&
+      (q.scope !== 'text' || (point(q.start) && point(q.end) && str(q.text, 16000) && !!q.text))
+    );
+  }
   if (q.kind === 'word') {
     if (q.scope === 'page') {
       if (new TextEncoder().encode(JSON.stringify(q)).byteLength > 32768) return false;
@@ -425,6 +505,8 @@ export function outputDraftLabel(
 
 /** A concise display label only; target and source identity remain host-owned. */
 export function officeSelectionLabel(selection: OfficeSelection): string {
+  if (selection.kind === 'pdf')
+    return `PDF 第 ${selection.page} 页${selection.scope === 'text' ? '选中文字' : selection.scope === 'region' ? '选定区域' : ''}`;
   if (selection.kind === 'excel')
     return 'scope' in selection
       ? `工作表 ${selection.sheet}`

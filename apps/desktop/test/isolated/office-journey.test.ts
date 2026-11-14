@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { officeJourneyDecision, validateOfficeFixtureRoot } from '../office-journey.fixture';
+import {
+  officeJourneyDecision,
+  officePreviewObservation,
+  validateOfficeFixtureRoot,
+} from '../office-journey.fixture';
 
 const marker =
   '\n\nAttached file references (user-provided data; paths do not grant permissions):\n';
@@ -68,4 +72,38 @@ test('local references select exact escaped path, preserve original, and reject 
     rmSync(root, { recursive: true });
     rmSync(outside, { recursive: true });
   }
+});
+
+test('preview observation rejects stale/other-target failures and waits for Word pagination', () => {
+  const base = {
+    targetMatches: true,
+    preparing: false,
+    failed: false,
+    sawPreparing: false,
+    contentVisible: false,
+    word: true,
+    pagination: null,
+  };
+  expect(officePreviewObservation({ ...base, failed: true }).outcome).toBe('waiting');
+  expect(
+    officePreviewObservation({ ...base, targetMatches: false, sawPreparing: true, failed: true }),
+  ).toEqual({ sawPreparing: false, outcome: 'waiting' });
+  const start = officePreviewObservation({ ...base, preparing: true });
+  expect(start).toEqual({ sawPreparing: true, outcome: 'waiting' });
+  expect(
+    officePreviewObservation({ ...base, sawPreparing: start.sawPreparing, failed: true }).outcome,
+  ).toBe('failed');
+  for (const pagination of [null, 'pending'])
+    expect(officePreviewObservation({ ...base, contentVisible: true, pagination }).outcome).toBe(
+      'waiting',
+    );
+  expect(
+    officePreviewObservation({ ...base, contentVisible: true, pagination: 'settled' }).outcome,
+  ).toBe('ready');
+  expect(
+    officePreviewObservation({ ...base, contentVisible: true, pagination: 'unavailable' }).outcome,
+  ).toBe('pagination-unavailable');
+  expect(officePreviewObservation({ ...base, contentVisible: true, word: false }).outcome).toBe(
+    'ready',
+  );
 });

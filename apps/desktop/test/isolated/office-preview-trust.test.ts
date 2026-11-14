@@ -749,3 +749,63 @@ test('generic local preview zoom uses the control ratio without dividing by 100'
   await h.preview.control('A', 1, { kind: 'zoom', value: 'fit' });
   expect(scripts.at(-1)).toBe('document.documentElement.style.zoom = "1"');
 });
+
+test('PDF source text and current page are revalidated before opening request input', async () => {
+  const selected = {
+    kind: 'pdf' as const,
+    page: 1,
+    pageBasis: 'pdf-rendered' as const,
+    scope: 'text' as const,
+    rects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.1 }],
+    text: 'Hello',
+    start: { item: 0, offset: 0 },
+    end: { item: 0, offset: 5 },
+  };
+  let page = 1,
+    text = 'Hello';
+  const h = harness({
+    evidence: async (code) =>
+      code?.includes('.page()')
+        ? page
+        : code?.includes('.setLayer(')
+          ? undefined
+          : { selection: { ...selected, text } },
+  });
+  Reflect.set(h.preview.active!, 'pdf', true);
+  Reflect.set(h.preview.active!, 'officeKind', 'pdf');
+  Reflect.set(h.preview.active!, 'pdfLayers', new Map([[1, { items: [{ text: 'Hello world' }] }]]));
+  expect((await h.preview.readInteraction('A', 1, false)).selection).toEqual(selected);
+  text = 'Spoof';
+  await expect(h.preview.readInteraction('A', 1, false)).rejects.toThrow(
+    'preview_selection_replaced',
+  );
+  text = 'Hello';
+  page = 2;
+  await expect(h.preview.readInteraction('A', 1, false)).rejects.toThrow(
+    'preview_selection_replaced',
+  );
+  expect(h.requests).toHaveLength(0);
+});
+test('PDF selection rejects arbitrary identity, coordinates, excess rectangles and unknown fields', () => {
+  const page: import('../../src/output-files-bridge').PdfSelection = {
+    kind: 'pdf',
+    page: 1,
+    pageBasis: 'pdf-rendered',
+    scope: 'page',
+    rects: [],
+  };
+  expect(readOfficeDescription({ selection: page }, 'pdf', hash).selection).toEqual(page);
+  for (const s of [
+    { ...page, page: 0 },
+    { ...page, pageBasis: 'html-preview' },
+    { ...page, target },
+    { ...page, scope: 'region', rects: [{ x: 0.9, y: 0, width: 0.2, height: 0.2 }] },
+    {
+      ...page,
+      scope: 'region',
+      rects: Array.from({ length: 257 }, () => ({ x: 0, y: 0, width: 0.1, height: 0.1 })),
+    },
+    { ...page, scope: 'text', text: 'fake' },
+  ])
+    expect(() => readOfficeDescription({ selection: s }, 'pdf', hash)).toThrow();
+});

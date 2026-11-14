@@ -10,7 +10,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
 import { NativeFilePreview } from './native-file-preview';
 import { NativeLocalFilePreview } from './native-local-file-preview';
-import type { OfficeEditContext, OfficeRequestOutcome } from './output-files-bridge';
+import type {
+  LocalOfficeRequest,
+  OfficeEditContext,
+  OfficeRequestOutcome,
+} from './output-files-bridge';
 
 function target(file: OutputFileTarget): OutputFileTarget {
   return {
@@ -50,6 +54,10 @@ export function useNativeOutputFiles(input: {
     file: OutputFileSummary,
     context: OfficeEditContext,
     prompt: string,
+  ) => Promise<OfficeRequestOutcome>;
+  onRequestLocalEdit?: (
+    target: Extract<SessionFileTarget, { kind: 'local-preview' }>,
+    request: LocalOfficeRequest,
   ) => Promise<OfficeRequestOutcome>;
   turnLabel: (runId: string) => string;
 }) {
@@ -110,6 +118,11 @@ export function useNativeOutputFiles(input: {
           bridge={input.bridge}
           generation={input.generation}
           target={source}
+          onRequestEdit={
+            input.onRequestLocalEdit
+              ? (request) => input.onRequestLocalEdit!(source, request)
+              : undefined
+          }
         />
       ) : (
         <NativeFilePreview

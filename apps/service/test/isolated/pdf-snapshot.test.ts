@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AgentRuntime } from '@kite-ai/agent';
+import { schemas } from '../../src/http/schema';
 import { PdfSnapshotRequest } from '../../src/http/schema/pdf-snapshot';
 import { createOutputPreviews } from '../../src/output-previews';
 
@@ -45,4 +46,32 @@ test('PDF snapshot validates store/session/hash before renderer and preserves ca
   const owner = new AbortController();
   owner.abort();
   await expect(previews.renderPdfSnapshot(input, owner.signal)).rejects.toThrow();
+});
+
+test('PDF UI text layer is optional, bounded and never accepts style markup', () => {
+  const page = { page: 1, totalPages: 1, mediaType: 'image/png', data: 'iVBORw0KGgo=' };
+  expect(schemas.OutputPdfPage.safeParse(page).success).toBe(true);
+  const item = {
+    text: '中文',
+    transform: [12, 0, 0, -12, 30, 40],
+    width: 24,
+    height: 12,
+    ascent: null,
+    descent: null,
+    vertical: false,
+    dir: 'ltr',
+    fontFamily: 'sans-serif',
+    hasEOL: false,
+  };
+  const textLayer = { status: 'available', width: 918, height: 1188, items: [item] };
+  expect(schemas.OutputPdfPage.safeParse({ ...page, textLayer }).success).toBe(true);
+  for (const bad of [
+    { ...textLayer, items: [{ ...item, fontFamily: 'url(https://evil.invalid)' }] },
+    { ...textLayer, items: [{ ...item, transform: [1, 2] }] },
+    { ...textLayer, items: [{ ...item, transform: [1, 0, 0, 1, Infinity, 0] }] },
+    { ...textLayer, items: [{ ...item, html: '<script>' }] },
+    { ...textLayer, items: Array(10001).fill(item) },
+    { ...textLayer, items: [{ ...item, text: 'a'.repeat(16385) }] },
+  ])
+    expect(schemas.OutputPdfPage.safeParse({ ...page, textLayer: bad }).success).toBe(false);
 });
