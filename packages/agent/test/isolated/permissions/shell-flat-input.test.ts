@@ -447,3 +447,29 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     }
   },
 );
+
+test('host output allocation callback stays outside cloned configuration and serializable snapshot', async () => {
+  const f = await fixture();
+  try {
+    let invoked = false;
+    const configuration = await createShellConfiguration({
+      workspaceRoot: f.workspace,
+      toolIds: ['shell.execute'],
+      options: {
+        ...f.options,
+        outputCollection: {
+          async prepare() {
+            invoked = true;
+            return { env: {}, cleanupTransferred: true };
+          },
+        },
+      },
+    });
+    expect(configuration.snapshot.available).toBe(true);
+    expect(invoked).toBe(false);
+    expect(structuredClone(configuration.snapshot)).toEqual(configuration.snapshot);
+    expect(JSON.stringify(configuration.snapshot)).not.toContain('outputCollection');
+  } finally {
+    f.close();
+  }
+});

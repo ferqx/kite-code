@@ -7,6 +7,7 @@ import {
   type AgentRuntime,
   type ModelInputSnapshot,
   type TrustedToolBehavior,
+  withOutputCollection,
 } from '@kite-ai/agent';
 import type { PublicExecution, ReadContext, ToolContext } from '@kite-ai/agent/extensions';
 import {
@@ -824,7 +825,7 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
   };
   return {
-    extension: { ...outputs.extension, tools },
+    extension: { ...withOutputCollection(outputs.extension, options.runtime), tools },
     tools,
     toolBehaviors: [
       restoreConfirmation,

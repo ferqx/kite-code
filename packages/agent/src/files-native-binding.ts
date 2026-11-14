@@ -33,6 +33,7 @@ interface NativeOwner {
   publishAt(parent: number, temp: string, target: string, createOnly: boolean): void;
   unlinkAt(parent: number, name: string, strict: boolean): void;
   listAt(parent: number): ReturnType<WorkspaceFileIo['listAt']>;
+  listAtBounded?(parent: number, maxEntries: number): ReturnType<WorkspaceFileIo['listAt']>;
   closeHandle(id: number): void;
   close(): void;
 }
@@ -142,7 +143,18 @@ export function createNativeWorkspaceFileIo(
       native(() => owner.publishAt(parent, temp, target, createOnly)),
     unlinkAt: (parent: number, name: string, strict = false) =>
       native(() => owner.unlinkAt(parent, name, strict)),
-    listAt: (parent: number) => native(() => owner.listAt(parent)),
+    listAt(parent: number, maxEntries?: number) {
+      if (
+        maxEntries !== undefined &&
+        (!Number.isInteger(maxEntries) || maxEntries < 0 || maxEntries > 0xffffffff)
+      )
+        throw new AgentError('file_io_invalid');
+      if (maxEntries === undefined) return native(() => owner.listAt(parent));
+      // Older same-ABI companions ignore extra arguments to listAt: never fall back to it.
+      if (typeof owner.listAtBounded !== 'function')
+        throw new AgentError('file_native_bounded_listing_unavailable');
+      return native(() => owner.listAtBounded!(parent, maxEntries));
+    },
     closeHandle: (id: number) => native(() => owner.closeHandle(id)),
     close: () => native(() => owner.close()),
   });

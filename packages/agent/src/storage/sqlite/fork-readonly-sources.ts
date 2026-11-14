@@ -16,6 +16,7 @@ import { filter, selected } from './context-selection-operations';
 import { readExecutionGroupSafety } from './execution-group-safety';
 import { messageOriginRow } from './fork-operations';
 import type { SqliteOperations } from './operations';
+import { outputArtifactForExecution } from './output-collection';
 
 type Row = Record<string, string | number | bigint | null>;
 type Scope = { expectedStoreId: string; sessionId: string; subjectId: string; extensionId: string };
@@ -178,8 +179,12 @@ function artifact(
     r.session_id !== scope.sessionId ||
     r.subject_id !== scope.subjectId ||
     r.origin_store_id !== scope.originStoreId ||
-    r.owner_kind !== 'execution' ||
-    r.owner_id !== scope.executionId
+    !(
+      (r.owner_kind === 'execution' && r.owner_id === scope.executionId) ||
+      (r.owner_kind === 'session' &&
+        r.owner_id === scope.sessionId &&
+        outputArtifactForExecution(db, scope.sessionId, scope.executionId, id))
+    )
   )
     return fail();
   return {
@@ -187,7 +192,7 @@ function artifact(
     storeId: String(r.origin_store_id),
     sessionId: String(r.session_id),
     subjectId: String(r.subject_id),
-    scope: { kind: 'execution', id: String(r.owner_id) },
+    scope: { kind: r.owner_kind as 'execution' | 'session', id: String(r.owner_id) },
     hash: String(r.blob_hash),
     size: String(r.size),
     mediaType: String(r.media_type),

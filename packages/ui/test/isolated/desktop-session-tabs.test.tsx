@@ -1459,3 +1459,101 @@ test('trajectory details keep as-of materials and exact replay cursor strings', 
   expect(paused).toBeGreaterThan(0);
   expect(evidenceClosed).toBeGreaterThan(0);
 });
+
+test('file tabs deduplicate full Store Session file identity and share the eight-tab budget', async () => {
+  let model!: SessionTabsModel;
+  function Harness() {
+    model = useSessionTabs('outputs');
+    return (
+      <SessionTabs
+        model={model}
+        visible
+        changes={null}
+        onClose={() => {}}
+        renderFile={({ target }) => (
+          <p data-file={'fileId' in target ? target.fileId : target.handleId}>{target.sessionId}</p>
+        )}
+      />
+    );
+  }
+  root = createRoot(document.body);
+  await act(() => root!.render(<Harness />));
+  const target = {
+    storeId: 'store',
+    sessionId: 'session',
+    fileId: 'file',
+    locator: { kind: 'delivery' as const, key: 'delivery/00000000000000000001/job/file' },
+  };
+  await act(() => {
+    expect(model.openFile(target, 'report.docx')).toBe(true);
+    expect(model.openFile(target, 'report.docx')).toBe(true);
+  });
+  expect(model.tabs).toHaveLength(1);
+  await act(() => {
+    expect(model.openFile({ ...target, sessionId: 'other' }, 'report.docx')).toBe(true);
+  });
+  expect(model.tabs).toHaveLength(2);
+  await act(() => {
+    for (let index = 0; index < 6; index++)
+      expect(model.openFile({ ...target, fileId: `other-${index}` }, 'report.docx')).toBe(true);
+    expect(model.openFile({ ...target, fileId: 'overflow' }, 'report.docx')).toBe(false);
+  });
+  expect(model.tabs).toHaveLength(8);
+  await act(() => {
+    expect(model.openFile(target, 'report.docx')).toBe(true);
+  });
+  expect(document.querySelectorAll('[data-file]')).toHaveLength(1);
+  expect(document.querySelector('[data-file]')?.getAttribute('data-file')).toBe('file');
+});
+
+test('local read handles remain distinct from deliveries and release only on explicit tab close', async () => {
+  let model!: SessionTabsModel;
+  const released: string[] = [];
+  function Harness() {
+    model = useSessionTabs('local-preview', undefined, undefined, undefined, false, (target) => {
+      if ('handleId' in target) released.push(target.handleId);
+    });
+    return (
+      <SessionTabs
+        model={model}
+        visible
+        changes={null}
+        onClose={() => {}}
+        renderFile={({ target }) => <p>{'handleId' in target ? target.handleId : target.fileId}</p>}
+      />
+    );
+  }
+  root = createRoot(document.body);
+  await act(() => root!.render(<Harness />));
+  const local = {
+    kind: 'local-preview' as const,
+    storeId: 's',
+    sessionId: 'session',
+    handleId: 'same',
+    name: 'report.pdf',
+    mediaType: 'application/pdf',
+  };
+  await act(() => {
+    expect(model.openFile(local, local.name)).toBe(true);
+  });
+  const id = model.active;
+  await act(() => {
+    model.openFile(
+      {
+        storeId: 's',
+        sessionId: 'session',
+        fileId: 'same',
+        locator: { kind: 'delivery', key: 'delivery/same' },
+      },
+      'saved.pdf',
+    );
+  });
+  expect(model.tabs).toHaveLength(2);
+  expect(released).toEqual([]);
+  await act(() => model.select(id));
+  expect(released).toEqual([]);
+  await act(() => model.closeTab(id));
+  expect(released).toEqual(['same']);
+  await act(() => model.closeTab(id));
+  expect(released).toEqual(['same']);
+});

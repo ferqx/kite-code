@@ -10,7 +10,7 @@ import {
   ConfigurationPreparationCleanupError,
   type ContextCompressor,
   type ContextSource,
-  createExecutionEvidenceExtension,
+  prepareOutputStaging,
   type RunConfiguration,
   type RuntimeOptions,
 } from '@kite-ai/agent';
@@ -455,15 +455,7 @@ export function createDefaultProcessConfiguration(options: {
       readOnlyWorktreeBoundary(policyRuntime, shellForSession, execution, input),
   );
   const askUser = createAskUserExtension();
-  const executionEvidence = createExecutionEvidenceExtension({
-    read: (request) => {
-      if (!policyRuntime) throw new AgentError('execution_evidence_scope_denied');
-      return policyRuntime.readExecutionEvidence(request);
-    },
-  });
-  const builtinReadTools = new Map(
-    [...(askUser.tools ?? []), ...(executionEvidence.tools ?? [])].map((tool) => [tool.id, tool]),
-  );
+  const builtinReadTools = new Map((askUser.tools ?? []).map((tool) => [tool.id, tool]));
   const vault = createCredentialVault({
     backend:
       options.credentialBackend ??
@@ -548,7 +540,6 @@ export function createDefaultProcessConfiguration(options: {
   const fileTools = new Map(files.tools.map((tool) => [tool.id, tool]));
   const builtinExtensions = [
     askUser,
-    executionEvidence,
     planning.extension,
     files.extension,
     browser.extension,
@@ -876,8 +867,7 @@ export function createDefaultProcessConfiguration(options: {
         ) &&
         !explicitBrowser.some((tool) => tool.id === 'browser.execute' && tool.enabled !== false);
       const legacyRecovery =
-        recovery &&
-        recovery.browserSnapshot &&
+        recovery?.browserSnapshot &&
         typeof recovery.browserSnapshot === 'object' &&
         !Array.isArray(recovery.browserSnapshot) &&
         recovery.browserSnapshot.execution === undefined;
@@ -1114,7 +1104,27 @@ export function createDefaultProcessConfiguration(options: {
       const shell = await createShellConfiguration({
         workspaceRoot: root,
         toolIds,
-        options: runShellOptions,
+        options: runShellOptions
+          ? {
+              ...runShellOptions,
+              host: {
+                controlBase: options.profile.coordinationPath,
+                protectedRoots: [],
+                readonlyAssets: [],
+                runtimeReadOnlyRoots: [],
+                ...runShellOptions.host,
+                temporaryRoot: prepareOutputStaging(
+                  join(options.profile.coordinationPath, 'shell-staging'),
+                ),
+              },
+              outputCollection: {
+                prepare(context, identity) {
+                  if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+                  return policyRuntime.prepareOutputCollection(context, identity);
+                },
+              },
+            }
+          : undefined,
         signal: recovery?.signal,
         worktreeHost: createWorktreeHost(() => policyRuntime),
       });
@@ -1146,7 +1156,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
-        externallyRegisteredExtensions: [askUser, executionEvidence, browser.extension],
+        externallyRegisteredExtensions: [askUser, browser.extension],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -1588,8 +1598,7 @@ export function createDefaultProcessConfiguration(options: {
           ? await policyRuntime?.getCommand(outerSnapshot.inputCommandId)
           : null;
       if (
-        !raw ||
-        raw.kind !== 'human.input' ||
+        raw?.kind !== 'human.input' ||
         raw.originStoreId !== input.run.originStoreId ||
         raw.sessionId !== input.run.sessionId ||
         raw.subjectId !== input.command.subjectId ||

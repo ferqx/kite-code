@@ -77,6 +77,8 @@ export class WorkerQueue {
 function categoryOf(method: WorkerRequest['method']): Category {
   if (method === 'persistModelPartial' || method === 'appendExecutionOutput') return 'body';
   if (
+    method === 'queryOutputFiles' ||
+    method === 'resolveOutputFile' ||
     method === 'readRunResumeExecutionPage' ||
     method === 'readExecutionEvidence' ||
     method === 'readFirstSessionRun' ||

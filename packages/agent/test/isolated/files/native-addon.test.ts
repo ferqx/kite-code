@@ -81,6 +81,40 @@ test('Node-API capability preserves native publication, complete bytes and prote
   }
 });
 
+test('Node-API directory budgets count protected entries and keep unlimited callers unchanged', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-list-')));
+  const io = createNativeWorkspaceFileIo(root, ['protected'], true);
+  try {
+    expect(io.listAt(io.root, 0)).toEqual([]);
+    for (const name of ['first', 'second', 'protected']) writeFileSync(join(root, name), '');
+    expect(
+      io
+        .listAt(io.root, 3)
+        .map((entry) => entry.name)
+        .sort(),
+    ).toEqual(['first', 'second']);
+    for (const max of [0, 1, 2]) {
+      try {
+        io.listAt(io.root, max);
+        throw Error('expected directory limit');
+      } catch (error) {
+        expect(error).toMatchObject({ code: 'file_directory_entry_limit' });
+      }
+    }
+    expect(
+      io
+        .listAt(io.root)
+        .map((entry) => entry.name)
+        .sort(),
+    ).toEqual(['first', 'second']);
+    for (const invalid of [-1, 0.5, NaN, Infinity, 0x100000000])
+      expect(() => io.listAt(io.root, invalid)).toThrow('file_io_invalid');
+  } finally {
+    io.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('native directory creation is create-only, private and anchored without following existing links', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-parent-')));
   const io = createNativeWorkspaceFileIo(root, ['protected'], false);

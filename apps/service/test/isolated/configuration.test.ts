@@ -329,6 +329,8 @@ test('ordinary host defaults select only available Shell and Task capabilities a
   const shellOnly = ordinaryHostConfigurationDefaults(true, false).tools.map((tool) => tool.id);
   expect(shellOnly.some((id) => id.startsWith('task.'))).toBe(false);
   expect(shellOnly.filter((id) => id.startsWith('shell.'))).toHaveLength(5);
+  for (const ids of [unavailable, available, taskOnly, shellOnly])
+    expect(ids).not.toContain('execution_evidence.read');
 });
 
 test('ordinary paired default Auto host edits with an exact baseline without risk review, preserves public schemas and internal inputs, and respects explicit disable', async () => {
@@ -534,7 +536,6 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       : browserToolIds.map((id) => id.replace('.', '_'));
     const expectedNames = [
       'ask_user',
-      'read_execution_evidence',
       'web_fetch',
       'read_file',
       'view_images',
@@ -548,6 +549,7 @@ test('ordinary paired default Auto host edits with an exact baseline without ris
       'interrupt_agent',
       ...browserNames,
     ];
+    expect(names).not.toContain('read_execution_evidence');
     expect(names).toHaveLength(expectedNames.length);
     expect([...names].sort()).toEqual([...expectedNames].sort());
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
@@ -1406,3 +1408,28 @@ test('ordinary paired host reads an external user-file reference through the uni
     f.close();
   }
 }, 15000);
+
+test('ordinary Office skill readers depend on Shell, not browser availability, and are unique', () => {
+  for (const browserAllowed of [false, true]) {
+    for (const unifiedBrowser of [false, true]) {
+      const ids = ordinaryHostConfigurationDefaults(
+        true,
+        false,
+        browserAllowed,
+        unifiedBrowser,
+      ).tools.map((tool) => tool.id);
+      expect(ids.filter((id) => id === 'skills.load')).toHaveLength(1);
+      expect(ids.filter((id) => id === 'skills.resource')).toHaveLength(1);
+      expect(new Set(ids).size).toBe(ids.length);
+    }
+  }
+  const none = ordinaryHostConfigurationDefaults(false, false, false, true).tools.map(
+    (tool) => tool.id,
+  );
+  expect(none).not.toContain('skills.load');
+  expect(none).not.toContain('skills.resource');
+  const browser = ordinaryHostConfigurationDefaults(false, false, true, true).tools.map(
+    (tool) => tool.id,
+  );
+  expect(browser.filter((id) => id === 'skills.load')).toHaveLength(1);
+});

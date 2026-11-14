@@ -27,6 +27,10 @@ import {
   type LinuxShellProcessEvidence,
   linuxShellProcessEvidenceEnded,
 } from './linux-shell-process-evidence';
+import {
+  prepareShellOutputCollection,
+  ShellOutputPreparationCleanupError,
+} from './output-collection';
 import type { ShellJobOptions } from './shell';
 
 interface State {
@@ -59,6 +63,7 @@ export function createLinuxShellJob(
     configuration.initExecutable,
     configuration.bunExecutable ?? process.execPath,
     shell,
+    ...(configuration.trustedExecutables ?? []),
   ];
   if (
     !Number.isSafeInteger(maximum) ||
@@ -200,8 +205,26 @@ export function createLinuxShellJob(
         launch = error.launch;
         preparationFailure = error;
       }
+      let collection: Awaited<ReturnType<typeof prepareShellOutputCollection>> | undefined;
+      if (!preparationFailure && configuration.outputCollection) {
+        try {
+          collection = await prepareShellOutputCollection(
+            configuration.outputCollection,
+            context,
+            launch,
+          );
+        } catch (error) {
+          if (!(error instanceof ShellOutputPreparationCleanupError)) throw error;
+          preparationFailure = new LinuxPreparationCleanupError(
+            error.preparationError,
+            error.cleanupError,
+            launch,
+          );
+        }
+      }
+      const cleanup = collection ? () => {} : launch.cleanup;
       const env = Object.fromEntries(
-        Object.entries(trusted?.env ?? configuration.env).filter(
+        Object.entries({ ...(trusted?.env ?? configuration.env), ...collection?.env }).filter(
           ([key]) => !/^(?:DYLD_|LD_|BASH_ENV$|ENV$|ZDOTDIR$|NODE_OPTIONS$|BUN_OPTIONS$)/.test(key),
         ),
       );
@@ -244,7 +267,7 @@ export function createLinuxShellJob(
           // original private directory; native close uncertainty has the
           // explicit retained facade above and never enters this path.
           try {
-            launch.cleanup();
+            cleanup();
           } catch (cleanupError) {
             return new LinuxOwnedShellStartError(error, cleanupError, {
               nonce,
@@ -264,7 +287,7 @@ export function createLinuxShellJob(
         observed: false,
         ended: false,
         cleanupUnknown: false,
-        cleanup: launch.cleanup,
+        cleanup,
         signal: context.signal,
         aborted: () => {
           void owner.cancel();
@@ -272,14 +295,10 @@ export function createLinuxShellJob(
         completion: owner.completion.then(
           async (receipt) => {
             if (trusted && receipt.confirmed) await Promise.all(outputEnds);
-            complete(state, receipt, launch.cleanup);
+            complete(state, receipt, cleanup);
           },
           () =>
-            complete(
-              state,
-              { confirmed: false, code: null, signal: null, reason: null },
-              launch.cleanup,
-            ),
+            complete(state, { confirmed: false, code: null, signal: null, reason: null }, cleanup),
         ),
       };
       context.signal.addEventListener('abort', state.aborted, { once: true });

@@ -773,7 +773,11 @@ impl Owner {
         })();
         confirm.map_err(|_| fail("file_publish_outcome_unknown"))
     }
-    pub fn list_at(&mut self, parent: u32) -> Result<Vec<DirectoryEntry>> {
+    pub fn list_at(
+        &mut self,
+        parent: u32,
+        mut max_entries: Option<u32>,
+    ) -> Result<Vec<DirectoryEntry>> {
         self.verify_root()?;
         self.verify(parent)?;
         let directory = self.entry(parent)?;
@@ -827,14 +831,16 @@ impl Owner {
                 {
                     return Err(fail("file_directory_invalid"));
                 }
-                let name = String::from_utf16(unsafe {
+                let name = unsafe {
                     std::slice::from_raw_parts(
                         buffer.as_ptr().cast::<u8>().add(start).cast::<u16>(),
                         length / 2,
                     )
-                })
-                .map_err(|_| fail("file_directory_encoding_invalid"))?;
-                if name != "." && name != ".." {
+                };
+                if name != [b'.' as u16] && name != [b'.' as u16, b'.' as u16] {
+                    crate::consume_directory_entry(&mut max_entries)?;
+                    let name = String::from_utf16(name)
+                        .map_err(|_| fail("file_directory_encoding_invalid"))?;
                     component(&name)?;
                     if !self.protect_reads || !self.protected(&child(&directory.path, &name)) {
                         entries.push(DirectoryEntry {

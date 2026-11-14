@@ -123,6 +123,7 @@
     "@kite-ai/trace-extension-sdk": "workspace:*"
   },
   "patchedDependencies": {
+    "@pdf-lib/fontkit@1.1.0": "patches/@pdf-lib%2Ffontkit@1.1.0.patch",
     "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch",
     "@radix-ui/react-scroll-area@1.2.18": "patches/@radix-ui%2Freact-scroll-area@1.2.18.patch"
   }

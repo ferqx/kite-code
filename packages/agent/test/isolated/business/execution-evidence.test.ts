@@ -1,3 +1,4 @@
+// Legacy compatibility coverage, not a supported current model tool.
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,16 +6,16 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
+import type { ToolContext } from '../../../src/extensions';
+import { createRuntime } from '../../../src/runtime';
+import { openSqliteStore } from '../../../src/sqlite';
+import { AgentError } from '../../../src/storage/types';
 import {
   createExecutionEvidenceExtension,
   type ExecutionEvidencePage,
   type ExecutionEvidenceReadRequest,
   type ExecutionEvidenceRecord,
-} from '../../../src/business/execution-evidence';
-import type { ToolContext } from '../../../src/extensions';
-import { createRuntime } from '../../../src/runtime';
-import { openSqliteStore } from '../../../src/sqlite';
-import { AgentError } from '../../../src/storage/types';
+} from '../../fixtures/legacy-execution-evidence';
 
 const context = {
   sessionId: 'session',

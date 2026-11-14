@@ -1149,3 +1149,29 @@ test('initial read failure is distinct from an empty catalogue and hides unsafe 
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.textContent).toContain('尚未配置用户 Skill。');
   }));
+
+test('office documents appears as an installed builtin rather than a missing source', async () => {
+  await fixture(async (host, _root, render) => {
+    await render(
+      bridgeOf(async (request) =>
+        result(request, [
+          {
+            id: 'office-documents',
+            name: 'office-documents',
+            description: 'Office documents',
+            source: null,
+            version: 'c'.repeat(64),
+            enabled: true,
+            state: 'available',
+            reason: null,
+            requiredCapabilities: [],
+            missingCapabilities: [],
+          },
+        ]),
+      ),
+    );
+    expect(host.textContent).toContain('office-documents');
+    expect(host.textContent).toContain('内置技能');
+    expect(host.textContent).not.toContain('未提供来源信息');
+  });
+});

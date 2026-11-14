@@ -1,11 +1,19 @@
 import { createRequire } from 'node:module';
 import { verifyNativeAsset } from './native-assets';
 
+export interface WindowsOfficeGuard {
+  verify(): void;
+  release(): void;
+}
+export interface WindowsOfficeStorage {
+  access(relative: string): WindowsOfficeGuard;
+}
 export interface WindowsAccessLease {
   verify(): void;
   release(): void;
   preparePrivateUi(): void;
   verifyPrivateUi(): void;
+  officeAccess(relative: string): WindowsOfficeGuard;
 }
 export interface WindowsProfilePermissionIssue {
   readonly path: string;

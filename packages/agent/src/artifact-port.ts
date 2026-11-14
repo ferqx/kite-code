@@ -26,6 +26,8 @@ export interface ArtifactContentStore {
     input: ArtifactReadInput & { content: Uint8Array; mediaType: string },
   ): Promise<ArtifactReference>;
   read(input: ArtifactReadInput): Promise<Uint8Array>;
+  /** Successful EOF verifies full bytes; partial consumption is not a complete file. */
+  readStream?(input: ArtifactReadInput): AsyncIterable<Uint8Array>;
   /** Fresh scope lookup must match the complete original reference before verified full-body I/O. */
   readReference?(input: ArtifactReferenceReadInput): Promise<Uint8Array>;
   close(): Promise<void>;

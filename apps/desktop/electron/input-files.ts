@@ -1,5 +1,10 @@
 import { createHash, type Hash } from 'node:crypto';
-import { type AgentClient, ClientError, type InputFileReference } from '@kite-ai/client';
+import {
+  type AgentClient,
+  ClientError,
+  type InputFileReference,
+  type OutputFileTarget,
+} from '@kite-ai/client';
 
 type Draft = {
   id: string;
@@ -17,6 +22,51 @@ type Draft = {
 /** Window-owned byte preparation before a Session exists. Bounded chunks never become a
  * Base64 document or a renderer-selected filesystem read; published originals live in Artifact. */
 export class NativeInputFiles {
+  private readonly outputs = new Map<
+    string,
+    {
+      target: OutputFileTarget;
+      name: string;
+      publications: Map<string, Promise<InputFileReference>>;
+      local?: {
+        identity: string;
+        publish(
+          client: AgentClient,
+          storeId: string,
+          sessionId: string,
+          importId: string,
+        ): Promise<InputFileReference>;
+      };
+    }
+  >();
+  fromOutput(
+    id: string,
+    target: OutputFileTarget,
+    name: string,
+    local?: {
+      identity: string;
+      publish(
+        client: AgentClient,
+        storeId: string,
+        sessionId: string,
+        importId: string,
+      ): Promise<InputFileReference>;
+    },
+  ) {
+    if (this.closed || this.drafts.has(id)) throw new ClientError('native_file_invalid');
+    const existing = this.outputs.get(id);
+    if (existing) {
+      if (
+        JSON.stringify(existing.target) !== JSON.stringify(target) ||
+        existing.local?.identity !== local?.identity
+      )
+        throw new ClientError('native_file_invalid');
+      return;
+    }
+    if (this.outputs.size + this.drafts.size >= 128)
+      throw new ClientError('native_file_budget_unavailable');
+    this.outputs.set(id, { target: structuredClone(target), name, publications: new Map(), local });
+  }
   private readonly drafts = new Map<string, Draft>();
   private readonly pending = new Set<Promise<InputFileReference>>();
   private readonly owned = new Set<Draft>();
@@ -25,6 +75,7 @@ export class NativeInputFiles {
   begin(input: { id: string; name: string; mediaType: string; size: number }) {
     if (
       this.closed ||
+      this.outputs.has(input.id) ||
       this.owned.size >= 128 ||
       [...this.owned].some((draft) => draft.id === input.id) ||
       !Number.isSafeInteger(input.size) ||
@@ -75,6 +126,36 @@ export class NativeInputFiles {
       throw new ClientError('native_file_invalid');
     const result: InputFileReference[] = [];
     for (const id of ids) {
+      const output = this.outputs.get(id);
+      if (output) {
+        const key = JSON.stringify([storeId, sessionId]);
+        let pending = output.publications.get(key);
+        if (!pending) {
+          const importId = createHash('sha256')
+            .update(JSON.stringify([storeId, sessionId, id]))
+            .digest('hex');
+          pending = output.local
+            ? output.local.publish(client, storeId, sessionId, importId)
+            : client.prepareInputFromOutput({
+                expectedStoreId: storeId,
+                targetSessionId: sessionId,
+                importId,
+                preparationId: id,
+                source: output.target,
+              });
+          output.publications.set(key, pending);
+          this.pending.add(pending);
+          void pending.then(
+            () => this.pending.delete(pending!),
+            () => {
+              this.pending.delete(pending!);
+              output.publications.delete(key);
+            },
+          );
+        }
+        result.push(await pending);
+        continue;
+      }
       const draft = this.drafts.get(id);
       if (!draft?.hash) throw new ClientError('native_file_missing');
       const key = JSON.stringify([storeId, sessionId]);
@@ -144,6 +225,7 @@ export class NativeInputFiles {
     return result;
   }
   release(id: string) {
+    this.outputs.delete(id);
     const draft = this.drafts.get(id);
     if (!draft) return;
     this.drafts.delete(id);
@@ -161,6 +243,7 @@ export class NativeInputFiles {
     draft.publications.clear();
   }
   reset() {
+    this.outputs.clear();
     for (const id of this.drafts.keys()) this.release(id);
   }
   async close() {

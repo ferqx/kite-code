@@ -243,7 +243,6 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           'follow_up_agent',
           'interrupt_agent',
           'list_agents',
-          'read_execution_evidence',
           'read_file',
           'send_agent_message',
           'spawn_agent',

@@ -570,6 +570,7 @@ export function Conversation({
   renderMessage,
   renderMessageContent,
   renderMessageAttachments,
+  renderTurnOutputs,
   renderToolActivity,
   traceTurns = false,
   renderReasoning,
@@ -600,6 +601,11 @@ export function Conversation({
   renderMessageContent?: (message: Message) => ReactNode;
   /** Attachment presentation outside the user text bubble, sharing the same message identity. */
   renderMessageAttachments?: (message: Message) => ReactNode;
+  renderTurnOutputs?: (target: {
+    turnId: string;
+    finalMessageId?: string;
+    terminalStatus?: Message['turnTerminalStatus'];
+  }) => ReactNode;
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Native conversation: group consecutive reasoning and tools around public prose. */
@@ -1192,7 +1198,7 @@ export function Conversation({
           <Fragment key={entry.key}>{entry.groups.map((group) => renderGroup(group))}</Fragment>
         );
       const finalGroup = entry.groups.find(
-        ([message]) => message?.role === 'assistant' && message.settled && message.finalReply,
+        ([message]) => message?.id === finalReplyByTurn.get(entry.turnId!)?.id,
       );
       const failureGroups = entry.groups.filter(([message]) => !!message && isTurnFailure(message));
       const processGroups = entry.groups.filter(
@@ -1584,6 +1590,15 @@ export function Conversation({
           {finalGroup && (
             <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>
           )}
+          {((finalGroup && finalGroup[0]?.id === finalReplyByTurn.get(entry.turnId)?.id) ||
+            (!finalReplyByTurn.has(entry.turnId) &&
+              lastTurnEntry &&
+              (ended || failureGroups.length > 0))) &&
+            renderTurnOutputs?.({
+              turnId: entry.turnId,
+              finalMessageId: finalGroup?.[0]?.id,
+              terminalStatus,
+            })}
           {responding && (
             <small className="response-status" role="status">
               <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
@@ -1619,6 +1634,7 @@ export function Conversation({
     renderMessage,
     renderMessageContent,
     renderMessageAttachments,
+    renderTurnOutputs,
     renderToolActivity,
     traceTurns,
     renderReasoning,

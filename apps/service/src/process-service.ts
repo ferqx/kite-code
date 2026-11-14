@@ -1,9 +1,16 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AgentError, createRuntime } from '@kite-ai/agent';
+import {
+  AgentError,
+  createRuntime,
+  prepareOutputDirectory,
+  prepareOutputStaging,
+} from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { officeShellEnvironment, verifyOfficeRuntimeAssets } from '@kite-ai/agent/documents';
+import { createWorkingInputFiles } from '@kite-ai/agent/files';
 import {
   linuxShellInitAsset,
   shellSupervisorAsset,
@@ -22,6 +29,7 @@ import { createDesktopShellEnvironments } from './desktop-shell';
 import { startService } from './index';
 import { assertMcpSourceStdioAssetsClosed } from './mcp-source-configuration';
 import { windowsRuntimePinCloseUnknown } from './native-runtime-assets';
+import { createOutputPreviews } from './output-previews';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
 import { encodeServiceStartupDiagnostic } from './startup-diagnostic';
 import { measureServiceStartup } from './startup-timing';
@@ -298,6 +306,12 @@ export async function assembleProcessService(
           ...runtimeConfiguration,
           workspaceSerialLocks: runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks,
           artifacts,
+          workingInputFiles: createWorkingInputFiles({
+            protectedPaths: [selected.profilePath, selected.coordinationPath, ...runtimeAssets],
+          }),
+          outputCollections: {
+            prepare: (context, identity) => prepareOutputDirectory(runtime!, context, identity),
+          },
           store,
           instanceId: startup.instanceId,
           permissions: configuration.permissions ?? {
@@ -350,6 +364,9 @@ export async function assembleProcessService(
       startService({
         subjectId,
         runtime,
+        outputPreviews: runtime
+          ? createOutputPreviews(runtime, selected.profilePath, subjectId)
+          : undefined,
         beforeResourceClose: async () => {
           await trace?.close();
           assertMcpSourceStdioAssetsClosed(selected.profileAccessKey);
@@ -458,6 +475,7 @@ async function packagedShellAssets(
   }
   const bubblewrap = process.platform === 'linux' ? Bun.which('bwrap') : undefined;
   if (process.platform === 'linux' && !bubblewrap) return;
+  const office = await verifyOfficeRuntimeAssets();
   const ripgrep = withBundledRipgrep(
     Object.fromEntries(
       Object.entries(process.env).filter(
@@ -474,7 +492,7 @@ async function packagedShellAssets(
       : process.platform === 'linux'
         ? 'default.linux-host-shell-v1'
         : 'default.macos-host-shell-v1',
-    env: ripgrep.env,
+    env: { ...ripgrep.env, ...officeShellEnvironment() },
     supervisorPath,
     bunExecutable: process.execPath,
     shellExecutable: windows?.shell ?? '/bin/sh',
@@ -482,9 +500,11 @@ async function packagedShellAssets(
     ...(bubblewrap ? { linux: { bubblewrapPath: realpathSync.native(bubblewrap) } } : {}),
     host: {
       controlBase: profile.coordinationPath,
+      temporaryRoot: prepareOutputStaging(join(profile.coordinationPath, 'shell-staging')),
+      trustedExecutables: [office.officecli],
       protectedRoots: [],
       readonlyAssets: [],
-      runtimeReadOnlyRoots: [],
+      runtimeReadOnlyRoots: [dirname(office.helper)],
     },
   };
 }

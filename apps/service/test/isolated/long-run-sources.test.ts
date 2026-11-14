@@ -311,7 +311,6 @@ test(
           ),
         );
         expect(request.tools.map((tool) => tool.function.name)).toEqual([
-          'read_execution_evidence',
           'edit_file',
           'read_file',
           'view_images',

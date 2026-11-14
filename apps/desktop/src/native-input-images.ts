@@ -10,6 +10,7 @@ import {
 import { inputImageCount, inputImageWindowCount } from './input-images-bridge';
 import type { NativeBridge } from './native-bridge';
 import { NativeImagePreviews } from './native-image-previews';
+import type { OutputDraftFile } from './output-files-bridge';
 
 type ImageDraft = {
   id: string;
@@ -23,7 +24,14 @@ type ImageDraft = {
   previewError?: string;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
-type FileDraft = { id: string; name: string; uri: string; generation: number; prepared?: boolean };
+type FileDraft = {
+  id: string;
+  name: string;
+  uri: string;
+  generation: number;
+  prepared?: boolean;
+  output?: OutputDraftFile;
+};
 function attachmentHostOutdated(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return code === 'invalid_native_request' || code === 'native_host_operation_unavailable';
@@ -34,6 +42,7 @@ export function useNativeInputImages(
   bridge: NativeBridge | undefined,
   generation: number | undefined,
   storeId: string | undefined,
+  localFileReferences = false,
 ) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: Derived content cannot cross a connection, generation or Store boundary.
   const previews = useMemo(() => new NativeImagePreviews(), [bridge, generation, storeId]);
@@ -80,7 +89,13 @@ export function useNativeInputImages(
   }
   function addFiles(
     key: string,
-    selected: readonly { name: string; uri: string; id?: string; prepared?: boolean }[],
+    selected: readonly {
+      name: string;
+      uri: string;
+      id?: string;
+      prepared?: boolean;
+      output?: OutputDraftFile;
+    }[],
   ) {
     if (
       !bridge ||
@@ -91,13 +106,13 @@ export function useNativeInputImages(
       current.current.storeId !== storeId
     )
       return;
-    const uris = new Set(files(key).map((file) => file.uri));
+    const uris = new Map(files(key).map((file) => [file.uri, file.id]));
     drafts.current.set(key, [
       ...all(key),
       ...selected
         .filter((file) => {
           if (uris.has(file.uri)) {
-            if (file.prepared && file.id) {
+            if (file.prepared && file.id && file.id !== uris.get(file.uri)) {
               fileHandoffs.current.get(file.id)?.();
               preparedFiles.current.delete(file.id);
               void bridge
@@ -106,7 +121,7 @@ export function useNativeInputImages(
             }
             return false;
           }
-          uris.add(file.uri);
+          uris.set(file.uri, file.id ?? '');
           return true;
         })
         .map((file) => {
@@ -310,7 +325,7 @@ export function useNativeInputImages(
       { once: true },
     );
     const prepare = async () => {
-      const result: { name: string; uri: string; id: string; prepared: true }[] = [];
+      const result: { name: string; uri: string; id: string; prepared?: boolean }[] = [];
       const check = () => {
         controller.signal.throwIfAborted();
         if (
@@ -323,8 +338,13 @@ export function useNativeInputImages(
       try {
         for (const [index, file] of selected.entries()) {
           check();
-          if (file.size > 256 * 1024 * 1024) throw Error('input_file_too_large');
           const id = crypto.randomUUID();
+          const reference = references[index];
+          if (localFileReferences && reference?.uri.startsWith('file://')) {
+            result.push({ ...reference, id });
+            continue;
+          }
+          if (file.size > 256 * 1024 * 1024) throw Error('input_file_too_large');
           ids.push(id);
           preparedFiles.current.add(id);
           await bridge.request({
@@ -350,7 +370,12 @@ export function useNativeInputImages(
           check();
           await bridge.request({ method: 'input.files.finish', generation, id });
           check();
-          result.push({ ...references[index]!, id, prepared: true });
+          result.push({
+            name: reference?.name || file.name,
+            uri: reference?.uri || `file:///kite-prepared/${id}/${encodeURIComponent(file.name)}`,
+            id,
+            prepared: true,
+          });
         }
         check();
         ready = true;

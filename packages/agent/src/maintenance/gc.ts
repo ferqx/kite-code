@@ -24,6 +24,7 @@ import {
   withPrivateDatabaseSnapshot,
 } from './files';
 import { collectHistory, planHistoryCollection } from './gc-history';
+import { collectOutputStaging } from './output-staging';
 import { capture, openBackupDatabase, openMaintenanceDatabase } from './sqlite';
 import { MaintenanceError } from './types';
 import { collectWorkingFiles } from './working-files';
@@ -340,6 +341,7 @@ async function collectProfileGarbageOwned(
       result.removedFiles += managed.removedFiles;
       result.removedBytes = String(BigInt(result.removedBytes) + managed.removedBytes);
     });
+    await snapshot((db) => collectOutputStaging(db, access.coordinationPath, now, input.signal));
     return result;
   } finally {
     if (maintenanceResourcesClosed()) access.lock.release();

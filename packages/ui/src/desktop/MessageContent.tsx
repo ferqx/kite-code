@@ -118,6 +118,7 @@ function projectFilePath(rootUri: string | undefined, path: string): string {
     return path;
   }
 }
+export const WebLinkContext = createContext<((url: string) => void) | undefined>(undefined);
 
 const alertIcons = new Map([
   ['note', InformationCircleIcon],
@@ -148,6 +149,7 @@ function MarkdownLink({
   node: _node,
   ...props
 }: ComponentPropsWithoutRef<'a'> & ExtraProps) {
+  const openWebLink = useContext(WebLinkContext);
   const readActive = useConversationReadActive();
   if (!href) return <span>{children}</span>;
   if (href.startsWith('#'))
@@ -172,7 +174,16 @@ function MarkdownLink({
     );
   if (/^https?:\/\//i.test(href))
     return (
-      <a {...props} href={href} target="_blank" rel="noreferrer">
+      <a
+        {...props}
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(event) => {
+          if (!readActive || openWebLink) event.preventDefault();
+          if (readActive) openWebLink?.(href);
+        }}
+      >
         {children}
       </a>
     );

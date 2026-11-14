@@ -1,0 +1,242 @@
+.native-file-preview {
+  min-width: 0;
+  min-height: 0;
+  container-type: inline-size;
+  container-name: office-preview;
+  background: var(--page-background);
+  color: var(--foreground);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+.native-office-toolbar {
+  align-self: center;
+  width: fit-content;
+  max-width: calc(100% - 16px);
+  margin: 8px auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card, var(--page-background));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.native-office-button-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.native-office-edit-actions {
+  flex-shrink: 0;
+}
+.native-office-view-actions {
+  margin-left: 0;
+  min-width: 0;
+}
+.native-office-file-actions {
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 4px;
+}
+.native-office-pill .native-office-icon-button {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  width: 28px;
+  flex: 0 0 28px;
+}
+.native-office-icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+.native-office-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--control-gap, 4px);
+}
+.native-office-pill button,
+.native-office-pill select {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px 8px;
+  border-radius: var(--button-radius, 8px);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+  transition:
+    background-color 100ms,
+    color 100ms;
+}
+.native-office-pill button:hover:not(:disabled),
+.native-office-pill select:hover:not(:disabled),
+.native-office-notes summary:hover {
+  background: var(--control-hover);
+}
+.native-office-pill button[aria-pressed="true"] {
+  background: var(--control-selected);
+}
+.native-office-pill button:active:not(:disabled),
+.native-office-pill select:active:not(:disabled),
+.native-office-notes summary:active {
+  background: var(--control-pressed);
+}
+.native-office-pill button:focus-visible,
+.native-office-pill select:focus-visible,
+.native-office-notes summary:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+.native-office-pill button:disabled,
+.native-office-pill select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.native-office-pill select {
+  width: 106px;
+  max-width: 100%;
+  min-width: 0;
+}
+.native-office-pill option {
+  background: var(--card);
+  color: var(--foreground);
+}
+.native-office-status {
+  padding: 4px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.native-office-notes {
+  flex-shrink: 0;
+  padding: 0 8px 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.native-office-notes summary {
+  padding: 4px 8px;
+  border-radius: var(--button-radius, 8px);
+  cursor: pointer;
+}
+.native-office-notes p {
+  margin: 4px 8px 8px;
+  color: var(--foreground);
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .native-office-pill button,
+  .native-office-pill select {
+    transition: none;
+  }
+}
+.native-excel-readonly {
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.native-excel-readonly-row {
+  align-items: flex-start;
+}
+.native-excel-readonly-row > button:first-child {
+  min-width: 72px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.native-excel-dimensions {
+  font-size: 12px;
+  line-height: 28px;
+  white-space: nowrap;
+}
+.native-excel-value {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.native-excel-value > span {
+  line-height: 28px;
+  white-space: nowrap;
+}
+.native-excel-value textarea {
+  min-height: 0;
+  max-height: none;
+  height: 28px;
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--foreground);
+  background: var(--page-background);
+  font: inherit;
+  line-height: 18px;
+}
+.native-excel-value textarea[rows="5"] {
+  height: 100px;
+}
+.native-excel-value textarea:focus-visible,
+.native-office-notes summary:focus-visible {
+  outline: 1px solid var(--foreground);
+  outline-offset: -2px;
+}
+
+@container office-preview (max-width: 260px) {
+  .native-office-toolbar {
+    gap: 2px;
+    max-width: calc(100% - 8px);
+    margin: 6px auto;
+  }
+  .native-office-pill select {
+    width: 92px;
+    padding-inline: 4px;
+  }
+  .native-office-file-actions {
+    padding-left: 2px;
+  }
+}
+@container office-preview (max-width: 480px) {
+  .native-excel-readonly {
+    padding-inline: 8px;
+  }
+  .native-excel-readonly-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 4px 8px;
+  }
+  .native-excel-readonly-row > button:first-child {
+    min-width: 0;
+    max-width: none;
+  }
+  .native-excel-dimensions {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .native-excel-value {
+    grid-area: 2 / 1 / 3 / -1;
+  }
+  .native-excel-readonly-row > button:last-child {
+    grid-area: 1 / 3;
+  }
+}

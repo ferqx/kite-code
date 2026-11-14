@@ -51,6 +51,11 @@ import {
   nativeModelPreferenceChannel,
 } from '../src/native-model-preference-bridge';
 import {
+  nativePreviewLayoutChannel,
+  nativePreviewPresentationChannel,
+  readNativePreviewLayoutReply,
+} from '../src/native-preview-layout-bridge';
+import {
   type NativeTrajectoryFileBridge,
   type NativeTrajectoryFileReply,
   nativeTrajectoryFileChannel,
@@ -107,6 +112,22 @@ const bridge: NativeBridge &
       throw Error('invalid_browser_state');
     return reply.value;
   },
+  presentPreviewLayout(input) {
+    readNativePreviewLayoutReply(ipcRenderer.sendSync(nativePreviewLayoutChannel, input), input);
+  },
+  async presentPreviewLayoutAsync(input) {
+    return readNativePreviewLayoutReply(
+      await ipcRenderer.invoke(nativePreviewLayoutChannel, input),
+      input,
+    );
+  },
+  subscribePreviewPresentation(listener) {
+    const receive = (_event: unknown, value: unknown) => {
+      if (value === true) listener();
+    };
+    ipcRenderer.on(nativePreviewPresentationChannel, receive);
+    return () => ipcRenderer.removeListener(nativePreviewPresentationChannel, receive);
+  },
   presentBrowserLayout(input) {
     return readBrowserLayoutReply(
       ipcRenderer.sendSync(nativeBrowserLayoutChannel, input) as BrowserLayoutReply,
@@ -160,7 +181,11 @@ const bridge: NativeBridge &
   },
   fileReferences(files) {
     if (!Array.isArray(files) || files.length > 128) throw Error('file_reference_unavailable');
-    return files.map((file) => inputFileReference(file.name, webUtils.getPathForFile(file)));
+    return files.map((file) => {
+      const path = webUtils.getPathForFile(file);
+      // Synthetic browser Files have bytes but no native path. Import those normally.
+      return path ? inputFileReference(file.name, path) : { name: file.name, uri: '' };
+    });
   },
   async showWindowMenu(request) {
     const reply = (await ipcRenderer.invoke(nativeWindowMenuChannel, request)) as NativeReply;

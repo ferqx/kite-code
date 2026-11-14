@@ -62,12 +62,28 @@ test('relocated native companion loads in Bun and Node without a compiler/source
       `
 import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,readFileSync,readdirSync,rmSync} from 'node:fs';
+import {createRequire} from 'node:module';
 import {join} from 'node:path';
 import {createNativeWorkspaceFileIo} from './files-native-binding.js';
 const root=join(import.meta.dirname,'work');mkdirSync(root,{recursive:true});
+const withoutBounded=process.argv[2]==='without-bounded';
+let unboundedCalls=0;
+if(withoutBounded){
+ const {NativeFiles}=createRequire(import.meta.url)('./native/files/files.node');
+ const originalList=NativeFiles.prototype.listAt;
+ Object.defineProperty(NativeFiles.prototype,'listAtBounded',{value:undefined});
+ Object.defineProperty(NativeFiles.prototype,'listAt',{value:function(...args){
+  unboundedCalls++;return Reflect.apply(originalList,this,args);
+ }});
+}
 let io;
 try{
  io=createNativeWorkspaceFileIo(root,[],false);
+ if(withoutBounded){
+  assert.throws(()=>io.listAt(io.root,0),{code:'file_native_bounded_listing_unavailable'});
+  assert.equal(unboundedCalls,0);
+  assert.deepEqual(io.listAt(io.root),[]);assert.equal(unboundedCalls,1);
+ }else assert.deepEqual(io.listAt(io.root,0),[]);
  const id=io.openAt(io.root,'temporary','temporary');
  const bytes=Buffer.from('完整 Node-API α\\r\\n'.repeat(90000));
  io.write(id,bytes);io.sync(id);const baseline=io.stat(id);
@@ -78,7 +94,7 @@ try{
  assert.equal(offset,bytes.length);assert.deepEqual(actual,bytes);
  assert.equal(io.stat(read).ino,baseline.ino);io.closeHandle(read);
  assert.deepEqual(readFileSync(join(root,'actual')),bytes);io.close();
- rmSync(join(root,'actual'));console.log(JSON.stringify({outcome:'succeeded',bytes:offset}));
+ rmSync(join(root,'actual'));console.log(JSON.stringify({outcome:'succeeded',bytes:offset,boundedGuard:withoutBounded?'rejected':'supported'}));
 }catch(error){console.log(JSON.stringify({code:error.code,entries:readdirSync(root)}));}
 finally{io?.close();}
 `,
@@ -86,8 +102,8 @@ finally{io?.close();}
     const node = Bun.which('node');
     expect(node).not.toBeNull();
     const runtimes = [process.execPath, node!];
-    const run = async (runtime: string) => {
-      const child = Bun.spawn([runtime, script], {
+    const run = async (runtime: string, ...args: string[]) => {
+      const child = Bun.spawn([runtime, script, ...args], {
         cwd: root,
         env: { ...process.env, PATH: '', NODE_PATH: '', NODE_OPTIONS: '', BUN_OPTIONS: '' },
         stdout: 'pipe',
@@ -104,7 +120,12 @@ finally{io?.close();}
       return JSON.parse(out);
     };
     for (const runtime of runtimes)
-      expect(await run(runtime)).toMatchObject({ outcome: 'succeeded' });
+      expect(await run(runtime)).toMatchObject({ outcome: 'succeeded', boundedGuard: 'supported' });
+    for (const runtime of runtimes)
+      expect(await run(runtime, 'without-bounded')).toMatchObject({
+        outcome: 'succeeded',
+        boundedGuard: 'rejected',
+      });
     const metadata = join(root, 'native/files/manifest.json');
     const original = readFileSync(metadata, 'utf8');
     for (const changed of [
