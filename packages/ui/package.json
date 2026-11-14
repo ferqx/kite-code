@@ -13,7 +13,7 @@
     "./tui/ink": "./src/tui/ink.ts"
   },
   "scripts": {
-    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.tsx --target=browser --packages=bundle --external=react --external=react-dom --external=@kite-ai/client --outdir=dist && node --import ../../scripts/tooling/register.mjs scripts/build-tui.ts --outdir=dist/tui && node --import ../../scripts/tooling/register.mjs scripts/build-desktop.ts --outdir=dist/desktop",
+    "build": "bun --no-config --no-env-file --no-install ../../scripts/tooling/build-command.ts ./src/index.tsx --target=browser --packages=bundle --external=react --external=react-dom --external=@kite-ai/client --outdir=dist && bun --no-config --no-env-file --no-install scripts/build-tui.ts --outdir=dist/tui && bun --no-config --no-env-file --no-install scripts/build-desktop.ts --outdir=dist/desktop",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-test-files.ts ./test"
   },

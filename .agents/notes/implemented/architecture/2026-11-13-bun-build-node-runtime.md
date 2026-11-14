@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-本机 `bun run test:fast` 使用 Bun 跑一组已有单测，`--node` 复跑同一组。默认测试、运行时回归和正式制品测试在 Node 下执行。本机和 CI 用固定的 Bun 1.4.4 按同一份 `bun.lock` 隔离安装依赖。构建脚本用同版 Bun 打包产品 JS／TS，开发版 Service 与发行候选共用打包入口。Node 负责构建策略和导入转换，服务端输出选 Node 目标。普通浏览器目录构建由 Bun 写入，Node 接收结果和诊断；带插件或内存产物的构建沿原接口处理。桌面 renderer 使用 Vite／Tailwind，原生组件沿用各平台工具链。发行运行时遵循[随包 Node 决定](2026-11-12-bundled-node-native-runtime.md)。
+本机 `bun run build` 和 `bun run test:fast` 直接从 Bun 启动。构建脚本在自身进程里调用 `Bun.build()`，`test:fast --node` 复跑同一组单测。默认测试、运行时回归和正式制品测试在 Node 下执行。本机和 CI 用固定的 Bun 1.4.4 按同一份 `bun.lock` 隔离安装依赖。开发构建、Desktop 的 Service 重载与发行候选共用打包配置，服务端输出选 Node 目标。Node 启动的构建和校验脚本通过子进程调用同版 Bun 编译器，保留发行的导入转换和产物检查。桌面 renderer 使用 Vite／Tailwind，原生组件沿用各平台工具链。发行运行时遵循[随包 Node 决定](2026-11-12-bundled-node-native-runtime.md)。
 
 ## Alternatives considered
 

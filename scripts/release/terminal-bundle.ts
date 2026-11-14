@@ -56,6 +56,7 @@ import { aiBundledDependencies } from '../../packages/ai/bundled-dependencies';
 import { desktopBundledDependencies } from '../../packages/ui/scripts/bundled-dependencies';
 import { tuiBundledDependencies } from '../../packages/ui/scripts/tui-bundled-dependencies';
 import { initializeDesktopBuildEnvironment } from '../development/windows-desktop-environment';
+import { workspaceBuildCommand } from '../tooling/build-command';
 import { build as bundle } from '../tooling/bun-build';
 import { spawn as spawnProcess } from '../tooling/process';
 import { scanImports } from '../tooling/scan-imports';
@@ -453,13 +454,8 @@ export async function buildTerminalBundle(
       mkdirSync(item.destination, { recursive: true, mode: 0o700 });
       const desktopService = desktop && item.name === '@kite-ai/service';
       for (const segment of item.manifest.scripts.build.split(/\s*&&\s*/)) {
-        const words = segment.trim().split(/\s+/);
-        if (
-          words.shift() !== 'node' ||
-          words.shift() !== '--import' ||
-          resolve(item.source, words.shift() ?? '') !== register
-        )
-          error('build_script_unsupported');
+        const words = workspaceBuildCommand(segment, item.source, register);
+        if (!words) error('build_script_unsupported');
         if (item.name === '@kite-ai/trace-extension-sdk' && words.includes('./src/bundle.ts'))
           continue; // Authoring-only bundler requires a checkout and is not a runtime export.
         const args = words

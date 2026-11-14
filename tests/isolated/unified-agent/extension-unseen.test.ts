@@ -11,14 +11,19 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test } from '#kite-test';
+import { workspaceBuildCommand } from '../../../scripts/tooling/build-command';
 import {
   which as findFixtureExecutable,
   spawn as spawnFixtureProcess,
 } from '../../../scripts/tooling/process';
-import { hostBuildEnvironment } from '../../fixtures/build-tool-environment';
+import {
+  copyDevelopmentRuntime,
+  hostBuildEnvironment,
+} from '../../fixtures/build-tool-environment';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dirname, '../../..');
+const register = join(repository, 'scripts/tooling/register.mjs');
 const priorSha = '6d9ffc07b069d4314970727c0a74ef0b62ed0990e4298805119953c25efda8ef';
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 type Manifest = {
@@ -98,8 +103,12 @@ async function build(source: string, destination: string) {
   const manifest = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')) as Manifest;
   mkdirSync(destination, { recursive: true });
   for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
-    const words = segment.trim().split(/\s+/);
-    if (words.shift() !== 'bun') throw Error('unsupported_real_manifest');
+    const words = workspaceBuildCommand(segment, source, register);
+    if (!words) throw Error('unsupported_real_manifest');
+    if (manifest.name === '@kite-ai/agent' && words[0] === 'scripts/build-node-runtime.ts') {
+      copyDevelopmentRuntime(source, destination);
+      continue;
+    }
     const args = words.map((word) =>
       word === 'dist' || word === './dist'
         ? destination
@@ -109,7 +118,12 @@ async function build(source: string, destination: string) {
     );
     const index = args.indexOf('--outdir');
     if (index >= 0) args[index + 1] = args[index + 1]!.replace(/^\.\/dist(?=\/|$)/, destination);
-    await child([process.execPath, ...args], source, 20000, hostBuildEnvironment());
+    await child(
+      [process.execPath, '--import', register, ...args],
+      source,
+      20000,
+      hostBuildEnvironment(),
+    );
   }
   const exports = Object.fromEntries(
     Object.entries(manifest.exports).map(([name, path]) => [
@@ -132,6 +146,7 @@ async function distribution() {
   mkdirSync(modules, { recursive: true });
   const dependencyOwners = new Map<string, string[]>();
   for (const [name, source] of [
+    ['trajectory', 'packages/trajectory'],
     ['ai', 'packages/ai'],
     ['agent', 'packages/agent'],
     ['client', 'packages/client'],

@@ -130,7 +130,7 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确十个 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。除 `apps/kite-cli` 历史源码外，其他旧架构模块及其独占测试已删除；保留目录不具有运行依赖闭包，不进入正式产物或默认调度。旧实现与原验证证据通过删除前固定 revision 追溯。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
 
-正式命令/CI 中 `bun test` 明确列出的 `*.test/spec.*` 文件必须存在，包含 `--cwd` 解析后的输入；缺失由 [workspace 守卫](../../scripts/check-unified-workspaces.ts)以 `formal-test-file-missing` 拒绝。此检查不把 build 尚未生成的输出当测试输入，不改变运行预算、选择范围或原资格要求。
+根与 workspace 的开发 `build` 可直接由 Bun 执行，构建入口和输入仍纳入源码边界检查。`test:fast` 是本机快测入口，正式测试和发行继续由 Node 调度。正式命令/CI 经 `--cwd` 解析的显式 `*.test/spec.*` 文件必须存在，缺失由 [workspace 守卫](../../scripts/check-unified-workspaces.ts)以 `formal-test-file-missing` 拒绝。构建生成的文件按输出处理。
 
 质量作业、提交 hook 和 pre-release architecture 统一通过该 workspace 守卫执行一次默认源码及正式消费入口的边界检查；独立 `check:unified-agent-boundary`／`check:core-boundary` 仍可诊断。合并结果保留 source-boundary 拒绝、覆盖计数、pending 与未完成发布资格提示，不将源码缺失或计算夹具当作实际运行通过。`tsconfig.typecheck.json` 仅聚合原根和精确十 workspace，共十一份配置独立生效；清单守卫拒绝漏项、重复、越界及额外配置，文件和失败路径验证归[测试体系](../../tests/README.md#类型检查)。
 

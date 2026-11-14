@@ -11,7 +11,7 @@
     }
   },
   "scripts": {
-    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts --target=browser --packages=external --outdir=dist && node --import ../../scripts/tooling/register.mjs build.ts",
+    "build": "bun --no-config --no-env-file --no-install ../../scripts/tooling/build-command.ts ./src/index.ts --target=browser --packages=external --outdir=dist && bun --no-config --no-env-file --no-install build.ts",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-test-files.ts ./test"
   },

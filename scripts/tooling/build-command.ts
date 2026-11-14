@@ -2,6 +2,22 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { build } from './bun-build';
 
+/** Read a workspace build segment for a Node caller that supplies its own preload. */
+export function workspaceBuildCommand(
+  segment: string,
+  cwd: string,
+  register: string,
+): string[] | undefined {
+  const [runtime, first, second, ...args] = segment.trim().split(/\s+/);
+  if (runtime === 'bun') {
+    if (first !== '--no-config' || second !== '--no-env-file' || args.shift() !== '--no-install')
+      return undefined;
+  } else if (runtime !== 'node' || first !== '--import' || resolve(cwd, second ?? '') !== register)
+    return undefined;
+  const entry = args[0];
+  return entry?.endsWith('.ts') && !entry.startsWith('-') ? args : undefined;
+}
+
 export function workspaceBuildOptions(
   args: readonly string[],
   mode: 'workspace' | 'desktop' = 'workspace',

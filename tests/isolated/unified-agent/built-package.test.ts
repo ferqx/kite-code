@@ -23,6 +23,7 @@ import {
 } from '../../../scripts/release/node-inputs';
 import { buildTerminalSqliteEngine } from '../../../scripts/release/sqlite-engine';
 import { build as bundle } from '../../../scripts/tooling/build';
+import { workspaceBuildCommand } from '../../../scripts/tooling/build-command';
 import { serve as serveFixture } from '../../../scripts/tooling/http';
 import { spawn as spawnFixtureProcess } from '../../../scripts/tooling/process';
 
@@ -148,16 +149,11 @@ async function buildManifest(
   destination: string,
   env?: Record<string, string>,
 ) {
-  // Execute every command from the actual manifest, changing only its output destination.
+  // Execute each manifest build entry on Node with its isolated output destination.
   // All entries remain in one build invocation, preserving common-root behavior.
   for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
-    const words = segment.trim().split(/\s+/);
-    if (
-      words.shift() !== 'node' ||
-      words.shift() !== '--import' ||
-      resolve(source, words.shift() ?? '') !== register
-    )
-      throw new Error('unsupported_manifest_build');
+    const words = workspaceBuildCommand(segment, source, register);
+    if (!words) throw new Error('unsupported_manifest_build');
     const args = words.map((word) =>
       word === 'dist' || word === './dist'
         ? destination

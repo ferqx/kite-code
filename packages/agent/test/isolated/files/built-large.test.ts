@@ -11,11 +11,16 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test } from '#kite-test';
+import { workspaceBuildCommand } from '../../../../../scripts/tooling/build-command';
 import { spawn as spawnProcess } from '../../../../../scripts/tooling/process';
 import { testRuntimeFlags } from '../../../../../scripts/tooling/test-command';
-import { hostBuildEnvironment } from '../../../../../tests/fixtures/build-tool-environment';
+import {
+  copyDevelopmentRuntime,
+  hostBuildEnvironment,
+} from '../../../../../tests/fixtures/build-tool-environment';
 
 const repository = resolve(import.meta.dirname, '../../../../..');
+const register = join(repository, 'scripts/tooling/register.mjs');
 type Manifest = {
   name: string;
   version: string;
@@ -59,8 +64,12 @@ test('fresh complete package outside source runs large file and streamed Artifac
       const destination = join(modules, manifest.name);
       mkdirSync(destination, { recursive: true });
       for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
-        const words = segment.trim().split(/\s+/);
-        if (words.shift() !== 'bun') throw new Error('unsupported_manifest_build');
+        const words = workspaceBuildCommand(segment, source, register);
+        if (!words) throw new Error('unsupported_manifest_build');
+        if (manifest.name === '@kite-ai/agent' && words[0] === 'scripts/build-node-runtime.ts') {
+          copyDevelopmentRuntime(source, destination);
+          continue;
+        }
         const args = words.map((word) =>
           word === 'dist' || word === './dist'
             ? destination

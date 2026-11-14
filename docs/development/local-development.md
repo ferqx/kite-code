@@ -4,9 +4,9 @@ Desktop 开发入口在每个独立 Service 版本内准备 Agent Browser 的当
 
 在源码 checkout 准备 Node.js 26.13.1 和 Bun 1.4.4，执行 `bun install --frozen-lockfile`。Bun 按 `bun.lock` 将依赖隔离安装到仓库自己的 `node_modules/.bun`，构建与 CI 使用同一份锁。根 postinstall 构建 [Files Node-API companion](../../packages/agent/native/files/README.md)，需要 rustup／固定 Rust 1.97.1 和本机 linker。Windows x64 使用 MSVC Build Tools，macOS 使用 Xcode Command Line Tools，Linux 使用 GNU C/C++ 工具链、`pkg-config` 和 `libffi-dev`。使用 `--ignore-scripts` 安装后，运行 `bun run build:files-native` 补齐 Files 资产。直跑 Agent 或 Service 源码测试前执行 `bun --cwd=packages/agent run build`，使原生插件和 Worker 摘要匹配。发行制品自带 Node 和原生插件。
 
-十个 workspace 的 JS／TS bundle、Desktop 开发版 Service 重载及 Terminal／Native 发行构建共用 [Bun 打包入口](../../scripts/tooling/bun-build.ts)，开发脚本和服务端产物由 Node 执行。`bun run test` 通过显式 Node 入口执行正式测试。[Bun 配置](../../bunfig.toml)关闭自动读取 `.env`、自动安装和 `node` 命令替换。Desktop renderer 的热更新和生产构建使用 Vite／Tailwind，原生组件沿用各平台编译工具链。取舍见 [Bun 工具链决定](../../.agents/notes/implemented/architecture/2026-11-13-bun-build-node-runtime.md)。
+`bun run build` 直接用 Bun 按顺序构建十个 workspace，脚本在自身进程里调用 `Bun.build()`。`bun run test:fast` 直接由 Bun 启动并执行快速单测。`bun run test` 和发行入口用 Node，服务端构建输出面向 Node。[Bun 配置](../../bunfig.toml)关闭自动读取 `.env`、自动安装和 `node` 命令替换。Desktop renderer 的热更新和生产构建使用 Vite／Tailwind，原生组件沿用各平台编译工具链。取舍见 [Bun 工具链决定](../../.agents/notes/implemented/architecture/2026-11-13-bun-build-node-runtime.md)。
 
-[工作区构建参数](../../scripts/tooling/build-command.ts)由开发和桌面发行共用。普通浏览器目录构建由 Bun 写入，只向 Node 返回构建结果和诊断。需要私有导入转换或内存产物的构建沿用原接口。[API 校验器](../../scripts/generate-unified-api.ts)由同一版本的 Bun 打包。
+[工作区构建参数](../../scripts/tooling/build-command.ts)由开发和桌面发行共用。Desktop 开发版 Service 重载、发行脚本和 [API 校验器](../../scripts/generate-unified-api.ts)由 Node 调用同版 [Bun 编译器](../../scripts/tooling/bun-build.ts)。开发构建用锁定的 Node 验证原生 SQLite 和插件，发行包自带运行时。
 
 Required 的纯静态 `quality` 作业使用 `bun install --frozen-lockfile --ignore-scripts`，显式构建 Web 的公开 assets export，再执行全部质量门禁。其他构建作业按相同锁文件安装，再准备各自的原生输入和测试环境。
 

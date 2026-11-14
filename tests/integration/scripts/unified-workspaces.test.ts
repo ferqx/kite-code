@@ -10,6 +10,7 @@ import {
 } from '../../../scripts/check-unified-workspaces';
 
 const roots: string[] = [];
+const directBun = 'bun --no-config --no-env-file --no-install';
 function put(root: string, path: string, value: unknown) {
   const file = resolve(root, path);
   mkdirSync(dirname(file), { recursive: true });
@@ -19,10 +20,10 @@ function fixture() {
   const root = mkdtempSync(resolve(tmpdir(), 'kite-unified-workspaces-'));
   roots.push(root);
   const scripts = {
-    build:
-      'node --import ./scripts/tooling/register.mjs scripts/run-runtime-workspace-script.ts build',
+    build: `${directBun} ./scripts/run-runtime-workspace-script.ts build`,
     test: 'node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts',
     'test:all': 'bun run test',
+    'test:fast': `${directBun} ./tests/fast/run.mjs`,
     typecheck: 'node node_modules/typescript/bin/tsc -b tsconfig.typecheck.json',
     agent: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/cli.ts',
     tui: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/tui.ts',
@@ -50,9 +51,10 @@ function fixture() {
     devDependencies: { '@kite-ai/agent': 'workspace:*' },
   });
   for (const script of Object.values(scripts)) {
-    const path = script.match(/node --import \S+ (\S+\.ts)/)?.[1];
+    const path = script.match(/(?:node --import \S+|bun \S+ \S+ \S+) (\S+\.(?:ts|mjs))/)?.[1];
     if (path) put(root, path, 'export {};');
   }
+  put(root, 'scripts/tooling/build-command.ts', 'export {};');
   put(root, 'scripts/release/source-terminal.ts', 'export {};');
   put(root, 'tsconfig.typecheck.json', {
     files: [],
@@ -67,8 +69,7 @@ function fixture() {
       type: 'module',
       exports: { '.': './src/index.ts' },
       scripts: {
-        build:
-          'node --import ./scripts/tooling/register.mjs scripts/tooling/build-command.ts src/index.ts',
+        build: `${directBun} ../../scripts/tooling/build-command.ts src/index.ts`,
         typecheck: 'node ../../node_modules/typescript/bin/tsc -p tsconfig.json',
         test: 'node --import ../../scripts/tooling/register.mjs ../../scripts/run-test-files.ts test',
       },
@@ -298,6 +299,7 @@ test('formal consumers allow frozen Bun installs and manifest dispatch while rej
     'bun run --bun test',
     'bun run ./scripts/run-default-tests.ts',
     'bun test',
+    `${directBun} ./tests/fast/run.mjs`,
   ]) {
     edit(root, 'package.json', (m) => {
       m.scripts.extra = command;
@@ -308,4 +310,64 @@ test('formal consumers allow frozen Bun installs and manifest dispatch while rej
       message: 'Bun may install frozen dependencies or dispatch a manifest script',
     });
   }
+});
+
+test('direct Bun build scripts still expose compiler inputs to the source boundary', () => {
+  const root = fixture();
+  put(root, 'apps/web/src/entry.tsx', 'export * from "../../../packages/runtime-host/src/index";');
+  put(root, 'packages/runtime-host/src/index.ts', 'export {};');
+  edit(root, 'apps/web/package.json', (m) => {
+    m.scripts.build = `${directBun} ../../scripts/tooling/build-command.ts src/entry.tsx --outfile dist/ignored.js`;
+  });
+  const consumers = checkUnifiedFormalConsumers(root);
+  expect(consumers.violations).toEqual([]);
+  expect(consumers.entrypoints).toContain('apps/web/src/entry.tsx');
+  expect(consumers.entrypoints).not.toContain('apps/web/dist/ignored.js');
+  expect(checkUnifiedWorkspaces(root).violations).toContainEqual(
+    expect.objectContaining({ code: 'source-boundary', path: 'apps/web/src/entry.tsx' }),
+  );
+});
+
+test('the local fast runner cannot replace formal tests or release commands directly or through aliases', () => {
+  const root = fixture();
+  edit(root, 'package.json', (m) => {
+    m.scripts.test = 'bun run delegated';
+    m.scripts.delegated = 'bun run test:fast';
+    m.scripts['release:build'] = `${directBun} ./scripts/release/unified.ts build`;
+  });
+  put(
+    root,
+    '.github/workflows/probe.yml',
+    `name: probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: bun run delegated
+      - run: bun run test:fast
+      - run: ${directBun} ./tests/fast/run.mjs
+`,
+  );
+  const violations = checkUnifiedFormalConsumers(root).violations;
+  expect(violations).toContainEqual({
+    code: 'formal-runtime-forbidden',
+    path: 'package.json#delegated',
+    message: 'test:fast is for local development',
+  });
+  expect(violations).toContainEqual({
+    code: 'formal-runtime-forbidden',
+    path: '.github/workflows/probe.yml#probe',
+    message: 'test:fast is for local development',
+  });
+  expect(violations).toContainEqual({
+    code: 'formal-runtime-forbidden',
+    path: 'package.json#release:build',
+    message: 'Bun may install frozen dependencies or dispatch a manifest script',
+  });
+  expect(violations).toContainEqual({
+    code: 'formal-runtime-forbidden',
+    path: '.github/workflows/probe.yml#probe',
+    message: 'Bun may install frozen dependencies or dispatch a manifest script',
+  });
 });

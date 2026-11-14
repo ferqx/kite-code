@@ -9,7 +9,9 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { build as buildFixture } from '../../../../scripts/tooling/build';
+import { workspaceBuildCommand } from '../../../../scripts/tooling/build-command';
 import { spawn as spawnFixtureProcess } from '../../../../scripts/tooling/process';
+import { copyDevelopmentRuntime, hostBuildEnvironment } from '../../build-tool-environment';
 
 type Manifest = {
   name: string;
@@ -19,10 +21,15 @@ type Manifest = {
   dependencies?: Record<string, string>;
 };
 const repository = resolve(import.meta.dirname, '../../../..');
+const register = join(repository, 'scripts/tooling/register.mjs');
 async function build(manifest: Manifest, source: string, destination: string) {
   for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
-    const words = segment.trim().split(/\s+/);
-    if (words.shift() !== 'bun') throw Error('owned_manifest_build_invalid');
+    const words = workspaceBuildCommand(segment, source, register);
+    if (!words) throw Error('owned_manifest_build_invalid');
+    if (manifest.name === '@kite-ai/agent' && words[0] === 'scripts/build-node-runtime.ts') {
+      copyDevelopmentRuntime(source, destination);
+      continue;
+    }
     const args = words.map((word) =>
       word === 'dist' || word === './dist'
         ? destination
@@ -30,9 +37,9 @@ async function build(manifest: Manifest, source: string, destination: string) {
     );
     const flag = args.indexOf('--outdir');
     if (flag >= 0) args[flag + 1] = destination;
-    const child = spawnFixtureProcess([process.execPath, ...args], {
+    const child = spawnFixtureProcess([process.execPath, '--import', register, ...args], {
       cwd: source,
-      env: { PATH: process.env.PATH ?? '' },
+      env: hostBuildEnvironment(),
       stdout: 'pipe',
       stderr: 'pipe',
     });

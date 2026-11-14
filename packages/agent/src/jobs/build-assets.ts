@@ -34,13 +34,11 @@ writeFileSync(
 if (process.platform === 'win32') {
   if (process.arch !== 'x64') throw Error('windows_shell_arch_unsupported');
   const root = resolve(import.meta.dirname, '../../../..');
+  const flags = process.versions.bun
+    ? ['--no-config', '--no-env-file', '--no-install']
+    : ['--import', resolve(root, 'scripts/tooling/register.mjs')];
   const compiled = spawnSync(
-    [
-      process.execPath,
-      '--import',
-      resolve(root, 'scripts/tooling/register.mjs'),
-      resolve(root, 'scripts/release/build-windows-runner.ts'),
-    ],
+    [process.execPath, ...flags, resolve(root, 'scripts/release/build-windows-runner.ts')],
     { cwd: root, stdout: 'inherit', stderr: 'inherit' },
   );
   if (compiled.exitCode !== 0) throw Error('windows_shell_runner_build_failed');

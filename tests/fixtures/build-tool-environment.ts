@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { cpSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -26,6 +26,14 @@ export function hostBuildEnvironment(): NodeJS.ProcessEnv {
         }
       : {}),
   };
+}
+
+/** Reuse the checkout's matched native addon and engine in an isolated fixture build. */
+export function copyDevelopmentRuntime(source: string, destination: string): void {
+  cpSync(join(source, 'dist/runtime-native.node'), join(destination, 'runtime-native.node'));
+  cpSync(join(source, 'dist/storage/engine'), join(destination, 'storage/engine'), {
+    recursive: true,
+  });
 }
 
 /** Run the real native build in a child without changing the test process environment. */

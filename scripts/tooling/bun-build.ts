@@ -42,6 +42,10 @@ export type BunBundleConfig = Pick<
   | 'minify'
 > & { plugins?: readonly BunBuildPlugin[] };
 
+type CompilerOptions = Omit<BunBundleConfig, 'plugins' | 'outfile' | 'write'> & {
+  env: 'disable';
+  banner?: string;
+};
 type Artifact = { path: string; kind: BuildArtifact['kind']; type: string; contents: string };
 type CallbackReply = { kind: 'callback'; id: number } & (
   | { value: ResolveResult | LoadResult | null | undefined }
@@ -53,6 +57,41 @@ type Reply =
   | { kind: 'load'; index: number; id: number; args: LoadArgs };
 
 const worker = fileURLToPath(new URL('./bun-build-worker.mjs', import.meta.url));
+
+function diagnostic(error: unknown): BuildResult['logs'][number] {
+  const item = error as { message?: string; position?: { file?: string; line: number } } | null;
+  const position = item?.position;
+  return {
+    text: item?.message ?? String(error),
+    location: position?.file ? { file: position.file, line: position.line } : null,
+  };
+}
+
+export async function compileInBun(
+  options: CompilerOptions,
+  plugins: readonly BunBuildPlugin[],
+): Promise<BuildResult> {
+  const expected = '1.4.4';
+  if (process.versions.bun !== expected)
+    throw Error(`Bun ${expected} is required for bundling (found ${process.versions.bun}).`);
+  const bun = Reflect.get(globalThis, 'Bun') as {
+    build(config: CompilerOptions & { plugins: readonly BunBuildPlugin[] }): Promise<{
+      outputs: BuildArtifact[];
+      logs: unknown[];
+    }>;
+  };
+  try {
+    const { outputs, logs } = await bun.build({ ...options, plugins });
+    return { success: true, outputs: options.outdir ? [] : outputs, logs: logs.map(diagnostic) };
+  } catch (error) {
+    return {
+      success: false,
+      outputs: [],
+      logs: (error instanceof AggregateError ? error.errors : [error]).map(diagnostic),
+    };
+  }
+}
+
 function filters(hooks: readonly { options: Filter }[]) {
   return hooks.map(({ options: { filter, namespace } }) => ({
     source: filter.source,
@@ -61,7 +100,7 @@ function filters(hooks: readonly { options: Filter }[]) {
   }));
 }
 
-/** Keep build policy and hooks in Node. Only the compiler runs inside the Bun child. */
+/** Share bundle options between the Bun build scripts and the Node release tools. */
 export async function build(config: BunBundleConfig, output?: 'files'): Promise<BuildResult> {
   const {
     entrypoints,
@@ -84,6 +123,65 @@ export async function build(config: BunBundleConfig, output?: 'files'): Promise<
   if (format !== 'esm' && format !== 'cjs' && format !== 'iife')
     throw Error('bun_build_format_invalid');
 
+  const destination = resolve(outdir ?? (outfile ? dirname(outfile) : '.'));
+  const commonjs = target === 'node' && format === 'cjs';
+  const esm = target === 'node' && format === 'esm';
+  const options: CompilerOptions = {
+    entrypoints: entrypoints.map((path) => resolve(path)),
+    target,
+    root: root ? resolve(root) : undefined,
+    naming: outfile ? basename(outfile) : naming,
+    packages,
+    format,
+    // A plain directory build needs diagnostics only. Other callers use the in-memory artifacts.
+    outdir: output === 'files' && outdir && write !== false ? destination : undefined,
+    env: 'disable',
+    splitting,
+    minify,
+    external: target === 'node' ? [...(external ?? []), '*.node'] : external,
+    banner: esm
+      ? 'import {createRequire as __kite_createRequire} from "node:module";const require=__kite_createRequire(import.meta.url);'
+      : commonjs
+        ? 'const __kite_import_meta={get url(){return require("node:url").pathToFileURL(__filename).href;}};'
+        : undefined,
+    define: {
+      ...(target === 'node' ? { 'process.env.NODE_ENV': 'process.env.NODE_ENV' } : {}),
+      ...(commonjs
+        ? {
+            'import.meta.url': '__kite_import_meta.url',
+            'import.meta.dirname': '__dirname',
+            'import.meta.filename': '__filename',
+          }
+        : {}),
+      ...define,
+    },
+  };
+  const result = process.versions.bun
+    ? await compileInBun(options, plugins)
+    : await compileInWorker(options, plugins);
+  const outputs = await Promise.all(
+    result.outputs.map(async (output) => {
+      const path = resolve(destination, output.path);
+      const name = relative(destination, path);
+      if (!name || isAbsolute(name) || /^\.\.(?:[\\/]|$)/u.test(name))
+        throw Error('bun_build_output_path');
+      if (write !== false && (outdir || outfile)) {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, new Uint8Array(await output.arrayBuffer()));
+      }
+      return Object.assign(output.slice(0, output.size, output.type), {
+        path: outdir || outfile ? path : `./${name.replaceAll('\\', '/')}`,
+        kind: output.kind,
+      });
+    }),
+  );
+  return { success: result.success, outputs, logs: result.logs };
+}
+
+async function compileInWorker(
+  config: CompilerOptions,
+  plugins: readonly BunBuildPlugin[],
+): Promise<BuildResult> {
   const resolvers: Hook<ResolveArgs, ResolveResult>[] = [];
   const loaders: Hook<LoadArgs, LoadResult>[] = [];
   const builder: BunPluginBuilder = {
@@ -91,42 +189,9 @@ export async function build(config: BunBundleConfig, output?: 'files'): Promise<
     onLoad: (options, callback) => void loaders.push({ options, callback }),
   };
   for (const plugin of plugins) plugin.setup(builder);
-
-  const destination = resolve(outdir ?? (outfile ? dirname(outfile) : '.'));
-  const commonjs = target === 'node' && format === 'cjs';
-  const esm = target === 'node' && format === 'esm';
   const request = {
     kind: 'build',
-    config: {
-      entrypoints: entrypoints.map((path) => resolve(path)),
-      target,
-      root: root ? resolve(root) : undefined,
-      naming: outfile ? basename(outfile) : naming,
-      packages,
-      format,
-      // A plain directory build needs diagnostics only. Other callers use the in-memory artifacts.
-      outdir: output === 'files' && outdir && write !== false ? destination : undefined,
-      env: 'disable',
-      splitting,
-      minify,
-      external: target === 'node' ? [...(external ?? []), '*.node'] : external,
-      banner: esm
-        ? 'import {createRequire as __kite_createRequire} from "node:module";const require=__kite_createRequire(import.meta.url);'
-        : commonjs
-          ? 'const __kite_import_meta={get url(){return require("node:url").pathToFileURL(__filename).href;}};'
-          : undefined,
-      define: {
-        ...(target === 'node' ? { 'process.env.NODE_ENV': 'process.env.NODE_ENV' } : {}),
-        ...(commonjs
-          ? {
-              'import.meta.url': '__kite_import_meta.url',
-              'import.meta.dirname': '__dirname',
-              'import.meta.filename': '__filename',
-            }
-          : {}),
-        ...define,
-      },
-    },
+    config,
     resolvers: filters(resolvers),
     loaders: filters(loaders),
   };
@@ -174,21 +239,10 @@ export async function build(config: BunBundleConfig, output?: 'files'): Promise<
     });
     child.once('spawn', () => send(request));
   });
-  const outputs = await Promise.all(
-    result.outputs.map(async (output) => {
-      const path = resolve(destination, output.path);
-      const name = relative(destination, path);
-      if (!name || isAbsolute(name) || /^\.\.(?:[\\/]|$)/u.test(name))
-        throw Error('bun_build_output_path');
-      const contents = new Uint8Array(Buffer.from(output.contents, 'base64'));
-      if (write !== false && (outdir || outfile)) {
-        await mkdir(dirname(path), { recursive: true });
-        await writeFile(path, contents);
-      }
-      return Object.assign(new Blob([contents], { type: output.type }), {
-        path: outdir || outfile ? path : `./${name.replaceAll('\\', '/')}`,
-        kind: output.kind,
-      });
+  const outputs = result.outputs.map(({ path, kind, type, contents }) =>
+    Object.assign(new Blob([new Uint8Array(Buffer.from(contents, 'base64'))], { type }), {
+      path,
+      kind,
     }),
   );
   return { success: result.success, outputs, logs: result.logs };

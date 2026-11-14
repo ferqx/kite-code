@@ -18,10 +18,10 @@
   ],
   "scripts": {
     "agent": "node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/cli.ts",
-    "build": "node --import ./scripts/tooling/register.mjs scripts/run-runtime-workspace-script.ts build",
+    "build": "bun --no-config --no-env-file --no-install ./scripts/run-runtime-workspace-script.ts build",
     "test": "node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts",
     "test:all": "bun run test",
-    "test:fast": "node tests/fast/run.mjs",
+    "test:fast": "bun --no-config --no-env-file --no-install ./tests/fast/run.mjs",
     "test:mock": "node --import ./scripts/tooling/register.mjs ./scripts/run-test-files.ts --parallel=1 --max-concurrency=1 apps/service/test/isolated/compression-configuration.test.ts apps/service/test/isolated/compression-automatic-configuration.test.ts packages/agent/test/isolated/context/compression.test.ts packages/agent/test/isolated/storage/context-compression-history-source.test.ts",
     "test:mcp:live": "node --import ./scripts/tooling/register.mjs scripts/runtime/unified-mcp-live-smoke.ts",
     "test:model:tools:live": "node --import ./scripts/tooling/register.mjs tests/e2e/live/model/model-tools.live.ts",

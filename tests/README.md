@@ -239,7 +239,7 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 ## 本机快速单测
 
-用 Bun 1.4.4 冻结安装依赖后，可在仓库根快速跑指定的已有单测。`--node` 用常规 Node 测试入口跑相同文件。两种模式使用同一版本的 `expect` 断言库。
+用 Bun 1.4.4 冻结安装依赖后，可在仓库根直接用 Bun 跑指定的已有单测。`--node` 从 PATH 启动 Node，沿常规测试入口跑相同文件。两种模式使用同一版本的 `expect` 断言库。
 
 ```sh
 bun run test:fast tui desktop

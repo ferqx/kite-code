@@ -10,7 +10,7 @@
     "./sse": "./src/sse.ts"
   },
   "scripts": {
-    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts ./src/sse.ts ./src/browser.ts ./src/file-recovery-intent.ts --target=browser --packages=external --outdir=dist",
+    "build": "bun --no-config --no-env-file --no-install ../../scripts/tooling/build-command.ts ./src/index.ts ./src/sse.ts ./src/browser.ts ./src/file-recovery-intent.ts --target=browser --packages=external --outdir=dist",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-test-files.ts ./test"
   },

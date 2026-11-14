@@ -61,7 +61,7 @@ function run() {
     options: { node: { type: 'boolean' }, help: { type: 'boolean', short: 'h' } },
   });
   if (values.help) {
-    console.log('Usage: node tests/fast/run.mjs [--node] [group ...]');
+    console.log('Usage: bun run test:fast [--node] [group ...]');
     console.log(`Groups: ${[...groups.keys()].join(', ')}. Omit groups to run them all.`);
     return 0;
   }
@@ -79,9 +79,12 @@ function run() {
     }
   }
   const [command, ...args] = values.node
-    ? testFileCommand(['--only-failures', ...files])
+    ? [
+        process.versions.bun ? 'node' : process.execPath,
+        ...testFileCommand(['--only-failures', ...files]).slice(1),
+      ]
     : [
-        'bun',
+        process.versions.bun ? process.execPath : 'bun',
         'test',
         '--no-config',
         '--no-env-file',
@@ -94,8 +97,12 @@ function run() {
       ];
   console.log(`Local unit tests on ${values.node ? 'Node' : 'Bun'} (${files.length} files)`);
   const result = spawnSync(command, args, { cwd: repository, stdio: 'inherit' });
-  if (result.error?.code === 'ENOENT' && !values.node) {
-    console.error('Bun was not found. Run the same tests with node tests/fast/run.mjs --node.');
+  if (result.error?.code === 'ENOENT') {
+    console.error(
+      values.node
+        ? 'Node was not found on PATH.'
+        : 'Bun was not found. Run the same tests with node tests/fast/run.mjs --node.',
+    );
     return 2;
   }
   if (result.error) throw result.error;

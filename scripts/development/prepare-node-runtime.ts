@@ -70,14 +70,11 @@ export async function prepareDevelopmentRuntime(repository: string) {
     };
     const sourceDigest = nativeRuntimeSourceDigest(repository);
     if (!preparedAddonMatches(out, sourceDigest)) {
+      const flags = process.versions.bun
+        ? ['--no-config', '--no-env-file', '--no-install']
+        : ['--import', join(repository, 'scripts/tooling/register.mjs')];
       const addon = spawnProcessSync(
-        [
-          process.execPath,
-          '--import',
-          join(repository, 'scripts/tooling/register.mjs'),
-          join(agent, 'scripts/build-node-runtime.ts'),
-          out,
-        ],
+        [process.execPath, ...flags, join(agent, 'scripts/build-node-runtime.ts'), out],
         {
           env,
           stdout: 'inherit',

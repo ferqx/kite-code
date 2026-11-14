@@ -29,11 +29,14 @@ export interface UnifiedWorkspaceReport {
   readonly boundary: UnifiedBoundaryReport;
 }
 const names = new Map(UNIFIED_WORKSPACES.map((path) => [`@kite-ai/${path.split('/')[1]}`, path]));
-const formalScripts: Readonly<Record<string, string>> = {
-  build:
-    'node --import ./scripts/tooling/register.mjs scripts/run-runtime-workspace-script.ts build',
+const directBunFlags = ['--no-config', '--no-env-file', '--no-install'];
+const directBun = ['bun', ...directBunFlags].join(' ');
+const buildSource = /^(?!-)(?:[\w.-]+\/)*[\w][\w.-]*\.ts$/u;
+const rootScripts: Readonly<Record<string, string>> = {
+  build: `${directBun} ./scripts/run-runtime-workspace-script.ts build`,
   test: 'node --import ./scripts/tooling/register.mjs scripts/run-default-tests.ts',
   'test:all': 'bun run test',
+  'test:fast': `${directBun} ./tests/fast/run.mjs`,
   typecheck: 'node node_modules/typescript/bin/tsc -b tsconfig.typecheck.json',
   agent: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/cli.ts',
   tui: 'node --import ./scripts/tooling/register.mjs scripts/release/entrypoints/tui.ts',
@@ -95,7 +98,28 @@ export function checkUnifiedFormalConsumers(root: string): {
       for (const child of readdirSync(resolve(root, path))) paths(`${path}/${child}`);
     else if (/\.[cm]?[jt]sx?$/.test(path)) entrypoints.add(path.replaceAll('\\', '/'));
   };
-  const inspect = (command: string, location: string, cwd = ''): void => {
+  const inspectEntry = (entry: string | undefined, args: readonly string[], cwd: string) => {
+    if (!entry || !/\.[cm]?[jt]sx?$/u.test(entry)) return;
+    const path = relative(root, resolve(root, cwd, entry)).replaceAll('\\', '/');
+    paths(path);
+    if (/(?:^|\/)run-test-files\.ts$/u.test(path)) {
+      for (const arg of args) {
+        if (arg.startsWith('-')) continue;
+        paths(relative(root, resolve(root, cwd, arg)), /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(arg));
+      }
+    } else if (/(?:^|\/)build-command\.ts$/u.test(path)) {
+      const firstOption = args.findIndex((token) => token.startsWith('-'));
+      const inputs = firstOption < 0 ? args : args.slice(0, firstOption);
+      for (const input of inputs) paths(relative(root, resolve(root, cwd, input)));
+    }
+  };
+  const inspect = (
+    command: string,
+    location: string,
+    cwd = '',
+    formalConsumer = location.startsWith('.github/workflows/') ||
+      (location !== 'package.json#test:fast' && /#(?:test(?:$|:)|release:)/u.test(location)),
+  ): void => {
     if (legacyConsumer.test(command) || legacyConsumer.test(cwd))
       add('formal-legacy-command', location, command);
     if (/^\s*\$/.test(command)) add('formal-command-unresolved', location, 'computed command head');
@@ -114,23 +138,7 @@ export function checkUnifiedFormalConsumers(root: string): {
             if (preload?.startsWith('.')) paths(relative(root, resolve(root, cwd, preload)));
           }
         }
-        const entry = tokens.shift();
-        if (!entry || !/\.[cm]?[jt]sx?$/u.test(entry)) continue;
-        const path = relative(root, resolve(root, cwd, entry));
-        paths(path);
-        if (/(?:^|\/)run-test-files\.ts$/u.test(path)) {
-          for (const arg of tokens) {
-            if (arg.startsWith('-')) continue;
-            paths(
-              relative(root, resolve(root, cwd, arg)),
-              /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(arg),
-            );
-          }
-        } else if (/(?:^|\/)build-command\.ts$/u.test(path)) {
-          const firstOption = tokens.findIndex((token) => token.startsWith('-'));
-          const entrypoints = firstOption < 0 ? tokens : tokens.slice(0, firstOption);
-          for (const input of entrypoints) paths(relative(root, resolve(root, cwd, input)));
-        }
+        inspectEntry(tokens.shift(), tokens, cwd);
         continue;
       }
       if (tool === 'pnpm') {
@@ -142,6 +150,18 @@ export function checkUnifiedFormalConsumers(root: string): {
         continue;
       }
       if (tool !== 'bun') continue;
+      const manifest = cwd ? `${cwd}/package.json` : 'package.json';
+      if (
+        directBunFlags.every((flag, index) => tokens[index] === flag) &&
+        (location === 'package.json#test:fast'
+          ? tokens[directBunFlags.length] === './tests/fast/run.mjs'
+          : location === `${manifest}#build` &&
+            buildSource.test(tokens[directBunFlags.length] ?? ''))
+      ) {
+        tokens.splice(0, directBunFlags.length);
+        inspectEntry(tokens.shift(), tokens, cwd);
+        continue;
+      }
       let selected = cwd;
       const cwdOption = tokens[0]?.match(/^--cwd=(.+)$/u);
       if (cwdOption) {
@@ -171,14 +191,22 @@ export function checkUnifiedFormalConsumers(root: string): {
         add('formal-command-invalid', location, command);
         continue;
       }
+      if (formalConsumer && !selected && target === 'test:fast') {
+        add('formal-runtime-forbidden', location, 'test:fast is for local development');
+        continue;
+      }
       const key = `${selected}:${target}`;
-      if (visited.has(key)) continue;
-      visited.add(key);
+      const traversal = `${formalConsumer}:${key}`;
+      if (visited.has(traversal)) continue;
+      visited.add(traversal);
       try {
         const scripts = packageAt(selected).scripts as Record<string, unknown> | undefined;
         const value = scripts?.[target];
         if (typeof value !== 'string') add('formal-command-unresolved', location, key);
-        else inspect(value, `${selected || '.'}/package.json#${target}`, selected);
+        else {
+          const manifest = selected ? `${selected}/package.json` : 'package.json';
+          inspect(value, `${manifest}#${target}`, selected, formalConsumer);
+        }
       } catch (error) {
         add('formal-command-unresolved', location, String(error));
       }
@@ -931,10 +959,12 @@ export function checkUnifiedWorkspaces(repositoryRoot: string): UnifiedWorkspace
         'module must be scripts/release/source-terminal.ts',
       );
     const scripts = top.scripts as Record<string, unknown> | undefined;
-    for (const [name, expected] of Object.entries(formalScripts)) {
+    for (const [name, expected] of Object.entries(rootScripts)) {
       if (scripts?.[name] !== expected)
         add('formal-script-invalid', 'package.json', `${name} must be ${expected}`);
-      const entry = expected.match(/node --import \S+ (\S+\.ts)(?: |$)/)?.[1];
+      const entry = expected.match(
+        /(?:node --import \S+|bun \S+ \S+ \S+) (\S+\.(?:ts|mjs))(?: |$)/,
+      )?.[1];
       if (entry && !existsSync(resolve(root, entry))) add('formal-entry-missing', entry, name);
     }
     if (!existsSync(resolve(root, 'scripts/release/source-terminal.ts')))

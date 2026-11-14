@@ -8,7 +8,7 @@
     "./bundle": "./src/bundle.ts"
   },
   "scripts": {
-    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts --outdir ./dist --target browser --packages external && node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/bundle.ts --outdir ./dist --target=node --packages external",
+    "build": "bun --no-config --no-env-file --no-install ../../scripts/tooling/build-command.ts ./src/index.ts --outdir ./dist --target browser --packages external && bun --no-config --no-env-file --no-install ../../scripts/tooling/build-command.ts ./src/bundle.ts --outdir ./dist --target=node --packages external",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-owned-tests.ts ."
   },

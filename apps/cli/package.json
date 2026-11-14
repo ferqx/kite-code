@@ -11,7 +11,7 @@
     "./tui-main": "./host/tui-main.ts"
   },
   "scripts": {
-    "build": "node --import ../../scripts/tooling/register.mjs ../../scripts/tooling/build-command.ts ./src/index.ts ./host/index.ts ./host/main.ts ./host/tui.tsx ./host/tui-main.ts --target=node --packages=external --root=. --outdir=dist",
+    "build": "bun --no-config --no-env-file --no-install ../../scripts/tooling/build-command.ts ./src/index.ts ./host/index.ts ./host/main.ts ./host/tui.tsx ./host/tui-main.ts --target=node --packages=external --root=. --outdir=dist",
     "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json",
     "test": "node --import ../../scripts/tooling/register.mjs ../../scripts/run-test-files.ts ./test"
   },

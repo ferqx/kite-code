@@ -13,12 +13,17 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { afterAll, beforeAll, expect, test } from '#kite-test';
+import { workspaceBuildCommand } from '../../../../scripts/tooling/build-command';
 import { spawn as spawnProcess } from '../../../../scripts/tooling/process';
 import { testRuntimeFlags } from '../../../../scripts/tooling/test-command';
-import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
+import {
+  copyDevelopmentRuntime,
+  hostBuildEnvironment,
+} from '../../../../tests/fixtures/build-tool-environment';
 import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dirname, '../../../..');
+const register = join(repository, 'scripts/tooling/register.mjs');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 let root: string, artifact: string;
 let entries: Record<'paired' | 'daemon', string>;
@@ -67,6 +72,7 @@ beforeAll(async () => {
   // Same complete public-manifest pattern as daemon-process: only output paths change.
   for (const directory of [
     'packages/trajectory',
+    'packages/trace-extension-sdk',
     'packages/agent',
     'packages/ai',
     'packages/client',
@@ -83,8 +89,8 @@ beforeAll(async () => {
     const destination = join(modules, manifest.name);
     mkdirSync(destination, { recursive: true });
     for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
-      const words = segment.trim().split(/\s+/);
-      if (words.shift() !== 'bun') throw Error('startup_frame_manifest_unknown');
+      const words = workspaceBuildCommand(segment, source, register);
+      if (!words) throw Error('startup_frame_manifest_unknown');
       const args = words.map((word) =>
         word === 'dist' || word === './dist'
           ? destination
@@ -92,7 +98,9 @@ beforeAll(async () => {
       );
       const out = args.indexOf('--outdir');
       if (out >= 0) args[out + 1] = destination;
-      await build(args, source);
+      if (manifest.name === '@kite-ai/agent' && words[0] === 'scripts/build-node-runtime.ts') {
+        copyDevelopmentRuntime(source, destination);
+      } else await build(args, source);
     }
     const exports = Object.fromEntries(
       Object.entries(manifest.exports).map(([key, value]) => [

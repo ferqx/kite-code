@@ -115,9 +115,9 @@ export async function buildNativeFiles(outdir: string) {
   const notices: string[] = [];
   for (const item of metadata.packages) {
     const root = dirname(item.manifest_path);
-    const names = readdirSync(root).filter((name) =>
-      /^(?:LICENSE|COPYING)(?:[-_.].*)?$/i.test(name),
-    );
+    const names = readdirSync(root)
+      .filter((name) => /^(?:LICENSE|COPYING)(?:[-_.].*)?$/i.test(name))
+      .sort();
     notices.push(`${item.name} ${item.version}\n${item.license ?? ''}\n${item.repository ?? ''}`);
     for (const name of names) notices.push(readFileSync(join(root, name), 'utf8'));
   }

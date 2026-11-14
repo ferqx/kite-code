@@ -1,5 +1,4 @@
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -10,10 +9,15 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build as testBuild } from '../../../../scripts/tooling/build';
+import { workspaceBuildCommand } from '../../../../scripts/tooling/build-command';
 import { spawn as testSpawn } from '../../../../scripts/tooling/process';
-import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
+import {
+  copyDevelopmentRuntime,
+  hostBuildEnvironment,
+} from '../../../../tests/fixtures/build-tool-environment';
 
 const repository = resolve(import.meta.dirname, '../../../..');
+const register = join(repository, 'scripts/tooling/register.mjs');
 async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -28,7 +32,7 @@ async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
   }
 }
 async function runBuild(args: string[], cwd: string) {
-  const child = testSpawn([process.execPath, ...args], {
+  const child = testSpawn([process.execPath, '--import', register, ...args], {
     cwd,
     env: hostBuildEnvironment(),
     stdout: 'pipe',
@@ -73,13 +77,8 @@ export async function buildOwnedDaemon(artifact: string): Promise<string> {
     const destination = join(modules, manifest.name);
     mkdirSync(destination, { recursive: true });
     for (const segment of manifest.scripts.build.split(/\s*&&\s*/)) {
-      const words = segment.trim().split(/\s+/);
-      if (
-        words.shift() !== 'node' ||
-        words[0] !== '--import' ||
-        words[1] !== '../../scripts/tooling/register.mjs'
-      )
-        throw Error('daemon_fixture_manifest_unknown');
+      const words = workspaceBuildCommand(segment, source, register);
+      if (!words) throw Error('daemon_fixture_manifest_unknown');
       const args = words.map((word) =>
         word === 'dist' || word === './dist'
           ? destination
@@ -87,8 +86,8 @@ export async function buildOwnedDaemon(artifact: string): Promise<string> {
       );
       const output = args.indexOf('--outdir');
       if (output >= 0) args[output + 1] = destination;
-      if (manifest.name === '@kite-ai/agent' && words[2] === 'scripts/build-node-runtime.ts') {
-        cpSync(join(source, 'dist/runtime-native.node'), join(destination, 'runtime-native.node'));
+      if (manifest.name === '@kite-ai/agent' && words[0] === 'scripts/build-node-runtime.ts') {
+        copyDevelopmentRuntime(source, destination);
       } else await runBuild(args, source);
     }
     const exports = Object.fromEntries(
@@ -107,13 +106,6 @@ export async function buildOwnedDaemon(artifact: string): Promise<string> {
       dependencies.set(dependency, owners);
     }
     if (existsSync(join(destination, 'src'))) throw Error('daemon_fixture_source_fallback');
-    if (manifest.name === '@kite-ai/agent') {
-      // The reviewed source fixture build reuses the selected checkout SQLite
-      // engine. The package can start without a source loader or host SQLite.
-      cpSync(join(source, 'dist/storage/engine'), join(destination, 'storage/engine'), {
-        recursive: true,
-      });
-    }
   }
   for (const [dependency, owners] of dependencies) {
     if (dependency.startsWith('@kite-ai/')) continue;

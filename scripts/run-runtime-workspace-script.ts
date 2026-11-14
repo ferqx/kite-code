@@ -11,10 +11,10 @@ export async function runWorkspaceScript(root: string, args: readonly string[]):
     return 2;
   }
 
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
-  };
+  const env = { ...process.env };
+  const bun = process.versions.bun ? process.execPath : 'bun';
+  if (!process.versions.bun)
+    env.PATH = [dirname(process.execPath), env.PATH].filter(Boolean).join(delimiter);
   delete env.BUN_BE_BUN;
   delete env.BUN_OPTIONS;
   for (const workspace of UNIFIED_RUNTIME_WORKSPACES) {
@@ -36,7 +36,7 @@ export async function runWorkspaceScript(root: string, args: readonly string[]):
 
     console.log(`\n[workspace:${packageJson.name ?? workspace}] ${scriptName}`);
     const child = spawnProcess(
-      ['bun', 'run', '--no-config', '--no-env-file', '--no-install', scriptName],
+      [bun, 'run', '--no-config', '--no-env-file', '--no-install', scriptName],
       {
         cwd: workspaceRoot,
         env,
